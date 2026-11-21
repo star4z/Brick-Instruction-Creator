@@ -172,8 +172,13 @@ const PARTS_CATALOG = {
   '3706':{name:'Technic Axle 6L',sx:0.4,sz:0.4,h:120,studs:false,shape:'bar',centered:true,lengthL:6},
   '3815c01':{name:'Minifigure Hips & Legs',sx:1.6,sz:0.8,h:28,studs:false,shape:'mf_legs'},
   '970c00':{name:'Minifigure Hips & Legs',sx:1.6,sz:0.8,h:28,studs:false,shape:'mf_legs'},
-  '973c01':{name:'Minifigure Torso Assembly',sx:1.9,sz:0.8,h:28,studs:false,shape:'mf_torso'},
+  '973':{name:'Minifigure Torso',sx:1.5,sz:0.75,h:32,studs:false,shape:'mf_torso_body'},
+  '973c01':{name:'Minifigure Torso Assembly',sx:1.9,sz:0.8,h:32,studs:false,shape:'mf_torso'},
+  '3626':{name:'Minifigure Head',sx:1,sz:1,h:24,studs:true,shape:'mf_head'},
+  '3626b':{name:'Minifigure Head',sx:1,sz:1,h:24,studs:true,shape:'mf_head'},
+  '3626c':{name:'Minifigure Head',sx:1,sz:1,h:24,studs:true,shape:'mf_head'},
   '3626cp01':{name:'Minifigure Head',sx:1,sz:1,h:24,studs:true,shape:'mf_head'},
+  '28621':{name:'Minifigure Head',sx:1,sz:1,h:24,studs:true,shape:'mf_head'},
   '3842a':{name:'Minifigure Helmet',sx:1.2,sz:1.2,h:24,studs:false,shape:'mf_helmet'},
 };
 
@@ -189,11 +194,70 @@ function normId(raw) {
   return String(raw || '').trim().replace(/\\/g, '/').toLowerCase().replace(/^ldraw\//,'').replace(/^parts\//,'').replace(/^p\//,'').replace(/\.dat$/i,'');
 }
 
+// BrickLink Studio un-expanded torso assemblies (bl_973pb*c01) have their local origin at waist corner
+// instead of LDraw 973c01's neck-base origin: shifted by (-20, -32, +10) in LDraw coords.
+function isBrickLinkTorsoAssemblyId(k) {
+  return /^bl_973p[a-z0-9]+c\d+$/i.test(k);
+}
+
+// Map BrickLink Studio / decorated / printed part IDs (bl_*, *-bl, *pb####*, *_torso)
+// to their canonical unprinted LDraw base IDs so local cache & public LDraw mirrors resolve them!
+function getPartIdFallbacks(raw) {
+  const k = normId(raw);
+  if (!k || k.includes('/')) return [];
+  const out = [];
+  const add = (id) => { if (id && id !== k && !out.includes(id)) out.push(id); };
+
+  const noBl = k.replace(/^bl_/, '').replace(/-bl$/, '');
+
+  // Minifig bare torso bodies (no arms!) vs complete torso+arms+hands assemblies
+  if (/^973.*_torso$/i.test(noBl)) {
+    add('973');
+    return out;
+  }
+  if (/^973p[a-z0-9]+c\d+$/i.test(noBl)) {
+    add('973c01');
+    add('973');
+    return out;
+  }
+  if (/^973p[a-z0-9]+$/i.test(noBl)) {
+    add('973');
+    return out;
+  }
+
+  // Strip BrickLink print/sticker suffixes (pb####, ps####, pat####, pr####)
+  const noBlPrint = noBl.replace(/(?:pb|ps|pat|pr)\d+[a-z0-9_]*$/i, '');
+  if (noBlPrint && noBlPrint !== noBl) {
+    add(noBlPrint);
+  } else if (noBl !== k) {
+    add(noBl);
+  }
+
+  // Strip LDraw print/pattern suffix when preceded by a 3+ digit base mold (e.g., 3626cp01 -> 3626c)
+  const candBase = noBlPrint || noBl;
+  const mLdrawPrint = candBase.match(/^(\d{3,}[a-z]?)(?:p[0-9a-z]{2,}|d\d+)$/i);
+  if (mLdrawPrint) add(mLdrawPrint[1]);
+
+  const effective = mLdrawPrint ? mLdrawPrint[1] : candBase;
+  if (/^\d{3,}[a-z]$/i.test(effective)) add(effective.slice(0, -1));
+  if (/^\d{3,}c\d+$/i.test(effective)) add(effective.replace(/c\d+$/i, ''));
+
+  // Known exact LDraw mold equivalences
+  if (effective === '28621') { add('3626c'); add('3626b'); add('3626'); }
+  if (effective === '3626c') { add('3626b'); add('3626'); }
+  if (/^970c\d+$/i.test(effective)) { add('970c00'); add('3815c01'); }
+
+  return out;
+}
+
 function hasKnownShape(pid) {
   const k = normId(pid);
   if (compositePartDefs.has(k)) return true;
   if (lookupEmbeddedDat(k)) return true;
   if (PARTS_CATALOG[k]) return true;
+  for (const fb of getPartIdFallbacks(k)) {
+    if (PARTS_CATALOG[fb]) return true;
+  }
   const base = k.replace(/[a-z].*$/, '');
   return Boolean(PARTS_CATALOG[base]);
 }
@@ -206,6 +270,11 @@ function resolvePart(pid) {
   }
   const title = embeddedDatTitles.get(k) || userLibTitles.get(k);
   if (PARTS_CATALOG[k]) return title ? { ...PARTS_CATALOG[k], name: title } : PARTS_CATALOG[k];
+  for (const fb of getPartIdFallbacks(k)) {
+    const fbTitle = title || embeddedDatTitles.get(fb) || userLibTitles.get(fb);
+    if (PARTS_CATALOG[fb]) return fbTitle ? { ...PARTS_CATALOG[fb], name: fbTitle } : PARTS_CATALOG[fb];
+    if (fbTitle) return { name: fbTitle, sx: 1, sz: 1, h: 24, studs: true };
+  }
   const base = k.replace(/[a-z].*$/, '');
   if (PARTS_CATALOG[base]) return title ? { ...PARTS_CATALOG[base], name: title } : PARTS_CATALOG[base];
   const pretty = title || (k.toUpperCase());
@@ -311,9 +380,18 @@ function lookupEmbeddedDat(ref) {
   const stripped = k.replace(/^(48|8|s)\//, '');
   const base = k.split('/').pop();
   for (const store of [embeddedDatRaw, userLibRaw]) {
-    if (store.has(k)) return { key: k, lines: store.get(k) };
-    if (store.has(stripped)) return { key: stripped, lines: store.get(stripped) };
-    if (store.has(base)) return { key: base, lines: store.get(base) };
+    if (store.has(k)) return { key: k, lines: store.get(k), offset: null };
+    if (store.has(stripped)) return { key: stripped, lines: store.get(stripped), offset: null };
+    if (store.has(base)) return { key: base, lines: store.get(base), offset: null };
+  }
+  const fbs = getPartIdFallbacks(k);
+  if (fbs.length > 0) {
+    const offset = isBrickLinkTorsoAssemblyId(k) ? [-20, -32, 10] : null;
+    for (const fb of fbs) {
+      for (const store of [embeddedDatRaw, userLibRaw]) {
+        if (store.has(fb)) return { key: fb, lines: store.get(fb), offset };
+      }
+    }
   }
   return null;
 }
@@ -457,7 +535,8 @@ function compileEmbeddedDat(partId) {
       }
     }
   };
-  walk(found.lines, 0, 0, 0, R_ID, 0);
+  const [rootOx, rootOy, rootOz] = found.offset || [0, 0, 0];
+  walk(found.lines, rootOx, rootOy, rootOz, R_ID, 0);
 
   if (tris.length === 0) { embeddedDatCompiled.set(k, null); return null; }
   const res = {
@@ -669,11 +748,16 @@ function buildMeshBuffers(prevParts, newParts, opts) {
       addBox(0,-3,0, 32,6,16, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
       addBox(-8.5,-17,0, 14,22,14, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
       addBox(8.5,-17,0, 14,22,14, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
+    } else if (def.shape === 'mf_torso_body') {
+      // Bare minifigure torso (matches LDraw 973.dat origin: y=0 shoulders, y=-32 waist, neck +0..+10)
+      addBox(0,-16,0, 30,32,15, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
+      addCyl(0,5.0,0, 5.8,5.8,10,'y',10, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
     } else if (def.shape === 'mf_torso') {
-      addBox(0,-14,0, 30,28,15, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
-      addBox(-18.5,-15,0, 7,22,8, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
-      addBox(18.5,-15,0, 7,22,8, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
-      addCyl(0,2.0,0, 5.8,5.8,5.2,'y',10, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
+      const sh = isBrickLinkTorsoAssemblyId(normId(leafPart.p)) ? [-20, 32, -10] : [0, 0, 0];
+      addBox(sh[0],sh[1]-16,sh[2], 30,32,15, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
+      addBox(sh[0]-18.5,sh[1]-17,sh[2], 7,24,8, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
+      addBox(sh[0]+18.5,sh[1]-17,sh[2], 7,24,8, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
+      addCyl(sh[0],sh[1]+5.0,sh[2], 5.8,5.8,10,'y',10, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
     } else if (def.shape === 'mf_head') {
       addCyl(0,-11,0, 9.5,9.5,22,'y',12, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
       addCyl(0,1.9,0, 5.8,5.8,4.6,'y',10, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
@@ -3702,28 +3786,33 @@ function getSelectedPublicLibBases() {
 }
 
 async function fetchDatFromPublicMirrors(normKey, bases) {
-  const clean = normKey.replace(/\.dat$/i, '');
-  const paths = clean.startsWith('s/')
-    ? [`parts/${clean}.dat`, `${clean}.dat`]
-    : clean.startsWith('48/') || clean.startsWith('8/')
-      ? [`p/${clean}.dat`, `${clean}.dat`]
-      : [`parts/${clean}.dat`, `p/${clean}.dat`, `parts/s/${clean}.dat`];
-
+  const tryKeys = [normKey, ...getPartIdFallbacks(normKey)];
   let sawNetworkError = false;
-  for (const base of bases) {
-    for (const rel of paths) {
-      try {
-        const res = await fetch(base + rel, { mode: 'cors' });
-        if (res.ok) {
-          const text = await res.text();
-          if (text && text.length > 10 && !/^\s*<!doctype/i.test(text)) return { text, networkBlocked: false };
+  for (const key of tryKeys) {
+    const clean = key.replace(/\.dat$/i, '');
+    const paths = clean.startsWith('s/')
+      ? [`parts/${clean}.dat`, `${clean}.dat`]
+      : clean.startsWith('48/') || clean.startsWith('8/')
+        ? [`p/${clean}.dat`, `${clean}.dat`]
+        : [`parts/${clean}.dat`, `p/${clean}.dat`, `parts/s/${clean}.dat`];
+
+    for (const base of bases) {
+      for (const rel of paths) {
+        try {
+          const res = await fetch(base + rel, { mode: 'cors' });
+          if (res.ok) {
+            const text = await res.text();
+            if (text && text.length > 10 && !/^\s*<!doctype/i.test(text)) {
+              return { text, resolvedKey: clean, networkBlocked: false };
+            }
+          }
+        } catch (_) {
+          sawNetworkError = true;
         }
-      } catch (_) {
-        sawNetworkError = true;
       }
     }
   }
-  return { text: null, networkBlocked: sawNetworkError };
+  return { text: null, resolvedKey: normKey, networkBlocked: sawNetworkError };
 }
 
 async function fetchMissingPartsOnline() {
@@ -3745,6 +3834,15 @@ async function fetchMissingPartsOnline() {
     if (!k || queued.has(k) || lookupEmbeddedDat(k)) return;
     // Skip standard studs/arcs we already synthesize procedurally at high speed!
     if (/^(stud|stud2|stud2a|stud3|stud4|stud4a|stud10|stud15|studp01|axlehol|npeghol|beamhol|\d+-\d+(cyli|cylo|disc|edge|ring\d+|chrd|ndis))$/.test(base)) return;
+    // BrickLink-proprietary printed/prefixed IDs (bl_*, *-bl, *pb####*, *_torso) never exist verbatim
+    // in official LDraw mirrors — directly enqueue their canonical unprinted base LDraw ID!
+    if (!k.includes('/') && /^(?:bl_|.*-bl$|.*(?:pb|ps|pat|pr)\d+|.*_torso$)/i.test(k)) {
+      const fbs = getPartIdFallbacks(k);
+      if (fbs.length > 0) {
+        enqueue(fbs[0]);
+        return;
+      }
+    }
     queued.add(k);
     queue.push(k);
   };
@@ -3783,8 +3881,9 @@ async function fetchMissingPartsOnline() {
       const toStore = [];
       for (const r of results) {
         if (r.text) {
-          registerUserLibDat(r.k, r.text);
-          toStore.push([r.k, r.text]);
+          const storeKey = r.resolvedKey || r.k;
+          registerUserLibDat(storeKey, r.text);
+          toStore.push([storeKey, r.text]);
           fetched++;
           // Enqueue any referenced subparts / primitives inside this .dat!
           for (const line of r.text.split(/\r?\n/)) {
