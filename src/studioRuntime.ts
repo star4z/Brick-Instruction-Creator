@@ -1004,7 +1004,7 @@ async function extractIoArchive(arrayBuffer) {
   const m1Text = m1Entry ? await readZipEntryText(bytes, view, m1Entry) : '';
   const m2Text = m2Entry ? await readZipEntryText(bytes, view, m2Entry) : '';
 
-  embeddedDatRaw.clear(); embeddedDatTitles.clear(); embeddedDatCompiled.clear(); compositePartDefs.clear(); pliThumbCache.clear();
+  embeddedDatRaw.clear(); embeddedDatTitles.clear(); embeddedDatCompiled.clear(); compositePartDefs.clear(); pliThumbCache.clear(); submodelThumbCache.clear();
   if (m2Text) {
     const m2Map = splitMpd(m2Text, 'model2.ldr');
     for (const sf of m2Map.values()) {
@@ -1024,9 +1024,9 @@ function flattenMpd(source, fileName, useIsSubModelFlag = false) {
   const root = subfiles.values().next().value;
   if (!root) return { parts: [], hasSteps: false, submodelCount: 0 };
   const parts = [];
-  let hasSteps = false, submodelCount = 0, seq = 0, asmSeq = 0;
+  let hasSteps = false, submodelCount = 0, seq = 0, asmSeq = 0, subInstSeq = 0;
 
-  const visit = (sf, px, py, pz, pm, parentCol, topSub, depth, assemblyTag) => {
+  const visit = (sf, px, py, pz, pm, parentCol, topSub, depth, assemblyTag, subChain) => {
     if (!sf || depth > 18) return;
     let stepIdx = 0;
     for (const line of sf.lines) {
@@ -1056,7 +1056,9 @@ function flattenMpd(source, fileName, useIsSubModelFlag = false) {
         const nextAsm = childIsAsm
           ? { id: 'asm_' + (++asmSeq), key: normId(child.name.replace(/\s+copy(\s*\d+)?$/i,'')), name: getSubfileTitle(child), rootPos: [wx, -wy, -wz] }
           : assemblyTag;
-        visit(child, wx, wy, wz, wm, c, topSub || (childIsAsm ? null : cleanSubName(child.name)), depth + 1, nextAsm);
+        const cleanName = cleanSubName(child.name);
+        const nextChain = childIsAsm ? subChain : [...subChain, { name: cleanName, instId: ++subInstSeq }];
+        visit(child, wx, wy, wz, wm, c, topSub || (childIsAsm ? null : cleanName), depth + 1, nextAsm, nextChain);
       } else {
         parts.push({
           id: 'imp_' + (++seq),
@@ -1065,13 +1067,14 @@ function flattenMpd(source, fileName, useIsSubModelFlag = false) {
           x: wx, y: -wy, z: -wz,
           m: [wm[0],-wm[1],-wm[2], -wm[3],wm[4],wm[5], -wm[6],wm[7],wm[8]],
           sub: topSub || 'Main Build',
+          subChain,
           origStep: stepIdx,
           asm: assemblyTag || null,
         });
       }
     }
   };
-  visit(root, 0, 0, 0, R_ID, 71, null, 0, null);
+  visit(root, 0, 0, 0, R_ID, 71, null, 0, null, []);
   return { parts, hasSteps, submodelCount };
 }
 
@@ -1092,6 +1095,7 @@ function fuseAssemblies(rawParts) {
           x: p.asm.rootPos[0], y: p.asm.rootPos[1], z: p.asm.rootPos[2],
           m: R_ID,
           sub: p.sub,
+          subChain: p.subChain || [],
           origStep: p.origStep,
           children: [],
         };
@@ -1203,7 +1207,275 @@ function boxesPhysicallyTouch(a, b, roleA, roleB) {
   return goodAxes >= 2;
 }
 
-// ZERO-FLOATING CHASSIS-FIRST STEP GENERATOR (with continuous global step numbering)
+function mat3Transpose(m) {
+  return [m[0],m[3],m[6], m[1],m[4],m[7], m[2],m[5],m[8]];
+}
+function mat3Det(m) {
+  return m[0]*(m[4]*m[8]-m[5]*m[7]) - m[1]*(m[3]*m[8]-m[5]*m[6]) + m[2]*(m[3]*m[7]-m[4]*m[6]);
+}
+
+// Normalize a single canonical copy of a submodel to centered local coordinates (bottom at y=0)
+function normalizeCanonicalSubParts(rawList, prefix) {
+  let mnX = Infinity, mnY = Infinity, mnZ = Infinity, mxX = -Infinity, mxZ = -Infinity;
+  for (const p of rawList) {
+    const b = computeWorldBox(p);
+    if (b.min[0] < mnX) mnX = b.min[0]; if (b.max[0] > mxX) mxX = b.max[0];
+    if (b.min[1] < mnY) mnY = b.min[1];
+    if (b.min[2] < mnZ) mnZ = b.min[2]; if (b.max[2] > mxZ) mxZ = b.max[2];
+  }
+  const cx = isFinite(mnX) ? (mnX + mxX) / 2 : 0;
+  const cy = isFinite(mnY) ? mnY : 0;
+  const cz = isFinite(mnZ) ? (mnZ + mxZ) / 2 : 0;
+  return rawList.map((p, idx) => ({
+    ...p,
+    id: `${prefix}_c${idx}`,
+    x: p.x - cx,
+    y: p.y - cy,
+    z: p.z - cz,
+    children: p.children ? p.children.map((ch, ci) => ({
+      ...ch,
+      id: `${prefix}_c${idx}_${ci}`,
+      x: ch.x - cx,
+      y: ch.y - cy,
+      z: ch.z - cz,
+    })) : undefined,
+  }));
+}
+
+function autoNameDuplicateSubmodel(indices, parts, fallbackNum) {
+  const names = indices.map(i => (resolvePart(parts[i].p).name || '').toLowerCase());
+  if (names.some(n => /wheel|bogie/.test(n))) return 'Wheel Assembly';
+  if (names.some(n => /window|glass|windscreen/.test(n))) return 'Window Module';
+  if (names.some(n => /door/.test(n))) return 'Door Assembly';
+  if (names.some(n => /seat|chair/.test(n))) return 'Seat Assembly';
+  if (names.some(n => /bracket|hinge|clip/.test(n))) return 'Side Assembly';
+  if (names.some(n => /slope|wedge|arch/.test(n))) return 'Body Module';
+  return `Submodel ${fallbackNum}`;
+}
+
+// Detect duplicate submodels AUTOMATICALLY:
+// Stage 1: Explicit file submodels (.io / .mpd) appearing >= 2 times
+// Stage 2: Submodel-agnostic geometric rigid-body duplicate detection on remaining bricks!
+function detectDuplicateSubassemblies(parts, boxes, adj, roles) {
+  if (!state.detectDuplicates || parts.length < 6) return [];
+  const maxSubSize = Math.min(36, Math.max(8, Math.floor(parts.length * 0.28)));
+  const candidates = [];
+
+  // Stage 1: Explicit submodel instances from .io / .mpd files
+  const byInst = new Map();
+  for (let i = 0; i < parts.length; i++) {
+    const chain = parts[i].subChain || [];
+    for (const entry of chain) {
+      if (!byInst.has(entry.instId)) byInst.set(entry.instId, { name: entry.name, indices: [] });
+      byInst.get(entry.instId).indices.push(i);
+    }
+  }
+  const byExplicitSig = new Map();
+  for (const rec of byInst.values()) {
+    if (rec.indices.length < 2 || rec.indices.length > maxSubSize) continue;
+    if (rec.indices.every(i => roles[i] === 'figure')) continue;
+    const sig = rec.indices.map(i => `${parts[i].p}:${parts[i].c}`).sort().join('|');
+    if (!byExplicitSig.has(sig)) byExplicitSig.set(sig, []);
+    byExplicitSig.get(sig).push(rec);
+  }
+  for (const instList of byExplicitSig.values()) {
+    const disjoint = [];
+    const seen = new Set();
+    for (const rec of instList) {
+      if (rec.indices.some(i => seen.has(i))) continue;
+      rec.indices.forEach(i => seen.add(i));
+      disjoint.push(rec.indices);
+    }
+    if (disjoint.length >= 2) {
+      const sz = disjoint[0].length;
+      const cleanName = (instList[0].name || 'Submodel').replace(/\s+copy(\s*\d+)?$/i, '').trim() || 'Submodel';
+      candidates.push({
+        name: cleanName,
+        explicit: true,
+        size: sz,
+        count: disjoint.length,
+        savings: (disjoint.length - 1) * sz + 20,
+        instances: disjoint,
+      });
+    }
+  }
+
+  // Stage 2: Automatic geometric rigid-body duplicate detection (works even on flat .ldr files with ZERO submodels!)
+  const byPC = new Map();
+  for (let i = 0; i < parts.length; i++) {
+    if (parts[i].children || roles[i] === 'figure') continue;
+    const k = `${parts[i].p}:${parts[i].c}`;
+    if (!byPC.has(k)) byPC.set(k, []);
+    byPC.get(k).push(i);
+  }
+
+  const triedGeoSigs = new Set();
+  for (const idxs of byPC.values()) {
+    if (idxs.length < 2 || idxs.length > 18) continue;
+    const seedA = idxs[0];
+    const mAT = mat3Transpose(parts[seedA].m || R_ID);
+    const maxPairs = Math.min(idxs.length, 8);
+    for (let bi = 1; bi < maxPairs; bi++) {
+      const seedB = idxs[bi];
+      const T = mat3Mul(parts[seedB].m || R_ID, mAT);
+      if (Math.abs(mat3Det(T) - 1) > 0.08) continue;
+      const rA = m3v(T, parts[seedA].x, parts[seedA].y, parts[seedA].z);
+      const tx = parts[seedB].x - rA[0], ty = parts[seedB].y - rA[1], tz = parts[seedB].z - rA[2];
+      if (Math.hypot(tx, ty, tz) < 5) continue;
+
+      const setA = new Set([seedA]), setB = new Set([seedB]);
+      const q = [seedA];
+      while (q.length && setA.size < maxSubSize) {
+        const u = q.shift();
+        for (const nb of adj[u]) {
+          if (setA.has(nb) || setB.has(nb) || parts[nb].children || roles[nb] === 'figure') continue;
+          const pNb = parts[nb];
+          const ru = m3v(T, pNb.x, pNb.y, pNb.z);
+          const ex = ru[0] + tx, ey = ru[1] + ty, ez = ru[2] + tz;
+          const pool = byPC.get(`${pNb.p}:${pNb.c}`);
+          if (!pool) continue;
+          let match = -1, bestD = 3.2;
+          for (const cand of pool) {
+            if (setA.has(cand) || setB.has(cand)) continue;
+            const d = Math.hypot(parts[cand].x - ex, parts[cand].y - ey, parts[cand].z - ez);
+            if (d < bestD) { bestD = d; match = cand; }
+          }
+          if (match >= 0) { setA.add(nb); setB.add(match); q.push(nb); }
+        }
+      }
+
+      if (setA.size >= 3) {
+        const arrA = Array.from(setA).sort((a, b) => a - b);
+        const geoSig = arrA.join(',');
+        if (triedGeoSigs.has(geoSig)) continue;
+        triedGeoSigs.add(geoSig);
+
+        const instances = [arrA];
+        const used = new Set(arrA);
+        for (const candSeed of idxs) {
+          if (used.has(candSeed)) continue;
+          const Tc = mat3Mul(parts[candSeed].m || R_ID, mAT);
+          if (Math.abs(mat3Det(Tc) - 1) > 0.08) continue;
+          const rc = m3v(Tc, parts[seedA].x, parts[seedA].y, parts[seedA].z);
+          const tcx = parts[candSeed].x - rc[0], tcy = parts[candSeed].y - rc[1], tcz = parts[candSeed].z - rc[2];
+          const matched = [], localUsed = new Set();
+          let ok = true;
+          for (const u of arrA) {
+            const pu = parts[u];
+            const ru = m3v(Tc, pu.x, pu.y, pu.z);
+            const ex = ru[0] + tcx, ey = ru[1] + tcy, ez = ru[2] + tcz;
+            const pool = byPC.get(`${pu.p}:${pu.c}`);
+            let best = -1, bestD = 3.2;
+            for (const v of pool) {
+              if (used.has(v) || localUsed.has(v)) continue;
+              const d = Math.hypot(parts[v].x - ex, parts[v].y - ey, parts[v].z - ez);
+              if (d < bestD) { bestD = d; best = v; }
+            }
+            if (best < 0) { ok = false; break; }
+            matched.push(best); localUsed.add(best);
+          }
+          if (ok) {
+            instances.push(matched);
+            matched.forEach(v => used.add(v));
+          }
+        }
+        if (instances.length >= 2) {
+          candidates.push({
+            name: null,
+            explicit: false,
+            size: arrA.length,
+            count: instances.length,
+            savings: (instances.length - 1) * arrA.length,
+            instances,
+          });
+        }
+      }
+    }
+  }
+
+  candidates.sort((a, b) => b.savings - a.savings || b.count - a.count || b.size - a.size);
+  const claimed = new Uint8Array(parts.length);
+  const groups = [];
+  let gSeq = 0;
+  for (const c of candidates) {
+    if (c.instances.some(inst => inst.some(i => claimed[i]))) continue;
+    c.instances.forEach(inst => inst.forEach(i => { claimed[i] = 1; }));
+    gSeq++;
+    const name = c.name || autoNameDuplicateSubmodel(c.instances[0], parts, gSeq);
+    const gid = `dupsub_${gSeq}`;
+    groups.push({
+      id: gid,
+      name,
+      repeatCount: c.instances.length,
+      instances: c.instances,
+      canonicalParts: normalizeCanonicalSubParts(c.instances[0].map(i => parts[i]), gid),
+    });
+  }
+  return groups;
+}
+
+// Build bottom-up zero-floating steps for 1 canonical copy of a duplicate submodel
+function buildLocalSubmodelSteps(canonicalParts, perStep, groupId, repeatCount) {
+  const n = canonicalParts.length;
+  const boxes = canonicalParts.map(p => computeWorldBox(p));
+  const roles = canonicalParts.map(p => classifyPartRole(p));
+  const adj = Array.from({ length: n }, () => []);
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      if (boxesPhysicallyTouch(boxes[i], boxes[j], roles[i], roles[j])) {
+        adj[i].push(j); adj[j].push(i);
+      }
+    }
+  }
+  const subPerStep = Math.max(2, Math.min(perStep, n <= 4 ? 2 : 4));
+  const placed = new Set();
+  const remaining = new Set(Array.from({ length: n }, (_, i) => i));
+  const steps = [];
+  let sNum = 0;
+
+  while (remaining.size > 0) {
+    let frontier;
+    if (placed.size === 0) {
+      const nonWheels = Array.from(remaining).filter(i => roles[i] !== 'wheel');
+      const pool = nonWheels.length > 0 ? nonWheels : Array.from(remaining);
+      pool.sort((a, b) => boxes[a].min[1] - boxes[b].min[1]);
+      frontier = pool;
+    } else {
+      frontier = Array.from(remaining).filter(i => adj[i].some(nb => placed.has(nb)));
+      if (frontier.length === 0) frontier = Array.from(remaining).sort((a, b) => boxes[a].min[1] - boxes[b].min[1]);
+      frontier.sort((a, b) => (roles[a] === 'wheel' ? 1 : 0) - (roles[b] === 'wheel' ? 1 : 0) || Math.round(boxes[a].min[1]/8) - Math.round(boxes[b].min[1]/8));
+    }
+    const anchor = frontier[0];
+    const anchorY = boxes[anchor].min[1];
+    const stepIdx = [anchor];
+    remaining.delete(anchor); placed.add(anchor);
+
+    while (stepIdx.length < subPerStep && remaining.size > 0) {
+      const cands = Array.from(remaining).filter(i => Math.abs(boxes[i].min[1] - anchorY) <= 18 && adj[i].some(nb => placed.has(nb)));
+      if (cands.length === 0) break;
+      const next = cands[0];
+      stepIdx.push(next); remaining.delete(next); placed.add(next);
+    }
+    sNum++;
+    steps.push({
+      id: `${groupId}_s${sNum}`,
+      num: sNum,
+      side: 'top',
+      corner: 'front_right',
+      cue: 'none',
+      parts: stepIdx.map(i => canonicalParts[i]),
+      isSubmodelStep: true,
+    });
+  }
+  // Indicate ×N on ONLY the last step of the submodel!
+  if (steps.length > 0) {
+    steps[steps.length - 1].isSubmodelFinal = true;
+    steps[steps.length - 1].submodelRepeat = repeatCount;
+  }
+  return steps;
+}
+
+// ZERO-FLOATING CHASSIS-FIRST STEP GENERATOR (with automatic duplicate submodel chapters!)
 function buildManualFromParsed(parsed, mode) {
   const perStep = state.pacing === 'few' ? 3 : state.pacing === 'many' ? 12 : 6;
   const parts = parsed.parts;
@@ -1231,7 +1503,7 @@ function buildManualFromParsed(parsed, mode) {
         id: `kc${chIdx}_s${++globalStep}`, num: globalStep,
         side: 'top', corner: 'front_right', cue: 'none', parts: byOrig.get(k),
       }));
-      chapters.push({ id: `kch_${chIdx}`, name: subName, kind: 'main', steps });
+      chapters.push({ id: `kch_${chIdx}`, name: subName, kind: 'main', sectionId: `ksec_${chIdx}`, steps });
     }
     return { title: parsed.title, subtitle: `${parts.length} pieces · ${globalStep} steps`, chapters, _parsed: parsed, _mode: mode };
   }
@@ -1266,6 +1538,15 @@ function buildManualFromParsed(parsed, mode) {
     }
   }
 
+  // 1b. Automatic Duplicate Submodel Detection (explicit submodels + geometric-only duplicates!)
+  const dupGroups = detectDuplicateSubassemblies(parts, boxes, adj, roles);
+  const partToDup = new Map();
+  for (const g of dupGroups) {
+    g.instances.forEach((inst, instIdx) => {
+      for (const pi of inst) partToDup.set(pi, { group: g, instIdx });
+    });
+  }
+
   // 2. Connected components -> separate standalone figures/accessories from main model
   const visited = new Uint8Array(parts.length);
   const rawComps = [];
@@ -1285,29 +1566,42 @@ function buildManualFromParsed(parsed, mode) {
   if (smallComps.length > 0) groupedComps.push({ name: 'Figure & Accessories', indices: smallComps.flat() });
   largeComps.forEach((c, idx) => groupedComps.push({ name: largeComps.length === 1 ? parsed.title : `${parsed.title} · Section ${idx + 1}`, indices: c }));
 
-  // 3. Chassis-First Bottom-Up Zero-Floating Frontier
+  // 3. Chassis-First Bottom-Up Zero-Floating Frontier (interleaving duplicate submodel chapters cleanly!)
   const chapters = [];
-  let globalStep = 0;
+  const emittedSubChapters = new Set();
+  let globalStep = 0, chSeq = 0;
 
-  groupedComps.forEach((group, chIdx) => {
+  groupedComps.forEach((group, secIdx) => {
+    const sectionId = `sec_${secIdx + 1}`;
+    const isFigSec = secIdx === 0 && smallComps.length > 0;
     const indices = group.indices;
     const placed = new Set();
     const remaining = new Set(indices);
-    const steps = [];
+    let curSteps = [];
+
+    const flushMainSteps = () => {
+      if (curSteps.length === 0) return;
+      chapters.push({
+        id: `ach_${++chSeq}`,
+        name: group.name,
+        kind: isFigSec ? 'minifigure' : 'main',
+        sectionId,
+        steps: curSteps,
+      });
+      curSteps = [];
+    };
 
     while (remaining.size > 0) {
       let frontier;
       if (placed.size === 0) {
-        // NEVER start a build on a loose wheel! Prefer lowest structural/holder chassis pieces with strong connectivity
         const nonWheels = Array.from(remaining).filter(i => roles[i] !== 'wheel');
         const pool = nonWheels.length > 0 ? nonWheels : Array.from(remaining);
         pool.sort((a, b) => boxes[a].min[1] - boxes[b].min[1]);
         const minY = boxes[pool[0]].min[1];
         const lowBand = pool.filter(i => boxes[i].min[1] <= minY + 32);
-        // Pick the best structural anchor in the bottom band (prefers plates/bricks/holders with highest connections!)
         lowBand.sort((a, b) => {
-          const sa = (roles[a] === 'structural' || roles[a] === 'wheel_holder' ? 50 : 0) + adj[a].length * 6 - (boxes[a].min[1] - minY) * 0.8;
-          const sb = (roles[b] === 'structural' || roles[b] === 'wheel_holder' ? 50 : 0) + adj[b].length * 6 - (boxes[b].min[1] - minY) * 0.8;
+          const sa = (partToDup.has(a) ? -80 : 0) + (roles[a] === 'structural' || roles[a] === 'wheel_holder' ? 50 : 0) + adj[a].length * 6 - (boxes[a].min[1] - minY) * 0.8;
+          const sb = (partToDup.has(b) ? -80 : 0) + (roles[b] === 'structural' || roles[b] === 'wheel_holder' ? 50 : 0) + adj[b].length * 6 - (boxes[b].min[1] - minY) * 0.8;
           return sb - sa;
         });
         frontier = lowBand;
@@ -1316,15 +1610,66 @@ function buildManualFromParsed(parsed, mode) {
         if (frontier.length === 0) {
           frontier = Array.from(remaining).sort((a, b) => boxes[a].min[1] - boxes[b].min[1]);
         }
-        // Sort frontier: lowest structural pieces first; wheels only attach cleanly once their holder is already placed
         frontier.sort((a, b) => {
           const wa = roles[a] === 'wheel' ? 1 : 0, wb = roles[b] === 'wheel' ? 1 : 0;
-          if (wa !== wb) return wa - wb; // attach structure/holders before snapping on wheels
+          if (wa !== wb) return wa - wb;
           return Math.round(boxes[a].min[1] / 8) - Math.round(boxes[b].min[1] / 8) || parts[a].p.localeCompare(parts[b].p);
         });
       }
 
       const anchor = frontier[0];
+      const dupInfo = partToDup.get(anchor);
+
+      // DUPLICATE SUBMODEL HANDLING: Build 1 canonical copy with ×N, then attach copies cleanly!
+      if (dupInfo) {
+        const g = dupInfo.group;
+        const readyInsts = [];
+        g.instances.forEach((instIndices, instIdx) => {
+          const unplacedInSec = instIndices.filter(pi => remaining.has(pi));
+          if (unplacedInSec.length === 0) return;
+          const isAnchorInst = instIdx === dupInfo.instIdx;
+          const touchesPlaced = placed.size === 0 || unplacedInSec.some(pi => adj[pi].some(nb => placed.has(nb)));
+          if (isAnchorInst || touchesPlaced) readyInsts.push(unplacedInSec);
+        });
+
+        // Emit the submodel's own step-by-step chapter ONCE right before its first attachment!
+        if (!emittedSubChapters.has(g.id)) {
+          flushMainSteps();
+          const subSteps = buildLocalSubmodelSteps(g.canonicalParts, perStep, g.id, g.repeatCount);
+          chapters.push({
+            id: `subch_${++chSeq}_${g.id}`,
+            name: g.name,
+            kind: 'submodel',
+            sectionId: `subsec_${g.id}`,
+            repeatCount: g.repeatCount,
+            canonicalParts: g.canonicalParts,
+            steps: subSteps,
+          });
+          emittedSubChapters.add(g.id);
+        }
+
+        const attachIndices = readyInsts.flat();
+        for (const pi of attachIndices) { remaining.delete(pi); placed.add(pi); }
+        globalStep++;
+        curSteps.push({
+          id: `ac${secIdx+1}_s${globalStep}`,
+          num: globalStep,
+          side: 'top',
+          corner: 'front_right',
+          cue: 'none',
+          parts: attachIndices.map(i => parts[i]),
+          attachedSubmodel: {
+            id: g.id,
+            name: g.name,
+            repeatCount: readyInsts.length,
+            totalRepeatCount: g.repeatCount,
+            canonicalParts: g.canonicalParts,
+          },
+        });
+        continue;
+      }
+
+      // NORMAL STEP (non-duplicate-submodel bricks)
       const anchorY = boxes[anchor].min[1];
       const anchorC = boxes[anchor].center;
       const stepIndices = [anchor];
@@ -1333,6 +1678,7 @@ function buildManualFromParsed(parsed, mode) {
 
       while (stepIndices.length < perStep && remaining.size > 0) {
         const cands = Array.from(remaining).filter(i => {
+          if (partToDup.has(i)) return false;
           if (Math.abs(boxes[i].min[1] - anchorY) > 18) return false;
           if (!adj[i].some(nb => placed.has(nb))) return false;
           const d = Math.hypot(boxes[i].center[0]-anchorC[0], boxes[i].center[1]-anchorC[1], boxes[i].center[2]-anchorC[2]);
@@ -1358,41 +1704,55 @@ function buildManualFromParsed(parsed, mode) {
       }
 
       globalStep++;
-      steps.push({
-        id: `ac${chIdx+1}_s${globalStep}`,
+      curSteps.push({
+        id: `ac${secIdx+1}_s${globalStep}`,
         num: globalStep,
         side: 'top', corner: 'front_right', cue: 'none',
         parts: stepIndices.map(i => parts[i]),
       });
     }
-    chapters.push({ id: `ach_${chIdx+1}`, name: group.name, kind: chIdx === 0 && smallComps.length > 0 ? 'minifigure' : 'main', steps });
+    flushMainSteps();
   });
 
-  return { title: parsed.title, subtitle: `${parts.length} pieces · ${globalStep} steps`, chapters, _parsed: parsed, _mode: mode };
+  const dupSummary = dupGroups.length > 0 ? ` · ${dupGroups.length} repeated submodel${dupGroups.length === 1 ? '' : 's'}` : '';
+  return { title: parsed.title, subtitle: `${parts.length} pieces · ${globalStep} steps${dupSummary}`, chapters, _parsed: parsed, _mode: mode };
 }
 
-// Built-in Sample Model (uses fused minifigure assemblies!)
+// Built-in Sample Model (includes fused minifigure + a genuine ×2 duplicate submodel showcase!)
 function buildSampleModel() {
   const mk = (id, p, c, x, y, z) => ({ id, p, c, x, y, z, m: R_ID });
+  const solarCanon = [mk('sc1','3023',15,0,8,0), mk('sc2','60470b',72,20,8,0), mk('sc3','3068b',1,0,16,0)];
   return {
     title: 'Orbital Rover',
-    subtitle: 'Sample · 19 pieces · 5 steps',
+    subtitle: 'Sample · 19 pieces · 5 steps · 1 repeated submodel',
     chapters: [
       {
-        id: 'ch_mf', name: 'Astronaut', kind: 'minifigure',
+        id: 'ch_mf', name: 'Astronaut', kind: 'minifigure', sectionId: 'sec_mf',
         steps: [
           { id:'s1', num:1, side:'top', corner:'front_right', cue:'none', parts:[mk('m1','3815c01',15,0,28,0), mk('m2','973c01',15,0,56,0)] },
           { id:'s2', num:2, side:'top', corner:'front_right', cue:'none', parts:[mk('m3','3626cp01',14,0,80,0), mk('m4','3842a',15,0,84,0)] },
         ],
       },
       {
-        id: 'ch_main', name: 'Rover Chassis', kind: 'main',
+        id: 'ch_main_1', name: 'Rover Chassis', kind: 'main', sectionId: 'sec_main',
         steps: [
           { id:'s3', num:3, side:'top', corner:'front_right', cue:'none', parts:[mk('r1','3031',72,0,8,0), mk('r2','3020',71,-30,16,0), mk('r3','3020',71,30,16,0)] },
           { id:'s4', num:4, side:'top', corner:'front_right', cue:'none', parts:[mk('r4','3001',15,0,40,0), mk('r5','4733',72,-30,40,0), mk('r6','4733',72,30,40,0), mk('r7','4519',0,0,48,0)] },
+        ],
+      },
+      {
+        id: 'ch_sub_solar', name: 'Solar Array', kind: 'submodel', sectionId: 'sub_solar', repeatCount: 2, canonicalParts: solarCanon,
+        steps: [
+          { id:'sub_s1', num:1, side:'top', corner:'front_right', cue:'none', isSubmodelStep:true, parts:[solarCanon[0], solarCanon[1]] },
+          { id:'sub_s2', num:2, side:'top', corner:'front_right', cue:'none', isSubmodelStep:true, isSubmodelFinal:true, submodelRepeat:2, parts:[solarCanon[2]] },
+        ],
+      },
+      {
+        id: 'ch_main_2', name: 'Rover Chassis', kind: 'main', sectionId: 'sec_main',
+        steps: [
           {
             id:'s5', num:5, side:'top', corner:'back_left', cue:'yaw_180',
-            subassembly: { name:'Solar Array', repeatCount:2, direction:'horizontal', asPages:false, buildParts:[mk('sa1','3023',15,0,8,0), mk('sa2','3068b',1,0,16,0), mk('sa3','60470b',72,20,8,0)] },
+            attachedSubmodel: { id:'sub_solar', name:'Solar Array', repeatCount:2, totalRepeatCount:2, canonicalParts: solarCanon },
             parts:[mk('r8','3023',15,-46,24,0), mk('r9','3068b',1,-46,32,0), mk('r10','3023',15,46,24,0), mk('r11','3068b',1,46,32,0), mk('r12','30374',71,0,66,0)],
           },
         ],
@@ -1416,6 +1776,7 @@ const state = {
   showPrintGuides: false,
   layout: 'auto',          // auto | 1-up | 2-up | 4-up
   pacing: 'standard',      // few | standard | many
+  detectDuplicates: true,  // auto-detect explicit + geometric duplicate submodels
   highlightNew: true,
   highlightColor: '#ff2d55',
   fadePrev: true,
@@ -1497,10 +1858,50 @@ function showToast(msg) {
 }
 
 function getAllSteps(model) { return model ? model.chapters.flatMap(ch => ch.steps.map(step => ({ ch, step }))) : []; }
-function getAllParts(model) { return getAllSteps(model).flatMap(x => x.step.parts); }
+function getMainSteps(model) { return model ? model.chapters.filter(ch => ch.kind !== 'submodel').flatMap(ch => ch.steps.map(step => ({ ch, step }))) : []; }
+function getAllParts(model) { return getMainSteps(model).flatMap(x => x.step.parts); }
 function renumberContinuousSteps(model) {
-  let n = 0;
-  for (const ch of model.chapters) for (const s of ch.steps) s.num = ++n;
+  let mainNum = 0;
+  for (const ch of model.chapters) {
+    if (ch.kind === 'submodel') {
+      ch.steps.forEach((s, idx) => {
+        s.num = idx + 1;
+        s.isSubmodelStep = true;
+        s.isSubmodelFinal = idx === ch.steps.length - 1;
+        s.submodelRepeat = ch.repeatCount || 2;
+      });
+    } else {
+      for (const s of ch.steps) s.num = ++mainNum;
+    }
+  }
+}
+function getPreviousPartsForStep(model, ch, step) {
+  const prev = [];
+  if (ch.kind === 'submodel') {
+    for (const s of ch.steps) { if (s.id === step.id) break; prev.push(...s.parts); }
+    return prev;
+  }
+  const sec = ch.sectionId || ch.id;
+  for (const c of model.chapters) {
+    if (c.kind === 'submodel') continue;
+    if ((c.sectionId || c.id) !== sec) continue;
+    for (const s of c.steps) {
+      if (s.id === step.id) return prev;
+      prev.push(...s.parts);
+    }
+    if (c.id === ch.id) break;
+  }
+  return prev;
+}
+const submodelThumbCache = new Map();
+function getSubmodelThumb(subObj, w = 220, h = 150) {
+  if (!subObj || !subObj.canonicalParts?.length) return '';
+  if (submodelThumbCache.size > 120) submodelThumbCache.clear();
+  const k = `${subObj.id || subObj.name}_${w}x${h}`;
+  if (submodelThumbCache.has(k)) return submodelThumbCache.get(k);
+  const snap = renderSnapshot([], subObj.canonicalParts, 38, 28, w, h, 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:'#1a73e8' });
+  submodelThumbCache.set(k, snap.url);
+  return snap.url;
 }
 
 function formatPageNumber(num, total) {
@@ -1691,6 +2092,8 @@ function rebuildPages() {
 
   for (const ch of state.model.chapters) {
     let i = 0;
+    let isFirstChPage = true;
+    const isSubCh = ch.kind === 'submodel';
     while (i < ch.steps.length) {
       const first = ch.steps[i];
       const firstOv = state.overrides[first.id] || {};
@@ -1703,23 +2106,37 @@ function rebuildPages() {
         });
       }
       const cap = state.layout === 'auto'
-        ? (first.subassembly || first.parts.length >= 6 ? 1 : 2)
+        ? (first.subassembly || first.attachedSubmodel || first.parts.length >= 6 ? 1 : 2)
         : (state.layout === '1-up' ? 1 : state.layout === '2-up' ? 2 : 4);
       const slots = [];
       for (let k = 0; k < cap && i < ch.steps.length; k++) {
         const s = ch.steps[i];
         if (k > 0 && state.overrides[s.id]?.pin) break;
-        if (k > 0 && s.subassembly && state.layout === 'auto') break;
+        if (k > 0 && (s.subassembly || s.attachedSubmodel) && state.layout === 'auto') break;
         slots.push({ ch, step: s });
         i++;
-        if (s.subassembly && state.layout === 'auto') break;
+        if ((s.subassembly || s.attachedSubmodel) && state.layout === 'auto') break;
       }
-      const label = slots.length === 1 ? `Step ${slots[0].step.num}` : `Steps ${slots[0].step.num}–${slots[slots.length-1].step.num}`;
+      const stepRange = slots.length === 1 ? `Step ${slots[0].step.num}` : `Steps ${slots[0].step.num}–${slots[slots.length-1].step.num}`;
+      const label = isSubCh ? `${ch.name} ×${ch.repeatCount} · ${stepRange}` : stepRange;
       const pgId = 'pg_' + slots[0].step.id;
       pages.push({
-        id: pgId, kind: 'steps', num: ++pNum, label,
-        chapterName: ch.name, pinned: Boolean(state.overrides[slots[0].step.id]?.pin), slots,
+        id: pgId,
+        kind: 'steps',
+        num: ++pNum,
+        label,
+        chapterName: isSubCh ? `${ch.name} (×${ch.repeatCount})` : ch.name,
+        isSubmodelPage: isSubCh,
+        submodelIntro: (isSubCh && isFirstChPage) ? {
+          id: ch.id,
+          name: ch.name,
+          repeatCount: ch.repeatCount || 2,
+          canonicalParts: ch.canonicalParts || [],
+        } : null,
+        pinned: Boolean(state.overrides[slots[0].step.id]?.pin),
+        slots,
       });
+      isFirstChPage = false;
       if (state.dividerAfter[pgId]) {
         pages.push({ id: 'div_' + pgId, kind: 'divider', num: ++pNum, label: 'Divider Page', sourcePgId: pgId });
       }
@@ -2111,9 +2528,10 @@ function renderAll() {
       : slots.length === 2 ? (dims.isLandscape ? 'grid-cols-2 grid-rows-1' : 'grid-cols-1 grid-rows-2')
       : 'grid-cols-2 grid-rows-2';
 
+    const subIntroImg = page.submodelIntro ? getSubmodelThumb(page.submodelIntro, 240, 150) : null;
+
     const slotData = slots.map(({ ch, step }) => {
-      const prev = [];
-      for (const s of ch.steps) { if (s.id === step.id) break; prev.push(...s.parts); }
+      const prev = getPreviousPartsForStep(state.model, ch, step);
       const cam = getStepCamera(step);
       const ov = state.overrides[step.id] || {};
       const modelScale = ov.modelScale || 1.0;
@@ -2131,16 +2549,19 @@ function renderAll() {
       const subImg = (step.subassembly && !ov.calloutAsPages)
         ? renderSnapshot([], step.subassembly.buildParts, 38, 30, 260, 180, 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent }).url
         : null;
+      const attSubImg = step.attachedSubmodel ? getSubmodelThumb(step.attachedSubmodel, 160, 120) : null;
 
-      // Group PLI items + detect 1:1 Actual-Size Guides
+      // Group PLI items + detect 1:1 Actual-Size Guides (skip individual bricks when attaching a pre-built duplicate submodel!)
       const pliMap = new Map();
-      for (const p of step.parts) {
-        const k = `${p.p}:${p.c}`;
-        if (!pliMap.has(k)) pliMap.set(k, { part: p, ids: [], qty: 0, guide: getActualSizeGuide(p.p) });
-        const item = pliMap.get(k);
-        item.qty++; item.ids.push(p.id);
+      if (!step.attachedSubmodel) {
+        for (const p of step.parts) {
+          const k = `${p.p}:${p.c}`;
+          if (!pliMap.has(k)) pliMap.set(k, { part: p, ids: [], qty: 0, guide: getActualSizeGuide(p.p) });
+          const item = pliMap.get(k);
+          item.qty++; item.ids.push(p.id);
+        }
       }
-      return { ch, step, prev, cam, ov, snap, subImg, pli: Array.from(pliMap.values()) };
+      return { ch, step, prev, cam, ov, snap, subImg, attSubImg, pli: Array.from(pliMap.values()) };
     });
 
     const isRotateMode = state.mode === 'rotate';
@@ -2150,8 +2571,19 @@ function renderAll() {
 
     frame.innerHTML = `
       <div class="relative w-full h-full flex flex-col overflow-hidden ${guideCls}" style="padding:${padPx}px;padding-bottom:${padPx + 18}px">
+        ${page.submodelIntro ? `
+          <div class="shrink-0 mb-2 px-3 py-1.5 rounded-2xl flex items-center justify-between gap-3 shadow-xs" style="background:${theme.calloutBg};border:1.5px solid ${theme.calloutBorder}">
+            <div class="flex items-center gap-2.5 min-w-0">
+              <img src="${subIntroImg}" alt="${escHtml(page.submodelIntro.name)}" class="w-14 h-11 sm:w-20 sm:h-14 object-contain shrink-0 pointer-events-none" />
+              <div class="min-w-0">
+                <div class="text-[9px] font-bold uppercase tracking-wider opacity-65">Submodel</div>
+                <div class="text-xs sm:text-sm font-extrabold truncate">${escHtml(page.submodelIntro.name)}</div>
+              </div>
+            </div>
+            <span class="shrink-0 px-3 py-1 rounded-full text-sm sm:text-base font-black text-white shadow-xs" style="background:${theme.accent}">×${page.submodelIntro.repeatCount}</span>
+          </div>` : ''}
         <div class="grid ${gridCls} flex-1 min-h-0" style="gap:${gapPx}px">
-          ${slotData.map(({ step, ov, snap, subImg, pli }) => {
+          ${slotData.map(({ step, ov, snap, subImg, attSubImg, pli }) => {
             const isSelStep = state.selectedStepId === step.id;
             const showLive3D = isRotateMode && isSelStep;
             const pliScale = ov.pliScale || (isTightSlot ? 0.86 : 1.0);
@@ -2172,7 +2604,15 @@ function renderAll() {
                     <span class="${isTightSlot ? 'text-lg' : 'text-2xl'} font-extrabold leading-none">${step.num}</span>
                     ${ov.pin ? '<span class="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-900">Locked</span>' : ''}
 
-                    ${!step.subassembly || ov.calloutAsPages ? `
+                    ${step.attachedSubmodel ? `
+                      <div data-drag="pli" data-step="${step.id}" class="draggable-el flex items-center gap-2 px-2 py-1 rounded-xl shadow-xs ${isArrangeMode ? 'cursor-move' : ''}" style="background:${theme.calloutBg};border:${pliSel ? `2px solid ${theme.accent}` : `1.5px solid ${theme.calloutBorder}`};transform:translate(${pliPos.x}px,${pliPos.y}px) scale(${pliScale});transform-origin:top left;">
+                        <img src="${attSubImg}" alt="${escHtml(step.attachedSubmodel.name)}" class="${isTightSlot ? 'w-8 h-6' : 'w-11 h-8'} object-contain pointer-events-none" />
+                        <div class="leading-tight">
+                          <div class="text-xs font-black" style="color:${theme.accent}">×${step.attachedSubmodel.repeatCount}</div>
+                          <div class="text-[9px] font-semibold opacity-75 max-w-[96px] truncate">${escHtml(step.attachedSubmodel.name)}</div>
+                        </div>
+                      </div>`
+                    : (!step.subassembly || ov.calloutAsPages ? `
                       <div data-drag="pli" data-step="${step.id}" class="draggable-el flex items-center gap-1.5 px-1.5 py-0.5 rounded-xl flex-wrap shadow-xs ${isArrangeMode ? 'cursor-move' : ''}" style="background:${theme.pliBg};border:${pliSel ? `2px solid ${theme.accent}` : `1px solid ${theme.pliBorder}`};transform:translate(${pliPos.x}px,${pliPos.y}px) scale(${pliScale});transform-origin:top left;">
                         ${pli.slice(0, 7).map(item => {
                           const anySel = state.mode === 'select' && item.ids.some(id => state.selectedPartIds.has(id));
@@ -2189,7 +2629,7 @@ function renderAll() {
                               </div>` : ''}
                           </button>`;
                         }).join('')}
-                      </div>` : ''}
+                      </div>` : '')}
                   </div>
 
                   <div class="flex items-center gap-1 shrink-0">
@@ -2214,6 +2654,7 @@ function renderAll() {
                       ? `<canvas id="liveRotateCanvas" class="w-full h-full object-contain cursor-grab active:cursor-grabbing"></canvas>`
                       : `<img data-pick-step="${step.id}" src="${snap.url}" class="step-render-img max-w-full max-h-full w-full h-full object-contain ${state.mode === 'select' ? 'cursor-crosshair' : 'pointer-events-none'}" />`
                     }
+                    ${step.isSubmodelFinal ? `<span class="absolute bottom-1.5 right-1.5 px-3 py-1 rounded-full text-sm sm:text-base font-black text-white shadow-md pointer-events-none" style="background:${theme.accent}">×${step.submodelRepeat || 2}</span>` : ''}
                   </div>
                 </div>
               </div>`;
@@ -2820,6 +3261,7 @@ function syncMenuControls() {
   setChk('toggleCompleteFireworks', state.completeMeta.showFireworks !== false);
   setChk('togglePrintGuides', state.showPrintGuides);
   setChk('toggleExtras', state.showExtras);
+  setChk('toggleDetectDuplicates', state.detectDuplicates);
 
   const bc = state.bomConfig;
   document.querySelectorAll('.bom-dens-btn').forEach(b => {
@@ -3183,7 +3625,7 @@ async function importBricksLibraryFiles(fileList) {
         }
       }
     }
-    embeddedDatCompiled.clear(); pliThumbCache.clear();
+    embeddedDatCompiled.clear(); pliThumbCache.clear(); submodelThumbCache.clear();
     updateLibraryStatusUI();
     if (state.model) {
       if (state.model._parsed) state.model = buildManualFromParsed(state.model._parsed, state.model._mode || 'auto');
@@ -3336,7 +3778,7 @@ async function fetchMissingPartsOnline() {
       progBar.style.width = pct + '%';
     }
 
-    embeddedDatCompiled.clear(); pliThumbCache.clear();
+    embeddedDatCompiled.clear(); pliThumbCache.clear(); submodelThumbCache.clear();
     updateLibraryStatusUI();
     if (state.model) {
       if (fetched > 0 && state.model._parsed) state.model = buildManualFromParsed(state.model._parsed, state.model._mode || 'auto');
@@ -3360,7 +3802,7 @@ function computeModelDiagnostics() {
   if (!state.model) { state.diagnostics = []; updateErrorIndicators(); return; }
   const missingByPart = new Map();
   const unknownColors = new Map();
-  const allSteps = getAllSteps(state.model);
+  const allSteps = getMainSteps(state.model);
 
   for (const { step } of allSteps) {
     for (const p of step.parts) {
@@ -3601,7 +4043,7 @@ function scheduleSaveSessionPrefs() {
       themeId: state.themeId, paperFormat: state.paperFormat, orientation: state.orientation,
       customWidth: state.customWidth, customHeight: state.customHeight, customUnit: state.customUnit,
       density: state.density, showPrintGuides: state.showPrintGuides, layout: state.layout,
-      pacing: state.pacing, highlightNew: state.highlightNew, highlightColor: state.highlightColor,
+      pacing: state.pacing, detectDuplicates: state.detectDuplicates, highlightNew: state.highlightNew, highlightColor: state.highlightColor,
       fadePrev: state.fadePrev, fadeOpacity: state.fadeOpacity, showRotCues: state.showRotCues,
       showSizeGuides: state.showSizeGuides, showStepBorders: state.showStepBorders,
       showPageTitle: state.showPageTitle, pageNumberFormat: state.pageNumberFormat,
@@ -3637,6 +4079,7 @@ async function restoreLastSessionOnStart() {
     if (typeof prefs.showPrintGuides === 'boolean') state.showPrintGuides = prefs.showPrintGuides;
     if (prefs.layout) state.layout = prefs.layout;
     if (prefs.pacing) state.pacing = prefs.pacing;
+    if (typeof prefs.detectDuplicates === 'boolean') state.detectDuplicates = prefs.detectDuplicates;
     if (typeof prefs.highlightNew === 'boolean') state.highlightNew = prefs.highlightNew;
     if (prefs.highlightColor) state.highlightColor = prefs.highlightColor;
     if (typeof prefs.fadePrev === 'boolean') state.fadePrev = prefs.fadePrev;
@@ -3678,6 +4121,8 @@ async function restoreLastSessionOnStart() {
     document.getElementById('toggleFade').checked = state.fadePrev;
     document.getElementById('toggleRotCues').checked = state.showRotCues;
     document.getElementById('toggleSizeGuides').checked = state.showSizeGuides;
+    const dupEl = document.getElementById('toggleDetectDuplicates');
+    if (dupEl) dupEl.checked = state.detectDuplicates;
 
     computeModelDiagnostics();
     resetZoom();
@@ -3946,18 +4391,76 @@ async function renderPageToJpegBytes(page, pxW, pxH) {
       ctx.textAlign = 'left';
     }
   } else if (page.kind === 'steps') {
+    const drawRRect = (x, y, w, h, r) => {
+      const rr = Math.min(r, w / 2, h / 2);
+      ctx.beginPath();
+      ctx.moveTo(x + rr, y);
+      ctx.arcTo(x + w, y, x + w, y + h, rr);
+      ctx.arcTo(x + w, y + h, x, y + h, rr);
+      ctx.arcTo(x, y + h, x, y, rr);
+      ctx.arcTo(x, y, x + w, y, rr);
+      ctx.closePath();
+    };
+
     const slots = page.slots;
     const isLand = pxW >= pxH;
     const cols = slots.length === 1 ? 1 : slots.length === 2 ? (isLand ? 2 : 1) : 2;
     const rows = Math.ceil(slots.length / cols);
     const gap = Math.round(pad * 0.55);
+
+    // Optional Finished Submodel + ×N Intro Banner at top of submodel's first page
+    let topY = pad;
+    if (page.submodelIntro) {
+      const sub = page.submodelIntro;
+      const bannerH = Math.round(Math.min(pxH * 0.13, 130));
+      const bannerW = pxW - pad * 2;
+      drawRRect(pad, pad, bannerW, bannerH, 16);
+      ctx.fillStyle = theme.calloutBg;
+      ctx.fill();
+      ctx.strokeStyle = theme.calloutBorder;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      const thumbUrl = getSubmodelThumb(sub, 260, 160);
+      if (thumbUrl) {
+        const introImg = await loadImgPromise(thumbUrl);
+        drawContain(ctx, introImg, pad + 14, pad + 8, Math.round(bannerH * 1.45), bannerH - 16);
+      }
+      const textX = pad + 14 + Math.round(bannerH * 1.45) + 14;
+      ctx.fillStyle = theme.muted;
+      ctx.font = `700 ${Math.round(bannerH * 0.16)}px -apple-system, sans-serif`;
+      ctx.fillText('SUBMODEL', textX, pad + Math.round(bannerH * 0.2));
+      ctx.fillStyle = theme.text;
+      ctx.font = `800 ${Math.round(bannerH * 0.28)}px -apple-system, sans-serif`;
+      ctx.fillText(sub.name || 'Submodel', textX, pad + Math.round(bannerH * 0.44));
+
+      const multLabel = `×${sub.repeatCount}`;
+      const pillFont = Math.round(bannerH * 0.34);
+      ctx.font = `900 ${pillFont}px -apple-system, sans-serif`;
+      const pillW = Math.max(Math.round(bannerH * 0.95), Math.round(ctx.measureText(multLabel).width + 32));
+      const pillH = Math.round(bannerH * 0.54);
+      const pillX = pad + bannerW - pillW - 18;
+      const pillY = pad + Math.round((bannerH - pillH) / 2);
+      drawRRect(pillX, pillY, pillW, pillH, pillH / 2);
+      ctx.fillStyle = theme.accent;
+      ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(multLabel, pillX + pillW / 2, pillY + pillH / 2 + 1);
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+
+      topY = pad + bannerH + Math.round(gap * 0.8);
+    }
+
     const slotW = (pxW - pad * 2 - gap * (cols - 1)) / cols;
-    const slotH = (pxH - pad * 2 - footerH - gap * (rows - 1)) / rows;
+    const slotH = (pxH - topY - pad - footerH - gap * (rows - 1)) / rows;
 
     for (let idx = 0; idx < slots.length; idx++) {
       const { ch, step } = slots[idx];
       const sx = pad + (idx % cols) * (slotW + gap);
-      const sy = pad + Math.floor(idx / cols) * (slotH + gap);
+      const sy = topY + Math.floor(idx / cols) * (slotH + gap);
       if (state.showStepBorders) {
         ctx.strokeStyle = theme.pliBorder; ctx.lineWidth = 2;
         ctx.strokeRect(sx, sy, slotW, slotH);
@@ -3968,27 +4471,51 @@ async function renderPageToJpegBytes(page, pxW, pxH) {
       ctx.font = `800 ${Math.round(Math.min(slotH * 0.11, 44))}px -apple-system, sans-serif`;
       ctx.fillText(String(step.num), sx + 12, sy + 10);
 
-      // PLI Box
-      const pliMap = new Map();
-      for (const p of step.parts) { const k = `${p.p}:${p.c}`; if (!pliMap.has(k)) pliMap.set(k, { part: p, qty: 0 }); pliMap.get(k).qty++; }
-      const pli = Array.from(pliMap.values()).slice(0, 6);
+      // PLI Box (shows finished submodel thumbnail + ×N on attachment steps, or raw parts otherwise)
       const pliX = sx + Math.round(Math.min(slotH * 0.14, 62)), pliY = sy + 10;
-      const itemW = Math.min(72, (slotW - 80) / Math.max(1, pli.length));
       const pliH = Math.min(58, slotH * 0.22);
-      ctx.fillStyle = theme.pliBg;
-      ctx.fillRect(pliX, pliY, pli.length * itemW + 10, pliH);
-      ctx.strokeStyle = theme.pliBorder; ctx.lineWidth = 1.5;
-      ctx.strokeRect(pliX, pliY, pli.length * itemW + 10, pliH);
-      for (let pi = 0; pi < pli.length; pi++) {
-        const im = await loadImgPromise(getPliThumb(pli[pi].part));
-        drawContain(ctx, im, pliX + 6 + pi * itemW, pliY + 4, itemW * 0.56, pliH - 8);
-        ctx.fillStyle = theme.text; ctx.font = `bold ${Math.round(pliH * 0.34)}px -apple-system, sans-serif`;
-        ctx.fillText(`${pli[pi].qty}×`, pliX + 6 + pi * itemW + itemW * 0.58, pliY + pliH * 0.3);
+      if (step.attachedSubmodel) {
+        const att = step.attachedSubmodel;
+        const attBoxW = Math.min(slotW - (pliX - sx) - 14, Math.max(150, pliH * 3.4));
+        drawRRect(pliX, pliY, attBoxW, pliH, 10);
+        ctx.fillStyle = theme.calloutBg;
+        ctx.fill();
+        ctx.strokeStyle = theme.calloutBorder;
+        ctx.lineWidth = 1.8;
+        ctx.stroke();
+        const attUrl = getSubmodelThumb(att, 160, 120);
+        if (attUrl) {
+          const attImg = await loadImgPromise(attUrl);
+          drawContain(ctx, attImg, pliX + 6, pliY + 4, pliH * 1.25, pliH - 8);
+        }
+        const tx = pliX + 6 + pliH * 1.25 + 8;
+        ctx.fillStyle = theme.accent;
+        ctx.font = `900 ${Math.round(pliH * 0.36)}px -apple-system, sans-serif`;
+        ctx.fillText(`×${att.repeatCount}`, tx, pliY + Math.round(pliH * 0.14));
+        ctx.fillStyle = theme.text;
+        ctx.font = `600 ${Math.round(pliH * 0.24)}px -apple-system, sans-serif`;
+        ctx.fillText(att.name || 'Submodel', tx, pliY + Math.round(pliH * 0.56), Math.max(40, attBoxW - (tx - pliX) - 8));
+      } else {
+        const pliMap = new Map();
+        for (const p of step.parts) { const k = `${p.p}:${p.c}`; if (!pliMap.has(k)) pliMap.set(k, { part: p, qty: 0 }); pliMap.get(k).qty++; }
+        const pli = Array.from(pliMap.values()).slice(0, 6);
+        if (pli.length > 0) {
+          const itemW = Math.min(72, (slotW - 80) / Math.max(1, pli.length));
+          ctx.fillStyle = theme.pliBg;
+          ctx.fillRect(pliX, pliY, pli.length * itemW + 10, pliH);
+          ctx.strokeStyle = theme.pliBorder; ctx.lineWidth = 1.5;
+          ctx.strokeRect(pliX, pliY, pli.length * itemW + 10, pliH);
+          for (let pi = 0; pi < pli.length; pi++) {
+            const im = await loadImgPromise(getPliThumb(pli[pi].part));
+            drawContain(ctx, im, pliX + 6 + pi * itemW, pliY + 4, itemW * 0.56, pliH - 8);
+            ctx.fillStyle = theme.text; ctx.font = `bold ${Math.round(pliH * 0.34)}px -apple-system, sans-serif`;
+            ctx.fillText(`${pli[pi].qty}×`, pliX + 6 + pi * itemW + itemW * 0.58, pliY + pliH * 0.3);
+          }
+        }
       }
 
       // 3D Step Render
-      const prev = [];
-      for (const s of ch.steps) { if (s.id === step.id) break; prev.push(...s.parts); }
+      const prev = getPreviousPartsForStep(state.model, ch, step);
       const cam = getStepCamera(step);
       const ov = state.overrides[step.id] || {};
       const snap = renderSnapshot(prev, step.parts, cam.az, cam.el, 760, 520, ov.modelScale || 1.0, {
@@ -3998,6 +4525,26 @@ async function renderPageToJpegBytes(page, pxW, pxH) {
       });
       const stepImg = await loadImgPromise(snap.url);
       drawContain(ctx, stepImg, sx + 10, sy + pliH + 18, slotW - 20, slotH - pliH - 28);
+
+      // Final step of a duplicate submodel: show prominent ×N badge ONLY on this last step
+      if (step.isSubmodelFinal) {
+        const badgeLabel = `×${step.submodelRepeat || 2}`;
+        const badgeFont = Math.round(Math.min(slotH * 0.085, 34));
+        ctx.font = `900 ${badgeFont}px -apple-system, sans-serif`;
+        const bW = Math.max(Math.round(badgeFont * 2.1), Math.round(ctx.measureText(badgeLabel).width + 26));
+        const bH = Math.round(badgeFont * 1.55);
+        const bX = sx + slotW - bW - 14;
+        const bY = sy + slotH - bH - 12;
+        drawRRect(bX, bY, bW, bH, bH / 2);
+        ctx.fillStyle = theme.accent;
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(badgeLabel, bX + bW / 2, bY + bH / 2 + 1);
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+      }
     }
 
     if (state.showPageTitle) {
@@ -4162,6 +4709,24 @@ document.getElementById('togglePageTitle').onchange = setPageTitle;
 document.getElementById('togglePageTitleSetup').onchange = setPageTitle;
 document.getElementById('toggleCompleteText').onchange = (e) => { state.completeMeta.showText = e.target.checked; renderAll(); };
 document.getElementById('toggleCompleteFireworks').onchange = (e) => { state.completeMeta.showFireworks = e.target.checked; renderAll(); };
+document.getElementById('toggleDetectDuplicates').onchange = (e) => {
+  state.detectDuplicates = e.target.checked;
+  if (state.model?._parsed) {
+    pushUndo();
+    submodelThumbCache.clear();
+    state.model = buildManualFromParsed(state.model._parsed, state.model._mode || 'auto');
+    state.pageIdx = 0; state.selectedPartIds.clear();
+    computeModelDiagnostics();
+    renderAll();
+    const subCount = state.model.chapters.filter(c => c.kind === 'submodel').length;
+    showToast(state.detectDuplicates
+      ? (subCount > 0 ? `Detected ${subCount} duplicate submodel${subCount === 1 ? '' : 's'}.` : 'No repeated submodels detected in this build.')
+      : 'Duplicate submodel grouping disabled.');
+  } else {
+    scheduleSaveSessionPrefs();
+    syncMenuControls();
+  }
+};
 
 // Open real Print & Export PDF Modal (never silently closes!)
 function openExportModal() {
@@ -4225,6 +4790,7 @@ document.getElementById('menuAddDivider').onclick = () => {
 document.getElementById('menuRegenBtn').onclick = () => {
   if (!state.model?._parsed) return;
   pushUndo();
+  submodelThumbCache.clear();
   state.model = buildManualFromParsed(state.model._parsed, 'auto');
   state.pageIdx = 0; state.selectedPartIds.clear();
   computeModelDiagnostics();
@@ -4234,7 +4800,7 @@ document.getElementById('menuRegenBtn').onclick = () => {
 // Save / Open .bic.json Project (supports iOS Share Sheet + Download!)
 document.getElementById('menuSaveProj').onclick = async () => {
   if (!state.model) return;
-  const payload = JSON.stringify({ version: 3, title: state.model.title, chapters: state.model.chapters, overrides: state.overrides, pageInserts: state.pageInserts, dividerAfter: state.dividerAfter, coverMeta: state.coverMeta, completeMeta: state.completeMeta, backMeta: state.backMeta, bomConfig: state.bomConfig, showStepBorders: state.showStepBorders, showPageTitle: state.showPageTitle, pageNumberFormat: state.pageNumberFormat, themeId: state.themeId, paperFormat: state.paperFormat, orientation: state.orientation, density: state.density, layout: state.layout }, null, 2);
+  const payload = JSON.stringify({ version: 3, title: state.model.title, chapters: state.model.chapters, overrides: state.overrides, pageInserts: state.pageInserts, dividerAfter: state.dividerAfter, coverMeta: state.coverMeta, completeMeta: state.completeMeta, backMeta: state.backMeta, bomConfig: state.bomConfig, showStepBorders: state.showStepBorders, showPageTitle: state.showPageTitle, pageNumberFormat: state.pageNumberFormat, detectDuplicates: state.detectDuplicates, themeId: state.themeId, paperFormat: state.paperFormat, orientation: state.orientation, density: state.density, layout: state.layout }, null, 2);
   const fileName = `${state.model.title.replace(/[^a-z0-9_-]+/gi, '_')}.bic.json`;
   const blob = new Blob([payload], { type: 'application/json' });
   const file = new File([blob], fileName, { type: 'application/json' });
@@ -4253,6 +4819,7 @@ document.getElementById('projectLoadInput').onchange = async (e) => {
   const f = e.target.files?.[0]; e.target.value = ''; if (!f) return;
   try {
     const data = JSON.parse(await f.text());
+    submodelThumbCache.clear();
     state.model = { title: data.title || 'Loaded Manual', subtitle: '', chapters: data.chapters || [] };
     state.overrides = data.overrides || {}; state.pageInserts = data.pageInserts || {};
     state.dividerAfter = data.dividerAfter || {};
@@ -4263,6 +4830,7 @@ document.getElementById('projectLoadInput').onchange = async (e) => {
     if (typeof data.showStepBorders === 'boolean') state.showStepBorders = data.showStepBorders;
     if (typeof data.showPageTitle === 'boolean') state.showPageTitle = data.showPageTitle;
     if (data.pageNumberFormat) state.pageNumberFormat = data.pageNumberFormat;
+    if (typeof data.detectDuplicates === 'boolean') state.detectDuplicates = data.detectDuplicates;
     if (data.themeId) state.themeId = data.themeId;
     if (data.paperFormat) state.paperFormat = data.paperFormat;
     if (data.orientation) state.orientation = data.orientation;
@@ -4325,7 +4893,7 @@ document.getElementById('libImportInput').onchange = async (e) => {
   e.target.value = '';
 };
 document.getElementById('menuClearLibBtn').onclick = async () => {
-  userLibRaw.clear(); userLibTitles.clear(); embeddedDatCompiled.clear(); pliThumbCache.clear();
+  userLibRaw.clear(); userLibTitles.clear(); embeddedDatCompiled.clear(); pliThumbCache.clear(); submodelThumbCache.clear();
   await dbClearStore(LIB_STORE);
   updateLibraryStatusUI();
   if (state.model) { computeModelDiagnostics(); renderAll(); }
@@ -4333,7 +4901,7 @@ document.getElementById('menuClearLibBtn').onclick = async () => {
 };
 
 const loadSample = () => {
-  embeddedDatRaw.clear(); embeddedDatTitles.clear(); embeddedDatCompiled.clear(); compositePartDefs.clear(); pliThumbCache.clear();
+  embeddedDatRaw.clear(); embeddedDatTitles.clear(); embeddedDatCompiled.clear(); compositePartDefs.clear(); pliThumbCache.clear(); submodelThumbCache.clear();
   state.model = buildSampleModel();
   state.overrides = {}; state.pageInserts = {}; state.dividerAfter = {};
   state.coverMeta = { title:'', subtitle:'', az:38, el:26, bgSrc:null };
@@ -4350,6 +4918,7 @@ document.getElementById('menuSampleBtn').onclick = loadSample;
 
 let pendingRawFile = null; // { kind:'io'|'ldr', fileName, data }
 function finishImport(parsed, mode) {
+  submodelThumbCache.clear();
   state.model = buildManualFromParsed(parsed, mode);
   state.overrides = {}; state.pageInserts = {}; state.dividerAfter = {};
   state.coverMeta = { title:'', subtitle:'', az:38, el:26, bgSrc:null };
@@ -4365,7 +4934,8 @@ function finishImport(parsed, mode) {
   computeModelDiagnostics();
   resetZoom(); renderAll();
   const steps = getAllSteps(state.model);
-  showToast(`Imported ${parsed.title} (${parsed.parts.length} pieces, ${steps.length} steps).`);
+  const dupSubs = state.model.chapters.filter(c => c.kind === 'submodel').length;
+  showToast(`Imported ${parsed.title} (${parsed.parts.length} pieces, ${steps.length} steps${dupSubs ? `, ${dupSubs} repeated submodel${dupSubs === 1 ? '' : 's'}` : ''}).`);
   if (state.diagnostics.length > 0) showImportErrorBanner();
 }
 
@@ -4388,7 +4958,7 @@ document.getElementById('fileInput').onchange = async (e) => {
       const { m1Text, m2Text } = await extractIoArchive(ab);
       parsed = parseImportedModel(m1Text, m2Text, file.name);
     } else {
-      embeddedDatRaw.clear(); embeddedDatTitles.clear(); embeddedDatCompiled.clear(); compositePartDefs.clear(); pliThumbCache.clear();
+      embeddedDatRaw.clear(); embeddedDatTitles.clear(); embeddedDatCompiled.clear(); compositePartDefs.clear(); pliThumbCache.clear(); submodelThumbCache.clear();
       const txt = await file.text();
       pendingRawFile = { kind: 'ldr', fileName: file.name, data: txt };
       parsed = parseImportedModel(txt, '', file.name);
