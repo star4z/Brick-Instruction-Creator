@@ -1181,6 +1181,42 @@ function classifyPartRole(part) {
   return 'detail';
 }
 
+// Detect smooth finish tiles & sideways (SNOT) decorative cladding that should NOT
+// stick out/hang in mid-air before the structural walls & supports behind their full height are built.
+function isSidewaysCladdingPart(part, box) {
+  if (!part || part.children) return false;
+  const m = part.m || R_ID;
+  const isSideways = Math.abs(m[4]) < 0.5; // local +Y stud axis rotated sideways (SNOT)
+  const def = resolvePart(part.p);
+  const name = (def.name || '').toLowerCase();
+  const isSmoothTile = /\btile\b/.test(name) && !/clip|hinge|bar|holder|handle|modified|turntable/.test(name);
+  const isFinishCladding = isSmoothTile || (def.studs === false && !/wheel|tire|tyre|rim|axle|pin|bar|rod|technic|bracket|hinge|clip|holder|window|door|seat|chair|steering/.test(name));
+  const dy = box ? (box.max[1] - box.min[1]) : 0;
+  return (isSideways && isFinishCladding) || (isSmoothTile && dy > 20);
+}
+
+// Effective build-layer height for bottom-up ordering:
+// Upright bricks build from their bottom (min.y); sideways/vertical cladding tiles wait for their TOP (max.y)
+// so walls and upper SNOT anchors behind them are solidly in place first.
+function computeBuildLayerY(part, box) {
+  if (isSidewaysCladdingPart(part, box)) return box.max[1] + 8;
+  const def = resolvePart(part.p);
+  const name = (def.name || '').toLowerCase();
+  const isSmoothTile = /\btile\b/.test(name) && !/clip|hinge|bar|holder|handle|modified|turntable/.test(name);
+  return isSmoothTile ? box.min[1] + 6 : box.min[1];
+}
+
+// Returns true when a tall vertical/sideways cladding tile still has unplaced non-cladding wall/SNOT
+// supports along its upper half (prevents sticking a tall tile straight up into empty air).
+function isCladdingWaitingForUpperSupport(idx, claddingFlags, boxes, adj, placed) {
+  if (!claddingFlags[idx]) return false;
+  const b = boxes[idx];
+  if (b.max[1] - b.min[1] <= 24) return false;
+  const upperNbs = adj[idx].filter(nb => boxes[nb].max[1] >= b.center[1] && !claddingFlags[nb]);
+  if (upperNbs.length === 0) return false;
+  return !upperNbs.some(nb => placed.has(nb));
+}
+
 // Strict contact check: rejects empty AABB corners of round wheels grazing nearby bogie side plates!
 function boxesPhysicallyTouch(a, b, roleA, roleB) {
   const isWheelPair = (roleA === 'wheel' || roleB === 'wheel');
@@ -1419,6 +1455,8 @@ function buildLocalSubmodelSteps(canonicalParts, perStep, groupId, repeatCount) 
   const n = canonicalParts.length;
   const boxes = canonicalParts.map(p => computeWorldBox(p));
   const roles = canonicalParts.map(p => classifyPartRole(p));
+  const claddingFlags = canonicalParts.map((p, i) => isSidewaysCladdingPart(p, boxes[i]));
+  const layerY = canonicalParts.map((p, i) => computeBuildLayerY(p, boxes[i]));
   const adj = Array.from({ length: n }, () => []);
   for (let i = 0; i < n; i++) {
     for (let j = i + 1; j < n; j++) {
@@ -1436,22 +1474,28 @@ function buildLocalSubmodelSteps(canonicalParts, perStep, groupId, repeatCount) 
   while (remaining.size > 0) {
     let frontier;
     if (placed.size === 0) {
-      const nonWheels = Array.from(remaining).filter(i => roles[i] !== 'wheel');
+      const nonWheels = Array.from(remaining).filter(i => roles[i] !== 'wheel' && !claddingFlags[i]);
       const pool = nonWheels.length > 0 ? nonWheels : Array.from(remaining);
-      pool.sort((a, b) => boxes[a].min[1] - boxes[b].min[1]);
+      pool.sort((a, b) => layerY[a] - layerY[b]);
       frontier = pool;
     } else {
-      frontier = Array.from(remaining).filter(i => adj[i].some(nb => placed.has(nb)));
-      if (frontier.length === 0) frontier = Array.from(remaining).sort((a, b) => boxes[a].min[1] - boxes[b].min[1]);
-      frontier.sort((a, b) => (roles[a] === 'wheel' ? 1 : 0) - (roles[b] === 'wheel' ? 1 : 0) || Math.round(boxes[a].min[1]/8) - Math.round(boxes[b].min[1]/8));
+      const rawFrontier = Array.from(remaining).filter(i => adj[i].some(nb => placed.has(nb)));
+      const readyFrontier = rawFrontier.filter(i => !isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, placed));
+      frontier = readyFrontier.length > 0 ? readyFrontier : rawFrontier;
+      if (frontier.length === 0) frontier = Array.from(remaining).sort((a, b) => layerY[a] - layerY[b]);
+      frontier.sort((a, b) => (roles[a] === 'wheel' ? 1 : 0) - (roles[b] === 'wheel' ? 1 : 0) || Math.round(layerY[a]/8) - Math.round(layerY[b]/8));
     }
     const anchor = frontier[0];
-    const anchorY = boxes[anchor].min[1];
+    const anchorY = layerY[anchor];
     const stepIdx = [anchor];
     remaining.delete(anchor); placed.add(anchor);
 
     while (stepIdx.length < subPerStep && remaining.size > 0) {
-      const cands = Array.from(remaining).filter(i => Math.abs(boxes[i].min[1] - anchorY) <= 18 && adj[i].some(nb => placed.has(nb)));
+      const cands = Array.from(remaining).filter(i =>
+        Math.abs(layerY[i] - anchorY) <= 18
+        && !isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, placed)
+        && adj[i].some(nb => placed.has(nb))
+      );
       if (cands.length === 0) break;
       const next = cands[0];
       stepIdx.push(next); remaining.delete(next); placed.add(next);
@@ -1481,6 +1525,8 @@ function buildManualFromParsed(parsed, mode) {
   const parts = parsed.parts;
   const boxes = parts.map(p => computeWorldBox(p));
   const roles = parts.map(p => classifyPartRole(p));
+  const claddingFlags = parts.map((p, i) => isSidewaysCladdingPart(p, boxes[i]));
+  const layerY = parts.map((p, i) => computeBuildLayerY(p, boxes[i]));
 
   if (mode === 'keep' && parsed.hasSteps) {
     const bySub = new Map();
@@ -1594,26 +1640,28 @@ function buildManualFromParsed(parsed, mode) {
     while (remaining.size > 0) {
       let frontier;
       if (placed.size === 0) {
-        const nonWheels = Array.from(remaining).filter(i => roles[i] !== 'wheel');
+        const nonWheels = Array.from(remaining).filter(i => roles[i] !== 'wheel' && !claddingFlags[i]);
         const pool = nonWheels.length > 0 ? nonWheels : Array.from(remaining);
-        pool.sort((a, b) => boxes[a].min[1] - boxes[b].min[1]);
-        const minY = boxes[pool[0]].min[1];
-        const lowBand = pool.filter(i => boxes[i].min[1] <= minY + 32);
+        pool.sort((a, b) => layerY[a] - layerY[b]);
+        const minY = layerY[pool[0]];
+        const lowBand = pool.filter(i => layerY[i] <= minY + 32);
         lowBand.sort((a, b) => {
-          const sa = (partToDup.has(a) ? -80 : 0) + (roles[a] === 'structural' || roles[a] === 'wheel_holder' ? 50 : 0) + adj[a].length * 6 - (boxes[a].min[1] - minY) * 0.8;
-          const sb = (partToDup.has(b) ? -80 : 0) + (roles[b] === 'structural' || roles[b] === 'wheel_holder' ? 50 : 0) + adj[b].length * 6 - (boxes[b].min[1] - minY) * 0.8;
+          const sa = (partToDup.has(a) ? -80 : 0) + (roles[a] === 'structural' || roles[a] === 'wheel_holder' ? 50 : 0) + adj[a].length * 6 - (layerY[a] - minY) * 0.8;
+          const sb = (partToDup.has(b) ? -80 : 0) + (roles[b] === 'structural' || roles[b] === 'wheel_holder' ? 50 : 0) + adj[b].length * 6 - (layerY[b] - minY) * 0.8;
           return sb - sa;
         });
         frontier = lowBand;
       } else {
-        frontier = Array.from(remaining).filter(i => adj[i].some(nb => placed.has(nb)));
+        const rawFrontier = Array.from(remaining).filter(i => adj[i].some(nb => placed.has(nb)));
+        const readyFrontier = rawFrontier.filter(i => !isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, placed));
+        frontier = readyFrontier.length > 0 ? readyFrontier : rawFrontier;
         if (frontier.length === 0) {
-          frontier = Array.from(remaining).sort((a, b) => boxes[a].min[1] - boxes[b].min[1]);
+          frontier = Array.from(remaining).sort((a, b) => layerY[a] - layerY[b]);
         }
         frontier.sort((a, b) => {
           const wa = roles[a] === 'wheel' ? 1 : 0, wb = roles[b] === 'wheel' ? 1 : 0;
           if (wa !== wb) return wa - wb;
-          return Math.round(boxes[a].min[1] / 8) - Math.round(boxes[b].min[1] / 8) || parts[a].p.localeCompare(parts[b].p);
+          return Math.round(layerY[a] / 8) - Math.round(layerY[b] / 8) || (claddingFlags[a] ? 1 : 0) - (claddingFlags[b] ? 1 : 0) || parts[a].p.localeCompare(parts[b].p);
         });
       }
 
@@ -1670,7 +1718,7 @@ function buildManualFromParsed(parsed, mode) {
       }
 
       // NORMAL STEP (non-duplicate-submodel bricks)
-      const anchorY = boxes[anchor].min[1];
+      const anchorY = layerY[anchor];
       const anchorC = boxes[anchor].center;
       const stepIndices = [anchor];
       remaining.delete(anchor);
@@ -1679,7 +1727,8 @@ function buildManualFromParsed(parsed, mode) {
       while (stepIndices.length < perStep && remaining.size > 0) {
         const cands = Array.from(remaining).filter(i => {
           if (partToDup.has(i)) return false;
-          if (Math.abs(boxes[i].min[1] - anchorY) > 18) return false;
+          if (isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, placed)) return false;
+          if (Math.abs(layerY[i] - anchorY) > 18) return false;
           if (!adj[i].some(nb => placed.has(nb))) return false;
           const d = Math.hypot(boxes[i].center[0]-anchorC[0], boxes[i].center[1]-anchorC[1], boxes[i].center[2]-anchorC[2]);
           return d <= 160;
@@ -1692,7 +1741,7 @@ function buildManualFromParsed(parsed, mode) {
             else if (parts[i].p === parts[anchor].p) s += 35;
             if (roles[i] === roles[anchor]) s += 20;
             s -= Math.hypot(boxes[i].center[0]-anchorC[0], boxes[i].center[2]-anchorC[2]) * 0.45;
-            s -= Math.abs(boxes[i].min[1] - anchorY) * 2.0;
+            s -= Math.abs(layerY[i] - anchorY) * 2.0;
             return s;
           };
           return score(b) - score(a);
