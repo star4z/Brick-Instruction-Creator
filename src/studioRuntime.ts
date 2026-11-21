@@ -1841,7 +1841,7 @@ const state = {
   dividerAfter: {},        // keyed by pageId: { title, note }
   coverMeta: { title:'', subtitle:'', az:38, el:26, bgSrc:null },
   completeMeta: { title:'Build Complete!', subtitle:'Ready for display!', az:315, el:28, bgSrc:null, showText:true, showFireworks:true },
-  backMeta:  { title:'', subtitle:'Created with Brick Instruction Creator', az:38, el:24, bgSrc:null },
+  backMeta:  { title:'', subtitle:'Made with Brick Instruction Creator', az:38, el:24, bgSrc:null },
   bomConfig: {
     density: 'balanced',     // 'compact' | 'balanced' | 'spacious'
     flow: 'rows',            // 'rows' | 'columns'
@@ -2475,29 +2475,15 @@ function renderAll() {
       </div>`;
   } else if (page.kind === 'back') {
     const bm = state.backMeta;
-    const backTitle = bm.title || state.model.title;
+    const credit = (!bm.subtitle || bm.subtitle === 'Created with Brick Instruction Creator')
+      ? 'Made with Brick Instruction Creator'
+      : bm.subtitle;
     frame.innerHTML = `
-      <div class="relative w-full h-full text-center flex flex-col items-center justify-between overflow-hidden ${guideCls}" style="padding:${padPx + 10}px;${bm.bgSrc ? `background-image:url(${bm.bgSrc});background-size:cover;background-position:center;` : ''}">
-        <div class="shrink-0 w-full flex items-center justify-center">
-          <span class="text-[10px] font-bold uppercase tracking-[0.18em] opacity-60">Instruction Manual</span>
+      <div class="relative w-full h-full text-center flex flex-col items-center justify-center gap-3 overflow-hidden ${guideCls}" style="padding:${padPx + 10}px;${bm.bgSrc ? `background-image:url(${bm.bgSrc});background-size:cover;background-position:center;` : ''}">
+        <div class="w-16 h-16 sm:w-20 sm:h-20 rounded-3xl flex items-center justify-center shadow-sm" style="background:${theme.pliBg};border:1px solid ${theme.pliBorder}">
+          <svg class="w-11 h-11 sm:w-14 sm:h-14" viewBox="0 0 64 64" fill="none" aria-hidden="true"><path d="M18.2 10.1 C10.0 18.9 9.8 33.2 16.8 41.3 L19.2 52.2 L10.9 43.3 L13.9 43.6 C5.8 33.7 8.3 17.1 18.2 10.1 Z" fill="#38bdf8"/><path d="M26.8 7.0 C19.6 14.6 18.5 34.6 24.3 43.1 L25.9 56.0 L17.2 44.9 L20.4 45.5 C13.7 34.5 17.5 12.8 26.8 7.0 Z" fill="#2696f7"/><path d="M32.0 5.4 C33.6 10.2 34.4 34.8 34.7 45.1 L37.9 43.9 L32.0 58.6 L26.1 43.9 L29.3 45.1 C29.6 34.8 30.4 10.2 32.0 5.4 Z" fill="#1a73e8"/><path d="M37.2 7.0 C46.5 12.8 50.3 34.5 43.6 45.5 L46.8 44.9 L38.1 56.0 L39.7 43.1 C45.5 34.6 44.4 14.6 37.2 7.0 Z" fill="#1a5cd8"/><path d="M45.8 10.1 C55.7 17.1 58.2 33.7 50.1 43.6 L53.1 43.3 L44.8 52.2 L47.2 41.3 C54.2 33.2 54.0 18.9 45.8 10.1 Z" fill="#1d48b8"/></svg>
         </div>
-        <div class="flex-1 min-h-0 w-full flex flex-col items-center justify-center gap-3 px-4">
-          <div class="w-16 h-16 sm:w-20 sm:h-20 rounded-3xl flex items-center justify-center shadow-sm" style="background:${theme.pliBg};border:1px solid ${theme.pliBorder}">
-            <svg class="w-11 h-11 sm:w-14 sm:h-14" viewBox="0 0 64 64" fill="none" aria-hidden="true"><path d="M18.2 10.1 C10.0 18.9 9.8 33.2 16.8 41.3 L19.2 52.2 L10.9 43.3 L13.9 43.6 C5.8 33.7 8.3 17.1 18.2 10.1 Z" fill="#38bdf8"/><path d="M26.8 7.0 C19.6 14.6 18.5 34.6 24.3 43.1 L25.9 56.0 L17.2 44.9 L20.4 45.5 C13.7 34.5 17.5 12.8 26.8 7.0 Z" fill="#2696f7"/><path d="M32.0 5.4 C33.6 10.2 34.4 34.8 34.7 45.1 L37.9 43.9 L32.0 58.6 L26.1 43.9 L29.3 45.1 C29.6 34.8 30.4 10.2 32.0 5.4 Z" fill="#1a73e8"/><path d="M37.2 7.0 C46.5 12.8 50.3 34.5 43.6 45.5 L46.8 44.9 L38.1 56.0 L39.7 43.1 C45.5 34.6 44.4 14.6 37.2 7.0 Z" fill="#1a5cd8"/><path d="M45.8 10.1 C55.7 17.1 58.2 33.7 50.1 43.6 L53.1 43.3 L44.8 52.2 L47.2 41.3 C54.2 33.2 54.0 18.9 45.8 10.1 Z" fill="#1d48b8"/></svg>
-          </div>
-          <div class="space-y-1 max-w-md">
-            <h2 class="text-xl sm:text-3xl font-extrabold tracking-tight leading-tight break-words">${escHtml(backTitle)}</h2>
-            <div class="w-12 h-0.5 mx-auto rounded-full opacity-40" style="background:${theme.accent}"></div>
-          </div>
-          <div class="flex flex-wrap items-center justify-center gap-2 text-[11px] font-semibold">
-            <span class="px-3 py-1 rounded-full" style="background:${theme.pliBg};border:1px solid ${theme.pliBorder}">${allParts.length} Pieces</span>
-            <span class="px-3 py-1 rounded-full" style="background:${theme.pliBg};border:1px solid ${theme.pliBorder}">${allSteps.length} Steps</span>
-            <span class="px-3 py-1 rounded-full" style="background:${theme.pliBg};border:1px solid ${theme.pliBorder}">${state.pages.length} Pages</span>
-          </div>
-        </div>
-        <div class="shrink-0 flex flex-col items-center gap-1 text-[11px] font-medium" style="color:${theme.muted}">
-          <span>${escHtml(bm.subtitle || 'Created with Brick Instruction Creator')}</span>
-        </div>
+        <span class="text-xs sm:text-sm font-semibold" style="color:${theme.muted}">${escHtml(credit)}</span>
       </div>`;
   } else if (page.kind === 'divider') {
     const d = state.dividerAfter[page.sourcePgId] || { title:'Section Divider', note:'' };
@@ -2903,15 +2889,19 @@ function renderContextOverlay(page) {
   if (page.kind === 'cover' || page.kind === 'complete' || page.kind === 'back') {
     const isCover = page.kind === 'cover';
     const isComplete = page.kind === 'complete';
+    const isBack = page.kind === 'back';
     const meta = isCover ? state.coverMeta : isComplete ? state.completeMeta : state.backMeta;
     const label = isCover ? 'Cover Page' : isComplete ? 'Build Complete Page' : 'Back Cover';
-    const defaultTitle = isCover ? state.model.title : isComplete ? 'Build Complete!' : state.model.title;
+    const defaultTitle = isCover ? state.model.title : 'Build Complete!';
+    const backCredit = (!meta.subtitle || meta.subtitle === 'Created with Brick Instruction Creator')
+      ? 'Made with Brick Instruction Creator'
+      : meta.subtitle;
     box.innerHTML = `
       <div class="pointer-events-auto glass-pill rounded-2xl p-3 w-full space-y-2 text-xs">
         <div class="flex items-center justify-between gap-1.5 flex-wrap font-bold">
           <span>Edit ${label}</span>
           <div class="flex items-center gap-1 flex-wrap">
-            ${!page.kind || page.kind !== 'back' ? `
+            ${!isBack ? `
               <button id="covRotL" class="px-2.5 py-1 rounded-full bg-black/5 dark:bg-white/10">↺ Angle</button>
               <button id="covRotR" class="px-2.5 py-1 rounded-full bg-black/5 dark:bg-white/10">↻ Angle</button>
             ` : ''}
@@ -2922,12 +2912,17 @@ function renderContextOverlay(page) {
             <button id="covBgBtn" class="px-2.5 py-1 rounded-full bg-[#1a73e8] text-white">Bg Image</button>
           </div>
         </div>
-        <div class="grid grid-cols-2 gap-1.5">
-          <input id="covTitleIn" value="${escHtml(meta.title || defaultTitle)}" placeholder="Title" class="px-2.5 py-1.5 rounded-xl bg-black/5 dark:bg-white/10 outline-none" />
-          <input id="covSubIn" value="${escHtml(meta.subtitle || '')}" placeholder="Subtitle" class="px-2.5 py-1.5 rounded-xl bg-black/5 dark:bg-white/10 outline-none" />
-        </div>
+        ${isBack ? `
+          <input id="covSubIn" value="${escHtml(backCredit)}" placeholder="Back cover text" class="w-full px-2.5 py-1.5 rounded-xl bg-black/5 dark:bg-white/10 outline-none" />
+        ` : `
+          <div class="grid grid-cols-2 gap-1.5">
+            <input id="covTitleIn" value="${escHtml(meta.title || defaultTitle)}" placeholder="Title" class="px-2.5 py-1.5 rounded-xl bg-black/5 dark:bg-white/10 outline-none" />
+            <input id="covSubIn" value="${escHtml(meta.subtitle || '')}" placeholder="Subtitle" class="px-2.5 py-1.5 rounded-xl bg-black/5 dark:bg-white/10 outline-none" />
+          </div>
+        `}
       </div>`;
-    box.querySelector('#covTitleIn').onchange = (e) => { pushUndo(); meta.title = e.target.value; renderAll(); };
+    const titleIn = box.querySelector('#covTitleIn');
+    if (titleIn) titleIn.onchange = (e) => { pushUndo(); meta.title = e.target.value; renderAll(); };
     box.querySelector('#covSubIn').onchange = (e) => { pushUndo(); meta.subtitle = e.target.value; renderAll(); };
     const rotL = box.querySelector('#covRotL');
     if (rotL) rotL.onclick = () => { pushUndo(); meta.az = (meta.az - 30 + 360) % 360; renderAll(); };
@@ -4353,28 +4348,17 @@ async function renderPageToJpegBytes(page, pxW, pxH) {
     }
   } else if (page.kind === 'back') {
     const bm = state.backMeta;
-    const backTitle = bm.title || state.model.title;
+    const credit = (!bm.subtitle || bm.subtitle === 'Created with Brick Instruction Creator')
+      ? 'Made with Brick Instruction Creator'
+      : bm.subtitle;
     ctx.textAlign = 'center';
-    ctx.fillStyle = theme.muted;
-    ctx.font = `700 ${Math.round(pxH * 0.017)}px -apple-system, sans-serif`;
-    ctx.fillText('INSTRUCTION MANUAL', pxW / 2, pad);
-
-    const logoSz = Math.round(Math.min(pxW, pxH) * 0.16);
-    drawBrandLogoCanvas(ctx, (pxW - logoSz) / 2, Math.round(pxH * 0.30), logoSz);
-
-    ctx.fillStyle = theme.text;
-    ctx.font = `800 ${Math.round(pxH * 0.05)}px -apple-system, sans-serif`;
-    ctx.fillText(backTitle, pxW / 2, Math.round(pxH * 0.30) + logoSz + Math.round(pxH * 0.04));
-
-    ctx.fillStyle = theme.accent;
-    ctx.fillRect(pxW / 2 - Math.round(pxW * 0.05), Math.round(pxH * 0.30) + logoSz + Math.round(pxH * 0.115), Math.round(pxW * 0.10), 4);
+    const logoSz = Math.round(Math.min(pxW, pxH) * 0.14);
+    const logoY = Math.round(pxH * 0.5 - logoSz * 0.65);
+    drawBrandLogoCanvas(ctx, (pxW - logoSz) / 2, logoY, logoSz);
 
     ctx.fillStyle = theme.muted;
-    ctx.font = `600 ${Math.round(pxH * 0.024)}px -apple-system, sans-serif`;
-    ctx.fillText(`${allParts.length} Pieces · ${allSteps.length} Steps · ${state.pages.length} Pages`, pxW / 2, Math.round(pxH * 0.30) + logoSz + Math.round(pxH * 0.145));
-
-    ctx.font = `500 ${Math.round(pxH * 0.02)}px -apple-system, sans-serif`;
-    ctx.fillText(bm.subtitle || 'Created with Brick Instruction Creator', pxW / 2, pxH - pad - pxH * 0.03);
+    ctx.font = `600 ${Math.round(pxH * 0.022)}px -apple-system, sans-serif`;
+    ctx.fillText(credit, pxW / 2, logoY + logoSz + Math.round(pxH * 0.03));
     ctx.textAlign = 'left';
   } else if (page.kind === 'bom') {
     const cfg = state.bomConfig;
