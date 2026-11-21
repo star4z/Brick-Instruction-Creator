@@ -2633,7 +2633,6 @@ function renderAll() {
                   </div>
 
                   <div class="flex items-center gap-1 shrink-0">
-                    ${snap.mesh.isZoomedIn ? `<span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-white/90 text-[#202124] shadow-xs" style="border:1px solid ${theme.pliBorder}">Close-Up</span>` : ''}
                     ${state.showRotCues && step.cue && step.cue !== 'none' ? `<span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-white text-[#202124] shadow-xs" style="border:1.5px solid ${theme.accent}">↻ ${step.cue === 'flip_vertical' ? 'Flip Over' : step.cue === 'yaw_180' ? 'Turn 180°' : 'Rotate 90°'}</span>` : ''}
                   </div>
                 </div>
