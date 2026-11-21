@@ -1624,6 +1624,25 @@ function computePageFrameDimensions() {
 // =========================================================================
 // 6. MAIN RENDERER (LIVE FULL-SCREEN PAGE + FLOATING CONTEXT OVERLAYS)
 // =========================================================================
+function getModelFileTypeInfo() {
+  const rec = lastSourceRecord;
+  const rawName = (rec?.fileName || '').trim();
+  const lower = rawName.toLowerCase();
+  if (lower.endsWith('.io') || rec?.kind === 'io') {
+    return { badge: '.IO', label: 'BrickLink Studio (.io)', cls: 'bg-[#1a73e8]/15 text-[#1a73e8]' };
+  }
+  if (lower.endsWith('.mpd')) {
+    return { badge: '.MPD', label: 'LDraw Multi-Part (.mpd)', cls: 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300' };
+  }
+  if (lower.endsWith('.ldr') || rec?.kind === 'ldr') {
+    return { badge: '.LDR', label: 'LDraw (.ldr)', cls: 'bg-amber-500/15 text-amber-700 dark:text-amber-300' };
+  }
+  if (rec?.kind === 'project' || lower.endsWith('.json')) {
+    return { badge: '.JSON', label: 'Saved Project (.bic.json)', cls: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' };
+  }
+  return { badge: 'SAMPLE', label: 'Built-In Sample Model', cls: 'bg-black/10 dark:bg-white/10 text-[var(--muted-foreground)]' };
+}
+
 function renderAll() {
   if (activeLiveEngine) { activeLiveEngine.dispose(); activeLiveEngine = null; }
   currentSlotRenderInfo.clear();
@@ -1634,10 +1653,17 @@ function renderAll() {
   document.getElementById('topRightPills').classList.toggle('hidden', !hasModel);
   document.getElementById('bottomDock').classList.toggle('hidden', !hasModel);
 
+  const typeBadgeEl = document.getElementById('menuModelTypeBadge');
+  const fileTypeEl = document.getElementById('menuModelFileType');
+  const statsEl = document.getElementById('menuModelStats');
+
   if (!hasModel) {
     document.getElementById('desktopModelName').textContent = 'Brick Instruction Creator';
     document.getElementById('desktopModelMeta').textContent = '';
     document.getElementById('menuModelName').textContent = 'No model loaded';
+    if (typeBadgeEl) typeBadgeEl.classList.add('hidden');
+    if (fileTypeEl) { fileTypeEl.textContent = 'Import a .io or .ldr file to get started.'; fileTypeEl.classList.remove('hidden'); }
+    if (statsEl) { statsEl.innerHTML = ''; statsEl.classList.add('hidden'); }
     document.getElementById('contextOverlay').classList.add('hidden');
     syncMenuControls();
     return;
@@ -1647,10 +1673,26 @@ function renderAll() {
   const theme = THEMES[state.themeId];
   const allSteps = getAllSteps(state.model);
   const allParts = getAllParts(state.model);
+  const ft = getModelFileTypeInfo();
 
   document.getElementById('desktopModelName').textContent = state.model.title;
-  document.getElementById('desktopModelMeta').textContent = `· ${allParts.length} pcs`;
-  document.getElementById('menuModelName').textContent = `${state.model.title} · ${allParts.length} pcs · ${allSteps.length} steps`;
+  document.getElementById('desktopModelMeta').textContent = `· ${ft.badge} · ${allParts.length} pcs`;
+  document.getElementById('menuModelName').textContent = state.model.title;
+  if (typeBadgeEl) {
+    typeBadgeEl.textContent = ft.badge;
+    typeBadgeEl.className = `shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wide uppercase ${ft.cls}`;
+  }
+  if (fileTypeEl) {
+    fileTypeEl.textContent = ft.label;
+    fileTypeEl.classList.remove('hidden');
+  }
+  if (statsEl) {
+    statsEl.innerHTML = `
+      <span class="px-2 py-0.5 rounded-full bg-[var(--card)] border border-[var(--border)]">${allParts.length} pieces</span>
+      <span class="px-2 py-0.5 rounded-full bg-[var(--card)] border border-[var(--border)]">${allSteps.length} steps</span>
+      <span class="px-2 py-0.5 rounded-full bg-[var(--card)] border border-[var(--border)]">${state.pages.length} pages</span>`;
+    statsEl.classList.remove('hidden');
+  }
 
   document.getElementById('btnUndo').disabled = state.undoStack.length === 0;
   document.getElementById('btnRedo').disabled = state.redoStack.length === 0;
@@ -2400,8 +2442,9 @@ function syncMenuControls() {
   document.getElementById('menuRegenBtn').disabled = !hasModel || !state.model._parsed;
 
   document.querySelectorAll('.fmt-btn').forEach(b => {
-    const act = b.getAttribute('data-format') === state.paperFormat;
-    b.className = `fmt-btn py-2 px-3 rounded-xl border text-left transition ${act ? 'border-[#1a73e8] bg-[#1a73e8]/15 text-[#1a73e8]' : 'border-[var(--border)] bg-[var(--background)]'}`;
+    const fmtId = b.getAttribute('data-format');
+    const act = fmtId === state.paperFormat;
+    b.className = `fmt-btn py-2.5 px-3 rounded-xl border text-left transition ${fmtId === 'custom' ? 'sm:col-span-2 ' : ''}${act ? 'border-[#1a73e8] bg-[#1a73e8]/15 text-[#1a73e8]' : 'border-[var(--border)] bg-[var(--background)]'}`;
   });
   document.getElementById('customSizeWrap').classList.toggle('hidden', state.paperFormat !== 'custom');
   document.getElementById('orientationWrap').classList.toggle('hidden', state.paperFormat === 'screen' || state.paperFormat === 'square' || state.paperFormat === 'custom');
@@ -2423,17 +2466,34 @@ function syncMenuControls() {
       ? `= ${(cWIn * 2.54).toFixed(1)} × ${(cHIn * 2.54).toFixed(1)} cm`
       : `= ${cWIn.toFixed(2)} × ${cHIn.toFixed(2)} in`;
   }
+  const activeFmt = PAPER_FORMATS[state.paperFormat] || PAPER_FORMATS.screen;
+  const [actWIn, actHIn] = getActivePagePhysicalInches();
+  const menuPageSum = document.getElementById('menuPageSetupSummary');
+  if (menuPageSum) {
+    const orientShort = (state.paperFormat === 'letter' || state.paperFormat === 'a4')
+      ? ` · ${state.orientation === 'portrait' ? 'Portrait' : 'Landscape'}`
+      : state.paperFormat === 'custom'
+        ? ` · ${state.customWidth}×${state.customHeight} ${state.customUnit}`
+        : '';
+    menuPageSum.textContent = `${activeFmt.name}${orientShort}`;
+  }
+  const pageSetupSub = document.getElementById('pageSetupSubtitle');
+  if (pageSetupSub) {
+    pageSetupSub.textContent = state.paperFormat === 'screen'
+      ? 'Adapts to current screen · Change paper size, margins & steps per page'
+      : `${activeFmt.name} · ${formatPhysicalDims(actWIn, actHIn)}`;
+  }
   document.querySelectorAll('.orient-btn').forEach(b => {
     const act = b.getAttribute('data-orient') === state.orientation;
-    b.className = `orient-btn py-1.5 rounded-full border font-semibold transition ${act ? 'border-[#1a73e8] bg-[#1a73e8] text-white' : 'border-[var(--border)] bg-[var(--background)]'}`;
+    b.className = `orient-btn py-2 rounded-full border font-semibold transition ${act ? 'border-[#1a73e8] bg-[#1a73e8] text-white' : 'border-[var(--border)] bg-[var(--background)]'}`;
   });
   document.querySelectorAll('.layout-btn').forEach(b => {
     const act = b.getAttribute('data-layout') === state.layout;
-    b.className = `layout-btn py-1.5 rounded-full border font-semibold transition ${act ? 'border-[#1a73e8] bg-[#1a73e8] text-white' : 'border-[var(--border)] bg-[var(--background)]'}`;
+    b.className = `layout-btn py-2 rounded-full border font-semibold transition ${act ? 'border-[#1a73e8] bg-[#1a73e8] text-white' : 'border-[var(--border)] bg-[var(--background)]'}`;
   });
   document.querySelectorAll('.dens-btn').forEach(b => {
     const act = b.getAttribute('data-density') === state.density;
-    b.className = `dens-btn py-1.5 rounded-full border font-semibold transition ${act ? 'border-[#1a73e8] bg-[#1a73e8] text-white' : 'border-[var(--border)] bg-[var(--background)]'}`;
+    b.className = `dens-btn py-2 rounded-full border font-semibold transition ${act ? 'border-[#1a73e8] bg-[#1a73e8] text-white' : 'border-[var(--border)] bg-[var(--background)]'}`;
   });
   document.querySelectorAll('.pacing-btn').forEach(b => {
     const act = b.getAttribute('data-pacing') === state.pacing;
@@ -2996,6 +3056,8 @@ function computeModelDiagnostics() {
 
   state.diagnostics = diags;
   updateErrorIndicators();
+  const errModalEl = document.getElementById('errorsModal');
+  if (errModalEl && !errModalEl.classList.contains('hidden')) renderErrorsModal();
 }
 
 function updateErrorIndicators() {
@@ -3029,6 +3091,10 @@ function showImportErrorBanner() {
   errorBannerTimer = setTimeout(dismissErrorBanner, 12000);
 }
 
+function escHtml(s) {
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 function renderErrorsModal() {
   const diags = state.diagnostics;
   const counts = {
@@ -3037,6 +3103,8 @@ function renderErrorsModal() {
     floating: diags.filter(d => d.category === 'floating').length,
     color: diags.filter(d => d.category === 'color').length,
   };
+  if (!Object.prototype.hasOwnProperty.call(counts, errFilter)) errFilter = 'all';
+
   document.getElementById('errModalTitle').textContent = diags.length === 0
     ? 'No Model Errors'
     : `Model Errors & Warnings (${diags.length})`;
@@ -3051,9 +3119,18 @@ function renderErrorsModal() {
   bar.innerHTML = tabs.map(t => `
     <button data-ef="${t.id}" class="ef-btn shrink-0 px-3 py-1 rounded-full font-semibold transition ${errFilter === t.id ? 'bg-[#1a73e8] text-white' : 'bg-[var(--background)] border border-[var(--border)]'}">${t.label}</button>
   `).join('');
-  bar.querySelectorAll('.ef-btn').forEach(b => { b.onclick = () => { errFilter = b.getAttribute('data-ef'); renderErrorsModal(); }; });
+  bar.querySelectorAll('.ef-btn').forEach(b => {
+    b.onclick = () => {
+      errFilter = b.getAttribute('data-ef') || 'all';
+      renderErrorsModal();
+    };
+  });
 
   const body = document.getElementById('errListBody');
+  // Reset scroll offset BEFORE replacing innerHTML so iOS WebKit never leaves the
+  // composited scroll layer stranded below shorter tab content (e.g., 22 items -> 1 item).
+  body.scrollTop = 0;
+
   const filtered = errFilter === 'all' ? diags : diags.filter(d => d.category === errFilter);
 
   if (filtered.length === 0) {
@@ -3063,6 +3140,8 @@ function renderErrorsModal() {
         <div class="font-bold text-sm">Looking clean!</div>
         <p class="text-[11px] text-[var(--muted-foreground)]">No issues in this category.</p>
       </div>`;
+    body.scrollTop = 0;
+    requestAnimationFrame(() => { body.scrollTop = 0; });
     return;
   }
 
@@ -3088,15 +3167,20 @@ function renderErrorsModal() {
         <div class="space-y-1 min-w-0">
           <div class="flex items-center gap-1.5 flex-wrap">
             <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${isErr ? 'bg-red-500/15 text-red-600 dark:text-red-400' : 'bg-amber-500/15 text-amber-700 dark:text-amber-300'}">${isErr ? 'Error' : 'Warning'}</span>
-            <span class="font-bold truncate">${d.title}</span>
+            <span class="font-bold break-words">${escHtml(d.title)}</span>
           </div>
-          <p class="text-[11px] text-[var(--muted-foreground)] leading-relaxed">${d.detail}</p>
+          <p class="text-[11px] text-[var(--muted-foreground)] leading-relaxed break-words">${escHtml(d.detail)}</p>
         </div>
-        ${d.stepId ? `<button data-jump-step="${d.stepId}" class="jump-step-btn shrink-0 px-2.5 py-1.5 rounded-full border border-[var(--border)] bg-[var(--card)] font-semibold hover:border-[#1a73e8] hover:text-[#1a73e8]">Step ${d.stepNum} →</button>` : ''}
+        ${d.stepId ? `<button data-jump-step="${escHtml(d.stepId)}" class="jump-step-btn shrink-0 px-2.5 py-1.5 rounded-full border border-[var(--border)] bg-[var(--card)] font-semibold hover:border-[#1a73e8] hover:text-[#1a73e8]">Step ${d.stepNum} →</button>` : ''}
       </div>`;
   }).join('');
 
   body.innerHTML = html;
+  // Force clean scroll & WebKit compositing sync after DOM update
+  body.scrollTop = 0;
+  void body.offsetHeight;
+  requestAnimationFrame(() => { body.scrollTop = 0; });
+
   const quickFetch = body.querySelector('#errFetchLibQuick');
   if (quickFetch) quickFetch.onclick = async () => { document.getElementById('errorsModal').classList.add('hidden'); openMenu(); await fetchMissingPartsOnline(); };
   const quickLib = body.querySelector('#errImportLibQuick');
@@ -3117,8 +3201,17 @@ function renderErrorsModal() {
 function openErrorsModal() {
   closeMenu();
   dismissErrorBanner();
+  if (errFilter !== 'all' && state.diagnostics.length > 0 && !state.diagnostics.some(d => d.category === errFilter)) {
+    errFilter = 'all';
+  }
   renderErrorsModal();
   document.getElementById('errorsModal').classList.remove('hidden');
+}
+
+function openPageSetupModal() {
+  closeMenu();
+  syncMenuControls();
+  document.getElementById('pageSetupModal').classList.remove('hidden');
 }
 
 let lastSourceRecord = null; // { kind:'io'|'ldr'|'sample', fileName, data, importMode }
@@ -3570,9 +3663,10 @@ document.getElementById('toggleRotCues').onchange = (e) => { state.showRotCues =
 document.getElementById('toggleSizeGuides').onchange = (e) => { state.showSizeGuides = e.target.checked; renderAll(); };
 
 // Open real Print & Export PDF Modal (never silently closes!)
-document.getElementById('menuPrintBtn').onclick = () => {
+function openExportModal() {
   if (!state.model) { showToast('Import a model first.'); return; }
   closeMenu();
+  document.getElementById('pageSetupModal').classList.add('hidden');
   const fmt = PAPER_FORMATS[state.paperFormat] || PAPER_FORMATS.letter;
   const [wIn, hIn] = getActivePagePhysicalInches();
   document.getElementById('expFormatSummary').textContent = `${fmt.name} (${formatPhysicalDims(wIn, hIn)}) · ${state.pages.length} pages`;
@@ -3580,7 +3674,15 @@ document.getElementById('menuPrintBtn').onclick = () => {
   document.getElementById('expProgressWrap').classList.add('hidden');
   document.getElementById('expReadyWrap').classList.add('hidden');
   document.getElementById('exportModal').classList.remove('hidden');
-};
+}
+document.getElementById('menuPrintBtn').onclick = openExportModal;
+document.getElementById('menuPageSetupBtn').onclick = openPageSetupModal;
+const closePageSetupModal = () => document.getElementById('pageSetupModal').classList.add('hidden');
+document.getElementById('btnClosePageSetup').onclick = closePageSetupModal;
+document.getElementById('pageSetupDoneBtn').onclick = closePageSetupModal;
+document.getElementById('pageSetupPrintBtn').onclick = openExportModal;
+document.getElementById('pageSetupModal').onclick = (e) => { if (e.target.id === 'pageSetupModal') closePageSetupModal(); };
+document.getElementById('errorsModal').onclick = (e) => { if (e.target.id === 'errorsModal') document.getElementById('errorsModal').classList.add('hidden'); };
 document.getElementById('btnCloseExport').onclick = () => document.getElementById('exportModal').classList.add('hidden');
 document.getElementById('btnExpCurrentPdf').onclick = () => runPdfExport([state.pages[state.pageIdx]]);
 document.getElementById('btnExpAllPdf').onclick = () => runPdfExport(state.pages);
@@ -3610,6 +3712,7 @@ document.getElementById('menuRegenBtn').onclick = () => {
   pushUndo();
   state.model = buildManualFromParsed(state.model._parsed, 'auto');
   state.pageIdx = 0; state.selectedPartIds.clear();
+  computeModelDiagnostics();
   closeMenu(); renderAll(); showToast('Regenerated clean steps.');
 };
 
@@ -3646,6 +3749,9 @@ document.getElementById('projectLoadInput').onchange = async (e) => {
     if (data.density) state.density = data.density;
     if (data.layout) state.layout = data.layout;
     state.pageIdx = 0; state.undoStack = []; state.redoStack = [];
+    errFilter = 'all';
+    lastSourceRecord = { kind: 'project', fileName: f.name };
+    computeModelDiagnostics();
     closeMenu(); renderAll(); showToast(`Opened ${state.model.title}.`);
   } catch (err) { showToast('Could not read project file.'); }
 };
@@ -3712,6 +3818,7 @@ const loadSample = () => {
   state.coverMeta = { title:'', subtitle:'', az:38, el:26, bgSrc:null };
   state.pageIdx = 1; state.mode = 'pan'; state.selectedPartIds.clear();
   state.undoStack = []; state.redoStack = [];
+  errFilter = 'all';
   lastSourceRecord = { kind: 'sample', fileName: 'Orbital Rover' };
   dbPut('lastModel', lastSourceRecord);
   computeModelDiagnostics();
@@ -3727,6 +3834,7 @@ function finishImport(parsed, mode) {
   state.coverMeta = { title:'', subtitle:'', az:38, el:26, bgSrc:null };
   state.pageIdx = 0; state.mode = 'pan'; state.selectedPartIds.clear();
   state.undoStack = []; state.redoStack = [];
+  errFilter = 'all';
   document.getElementById('importModal').classList.add('hidden');
   if (pendingRawFile) {
     lastSourceRecord = { ...pendingRawFile, importMode: mode };

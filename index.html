@@ -163,7 +163,7 @@
     <div id="menuBackdrop" class="no-print hidden fixed inset-0 z-50 bg-black/40 backdrop-blur-[2px] flex">
       <aside id="menuDrawer" class="w-[min(86vw,340px)] h-full bg-[var(--card)] border-r border-[var(--border)] shadow-2xl flex flex-col overflow-hidden">
         <!-- Drawer Header -->
-        <div class="p-4 border-b border-[var(--border)] flex items-center justify-between gap-2">
+        <div class="p-4 border-b border-[var(--border)] flex items-center justify-between gap-2 shrink-0">
           <div class="flex items-center gap-2.5 min-w-0">
             <div class="w-9 h-9 rounded-2xl bg-[#1a73e8]/10 border border-[#1a73e8]/20 flex items-center justify-center shrink-0">
               <svg class="w-6 h-6" viewBox="0 0 64 64" fill="none" aria-hidden="true">
@@ -175,17 +175,27 @@
               </svg>
             </div>
             <div class="min-w-0">
-              <div class="text-sm font-bold tracking-tight truncate">Brick Instruction Creator</div>
-              <div id="menuModelName" class="text-xs text-[var(--muted-foreground)] truncate">No model loaded</div>
+              <div class="text-sm font-bold tracking-tight leading-tight">Brick Instruction Creator</div>
+              <div class="text-[11px] text-[var(--muted-foreground)] leading-tight">Instruction Manual Studio</div>
             </div>
           </div>
-          <button id="btnCloseMenu" class="w-8 h-8 rounded-full flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/10">
+          <button id="btnCloseMenu" class="w-8 h-8 rounded-full flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/10 shrink-0">
             <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
           </button>
         </div>
 
         <!-- Drawer Scrollable Body -->
-        <div class="flex-1 overflow-y-auto p-4 space-y-5 text-xs">
+        <div class="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 space-y-5 text-xs">
+
+          <!-- Active Model Details Card (Full wrap, never truncated + File Type) -->
+          <div id="menuModelCard" class="p-3 rounded-2xl border border-[var(--border)] bg-[var(--background)] space-y-1.5">
+            <div class="flex items-start justify-between gap-2">
+              <div id="menuModelName" class="text-[13px] font-bold leading-snug break-words min-w-0">No model loaded</div>
+              <span id="menuModelTypeBadge" class="hidden shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wide uppercase"></span>
+            </div>
+            <div id="menuModelFileType" class="hidden text-[11px] text-[var(--muted-foreground)] break-words"></div>
+            <div id="menuModelStats" class="hidden flex flex-wrap items-center gap-1.5 pt-0.5 text-[11px] font-semibold"></div>
+          </div>
 
           <!-- Model & Project Files -->
           <div class="space-y-2">
@@ -210,10 +220,29 @@
             </button>
             <button id="menuErrorsBtn" class="w-full py-2.5 px-3 rounded-xl border border-[var(--border)] bg-[var(--background)] font-semibold text-left flex items-center justify-between gap-2">
               <span class="flex items-center gap-2">
-                <svg class="w-4 h-4 text-red-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>
+                <svg class="w-4 h-4 text-red-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>
                 <span>Model Errors &amp; Warnings</span>
               </span>
               <span id="menuErrorCountBadge" class="px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">0</span>
+            </button>
+          </div>
+
+          <!-- Page Setup (Dedicated Page) & Print / Export -->
+          <div class="space-y-2 pt-4 border-t border-[var(--border)]">
+            <div class="text-[11px] font-bold uppercase tracking-wider text-[var(--muted-foreground)]">Page &amp; Print</div>
+            <button id="menuPageSetupBtn" class="w-full py-2.5 px-3 rounded-xl border border-[var(--border)] bg-[var(--background)] font-semibold text-left flex items-center justify-between gap-2">
+              <span class="flex items-center gap-2 min-w-0">
+                <svg class="w-4 h-4 text-[#1a73e8] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1"><rect x="4" y="3" width="16" height="18" rx="2"/><line x1="8" x2="16" y1="8" y2="8"/><line x1="8" x2="16" y1="12" y2="12"/><line x1="8" x2="12" y1="16" y2="16"/></svg>
+                <span>Page Setup</span>
+              </span>
+              <span class="flex items-center gap-1.5 shrink-0 max-w-[55%]">
+                <span id="menuPageSetupSummary" class="text-[11px] font-medium text-[var(--muted-foreground)] truncate">Screen Fit</span>
+                <span class="opacity-50">→</span>
+              </span>
+            </button>
+            <button id="menuPrintBtn" class="w-full py-2.5 px-3.5 rounded-2xl border border-[var(--border)] bg-[var(--background)] font-semibold flex items-center justify-center gap-2">
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect width="12" height="8" x="6" y="14"/></svg>
+              Print / Save PDF
             </button>
           </div>
 
@@ -252,99 +281,6 @@
                 <div id="libProgressBar" class="h-full bg-[#1a73e8]" style="width:0%"></div>
               </div>
             </div>
-          </div>
-
-          <!-- Print Format, Proportions & Density -->
-          <div class="space-y-3 pt-4 border-t border-[var(--border)]">
-            <div class="text-[11px] font-bold uppercase tracking-wider text-[var(--muted-foreground)]">Print &amp; Page Setup</div>
-
-            <div class="space-y-1.5">
-              <div class="font-medium text-[var(--muted-foreground)]">Page Format</div>
-              <div class="grid grid-cols-1 gap-1.5">
-                <button data-format="screen" class="fmt-btn py-2 px-3 rounded-xl border text-left">
-                  <div class="font-semibold">Screen Fit</div>
-                  <div class="text-[10px] opacity-70">Adapts to current screen</div>
-                </button>
-                <button data-format="letter" class="fmt-btn py-2 px-3 rounded-xl border text-left">
-                  <div class="font-semibold">US Letter</div>
-                  <div class="text-[10px] opacity-70">8.5 × 11 in · 21.6 × 27.9 cm</div>
-                </button>
-                <button data-format="a4" class="fmt-btn py-2 px-3 rounded-xl border text-left">
-                  <div class="font-semibold">A4 Paper</div>
-                  <div class="text-[10px] opacity-70">8.27 × 11.69 in · 21.0 × 29.7 cm</div>
-                </button>
-                <button data-format="square" class="fmt-btn py-2 px-3 rounded-xl border text-left">
-                  <div class="font-semibold">Booklet Square</div>
-                  <div class="text-[10px] opacity-70">8.5 × 8.5 in · 21.6 × 21.6 cm</div>
-                </button>
-                <button data-format="custom" class="fmt-btn py-2 px-3 rounded-xl border text-left">
-                  <div class="font-semibold">Custom Size</div>
-                  <div id="customFmtSub" class="text-[10px] opacity-70">10.0 × 8.0 in · 25.4 × 20.3 cm</div>
-                </button>
-              </div>
-            </div>
-
-            <div id="customSizeWrap" class="hidden p-3 rounded-2xl border border-[var(--border)] bg-[var(--background)] space-y-2">
-              <div class="flex items-center justify-between">
-                <span class="font-semibold text-[11px]">Custom Dimensions</span>
-                <div class="inline-flex rounded-full border border-[var(--border)] p-0.5 bg-[var(--card)]">
-                  <button data-unit="in" class="unit-btn px-2.5 py-0.5 rounded-full text-[11px] font-semibold">in</button>
-                  <button data-unit="cm" class="unit-btn px-2.5 py-0.5 rounded-full text-[11px] font-semibold">cm</button>
-                </div>
-              </div>
-              <div class="grid grid-cols-2 gap-2">
-                <label class="space-y-0.5">
-                  <span class="text-[10px] text-[var(--muted-foreground)]">Width</span>
-                  <input id="customWidthIn" type="number" min="2" max="120" step="0.1" value="10" class="w-full px-2.5 py-1.5 rounded-xl border border-[var(--border)] bg-[var(--card)] font-semibold outline-none" />
-                </label>
-                <label class="space-y-0.5">
-                  <span class="text-[10px] text-[var(--muted-foreground)]">Height</span>
-                  <input id="customHeightIn" type="number" min="2" max="120" step="0.1" value="8" class="w-full px-2.5 py-1.5 rounded-xl border border-[var(--border)] bg-[var(--card)] font-semibold outline-none" />
-                </label>
-              </div>
-              <div id="customUnitEquiv" class="text-[10px] text-[var(--muted-foreground)]">25.4 × 20.3 cm</div>
-            </div>
-
-            <div id="orientationWrap" class="space-y-1.5">
-              <div class="font-medium text-[var(--muted-foreground)]">Orientation</div>
-              <div class="grid grid-cols-2 gap-1.5">
-                <button data-orient="landscape" class="orient-btn py-1.5 rounded-full border font-semibold">Landscape</button>
-                <button data-orient="portrait" class="orient-btn py-1.5 rounded-full border font-semibold">Portrait</button>
-              </div>
-            </div>
-
-            <div class="space-y-1.5">
-              <div class="font-medium text-[var(--muted-foreground)]">Default Steps per Page</div>
-              <div class="grid grid-cols-4 gap-1">
-                <button data-layout="auto" class="layout-btn py-1.5 rounded-full border font-semibold">Auto</button>
-                <button data-layout="1-up" class="layout-btn py-1.5 rounded-full border font-semibold">1</button>
-                <button data-layout="2-up" class="layout-btn py-1.5 rounded-full border font-semibold">2</button>
-                <button data-layout="4-up" class="layout-btn py-1.5 rounded-full border font-semibold">4</button>
-              </div>
-            </div>
-
-            <div class="space-y-1.5">
-              <div class="font-medium text-[var(--muted-foreground)]">Page Density &amp; Margins</div>
-              <div class="grid grid-cols-3 gap-1">
-                <button data-density="compact" class="dens-btn py-1.5 rounded-full border font-semibold">Compact</button>
-                <button data-density="balanced" class="dens-btn py-1.5 rounded-full border font-semibold">Balanced</button>
-                <button data-density="spacious" class="dens-btn py-1.5 rounded-full border font-semibold">Spacious</button>
-              </div>
-            </div>
-
-            <label class="flex items-center justify-between py-0.5">
-              <span class="font-medium">Show Print Margin Guides</span>
-              <input id="togglePrintGuides" type="checkbox" class="w-4 h-4 accent-[#1a73e8]" />
-            </label>
-            <label class="flex items-center justify-between py-0.5">
-              <span class="font-medium">Cover, Parts List &amp; Back Page</span>
-              <input id="toggleExtras" type="checkbox" checked class="w-4 h-4 accent-[#1a73e8]" />
-            </label>
-
-            <button id="menuPrintBtn" class="w-full py-2.5 px-3.5 rounded-2xl border border-[var(--border)] bg-[var(--background)] font-semibold flex items-center justify-center gap-2">
-              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect width="12" height="8" x="6" y="14"/></svg>
-              Print / Save PDF
-            </button>
           </div>
 
           <!-- Auto-Step Regeneration (Moved out of live step view to remove redundancy) -->
@@ -505,11 +441,121 @@
     </div>
 
     <!-- ================================================================ -->
+    <!-- PAGE SETUP PAGE MODAL (Linked from Menu like Errors)             -->
+    <!-- ================================================================ -->
+    <div id="pageSetupModal" class="no-print hidden fixed inset-0 z-50 bg-black/50 backdrop-blur-[2px] flex items-end sm:items-center justify-center p-3">
+      <div class="w-full max-w-xl max-h-[85vh] rounded-3xl bg-[var(--card)] border border-[var(--border)] shadow-2xl flex flex-col overflow-hidden text-xs">
+        <div class="p-4 border-b border-[var(--border)] flex items-center justify-between gap-2 shrink-0">
+          <div class="min-w-0">
+            <h2 class="text-sm font-bold">Page Setup</h2>
+            <p id="pageSetupSubtitle" class="text-[11px] text-[var(--muted-foreground)] truncate">Paper size, orientation, density, and print options</p>
+          </div>
+          <button id="btnClosePageSetup" class="w-8 h-8 rounded-full flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/10 shrink-0">✕</button>
+        </div>
+
+        <div class="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 space-y-4">
+          <div class="space-y-1.5">
+            <div class="font-semibold text-[var(--muted-foreground)] uppercase tracking-wider text-[10px]">Page Format</div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <button data-format="screen" class="fmt-btn py-2.5 px-3 rounded-xl border text-left">
+                <div class="font-semibold">Screen Fit</div>
+                <div class="text-[10px] opacity-70">Adapts to current screen</div>
+              </button>
+              <button data-format="letter" class="fmt-btn py-2.5 px-3 rounded-xl border text-left">
+                <div class="font-semibold">US Letter</div>
+                <div class="text-[10px] opacity-70">8.5 × 11 in · 21.6 × 27.9 cm</div>
+              </button>
+              <button data-format="a4" class="fmt-btn py-2.5 px-3 rounded-xl border text-left">
+                <div class="font-semibold">A4 Paper</div>
+                <div class="text-[10px] opacity-70">8.27 × 11.69 in · 21.0 × 29.7 cm</div>
+              </button>
+              <button data-format="square" class="fmt-btn py-2.5 px-3 rounded-xl border text-left">
+                <div class="font-semibold">Booklet Square</div>
+                <div class="text-[10px] opacity-70">8.5 × 8.5 in · 21.6 × 21.6 cm</div>
+              </button>
+              <button data-format="custom" class="fmt-btn py-2.5 px-3 rounded-xl border text-left sm:col-span-2">
+                <div class="font-semibold">Custom Size</div>
+                <div id="customFmtSub" class="text-[10px] opacity-70">10.0 × 8.0 in · 25.4 × 20.3 cm</div>
+              </button>
+            </div>
+          </div>
+
+          <div id="customSizeWrap" class="hidden p-3.5 rounded-2xl border border-[var(--border)] bg-[var(--background)] space-y-2.5">
+            <div class="flex items-center justify-between">
+              <span class="font-semibold text-[11px]">Custom Dimensions</span>
+              <div class="inline-flex rounded-full border border-[var(--border)] p-0.5 bg-[var(--card)]">
+                <button data-unit="in" class="unit-btn px-2.5 py-0.5 rounded-full text-[11px] font-semibold">in</button>
+                <button data-unit="cm" class="unit-btn px-2.5 py-0.5 rounded-full text-[11px] font-semibold">cm</button>
+              </div>
+            </div>
+            <div class="grid grid-cols-2 gap-2.5">
+              <label class="space-y-0.5">
+                <span class="text-[10px] text-[var(--muted-foreground)]">Width</span>
+                <input id="customWidthIn" type="number" min="2" max="120" step="0.1" value="10" class="w-full px-2.5 py-1.5 rounded-xl border border-[var(--border)] bg-[var(--card)] font-semibold outline-none" />
+              </label>
+              <label class="space-y-0.5">
+                <span class="text-[10px] text-[var(--muted-foreground)]">Height</span>
+                <input id="customHeightIn" type="number" min="2" max="120" step="0.1" value="8" class="w-full px-2.5 py-1.5 rounded-xl border border-[var(--border)] bg-[var(--card)] font-semibold outline-none" />
+              </label>
+            </div>
+            <div id="customUnitEquiv" class="text-[10px] text-[var(--muted-foreground)]">25.4 × 20.3 cm</div>
+          </div>
+
+          <div id="orientationWrap" class="space-y-1.5">
+            <div class="font-semibold text-[var(--muted-foreground)] uppercase tracking-wider text-[10px]">Orientation</div>
+            <div class="grid grid-cols-2 gap-2">
+              <button data-orient="landscape" class="orient-btn py-2 rounded-full border font-semibold">Landscape</button>
+              <button data-orient="portrait" class="orient-btn py-2 rounded-full border font-semibold">Portrait</button>
+            </div>
+          </div>
+
+          <div class="space-y-1.5">
+            <div class="font-semibold text-[var(--muted-foreground)] uppercase tracking-wider text-[10px]">Default Steps per Page</div>
+            <div class="grid grid-cols-4 gap-1.5">
+              <button data-layout="auto" class="layout-btn py-2 rounded-full border font-semibold">Auto</button>
+              <button data-layout="1-up" class="layout-btn py-2 rounded-full border font-semibold">1</button>
+              <button data-layout="2-up" class="layout-btn py-2 rounded-full border font-semibold">2</button>
+              <button data-layout="4-up" class="layout-btn py-2 rounded-full border font-semibold">4</button>
+            </div>
+          </div>
+
+          <div class="space-y-1.5">
+            <div class="font-semibold text-[var(--muted-foreground)] uppercase tracking-wider text-[10px]">Page Density &amp; Margins</div>
+            <div class="grid grid-cols-3 gap-1.5">
+              <button data-density="compact" class="dens-btn py-2 rounded-full border font-semibold">Compact</button>
+              <button data-density="balanced" class="dens-btn py-2 rounded-full border font-semibold">Balanced</button>
+              <button data-density="spacious" class="dens-btn py-2 rounded-full border font-semibold">Spacious</button>
+            </div>
+          </div>
+
+          <div class="space-y-2 pt-2 border-t border-[var(--border)]">
+            <label class="flex items-center justify-between py-1">
+              <span class="font-medium">Show Print Margin Guides</span>
+              <input id="togglePrintGuides" type="checkbox" class="w-4 h-4 accent-[#1a73e8]" />
+            </label>
+            <label class="flex items-center justify-between py-1">
+              <span class="font-medium">Cover, Parts List &amp; Back Page</span>
+              <input id="toggleExtras" type="checkbox" checked class="w-4 h-4 accent-[#1a73e8]" />
+            </label>
+          </div>
+        </div>
+
+        <div class="p-3.5 border-t border-[var(--border)] flex items-center gap-2 shrink-0 bg-[var(--card)]">
+          <button id="pageSetupPrintBtn" class="flex-1 py-2.5 px-3.5 rounded-full border border-[var(--border)] bg-[var(--background)] font-semibold flex items-center justify-center gap-1.5">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect width="12" height="8" x="6" y="14"/></svg>
+            Print / Save PDF
+          </button>
+          <button id="pageSetupDoneBtn" class="px-5 py-2.5 rounded-full bg-[#1a73e8] text-white font-semibold">Done</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================================================================ -->
     <!-- ERRORS & DIAGNOSTICS PAGE MODAL                                  -->
     <!-- ================================================================ -->
     <div id="errorsModal" class="no-print hidden fixed inset-0 z-50 bg-black/50 backdrop-blur-[2px] flex items-end sm:items-center justify-center p-3">
       <div class="w-full max-w-xl max-h-[85vh] rounded-3xl bg-[var(--card)] border border-[var(--border)] shadow-2xl flex flex-col overflow-hidden text-xs">
-        <div class="p-4 border-b border-[var(--border)] flex items-center justify-between gap-2">
+        <div class="p-4 border-b border-[var(--border)] flex items-center justify-between gap-2 shrink-0">
           <div>
             <h2 id="errModalTitle" class="text-sm font-bold">Model Errors &amp; Warnings</h2>
             <p id="errModalSubtitle" class="text-[11px] text-[var(--muted-foreground)]">Issues found during import or step generation</p>
@@ -517,7 +563,7 @@
           <button id="btnCloseErrors" class="w-8 h-8 rounded-full flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/10">✕</button>
         </div>
         <div id="errFilterBar" class="px-4 py-2.5 border-b border-[var(--border)] flex items-center gap-1.5 overflow-x-auto no-scrollbar shrink-0"></div>
-        <div id="errListBody" class="flex-1 overflow-y-auto p-3.5 space-y-2"></div>
+        <div id="errListBody" class="flex-1 min-h-0 min-h-[240px] overflow-y-auto overscroll-contain p-3.5 space-y-2"></div>
       </div>
     </div>
 
