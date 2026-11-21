@@ -1,0 +1,521 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Brick Instruction Creator</title>
+    <meta
+      name="description"
+      content="Automatically generate, customize, and export printable LEGO instruction manuals from BrickLink Studio (.io) and LDraw (.ldr/.mpd) models."
+    />
+  </head>
+  <body class="bg-[var(--background)] text-[var(--foreground)] antialiased select-none">
+<!-- Full-Screen App Shell -->
+  <div class="relative w-full h-full overflow-hidden flex flex-col">
+
+    <!-- Hidden File Inputs -->
+    <input id="fileInput" type="file" class="hidden" />
+    <input id="reimportInput" type="file" class="hidden" />
+    <input id="libImportInput" type="file" multiple class="hidden" />
+    <input id="projectLoadInput" type="file" accept=".json,.bic.json" class="hidden" />
+    <input id="insertImageInput" type="file" accept="image/*" class="hidden" />
+    <input id="coverImageInput" type="file" accept="image/*" class="hidden" />
+
+    <!-- ================================================================ -->
+    <!-- FLOATING TOP-LEFT PILL: Menu ☰ (+ Model Name chip on desktop)    -->
+    <!-- ================================================================ -->
+    <div class="no-print fixed top-3 left-3 z-40 flex items-center gap-2 max-w-[calc(100vw-160px)]">
+      <button id="btnOpenMenu" title="Menu" class="relative glass-pill h-10 w-10 rounded-full flex items-center justify-center hover:scale-[1.03] active:scale-95 transition shrink-0">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+          <line x1="4" x2="20" y1="7" y2="7"/><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="17" y2="17"/>
+        </svg>
+        <span id="menuBtnErrorBadge" class="hidden absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-red-600 text-white text-[10px] font-bold flex items-center justify-center shadow-sm">0</span>
+      </button>
+
+      <!-- Model Name Chip (Desktop only — on mobile this lives inside the Menu!) -->
+      <button id="desktopModelChip" class="hidden md:inline-flex glass-pill h-10 px-4 rounded-full items-center gap-2 text-xs font-semibold truncate max-w-[320px] hover:opacity-95 transition">
+        <span class="w-2 h-2 rounded-full bg-[#1a73e8] shrink-0"></span>
+        <span id="desktopModelName" class="truncate">Brick Instruction Creator</span>
+        <span id="desktopModelMeta" class="text-[11px] opacity-60 shrink-0"></span>
+      </button>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- FLOATING TOP-RIGHT PILLS: Undo / Redo + Style Popover            -->
+    <!-- ================================================================ -->
+    <div id="topRightPills" class="no-print hidden fixed top-3 right-3 z-40 flex items-center gap-1.5">
+      <div class="glass-pill h-10 rounded-full px-1 flex items-center gap-0.5">
+        <button id="btnUndo" title="Undo" class="h-8 w-8 rounded-full flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/10 disabled:opacity-30 transition">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"/></svg>
+        </button>
+        <button id="btnRedo" title="Redo" class="h-8 w-8 rounded-full flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/10 disabled:opacity-30 transition">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5A5.5 5.5 0 0 0 9.5 20H13"/></svg>
+        </button>
+      </div>
+      <button id="btnStylePop" class="glass-pill h-10 px-3.5 rounded-full flex items-center gap-1.5 text-xs font-semibold hover:scale-[1.02] active:scale-95 transition">
+        <svg class="w-4 h-4 text-[#1a73e8]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="13.5" cy="6.5" r=".6" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".6" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".6" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".6" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></svg>
+        <span>Style</span>
+      </button>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- EMPTY WELCOME STATE (shown until model is loaded)                -->
+    <!-- ================================================================ -->
+    <section id="emptyState" class="flex-1 flex items-center justify-center p-5">
+      <div class="w-full max-w-md rounded-3xl bg-[var(--card)] border border-[var(--border)] p-7 text-center space-y-5 shadow-md">
+        <div class="w-14 h-14 mx-auto rounded-2xl bg-[#1a73e8]/15 text-[#1a73e8] flex items-center justify-center">
+          <svg class="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
+        </div>
+        <div class="space-y-1.5">
+          <h1 class="text-xl font-bold tracking-tight">Brick Instruction Creator</h1>
+          <p class="text-xs text-[var(--muted-foreground)] leading-relaxed">
+            Import a BrickLink Studio (<b>.io</b>) or LDraw (<b>.ldr / .mpd</b>) file to generate clean, printable building instructions with zero floating pieces.
+          </p>
+        </div>
+        <div class="space-y-2.5 pt-1">
+          <button id="emptyImportBtn" class="w-full py-3 px-5 rounded-full bg-[#1a73e8] text-white text-sm font-semibold inline-flex items-center justify-center gap-2 shadow-sm hover:opacity-95 active:scale-[0.99] transition">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
+            Import .io or .ldr Model
+          </button>
+          <button id="loadSampleBtn" class="text-xs font-semibold text-[#1a73e8] py-1.5">
+            Or try a sample model
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================================================================ -->
+    <!-- FULL-SCREEN ZOOMABLE LIVE PAGE STAGE                             -->
+    <!-- ================================================================ -->
+    <main id="stageViewport" class="stage-viewport hidden flex-1 relative w-full h-full overflow-hidden flex items-center justify-center bg-[#e8eaed] dark:bg-[#131417]">
+      <div id="stageContainer" class="origin-center will-change-transform flex items-center justify-center p-4 pb-28 pt-16">
+        <div id="pageFrame" class="rounded-2xl shadow-2xl overflow-hidden relative border border-black/15 transition-colors"></div>
+      </div>
+    </main>
+
+    <!-- ================================================================ -->
+    <!-- FLOATING CONTEXTUAL CONTROLS (Mode-specific overlays over page)  -->
+    <!-- ================================================================ -->
+    <div id="contextOverlay" class="no-print hidden fixed left-1/2 -translate-x-1/2 bottom-[114px] z-35 w-[min(94vw,520px)] pointer-events-none flex flex-col items-center gap-2"></div>
+
+    <!-- ================================================================ -->
+    <!-- FLOATING BOTTOM DOCK: Mode Pill + Page & Zoom Pill               -->
+    <!-- ================================================================ -->
+    <div id="bottomDock" class="no-print hidden fixed bottom-3 left-1/2 -translate-x-1/2 z-40 flex flex-col items-center gap-2 max-w-[96vw]">
+      <!-- Mode Pill (Clean 1-finger gesture ownership) -->
+      <div class="glass-pill p-1 rounded-full flex items-center gap-0.5 text-[11px] sm:text-xs font-semibold whitespace-nowrap">
+        <button data-mode="pan" class="mode-btn px-2.5 sm:px-3 py-1.5 rounded-full flex items-center gap-1 whitespace-nowrap transition">
+          <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/><path d="M11 8v6"/><path d="M8 11h6"/></svg>
+          <span>Pan</span>
+        </button>
+        <button data-mode="select" class="mode-btn px-2.5 sm:px-3 py-1.5 rounded-full flex items-center gap-1 whitespace-nowrap transition">
+          <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m4 4 7.07 17 2.51-7.39L21 11.07z"/></svg>
+          <span>Select</span>
+        </button>
+        <button data-mode="rotate" class="mode-btn px-2.5 sm:px-3 py-1.5 rounded-full flex items-center gap-1 whitespace-nowrap transition">
+          <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="9"/><path d="M3.6 9h16.8"/><path d="M3.6 15h16.8"/><path d="M11.5 3a17 17 0 0 0 0 18"/><path d="M12.5 3a17 17 0 0 1 0 18"/></svg>
+          <span>Rotate</span>
+        </button>
+        <button data-mode="arrange" class="mode-btn px-2.5 sm:px-3 py-1.5 rounded-full flex items-center gap-1 whitespace-nowrap transition">
+          <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>
+          <span>Arrange</span>
+        </button>
+      </div>
+
+      <!-- Page & Zoom Pill -->
+      <div class="glass-pill px-1.5 py-1 rounded-full flex items-center gap-1 text-xs font-semibold whitespace-nowrap">
+        <button id="prevPage" title="Previous Page" class="h-8 w-8 rounded-full flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/10 disabled:opacity-30 transition shrink-0">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m15 18-6-6 6-6"/></svg>
+        </button>
+        <button id="btnPageOverview" class="h-8 px-2.5 rounded-full hover:bg-black/5 dark:hover:bg-white/10 flex items-center gap-1 whitespace-nowrap transition">
+          <span id="pageLabelText">Page 1 / 1</span>
+          <svg class="w-3.5 h-3.5 opacity-60 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m6 9 6 6 6-6"/></svg>
+        </button>
+        <button id="nextPage" title="Next Page" class="h-8 w-8 rounded-full bg-[#1a73e8] text-white flex items-center justify-center hover:opacity-95 disabled:opacity-30 transition">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m9 18 6-6-6-6"/></svg>
+        </button>
+
+        <div class="w-px h-5 bg-black/15 dark:bg-white/15 mx-1"></div>
+
+        <button id="btnZoomOut" title="Zoom Out" class="h-8 w-7 rounded-full flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/10 text-sm font-bold">−</button>
+        <button id="btnZoomFit" title="Reset Zoom" class="h-8 px-2 rounded-full text-[11px] font-semibold hover:bg-black/5 dark:hover:bg-white/10 tabular-nums">100%</button>
+        <button id="btnZoomIn" title="Zoom In" class="h-8 w-7 rounded-full flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/10 text-sm font-bold">+</button>
+      </div>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- TOP-LEFT SLIDE-OUT MENU DRAWER                                   -->
+    <!-- ================================================================ -->
+    <div id="menuBackdrop" class="no-print hidden fixed inset-0 z-50 bg-black/40 backdrop-blur-[2px] flex">
+      <aside id="menuDrawer" class="w-[min(86vw,340px)] h-full bg-[var(--card)] border-r border-[var(--border)] shadow-2xl flex flex-col overflow-hidden">
+        <!-- Drawer Header -->
+        <div class="p-4 border-b border-[var(--border)] flex items-center justify-between gap-2">
+          <div class="flex items-center gap-2.5 min-w-0">
+            <div class="w-9 h-9 rounded-2xl bg-[#1a73e8]/15 text-[#1a73e8] flex items-center justify-center shrink-0">
+              <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
+            </div>
+            <div class="min-w-0">
+              <div class="text-sm font-bold tracking-tight truncate">Brick Instruction Creator</div>
+              <div id="menuModelName" class="text-xs text-[var(--muted-foreground)] truncate">No model loaded</div>
+            </div>
+          </div>
+          <button id="btnCloseMenu" class="w-8 h-8 rounded-full flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/10">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
+        </div>
+
+        <!-- Drawer Scrollable Body -->
+        <div class="flex-1 overflow-y-auto p-4 space-y-5 text-xs">
+
+          <!-- Model & Project Files -->
+          <div class="space-y-2">
+            <div class="text-[11px] font-bold uppercase tracking-wider text-[var(--muted-foreground)]">Model &amp; Project</div>
+            <button id="menuImportBtn" class="w-full py-2.5 px-3.5 rounded-2xl bg-[#1a73e8] text-white font-semibold flex items-center gap-2.5 shadow-xs">
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
+              Import .io or .ldr Model
+            </button>
+            <div class="grid grid-cols-2 gap-2">
+              <button id="menuSaveProj" class="py-2 px-3 rounded-xl border border-[var(--border)] bg-[var(--background)] font-semibold flex items-center justify-center gap-1.5 disabled:opacity-40">
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                Save Project
+              </button>
+              <button id="menuLoadProj" class="py-2 px-3 rounded-xl border border-[var(--border)] bg-[var(--background)] font-semibold flex items-center justify-center gap-1.5">
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                Open Project
+              </button>
+            </div>
+            <button id="menuSampleBtn" class="w-full py-2 px-3 rounded-xl border border-[var(--border)] bg-[var(--background)] font-semibold text-left flex items-center justify-between">
+              <span>Load Built-In Sample Model</span>
+              <span class="opacity-50">→</span>
+            </button>
+            <button id="menuErrorsBtn" class="w-full py-2.5 px-3 rounded-xl border border-[var(--border)] bg-[var(--background)] font-semibold text-left flex items-center justify-between gap-2">
+              <span class="flex items-center gap-2">
+                <svg class="w-4 h-4 text-red-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>
+                <span>Model Errors &amp; Warnings</span>
+              </span>
+              <span id="menuErrorCountBadge" class="px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">0</span>
+            </button>
+          </div>
+
+          <!-- Bricks Library (Public Fetch + Local complete.zip / .dat) -->
+          <div class="space-y-2 pt-4 border-t border-[var(--border)]">
+            <div class="flex items-center justify-between">
+              <span class="text-[11px] font-bold uppercase tracking-wider text-[var(--muted-foreground)]">Bricks Library</span>
+              <span id="libStatusText" class="text-[11px] text-[var(--muted-foreground)]">0 saved</span>
+            </div>
+            <p class="text-[11px] text-[var(--muted-foreground)] leading-snug">
+              Studio <b>.io</b> files include 3D shapes automatically. For plain <b>.ldr</b> files, fetch missing parts online or import LDraw's <b>complete.zip</b> once.
+            </p>
+            <select id="libSourceSelect" class="w-full py-1.5 px-2.5 rounded-xl border border-[var(--border)] bg-[var(--background)] text-[11px] font-semibold outline-none">
+              <option value="https://raw.githubusercontent.com/gkjohnson/ldraw-parts-library/master/complete/ldraw/">Public Mirror: GitHub LDraw Library</option>
+              <option value="https://cdn.jsdelivr.net/gh/gkjohnson/ldraw-parts-library@master/complete/ldraw/">Public Mirror: jsDelivr LDraw CDN</option>
+              <option value="custom">Custom Public LDraw Base URL…</option>
+            </select>
+            <input id="libCustomUrlInput" type="url" placeholder="https://example.com/ldraw/" class="hidden w-full py-1.5 px-2.5 rounded-xl border border-[var(--border)] bg-[var(--background)] text-[11px] outline-none" />
+            <button id="menuFetchLibBtn" class="w-full py-2 px-3 rounded-xl bg-[#1a73e8]/15 border border-[#1a73e8]/40 text-[#1a73e8] font-semibold flex items-center justify-center gap-1.5">
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 12a9 9 0 0 1-9 9m9-9a9 9 0 0 0-9-9m9 9H3m9 9a9 9 0 0 1-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"/></svg>
+              Fetch Missing Parts Online
+            </button>
+            <div class="flex gap-2">
+              <button id="menuImportLibBtn" class="flex-1 py-2 px-3 rounded-xl border border-[var(--border)] bg-[var(--background)] font-semibold flex items-center justify-center gap-1.5">
+                <svg class="w-3.5 h-3.5 text-[#1a73e8]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
+                Import .zip / .dat
+              </button>
+              <button id="menuClearLibBtn" title="Clear Saved Library" class="hidden py-2 px-3 rounded-xl border border-[var(--border)] bg-[var(--background)] text-red-600 font-semibold">Clear</button>
+            </div>
+            <div id="libProgressWrap" class="hidden space-y-1">
+              <div class="flex justify-between text-[11px] font-semibold">
+                <span id="libProgressLabel">Loading library…</span>
+                <span id="libProgressPct">0%</span>
+              </div>
+              <div class="w-full h-1.5 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden">
+                <div id="libProgressBar" class="h-full bg-[#1a73e8]" style="width:0%"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Print Format, Proportions & Density -->
+          <div class="space-y-3 pt-4 border-t border-[var(--border)]">
+            <div class="text-[11px] font-bold uppercase tracking-wider text-[var(--muted-foreground)]">Print &amp; Page Setup</div>
+
+            <div class="space-y-1.5">
+              <div class="font-medium text-[var(--muted-foreground)]">Page Format</div>
+              <div class="grid grid-cols-1 gap-1.5">
+                <button data-format="screen" class="fmt-btn py-2 px-3 rounded-xl border text-left">
+                  <div class="font-semibold">Screen Fit</div>
+                  <div class="text-[10px] opacity-70">Adapts to current screen</div>
+                </button>
+                <button data-format="letter" class="fmt-btn py-2 px-3 rounded-xl border text-left">
+                  <div class="font-semibold">US Letter</div>
+                  <div class="text-[10px] opacity-70">8.5 × 11 in · 21.6 × 27.9 cm</div>
+                </button>
+                <button data-format="a4" class="fmt-btn py-2 px-3 rounded-xl border text-left">
+                  <div class="font-semibold">A4 Paper</div>
+                  <div class="text-[10px] opacity-70">8.27 × 11.69 in · 21.0 × 29.7 cm</div>
+                </button>
+                <button data-format="square" class="fmt-btn py-2 px-3 rounded-xl border text-left">
+                  <div class="font-semibold">Booklet Square</div>
+                  <div class="text-[10px] opacity-70">8.5 × 8.5 in · 21.6 × 21.6 cm</div>
+                </button>
+                <button data-format="custom" class="fmt-btn py-2 px-3 rounded-xl border text-left">
+                  <div class="font-semibold">Custom Size</div>
+                  <div id="customFmtSub" class="text-[10px] opacity-70">10.0 × 8.0 in · 25.4 × 20.3 cm</div>
+                </button>
+              </div>
+            </div>
+
+            <div id="customSizeWrap" class="hidden p-3 rounded-2xl border border-[var(--border)] bg-[var(--background)] space-y-2">
+              <div class="flex items-center justify-between">
+                <span class="font-semibold text-[11px]">Custom Dimensions</span>
+                <div class="inline-flex rounded-full border border-[var(--border)] p-0.5 bg-[var(--card)]">
+                  <button data-unit="in" class="unit-btn px-2.5 py-0.5 rounded-full text-[11px] font-semibold">in</button>
+                  <button data-unit="cm" class="unit-btn px-2.5 py-0.5 rounded-full text-[11px] font-semibold">cm</button>
+                </div>
+              </div>
+              <div class="grid grid-cols-2 gap-2">
+                <label class="space-y-0.5">
+                  <span class="text-[10px] text-[var(--muted-foreground)]">Width</span>
+                  <input id="customWidthIn" type="number" min="2" max="120" step="0.1" value="10" class="w-full px-2.5 py-1.5 rounded-xl border border-[var(--border)] bg-[var(--card)] font-semibold outline-none" />
+                </label>
+                <label class="space-y-0.5">
+                  <span class="text-[10px] text-[var(--muted-foreground)]">Height</span>
+                  <input id="customHeightIn" type="number" min="2" max="120" step="0.1" value="8" class="w-full px-2.5 py-1.5 rounded-xl border border-[var(--border)] bg-[var(--card)] font-semibold outline-none" />
+                </label>
+              </div>
+              <div id="customUnitEquiv" class="text-[10px] text-[var(--muted-foreground)]">25.4 × 20.3 cm</div>
+            </div>
+
+            <div id="orientationWrap" class="space-y-1.5">
+              <div class="font-medium text-[var(--muted-foreground)]">Orientation</div>
+              <div class="grid grid-cols-2 gap-1.5">
+                <button data-orient="landscape" class="orient-btn py-1.5 rounded-full border font-semibold">Landscape</button>
+                <button data-orient="portrait" class="orient-btn py-1.5 rounded-full border font-semibold">Portrait</button>
+              </div>
+            </div>
+
+            <div class="space-y-1.5">
+              <div class="font-medium text-[var(--muted-foreground)]">Default Steps per Page</div>
+              <div class="grid grid-cols-4 gap-1">
+                <button data-layout="auto" class="layout-btn py-1.5 rounded-full border font-semibold">Auto</button>
+                <button data-layout="1-up" class="layout-btn py-1.5 rounded-full border font-semibold">1</button>
+                <button data-layout="2-up" class="layout-btn py-1.5 rounded-full border font-semibold">2</button>
+                <button data-layout="4-up" class="layout-btn py-1.5 rounded-full border font-semibold">4</button>
+              </div>
+            </div>
+
+            <div class="space-y-1.5">
+              <div class="font-medium text-[var(--muted-foreground)]">Page Density &amp; Margins</div>
+              <div class="grid grid-cols-3 gap-1">
+                <button data-density="compact" class="dens-btn py-1.5 rounded-full border font-semibold">Compact</button>
+                <button data-density="balanced" class="dens-btn py-1.5 rounded-full border font-semibold">Balanced</button>
+                <button data-density="spacious" class="dens-btn py-1.5 rounded-full border font-semibold">Spacious</button>
+              </div>
+            </div>
+
+            <label class="flex items-center justify-between py-0.5">
+              <span class="font-medium">Show Print Margin Guides</span>
+              <input id="togglePrintGuides" type="checkbox" class="w-4 h-4 accent-[#1a73e8]" />
+            </label>
+            <label class="flex items-center justify-between py-0.5">
+              <span class="font-medium">Cover, Parts List &amp; Back Page</span>
+              <input id="toggleExtras" type="checkbox" checked class="w-4 h-4 accent-[#1a73e8]" />
+            </label>
+
+            <button id="menuPrintBtn" class="w-full py-2.5 px-3.5 rounded-2xl border border-[var(--border)] bg-[var(--background)] font-semibold flex items-center justify-center gap-2">
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect width="12" height="8" x="6" y="14"/></svg>
+              Print / Save PDF
+            </button>
+          </div>
+
+          <!-- Auto-Step Regeneration (Moved out of live step view to remove redundancy) -->
+          <div class="space-y-2.5 pt-4 border-t border-[var(--border)]">
+            <div class="text-[11px] font-bold uppercase tracking-wider text-[var(--muted-foreground)]">Auto-Generate Steps</div>
+            <div class="grid grid-cols-3 gap-1">
+              <button data-pacing="few" class="pacing-btn py-1.5 rounded-full border font-semibold">Few / Step</button>
+              <button data-pacing="standard" class="pacing-btn py-1.5 rounded-full border font-semibold">Balanced</button>
+              <button data-pacing="many" class="pacing-btn py-1.5 rounded-full border font-semibold">Many / Step</button>
+            </div>
+            <button id="menuRegenBtn" class="w-full py-2 px-3 rounded-xl border border-[var(--border)] bg-[var(--background)] font-semibold disabled:opacity-40">
+              Regenerate Steps from Model
+            </button>
+          </div>
+
+          <!-- Extra Page Inserts -->
+          <div class="space-y-2 pt-4 border-t border-[var(--border)]">
+            <div class="text-[11px] font-bold uppercase tracking-wider text-[var(--muted-foreground)]">Page Inserts</div>
+            <button id="menuAddDivider" class="w-full py-2 px-3 rounded-xl border border-[var(--border)] bg-[var(--background)] font-semibold text-left flex items-center justify-between">
+              <span>+ Insert Blank / Divider Page After Current</span>
+            </button>
+          </div>
+        </div>
+      </aside>
+      <div id="menuDismissArea" class="flex-1"></div>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- FLOATING STYLE POPOVER (Top-Right)                               -->
+    <!-- ================================================================ -->
+    <div id="stylePopover" class="no-print hidden fixed top-15 right-3 z-45 w-[min(92vw,310px)] rounded-3xl bg-[var(--card)] border border-[var(--border)] shadow-2xl p-4 space-y-4 text-xs max-h-[75vh] overflow-y-auto">
+      <div class="flex items-center justify-between">
+        <span class="text-sm font-bold">Manual Style</span>
+        <button id="btnCloseStyle" class="w-7 h-7 rounded-full flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/10">✕</button>
+      </div>
+      <div id="presetGrid" class="grid grid-cols-2 gap-2"></div>
+
+      <div class="space-y-2.5 pt-3 border-t border-[var(--border)]">
+        <label class="flex items-center justify-between gap-2">
+          <span class="font-medium">Outline New Pieces</span>
+          <div class="flex items-center gap-2">
+            <input id="highlightColor" type="color" value="#ff2d55" class="w-6 h-6 rounded-md border border-[var(--border)] bg-transparent cursor-pointer" />
+            <input id="toggleHighlight" type="checkbox" checked class="w-4 h-4 accent-[#1a73e8]" />
+          </div>
+        </label>
+        <label class="flex items-center justify-between gap-2">
+          <span class="font-medium">Fade Earlier Pieces</span>
+          <input id="toggleFade" type="checkbox" checked class="w-4 h-4 accent-[#1a73e8]" />
+        </label>
+        <div class="space-y-1">
+          <div class="text-[11px] text-[var(--muted-foreground)]">Earlier Piece Visibility</div>
+          <div class="grid grid-cols-4 gap-1">
+            <button data-fade="0.45" class="fade-chip py-1 rounded-full border font-semibold">Soft</button>
+            <button data-fade="0.65" class="fade-chip py-1 rounded-full border font-semibold">Medium</button>
+            <button data-fade="0.82" class="fade-chip py-1 rounded-full border font-semibold">Clear</button>
+            <button data-fade="1.0" class="fade-chip py-1 rounded-full border font-semibold">Full</button>
+          </div>
+        </div>
+        <label class="flex items-center justify-between gap-2">
+          <span class="font-medium">Rotation Badges</span>
+          <input id="toggleRotCues" type="checkbox" checked class="w-4 h-4 accent-[#1a73e8]" />
+        </label>
+        <label class="flex items-center justify-between gap-2">
+          <span class="font-medium">1:1 Axle &amp; Beam Guides</span>
+          <input id="toggleSizeGuides" type="checkbox" checked class="w-4 h-4 accent-[#1a73e8]" />
+        </label>
+      </div>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- FLOATING PAGE & STEP OVERVIEW OVERLAY (Tap Page # in bottom pill)-->
+    <!-- ================================================================ -->
+    <div id="overviewModal" class="no-print hidden fixed inset-0 z-50 bg-black/45 backdrop-blur-[2px] flex items-end sm:items-center justify-center p-3">
+      <div class="w-full max-w-xl max-h-[82vh] rounded-3xl bg-[var(--card)] border border-[var(--border)] shadow-2xl flex flex-col overflow-hidden">
+        <div class="p-4 border-b border-[var(--border)] flex items-center justify-between gap-2">
+          <div>
+            <h2 class="text-sm font-bold">Pages &amp; Steps</h2>
+            <p class="text-[11px] text-[var(--muted-foreground)]">Jump to any page, lock page breaks, or reorder steps</p>
+          </div>
+          <button id="btnCloseOverview" class="w-8 h-8 rounded-full flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/10">✕</button>
+        </div>
+        <div id="overviewList" class="flex-1 overflow-y-auto p-3 space-y-2 text-xs"></div>
+      </div>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- IMPORT MODE DIALOG                                               -->
+    <!-- ================================================================ -->
+    <div id="importModal" class="no-print hidden fixed inset-0 z-50 bg-black/50 backdrop-blur-[2px] flex items-center justify-center p-4">
+      <div class="w-full max-w-md rounded-3xl bg-[var(--card)] border border-[var(--border)] p-6 space-y-4 shadow-2xl">
+        <div class="space-y-1">
+          <h3 id="impTitle" class="text-base font-bold">Import Model</h3>
+          <p id="impSummary" class="text-xs text-[var(--muted-foreground)]"></p>
+        </div>
+        <div class="space-y-2">
+          <button id="impBtnAuto" class="w-full text-left p-3.5 rounded-2xl border-2 border-[#1a73e8] bg-[#1a73e8]/10">
+            <div class="text-xs font-bold text-[#1a73e8]">Auto-Generate Clean Steps (Recommended)</div>
+            <div class="text-[11px] text-[var(--muted-foreground)] mt-0.5">Fuses minifigure assemblies, builds chassis-first with zero floating wheels, and picks clear angles.</div>
+          </button>
+          <button id="impBtnKeep" class="w-full text-left p-3.5 rounded-2xl border border-[var(--border)] bg-[var(--background)]">
+            <div class="text-xs font-bold">Keep Existing File Steps</div>
+            <div class="text-[11px] text-[var(--muted-foreground)] mt-0.5">Preserves step markers saved in the file while cleaning up chapter labels.</div>
+          </button>
+        </div>
+        <div class="flex justify-end">
+          <button id="impBtnCancel" class="px-4 py-1.5 rounded-full text-xs font-semibold text-[var(--muted-foreground)]">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- PRINT & EXPORT PDF MODAL (Works in iOS WebView & Desktop!)       -->
+    <!-- ================================================================ -->
+    <div id="exportModal" class="no-print hidden fixed inset-0 z-50 bg-black/50 backdrop-blur-[2px] flex items-center justify-center p-4">
+      <div class="w-full max-w-md rounded-3xl bg-[var(--card)] border border-[var(--border)] p-6 space-y-4 shadow-2xl text-xs">
+        <div class="flex items-start justify-between gap-2">
+          <div>
+            <h3 class="text-base font-bold">Print &amp; Export PDF</h3>
+            <p id="expFormatSummary" class="text-[11px] text-[var(--muted-foreground)] mt-0.5"></p>
+          </div>
+          <button id="btnCloseExport" class="w-7 h-7 rounded-full flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/10">✕</button>
+        </div>
+
+        <div id="expActions" class="space-y-2">
+          <button id="btnExpCurrentPdf" class="w-full py-2.5 px-4 rounded-2xl bg-[#1a73e8] text-white font-semibold flex items-center justify-between">
+            <span>Export Current Page as PDF</span>
+            <span class="opacity-80">Instant</span>
+          </button>
+          <button id="btnExpAllPdf" class="w-full py-2.5 px-4 rounded-2xl border border-[#1a73e8] text-[#1a73e8] bg-[#1a73e8]/10 font-semibold flex items-center justify-between">
+            <span>Export Full Manual as PDF</span>
+            <span id="expPageCountBadge" class="opacity-80"></span>
+          </button>
+          <button id="btnSysPrint" class="w-full py-2.5 px-4 rounded-2xl border border-[var(--border)] bg-[var(--background)] font-semibold">
+            Open System Print Dialog
+          </button>
+        </div>
+
+        <div id="expProgressWrap" class="hidden space-y-2">
+          <div class="flex justify-between font-semibold">
+            <span id="expProgressLabel">Rendering pages…</span>
+            <span id="expProgressPct">0%</span>
+          </div>
+          <div class="w-full h-2 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden">
+            <div id="expProgressBar" class="h-full bg-[#1a73e8] transition-all duration-75" style="width:0%"></div>
+          </div>
+        </div>
+
+        <div id="expReadyWrap" class="hidden space-y-2 pt-2 border-t border-[var(--border)]">
+          <div id="expReadyNote" class="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">PDF Ready!</div>
+          <img id="expPreviewImg" alt="Rendered print page preview" class="w-full max-h-44 object-contain rounded-xl border border-[var(--border)] bg-black/5" />
+          <p class="text-[10px] text-[var(--muted-foreground)]">On iOS in-app previews, long-press the preview image to save/print if downloads are restricted by the app sandbox.</p>
+          <div class="flex gap-2">
+            <button id="btnSharePdf" class="hidden flex-1 py-2.5 px-3 rounded-full bg-[#1a73e8] text-white font-semibold">Share / Save / AirPrint</button>
+            <a id="linkDownloadPdf" download="manual.pdf" class="flex-1 py-2.5 px-3 rounded-full border border-[var(--border)] bg-[var(--background)] font-semibold text-center">Download PDF</a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- ERRORS & DIAGNOSTICS PAGE MODAL                                  -->
+    <!-- ================================================================ -->
+    <div id="errorsModal" class="no-print hidden fixed inset-0 z-50 bg-black/50 backdrop-blur-[2px] flex items-end sm:items-center justify-center p-3">
+      <div class="w-full max-w-xl max-h-[85vh] rounded-3xl bg-[var(--card)] border border-[var(--border)] shadow-2xl flex flex-col overflow-hidden text-xs">
+        <div class="p-4 border-b border-[var(--border)] flex items-center justify-between gap-2">
+          <div>
+            <h2 id="errModalTitle" class="text-sm font-bold">Model Errors &amp; Warnings</h2>
+            <p id="errModalSubtitle" class="text-[11px] text-[var(--muted-foreground)]">Issues found during import or step generation</p>
+          </div>
+          <button id="btnCloseErrors" class="w-8 h-8 rounded-full flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/10">✕</button>
+        </div>
+        <div id="errFilterBar" class="px-4 py-2.5 border-b border-[var(--border)] flex items-center gap-1.5 overflow-x-auto no-scrollbar shrink-0"></div>
+        <div id="errListBody" class="flex-1 overflow-y-auto p-3.5 space-y-2"></div>
+      </div>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- DISMISSIBLE BOTTOM IMPORT ERROR NOTIFICATION                     -->
+    <!-- ================================================================ -->
+    <div id="errorBanner" class="no-print hidden fixed left-1/2 -translate-x-1/2 bottom-[114px] z-45 max-w-[94vw]">
+      <div class="flex items-center gap-2.5 px-3.5 py-2 rounded-full bg-[#202124] text-white shadow-xl border border-white/10 text-xs font-semibold">
+        <span class="w-2 h-2 rounded-full bg-red-500 shrink-0"></span>
+        <span id="errorBannerText" class="whitespace-nowrap">There are 0 errors.</span>
+        <button id="btnBannerSeeErrors" class="px-2.5 py-1 rounded-full bg-white/15 hover:bg-white/25 text-[#8ab4f8] font-bold whitespace-nowrap transition">See errors →</button>
+        <button id="btnBannerDismiss" title="Dismiss" class="w-6 h-6 rounded-full hover:bg-white/15 flex items-center justify-center opacity-75">✕</button>
+      </div>
+    </div>
+
+    <!-- Toast Banner -->
+    <div id="toast" class="no-print hidden fixed top-16 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-full text-xs font-semibold bg-[#202124] text-white shadow-lg max-w-[90vw] text-center pointer-events-none"></div>
+  </div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

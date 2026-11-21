@@ -1,0 +1,105 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f8f9fa;
+  --foreground: #202124;
+  --card: #ffffff;
+  --border: #dadce0;
+  --muted-foreground: #5f6368;
+  --primary: #1a73e8;
+  --primary-foreground: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #131417;
+    --foreground: #f1f3f4;
+    --card: #1e1f22;
+    --border: rgba(255, 255, 255, 0.14);
+    --muted-foreground: #9aa0a6;
+    --primary: #8ab4f8;
+    --primary-foreground: #111318;
+  }
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+}
+
+.blueprint-grid {
+  background-image:
+    linear-gradient(to right, rgba(116, 211, 255, 0.14) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(116, 211, 255, 0.14) 1px, transparent 1px),
+    linear-gradient(to right, rgba(116, 211, 255, 0.24) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(116, 211, 255, 0.24) 1px, transparent 1px);
+  background-size: 16px 16px, 16px 16px, 80px 80px, 80px 80px;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.stage-viewport {
+  touch-action: none;
+}
+
+.glass-pill {
+  background: rgba(255, 255, 255, 0.92);
+  color: #1f1f1f;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.1);
+}
+
+@media (prefers-color-scheme: dark) {
+  .glass-pill {
+    background: rgba(30, 31, 34, 0.92);
+    color: #f1f3f4;
+    border-color: rgba(255, 255, 255, 0.14);
+    box-shadow: 0 6px 22px rgba(0, 0, 0, 0.42);
+  }
+}
+
+.print-margin-guide {
+  outline: 1.5px dashed rgba(26, 115, 232, 0.48);
+  outline-offset: -1px;
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  html,
+  body {
+    overflow: visible !important;
+    height: auto !important;
+  }
+  #stageContainer {
+    transform: none !important;
+    position: static !important;
+  }
+  #pageFrame {
+    box-shadow: none !important;
+    border: none !important;
+    width: 100% !important;
+    max-width: none !important;
+  }
+}
