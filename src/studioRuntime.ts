@@ -250,6 +250,91 @@ function getPartIdFallbacks(raw) {
   return out;
 }
 
+// Friendly human-readable names for common BrickLink / Studio & specialty LDraw part IDs
+const KNOWN_EXTRA_PART_NAMES = {
+  '28621': 'Minifigure Head (Hollow Stud)',
+  '29085': 'Train Buffer Beam with Magnet Coupler',
+  '29085c01': 'Train Buffer Beam with Magnet Coupler',
+  'bb892': 'Powered Up Train Motor',
+  'bb892c01': 'Powered Up Train Motor',
+  '28740': 'Powered Up Train Motor',
+  '28740c01': 'Powered Up Train Motor',
+  '76925': 'Minifigure Hair / Headgear',
+  '26066': 'Minifigure Hair / Headgear',
+  '11303': 'Minifigure Hair',
+  '66913': 'Minifigure Hair',
+  '21778': 'Minifigure Hair',
+  '98385': 'Minifigure Hair',
+  '15207': 'Panel 1×4×1',
+  '14716': 'Brick 1×1×3',
+  '86996': 'Brick 1×1×2/3',
+  '11477': 'Curved Slope 2×1',
+  '41740': 'Plate 1×4 (2 Studs)',
+  '15068': 'Curved Slope 2×2×2/3',
+  '93091': 'Minifigure Accessory',
+  '24093': 'Minifigure Accessory',
+  '3815': 'Minifigure Hips',
+  '3816': 'Minifigure Leg (Right)',
+  '3817': 'Minifigure Leg (Left)',
+  '3818': 'Minifigure Arm (Right)',
+  '3819': 'Minifigure Arm (Left)',
+  '3820': 'Minifigure Hand',
+};
+
+function getHumanPartName(pid) {
+  const k = normId(pid);
+  const directTitle = embeddedDatTitles.get(k) || userLibTitles.get(k);
+  if (directTitle) return directTitle;
+
+  const isPrinted = /(?:pb|ps|pat|pr)\d+/i.test(k) || /^\d{3,}[a-z]?p[0-9a-z]{2,}/i.test(k);
+  const lookupName = (id) => {
+    const t = embeddedDatTitles.get(id) || userLibTitles.get(id);
+    if (t) return t;
+    if (KNOWN_EXTRA_PART_NAMES[id]) return KNOWN_EXTRA_PART_NAMES[id];
+    if (PARTS_CATALOG[id]?.name) return PARTS_CATALOG[id].name;
+    return null;
+  };
+
+  let baseName = lookupName(k);
+  if (!baseName) {
+    for (const fb of getPartIdFallbacks(k)) {
+      baseName = lookupName(fb);
+      if (baseName) break;
+    }
+  }
+  if (!baseName) {
+    const noBl = k.replace(/^bl_/, '').replace(/-bl$/, '');
+    baseName = lookupName(noBl) || lookupName(noBl.replace(/[a-z].*$/, ''));
+  }
+  if (!baseName) {
+    if (/^bb\d+/i.test(k)) return 'BrickLink Custom Assembly';
+    if (/^bl_/i.test(k)) return isPrinted ? 'Printed BrickLink Studio Part' : 'BrickLink Studio Custom Part';
+    if (isPrinted) return 'Printed Part';
+    return `Part ${k.toUpperCase()}`;
+  }
+  if (isPrinted && !/^printed\b/i.test(baseName)) return `Printed ${baseName}`;
+  return baseName;
+}
+
+function explainMissingPartReason(pid) {
+  const k = normId(pid);
+  const fbs = getPartIdFallbacks(k);
+  const isPrinted = /(?:pb|ps|pat|pr)\d+/i.test(k) || /_torso$/i.test(k);
+  const isBlCustom = /^bl_|-bl$/i.test(k);
+  const isBbCustom = /^bb\d+/i.test(k);
+
+  if (isPrinted || isBlCustom) {
+    if (fbs.length > 0) {
+      return `BrickLink Studio ${isPrinted ? 'printed/decorated' : 'custom'} part ID (not in official LDraw). Tap Fetch Online to load its unprinted base shape (${fbs[0]}.dat), or open the original .io file.`;
+    }
+    return `BrickLink Studio custom part ID not distributed in standard LDraw mirrors. Open the original Studio .io file to include its exact 3D geometry.`;
+  }
+  if (isBbCustom) {
+    return `BrickLink custom assembly ID (not distributed in standard LDraw mirrors). Open the original Studio .io file to include its 3D geometry.`;
+  }
+  return `3D geometry for ${k}.dat is not in your saved Bricks Library yet. Tap Fetch Online to download it from the public LDraw library, or import complete.zip.`;
+}
+
 function hasKnownShape(pid) {
   const k = normId(pid);
   if (compositePartDefs.has(k)) return true;
@@ -268,17 +353,14 @@ function resolvePart(pid) {
     const comp = compositePartDefs.get(k);
     return { name: comp.name, sx: 1.8, sz: 1, h: 28, studs: false };
   }
-  const title = embeddedDatTitles.get(k) || userLibTitles.get(k);
-  if (PARTS_CATALOG[k]) return title ? { ...PARTS_CATALOG[k], name: title } : PARTS_CATALOG[k];
+  const friendly = getHumanPartName(k);
+  if (PARTS_CATALOG[k]) return { ...PARTS_CATALOG[k], name: friendly };
   for (const fb of getPartIdFallbacks(k)) {
-    const fbTitle = title || embeddedDatTitles.get(fb) || userLibTitles.get(fb);
-    if (PARTS_CATALOG[fb]) return fbTitle ? { ...PARTS_CATALOG[fb], name: fbTitle } : PARTS_CATALOG[fb];
-    if (fbTitle) return { name: fbTitle, sx: 1, sz: 1, h: 24, studs: true };
+    if (PARTS_CATALOG[fb]) return { ...PARTS_CATALOG[fb], name: friendly };
   }
   const base = k.replace(/[a-z].*$/, '');
-  if (PARTS_CATALOG[base]) return title ? { ...PARTS_CATALOG[base], name: title } : PARTS_CATALOG[base];
-  const pretty = title || (k.toUpperCase());
-  return { name: pretty, sx: 1, sz: 1, h: 24, studs: true };
+  if (PARTS_CATALOG[base]) return { ...PARTS_CATALOG[base], name: friendly };
+  return { name: friendly, sx: 1, sz: 1, h: 24, studs: true };
 }
 
 // Detect 1:1 Actual-Size Guide length (in studs / L) for axles, bars, beams
@@ -3815,6 +3897,32 @@ async function fetchDatFromPublicMirrors(normKey, bases) {
   return { text: null, resolvedKey: normKey, networkBlocked: sawNetworkError };
 }
 
+let libHighlightTimer = null;
+function scrollMenuToBricksLibrary(highlight = true) {
+  const scrollBox = document.getElementById('menuScrollBody');
+  const sec = document.getElementById('menuBricksLibSection');
+  if (!sec) return;
+  const doScroll = () => {
+    if (scrollBox) {
+      const boxRect = scrollBox.getBoundingClientRect();
+      const secRect = sec.getBoundingClientRect();
+      const targetTop = scrollBox.scrollTop + (secRect.top - boxRect.top) - 12;
+      scrollBox.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' });
+    } else {
+      sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
+  // Two animation frames guarantee the newly unhidden drawer has completed layout on iOS Safari
+  requestAnimationFrame(() => requestAnimationFrame(doScroll));
+  if (highlight) {
+    clearTimeout(libHighlightTimer);
+    sec.classList.add('ring-2', 'ring-[#1a73e8]/60', 'rounded-2xl', 'p-2.5', '-mx-2.5', 'bg-[#1a73e8]/5');
+    libHighlightTimer = setTimeout(() => {
+      sec.classList.remove('ring-2', 'ring-[#1a73e8]/60', 'rounded-2xl', 'p-2.5', '-mx-2.5', 'bg-[#1a73e8]/5');
+    }, 1800);
+  }
+}
+
 async function fetchMissingPartsOnline() {
   const progWrap = document.getElementById('libProgressWrap');
   const progLabel = document.getElementById('libProgressLabel');
@@ -3824,6 +3932,7 @@ async function fetchMissingPartsOnline() {
   progLabel.textContent = 'Checking missing parts…';
   progPct.textContent = '0%';
   progBar.style.width = '0%';
+  scrollMenuToBricksLibrary(false);
 
   // Gather missing leaf part IDs from current model (or starter set if no model loaded)
   const queue = [];
@@ -3986,11 +4095,14 @@ function computeModelDiagnostics() {
   for (const rec of missingByPart.values()) {
     const stepArr = Array.from(rec.steps).sort((a, b) => a - b);
     const firstStep = allSteps.find(x => x.step.num === stepArr[0])?.step;
+    const friendlyName = getHumanPartName(rec.partId);
+    const reason = explainMissingPartReason(rec.partId);
     diags.push({
       category: 'missing_shape',
       severity: 'error',
-      title: `Missing 3D shape: ${rec.partId}.dat (${rec.count}×)`,
-      detail: `Rendered as a 1×1 placeholder box. Import the LDraw Bricks Library (complete.zip) or use a Studio .io file to load its true 3D geometry. Used in Step${stepArr.length > 1 ? 's' : ''} ${stepArr.slice(0, 5).join(', ')}${stepArr.length > 5 ? '…' : ''}.`,
+      title: `${friendlyName} (${rec.count}×)`,
+      partCode: `${rec.partId}.dat`,
+      detail: `${reason} Used in Step${stepArr.length > 1 ? 's' : ''} ${stepArr.slice(0, 5).join(', ')}${stepArr.length > 5 ? '…' : ''}.`,
       stepNum: stepArr[0],
       stepId: firstStep?.id || null,
     });
@@ -4123,6 +4235,7 @@ function renderErrorsModal() {
           <div class="flex items-center gap-1.5 flex-wrap">
             <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${isErr ? 'bg-red-500/15 text-red-600 dark:text-red-400' : 'bg-amber-500/15 text-amber-700 dark:text-amber-300'}">${isErr ? 'Error' : 'Warning'}</span>
             <span class="font-bold break-words">${escHtml(d.title)}</span>
+            ${d.partCode ? `<span class="px-1.5 py-0.5 rounded-md text-[10px] font-mono bg-black/5 dark:bg-white/10 text-[var(--muted-foreground)] break-all">${escHtml(d.partCode)}</span>` : ''}
           </div>
           <p class="text-[11px] text-[var(--muted-foreground)] leading-relaxed break-words">${escHtml(d.detail)}</p>
         </div>
@@ -4137,9 +4250,19 @@ function renderErrorsModal() {
   requestAnimationFrame(() => { body.scrollTop = 0; });
 
   const quickFetch = body.querySelector('#errFetchLibQuick');
-  if (quickFetch) quickFetch.onclick = async () => { document.getElementById('errorsModal').classList.add('hidden'); openMenu(); await fetchMissingPartsOnline(); };
+  if (quickFetch) quickFetch.onclick = async () => {
+    document.getElementById('errorsModal').classList.add('hidden');
+    openMenu();
+    scrollMenuToBricksLibrary(true);
+    await fetchMissingPartsOnline();
+  };
   const quickLib = body.querySelector('#errImportLibQuick');
-  if (quickLib) quickLib.onclick = () => { document.getElementById('errorsModal').classList.add('hidden'); openMenu(); document.getElementById('libImportInput').click(); };
+  if (quickLib) quickLib.onclick = () => {
+    document.getElementById('errorsModal').classList.add('hidden');
+    openMenu();
+    scrollMenuToBricksLibrary(true);
+    document.getElementById('libImportInput').click();
+  };
   body.querySelectorAll('.jump-step-btn').forEach(btn => {
     btn.onclick = () => {
       const sid = btn.getAttribute('data-jump-step');
