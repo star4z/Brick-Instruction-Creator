@@ -1706,7 +1706,10 @@ function renderAll() {
             <span class="px-2.5 py-0.5 rounded-full" style="background:${theme.pliBg};border:1px solid ${theme.pliBorder}">${allParts.length} Pieces</span>
             <span class="px-2.5 py-0.5 rounded-full" style="background:${theme.pliBg};border:1px solid ${theme.pliBorder}">${allSteps.length} Steps</span>
           </div>
-          <span style="color:${theme.muted}">Brick Instruction Creator</span>
+          <span class="inline-flex items-center gap-1.5" style="color:${theme.muted}">
+            <svg class="w-4 h-4 shrink-0" viewBox="0 0 64 64" fill="none" aria-hidden="true"><path d="M18.2 10.1 C10.0 18.9 9.8 33.2 16.8 41.3 L19.2 52.2 L10.9 43.3 L13.9 43.6 C5.8 33.7 8.3 17.1 18.2 10.1 Z" fill="#38bdf8"/><path d="M26.8 7.0 C19.6 14.6 18.5 34.6 24.3 43.1 L25.9 56.0 L17.2 44.9 L20.4 45.5 C13.7 34.5 17.5 12.8 26.8 7.0 Z" fill="#2696f7"/><path d="M32.0 5.4 C33.6 10.2 34.4 34.8 34.7 45.1 L37.9 43.9 L32.0 58.6 L26.1 43.9 L29.3 45.1 C29.6 34.8 30.4 10.2 32.0 5.4 Z" fill="#1a73e8"/><path d="M37.2 7.0 C46.5 12.8 50.3 34.5 43.6 45.5 L46.8 44.9 L38.1 56.0 L39.7 43.1 C45.5 34.6 44.4 14.6 37.2 7.0 Z" fill="#1a5cd8"/><path d="M45.8 10.1 C55.7 17.1 58.2 33.7 50.1 43.6 L53.1 43.3 L44.8 52.2 L47.2 41.3 C54.2 33.2 54.0 18.9 45.8 10.1 Z" fill="#1d48b8"/></svg>
+            <span>Brick Instruction Creator</span>
+          </span>
         </div>
       </div>`;
   } else if (page.kind === 'back') {
@@ -1721,7 +1724,10 @@ function renderAll() {
         <div class="flex-1 min-h-0 w-full flex items-center justify-center my-1.5 overflow-hidden">
           <img src="${snap.url}" alt="Finished model" class="max-w-full max-h-full w-full h-full object-contain pointer-events-none" />
         </div>
-        <p class="shrink-0 text-[11px] font-medium" style="color:${theme.muted}">${state.model.title} · ${allParts.length} Pieces</p>
+        <p class="shrink-0 inline-flex items-center gap-1.5 text-[11px] font-medium" style="color:${theme.muted}">
+          <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 64 64" fill="none" aria-hidden="true"><path d="M18.2 10.1 C10.0 18.9 9.8 33.2 16.8 41.3 L19.2 52.2 L10.9 43.3 L13.9 43.6 C5.8 33.7 8.3 17.1 18.2 10.1 Z" fill="#38bdf8"/><path d="M26.8 7.0 C19.6 14.6 18.5 34.6 24.3 43.1 L25.9 56.0 L17.2 44.9 L20.4 45.5 C13.7 34.5 17.5 12.8 26.8 7.0 Z" fill="#2696f7"/><path d="M32.0 5.4 C33.6 10.2 34.4 34.8 34.7 45.1 L37.9 43.9 L32.0 58.6 L26.1 43.9 L29.3 45.1 C29.6 34.8 30.4 10.2 32.0 5.4 Z" fill="#1a73e8"/><path d="M37.2 7.0 C46.5 12.8 50.3 34.5 43.6 45.5 L46.8 44.9 L38.1 56.0 L39.7 43.1 C45.5 34.6 44.4 14.6 37.2 7.0 Z" fill="#1a5cd8"/><path d="M45.8 10.1 C55.7 17.1 58.2 33.7 50.1 43.6 L53.1 43.3 L44.8 52.2 L47.2 41.3 C54.2 33.2 54.0 18.9 45.8 10.1 Z" fill="#1d48b8"/></svg>
+          <span>${state.model.title} · ${allParts.length} Pieces</span>
+        </p>
       </div>`;
   } else if (page.kind === 'divider') {
     const d = state.dividerAfter[page.sourcePgId] || { title:'Section Divider', note:'' };
@@ -3319,9 +3325,25 @@ async function renderPageToJpegBytes(page, pxW, pxH) {
     const snap = renderSnapshot([], allParts, cm.az, cm.el, 900, 600, 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent });
     const img = await loadImgPromise(snap.url);
     drawContain(ctx, img, pad, pad + pxH * 0.12, pxW - pad * 2, pxH * 0.72);
+    const logoSz = Math.round(pxH * 0.032);
+    const footerY = pxH - pad - logoSz;
+    if (typeof Path2D !== 'undefined') {
+      const logoPaths = [
+        ['M18.2 10.1 C10.0 18.9 9.8 33.2 16.8 41.3 L19.2 52.2 L10.9 43.3 L13.9 43.6 C5.8 33.7 8.3 17.1 18.2 10.1 Z', '#38bdf8'],
+        ['M26.8 7.0 C19.6 14.6 18.5 34.6 24.3 43.1 L25.9 56.0 L17.2 44.9 L20.4 45.5 C13.7 34.5 17.5 12.8 26.8 7.0 Z', '#2696f7'],
+        ['M32.0 5.4 C33.6 10.2 34.4 34.8 34.7 45.1 L37.9 43.9 L32.0 58.6 L26.1 43.9 L29.3 45.1 C29.6 34.8 30.4 10.2 32.0 5.4 Z', '#1a73e8'],
+        ['M37.2 7.0 C46.5 12.8 50.3 34.5 43.6 45.5 L46.8 44.9 L38.1 56.0 L39.7 43.1 C45.5 34.6 44.4 14.6 37.2 7.0 Z', '#1a5cd8'],
+        ['M45.8 10.1 C55.7 17.1 58.2 33.7 50.1 43.6 L53.1 43.3 L44.8 52.2 L47.2 41.3 C54.2 33.2 54.0 18.9 45.8 10.1 Z', '#1d48b8'],
+      ];
+      ctx.save();
+      ctx.translate(pad, footerY - Math.round(logoSz * 0.1));
+      ctx.scale(logoSz / 64, logoSz / 64);
+      for (const [d, col] of logoPaths) { ctx.fillStyle = col; ctx.fill(new Path2D(d)); }
+      ctx.restore();
+    }
     ctx.fillStyle = theme.muted;
     ctx.font = `600 ${Math.round(pxH * 0.02)}px -apple-system, sans-serif`;
-    ctx.fillText(`${allParts.length} Pieces · ${allSteps.length} Steps · Brick Instruction Creator`, pad, pxH - pad - pxH * 0.03);
+    ctx.fillText(`${allParts.length} Pieces · ${allSteps.length} Steps · Brick Instruction Creator`, pad + logoSz + Math.round(logoSz * 0.35), footerY + Math.round(logoSz * 0.12));
   } else if (page.kind === 'back') {
     const bm = state.backMeta;
     ctx.fillStyle = theme.text;
