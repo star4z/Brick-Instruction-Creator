@@ -1412,12 +1412,25 @@ const state = {
   fadeOpacity: 0.82,
   showRotCues: true,
   showSizeGuides: true,
+  showStepBorders: true,
+  showPageTitle: true,
+  pageNumberFormat: 'page_n', // 'number' | 'page_n' | 'n_of_total' | 'none'
   showExtras: true,
   overrides: {},           // keyed by stepId: { pin, side, corner, az, el, modelScale, pliScale, pliPos:{x,y}, calloutPos:{x,y}, calloutDir, calloutAsPages, partOffsets:{ [partId]: {x,y,z,tilt,arrow} } }
   pageInserts: {},         // keyed by pageId: [ { id, kind:'text'|'image', text, src, x, y, scale } ]
   dividerAfter: {},        // keyed by pageId: { title, note }
   coverMeta: { title:'', subtitle:'', az:38, el:26, bgSrc:null },
-  backMeta:  { title:'Build Complete!', subtitle:'Created with Brick Instruction Creator', az:315, el:28, bgSrc:null },
+  completeMeta: { title:'Build Complete!', subtitle:'Ready for display!', az:315, el:28, bgSrc:null, showText:true, showFireworks:true },
+  backMeta:  { title:'', subtitle:'Created with Brick Instruction Creator', az:38, el:24, bgSrc:null },
+  bomConfig: {
+    density: 'balanced',     // 'compact' | 'balanced' | 'spacious'
+    flow: 'rows',            // 'rows' | 'columns'
+    align: 'start',          // 'start' | 'center' | 'end'
+    sortPrimary: 'color',    // 'color' | 'category' | 'qty' | 'size' | 'name'
+    sortSecondary: 'category',
+    showNames: true,
+  },
+  bomShortcutVisible: false,
   pages: [],
   pageIdx: 0,
   mode: 'pan',             // pan | select | rotate | arrange
@@ -1443,6 +1456,7 @@ function pushUndo() {
     pageInserts: state.pageInserts,
     dividerAfter: state.dividerAfter,
     coverMeta: state.coverMeta,
+    completeMeta: state.completeMeta,
     backMeta: state.backMeta,
   });
   state.undoStack.push(snap);
@@ -1457,6 +1471,7 @@ function applyHistorySnap(json) {
   state.pageInserts = s.pageInserts;
   state.dividerAfter = s.dividerAfter;
   state.coverMeta = s.coverMeta;
+  if (s.completeMeta) state.completeMeta = s.completeMeta;
   state.backMeta = s.backMeta;
   state.selectedPartIds.clear();
   renderAll();
@@ -1476,6 +1491,185 @@ function getAllParts(model) { return getAllSteps(model).flatMap(x => x.step.part
 function renumberContinuousSteps(model) {
   let n = 0;
   for (const ch of model.chapters) for (const s of ch.steps) s.num = ++n;
+}
+
+function formatPageNumber(num, total) {
+  if (state.pageNumberFormat === 'none') return '';
+  if (state.pageNumberFormat === 'number') return String(num);
+  if (state.pageNumberFormat === 'n_of_total') return `${num} / ${total}`;
+  return `Page ${num}`;
+}
+
+function getBomGridDimensions(isLandscape) {
+  const d = state.bomConfig?.density || 'balanced';
+  if (d === 'compact') return isLandscape ? { cols: 7, rows: 6, perPage: 42 } : { cols: 5, rows: 7, perPage: 35 };
+  if (d === 'spacious') return isLandscape ? { cols: 4, rows: 4, perPage: 16 } : { cols: 3, rows: 5, perPage: 15 };
+  return isLandscape ? { cols: 6, rows: 5, perPage: 30 } : { cols: 4, rows: 6, perPage: 24 };
+}
+
+function classifyBomCategory(part) {
+  const name = (resolvePart(part.p).name || '').toLowerCase();
+  if (part.children || /minifig|torso|legs|head|hair|helmet|hat|utensil|hand|cape|arm/.test(name)) return [7, 'Minifigures'];
+  if (/wheel|tire|tyre|rim|bogie|track/.test(name)) return [6, 'Wheels & Tires'];
+  if (/window|door|glass|panel|windscreen|fence|lattice|frame/.test(name)) return [5, 'Windows & Panels'];
+  if (/technic|axle|pin|beam|liftarm|gear|bush|connector|cross/.test(name)) return [4, 'Technic'];
+  if (/slope|wedge|curved|cheese|roof|wing|cone|dish/.test(name)) return [3, 'Slopes & Wedges'];
+  if (/tile/.test(name)) return [2, 'Tiles'];
+  if (/plate|baseplate|jumper|bracket|hinge|turntable|clip|bar/.test(name)) return [1, 'Plates'];
+  if (/brick|arch|cylinder|round|pillar|column/.test(name)) return [0, 'Bricks'];
+  return [8, 'Other'];
+}
+
+function getColorSortKey(colorId) {
+  const col = COLORS[colorId] || { name: `Color ${colorId}`, hex: '#9ea3a8' };
+  const cname = (col.name || '').toLowerCase();
+  const isSpecial = /trans|chrome|pearl|metal|glow|glitter/.test(cname);
+  const hex = (col.hex || '#9ea3a8').replace('#', '');
+  const r = parseInt(hex.slice(0, 2), 16) / 255 || 0;
+  const g = parseInt(hex.slice(2, 4), 16) / 255 || 0;
+  const b = parseInt(hex.slice(4, 6), 16) / 255 || 0;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  const lum = (max + min) / 2;
+  const d = max - min;
+  const sat = d === 0 ? 0 : d / (1 - Math.abs(2 * lum - 1));
+  let hue = 0;
+  if (d > 0) {
+    if (max === r) hue = ((g - b) / d + (g < b ? 6 : 0)) * 60;
+    else if (max === g) hue = ((b - r) / d + 2) * 60;
+    else hue = ((r - g) / d + 4) * 60;
+  }
+  // Group 0: Neutrals (white -> gray -> black), Group 1: Solid colors by hue, Group 2: Trans/Metallic
+  const grp = isSpecial ? 2 : (sat < 0.14 ? 0 : 1);
+  const ord = grp === 0 ? (1 - lum) : (hue / 360);
+  return grp * 1000 + ord * 100 + (1 - lum) * 10;
+}
+
+function getSortedBomEntries(allParts) {
+  const map = new Map();
+  for (const p of allParts) {
+    const k = `${p.p}:${p.c}`;
+    if (!map.has(k)) {
+      const meta = resolvePart(p.p);
+      const [catIdx, catName] = classifyBomCategory(p);
+      const sizeScore = (meta.sx || 1) * (meta.sz || 1) * ((meta.h || 8) / 8);
+      map.set(k, { part: p, qty: 0, meta, catIdx, catName, colorKey: getColorSortKey(p.c), sizeScore });
+    }
+    map.get(k).qty++;
+  }
+  const cmpTrait = (a, b, trait) => {
+    if (trait === 'color') return (a.colorKey - b.colorKey) || (a.part.c - b.part.c);
+    if (trait === 'category') return (a.catIdx - b.catIdx) || a.meta.name.localeCompare(b.meta.name);
+    if (trait === 'qty') return b.qty - a.qty;
+    if (trait === 'size') return b.sizeScore - a.sizeScore;
+    if (trait === 'name') return a.meta.name.localeCompare(b.meta.name);
+    return 0;
+  };
+  const primary = state.bomConfig?.sortPrimary || 'color';
+  const secondary = state.bomConfig?.sortSecondary || 'category';
+  return Array.from(map.values()).sort((a, b) =>
+    cmpTrait(a, b, primary)
+    || cmpTrait(a, b, secondary)
+    || (b.qty - a.qty)
+    || a.meta.name.localeCompare(b.meta.name)
+  );
+}
+
+// Exact fractional layout shared by live HTML & PDF Canvas so hanging rows/columns match 100%
+function computeBomGridLayout(items, cols, rows, flow, align) {
+  const n = items.length;
+  const cells = [];
+  if (n === 0) return cells;
+  if (flow === 'columns') {
+    const lastCol = Math.floor((n - 1) / rows);
+    const rem = n - lastCol * rows;
+    const shift = rem < rows ? (align === 'center' ? (rows - rem) / 2 : align === 'end' ? (rows - rem) : 0) : 0;
+    for (let i = 0; i < n; i++) {
+      const col = Math.floor(i / rows);
+      const row = (i % rows) + (col === lastCol ? shift : 0);
+      cells.push({ item: items[i], xFrac: col / cols, yFrac: row / rows, wFrac: 1 / cols, hFrac: 1 / rows });
+    }
+  } else {
+    const lastRow = Math.floor((n - 1) / cols);
+    const rem = n - lastRow * cols;
+    const shift = rem < cols ? (align === 'center' ? (cols - rem) / 2 : align === 'end' ? (cols - rem) : 0) : 0;
+    for (let i = 0; i < n; i++) {
+      const row = Math.floor(i / cols);
+      const col = (i % cols) + (row === lastRow ? shift : 0);
+      cells.push({ item: items[i], xFrac: col / cols, yFrac: row / rows, wFrac: 1 / cols, hFrac: 1 / rows });
+    }
+  }
+  return cells;
+}
+
+const FIREWORK_BURSTS = [
+  { cx: 14, cy: 20, r: 9.5, rays: 12, color: '#f59e0b', sub: '#ef4444' },
+  { cx: 86, cy: 19, r: 10.5, rays: 14, color: '#1a73e8', sub: '#38bdf8' },
+  { cx: 12, cy: 76, r: 8.5, rays: 10, color: '#10b981', sub: '#fbbf24' },
+  { cx: 88, cy: 74, r: 9.0, rays: 12, color: '#ec4899', sub: '#f59e0b' },
+  { cx: 26, cy: 11, r: 5.5, rays: 8,  color: '#ef4444', sub: '#facc15' },
+  { cx: 75, cy: 84, r: 6.0, rays: 8,  color: '#38bdf8', sub: '#8b5cf6' },
+];
+
+function buildFireworksSvg() {
+  const els = [];
+  for (const b of FIREWORK_BURSTS) {
+    for (let i = 0; i < b.rays; i++) {
+      const a = (i / b.rays) * Math.PI * 2;
+      const isLong = i % 2 === 0;
+      const r0 = b.r * 0.28;
+      const r1 = b.r * (isLong ? 1.0 : 0.68);
+      const x0 = (b.cx + Math.cos(a) * r0).toFixed(2);
+      const y0 = (b.cy + Math.sin(a) * r0).toFixed(2);
+      const x1 = (b.cx + Math.cos(a) * r1).toFixed(2);
+      const y1 = (b.cy + Math.sin(a) * r1).toFixed(2);
+      const col = isLong ? b.color : b.sub;
+      els.push(`<line x1="${x0}" y1="${y0}" x2="${x1}" y2="${y1}" stroke="${col}" stroke-width="${isLong ? 0.65 : 0.45}" stroke-linecap="round" opacity="0.88"/>`);
+      if (isLong) {
+        const dx = (b.cx + Math.cos(a) * (r1 + 1.35)).toFixed(2);
+        const dy = (b.cy + Math.sin(a) * (r1 + 1.35)).toFixed(2);
+        els.push(`<circle cx="${dx}" cy="${dy}" r="0.52" fill="${b.sub}" opacity="0.9"/>`);
+      }
+    }
+    els.push(`<circle cx="${b.cx}" cy="${b.cy}" r="0.9" fill="${b.color}" opacity="0.85"/>`);
+  }
+  return `<svg class="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice" aria-hidden="true">${els.join('')}</svg>`;
+}
+
+function drawFireworksCanvas(ctx, pxW, pxH) {
+  const unit = Math.min(pxW, pxH) / 100;
+  ctx.save();
+  for (const b of FIREWORK_BURSTS) {
+    const cx = (b.cx / 100) * pxW;
+    const cy = (b.cy / 100) * pxH;
+    const rad = b.r * unit;
+    for (let i = 0; i < b.rays; i++) {
+      const a = (i / b.rays) * Math.PI * 2;
+      const isLong = i % 2 === 0;
+      const r0 = rad * 0.28;
+      const r1 = rad * (isLong ? 1.0 : 0.68);
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0);
+      ctx.lineTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1);
+      ctx.strokeStyle = isLong ? b.color : b.sub;
+      ctx.lineWidth = Math.max(1.5, (isLong ? 0.65 : 0.45) * unit);
+      ctx.lineCap = 'round';
+      ctx.globalAlpha = 0.88;
+      ctx.stroke();
+      if (isLong) {
+        ctx.beginPath();
+        ctx.arc(cx + Math.cos(a) * (r1 + 1.35 * unit), cy + Math.sin(a) * (r1 + 1.35 * unit), Math.max(1.5, 0.52 * unit), 0, Math.PI * 2);
+        ctx.fillStyle = b.sub;
+        ctx.globalAlpha = 0.9;
+        ctx.fill();
+      }
+    }
+    ctx.beginPath();
+    ctx.arc(cx, cy, Math.max(2, 0.9 * unit), 0, Math.PI * 2);
+    ctx.fillStyle = b.color;
+    ctx.globalAlpha = 0.85;
+    ctx.fill();
+  }
+  ctx.restore();
 }
 
 function rebuildPages() {
@@ -1522,8 +1716,36 @@ function rebuildPages() {
     }
   }
   if (state.showExtras) {
-    pages.push({ id:'bom', kind:'bom', num:++pNum, label:'Parts List' });
-    pages.push({ id:'back', kind:'back', num:++pNum, label:'Back Page' });
+    // 1. Build Complete celebration page BEFORE Parts List
+    pages.push({ id:'complete', kind:'complete', num:++pNum, label:'Build Complete' });
+
+    // 2. Multi-page spillover Parts List (zero cut-off!)
+    const allParts = getAllParts(state.model);
+    const bomEntries = getSortedBomEntries(allParts);
+    const isLand = state.paperFormat === 'screen'
+      ? computePageFrameDimensions().isLandscape
+      : (([wIn, hIn]) => wIn >= hIn * 1.02)(getActivePagePhysicalInches());
+    const gridDims = getBomGridDimensions(isLand);
+    const bomPageCount = Math.max(1, Math.ceil(bomEntries.length / gridDims.perPage));
+    for (let bi = 0; bi < bomPageCount; bi++) {
+      const slice = bomEntries.slice(bi * gridDims.perPage, (bi + 1) * gridDims.perPage);
+      pages.push({
+        id: `bom_${bi}`,
+        kind: 'bom',
+        num: ++pNum,
+        label: bomPageCount > 1 ? `Parts List (${bi + 1}/${bomPageCount})` : 'Parts List',
+        bomPageIdx: bi,
+        bomPageCount,
+        bomTotalUnique: bomEntries.length,
+        bomTotalPieces: allParts.length,
+        bomCols: gridDims.cols,
+        bomRows: gridDims.rows,
+        bomEntries: slice,
+      });
+    }
+
+    // 3. Distinct Back Cover
+    pages.push({ id:'back', kind:'back', num:++pNum, label:'Back Cover' });
   }
   state.pages = pages;
   if (state.pageIdx >= pages.length) state.pageIdx = Math.max(0, pages.length - 1);
@@ -1754,76 +1976,123 @@ function renderAll() {
           </span>
         </div>
       </div>`;
+  } else if (page.kind === 'complete') {
+    const cm = state.completeMeta;
+    const snap = renderSnapshot([], allParts, cm.az, cm.el, 700, 460, 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent });
+    const pgNumText = formatPageNumber(page.num, state.pages.length);
+    const showText = cm.showText !== false;
+    const showFw = cm.showFireworks !== false;
+    frame.innerHTML = `
+      <div class="relative w-full h-full text-center flex flex-col items-center justify-between overflow-hidden ${guideCls}" style="padding:${padPx + 4}px;${cm.bgSrc ? `background-image:url(${cm.bgSrc});background-size:cover;background-position:center;` : ''}">
+        ${showFw ? buildFireworksSvg() : ''}
+        <div class="relative z-10 shrink-0 ${showText ? '' : 'hidden'}">
+          <h2 class="text-xl sm:text-3xl font-extrabold leading-tight">${escHtml(cm.title || 'Build Complete!')}</h2>
+          ${cm.subtitle ? `<p class="text-[11px] sm:text-xs mt-0.5" style="color:${theme.muted}">${escHtml(cm.subtitle)}</p>` : ''}
+        </div>
+        <div class="relative z-10 flex-1 min-h-0 w-full flex items-center justify-center my-1.5 overflow-hidden">
+          <img src="${snap.url}" alt="Completed build" class="max-w-full max-h-full w-full h-full object-contain pointer-events-none" />
+        </div>
+        <div class="relative z-10 w-full shrink-0 flex items-center justify-between text-[10px] font-medium" style="color:${theme.muted}">
+          <span class="truncate">${state.showPageTitle ? escHtml(state.model.title) : ''}</span>
+          <span style="color:${theme.text}" class="font-bold shrink-0">${escHtml(pgNumText)}</span>
+        </div>
+      </div>`;
   } else if (page.kind === 'back') {
     const bm = state.backMeta;
-    const snap = renderSnapshot([], allParts, bm.az, bm.el, 680, 440, 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent });
+    const backTitle = bm.title || state.model.title;
     frame.innerHTML = `
-      <div class="relative w-full h-full text-center flex flex-col items-center justify-between overflow-hidden ${guideCls}" style="padding:${padPx + 4}px;${bm.bgSrc ? `background-image:url(${bm.bgSrc});background-size:cover;background-position:center;` : ''}">
-        <div class="shrink-0">
-          <h2 class="text-xl sm:text-3xl font-extrabold leading-tight">${bm.title}</h2>
-          <p class="text-[11px] mt-0.5" style="color:${theme.muted}">${bm.subtitle}</p>
+      <div class="relative w-full h-full text-center flex flex-col items-center justify-between overflow-hidden ${guideCls}" style="padding:${padPx + 10}px;${bm.bgSrc ? `background-image:url(${bm.bgSrc});background-size:cover;background-position:center;` : ''}">
+        <div class="shrink-0 w-full flex items-center justify-center">
+          <span class="text-[10px] font-bold uppercase tracking-[0.18em] opacity-60">Instruction Manual</span>
         </div>
-        <div class="flex-1 min-h-0 w-full flex items-center justify-center my-1.5 overflow-hidden">
-          <img src="${snap.url}" alt="Finished model" class="max-w-full max-h-full w-full h-full object-contain pointer-events-none" />
+        <div class="flex-1 min-h-0 w-full flex flex-col items-center justify-center gap-3 px-4">
+          <div class="w-16 h-16 sm:w-20 sm:h-20 rounded-3xl flex items-center justify-center shadow-sm" style="background:${theme.pliBg};border:1px solid ${theme.pliBorder}">
+            <svg class="w-11 h-11 sm:w-14 sm:h-14" viewBox="0 0 64 64" fill="none" aria-hidden="true"><path d="M18.2 10.1 C10.0 18.9 9.8 33.2 16.8 41.3 L19.2 52.2 L10.9 43.3 L13.9 43.6 C5.8 33.7 8.3 17.1 18.2 10.1 Z" fill="#38bdf8"/><path d="M26.8 7.0 C19.6 14.6 18.5 34.6 24.3 43.1 L25.9 56.0 L17.2 44.9 L20.4 45.5 C13.7 34.5 17.5 12.8 26.8 7.0 Z" fill="#2696f7"/><path d="M32.0 5.4 C33.6 10.2 34.4 34.8 34.7 45.1 L37.9 43.9 L32.0 58.6 L26.1 43.9 L29.3 45.1 C29.6 34.8 30.4 10.2 32.0 5.4 Z" fill="#1a73e8"/><path d="M37.2 7.0 C46.5 12.8 50.3 34.5 43.6 45.5 L46.8 44.9 L38.1 56.0 L39.7 43.1 C45.5 34.6 44.4 14.6 37.2 7.0 Z" fill="#1a5cd8"/><path d="M45.8 10.1 C55.7 17.1 58.2 33.7 50.1 43.6 L53.1 43.3 L44.8 52.2 L47.2 41.3 C54.2 33.2 54.0 18.9 45.8 10.1 Z" fill="#1d48b8"/></svg>
+          </div>
+          <div class="space-y-1 max-w-md">
+            <h2 class="text-xl sm:text-3xl font-extrabold tracking-tight leading-tight break-words">${escHtml(backTitle)}</h2>
+            <div class="w-12 h-0.5 mx-auto rounded-full opacity-40" style="background:${theme.accent}"></div>
+          </div>
+          <div class="flex flex-wrap items-center justify-center gap-2 text-[11px] font-semibold">
+            <span class="px-3 py-1 rounded-full" style="background:${theme.pliBg};border:1px solid ${theme.pliBorder}">${allParts.length} Pieces</span>
+            <span class="px-3 py-1 rounded-full" style="background:${theme.pliBg};border:1px solid ${theme.pliBorder}">${allSteps.length} Steps</span>
+            <span class="px-3 py-1 rounded-full" style="background:${theme.pliBg};border:1px solid ${theme.pliBorder}">${state.pages.length} Pages</span>
+          </div>
         </div>
-        <p class="shrink-0 inline-flex items-center gap-1.5 text-[11px] font-medium" style="color:${theme.muted}">
-          <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 64 64" fill="none" aria-hidden="true"><path d="M18.2 10.1 C10.0 18.9 9.8 33.2 16.8 41.3 L19.2 52.2 L10.9 43.3 L13.9 43.6 C5.8 33.7 8.3 17.1 18.2 10.1 Z" fill="#38bdf8"/><path d="M26.8 7.0 C19.6 14.6 18.5 34.6 24.3 43.1 L25.9 56.0 L17.2 44.9 L20.4 45.5 C13.7 34.5 17.5 12.8 26.8 7.0 Z" fill="#2696f7"/><path d="M32.0 5.4 C33.6 10.2 34.4 34.8 34.7 45.1 L37.9 43.9 L32.0 58.6 L26.1 43.9 L29.3 45.1 C29.6 34.8 30.4 10.2 32.0 5.4 Z" fill="#1a73e8"/><path d="M37.2 7.0 C46.5 12.8 50.3 34.5 43.6 45.5 L46.8 44.9 L38.1 56.0 L39.7 43.1 C45.5 34.6 44.4 14.6 37.2 7.0 Z" fill="#1a5cd8"/><path d="M45.8 10.1 C55.7 17.1 58.2 33.7 50.1 43.6 L53.1 43.3 L44.8 52.2 L47.2 41.3 C54.2 33.2 54.0 18.9 45.8 10.1 Z" fill="#1d48b8"/></svg>
-          <span>${state.model.title} · ${allParts.length} Pieces</span>
-        </p>
+        <div class="shrink-0 flex flex-col items-center gap-1 text-[11px] font-medium" style="color:${theme.muted}">
+          <span>${escHtml(bm.subtitle || 'Created with Brick Instruction Creator')}</span>
+        </div>
       </div>`;
   } else if (page.kind === 'divider') {
     const d = state.dividerAfter[page.sourcePgId] || { title:'Section Divider', note:'' };
     frame.innerHTML = `
       <div class="w-full h-full flex flex-col items-center justify-center text-center gap-2 ${guideCls}" style="padding:${padPx + 12}px">
-        <div class="text-2xl sm:text-3xl font-extrabold">${d.title}</div>
-        <div class="text-xs max-w-md" style="color:${theme.muted}">${d.note || 'Switch to Arrange mode to edit this divider page or add notes/images.'}</div>
+        <div class="text-2xl sm:text-3xl font-extrabold">${escHtml(d.title)}</div>
+        <div class="text-xs max-w-md" style="color:${theme.muted}">${escHtml(d.note || 'Switch to Arrange mode to edit this divider page or add notes/images.')}</div>
       </div>`;
   } else if (page.kind === 'submodel_page') {
     const sub = page.step.subassembly;
     const snap = renderSnapshot([], sub.buildParts, 38, 30, 620, 400, 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent });
+    const pgNumText = formatPageNumber(page.num, state.pages.length);
     frame.innerHTML = `
       <div class="w-full h-full flex flex-col justify-between overflow-hidden ${guideCls}" style="padding:${padPx}px">
         <div class="shrink-0 flex items-center justify-between">
-          <h2 class="text-lg font-extrabold">${sub.name}</h2>
+          <h2 class="text-lg font-extrabold">${escHtml(sub.name)}</h2>
           <span class="px-2.5 py-0.5 rounded-full text-xs font-bold text-white" style="background:${theme.accent}">Build ${sub.repeatCount}×</span>
         </div>
         <div class="flex-1 min-h-0 flex items-center justify-center my-1.5 overflow-hidden">
           <img src="${snap.url}" class="max-w-full max-h-full w-full h-full object-contain pointer-events-none" />
         </div>
         <div class="shrink-0 flex justify-between text-[11px]" style="color:${theme.muted}">
-          <span>${page.chapterName}</span><span style="color:${theme.text}" class="font-bold">Page ${page.num}</span>
+          <span class="truncate">${state.showPageTitle ? escHtml(page.chapterName) : ''}</span>
+          <span style="color:${theme.text}" class="font-bold shrink-0">${escHtml(pgNumText)}</span>
         </div>
       </div>`;
   } else if (page.kind === 'bom') {
-    const map = new Map();
-    for (const p of allParts) {
-      const k = `${p.p}:${p.c}`;
-      if (!map.has(k)) map.set(k, { part: p, qty: 0 });
-      map.get(k).qty++;
-    }
-    const entries = Array.from(map.values()).sort((a,b) => b.qty - a.qty).slice(0, 48);
+    const cfg = state.bomConfig;
+    const cols = page.bomCols || 6;
+    const rows = page.bomRows || 5;
+    const entries = page.bomEntries || [];
+    const cells = computeBomGridLayout(entries, cols, rows, cfg.flow, cfg.align);
+    const pgNumText = formatPageNumber(page.num, state.pages.length);
+    const imgSizeCls = cfg.density === 'compact' ? 'w-7 h-7 sm:w-9 sm:h-9' : cfg.density === 'spacious' ? 'w-12 h-12 sm:w-16 sm:h-16' : 'w-9 h-9 sm:w-11 sm:h-11';
+    const qtySizeCls = cfg.density === 'compact' ? 'text-[9px]' : cfg.density === 'spacious' ? 'text-xs' : 'text-[10px]';
+
     frame.innerHTML = `
-      <div class="w-full h-full flex flex-col overflow-hidden ${guideCls}" style="padding:${padPx}px">
-        <div class="shrink-0 flex items-baseline justify-between pb-2 mb-2 border-b" style="border-color:${theme.pliBorder}">
-          <h2 class="text-base font-bold">Parts List</h2>
-          <span class="text-[11px]" style="color:${theme.muted}">${allParts.length} pieces (${map.size} unique)</span>
+      <div id="bomPageTapArea" class="relative w-full h-full flex flex-col overflow-hidden cursor-pointer ${guideCls}" style="padding:${padPx}px;padding-bottom:${padPx + 18}px">
+        <div class="shrink-0 flex items-baseline justify-between gap-2 pb-1.5 mb-1.5 border-b" style="border-color:${theme.pliBorder}">
+          <div class="flex items-baseline gap-2 min-w-0">
+            <h2 class="text-sm sm:text-base font-bold truncate">Parts List</h2>
+            ${page.bomPageCount > 1 ? `<span class="text-[10px] font-semibold opacity-70 shrink-0">${page.bomPageIdx + 1} / ${page.bomPageCount}</span>` : ''}
+          </div>
+          <span class="text-[10px] sm:text-[11px] shrink-0" style="color:${theme.muted}">${page.bomTotalPieces} pcs · ${page.bomTotalUnique} unique</span>
         </div>
-        <div class="grid grid-cols-3 sm:grid-cols-6 gap-1.5 overflow-y-auto flex-1 min-h-0">
-          ${entries.map(({ part, qty }) => {
-            const col = COLORS[part.c] || COLORS[71];
-            const meta = resolvePart(part.p);
+        <div class="relative flex-1 min-h-0 w-full">
+          ${cells.map(({ item, xFrac, yFrac, wFrac, hFrac }) => {
+            const { part, qty, meta } = item;
             const thumb = getPliThumb(part);
-            return `<div class="rounded-xl p-1.5 flex flex-col items-center text-center gap-0.5" style="background:${theme.pliBg};border:1px solid ${theme.pliBorder}">
-              <div class="w-full flex justify-between items-center text-[10px] font-bold">
-                <span class="w-2.5 h-2.5 rounded-full border border-black/20" style="background:${col.hex}"></span>
-                <span>${qty}×</span>
+            return `<div class="absolute p-0.5 flex flex-col items-center justify-center text-center overflow-hidden" style="left:${(xFrac*100).toFixed(4)}%;top:${(yFrac*100).toFixed(4)}%;width:${(wFrac*100).toFixed(4)}%;height:${(hFrac*100).toFixed(4)}%;background:transparent">
+              <div class="flex-1 min-h-0 w-full flex items-center justify-center">
+                <img src="${thumb}" alt="${escHtml(meta.name)}" class="max-w-full max-h-full ${imgSizeCls} object-contain pointer-events-none" />
               </div>
-              <img src="${thumb}" class="w-10 h-10 object-contain pointer-events-none" />
-              <div class="text-[9px] font-semibold truncate w-full" title="${meta.name}">${meta.name}</div>
+              <div class="shrink-0 leading-tight font-extrabold ${qtySizeCls}">${qty}×</div>
+              ${cfg.showNames ? `<div class="shrink-0 text-[8px] sm:text-[9px] font-medium truncate w-full px-0.5 opacity-80" title="${escHtml(meta.name)}">${escHtml(meta.name)}</div>` : ''}
             </div>`;
           }).join('')}
         </div>
+        <div class="absolute bottom-1.5 left-3.5 right-3.5 flex justify-between text-[10px] font-medium pointer-events-none" style="color:${theme.muted}">
+          <span class="truncate">${state.showPageTitle ? escHtml(state.model.title) : ''}</span>
+          <span style="color:${theme.text}" class="font-bold shrink-0">${escHtml(pgNumText)}</span>
+        </div>
       </div>`;
+
+    const tapArea = frame.querySelector('#bomPageTapArea');
+    if (tapArea) {
+      tapArea.addEventListener('click', () => {
+        state.bomShortcutVisible = !state.bomShortcutVisible;
+        renderContextOverlay(page);
+      });
+    }
   } else {
     // STEPS PAGE
     const activeObj = getActiveStepObj();
@@ -1867,6 +2136,7 @@ function renderAll() {
     const isRotateMode = state.mode === 'rotate';
     const isArrangeMode = state.mode === 'arrange';
     const isTightSlot = dims.height < 360 || slots.length >= 4 || (slots.length === 2 && !dims.isLandscape && dims.height < 460);
+    const pgNumText = formatPageNumber(page.num, state.pages.length);
 
     frame.innerHTML = `
       <div class="relative w-full h-full flex flex-col overflow-hidden ${guideCls}" style="padding:${padPx}px;padding-bottom:${padPx + 18}px">
@@ -1879,9 +2149,13 @@ function renderAll() {
             const calloutPos = ov.calloutPos || { x: 0, y: 0 };
             const calloutSel = isArrangeMode && state.selectedArrangeEl?.stepId === step.id && state.selectedArrangeEl?.kind === 'callout';
             const pliSel = isArrangeMode && state.selectedArrangeEl?.stepId === step.id && state.selectedArrangeEl?.kind === 'pli';
+            const slotBorderStyle = state.showStepBorders
+              ? (isSelStep && state.mode !== 'pan' ? `2px solid ${theme.accent}` : `1px solid ${theme.pliBorder}`)
+              : (isSelStep && state.mode !== 'pan' && slots.length > 1 ? `1.5px dashed ${theme.accent}` : '1px solid transparent');
+            const slotBgStyle = state.showStepBorders ? 'rgba(255,255,255,0.05)' : 'transparent';
 
             return `
-              <div data-step="${step.id}" class="step-slot relative rounded-xl p-2 flex flex-col min-h-0 overflow-hidden transition" style="border:${isSelStep && state.mode !== 'pan' ? `2px solid ${theme.accent}` : `1px solid ${theme.pliBorder}`};background:rgba(255,255,255,0.05)">
+              <div data-step="${step.id}" class="step-slot relative rounded-xl p-2 flex flex-col min-h-0 overflow-hidden transition" style="border:${slotBorderStyle};background:${slotBgStyle}">
                 <!-- Step Number & Draggable Parts List Box -->
                 <div class="relative z-10 shrink-0 flex items-start justify-between gap-1.5">
                   <div class="flex items-start gap-1.5 flex-wrap">
@@ -1948,8 +2222,8 @@ function renderAll() {
 
         <!-- Page Footer -->
         <div class="absolute bottom-1.5 left-3.5 right-3.5 flex justify-between text-[10px] font-medium pointer-events-none" style="color:${theme.muted}">
-          <span class="truncate">${page.chapterName}</span>
-          <span style="color:${theme.text}" class="font-bold shrink-0">Page ${page.num}</span>
+          <span class="truncate">${state.showPageTitle ? escHtml(page.chapterName) : ''}</span>
+          <span style="color:${theme.text}" class="font-bold shrink-0">${escHtml(pgNumText)}</span>
         </div>
       </div>`;
 
@@ -2110,32 +2384,60 @@ function renderContextOverlay(page) {
   const box = document.getElementById('contextOverlay');
   box.innerHTML = '';
 
+  // PARTS LIST TAP SHORTCUT (works in ANY mode, including Pan! Tap the Parts List page to toggle)
+  if (page.kind === 'bom') {
+    if (!state.bomShortcutVisible && state.mode === 'pan') { box.classList.add('hidden'); return; }
+    box.classList.remove('hidden');
+    box.innerHTML = `
+      <button id="bomQuickCustomizeBtn" class="pointer-events-auto glass-pill px-4 py-2.5 rounded-full inline-flex items-center gap-2 text-xs font-bold text-[#1a73e8] hover:scale-[1.02] active:scale-95 transition">
+        <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+        <span>Customize Parts List</span>
+      </button>`;
+    box.querySelector('#bomQuickCustomizeBtn').onclick = () => openBomSetupModal();
+    return;
+  }
+
   if (state.mode === 'pan') { box.classList.add('hidden'); return; }
   box.classList.remove('hidden');
 
-  // COVER / BACK PAGE EDITOR OVERLAY (in Arrange or Rotate mode)
-  if (page.kind === 'cover' || page.kind === 'back') {
+  // COVER / BUILD COMPLETE / BACK COVER EDITOR OVERLAY
+  if (page.kind === 'cover' || page.kind === 'complete' || page.kind === 'back') {
     const isCover = page.kind === 'cover';
-    const meta = isCover ? state.coverMeta : state.backMeta;
+    const isComplete = page.kind === 'complete';
+    const meta = isCover ? state.coverMeta : isComplete ? state.completeMeta : state.backMeta;
+    const label = isCover ? 'Cover Page' : isComplete ? 'Build Complete Page' : 'Back Cover';
+    const defaultTitle = isCover ? state.model.title : isComplete ? 'Build Complete!' : state.model.title;
     box.innerHTML = `
       <div class="pointer-events-auto glass-pill rounded-2xl p-3 w-full space-y-2 text-xs">
-        <div class="flex items-center justify-between font-bold">
-          <span>Edit ${isCover ? 'Cover' : 'Back'} Page</span>
-          <div class="flex gap-1">
-            <button id="covRotL" class="px-2.5 py-1 rounded-full bg-black/5 dark:bg-white/10">↺ Angle</button>
-            <button id="covRotR" class="px-2.5 py-1 rounded-full bg-black/5 dark:bg-white/10">↻ Angle</button>
+        <div class="flex items-center justify-between gap-1.5 flex-wrap font-bold">
+          <span>Edit ${label}</span>
+          <div class="flex items-center gap-1 flex-wrap">
+            ${!page.kind || page.kind !== 'back' ? `
+              <button id="covRotL" class="px-2.5 py-1 rounded-full bg-black/5 dark:bg-white/10">↺ Angle</button>
+              <button id="covRotR" class="px-2.5 py-1 rounded-full bg-black/5 dark:bg-white/10">↻ Angle</button>
+            ` : ''}
+            ${isComplete ? `
+              <button id="compToggleText" class="px-2.5 py-1 rounded-full ${meta.showText !== false ? 'bg-[#1a73e8] text-white' : 'bg-black/5 dark:bg-white/10'}">Text</button>
+              <button id="compToggleFw" class="px-2.5 py-1 rounded-full ${meta.showFireworks !== false ? 'bg-[#1a73e8] text-white' : 'bg-black/5 dark:bg-white/10'}">✦ Fireworks</button>
+            ` : ''}
             <button id="covBgBtn" class="px-2.5 py-1 rounded-full bg-[#1a73e8] text-white">Bg Image</button>
           </div>
         </div>
         <div class="grid grid-cols-2 gap-1.5">
-          <input id="covTitleIn" value="${(meta.title || (isCover ? state.model.title : 'Build Complete!')).replace(/"/g,'&quot;')}" placeholder="Title" class="px-2.5 py-1.5 rounded-xl bg-black/5 dark:bg-white/10 outline-none" />
-          <input id="covSubIn" value="${(meta.subtitle || (isCover ? state.model.subtitle : '')).replace(/"/g,'&quot;')}" placeholder="Subtitle" class="px-2.5 py-1.5 rounded-xl bg-black/5 dark:bg-white/10 outline-none" />
+          <input id="covTitleIn" value="${escHtml(meta.title || defaultTitle)}" placeholder="Title" class="px-2.5 py-1.5 rounded-xl bg-black/5 dark:bg-white/10 outline-none" />
+          <input id="covSubIn" value="${escHtml(meta.subtitle || '')}" placeholder="Subtitle" class="px-2.5 py-1.5 rounded-xl bg-black/5 dark:bg-white/10 outline-none" />
         </div>
       </div>`;
     box.querySelector('#covTitleIn').onchange = (e) => { pushUndo(); meta.title = e.target.value; renderAll(); };
     box.querySelector('#covSubIn').onchange = (e) => { pushUndo(); meta.subtitle = e.target.value; renderAll(); };
-    box.querySelector('#covRotL').onclick = () => { pushUndo(); meta.az = (meta.az - 30 + 360) % 360; renderAll(); };
-    box.querySelector('#covRotR').onclick = () => { pushUndo(); meta.az = (meta.az + 30) % 360; renderAll(); };
+    const rotL = box.querySelector('#covRotL');
+    if (rotL) rotL.onclick = () => { pushUndo(); meta.az = (meta.az - 30 + 360) % 360; renderAll(); };
+    const rotR = box.querySelector('#covRotR');
+    if (rotR) rotR.onclick = () => { pushUndo(); meta.az = (meta.az + 30) % 360; renderAll(); };
+    const tText = box.querySelector('#compToggleText');
+    if (tText) tText.onclick = () => { pushUndo(); meta.showText = !(meta.showText !== false); renderAll(); };
+    const tFw = box.querySelector('#compToggleFw');
+    if (tFw) tFw.onclick = () => { pushUndo(); meta.showFireworks = !(meta.showFireworks !== false); renderAll(); };
     box.querySelector('#covBgBtn').onclick = () => document.getElementById('coverImageInput').click();
     return;
   }
@@ -2495,6 +2797,59 @@ function syncMenuControls() {
     const act = b.getAttribute('data-density') === state.density;
     b.className = `dens-btn py-2 rounded-full border font-semibold transition ${act ? 'border-[#1a73e8] bg-[#1a73e8] text-white' : 'border-[var(--border)] bg-[var(--background)]'}`;
   });
+  document.querySelectorAll('.pgnum-btn').forEach(b => {
+    const act = b.getAttribute('data-pgnum') === state.pageNumberFormat;
+    b.className = `pgnum-btn py-2 rounded-full border font-semibold transition ${act ? 'border-[#1a73e8] bg-[#1a73e8] text-white' : 'border-[var(--border)] bg-[var(--background)]'}`;
+  });
+  const setChk = (id, val) => { const el = document.getElementById(id); if (el) el.checked = Boolean(val); };
+  setChk('toggleStepBorders', state.showStepBorders);
+  setChk('toggleStepBordersSetup', state.showStepBorders);
+  setChk('togglePageTitle', state.showPageTitle);
+  setChk('togglePageTitleSetup', state.showPageTitle);
+  setChk('toggleCompleteText', state.completeMeta.showText !== false);
+  setChk('toggleCompleteFireworks', state.completeMeta.showFireworks !== false);
+  setChk('togglePrintGuides', state.showPrintGuides);
+  setChk('toggleExtras', state.showExtras);
+
+  const bc = state.bomConfig;
+  document.querySelectorAll('.bom-dens-btn').forEach(b => {
+    const act = b.getAttribute('data-bom-dens') === bc.density;
+    b.className = `bom-dens-btn py-2 rounded-full border font-semibold transition ${act ? 'border-[#1a73e8] bg-[#1a73e8] text-white' : 'border-[var(--border)] bg-[var(--background)]'}`;
+  });
+  document.querySelectorAll('.bom-flow-btn').forEach(b => {
+    const act = b.getAttribute('data-bom-flow') === bc.flow;
+    b.className = `bom-flow-btn py-2 rounded-full border font-semibold transition ${act ? 'border-[#1a73e8] bg-[#1a73e8] text-white' : 'border-[var(--border)] bg-[var(--background)]'}`;
+  });
+  const alignHead = document.getElementById('bomAlignHeading');
+  if (alignHead) alignHead.textContent = bc.flow === 'columns' ? 'Hanging Column Alignment' : 'Hanging Row Alignment';
+  const alignLabels = bc.flow === 'columns'
+    ? { start: 'Top', center: 'Center', end: 'Bottom' }
+    : { start: 'Left', center: 'Center', end: 'Right' };
+  document.querySelectorAll('.bom-align-btn').forEach(b => {
+    const id = b.getAttribute('data-bom-align');
+    const act = id === bc.align;
+    b.textContent = alignLabels[id] || id;
+    b.className = `bom-align-btn py-2 rounded-full border font-semibold transition ${act ? 'border-[#1a73e8] bg-[#1a73e8] text-white' : 'border-[var(--border)] bg-[var(--background)]'}`;
+  });
+  const spEl = document.getElementById('bomSortPrimary');
+  if (spEl) spEl.value = bc.sortPrimary;
+  const ssEl = document.getElementById('bomSortSecondary');
+  if (ssEl) ssEl.value = bc.sortSecondary;
+  setChk('toggleBomNames', bc.showNames !== false);
+
+  const traitNames = { color: 'Color', category: 'Category', qty: 'Quantity', size: 'Size', name: 'Name' };
+  const densNames = { compact: 'Compact', balanced: 'Balanced', spacious: 'Spacious' };
+  const bomMenuSum = document.getElementById('menuBomSetupSummary');
+  if (bomMenuSum) bomMenuSum.textContent = `${densNames[bc.density] || 'Balanced'} · ${traitNames[bc.sortPrimary] || 'Color'}`;
+  const bomSub = document.getElementById('bomSetupSubtitle');
+  if (bomSub) {
+    const bomPages = state.pages.filter(p => p.kind === 'bom');
+    const uniqueN = bomPages[0]?.bomTotalUnique || 0;
+    bomSub.textContent = bomPages.length > 0
+      ? `${uniqueN} unique parts across ${bomPages.length} page${bomPages.length === 1 ? '' : 's'} · ${traitNames[bc.sortPrimary]} → ${traitNames[bc.sortSecondary]}`
+      : `${densNames[bc.density]} · ${bc.flow === 'columns' ? 'Columns' : 'Rows'} · By ${traitNames[bc.sortPrimary]}`;
+  }
+
   document.querySelectorAll('.pacing-btn').forEach(b => {
     const act = b.getAttribute('data-pacing') === state.pacing;
     b.className = `pacing-btn py-1.5 rounded-full border font-semibold transition ${act ? 'border-[#1a73e8] bg-[#1a73e8] text-white' : 'border-[var(--border)] bg-[var(--background)]'}`;
@@ -2563,7 +2918,7 @@ function renderOverviewModal() {
   let modeTouch = null; // 'pan' | 'pinch' | null
   let startZoom = 1, startPanX = 0, startPanY = 0;
   let startX = 0, startY = 0, startDist = 0, startMidX = 0, startMidY = 0;
-  let lastTapTime = 0;
+  let lastTapTime = 0, touchMoved = false;
 
   // Desktop mouse wheel focal-point zoom
   stage.addEventListener('wheel', (e) => {
@@ -2579,7 +2934,7 @@ function renderOverviewModal() {
     const t = e.touches;
     if (t.length === 2) {
       e.preventDefault();
-      modeTouch = 'pinch';
+      modeTouch = 'pinch'; touchMoved = true;
       startZoom = state.zoom; startPanX = state.panX; startPanY = state.panY;
       startDist = Math.max(10, Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY));
       startMidX = (t[0].clientX + t[1].clientX) / 2;
@@ -2587,9 +2942,9 @@ function renderOverviewModal() {
     } else if (t.length === 1 && state.mode === 'pan') {
       e.preventDefault();
       const now = Date.now();
-      if (now - lastTapTime < 280) { resetZoom(); modeTouch = null; return; }
+      if (now - lastTapTime < 280) { resetZoom(); modeTouch = null; touchMoved = true; return; }
       lastTapTime = now;
-      modeTouch = 'pan';
+      modeTouch = 'pan'; touchMoved = false;
       startPanX = state.panX; startPanY = state.panY;
       startX = t[0].clientX; startY = t[0].clientY;
     }
@@ -2600,6 +2955,7 @@ function renderOverviewModal() {
     const t = e.touches;
     if (modeTouch === 'pinch' && t.length >= 2) {
       e.preventDefault();
+      touchMoved = true;
       const dist = Math.max(10, Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY));
       const midX = (t[0].clientX + t[1].clientX) / 2;
       const midY = (t[0].clientY + t[1].clientY) / 2;
@@ -2612,6 +2968,7 @@ function renderOverviewModal() {
       applyStageTransform();
     } else if (modeTouch === 'pan' && t.length === 1 && state.mode === 'pan') {
       e.preventDefault();
+      if (Math.hypot(t[0].clientX - startX, t[0].clientY - startY) > 10) touchMoved = true;
       state.panX = startPanX + (t[0].clientX - startX);
       state.panY = startPanY + (t[0].clientY - startY);
       applyStageTransform();
@@ -2625,6 +2982,10 @@ function renderOverviewModal() {
       startPanX = state.panX; startPanY = state.panY;
       startX = t[0].clientX; startY = t[0].clientY;
     } else if (t.length === 0) {
+      if (modeTouch === 'pan' && !touchMoved && state.pages[state.pageIdx]?.kind === 'bom') {
+        state.bomShortcutVisible = !state.bomShortcutVisible;
+        renderContextOverlay(state.pages[state.pageIdx]);
+      }
       modeTouch = null;
     }
   };
@@ -3214,7 +3575,13 @@ function openPageSetupModal() {
   document.getElementById('pageSetupModal').classList.remove('hidden');
 }
 
-let lastSourceRecord = null; // { kind:'io'|'ldr'|'sample', fileName, data, importMode }
+function openBomSetupModal() {
+  closeMenu();
+  syncMenuControls();
+  document.getElementById('bomSetupModal').classList.remove('hidden');
+}
+
+let lastSourceRecord = null; // { kind:'io'|'ldr'|'sample'|'project', fileName, data, importMode }
 let savePrefsTimer = null;
 function scheduleSaveSessionPrefs() {
   if (!state.model) return;
@@ -3226,9 +3593,11 @@ function scheduleSaveSessionPrefs() {
       density: state.density, showPrintGuides: state.showPrintGuides, layout: state.layout,
       pacing: state.pacing, highlightNew: state.highlightNew, highlightColor: state.highlightColor,
       fadePrev: state.fadePrev, fadeOpacity: state.fadeOpacity, showRotCues: state.showRotCues,
-      showSizeGuides: state.showSizeGuides, showExtras: state.showExtras,
+      showSizeGuides: state.showSizeGuides, showStepBorders: state.showStepBorders,
+      showPageTitle: state.showPageTitle, pageNumberFormat: state.pageNumberFormat,
+      showExtras: state.showExtras, bomConfig: state.bomConfig,
       overrides: state.overrides, pageInserts: state.pageInserts, dividerAfter: state.dividerAfter,
-      coverMeta: state.coverMeta, backMeta: state.backMeta, pageIdx: state.pageIdx,
+      coverMeta: state.coverMeta, completeMeta: state.completeMeta, backMeta: state.backMeta, pageIdx: state.pageIdx,
     });
   }, 450);
 }
@@ -3264,7 +3633,11 @@ async function restoreLastSessionOnStart() {
     if (typeof prefs.fadeOpacity === 'number') state.fadeOpacity = prefs.fadeOpacity;
     if (typeof prefs.showRotCues === 'boolean') state.showRotCues = prefs.showRotCues;
     if (typeof prefs.showSizeGuides === 'boolean') state.showSizeGuides = prefs.showSizeGuides;
+    if (typeof prefs.showStepBorders === 'boolean') state.showStepBorders = prefs.showStepBorders;
+    if (typeof prefs.showPageTitle === 'boolean') state.showPageTitle = prefs.showPageTitle;
+    if (prefs.pageNumberFormat) state.pageNumberFormat = prefs.pageNumberFormat;
     if (typeof prefs.showExtras === 'boolean') state.showExtras = prefs.showExtras;
+    if (prefs.bomConfig) state.bomConfig = { ...state.bomConfig, ...prefs.bomConfig };
 
     if (rec.kind === 'sample') {
       state.model = buildSampleModel();
@@ -3283,8 +3656,9 @@ async function restoreLastSessionOnStart() {
     state.overrides = prefs.overrides || {};
     state.pageInserts = prefs.pageInserts || {};
     state.dividerAfter = prefs.dividerAfter || {};
-    if (prefs.coverMeta) state.coverMeta = prefs.coverMeta;
-    if (prefs.backMeta) state.backMeta = prefs.backMeta;
+    if (prefs.coverMeta) state.coverMeta = { ...state.coverMeta, ...prefs.coverMeta };
+    if (prefs.completeMeta) state.completeMeta = { ...state.completeMeta, ...prefs.completeMeta };
+    if (prefs.backMeta) state.backMeta = { ...state.backMeta, ...prefs.backMeta };
     state.pageIdx = Math.max(0, prefs.pageIdx || 0);
     // Sync checkboxes in DOM
     document.getElementById('togglePrintGuides').checked = state.showPrintGuides;
@@ -3378,6 +3752,22 @@ function drawContain(ctx, img, x, y, w, h) {
   ctx.drawImage(img, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh);
 }
 
+function drawBrandLogoCanvas(ctx, x, y, size) {
+  if (typeof Path2D === 'undefined') return;
+  const logoPaths = [
+    ['M18.2 10.1 C10.0 18.9 9.8 33.2 16.8 41.3 L19.2 52.2 L10.9 43.3 L13.9 43.6 C5.8 33.7 8.3 17.1 18.2 10.1 Z', '#38bdf8'],
+    ['M26.8 7.0 C19.6 14.6 18.5 34.6 24.3 43.1 L25.9 56.0 L17.2 44.9 L20.4 45.5 C13.7 34.5 17.5 12.8 26.8 7.0 Z', '#2696f7'],
+    ['M32.0 5.4 C33.6 10.2 34.4 34.8 34.7 45.1 L37.9 43.9 L32.0 58.6 L26.1 43.9 L29.3 45.1 C29.6 34.8 30.4 10.2 32.0 5.4 Z', '#1a73e8'],
+    ['M37.2 7.0 C46.5 12.8 50.3 34.5 43.6 45.5 L46.8 44.9 L38.1 56.0 L39.7 43.1 C45.5 34.6 44.4 14.6 37.2 7.0 Z', '#1a5cd8'],
+    ['M45.8 10.1 C55.7 17.1 58.2 33.7 50.1 43.6 L53.1 43.3 L44.8 52.2 L47.2 41.3 C54.2 33.2 54.0 18.9 45.8 10.1 Z', '#1d48b8'],
+  ];
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(size / 64, size / 64);
+  for (const [d, col] of logoPaths) { ctx.fillStyle = col; ctx.fill(new Path2D(d)); }
+  ctx.restore();
+}
+
 async function renderPageToJpegBytes(page, pxW, pxH) {
   const canvas = document.createElement('canvas');
   canvas.width = pxW; canvas.height = pxH;
@@ -3402,6 +3792,8 @@ async function renderPageToJpegBytes(page, pxW, pxH) {
 
   const dens = DENSITY_PAD[state.density] || DENSITY_PAD.balanced;
   const pad = Math.round((dens.pad / 20) * (pxW * 0.04));
+  const footerH = Math.round(pxH * 0.042);
+  const pgNumText = formatPageNumber(page.num, state.pages.length);
   ctx.fillStyle = theme.text;
   ctx.textBaseline = 'top';
 
@@ -3420,52 +3812,128 @@ async function renderPageToJpegBytes(page, pxW, pxH) {
     drawContain(ctx, img, pad, pad + pxH * 0.12, pxW - pad * 2, pxH * 0.72);
     const logoSz = Math.round(pxH * 0.032);
     const footerY = pxH - pad - logoSz;
-    if (typeof Path2D !== 'undefined') {
-      const logoPaths = [
-        ['M18.2 10.1 C10.0 18.9 9.8 33.2 16.8 41.3 L19.2 52.2 L10.9 43.3 L13.9 43.6 C5.8 33.7 8.3 17.1 18.2 10.1 Z', '#38bdf8'],
-        ['M26.8 7.0 C19.6 14.6 18.5 34.6 24.3 43.1 L25.9 56.0 L17.2 44.9 L20.4 45.5 C13.7 34.5 17.5 12.8 26.8 7.0 Z', '#2696f7'],
-        ['M32.0 5.4 C33.6 10.2 34.4 34.8 34.7 45.1 L37.9 43.9 L32.0 58.6 L26.1 43.9 L29.3 45.1 C29.6 34.8 30.4 10.2 32.0 5.4 Z', '#1a73e8'],
-        ['M37.2 7.0 C46.5 12.8 50.3 34.5 43.6 45.5 L46.8 44.9 L38.1 56.0 L39.7 43.1 C45.5 34.6 44.4 14.6 37.2 7.0 Z', '#1a5cd8'],
-        ['M45.8 10.1 C55.7 17.1 58.2 33.7 50.1 43.6 L53.1 43.3 L44.8 52.2 L47.2 41.3 C54.2 33.2 54.0 18.9 45.8 10.1 Z', '#1d48b8'],
-      ];
-      ctx.save();
-      ctx.translate(pad, footerY - Math.round(logoSz * 0.1));
-      ctx.scale(logoSz / 64, logoSz / 64);
-      for (const [d, col] of logoPaths) { ctx.fillStyle = col; ctx.fill(new Path2D(d)); }
-      ctx.restore();
-    }
+    drawBrandLogoCanvas(ctx, pad, footerY - Math.round(logoSz * 0.1), logoSz);
     ctx.fillStyle = theme.muted;
     ctx.font = `600 ${Math.round(pxH * 0.02)}px -apple-system, sans-serif`;
     ctx.fillText(`${allParts.length} Pieces · ${allSteps.length} Steps · Brick Instruction Creator`, pad + logoSz + Math.round(logoSz * 0.35), footerY + Math.round(logoSz * 0.12));
+  } else if (page.kind === 'complete') {
+    const cm = state.completeMeta;
+    if (cm.showFireworks !== false) drawFireworksCanvas(ctx, pxW, pxH);
+    const showText = cm.showText !== false;
+    if (showText) {
+      ctx.fillStyle = theme.text;
+      ctx.textAlign = 'center';
+      ctx.font = `800 ${Math.round(pxH * 0.055)}px -apple-system, sans-serif`;
+      ctx.fillText(cm.title || 'Build Complete!', pxW / 2, pad);
+      if (cm.subtitle) {
+        ctx.fillStyle = theme.muted;
+        ctx.font = `500 ${Math.round(pxH * 0.022)}px -apple-system, sans-serif`;
+        ctx.fillText(cm.subtitle, pxW / 2, pad + pxH * 0.068);
+      }
+      ctx.textAlign = 'left';
+    }
+    const snap = renderSnapshot([], allParts, cm.az, cm.el, 920, 620, 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent });
+    const img = await loadImgPromise(snap.url);
+    const topOff = showText ? pad + pxH * 0.12 : pad + pxH * 0.04;
+    const availH = pxH - topOff - pad - footerH;
+    drawContain(ctx, img, pad, topOff, pxW - pad * 2, availH);
+    if (state.showPageTitle) {
+      ctx.fillStyle = theme.muted;
+      ctx.font = `600 ${Math.round(pxH * 0.02)}px -apple-system, sans-serif`;
+      ctx.fillText(state.model.title, pad, pxH - pad - footerH * 0.4);
+    }
+    if (pgNumText) {
+      ctx.fillStyle = theme.text; ctx.textAlign = 'right';
+      ctx.font = `700 ${Math.round(pxH * 0.02)}px -apple-system, sans-serif`;
+      ctx.fillText(pgNumText, pxW - pad, pxH - pad - footerH * 0.4);
+      ctx.textAlign = 'left';
+    }
   } else if (page.kind === 'back') {
     const bm = state.backMeta;
-    ctx.fillStyle = theme.text;
+    const backTitle = bm.title || state.model.title;
     ctx.textAlign = 'center';
-    ctx.font = `bold ${Math.round(pxH * 0.055)}px -apple-system, sans-serif`;
-    ctx.fillText(bm.title, pxW / 2, pad);
-    const snap = renderSnapshot([], allParts, bm.az, bm.el, 900, 600, 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent });
-    const img = await loadImgPromise(snap.url);
-    drawContain(ctx, img, pad, pad + pxH * 0.12, pxW - pad * 2, pxH * 0.72);
     ctx.fillStyle = theme.muted;
+    ctx.font = `700 ${Math.round(pxH * 0.017)}px -apple-system, sans-serif`;
+    ctx.fillText('INSTRUCTION MANUAL', pxW / 2, pad);
+
+    const logoSz = Math.round(Math.min(pxW, pxH) * 0.16);
+    drawBrandLogoCanvas(ctx, (pxW - logoSz) / 2, Math.round(pxH * 0.30), logoSz);
+
+    ctx.fillStyle = theme.text;
+    ctx.font = `800 ${Math.round(pxH * 0.05)}px -apple-system, sans-serif`;
+    ctx.fillText(backTitle, pxW / 2, Math.round(pxH * 0.30) + logoSz + Math.round(pxH * 0.04));
+
+    ctx.fillStyle = theme.accent;
+    ctx.fillRect(pxW / 2 - Math.round(pxW * 0.05), Math.round(pxH * 0.30) + logoSz + Math.round(pxH * 0.115), Math.round(pxW * 0.10), 4);
+
+    ctx.fillStyle = theme.muted;
+    ctx.font = `600 ${Math.round(pxH * 0.024)}px -apple-system, sans-serif`;
+    ctx.fillText(`${allParts.length} Pieces · ${allSteps.length} Steps · ${state.pages.length} Pages`, pxW / 2, Math.round(pxH * 0.30) + logoSz + Math.round(pxH * 0.145));
+
     ctx.font = `500 ${Math.round(pxH * 0.02)}px -apple-system, sans-serif`;
-    ctx.fillText(bm.subtitle, pxW / 2, pxH - pad - pxH * 0.03);
+    ctx.fillText(bm.subtitle || 'Created with Brick Instruction Creator', pxW / 2, pxH - pad - pxH * 0.03);
     ctx.textAlign = 'left';
   } else if (page.kind === 'bom') {
-    ctx.font = `bold ${Math.round(pxH * 0.04)}px -apple-system, sans-serif`;
-    ctx.fillText(`Parts List (${allParts.length} pieces)`, pad, pad);
-    const map = new Map();
-    for (const p of allParts) { const k = `${p.p}:${p.c}`; if (!map.has(k)) map.set(k, { part: p, qty: 0 }); map.get(k).qty++; }
-    const entries = Array.from(map.values()).sort((a,b) => b.qty - a.qty).slice(0, 36);
-    const cols = pxW > pxH ? 6 : 4, rows = Math.ceil(entries.length / cols);
-    const cellW = (pxW - pad * 2) / cols, cellH = (pxH - pad * 2 - pxH * 0.08) / Math.max(1, rows);
-    for (let idx = 0; idx < entries.length; idx++) {
-      const { part, qty } = entries[idx];
-      const cx = pad + (idx % cols) * cellW + 4, cy = pad + pxH * 0.07 + Math.floor(idx / cols) * cellH + 4;
-      ctx.fillStyle = theme.pliBg; ctx.fillRect(cx, cy, cellW - 8, cellH - 8);
+    const cfg = state.bomConfig;
+    const cols = page.bomCols || (pxW > pxH ? 6 : 4);
+    const rows = page.bomRows || (pxW > pxH ? 5 : 6);
+    const entries = page.bomEntries || [];
+    const headerTitle = page.bomPageCount > 1
+      ? `Parts List (${page.bomPageIdx + 1} / ${page.bomPageCount})`
+      : 'Parts List';
+
+    ctx.fillStyle = theme.text;
+    ctx.font = `bold ${Math.round(pxH * 0.036)}px -apple-system, sans-serif`;
+    ctx.fillText(headerTitle, pad, pad);
+    ctx.fillStyle = theme.muted;
+    ctx.textAlign = 'right';
+    ctx.font = `600 ${Math.round(pxH * 0.02)}px -apple-system, sans-serif`;
+    ctx.fillText(`${page.bomTotalPieces || allParts.length} pcs · ${page.bomTotalUnique || entries.length} unique`, pxW - pad, pad + Math.round(pxH * 0.012));
+    ctx.textAlign = 'left';
+
+    const headerH = Math.round(pxH * 0.065);
+    ctx.strokeStyle = theme.pliBorder; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(pad, pad + headerH - 6); ctx.lineTo(pxW - pad, pad + headerH - 6); ctx.stroke();
+
+    const gridX = pad, gridY = pad + headerH;
+    const gridW = pxW - pad * 2, gridH = pxH - gridY - pad - footerH;
+    const cells = computeBomGridLayout(entries, cols, rows, cfg.flow, cfg.align);
+    const qtyFontPx = Math.max(12, Math.round(Math.min(gridW / cols, gridH / rows) * 0.15));
+    const nameFontPx = Math.max(9, Math.round(qtyFontPx * 0.72));
+    const textAreaH = qtyFontPx + (cfg.showNames ? nameFontPx + 8 : 6);
+
+    for (const c of cells) {
+      const { part, qty, meta } = c.item;
+      const cx = gridX + c.xFrac * gridW;
+      const cy = gridY + c.yFrac * gridH;
+      const cw = c.wFrac * gridW;
+      const ch = c.hFrac * gridH;
+      // Clear/transparent background — no opaque card boxes around BOM parts!
       const img = await loadImgPromise(getPliThumb(part));
-      drawContain(ctx, img, cx + 6, cy + 4, cellW - 20, cellH - 28);
-      ctx.fillStyle = theme.text; ctx.font = `bold ${Math.round(pxH * 0.018)}px -apple-system, sans-serif`;
-      ctx.fillText(`${qty}×`, cx + 8, cy + cellH - 24);
+      drawContain(ctx, img, cx + 6, cy + 4, cw - 12, Math.max(12, ch - textAreaH - 8));
+      ctx.textAlign = 'center';
+      ctx.fillStyle = theme.text;
+      ctx.font = `800 ${qtyFontPx}px -apple-system, sans-serif`;
+      ctx.fillText(`${qty}×`, cx + cw / 2, cy + ch - textAreaH);
+      if (cfg.showNames) {
+        ctx.fillStyle = theme.muted;
+        ctx.font = `500 ${nameFontPx}px -apple-system, sans-serif`;
+        const maxChars = Math.max(8, Math.floor((cw - 8) / (nameFontPx * 0.58)));
+        const nm = meta.name.length > maxChars ? meta.name.slice(0, maxChars - 1) + '…' : meta.name;
+        ctx.fillText(nm, cx + cw / 2, cy + ch - nameFontPx - 2);
+      }
+    }
+    ctx.textAlign = 'left';
+    if (state.showPageTitle) {
+      ctx.fillStyle = theme.muted;
+      ctx.font = `600 ${Math.round(pxH * 0.02)}px -apple-system, sans-serif`;
+      ctx.fillText(state.model.title, pad, pxH - pad - footerH * 0.4);
+    }
+    if (pgNumText) {
+      ctx.fillStyle = theme.text; ctx.textAlign = 'right';
+      ctx.font = `700 ${Math.round(pxH * 0.02)}px -apple-system, sans-serif`;
+      ctx.fillText(pgNumText, pxW - pad, pxH - pad - footerH * 0.4);
+      ctx.textAlign = 'left';
     }
   } else if (page.kind === 'steps') {
     const slots = page.slots;
@@ -3473,7 +3941,6 @@ async function renderPageToJpegBytes(page, pxW, pxH) {
     const cols = slots.length === 1 ? 1 : slots.length === 2 ? (isLand ? 2 : 1) : 2;
     const rows = Math.ceil(slots.length / cols);
     const gap = Math.round(pad * 0.55);
-    const footerH = Math.round(pxH * 0.045);
     const slotW = (pxW - pad * 2 - gap * (cols - 1)) / cols;
     const slotH = (pxH - pad * 2 - footerH - gap * (rows - 1)) / rows;
 
@@ -3481,8 +3948,10 @@ async function renderPageToJpegBytes(page, pxW, pxH) {
       const { ch, step } = slots[idx];
       const sx = pad + (idx % cols) * (slotW + gap);
       const sy = pad + Math.floor(idx / cols) * (slotH + gap);
-      ctx.strokeStyle = theme.pliBorder; ctx.lineWidth = 2;
-      ctx.strokeRect(sx, sy, slotW, slotH);
+      if (state.showStepBorders) {
+        ctx.strokeStyle = theme.pliBorder; ctx.lineWidth = 2;
+        ctx.strokeRect(sx, sy, slotW, slotH);
+      }
 
       // Step number
       ctx.fillStyle = theme.text;
@@ -3521,12 +3990,17 @@ async function renderPageToJpegBytes(page, pxW, pxH) {
       drawContain(ctx, stepImg, sx + 10, sy + pliH + 18, slotW - 20, slotH - pliH - 28);
     }
 
-    ctx.fillStyle = theme.muted;
-    ctx.font = `600 ${Math.round(pxH * 0.02)}px -apple-system, sans-serif`;
-    ctx.fillText(page.chapterName || '', pad, pxH - pad - footerH * 0.4);
-    ctx.fillStyle = theme.text; ctx.textAlign = 'right';
-    ctx.fillText(`Page ${page.num}`, pxW - pad, pxH - pad - footerH * 0.4);
-    ctx.textAlign = 'left';
+    if (state.showPageTitle) {
+      ctx.fillStyle = theme.muted;
+      ctx.font = `600 ${Math.round(pxH * 0.02)}px -apple-system, sans-serif`;
+      ctx.fillText(page.chapterName || '', pad, pxH - pad - footerH * 0.4);
+    }
+    if (pgNumText) {
+      ctx.fillStyle = theme.text; ctx.textAlign = 'right';
+      ctx.font = `700 ${Math.round(pxH * 0.02)}px -apple-system, sans-serif`;
+      ctx.fillText(pgNumText, pxW - pad, pxH - pad - footerH * 0.4);
+      ctx.textAlign = 'left';
+    }
   }
 
   const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
@@ -3617,16 +4091,16 @@ document.querySelectorAll('.mode-btn').forEach(b => {
 });
 
 document.getElementById('prevPage').onclick = () => {
-  if (state.pageIdx > 0) { state.pageIdx--; state.selectedPartIds.clear(); resetZoom(); renderAll(); }
+  if (state.pageIdx > 0) { state.pageIdx--; state.bomShortcutVisible = false; state.selectedPartIds.clear(); resetZoom(); renderAll(); }
 };
 document.getElementById('nextPage').onclick = () => {
-  if (state.pageIdx < state.pages.length - 1) { state.pageIdx++; state.selectedPartIds.clear(); resetZoom(); renderAll(); }
+  if (state.pageIdx < state.pages.length - 1) { state.pageIdx++; state.bomShortcutVisible = false; state.selectedPartIds.clear(); resetZoom(); renderAll(); }
 };
 document.getElementById('btnZoomIn').onclick = () => setZoom(state.zoom * 1.22);
 document.getElementById('btnZoomOut').onclick = () => setZoom(state.zoom * 0.82);
 document.getElementById('btnZoomFit').onclick = resetZoom;
 
-// Print & Page Setup inside Menu
+// Print & Page Setup + Parts List Setup
 document.querySelectorAll('.fmt-btn').forEach(b => { b.onclick = () => { state.paperFormat = b.getAttribute('data-format'); resetZoom(); renderAll(); }; });
 document.querySelectorAll('.unit-btn').forEach(b => {
   b.onclick = () => {
@@ -3651,8 +4125,17 @@ document.getElementById('customHeightIn').onchange = onCustomDimChange;
 document.querySelectorAll('.orient-btn').forEach(b => { b.onclick = () => { state.orientation = b.getAttribute('data-orient'); resetZoom(); renderAll(); }; });
 document.querySelectorAll('.layout-btn').forEach(b => { b.onclick = () => { state.layout = b.getAttribute('data-layout'); renderAll(); }; });
 document.querySelectorAll('.dens-btn').forEach(b => { b.onclick = () => { state.density = b.getAttribute('data-density'); renderAll(); }; });
+document.querySelectorAll('.pgnum-btn').forEach(b => { b.onclick = () => { state.pageNumberFormat = b.getAttribute('data-pgnum'); renderAll(); }; });
 document.querySelectorAll('.pacing-btn').forEach(b => { b.onclick = () => { state.pacing = b.getAttribute('data-pacing'); syncMenuControls(); }; });
 document.querySelectorAll('.fade-chip').forEach(b => { b.onclick = () => { state.fadeOpacity = parseFloat(b.getAttribute('data-fade')); renderAll(); }; });
+
+// Parts List Setup controls
+document.querySelectorAll('.bom-dens-btn').forEach(b => { b.onclick = () => { state.bomConfig.density = b.getAttribute('data-bom-dens'); renderAll(); }; });
+document.querySelectorAll('.bom-flow-btn').forEach(b => { b.onclick = () => { state.bomConfig.flow = b.getAttribute('data-bom-flow'); renderAll(); }; });
+document.querySelectorAll('.bom-align-btn').forEach(b => { b.onclick = () => { state.bomConfig.align = b.getAttribute('data-bom-align'); renderAll(); }; });
+document.getElementById('bomSortPrimary').onchange = (e) => { state.bomConfig.sortPrimary = e.target.value; renderAll(); };
+document.getElementById('bomSortSecondary').onchange = (e) => { state.bomConfig.sortSecondary = e.target.value; renderAll(); };
+document.getElementById('toggleBomNames').onchange = (e) => { state.bomConfig.showNames = e.target.checked; renderAll(); };
 
 document.getElementById('togglePrintGuides').onchange = (e) => { state.showPrintGuides = e.target.checked; renderAll(); };
 document.getElementById('toggleExtras').onchange = (e) => { state.showExtras = e.target.checked; renderAll(); };
@@ -3661,12 +4144,21 @@ document.getElementById('highlightColor').oninput = (e) => { state.highlightColo
 document.getElementById('toggleFade').onchange = (e) => { state.fadePrev = e.target.checked; renderAll(); };
 document.getElementById('toggleRotCues').onchange = (e) => { state.showRotCues = e.target.checked; renderAll(); };
 document.getElementById('toggleSizeGuides').onchange = (e) => { state.showSizeGuides = e.target.checked; renderAll(); };
+const setStepBorders = (e) => { state.showStepBorders = e.target.checked; renderAll(); };
+document.getElementById('toggleStepBorders').onchange = setStepBorders;
+document.getElementById('toggleStepBordersSetup').onchange = setStepBorders;
+const setPageTitle = (e) => { state.showPageTitle = e.target.checked; renderAll(); };
+document.getElementById('togglePageTitle').onchange = setPageTitle;
+document.getElementById('togglePageTitleSetup').onchange = setPageTitle;
+document.getElementById('toggleCompleteText').onchange = (e) => { state.completeMeta.showText = e.target.checked; renderAll(); };
+document.getElementById('toggleCompleteFireworks').onchange = (e) => { state.completeMeta.showFireworks = e.target.checked; renderAll(); };
 
 // Open real Print & Export PDF Modal (never silently closes!)
 function openExportModal() {
   if (!state.model) { showToast('Import a model first.'); return; }
   closeMenu();
   document.getElementById('pageSetupModal').classList.add('hidden');
+  document.getElementById('bomSetupModal').classList.add('hidden');
   const fmt = PAPER_FORMATS[state.paperFormat] || PAPER_FORMATS.letter;
   const [wIn, hIn] = getActivePagePhysicalInches();
   document.getElementById('expFormatSummary').textContent = `${fmt.name} (${formatPhysicalDims(wIn, hIn)}) · ${state.pages.length} pages`;
@@ -3682,6 +4174,19 @@ document.getElementById('btnClosePageSetup').onclick = closePageSetupModal;
 document.getElementById('pageSetupDoneBtn').onclick = closePageSetupModal;
 document.getElementById('pageSetupPrintBtn').onclick = openExportModal;
 document.getElementById('pageSetupModal').onclick = (e) => { if (e.target.id === 'pageSetupModal') closePageSetupModal(); };
+
+document.getElementById('menuBomSetupBtn').onclick = openBomSetupModal;
+const closeBomSetupModal = () => document.getElementById('bomSetupModal').classList.add('hidden');
+document.getElementById('btnCloseBomSetup').onclick = closeBomSetupModal;
+document.getElementById('bomSetupDoneBtn').onclick = closeBomSetupModal;
+document.getElementById('bomSetupModal').onclick = (e) => { if (e.target.id === 'bomSetupModal') closeBomSetupModal(); };
+document.getElementById('bomSetupJumpBtn').onclick = () => {
+  closeBomSetupModal();
+  if (!state.model) { showToast('Import a model first.'); return; }
+  if (!state.showExtras) { state.showExtras = true; rebuildPages(); }
+  const idx = state.pages.findIndex(p => p.kind === 'bom');
+  if (idx >= 0) { state.pageIdx = idx; state.bomShortcutVisible = false; resetZoom(); renderAll(); }
+};
 document.getElementById('errorsModal').onclick = (e) => { if (e.target.id === 'errorsModal') document.getElementById('errorsModal').classList.add('hidden'); };
 document.getElementById('btnCloseExport').onclick = () => document.getElementById('exportModal').classList.add('hidden');
 document.getElementById('btnExpCurrentPdf').onclick = () => runPdfExport([state.pages[state.pageIdx]]);
@@ -3719,7 +4224,7 @@ document.getElementById('menuRegenBtn').onclick = () => {
 // Save / Open .bic.json Project (supports iOS Share Sheet + Download!)
 document.getElementById('menuSaveProj').onclick = async () => {
   if (!state.model) return;
-  const payload = JSON.stringify({ version: 2, title: state.model.title, chapters: state.model.chapters, overrides: state.overrides, pageInserts: state.pageInserts, dividerAfter: state.dividerAfter, coverMeta: state.coverMeta, backMeta: state.backMeta, themeId: state.themeId, paperFormat: state.paperFormat, orientation: state.orientation, density: state.density, layout: state.layout }, null, 2);
+  const payload = JSON.stringify({ version: 3, title: state.model.title, chapters: state.model.chapters, overrides: state.overrides, pageInserts: state.pageInserts, dividerAfter: state.dividerAfter, coverMeta: state.coverMeta, completeMeta: state.completeMeta, backMeta: state.backMeta, bomConfig: state.bomConfig, showStepBorders: state.showStepBorders, showPageTitle: state.showPageTitle, pageNumberFormat: state.pageNumberFormat, themeId: state.themeId, paperFormat: state.paperFormat, orientation: state.orientation, density: state.density, layout: state.layout }, null, 2);
   const fileName = `${state.model.title.replace(/[^a-z0-9_-]+/gi, '_')}.bic.json`;
   const blob = new Blob([payload], { type: 'application/json' });
   const file = new File([blob], fileName, { type: 'application/json' });
@@ -3741,8 +4246,13 @@ document.getElementById('projectLoadInput').onchange = async (e) => {
     state.model = { title: data.title || 'Loaded Manual', subtitle: '', chapters: data.chapters || [] };
     state.overrides = data.overrides || {}; state.pageInserts = data.pageInserts || {};
     state.dividerAfter = data.dividerAfter || {};
-    if (data.coverMeta) state.coverMeta = data.coverMeta;
-    if (data.backMeta) state.backMeta = data.backMeta;
+    if (data.coverMeta) state.coverMeta = { ...state.coverMeta, ...data.coverMeta };
+    if (data.completeMeta) state.completeMeta = { ...state.completeMeta, ...data.completeMeta };
+    if (data.backMeta) state.backMeta = { ...state.backMeta, ...data.backMeta };
+    if (data.bomConfig) state.bomConfig = { ...state.bomConfig, ...data.bomConfig };
+    if (typeof data.showStepBorders === 'boolean') state.showStepBorders = data.showStepBorders;
+    if (typeof data.showPageTitle === 'boolean') state.showPageTitle = data.showPageTitle;
+    if (data.pageNumberFormat) state.pageNumberFormat = data.pageNumberFormat;
     if (data.themeId) state.themeId = data.themeId;
     if (data.paperFormat) state.paperFormat = data.paperFormat;
     if (data.orientation) state.orientation = data.orientation;
@@ -3777,6 +4287,7 @@ document.getElementById('coverImageInput').onchange = (e) => {
     const pg = state.pages[state.pageIdx];
     pushUndo();
     if (pg.kind === 'cover') state.coverMeta.bgSrc = r.result;
+    else if (pg.kind === 'complete') state.completeMeta.bgSrc = r.result;
     else if (pg.kind === 'back') state.backMeta.bgSrc = r.result;
     renderAll();
   };

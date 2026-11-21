@@ -240,6 +240,16 @@
                 <span class="opacity-50">→</span>
               </span>
             </button>
+            <button id="menuBomSetupBtn" class="w-full py-2.5 px-3 rounded-xl border border-[var(--border)] bg-[var(--background)] font-semibold text-left flex items-center justify-between gap-2">
+              <span class="flex items-center gap-2 min-w-0">
+                <svg class="w-4 h-4 text-[#1a73e8] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+                <span>Parts List Setup</span>
+              </span>
+              <span class="flex items-center gap-1.5 shrink-0 max-w-[52%]">
+                <span id="menuBomSetupSummary" class="text-[11px] font-medium text-[var(--muted-foreground)] truncate">Balanced · Color</span>
+                <span class="opacity-50">→</span>
+              </span>
+            </button>
             <button id="menuPrintBtn" class="w-full py-2.5 px-3.5 rounded-2xl border border-[var(--border)] bg-[var(--background)] font-semibold flex items-center justify-center gap-2">
               <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect width="12" height="8" x="6" y="14"/></svg>
               Print / Save PDF
@@ -346,6 +356,14 @@
         <label class="flex items-center justify-between gap-2">
           <span class="font-medium">1:1 Axle &amp; Beam Guides</span>
           <input id="toggleSizeGuides" type="checkbox" checked class="w-4 h-4 accent-[#1a73e8]" />
+        </label>
+        <label class="flex items-center justify-between gap-2">
+          <span class="font-medium">Box Around Each Step</span>
+          <input id="toggleStepBorders" type="checkbox" checked class="w-4 h-4 accent-[#1a73e8]" />
+        </label>
+        <label class="flex items-center justify-between gap-2">
+          <span class="font-medium">Model Title on Pages</span>
+          <input id="togglePageTitle" type="checkbox" checked class="w-4 h-4 accent-[#1a73e8]" />
         </label>
       </div>
     </div>
@@ -528,14 +546,44 @@
             </div>
           </div>
 
+          <div class="space-y-1.5">
+            <div class="font-semibold text-[var(--muted-foreground)] uppercase tracking-wider text-[10px]">Page Number Format</div>
+            <div class="grid grid-cols-4 gap-1.5">
+              <button data-pgnum="number" class="pgnum-btn py-2 rounded-full border font-semibold">1</button>
+              <button data-pgnum="page_n" class="pgnum-btn py-2 rounded-full border font-semibold">Page 1</button>
+              <button data-pgnum="n_of_total" class="pgnum-btn py-2 rounded-full border font-semibold">1 / N</button>
+              <button data-pgnum="none" class="pgnum-btn py-2 rounded-full border font-semibold">Off</button>
+            </div>
+          </div>
+
           <div class="space-y-2 pt-2 border-t border-[var(--border)]">
+            <label class="flex items-center justify-between py-1">
+              <span class="font-medium">Box Around Each Step</span>
+              <input id="toggleStepBordersSetup" type="checkbox" checked class="w-4 h-4 accent-[#1a73e8]" />
+            </label>
+            <label class="flex items-center justify-between py-1">
+              <span class="font-medium">Model Title on Every Page</span>
+              <input id="togglePageTitleSetup" type="checkbox" checked class="w-4 h-4 accent-[#1a73e8]" />
+            </label>
             <label class="flex items-center justify-between py-1">
               <span class="font-medium">Show Print Margin Guides</span>
               <input id="togglePrintGuides" type="checkbox" class="w-4 h-4 accent-[#1a73e8]" />
             </label>
             <label class="flex items-center justify-between py-1">
-              <span class="font-medium">Cover, Parts List &amp; Back Page</span>
+              <span class="font-medium">Cover, Build Complete, Parts List &amp; Back Cover</span>
               <input id="toggleExtras" type="checkbox" checked class="w-4 h-4 accent-[#1a73e8]" />
+            </label>
+          </div>
+
+          <div class="space-y-2 pt-2 border-t border-[var(--border)]">
+            <div class="font-semibold text-[var(--muted-foreground)] uppercase tracking-wider text-[10px]">Build Complete Page</div>
+            <label class="flex items-center justify-between py-1">
+              <span class="font-medium">Show "Build Complete!" Text</span>
+              <input id="toggleCompleteText" type="checkbox" checked class="w-4 h-4 accent-[#1a73e8]" />
+            </label>
+            <label class="flex items-center justify-between py-1">
+              <span class="font-medium">Celebration Fireworks Effect</span>
+              <input id="toggleCompleteFireworks" type="checkbox" checked class="w-4 h-4 accent-[#1a73e8]" />
             </label>
           </div>
         </div>
@@ -546,6 +594,87 @@
             Print / Save PDF
           </button>
           <button id="pageSetupDoneBtn" class="px-5 py-2.5 rounded-full bg-[#1a73e8] text-white font-semibold">Done</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- PARTS LIST SETUP PAGE MODAL (Linked from Menu & Parts List tap)  -->
+    <!-- ================================================================ -->
+    <div id="bomSetupModal" class="no-print hidden fixed inset-0 z-50 bg-black/50 backdrop-blur-[2px] flex items-end sm:items-center justify-center p-3">
+      <div class="w-full max-w-xl max-h-[85vh] rounded-3xl bg-[var(--card)] border border-[var(--border)] shadow-2xl flex flex-col overflow-hidden text-xs">
+        <div class="p-4 border-b border-[var(--border)] flex items-center justify-between gap-2 shrink-0">
+          <div class="min-w-0">
+            <h2 class="text-sm font-bold">Parts List Setup</h2>
+            <p id="bomSetupSubtitle" class="text-[11px] text-[var(--muted-foreground)] truncate">Grid density, flow, alignment, and sorting</p>
+          </div>
+          <button id="btnCloseBomSetup" class="w-8 h-8 rounded-full flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/10 shrink-0">✕</button>
+        </div>
+
+        <div class="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 space-y-4">
+          <div class="space-y-1.5">
+            <div class="font-semibold text-[var(--muted-foreground)] uppercase tracking-wider text-[10px]">Grid Density</div>
+            <div class="grid grid-cols-3 gap-1.5">
+              <button data-bom-dens="compact" class="bom-dens-btn py-2 rounded-full border font-semibold">Compact</button>
+              <button data-bom-dens="balanced" class="bom-dens-btn py-2 rounded-full border font-semibold">Balanced</button>
+              <button data-bom-dens="spacious" class="bom-dens-btn py-2 rounded-full border font-semibold">Spacious</button>
+            </div>
+          </div>
+
+          <div class="space-y-1.5">
+            <div class="font-semibold text-[var(--muted-foreground)] uppercase tracking-wider text-[10px]">Fill Direction</div>
+            <div class="grid grid-cols-2 gap-2">
+              <button data-bom-flow="rows" class="bom-flow-btn py-2 rounded-full border font-semibold">Rows (Left → Right)</button>
+              <button data-bom-flow="columns" class="bom-flow-btn py-2 rounded-full border font-semibold">Columns (Top → Bottom)</button>
+            </div>
+          </div>
+
+          <div class="space-y-1.5">
+            <div id="bomAlignHeading" class="font-semibold text-[var(--muted-foreground)] uppercase tracking-wider text-[10px]">Hanging Row Alignment</div>
+            <div class="grid grid-cols-3 gap-1.5">
+              <button data-bom-align="start" class="bom-align-btn py-2 rounded-full border font-semibold">Left</button>
+              <button data-bom-align="center" class="bom-align-btn py-2 rounded-full border font-semibold">Center</button>
+              <button data-bom-align="end" class="bom-align-btn py-2 rounded-full border font-semibold">Right</button>
+            </div>
+          </div>
+
+          <div class="space-y-2 pt-2 border-t border-[var(--border)]">
+            <div class="font-semibold text-[var(--muted-foreground)] uppercase tracking-wider text-[10px]">Sort Parts By</div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <label class="space-y-1">
+                <span class="text-[11px] font-medium text-[var(--muted-foreground)]">Primary Trait</span>
+                <select id="bomSortPrimary" class="w-full py-2 px-3 rounded-xl border border-[var(--border)] bg-[var(--background)] font-semibold outline-none">
+                  <option value="color">Color</option>
+                  <option value="category">General Category</option>
+                  <option value="qty">Quantity (Most First)</option>
+                  <option value="size">Part Size (Largest First)</option>
+                  <option value="name">Part Name (A–Z)</option>
+                </select>
+              </label>
+              <label class="space-y-1">
+                <span class="text-[11px] font-medium text-[var(--muted-foreground)]">Then By</span>
+                <select id="bomSortSecondary" class="w-full py-2 px-3 rounded-xl border border-[var(--border)] bg-[var(--background)] font-semibold outline-none">
+                  <option value="category">General Category</option>
+                  <option value="color">Color</option>
+                  <option value="qty">Quantity (Most First)</option>
+                  <option value="size">Part Size (Largest First)</option>
+                  <option value="name">Part Name (A–Z)</option>
+                </select>
+              </label>
+            </div>
+          </div>
+
+          <div class="space-y-2 pt-2 border-t border-[var(--border)]">
+            <label class="flex items-center justify-between py-1">
+              <span class="font-medium">Show Part Names Under Pieces</span>
+              <input id="toggleBomNames" type="checkbox" checked class="w-4 h-4 accent-[#1a73e8]" />
+            </label>
+          </div>
+        </div>
+
+        <div class="p-3.5 border-t border-[var(--border)] flex items-center gap-2 shrink-0 bg-[var(--card)]">
+          <button id="bomSetupJumpBtn" class="flex-1 py-2.5 px-3.5 rounded-full border border-[var(--border)] bg-[var(--background)] font-semibold">View Parts List</button>
+          <button id="bomSetupDoneBtn" class="px-5 py-2.5 rounded-full bg-[#1a73e8] text-white font-semibold">Done</button>
         </div>
       </div>
     </div>
