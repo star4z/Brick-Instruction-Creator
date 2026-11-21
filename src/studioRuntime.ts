@@ -164,12 +164,12 @@ const PARTS_CATALOG = {
   // Bars & Technic Axles (1:1 Size Guides)
   '30374':{name:'Bar 4L',sx:0.4,sz:0.4,h:80,studs:false,shape:'bar',lengthL:4},
   '63965':{name:'Bar 6L',sx:0.4,sz:0.4,h:120,studs:false,shape:'bar',lengthL:6},
-  '3707':{name:'Technic Axle 8L',sx:0.4,sz:0.4,h:160,studs:false,shape:'bar',lengthL:8},
-  '4519':{name:'Technic Axle 3L',sx:0.4,sz:0.4,h:60,studs:false,shape:'bar',lengthL:3},
-  '32062':{name:'Technic Axle 2L',sx:0.4,sz:0.4,h:40,studs:false,shape:'bar',lengthL:2},
-  '3705':{name:'Technic Axle 4L',sx:0.4,sz:0.4,h:80,studs:false,shape:'bar',lengthL:4},
-  '32073':{name:'Technic Axle 5L',sx:0.4,sz:0.4,h:100,studs:false,shape:'bar',lengthL:5},
-  '3706':{name:'Technic Axle 6L',sx:0.4,sz:0.4,h:120,studs:false,shape:'bar',lengthL:6},
+  '3707':{name:'Technic Axle 8L',sx:0.4,sz:0.4,h:160,studs:false,shape:'bar',centered:true,lengthL:8},
+  '4519':{name:'Technic Axle 3L',sx:0.4,sz:0.4,h:60,studs:false,shape:'bar',centered:true,lengthL:3},
+  '32062':{name:'Technic Axle 2L',sx:0.4,sz:0.4,h:40,studs:false,shape:'bar',centered:true,lengthL:2},
+  '3705':{name:'Technic Axle 4L',sx:0.4,sz:0.4,h:80,studs:false,shape:'bar',centered:true,lengthL:4},
+  '32073':{name:'Technic Axle 5L',sx:0.4,sz:0.4,h:100,studs:false,shape:'bar',centered:true,lengthL:5},
+  '3706':{name:'Technic Axle 6L',sx:0.4,sz:0.4,h:120,studs:false,shape:'bar',centered:true,lengthL:6},
   '3815c01':{name:'Minifigure Hips & Legs',sx:1.6,sz:0.8,h:28,studs:false,shape:'mf_legs'},
   '970c00':{name:'Minifigure Hips & Legs',sx:1.6,sz:0.8,h:28,studs:false,shape:'mf_legs'},
   '973c01':{name:'Minifigure Torso Assembly',sx:1.9,sz:0.8,h:28,studs:false,shape:'mf_torso'},
@@ -610,18 +610,26 @@ function buildMeshBuffers(prevParts, newParts, opts) {
     const startX = -((sx - 1) * 20) / 2, startZ = -((sz - 1) * 20) / 2;
     for (let ix = 0; ix < topX; ix++)
       for (let iz = 0; iz < sz; iz++)
-        addCyl(startX + ix*20, 1.9, startZ + iz*20, 5.8, 5.8, 4.6, 'y', 8, m, ox, oy, oz, hinge, col, eCol, aByte);
+        addCyl(startX + ix*20, 1.8, startZ + iz*20, 5.8, 5.8, 4.4, 'y', 8, m, ox, oy, oz, hinge, col, eCol, aByte);
   };
 
   const emitSingleLeaf = (leafPart, isNew, isSelected, offX, offY, offZ, hingeRad) => {
     const def = resolvePart(leafPart.p);
     const cInfo = COLORS[leafPart.c] || COLORS[71];
     const isFaded = !isNew && opts.fadePrev;
-    const baseCol = isSelected ? [26, 115, 232] : hexToRgb255(cInfo.hex, isFaded ? 0.35 : 0);
+    const isRealTrans = (cInfo.alpha || 1) < 0.96;
+    // Fade solid earlier bricks via clean color muting (NOT alpha transparency with depthMask=false!)
+    // so bricks underneath ALWAYS stay properly depth-occluded by plates above them!
+    const fadeMix = isFaded
+      ? Math.max(0, Math.min(0.76, (1.0 - opts.fadeOpacity) * 0.95 + (opts.fadeOpacity < 0.99 ? 0.16 : 0)))
+      : 0;
+    const baseCol = isSelected ? [26, 115, 232] : hexToRgb255(cInfo.hex, fadeMix);
     const edgeCol = isSelected
       ? [255, 255, 255]
-      : (isNew && opts.highlightNew ? hexToRgb255(opts.highlightColor, 0) : hexToRgb255(cInfo.edge, isFaded ? 0.35 : 0));
-    const aByte = Math.round(255 * (cInfo.alpha || 1) * (isFaded ? opts.fadeOpacity : 1));
+      : (isNew && opts.highlightNew ? hexToRgb255(opts.highlightColor, 0) : hexToRgb255(cInfo.edge, fadeMix * 0.85));
+    const aByte = isRealTrans
+      ? Math.round(255 * (cInfo.alpha || 0.7) * (isFaded ? Math.max(0.55, opts.fadeOpacity) : 1))
+      : 255;
     const m = leafPart.m || R_ID;
     const ox = leafPart.x + offX, oy = leafPart.y + offY, oz = leafPart.z + offZ;
 
@@ -646,7 +654,7 @@ function buildMeshBuffers(prevParts, newParts, opts) {
     }
 
     const w = def.sx * 20 - 0.5, d = def.sz * 20 - 0.5, h = def.h;
-    if (def.shape === 'bar') addCyl(0,0,0, 3.8,3.8,h,'y',10, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
+    if (def.shape === 'bar') addCyl(0, def.centered ? 0 : -h/2, 0, 3.8,3.8,h,'y',10, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
     else if (def.shape === 'round') { addCyl(0,-h/2,0, (def.sx*20)/2-0.3,(def.sx*20)/2-0.3,h,'y',12, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte); addTopStuds(def, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte); }
     else if (def.shape === 'snot4' || def.shape === 'snot1') {
       addBox(0,-h/2,0, w,h,d, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
@@ -797,7 +805,7 @@ class WebGLBrickEngine {
     if (!gl) return;
     const vsTri = `attribute vec3 aPos; attribute vec3 aNorm; attribute vec4 aCol; uniform mat4 uMVP; varying vec3 vNorm; varying vec4 vCol; void main(){ gl_Position = uMVP * vec4(aPos,1.0); vNorm = aNorm; vCol = aCol; }`;
     const fsTri = `precision mediump float; varying vec3 vNorm; varying vec4 vCol; void main(){ vec3 n = normalize(vNorm); if (!gl_FrontFacing) n = -n; float key = max(dot(n, normalize(vec3(0.55,0.85,0.55))), 0.0); float fill = max(dot(n, normalize(vec3(-0.7,0.35,-0.5))), 0.0); float hemi = 0.50 + 0.15 * n.y; float shade = min(1.08, hemi + key * 0.44 + fill * 0.18); gl_FragColor = vec4(vCol.rgb * shade, vCol.a); }`;
-    const vsLine = `attribute vec3 aPos; attribute vec4 aCol; uniform mat4 uMVP; varying vec4 vCol; void main(){ gl_Position = uMVP * vec4(aPos,1.0); gl_Position.z -= 0.0008; vCol = aCol; }`;
+    const vsLine = `attribute vec3 aPos; attribute vec4 aCol; uniform mat4 uMVP; varying vec4 vCol; void main(){ gl_Position = uMVP * vec4(aPos,1.0); gl_Position.z -= 0.00022; vCol = aCol; }`;
     const fsLine = `precision mediump float; varying vec4 vCol; void main(){ gl_FragColor = vCol; }`;
     const cmp = (t, s) => { const sh = gl.createShader(t); gl.shaderSource(sh, s); gl.compileShader(sh); return sh; };
     const lnk = (v, f) => { const p = gl.createProgram(); gl.attachShader(p, cmp(gl.VERTEX_SHADER, v)); gl.attachShader(p, cmp(gl.FRAGMENT_SHADER, f)); gl.linkProgram(p); return p; };
@@ -827,13 +835,15 @@ class WebGLBrickEngine {
   }
   computeMVP(mesh, w, h, azDeg, elDeg, zoom = 1) {
     const az = azDeg * Math.PI / 180, el = elDeg * Math.PI / 180;
-    // Keep eye far enough back using fullRadius so close-up ortho views never near-clip foreground bricks!
+    // Tight near/far ortho depth range around full model radius for 4x sharper Z-buffer occlusion!
     const clipRadius = Math.max(mesh.fullRadius || mesh.radius, mesh.radius);
-    const dist = clipRadius * 4.5;
+    const dist = clipRadius * 2.5;
     const eye = [mesh.center[0]+dist*Math.sin(az)*Math.cos(el), mesh.center[1]+dist*Math.sin(el), mesh.center[2]+dist*Math.cos(az)*Math.cos(el)];
     const halfH = (mesh.radius * 1.12) / Math.max(0.4, zoom);
     const halfW = halfH * (w / Math.max(1, h));
-    return mulMat4(orthoMat4(-halfW, halfW, -halfH, halfH, 1, dist * 4), lookAtMat4(eye, mesh.center, [0, 1, 0]));
+    const near = Math.max(1, dist - clipRadius * 2.2);
+    const far = dist + clipRadius * 2.2;
+    return mulMat4(orthoMat4(-halfW, halfW, -halfH, halfH, near, far), lookAtMat4(eye, mesh.center, [0, 1, 0]));
   }
   draw(mesh, w, h, azDeg, elDeg, zoom = 1) {
     const gl = this.gl;
