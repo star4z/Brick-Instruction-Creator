@@ -1624,20 +1624,44 @@ function detectDuplicateSubassemblies(parts, boxes, adj, roles) {
           }
         }
         if (instances.length >= 2) {
-          candidates.push({
-            name: null,
-            explicit: false,
-            size: arrA.length,
-            count: instances.length,
-            savings: (instances.length - 1) * arrA.length,
-            instances,
-          });
+          // Reject hollow/carved-out Stage 2 geometric submodels that sandwich external parts
+          // vertically between lower and upper bricks of the submodel (physically impossible to assemble!).
+          let sandwichesExternal = false;
+          for (const inst of instances) {
+            const instSet = new Set(inst);
+            for (let u = 0; u < parts.length; u++) {
+              if (instSet.has(u) || roles[u] === 'wheel' || roles[u] === 'figure') continue;
+              const bu = boxes[u];
+              let hasAbove = false, hasBelow = false;
+              for (const pi of inst) {
+                const bi = boxes[pi];
+                const ovX = Math.min(bu.max[0], bi.max[0]) - Math.max(bu.min[0], bi.min[0]);
+                const ovZ = Math.min(bu.max[2], bi.max[2]) - Math.max(bu.min[2], bi.min[2]);
+                if (ovX < 3.0 || ovZ < 3.0) continue;
+                if (!hasAbove && bi.min[1] >= bu.max[1] - 4.5 && bi.center[1] > bu.center[1] + 2.0 && (bi.min[1] - bu.max[1]) <= 36) hasAbove = true;
+                if (!hasBelow && bu.min[1] >= bi.max[1] - 4.5 && bu.center[1] > bi.center[1] + 2.0 && (bu.min[1] - bi.max[1]) <= 36) hasBelow = true;
+                if (hasAbove && hasBelow) break;
+              }
+              if (hasAbove && hasBelow) { sandwichesExternal = true; break; }
+            }
+            if (sandwichesExternal) break;
+          }
+          if (!sandwichesExternal) {
+            candidates.push({
+              name: null,
+              explicit: false,
+              size: arrA.length,
+              count: instances.length,
+              savings: (instances.length - 1) * arrA.length,
+              instances,
+            });
+          }
         }
       }
     }
   }
 
-  candidates.sort((a, b) => b.savings - a.savings || b.count - a.count || b.size - a.size);
+  candidates.sort((a, b) => (b.explicit ? 1 : 0) - (a.explicit ? 1 : 0) || b.savings - a.savings || b.count - a.count || b.size - a.size);
   const claimed = new Uint8Array(parts.length);
   const groups = [];
   let gSeq = 0;
@@ -1656,6 +1680,73 @@ function detectDuplicateSubassemblies(parts, boxes, adj, roles) {
     });
   }
   return groups;
+}
+
+// Build strict bottom-up vertical prerequisite DAG:
+// belowMap[i] = parts sitting directly underneath `i` that MUST be placed in an earlier step before `i`
+// (strict inequality on min[1] & center[1] guarantees a 100% cycle-free DAG!).
+function buildVerticalPrereqMap(boxes, adj, roles, claddingFlags, activeIndices) {
+  const idxList = activeIndices || boxes.map((_, i) => i);
+  const activeSet = new Set(idxList);
+  let baseMinY = Infinity;
+  for (const i of idxList) {
+    if (roles[i] === 'wheel' || roles[i] === 'figure' || claddingFlags[i]) continue;
+    if (boxes[i].min[1] < baseMinY) baseMinY = boxes[i].min[1];
+  }
+  if (!isFinite(baseMinY)) baseMinY = 0;
+
+  const hasLowerOrBaseSupport = (u) => {
+    if (boxes[u].min[1] <= baseMinY + 20) return true;
+    const bu = boxes[u];
+    for (const w of adj[u]) {
+      if (!activeSet.has(w) || roles[w] === 'wheel' || roles[w] === 'figure') continue;
+      const bw = boxes[w];
+      if (bw.min[1] < bu.max[1] - 4.0 && bw.center[1] <= bu.center[1] + 4.0) return true;
+    }
+    return false;
+  };
+
+  const belowMap = Array.from({ length: boxes.length }, () => []);
+  for (const i of idxList) {
+    if (roles[i] === 'wheel' || roles[i] === 'figure' || claddingFlags[i]) continue;
+    const bi = boxes[i];
+    for (const u of idxList) {
+      if (u === i || roles[u] === 'wheel' || roles[u] === 'figure' || claddingFlags[u]) continue;
+      const bu = boxes[u];
+      if (bu.min[1] >= bi.min[1] - 2.0) continue;
+      if (bu.center[1] >= bi.center[1] - 2.0) continue;
+      if (bu.max[1] > bi.min[1] + 4.5) continue;
+      if (bi.min[1] - bu.max[1] > 36) continue;
+      const ovX = Math.min(bi.max[0], bu.max[0]) - Math.max(bi.min[0], bu.min[0]);
+      const ovZ = Math.min(bi.max[2], bu.max[2]) - Math.max(bi.min[2], bu.min[2]);
+      if (ovX < 3.0 || ovZ < 3.0) continue;
+      if (!hasLowerOrBaseSupport(u)) continue;
+      belowMap[i].push(u);
+    }
+  }
+  return { belowMap, baseMinY };
+}
+
+// Unlock any unplaced base-layer prerequisites sitting underneath blocked frontier parts
+// (e.g., two base bricks on the table bridged by a window frame above them).
+function collectBasePrereqs(blockedIndices, belowMap, remaining, boxes, baseMinY) {
+  const unlocked = new Set();
+  const seen = new Set();
+  const stack = [...blockedIndices];
+  while (stack.length > 0) {
+    const cur = stack.pop();
+    for (const u of belowMap[cur]) {
+      if (!remaining.has(u) || seen.has(u)) continue;
+      seen.add(u);
+      const uBlocked = belowMap[u].some(w => remaining.has(w));
+      if (!uBlocked) {
+        if (boxes[u].min[1] <= baseMinY + 24) unlocked.add(u);
+      } else {
+        stack.push(u);
+      }
+    }
+  }
+  return Array.from(unlocked);
 }
 
 // Build bottom-up zero-floating steps for 1 canonical copy of a duplicate submodel
@@ -1687,6 +1778,7 @@ function buildLocalSubmodelSteps(canonicalParts, perStep, groupId, repeatCount) 
     }
     if (bestJ >= 0) { adj[i].push(bestJ); adj[bestJ].push(i); }
   }
+  const { belowMap, baseMinY } = buildVerticalPrereqMap(boxes, adj, roles, claddingFlags);
   const subPerStep = Math.max(2, Math.min(perStep, n <= 4 ? 2 : 4));
   const placed = new Set();
   const remaining = new Set(Array.from({ length: n }, (_, i) => i));
@@ -1697,14 +1789,25 @@ function buildLocalSubmodelSteps(canonicalParts, perStep, groupId, repeatCount) 
     const placedBeforeStep = new Set(placed);
     let frontier;
     if (placed.size === 0) {
-      const nonWheels = Array.from(remaining).filter(i => roles[i] !== 'wheel' && !claddingFlags[i]);
+      const nonWheels = Array.from(remaining).filter(i => roles[i] !== 'wheel' && !claddingFlags[i] && !belowMap[i].some(u => remaining.has(u)));
       const pool = nonWheels.length > 0 ? nonWheels : Array.from(remaining);
       pool.sort((a, b) => layerY[a] - layerY[b] || adj[b].length - adj[a].length);
       frontier = pool;
     } else {
       const rawFrontier = Array.from(remaining).filter(i => adj[i].some(nb => placedBeforeStep.has(nb)));
-      const readyFrontier = rawFrontier.filter(i => !isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, placedBeforeStep));
-      frontier = readyFrontier.length > 0 ? readyFrontier : rawFrontier;
+      const unblocked = rawFrontier.filter(i =>
+        !isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, placedBeforeStep)
+        && !belowMap[i].some(u => remaining.has(u))
+      );
+      const blocked = rawFrontier.filter(i => belowMap[i].some(u => remaining.has(u)));
+      const basePrereqs = blocked.length > 0 ? collectBasePrereqs(blocked, belowMap, remaining, boxes, baseMinY) : [];
+      const merged = Array.from(new Set([...basePrereqs, ...unblocked]));
+      if (merged.length > 0) {
+        frontier = merged;
+      } else {
+        const claddingReady = rawFrontier.filter(i => !isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, placedBeforeStep));
+        frontier = claddingReady.length > 0 ? claddingReady : rawFrontier;
+      }
       if (frontier.length === 0) frontier = Array.from(remaining).sort((a, b) => layerY[a] - layerY[b]);
       frontier.sort((a, b) => (roles[a] === 'wheel' ? 1 : 0) - (roles[b] === 'wheel' ? 1 : 0) || Math.round(layerY[a]/8) - Math.round(layerY[b]/8));
     }
@@ -1714,13 +1817,25 @@ function buildLocalSubmodelSteps(canonicalParts, perStep, groupId, repeatCount) 
     remaining.delete(anchor); placed.add(anchor);
 
     while (stepIdx.length < subPerStep && remaining.size > 0) {
-      // Every piece added in Step K > 1 must directly touch the already-built model from Steps 1..(K-1)!
+      // Every piece added in Step K > 1 must directly touch the already-built model from Steps 1..(K-1)
+      // AND have ALL parts directly underneath it already placed in an EARLIER step!
       const supportSet = placedBeforeStep.size > 0 ? placedBeforeStep : placed;
-      const cands = Array.from(remaining).filter(i =>
-        Math.abs(layerY[i] - anchorY) <= 18
-        && !isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, supportSet)
-        && adj[i].some(nb => supportSet.has(nb))
-      );
+      const cands = Array.from(remaining).filter(i => {
+        if (Math.abs(layerY[i] - anchorY) > 12) return false;
+        if (isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, supportSet)) return false;
+        if (placedBeforeStep.size > 0) {
+          if (belowMap[i].some(u => !placedBeforeStep.has(u))) return false;
+          const touchesPrev = adj[i].some(nb => placedBeforeStep.has(nb));
+          const sameBaseLayer = boxes[i].min[1] <= baseMinY + 24 && Math.abs(boxes[i].min[1] - boxes[anchor].min[1]) <= 4 && belowMap[i].length === 0;
+          if (!touchesPrev && !sameBaseLayer) return false;
+        } else {
+          if (belowMap[i].length > 0) return false;
+          const touchesCur = adj[i].some(nb => placed.has(nb));
+          const sameBaseLayer = boxes[i].min[1] <= baseMinY + 24 && Math.abs(boxes[i].min[1] - boxes[anchor].min[1]) <= 4;
+          if (!touchesCur && !sameBaseLayer) return false;
+        }
+        return true;
+      });
       if (cands.length === 0) break;
       cands.sort((a, b) =>
         (canonicalParts[b].p === canonicalParts[anchor].p && canonicalParts[b].c === canonicalParts[anchor].c ? 1 : 0)
@@ -1993,7 +2108,25 @@ function buildManualFromParsed(parsed, mode) {
     const indices = group.indices;
     const placed = new Set();
     const remaining = new Set(indices);
+    const { belowMap, baseMinY } = buildVerticalPrereqMap(boxes, adj, roles, claddingFlags, indices);
     let curSteps = [];
+
+    const isInstBlockedFromBelow = (instIndices) => {
+      const instSet = new Set(instIndices);
+      for (const pi of instIndices) {
+        if (!remaining.has(pi)) continue;
+        for (const u of belowMap[pi]) {
+          if (!instSet.has(u) && remaining.has(u)) return true;
+        }
+      }
+      return false;
+    };
+
+    const isPartBlockedFromBelow = (i) => {
+      const di = partToDup.get(i);
+      if (di) return isInstBlockedFromBelow(di.group.instances[di.instIdx]);
+      return belowMap[i].some(u => remaining.has(u));
+    };
 
     const flushMainSteps = () => {
       if (curSteps.length === 0) return;
@@ -2010,7 +2143,7 @@ function buildManualFromParsed(parsed, mode) {
     while (remaining.size > 0) {
       let frontier;
       if (placed.size === 0) {
-        const nonWheels = Array.from(remaining).filter(i => roles[i] !== 'wheel' && !claddingFlags[i]);
+        const nonWheels = Array.from(remaining).filter(i => roles[i] !== 'wheel' && !claddingFlags[i] && !isPartBlockedFromBelow(i));
         const pool = nonWheels.length > 0 ? nonWheels : Array.from(remaining);
         pool.sort((a, b) => layerY[a] - layerY[b]);
         const minY = layerY[pool[0]];
@@ -2023,8 +2156,30 @@ function buildManualFromParsed(parsed, mode) {
         frontier = lowBand;
       } else {
         const rawFrontier = Array.from(remaining).filter(i => adj[i].some(nb => placed.has(nb)));
-        const readyFrontier = rawFrontier.filter(i => !isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, placed));
-        frontier = readyFrontier.length > 0 ? readyFrontier : rawFrontier;
+        const unblocked = rawFrontier.filter(i =>
+          !isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, placed)
+          && !isPartBlockedFromBelow(i)
+        );
+        const blockedSeeds = [];
+        for (const i of rawFrontier) {
+          if (!isPartBlockedFromBelow(i)) continue;
+          const di = partToDup.get(i);
+          if (di) {
+            for (const pi of di.group.instances[di.instIdx]) if (remaining.has(pi)) blockedSeeds.push(pi);
+          } else {
+            blockedSeeds.push(i);
+          }
+        }
+        const basePrereqs = blockedSeeds.length > 0
+          ? collectBasePrereqs(blockedSeeds, belowMap, remaining, boxes, baseMinY).filter(u => !isPartBlockedFromBelow(u))
+          : [];
+        const merged = Array.from(new Set([...basePrereqs, ...unblocked]));
+        if (merged.length > 0) {
+          frontier = merged;
+        } else {
+          const claddingReady = rawFrontier.filter(i => !isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, placed));
+          frontier = claddingReady.length > 0 ? claddingReady : rawFrontier;
+        }
         if (frontier.length === 0) {
           frontier = Array.from(remaining).sort((a, b) => layerY[a] - layerY[b]);
         }
@@ -2047,7 +2202,8 @@ function buildManualFromParsed(parsed, mode) {
           if (unplacedInSec.length === 0) return;
           const isAnchorInst = instIdx === dupInfo.instIdx;
           const touchesPlaced = placed.size === 0 || unplacedInSec.some(pi => adj[pi].some(nb => placed.has(nb)));
-          if (isAnchorInst || touchesPlaced) readyInsts.push(unplacedInSec);
+          const underClear = !isInstBlockedFromBelow(instIndices);
+          if (isAnchorInst || (touchesPlaced && underClear)) readyInsts.push(unplacedInSec);
         });
 
         // Emit the submodel's own step-by-step chapter ONCE right before its first attachment!
@@ -2100,8 +2256,18 @@ function buildManualFromParsed(parsed, mode) {
         const cands = Array.from(remaining).filter(i => {
           if (partToDup.has(i)) return false;
           if (isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, supportSet)) return false;
-          if (Math.abs(layerY[i] - anchorY) > 18) return false;
-          if (!adj[i].some(nb => supportSet.has(nb))) return false;
+          if (Math.abs(layerY[i] - anchorY) > 12) return false;
+          if (placedBeforeStep.size > 0) {
+            if (belowMap[i].some(u => !placedBeforeStep.has(u))) return false;
+            const touchesPrev = adj[i].some(nb => placedBeforeStep.has(nb));
+            const sameBaseLayer = boxes[i].min[1] <= baseMinY + 24 && Math.abs(boxes[i].min[1] - boxes[anchor].min[1]) <= 4 && belowMap[i].length === 0;
+            if (!touchesPrev && !sameBaseLayer) return false;
+          } else {
+            if (belowMap[i].length > 0) return false;
+            const touchesCur = adj[i].some(nb => placed.has(nb));
+            const sameBaseLayer = boxes[i].min[1] <= baseMinY + 24 && Math.abs(boxes[i].min[1] - boxes[anchor].min[1]) <= 4;
+            if (!touchesCur && !sameBaseLayer) return false;
+          }
           const d = Math.hypot(boxes[i].center[0]-anchorC[0], boxes[i].center[1]-anchorC[1], boxes[i].center[2]-anchorC[2]);
           return d <= 160;
         });
