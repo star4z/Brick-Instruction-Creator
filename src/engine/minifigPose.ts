@@ -668,10 +668,11 @@ export function normalizeMinifigureForBuild(
     }
 
     for (const ae of armEntries) {
+      const rawDet = mat3Determinant(ae.leaf.m || R_IDENTITY);
       const armM = mat3Orthonormalize(ae.leaf.m);
       const u = mat3Col(armM, 0); // shoulder hinge pin axis
       // Only un-rotate around shoulder pin when the arm is properly oriented (not mirrored / flipped sideways)
-      if (u[0] > 0.5 && Math.abs(u[2]) < 0.35 && mat3Determinant(armM) > 0) {
+      if (u[0] > 0.5 && Math.abs(u[2]) < 0.35 && rawDet > 0) {
         const fTarget = vec3Norm([-u[0] * u[2], -u[1] * u[2], 1 - u[2] * u[2]]);
         const upTarget = vec3Norm(vec3Cross(fTarget, u));
         const R_armNeutral = mat3FromCols(u, upTarget, fTarget);
@@ -1137,10 +1138,25 @@ export function extractMinifigureGroups(
     };
     const grp = [t];
     // Attach any un-fused loose arms & hands belonging to this torso (flat .ldr files)
+    const attachedArmCenters: Vec3[] = [];
     for (let j = 0; j < parts.length; j++) {
       if (claimed[j] || j === t || !isLooseArmOrHand(parts[j])) continue;
+      const role = classifyMinifigLeafRole(parts[j].p, resolveName(parts[j].p));
+      if (role !== 'arm_r' && role !== 'arm_l') continue;
       const c = boxes[j].center;
-      if (Math.hypot(c[0] - tc[0], c[1] - tc[1], c[2] - tc[2]) <= 40) grp.push(j);
+      if (Math.hypot(c[0] - tc[0], c[1] - tc[1], c[2] - tc[2]) <= 42) {
+        grp.push(j);
+        attachedArmCenters.push(c);
+      }
+    }
+    for (let j = 0; j < parts.length; j++) {
+      if (claimed[j] || j === t || grp.includes(j) || !isLooseArmOrHand(parts[j])) continue;
+      const c = boxes[j].center;
+      const nearTorso = Math.hypot(c[0] - tc[0], c[1] - tc[1], c[2] - tc[2]) <= 46;
+      const nearArm = attachedArmCenters.some(
+        (ac) => Math.hypot(c[0] - ac[0], c[1] - ac[1], c[2] - ac[2]) <= 28,
+      );
+      if (nearTorso || nearArm) grp.push(j);
     }
     // Nearest unclaimed legs below/at torso (along -up)
     let bestLegs = -1;
