@@ -1396,8 +1396,30 @@ function isCladdingWaitingForUpperSupport(idx, claddingFlags, boxes, adj, placed
   return !upperNbs.some(nb => placed.has(nb));
 }
 
-// Strict contact check: rejects empty AABB corners of round wheels grazing nearby bogie side plates!
-function boxesPhysicallyTouch(a, b, roleA, roleB) {
+// True ONLY if a part has genuine sideways connection capability (SNOT orientation, side studs,
+// brackets, clips, hinges, Technic pins/holes, bars, axles, window frames/glass, etc.).
+// Two plain upright bricks/plates/slopes/tiles grazing side-by-side do NOT physically stick together!
+function canConnectSideways(part, role) {
+  if (!part) return true;
+  if (role === 'wheel' || role === 'figure') return true;
+  const m = part.m || R_ID;
+  if (Math.abs(m[4]) < 0.5) return true; // SNOT / sideways-mounted part
+  const k = normId(part.p);
+  const def = resolvePart(part.p);
+  const name = (def.name || '').toLowerCase();
+  if (def.shape === 'snot1' || def.shape === 'snot4' || def.shape === 'clip_h' || def.shape === 'clip_v' || def.shape === 'bar') return true;
+  if (/snot|bracket|clip|hinge|bar|axle|pin|technic|liftarm|beam|turntable|handle|hook|grab|magnet|coupler|buffer|ball|socket|window|glass|door|fence|rail|ladder|hose|antenna|lever/.test(name)) return true;
+  if (/^(3937|3938|44302|63868|37494|92582|2429|2430|3700|3701|3702|3894|32000|32018|6541|4070|87087|4733|47905|22885|99206|99207|99780|99781|44728|60475|15712|60470|6019|4085|36840|36841|29085|bb892)/.test(k)) return true;
+  return false;
+}
+
+// Strict LEGO clutch contact check:
+// - Train wheels attach ONLY to wheel holders.
+// - Upright bricks/plates/slopes/tiles connect via vertical stud footprint overlap (ovX >= 3 && ovZ >= 3),
+//   NOT by grazing smooth vertical side walls (which caused floating inverted slopes & train-body bleed into bogies!).
+// - Sideways contacts require either 3-axis interlocking (SNOT studs/pins/clips engaged >= 1.5 LDU)
+//   or BOTH parts having sideways/SNOT/clip/hinge/window connection capability.
+function boxesPhysicallyTouch(a, b, roleA, roleB, sideCapA = true, sideCapB = true) {
   const isWheelPair = (roleA === 'wheel' || roleB === 'wheel');
   const otherIsHolder = (roleA === 'wheel_holder' || roleB === 'wheel_holder');
   if (isWheelPair && otherIsHolder) {
@@ -1407,19 +1429,26 @@ function boxesPhysicallyTouch(a, b, roleA, roleB) {
     const gz = Math.max(0, a.min[2]-b.max[2], b.min[2]-a.max[2]);
     return Math.max(gx, gy, gz) <= 6.0;
   }
-  const tol = isWheelPair ? 0.5 : 2.8;
+  if (isWheelPair && !otherIsHolder) return false; // Train wheels attach ONLY via their wheel holder / axle!
+  const tol = 2.8;
   const gx = Math.max(0, a.min[0]-b.max[0], b.min[0]-a.max[0]);
   const gy = Math.max(0, a.min[1]-b.max[1], b.min[1]-a.max[1]);
   const gz = Math.max(0, a.min[2]-b.max[2], b.min[2]-a.max[2]);
   if (gx > tol || gy > tol || gz > tol) return false;
-  // Require real contact overlap on at least 2 axes so grazing corners don't falsely bond!
+
   const ovX = Math.min(a.max[0], b.max[0]) - Math.max(a.min[0], b.min[0]);
   const ovY = Math.min(a.max[1], b.max[1]) - Math.max(a.min[1], b.min[1]);
   const ovZ = Math.min(a.max[2], b.max[2]) - Math.max(a.min[2], b.min[2]);
-  const minOv = isWheelPair ? 10 : 1.5;
-  const goodAxes = (ovX >= minOv ? 1 : 0) + (ovY >= minOv ? 1 : 0) + (ovZ >= minOv ? 1 : 0);
-  if (isWheelPair && !otherIsHolder) return false; // Train wheels attach ONLY via their wheel holder / axle!
-  return goodAxes >= 2;
+
+  // 1. Vertical stud/tube stacking contact (overlapping horizontal footprint)
+  if (ovX >= 3.0 && ovZ >= 3.0) return true;
+
+  // 2. Sideways / SNOT / clip / hinge / Technic pin contact
+  const goodAxes = (ovX >= 1.5 ? 1 : 0) + (ovY >= 1.5 ? 1 : 0) + (ovZ >= 1.5 ? 1 : 0);
+  if (goodAxes < 2) return false;
+  // Require real 3-axis interlocking (e.g., SNOT studs/pins engaged >= 1.5 LDU) OR both parts sideways-capable!
+  if (ovX >= 1.5 && ovY >= 1.5 && ovZ >= 1.5) return true;
+  return Boolean(sideCapA && sideCapB);
 }
 
 function mat3Transpose(m) {
@@ -1634,15 +1663,29 @@ function buildLocalSubmodelSteps(canonicalParts, perStep, groupId, repeatCount) 
   const n = canonicalParts.length;
   const boxes = canonicalParts.map(p => computeWorldBox(p));
   const roles = canonicalParts.map(p => classifyPartRole(p));
+  const sideCaps = canonicalParts.map((p, i) => canConnectSideways(p, roles[i]));
   const claddingFlags = canonicalParts.map((p, i) => isSidewaysCladdingPart(p, boxes[i]));
   const layerY = canonicalParts.map((p, i) => computeBuildLayerY(p, boxes[i]));
   const adj = Array.from({ length: n }, () => []);
   for (let i = 0; i < n; i++) {
     for (let j = i + 1; j < n; j++) {
-      if (boxesPhysicallyTouch(boxes[i], boxes[j], roles[i], roles[j])) {
+      if (boxesPhysicallyTouch(boxes[i], boxes[j], roles[i], roles[j], sideCaps[i], sideCaps[j])) {
         adj[i].push(j); adj[j].push(i);
       }
     }
+  }
+  for (let i = 0; i < n; i++) {
+    if (adj[i].length > 0) continue;
+    let bestJ = -1, bestD = 12;
+    for (let j = 0; j < n; j++) {
+      if (i === j || roles[j] === 'wheel') continue;
+      const gx = Math.max(0, boxes[i].min[0]-boxes[j].max[0], boxes[j].min[0]-boxes[i].max[0]);
+      const gy = Math.max(0, boxes[i].min[1]-boxes[j].max[1], boxes[j].min[1]-boxes[i].max[1]);
+      const gz = Math.max(0, boxes[i].min[2]-boxes[j].max[2], boxes[j].min[2]-boxes[i].max[2]);
+      const d = Math.hypot(gx, gy, gz);
+      if (d < bestD) { bestD = d; bestJ = j; }
+    }
+    if (bestJ >= 0) { adj[i].push(bestJ); adj[bestJ].push(i); }
   }
   const subPerStep = Math.max(2, Math.min(perStep, n <= 4 ? 2 : 4));
   const placed = new Set();
@@ -1651,15 +1694,16 @@ function buildLocalSubmodelSteps(canonicalParts, perStep, groupId, repeatCount) 
   let sNum = 0;
 
   while (remaining.size > 0) {
+    const placedBeforeStep = new Set(placed);
     let frontier;
     if (placed.size === 0) {
       const nonWheels = Array.from(remaining).filter(i => roles[i] !== 'wheel' && !claddingFlags[i]);
       const pool = nonWheels.length > 0 ? nonWheels : Array.from(remaining);
-      pool.sort((a, b) => layerY[a] - layerY[b]);
+      pool.sort((a, b) => layerY[a] - layerY[b] || adj[b].length - adj[a].length);
       frontier = pool;
     } else {
-      const rawFrontier = Array.from(remaining).filter(i => adj[i].some(nb => placed.has(nb)));
-      const readyFrontier = rawFrontier.filter(i => !isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, placed));
+      const rawFrontier = Array.from(remaining).filter(i => adj[i].some(nb => placedBeforeStep.has(nb)));
+      const readyFrontier = rawFrontier.filter(i => !isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, placedBeforeStep));
       frontier = readyFrontier.length > 0 ? readyFrontier : rawFrontier;
       if (frontier.length === 0) frontier = Array.from(remaining).sort((a, b) => layerY[a] - layerY[b]);
       frontier.sort((a, b) => (roles[a] === 'wheel' ? 1 : 0) - (roles[b] === 'wheel' ? 1 : 0) || Math.round(layerY[a]/8) - Math.round(layerY[b]/8));
@@ -1670,12 +1714,19 @@ function buildLocalSubmodelSteps(canonicalParts, perStep, groupId, repeatCount) 
     remaining.delete(anchor); placed.add(anchor);
 
     while (stepIdx.length < subPerStep && remaining.size > 0) {
+      // Every piece added in Step K > 1 must directly touch the already-built model from Steps 1..(K-1)!
+      const supportSet = placedBeforeStep.size > 0 ? placedBeforeStep : placed;
       const cands = Array.from(remaining).filter(i =>
         Math.abs(layerY[i] - anchorY) <= 18
-        && !isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, placed)
-        && adj[i].some(nb => placed.has(nb))
+        && !isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, supportSet)
+        && adj[i].some(nb => supportSet.has(nb))
       );
       if (cands.length === 0) break;
+      cands.sort((a, b) =>
+        (canonicalParts[b].p === canonicalParts[anchor].p && canonicalParts[b].c === canonicalParts[anchor].c ? 1 : 0)
+        - (canonicalParts[a].p === canonicalParts[anchor].p && canonicalParts[a].c === canonicalParts[anchor].c ? 1 : 0)
+        || Math.abs(layerY[a] - anchorY) - Math.abs(layerY[b] - anchorY)
+      );
       const next = cands[0];
       stepIdx.push(next); remaining.delete(next); placed.add(next);
     }
@@ -1733,11 +1784,12 @@ function buildManualFromParsed(parsed, mode) {
     return { title: parsed.title, subtitle: `${parts.length} pieces · ${globalStep} steps`, chapters, _parsed: parsed, _mode: mode };
   }
 
-  // 1. Build strict physical adjacency graph (wheel-aware!)
+  // 1. Build strict physical adjacency graph (wheel-aware & rejects smooth side-wall grazing!)
+  const sideCaps = parts.map((p, i) => canConnectSideways(p, roles[i]));
   const adj = Array.from({ length: parts.length }, () => []);
   for (let i = 0; i < parts.length; i++) {
     for (let j = i + 1; j < parts.length; j++) {
-      if (boxesPhysicallyTouch(boxes[i], boxes[j], roles[i], roles[j])) {
+      if (boxesPhysicallyTouch(boxes[i], boxes[j], roles[i], roles[j], sideCaps[i], sideCaps[j])) {
         adj[i].push(j); adj[j].push(i);
       }
     }
@@ -2036,6 +2088,7 @@ function buildManualFromParsed(parsed, mode) {
       }
 
       // NORMAL STEP (non-duplicate-submodel bricks)
+      const placedBeforeStep = new Set(placed);
       const anchorY = layerY[anchor];
       const anchorC = boxes[anchor].center;
       const stepIndices = [anchor];
@@ -2043,11 +2096,12 @@ function buildManualFromParsed(parsed, mode) {
       placed.add(anchor);
 
       while (stepIndices.length < perStep && remaining.size > 0) {
+        const supportSet = placedBeforeStep.size > 0 ? placedBeforeStep : placed;
         const cands = Array.from(remaining).filter(i => {
           if (partToDup.has(i)) return false;
-          if (isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, placed)) return false;
+          if (isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, supportSet)) return false;
           if (Math.abs(layerY[i] - anchorY) > 18) return false;
-          if (!adj[i].some(nb => placed.has(nb))) return false;
+          if (!adj[i].some(nb => supportSet.has(nb))) return false;
           const d = Math.hypot(boxes[i].center[0]-anchorC[0], boxes[i].center[1]-anchorC[1], boxes[i].center[2]-anchorC[2]);
           return d <= 160;
         });
