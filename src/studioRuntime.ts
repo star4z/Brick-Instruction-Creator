@@ -9,6 +9,16 @@ import {
   recomputeProposalWithCount,
   splitProposedSection,
 } from './engine/subdivisionAnalyzer';
+import {
+  MINIFIG_BUILD_CAMERA,
+  classifyMinifigLeafRole,
+  computeMinifigOneToOneLayout,
+  mat3Col,
+  mat3Orthonormalize,
+  normalizeCompositeThumbPart,
+  normalizeMinifigureForBuild,
+  vec3Dot,
+} from './engine/minifigPose';
 
 let initialized = false;
 
@@ -1278,6 +1288,7 @@ function buildMeshBuffers(prevParts, newParts, opts) {
     radius: viewRadius,
     fullRadius,
     isZoomedIn,
+    bounds: isFinite(minX) ? { minX, minY, minZ, maxX, maxY, maxZ } : { minX: -20, minY: 0, minZ: -10, maxX: 20, maxY: 100, maxZ: 10 },
   };
 }
 
@@ -1319,19 +1330,19 @@ class WebGLBrickEngine {
     gl.bindBuffer(gl.ARRAY_BUFFER, this.bLineCol); gl.bufferData(gl.ARRAY_BUFFER, mesh.lineCol, gl.STATIC_DRAW);
     this.uploadedMesh = mesh;
   }
-  computeMVP(mesh, w, h, azDeg, elDeg, zoom = 1) {
+  computeMVP(mesh, w, h, azDeg, elDeg, zoom = 1, fixedHalfH = 0) {
     const az = azDeg * Math.PI / 180, el = elDeg * Math.PI / 180;
     // Tight near/far ortho depth range around full model radius for 4x sharper Z-buffer occlusion!
     const clipRadius = Math.max(mesh.fullRadius || mesh.radius, mesh.radius);
     const dist = clipRadius * 2.5;
     const eye = [mesh.center[0]+dist*Math.sin(az)*Math.cos(el), mesh.center[1]+dist*Math.sin(el), mesh.center[2]+dist*Math.cos(az)*Math.cos(el)];
-    const halfH = (mesh.radius * 1.12) / Math.max(0.4, zoom);
+    const halfH = fixedHalfH > 0 ? fixedHalfH : ((mesh.radius * 1.12) / Math.max(0.4, zoom));
     const halfW = halfH * (w / Math.max(1, h));
     const near = Math.max(1, dist - clipRadius * 2.2);
     const far = dist + clipRadius * 2.2;
     return mulMat4(orthoMat4(-halfW, halfW, -halfH, halfH, near, far), lookAtMat4(eye, mesh.center, [0, 1, 0]));
   }
-  draw(mesh, w, h, azDeg, elDeg, zoom = 1) {
+  draw(mesh, w, h, azDeg, elDeg, zoom = 1, fixedHalfH = 0) {
     const gl = this.gl;
     if (!gl || mesh.triPos.length === 0) return null;
     if (this.canvas.width !== w || this.canvas.height !== h) { this.canvas.width = w; this.canvas.height = h; }
@@ -1343,7 +1354,7 @@ class WebGLBrickEngine {
     gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     gl.enable(gl.POLYGON_OFFSET_FILL); gl.polygonOffset(1.0, 1.0);
 
-    const mvp = this.computeMVP(mesh, w, h, azDeg, elDeg, zoom);
+    const mvp = this.computeMVP(mesh, w, h, azDeg, elDeg, zoom, fixedHalfH);
     gl.useProgram(this.triProg);
     gl.uniformMatrix4fv(this.loc.tMVP, false, mvp);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.bTriPos); gl.enableVertexAttribArray(this.loc.tPos); gl.vertexAttribPointer(this.loc.tPos, 3, gl.FLOAT, false, 0, 0);
@@ -1381,19 +1392,9 @@ const pliThumbCache = new Map();
 function getPliThumb(part) {
   const key = `${part.p}:${part.c}`;
   if (pliThumbCache.has(key)) return pliThumbCache.get(key);
-  let samplePart;
-  if (part.children && part.children.length > 0) {
-    // Re-center composite assembly at origin for clean thumbnail
-    const cx = part.x, cy = part.y, cz = part.z;
-    samplePart = {
-      id: 't', p: part.p, c: part.c, x: 0, y: 0, z: 0, m: R_ID,
-      children: part.children.map(ch => ({ ...ch, x: ch.x - cx, y: ch.y - cy, z: ch.z - cz })),
-    };
-  } else {
-    samplePart = { id: 't', p: part.p, c: part.c, x: 0, y: 0, z: 0, m: R_ID };
-  }
+  const samplePart = normalizeCompositeThumbPart(part, (pid) => resolvePart(pid).name, computeWorldBox);
   const mesh = buildMeshBuffers([], [samplePart], { highlightNew:false, fadePrev:false, showArrows:false, accent:'#1a73e8' });
-  snapshotEngine.draw(mesh, 112, 112, 38, 28, 1.05);
+  snapshotEngine.draw(mesh, 112, 112, 32, 22, 1.05);
   const url = snapshotCanvas.toDataURL('image/png');
   if (pliThumbCache.size > 220) pliThumbCache.clear();
   pliThumbCache.set(key, url);
@@ -1402,8 +1403,20 @@ function getPliThumb(part) {
 
 function renderSnapshot(prev, next, az, el, w, h, zoom, opts) {
   const mesh = buildMeshBuffers(prev, next, opts);
-  const mvp = snapshotEngine.draw(mesh, w, h, az, el, zoom);
+  const mvp = snapshotEngine.draw(mesh, w, h, az, el, zoom, opts?.fixedHalfH || 0);
   return { url: snapshotCanvas.toDataURL('image/png'), mesh, mvp, w, h };
+}
+
+function renderMinifigOneToOne(parts, pagePxH, pageHIn, maxPxW, maxPxH, accent = '#1a73e8') {
+  const mesh = buildMeshBuffers([], parts, { highlightNew: false, fadePrev: false, showArrows: false, accent });
+  const widthLdu = Math.max(16, mesh.bounds.maxX - mesh.bounds.minX);
+  const heightLdu = Math.max(24, mesh.bounds.maxY - mesh.bounds.minY);
+  const layout = computeMinifigOneToOneLayout({ widthLdu, heightLdu }, pagePxH, pageHIn, maxPxW, maxPxH);
+  const aspect = layout.worldSpanW / Math.max(1, layout.worldSpanH);
+  const rh = Math.max(160, Math.min(480, Math.round(layout.displayPxH * 2.5)));
+  const rw = Math.max(96, Math.round(rh * aspect));
+  snapshotEngine.draw(mesh, rw, rh, 0, 0, 1.0, layout.fixedHalfH);
+  return { url: snapshotCanvas.toDataURL('image/png'), ...layout };
 }
 
 // =========================================================================
@@ -2335,12 +2348,27 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
     const name = (resolvePart(part.p).name || '').toLowerCase();
     const childKeys = (part.children || []).map(c => normId(c.p)).join(' ');
     const combo = `${k} ${childKeys}`;
-    if (/(?:^|\s)(?:asm_)?(?:bl_)?(?:3815|3816|3817|970|41879|16709)/i.test(combo) || /\bhips\b|minifig.*leg/i.test(name)) return 'legs';
-    if (/(?:^|\s)(?:asm_)?(?:bl_)?(?:973|3818|3819|3820)/i.test(combo) || /minifig.*torso|torso assembly/i.test(name)) return 'torso';
+    if (/(?:^|\s)(?:asm_)?(?:bl_)?(?:3815|3816|3817|970|41879|16709|37364|36036)/i.test(combo) || /\bhips\b|minifig.*leg/i.test(name)) return 'legs';
+    if (/(?:^|\s)(?:asm_)?(?:bl_)?(?:973|3818|3819|3820)/i.test(combo) || /minifig.*torso|torso assembly|minifig.*arm|minifig.*hand/i.test(name)) return 'torso';
     if (/(?:^|\s)(?:bl_)?(?:3626|28621)/i.test(combo) || /minifig.*head\b/i.test(name)) return 'head';
     if (/(?:^|\s)(?:bl_)?(?:76925|26066|11303|66913|21778|98385|11256|61976|25376|93091|24093|3842)/i.test(combo) ||
         /hair|helmet|hat|cap|hood|headgear|visor|crown|scarf|cape|armor|backpack|bag|ponytail|wig|beard|glasses|utensil|minifig.*accessory/i.test(name)) return 'headgear';
     return null;
+  };
+  const isCoreTorsoPart = (part) => {
+    if (part.children && part.children.length > 0) return classifyMinifigPiece(part) === 'torso';
+    return classifyMinifigLeafRole(part.p, resolvePart(part.p).name) === 'torso';
+  };
+  const isLooseArmOrHand = (part) => {
+    if (part.children && part.children.length > 0) return false;
+    const r = classifyMinifigLeafRole(part.p, resolvePart(part.p).name);
+    return r === 'arm_r' || r === 'arm_l' || r === 'hand';
+  };
+  const getPartUpVector = (part) => {
+    const leaf = (part.children && part.children.length > 0)
+      ? (part.children.find(c => classifyMinifigLeafRole(c.p, resolvePart(c.p).name) === 'torso') || part.children[0])
+      : part;
+    return mat3Col(mat3Orthonormalize(leaf.m || R_ID), 1);
   };
   const mfKinds = parts.map(p => classifyMinifigPiece(p));
   const mfClaimed = new Uint8Array(parts.length);
@@ -2355,7 +2383,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
     }
   }
   const mfSubCands = Array.from(mfSubInsts.values())
-    .filter(r => r.indices.length >= 2 && r.indices.length <= 12)
+    .filter(r => r.indices.length >= 2 && r.indices.length <= 14)
     .sort((a, b) => a.indices.length - b.indices.length);
   for (const rec of mfSubCands) {
     if (rec.indices.some(i => mfClaimed[i])) continue;
@@ -2366,30 +2394,54 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
     }
   }
 
-  // Stage B: Geometric whole-body minifigure detection (works even on flat .ldr files with ZERO submodels!)
+  // Stage B: Geometric whole-body minifigure detection (works on flat .ldr AND tilted/reclined figures!)
   for (let t = 0; t < parts.length; t++) {
-    if (mfClaimed[t] || mfKinds[t] !== 'torso') continue;
+    if (mfClaimed[t] || !isCoreTorsoPart(parts[t])) continue;
     const tc = boxes[t].center;
+    const up = getPartUpVector(parts[t]);
+    const localRel = (c) => {
+      const dx = c[0] - tc[0], dy = c[1] - tc[1], dz = c[2] - tc[2];
+      const along = vec3Dot([dx, dy, dz], up);
+      const horiz = Math.hypot(dx - up[0] * along, dy - up[1] * along, dz - up[2] * along);
+      return { along, horiz };
+    };
     const grp = [t];
-    // Nearest unclaimed legs below/at torso
+    // Attach any un-fused loose arms & hands belonging to this torso (flat .ldr files)
+    for (let j = 0; j < parts.length; j++) {
+      if (mfClaimed[j] || j === t || !isLooseArmOrHand(parts[j])) continue;
+      const c = boxes[j].center;
+      if (Math.hypot(c[0] - tc[0], c[1] - tc[1], c[2] - tc[2]) <= 40) grp.push(j);
+    }
+    // Nearest unclaimed legs below/at torso (along -up)
     let bestLegs = -1, bestLegsD = 58;
     for (let j = 0; j < parts.length; j++) {
       if (mfClaimed[j] || mfKinds[j] !== 'legs') continue;
-      const c = boxes[j].center;
-      const hDist = Math.hypot(c[0] - tc[0], c[2] - tc[2]);
-      const vDist = Math.abs(c[1] - tc[1]);
-      if (hDist <= 34 && vDist <= 56 && hDist + vDist * 0.6 < bestLegsD) { bestLegsD = hDist + vDist * 0.6; bestLegs = j; }
+      const { along, horiz } = localRel(boxes[j].center);
+      const vDist = Math.abs(along);
+      if (horiz <= 36 && along <= 12 && vDist <= 58 && horiz + vDist * 0.6 < bestLegsD) {
+        bestLegsD = horiz + vDist * 0.6; bestLegs = j;
+      }
     }
-    if (bestLegs >= 0) grp.push(bestLegs);
-    // Nearest unclaimed head above torso
+    if (bestLegs >= 0) {
+      grp.push(bestLegs);
+      // If un-fused flat .ldr legs (separate 3815 hips + 3816/3817 legs), pull in sibling leg pieces too!
+      if (!parts[bestLegs].children || parts[bestLegs].children.length === 0) {
+        const lc = boxes[bestLegs].center;
+        for (let j = 0; j < parts.length; j++) {
+          if (mfClaimed[j] || grp.includes(j) || mfKinds[j] !== 'legs') continue;
+          if (parts[j].children && parts[j].children.length > 0) continue;
+          const c = boxes[j].center;
+          if (Math.hypot(c[0] - lc[0], c[1] - lc[1], c[2] - lc[2]) <= 34) grp.push(j);
+        }
+      }
+    }
+    // Nearest unclaimed head above torso (along +up)
     let bestHead = -1, bestHeadD = 62;
     for (let j = 0; j < parts.length; j++) {
       if (mfClaimed[j] || mfKinds[j] !== 'head') continue;
-      const c = boxes[j].center;
-      const hDist = Math.hypot(c[0] - tc[0], c[2] - tc[2]);
-      const dy = c[1] - tc[1];
-      if (hDist <= 30 && dy >= -10 && dy <= 72 && hDist + Math.abs(dy - 36) * 0.5 < bestHeadD) {
-        bestHeadD = hDist + Math.abs(dy - 36) * 0.5; bestHead = j;
+      const { along, horiz } = localRel(boxes[j].center);
+      if (horiz <= 30 && along >= -10 && along <= 72 && horiz + Math.abs(along - 36) * 0.5 < bestHeadD) {
+        bestHeadD = horiz + Math.abs(along - 36) * 0.5; bestHead = j;
       }
     }
     if (bestHead >= 0) grp.push(bestHead);
@@ -2470,31 +2522,91 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
     indices: c,
   }));
 
-  // 3. Emit complete Minifigures chapter FIRST (1 whole minifigure per step), then Chassis-First Main Build!
+  // 3. Normalize all detected minifigures into canonical standing-up front-facing construction pose,
+  //    and prepare their placement transforms to run right before they are placed on the model!
+  const hasMainModel = groupedComps.length > 0;
+  const normalizedMinifigs = minifigGroups.map((mg, mfIdx) => {
+    const order = { legs: 0, torso: 1, head: 2, headgear: 3 };
+    const sortedIdx = [...mg.indices].sort((a, b) =>
+      (order[mfKinds[a]] ?? 4) - (order[mfKinds[b]] ?? 4) || boxes[a].min[1] - boxes[b].min[1]
+    );
+    const worldParts = sortedIdx.map(i => parts[i]);
+    const mfId = `mf_${mfIdx + 1}`;
+    const norm = normalizeMinifigureForBuild(
+      worldParts,
+      (pid) => resolvePart(pid).name,
+      computeWorldBox,
+      mfId,
+    );
+    const wMin = [Infinity, Infinity, Infinity], wMax = [-Infinity, -Infinity, -Infinity];
+    for (const idx of sortedIdx) {
+      for (let k = 0; k < 3; k++) {
+        if (boxes[idx].min[k] < wMin[k]) wMin[k] = boxes[idx].min[k];
+        if (boxes[idx].max[k] > wMax[k]) wMax[k] = boxes[idx].max[k];
+      }
+    }
+    const worldBox = {
+      min: wMin, max: wMax,
+      center: [(wMin[0] + wMax[0]) / 2, (wMin[1] + wMax[1]) / 2, (wMin[2] + wMax[2]) / 2],
+    };
+    return {
+      id: mfId,
+      name: mg.name || `Minifigure ${mfIdx + 1}`,
+      indices: sortedIdx,
+      worldParts,
+      worldBox,
+      ...norm,
+    };
+  });
+
+  // Assign each minifigure to its closest main-model section so it is posed & placed right onto the model
+  const sectionMinifigs = groupedComps.map(() => []);
+  if (hasMainModel) {
+    for (const nm of normalizedMinifigs) {
+      let bestSec = 0, bestD = Infinity;
+      groupedComps.forEach((g, secIdx) => {
+        for (const pi of g.indices) {
+          const b = boxes[pi];
+          const gx = Math.max(0, nm.worldBox.min[0] - b.max[0], b.min[0] - nm.worldBox.max[0]);
+          const gy = Math.max(0, nm.worldBox.min[1] - b.max[1], b.min[1] - nm.worldBox.max[1]);
+          const gz = Math.max(0, nm.worldBox.min[2] - b.max[2], b.min[2] - nm.worldBox.max[2]);
+          const d = Math.hypot(gx, gy, gz);
+          if (d < bestD) { bestD = d; bestSec = secIdx; }
+        }
+      });
+      sectionMinifigs[bestSec].push(nm);
+    }
+  }
+
+  // 4. Emit complete Minifigures chapter FIRST (standing upright, facing camera in front 3/4 view),
+  //    then Chassis-First Main Build with pre-placement pose/rotation + placement steps!
   const chapters = [];
   const emittedSubChapters = new Set();
   let globalStep = 0, chSeq = 0;
 
-  if (minifigGroups.length > 0) {
-    const mfSteps = minifigGroups.map((mg) => {
+  if (normalizedMinifigs.length > 0) {
+    const mfSteps = normalizedMinifigs.map((nm) => {
       globalStep++;
-      const order = { legs: 0, torso: 1, head: 2, headgear: 3 };
-      const sortedIdx = [...mg.indices].sort((a, b) =>
-        (order[mfKinds[a]] ?? 4) - (order[mfKinds[b]] ?? 4) || boxes[a].min[1] - boxes[b].min[1]
-      );
       return {
         id: `mf_s${globalStep}`,
         num: globalStep,
-        side: 'top',
-        corner: 'front_right',
+        side: MINIFIG_BUILD_CAMERA.side,
+        corner: MINIFIG_BUILD_CAMERA.corner,
+        az: MINIFIG_BUILD_CAMERA.az,
+        el: MINIFIG_BUILD_CAMERA.el,
         cue: 'none',
         isStandaloneFigure: true,
-        parts: sortedIdx.map(i => parts[i]),
+        isMinifigBuildStep: true,
+        placedInMain: hasMainModel,
+        minifigId: nm.id,
+        minifigName: nm.name,
+        minifigMetrics: nm.metrics,
+        parts: nm.canonicalParts,
       };
     });
     chapters.push({
       id: `ach_${++chSeq}`,
-      name: minifigGroups.length === 1 ? 'Minifigure' : 'Minifigures',
+      name: normalizedMinifigs.length === 1 ? 'Minifigure' : 'Minifigures',
       kind: 'minifigure',
       sectionId: 'sec_minifigs',
       steps: mfSteps,
@@ -2624,6 +2736,48 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
       if (!mfClaimed[i] && !assigned.has(i)) leftover.push(i);
     }
 
+    const appendMinifigPlacementSteps = (targetSteps, nm, idPrefix) => {
+      if (nm.needsTransform) {
+        globalStep++;
+        targetSteps.push({
+          id: `${idPrefix}_mfpose_${nm.id}_s${globalStep}`,
+          num: globalStep,
+          side: 'top',
+          corner: 'front_right',
+          az: 38,
+          el: 26,
+          cue: 'none',
+          isMinifigPoseStep: true,
+          minifigPrep: {
+            id: nm.id,
+            name: nm.name,
+            label: nm.transformLabel,
+            canonicalParts: nm.canonicalParts,
+            poseSummary: nm.poseSummary,
+          },
+          parts: nm.posedPreviewParts,
+        });
+      }
+      globalStep++;
+      targetSteps.push({
+        id: `${idPrefix}_mfplace_${nm.id}_s${globalStep}`,
+        num: globalStep,
+        side: 'top',
+        corner: 'front_right',
+        cue: 'none',
+        attachedMinifig: {
+          id: nm.id,
+          name: nm.name,
+          repeatCount: 1,
+          previewParts: nm.posedPreviewParts,
+          canonicalParts: nm.canonicalParts,
+          needsTransform: nm.needsTransform,
+          transformLabel: nm.transformLabel,
+        },
+        parts: nm.worldParts,
+      });
+    };
+
     if (subdivisionPlan.outputMode === 'numbered_bags') {
       const runningPlaced = new Set();
       const bagSections = [...resolvedSections];
@@ -2636,6 +2790,23 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
         }
       }
 
+      // Assign each minifigure to the bag whose bricks are closest to its placement spot
+      const bagMinifigs = bagSections.map(() => []);
+      for (const nm of normalizedMinifigs) {
+        let bestBag = Math.max(0, bagSections.length - 1), bestD = Infinity;
+        bagSections.forEach((sec, bIdx) => {
+          for (const pi of sec.cleanRepeatGroups.flat()) {
+            const b = boxes[pi];
+            const gx = Math.max(0, nm.worldBox.min[0] - b.max[0], b.min[0] - nm.worldBox.max[0]);
+            const gy = Math.max(0, nm.worldBox.min[1] - b.max[1], b.min[1] - nm.worldBox.max[1]);
+            const gz = Math.max(0, nm.worldBox.min[2] - b.max[2], b.min[2] - nm.worldBox.max[2]);
+            const d = Math.hypot(gx, gy, gz);
+            if (d < bestD) { bestD = d; bestBag = bIdx; }
+          }
+        });
+        if (bagMinifigs[bestBag]) bagMinifigs[bestBag].push(nm);
+      }
+
       bagSections.forEach((sec, bIdx) => {
         const bagIndices = sec.cleanRepeatGroups.flat();
         const { steps: bagSteps, placed: afterPlaced } = buildStepsForIndexList(
@@ -2645,6 +2816,9 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
           adaptiveMaxSpread,
         );
         for (const pi of afterPlaced) runningPlaced.add(pi);
+        for (const nm of (bagMinifigs[bIdx] || [])) {
+          appendMinifigPlacementSteps(bagSteps, nm, `bag${bIdx + 1}`);
+        }
         if (bagSteps.length > 0) {
           chapters.push({
             id: `bagch_${++chSeq}_${sec.id}`,
@@ -2740,6 +2914,11 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
         joinSteps.push(...connectorSteps);
       }
 
+      // Position / pose and place all minifigures onto the joined model in Connect & Finish
+      for (const nm of normalizedMinifigs) {
+        appendMinifigPlacementSteps(joinSteps, nm, 'join');
+      }
+
       if (joinSteps.length > 0) {
         chapters.push({
           id: `ach_${++chSeq}_connect`,
@@ -2770,6 +2949,97 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
     const remaining = new Set(indices);
     const { belowMap, baseMinY } = buildVerticalPrereqMap(boxes, adj, roles, claddingFlags, indices);
     let curSteps = [];
+
+    // Analyze support & overhead enclosure for minifigures belonging to this model section
+    const indexSet = new Set(indices);
+    const unplacedMinifigs = (sectionMinifigs[secIdx] || []).map((nm) => {
+      const mfIdxSet = new Set(nm.indices);
+      const wb = nm.worldBox;
+      const supportSet = new Set();
+      const overheadSet = new Set();
+      for (const j of indices) {
+        const b = boxes[j];
+        const ovX = Math.min(wb.max[0] + 8, b.max[0]) - Math.max(wb.min[0] - 8, b.min[0]);
+        const ovZ = Math.min(wb.max[2] + 8, b.max[2]) - Math.max(wb.min[2] - 8, b.min[2]);
+        if (ovX > 2 && ovZ > 2 && b.max[1] <= wb.min[1] + 28 && b.max[1] >= wb.min[1] - 32) {
+          supportSet.add(j);
+        }
+        const strictOvX = Math.min(wb.max[0], b.max[0]) - Math.max(wb.min[0], b.min[0]);
+        const strictOvZ = Math.min(wb.max[2], b.max[2]) - Math.max(wb.min[2], b.min[2]);
+        if (strictOvX >= 6 && strictOvZ >= 6 && b.min[1] >= wb.max[1] - 12) {
+          overheadSet.add(j);
+        }
+      }
+      for (const mi of mfIdxSet) {
+        for (const nb of adj[mi]) {
+          if (indexSet.has(nb) && boxes[nb].max[1] <= wb.min[1] + 32) supportSet.add(nb);
+        }
+      }
+      return {
+        nm,
+        supportIndices: Array.from(supportSet),
+        overheadIndices: overheadSet,
+        isEnclosed: overheadSet.size > 0,
+      };
+    });
+
+    const emitMinifigPlacement = (nm) => {
+      // Position / rotate / pose minifigure right before placing it on the model!
+      if (nm.needsTransform) {
+        globalStep++;
+        curSteps.push({
+          id: `ac${secIdx + 1}_mfpose_${nm.id}_s${globalStep}`,
+          num: globalStep,
+          side: 'top',
+          corner: 'front_right',
+          az: 38,
+          el: 26,
+          cue: 'none',
+          isMinifigPoseStep: true,
+          minifigPrep: {
+            id: nm.id,
+            name: nm.name,
+            label: nm.transformLabel,
+            canonicalParts: nm.canonicalParts,
+            poseSummary: nm.poseSummary,
+          },
+          parts: nm.posedPreviewParts,
+        });
+      }
+      globalStep++;
+      curSteps.push({
+        id: `ac${secIdx + 1}_mfplace_${nm.id}_s${globalStep}`,
+        num: globalStep,
+        side: 'top',
+        corner: 'front_right',
+        cue: 'none',
+        attachedMinifig: {
+          id: nm.id,
+          name: nm.name,
+          repeatCount: 1,
+          previewParts: nm.posedPreviewParts,
+          canonicalParts: nm.canonicalParts,
+          needsTransform: nm.needsTransform,
+          transformLabel: nm.transformLabel,
+        },
+        parts: nm.worldParts,
+      });
+    };
+
+    const flushReadyEnclosedMinifigs = (upcomingIndices = null) => {
+      for (let mi = 0; mi < unplacedMinifigs.length; ) {
+        const entry = unplacedMinifigs[mi];
+        if (!entry.isEnclosed) { mi++; continue; }
+        const supportReady = entry.supportIndices.length > 0 && entry.supportIndices.every(s => placed.has(s));
+        const aboutToEnclose = Boolean(upcomingIndices && placed.size > 0 && upcomingIndices.some(u => entry.overheadIndices.has(u)));
+        if (supportReady || aboutToEnclose) {
+          unplacedMinifigs.splice(mi, 1);
+          emitMinifigPlacement(entry.nm);
+        } else {
+          mi++;
+        }
+      }
+    };
 
     const isInstBlockedFromBelow = (instIndices) => {
       const instSet = new Set(instIndices);
@@ -2866,6 +3136,9 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
           if (isAnchorInst || (touchesPlaced && underClear)) readyInsts.push(unplacedInSec);
         });
 
+        const attachIndices = readyInsts.flat();
+        flushReadyEnclosedMinifigs(attachIndices);
+
         // Emit the submodel's own step-by-step chapter ONCE right before its first attachment!
         if (!emittedSubChapters.has(g.id)) {
           flushMainSteps();
@@ -2882,7 +3155,6 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
           emittedSubChapters.add(g.id);
         }
 
-        const attachIndices = readyInsts.flat();
         for (const pi of attachIndices) { remaining.delete(pi); placed.add(pi); }
         globalStep++;
         curSteps.push({
@@ -2900,6 +3172,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
             canonicalParts: g.canonicalParts,
           },
         });
+        flushReadyEnclosedMinifigs();
         continue;
       }
 
@@ -2950,6 +3223,9 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
         placed.add(next);
       }
 
+      // If this step places an overhead roof brick over an enclosed minifig, pose & place that minifig right BEFORE!
+      flushReadyEnclosedMinifigs(stepIndices);
+
       globalStep++;
       curSteps.push({
         id: `ac${secIdx+1}_s${globalStep}`,
@@ -2957,7 +3233,17 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
         side: 'top', corner: 'front_right', cue: 'none',
         parts: stepIndices.map(i => parts[i]),
       });
+
+      // If this step finished the floor/seat under an enclosed minifig, pose & place it right now!
+      flushReadyEnclosedMinifigs();
     }
+
+    // Place any remaining open-air / exterior minifigures at the end of this build section
+    while (unplacedMinifigs.length > 0) {
+      const entry = unplacedMinifigs.shift();
+      emitMinifigPlacement(entry.nm);
+    }
+
     flushMainSteps();
   });
 
@@ -2965,26 +3251,50 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
   return { title: parsed.title, subtitle: `${parts.length} pieces · ${globalStep} steps${dupSummary}`, chapters, _parsed: parsed, _mode: mode, _subdivisionPlan: null };
 }
 
-// Built-in Sample Model (includes fused minifigure + a genuine ×2 duplicate submodel showcase!)
+// Built-in Sample Model (includes standing minifigure + placement + a genuine ×2 duplicate submodel showcase!)
 function buildSampleModel() {
-  const mk = (id, p, c, x, y, z) => ({ id, p, c, x, y, z, m: R_ID });
+  const mk = (id, p, c, x, y, z, m = R_ID) => ({ id, p, c, x, y, z, m });
+  const rotY = (deg) => {
+    const r = deg * Math.PI / 180, co = Math.cos(r), si = Math.sin(r);
+    return [co, 0, si, 0, 1, 0, -si, 0, co];
+  };
+  const astroWorldM = rotY(-40);
+  const astroWorldParts = [
+    mk('m1', '3815c01', 15, 72, 28, 18, astroWorldM),
+    mk('m2', '973c01', 15, 72, 60, 18, astroWorldM),
+    mk('m3', '3626cp01', 14, 72, 84, 18, astroWorldM),
+    mk('m4', '3842a', 15, 72, 86, 18, astroWorldM),
+  ];
+  const astroNorm = normalizeMinifigureForBuild(
+    astroWorldParts,
+    (pid) => resolvePart(pid).name,
+    computeWorldBox,
+    'sample_astro',
+  );
   const solarCanon = [mk('sc1','3023',15,0,8,0), mk('sc2','60470b',72,20,8,0), mk('sc3','3068b',1,0,16,0)];
   return {
     title: 'Orbital Rover',
-    subtitle: 'Sample · 19 pieces · 5 steps · 1 repeated submodel',
+    subtitle: 'Sample · 19 pieces · 6 steps · 1 repeated submodel',
     chapters: [
       {
         id: 'ch_mf', name: 'Astronaut', kind: 'minifigure', sectionId: 'sec_mf',
         steps: [
-          { id:'s1', num:1, side:'top', corner:'front_right', cue:'none', parts:[mk('m1','3815c01',15,0,28,0), mk('m2','973c01',15,0,56,0)] },
-          { id:'s2', num:2, side:'top', corner:'front_right', cue:'none', parts:[mk('m3','3626cp01',14,0,80,0), mk('m4','3842a',15,0,84,0)] },
+          {
+            id: 's1', num: 1,
+            side: MINIFIG_BUILD_CAMERA.side, corner: MINIFIG_BUILD_CAMERA.corner,
+            az: MINIFIG_BUILD_CAMERA.az, el: MINIFIG_BUILD_CAMERA.el,
+            cue: 'none',
+            isStandaloneFigure: true, isMinifigBuildStep: true, placedInMain: true,
+            minifigId: 'sample_astro', minifigName: 'Astronaut', minifigMetrics: astroNorm.metrics,
+            parts: astroNorm.canonicalParts,
+          },
         ],
       },
       {
         id: 'ch_main_1', name: 'Rover Chassis', kind: 'main', sectionId: 'sec_main',
         steps: [
-          { id:'s3', num:3, side:'top', corner:'front_right', cue:'none', parts:[mk('r1','3031',72,0,8,0), mk('r2','3020',71,-30,16,0), mk('r3','3020',71,30,16,0)] },
-          { id:'s4', num:4, side:'top', corner:'front_right', cue:'none', parts:[mk('r4','3001',15,0,40,0), mk('r5','4733',72,-30,40,0), mk('r6','4733',72,30,40,0), mk('r7','4519',0,0,48,0)] },
+          { id:'s2', num:2, side:'top', corner:'front_right', cue:'none', parts:[mk('r1','3031',72,0,8,0), mk('r2','3020',71,-30,16,0), mk('r3','3020',71,30,16,0)] },
+          { id:'s3', num:3, side:'top', corner:'front_right', cue:'none', parts:[mk('r4','3001',15,0,40,0), mk('r5','4733',72,-30,40,0), mk('r6','4733',72,30,40,0), mk('r7','4519',0,0,48,0)] },
         ],
       },
       {
@@ -2998,9 +3308,27 @@ function buildSampleModel() {
         id: 'ch_main_2', name: 'Rover Chassis', kind: 'main', sectionId: 'sec_main',
         steps: [
           {
-            id:'s5', num:5, side:'top', corner:'back_left', cue:'yaw_180',
+            id:'s4', num:4, side:'top', corner:'back_left', cue:'yaw_180',
             attachedSubmodel: { id:'sub_solar', name:'Solar Array', repeatCount:2, totalRepeatCount:2, canonicalParts: solarCanon },
             parts:[mk('r8','3023',15,-46,24,0), mk('r9','3068b',1,-46,32,0), mk('r10','3023',15,46,24,0), mk('r11','3068b',1,46,32,0), mk('r12','30374',71,0,66,0)],
+          },
+          {
+            id:'s5', num:5, side:'top', corner:'front_right', az:38, el:26, cue:'none',
+            isMinifigPoseStep: true,
+            minifigPrep: {
+              id: 'sample_astro', name: 'Astronaut', label: astroNorm.transformLabel,
+              canonicalParts: astroNorm.canonicalParts, poseSummary: astroNorm.poseSummary,
+            },
+            parts: astroNorm.posedPreviewParts,
+          },
+          {
+            id:'s6', num:6, side:'top', corner:'front_right', cue:'none',
+            attachedMinifig: {
+              id: 'sample_astro', name: 'Astronaut', repeatCount: 1,
+              previewParts: astroNorm.posedPreviewParts, canonicalParts: astroNorm.canonicalParts,
+              needsTransform: astroNorm.needsTransform, transformLabel: astroNorm.transformLabel,
+            },
+            parts: astroWorldParts,
           },
         ],
       },
@@ -3030,6 +3358,7 @@ const state = {
   fadeOpacity: 0.82,
   showRotCues: true,
   showSizeGuides: true,
+  showMinifig1to1: false,
   showStepBorders: true,
   showPageTitle: true,
   pageNumberFormat: 'page_n', // 'number' | 'page_n' | 'n_of_total' | 'none'
@@ -3106,7 +3435,11 @@ function showToast(msg) {
 
 function getAllSteps(model) { return model ? model.chapters.flatMap(ch => ch.steps.map(step => ({ ch, step }))) : []; }
 function getMainSteps(model) { return model ? model.chapters.filter(ch => ch.kind !== 'submodel').flatMap(ch => ch.steps.map(step => ({ ch, step }))) : []; }
-function getAllParts(model) { return getMainSteps(model).flatMap(x => x.step.parts); }
+function getAllParts(model) {
+  return getMainSteps(model)
+    .filter(({ step }) => !step.isMinifigPoseStep && !(step.isMinifigBuildStep && step.placedInMain))
+    .flatMap(x => x.step.parts);
+}
 function renumberContinuousSteps(model) {
   let mainNum = 0;
   for (const ch of model.chapters) {
@@ -3125,7 +3458,7 @@ function renumberContinuousSteps(model) {
 }
 function getPreviousPartsForStep(model, ch, step) {
   const prev = [];
-  if (step.isStandaloneFigure) return prev;
+  if (step.isStandaloneFigure || step.isMinifigPoseStep) return prev;
   if (ch.kind === 'submodel') {
     for (const s of ch.steps) { if (s.id === step.id) break; prev.push(...s.parts); }
     return prev;
@@ -3136,6 +3469,7 @@ function getPreviousPartsForStep(model, ch, step) {
     if ((c.sectionId || c.id) !== sec) continue;
     for (const s of c.steps) {
       if (s.id === step.id) return prev;
+      if (s.isMinifigPoseStep || s.isStandaloneFigure) continue;
       prev.push(...s.parts);
     }
     if (c.id === ch.id) break;
@@ -3149,6 +3483,15 @@ function getSubmodelThumb(subObj, w = 220, h = 150) {
   const k = `${subObj.id || subObj.name}_${w}x${h}`;
   if (submodelThumbCache.has(k)) return submodelThumbCache.get(k);
   const snap = renderSnapshot([], subObj.canonicalParts, 38, 28, w, h, 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:'#1a73e8' });
+  submodelThumbCache.set(k, snap.url);
+  return snap.url;
+}
+function getMinifigThumb(partsList, cacheKey, az = MINIFIG_BUILD_CAMERA.az, el = MINIFIG_BUILD_CAMERA.el, w = 140, h = 140) {
+  if (!partsList?.length) return '';
+  if (submodelThumbCache.size > 140) submodelThumbCache.clear();
+  const k = `mf_${cacheKey}_${az}_${el}_${w}x${h}`;
+  if (submodelThumbCache.has(k)) return submodelThumbCache.get(k);
+  const snap = renderSnapshot([], partsList, az, el, w, h, 1.04, { highlightNew:false, fadePrev:false, showArrows:false, accent:'#1a73e8' });
   submodelThumbCache.set(k, snap.url);
   return snap.url;
 }
@@ -3373,17 +3716,19 @@ function rebuildPages() {
           chapterName: ch.name, step: first, ch,
         });
       }
+      const nextStep = ch.steps[i + 1];
+      const isPosePlacePair = Boolean(first.isMinifigPoseStep && nextStep?.attachedMinifig);
       const cap = state.layout === 'auto'
-        ? (first.subassembly || first.attachedSubmodel || first.parts.length >= 6 ? 1 : 2)
+        ? (isPosePlacePair ? 2 : (first.subassembly || first.attachedSubmodel || first.attachedMinifig || first.parts.length >= 6 ? 1 : 2))
         : (state.layout === '1-up' ? 1 : state.layout === '2-up' ? 2 : 4);
       const slots = [];
       for (let k = 0; k < cap && i < ch.steps.length; k++) {
         const s = ch.steps[i];
         if (k > 0 && state.overrides[s.id]?.pin) break;
-        if (k > 0 && (s.subassembly || s.attachedSubmodel) && state.layout === 'auto') break;
+        if (k > 0 && (s.subassembly || s.attachedSubmodel || (s.attachedMinifig && !isPosePlacePair) || s.isMinifigPoseStep) && state.layout === 'auto') break;
         slots.push({ ch, step: s });
         i++;
-        if ((s.subassembly || s.attachedSubmodel) && state.layout === 'auto') break;
+        if ((s.subassembly || s.attachedSubmodel || s.attachedMinifig) && state.layout === 'auto') break;
       }
       const stepRange = slots.length === 1 ? `Step ${slots[0].step.num}` : `Steps ${slots[0].step.num}–${slots[slots.length-1].step.num}`;
       const label = isSubCh
@@ -3455,7 +3800,12 @@ function getStepCamera(step) {
   const side = ov.side || step.side || 'top';
   const corner = ov.corner || step.corner || 'front_right';
   const cObj = CORNERS.find(c => c.id === corner) || CORNERS[0];
-  return { side, corner, az: ov.az ?? cObj.az, el: ov.el ?? (side === 'bottom' ? -30 : 30) };
+  return {
+    side,
+    corner,
+    az: ov.az ?? (typeof step.az === 'number' ? step.az : cObj.az),
+    el: ov.el ?? (typeof step.el === 'number' ? step.el : (side === 'bottom' ? -30 : 30)),
+  };
 }
 
 function getActiveStepObj() {
@@ -3814,6 +4164,13 @@ function renderAll() {
       : 'grid-cols-2 grid-rows-2';
 
     const subIntroImg = page.submodelIntro ? getSubmodelThumb(page.submodelIntro, 240, 150) : null;
+    const effectivePageHIn = state.paperFormat === 'screen'
+      ? (dims.isLandscape ? 8.5 : 11)
+      : getActivePagePhysicalInches()[1];
+    const slotCols = slots.length === 1 ? 1 : slots.length === 2 ? (dims.isLandscape ? 2 : 1) : 2;
+    const slotRows = Math.ceil(slots.length / slotCols);
+    const estSlotW = Math.max(120, (dims.width - padPx * 2 - gapPx * (slotCols - 1)) / slotCols);
+    const estSlotH = Math.max(120, (dims.height - padPx * 2 - 22 - gapPx * (slotRows - 1)) / slotRows);
 
     const slotData = slots.map(({ ch, step }) => {
       const prev = getPreviousPartsForStep(state.model, ch, step);
@@ -3835,10 +4192,24 @@ function renderAll() {
         ? renderSnapshot([], step.subassembly.buildParts, 38, 30, 260, 180, 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent }).url
         : null;
       const attSubImg = step.attachedSubmodel ? getSubmodelThumb(step.attachedSubmodel, 160, 120) : null;
+      const mfPrepImg = step.minifigPrep
+        ? getMinifigThumb(step.minifigPrep.canonicalParts, `prep_${step.minifigPrep.id}`, MINIFIG_BUILD_CAMERA.az, MINIFIG_BUILD_CAMERA.el, 120, 120)
+        : null;
+      const attMfImg = step.attachedMinifig
+        ? getMinifigThumb(
+            step.attachedMinifig.previewParts || step.attachedMinifig.canonicalParts,
+            `att_${step.attachedMinifig.id}`,
+            38, 26, 120, 120,
+          )
+        : null;
+      const isMfBuild = Boolean((step.isStandaloneFigure || ch.kind === 'minifigure') && !step.isMinifigPoseStep);
+      const mf1to1 = (state.showMinifig1to1 && isMfBuild)
+        ? renderMinifigOneToOne(step.parts, dims.height, effectivePageHIn, Math.round(estSlotW * 0.36), Math.round(estSlotH * 0.66), theme.accent)
+        : null;
 
-      // Group PLI items + detect 1:1 Actual-Size Guides (skip individual bricks when attaching a pre-built duplicate submodel!)
+      // Group PLI items + detect 1:1 Actual-Size Guides (skip individual bricks when attaching a pre-built submodel or minifigure!)
       const pliMap = new Map();
-      if (!step.attachedSubmodel) {
+      if (!step.attachedSubmodel && !step.attachedMinifig && !step.minifigPrep) {
         for (const p of step.parts) {
           const k = `${p.p}:${p.c}`;
           if (!pliMap.has(k)) pliMap.set(k, { part: p, ids: [], qty: 0, guide: getActualSizeGuide(p.p) });
@@ -3846,7 +4217,7 @@ function renderAll() {
           item.qty++; item.ids.push(p.id);
         }
       }
-      return { ch, step, prev, cam, ov, snap, subImg, attSubImg, pli: Array.from(pliMap.values()) };
+      return { ch, step, prev, cam, ov, snap, subImg, attSubImg, mfPrepImg, attMfImg, mf1to1, pli: Array.from(pliMap.values()) };
     });
 
     const isRotateMode = state.mode === 'rotate';
@@ -3868,7 +4239,7 @@ function renderAll() {
             <span class="shrink-0 px-3 py-1 rounded-full text-xs sm:text-sm font-black text-white shadow-xs" style="background:${theme.accent}">${page.submodelIntro.repeatCount > 1 ? `×${page.submodelIntro.repeatCount}` : `${page.submodelIntro.pieceCount || page.submodelIntro.canonicalParts.length} pcs`}</span>
           </div>` : ''}
         <div class="grid ${gridCls} flex-1 min-h-0" style="gap:${gapPx}px">
-          ${slotData.map(({ step, ov, snap, subImg, attSubImg, pli }) => {
+          ${slotData.map(({ step, ov, snap, subImg, attSubImg, mfPrepImg, attMfImg, mf1to1, pli }) => {
             const isSelStep = state.selectedStepId === step.id;
             const showLive3D = isRotateMode && isSelStep;
             const pliScale = ov.pliScale || (isTightSlot ? 0.86 : 1.0);
@@ -3897,6 +4268,22 @@ function renderAll() {
                           <div class="text-[9px] font-semibold opacity-75 max-w-[110px] truncate">${escHtml(step.attachedSubmodel.name)}</div>
                         </div>
                       </div>`
+                    : step.minifigPrep ? `
+                      <div data-drag="pli" data-step="${step.id}" class="draggable-el flex items-center gap-2 px-2 py-1 rounded-xl shadow-xs ${isArrangeMode ? 'cursor-move' : ''}" style="background:${theme.calloutBg};border:${pliSel ? `2px solid ${theme.accent}` : `1.5px solid ${theme.calloutBorder}`};transform:translate(${pliPos.x}px,${pliPos.y}px) scale(${pliScale});transform-origin:top left;">
+                        <img src="${mfPrepImg}" alt="${escHtml(step.minifigPrep.name)}" class="${isTightSlot ? 'w-7 h-7' : 'w-9 h-9'} object-contain pointer-events-none" />
+                        <div class="leading-tight">
+                          <div class="text-[10px] font-extrabold" style="color:${theme.accent}">${escHtml(step.minifigPrep.label)}</div>
+                          <div class="text-[9px] font-semibold opacity-75 max-w-[110px] truncate">${escHtml(step.minifigPrep.name)}</div>
+                        </div>
+                      </div>`
+                    : step.attachedMinifig ? `
+                      <div data-drag="pli" data-step="${step.id}" class="draggable-el flex items-center gap-2 px-2 py-1 rounded-xl shadow-xs ${isArrangeMode ? 'cursor-move' : ''}" style="background:${theme.calloutBg};border:${pliSel ? `2px solid ${theme.accent}` : `1.5px solid ${theme.calloutBorder}`};transform:translate(${pliPos.x}px,${pliPos.y}px) scale(${pliScale});transform-origin:top left;">
+                        <img src="${attMfImg}" alt="${escHtml(step.attachedMinifig.name)}" class="${isTightSlot ? 'w-7 h-7' : 'w-9 h-9'} object-contain pointer-events-none" />
+                        <div class="leading-tight">
+                          <div class="text-xs font-black" style="color:${theme.accent}">×${step.attachedMinifig.repeatCount || 1}</div>
+                          <div class="text-[9px] font-semibold opacity-75 max-w-[100px] truncate">${escHtml(step.attachedMinifig.name)}</div>
+                        </div>
+                      </div>`
                     : (!step.subassembly || ov.calloutAsPages ? `
                       <div data-drag="pli" data-step="${step.id}" class="draggable-el flex items-center gap-1.5 px-1.5 py-0.5 rounded-xl flex-wrap shadow-xs ${isArrangeMode ? 'cursor-move' : ''}" style="background:${theme.pliBg};border:${pliSel ? `2px solid ${theme.accent}` : `1px solid ${theme.pliBorder}`};transform:translate(${pliPos.x}px,${pliPos.y}px) scale(${pliScale});transform-origin:top left;">
                         ${pli.slice(0, 7).map(item => {
@@ -3918,11 +4305,12 @@ function renderAll() {
                   </div>
 
                   <div class="flex items-center gap-1 shrink-0">
+                    ${step.minifigPrep ? `<span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-white text-[#202124] shadow-xs" style="border:1.5px solid ${theme.accent}">↻ Prepare</span>` : ''}
                     ${state.showRotCues && step.cue && step.cue !== 'none' ? `<span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-white text-[#202124] shadow-xs" style="border:1.5px solid ${theme.accent}">↻ ${step.cue === 'flip_vertical' ? 'Flip Over' : step.cue === 'yaw_180' ? 'Turn 180°' : 'Rotate 90°'}</span>` : ''}
                   </div>
                 </div>
 
-                <!-- Step Visual Area (Callout + 3D Render — STRICT min-h-0 so NEVER clipped!) -->
+                <!-- Step Visual Area (Callout + 3D Render + Optional 1:1 Minifig Card — STRICT min-h-0 so NEVER clipped!) -->
                 <div class="flex-1 min-h-0 flex ${ov.calloutDir === 'vertical' ? 'flex-col' : 'flex-row'} items-center justify-center gap-1.5 mt-1 overflow-hidden">
                   ${step.subassembly && !ov.calloutAsPages ? `
                     <div data-drag="callout" data-step="${step.id}" class="draggable-el rounded-xl p-1.5 shrink-0 w-28 sm:w-40 max-h-full flex flex-col overflow-hidden ${isArrangeMode ? 'cursor-move' : ''}" style="background:${theme.calloutBg};border:${calloutSel ? `2px solid ${theme.accent}` : `1.5px solid ${theme.calloutBorder}`};transform:translate(${calloutPos.x}px,${calloutPos.y}px)">
@@ -3940,6 +4328,22 @@ function renderAll() {
                     }
                     ${step.isSubmodelFinal ? `<span class="absolute bottom-1.5 right-1.5 px-3 py-1 rounded-full text-sm sm:text-base font-black text-white shadow-md pointer-events-none" style="background:${theme.accent}">×${step.submodelRepeat || 2}</span>` : ''}
                   </div>
+
+                  ${mf1to1 ? `
+                    <div class="shrink-0 rounded-xl px-2 py-1.5 flex flex-col items-center justify-center gap-1 max-h-full overflow-hidden shadow-xs" style="background:${theme.calloutBg};border:1.5px solid ${theme.calloutBorder}" title="Actual-size 1:1 minifigure reference (${Math.round(mf1to1.heightMm)} mm tall)">
+                      <div class="flex items-center gap-1 text-[9px] font-extrabold leading-none">
+                        <span class="px-1.5 py-0.5 rounded-full text-white" style="background:${theme.accent}">1:1${mf1to1.isExact ? '' : ' · Fit'}</span>
+                        <span class="opacity-75 tabular-nums">${Math.round(mf1to1.heightMm)} mm</span>
+                      </div>
+                      <div class="flex items-center gap-1">
+                        <img src="${mf1to1.url}" alt="1:1 actual size minifigure" style="width:${mf1to1.displayPxW}px;height:${mf1to1.displayPxH}px" class="block shrink-0 pointer-events-none" />
+                        <div class="flex flex-col items-center justify-between opacity-55" style="height:${Math.max(24, Math.round(mf1to1.displayPxH * 0.92))}px">
+                          <span class="w-1.5 h-[1.5px] bg-current"></span>
+                          <span class="w-[1.5px] flex-1 bg-current"></span>
+                          <span class="w-1.5 h-[1.5px] bg-current"></span>
+                        </div>
+                      </div>
+                    </div>` : ''}
                 </div>
               </div>`;
           }).join('')}
@@ -4362,6 +4766,8 @@ function renderContextOverlay(page) {
     const cam = getStepCamera(step);
     const scalePct = Math.round((ov.modelScale || 1.0) * 100);
     const fMode = ov.focusMode || 'auto';
+    const isMfBuild = Boolean((step.isStandaloneFigure || ch.kind === 'minifigure') && !step.isMinifigPoseStep);
+    const isFront34 = Math.abs(cam.az - MINIFIG_BUILD_CAMERA.az) <= 4 && Math.abs(cam.el - MINIFIG_BUILD_CAMERA.el) <= 4;
     box.innerHTML = `
       <div class="pointer-events-auto glass-pill rounded-3xl p-3 w-full space-y-2 text-xs">
         <div class="flex items-center justify-between gap-2 flex-wrap">
@@ -4369,6 +4775,7 @@ function renderContextOverlay(page) {
           <div class="flex items-center gap-1 flex-wrap">
             <button id="camTop" class="px-2 py-1 rounded-full font-semibold ${cam.side === 'top' ? 'bg-[#1a73e8] text-white' : 'bg-black/5 dark:bg-white/10'}">Top</button>
             <button id="camBot" class="px-2 py-1 rounded-full font-semibold ${cam.side === 'bottom' ? 'bg-[#1a73e8] text-white' : 'bg-black/5 dark:bg-white/10'}">Bottom</button>
+            ${isMfBuild ? `<button id="btnToggleMf1to1Quick" class="px-2.5 py-1 rounded-full font-semibold ${state.showMinifig1to1 ? 'bg-[#1a73e8] text-white' : 'bg-black/5 dark:bg-white/10'}">1:1 View</button>` : ''}
             <div class="inline-flex rounded-full bg-black/5 dark:bg-white/10 p-0.5 text-[10px] font-semibold">
               <button data-focus="auto" class="focus-btn px-2 py-0.5 rounded-full ${fMode === 'auto' ? 'bg-[#1a73e8] text-white' : ''}">Auto</button>
               <button data-focus="focus" class="focus-btn px-2 py-0.5 rounded-full ${fMode === 'focus' ? 'bg-[#1a73e8] text-white' : ''}">Close-Up</button>
@@ -4383,7 +4790,8 @@ function renderContextOverlay(page) {
         </div>
         <div class="flex items-center justify-between gap-1.5 flex-wrap">
           <div class="flex gap-1 flex-wrap">
-            ${CORNERS.map(c => `<button data-corner="${c.id}" class="corner-btn px-2.5 py-1 rounded-full text-[11px] font-semibold ${cam.corner === c.id ? 'bg-[#1a73e8]/15 text-[#1a73e8] ring-1 ring-[#1a73e8]' : 'bg-black/5 dark:bg-white/10'}">${c.label}</button>`).join('')}
+            ${isMfBuild ? `<button id="btnMfFront34" class="px-2.5 py-1 rounded-full text-[11px] font-semibold ${isFront34 ? 'bg-[#1a73e8]/15 text-[#1a73e8] ring-1 ring-[#1a73e8]' : 'bg-black/5 dark:bg-white/10'}">Front 3/4</button>` : ''}
+            ${CORNERS.map(c => `<button data-corner="${c.id}" class="corner-btn px-2.5 py-1 rounded-full text-[11px] font-semibold ${!isFront34 && cam.corner === c.id ? 'bg-[#1a73e8]/15 text-[#1a73e8] ring-1 ring-[#1a73e8]' : 'bg-black/5 dark:bg-white/10'}">${c.label}</button>`).join('')}
           </div>
           <button id="btnApplyFollowing" class="px-3 py-1 rounded-full bg-[#1a73e8] text-white text-[11px] font-semibold">Apply to Following</button>
         </div>
@@ -4395,11 +4803,25 @@ function renderContextOverlay(page) {
       const nextSide = patch.side ?? cur.side ?? step.side ?? 'top';
       const nextCorner = patch.corner ?? cur.corner ?? step.corner ?? 'front_right';
       const cObj = CORNERS.find(c => c.id === nextCorner) || CORNERS[0];
-      state.overrides[step.id] = { ...cur, side: nextSide, corner: nextCorner, az: cObj.az, el: nextSide === 'bottom' ? -30 : 30 };
+      state.overrides[step.id] = {
+        ...cur,
+        side: nextSide,
+        corner: nextCorner,
+        az: patch.az ?? cObj.az,
+        el: patch.el ?? (nextSide === 'bottom' ? -30 : 30),
+      };
       renderAll();
     };
     box.querySelector('#camTop').onclick = () => setCam({ side: 'top' });
     box.querySelector('#camBot').onclick = () => setCam({ side: 'bottom' });
+    const mf34Btn = box.querySelector('#btnMfFront34');
+    if (mf34Btn) {
+      mf34Btn.onclick = () => setCam({ side: 'top', corner: 'front_right', az: MINIFIG_BUILD_CAMERA.az, el: MINIFIG_BUILD_CAMERA.el });
+    }
+    const mf1to1Btn = box.querySelector('#btnToggleMf1to1Quick');
+    if (mf1to1Btn) {
+      mf1to1Btn.onclick = () => { state.showMinifig1to1 = !state.showMinifig1to1; renderAll(); };
+    }
     box.querySelectorAll('.focus-btn').forEach(b => {
       b.onclick = () => {
         pushUndo();
@@ -4557,6 +4979,7 @@ function syncMenuControls() {
   setChk('togglePrintGuides', state.showPrintGuides);
   setChk('toggleExtras', state.showExtras);
   setChk('toggleDetectDuplicates', state.detectDuplicates);
+  setChk('toggleMinifig1to1', state.showMinifig1to1);
 
   const bc = state.bomConfig;
   document.querySelectorAll('.bom-dens-btn').forEach(b => {
@@ -5158,6 +5581,7 @@ function computeModelDiagnostics() {
   const allSteps = getMainSteps(state.model);
 
   for (const { step } of allSteps) {
+    if (step.isMinifigPoseStep || (step.isMinifigBuildStep && step.placedInMain)) continue;
     for (const p of step.parts) {
       const leaves = p.children && p.children.length > 0 ? p.children : [p];
       // 1. Check for missing 3D piece shapes
@@ -5427,7 +5851,7 @@ function scheduleSaveSessionPrefs() {
       density: state.density, showPrintGuides: state.showPrintGuides, layout: state.layout,
       pacing: state.pacing, detectDuplicates: state.detectDuplicates, highlightNew: state.highlightNew, highlightColor: state.highlightColor,
       fadePrev: state.fadePrev, fadeOpacity: state.fadeOpacity, showRotCues: state.showRotCues,
-      showSizeGuides: state.showSizeGuides, showStepBorders: state.showStepBorders,
+      showSizeGuides: state.showSizeGuides, showMinifig1to1: state.showMinifig1to1, showStepBorders: state.showStepBorders,
       showPageTitle: state.showPageTitle, pageNumberFormat: state.pageNumberFormat,
       showExtras: state.showExtras, bomConfig: state.bomConfig,
       overrides: state.overrides, pageInserts: state.pageInserts, dividerAfter: state.dividerAfter,
@@ -5468,6 +5892,7 @@ async function restoreLastSessionOnStart() {
     if (typeof prefs.fadeOpacity === 'number') state.fadeOpacity = prefs.fadeOpacity;
     if (typeof prefs.showRotCues === 'boolean') state.showRotCues = prefs.showRotCues;
     if (typeof prefs.showSizeGuides === 'boolean') state.showSizeGuides = prefs.showSizeGuides;
+    if (typeof prefs.showMinifig1to1 === 'boolean') state.showMinifig1to1 = prefs.showMinifig1to1;
     if (typeof prefs.showStepBorders === 'boolean') state.showStepBorders = prefs.showStepBorders;
     if (typeof prefs.showPageTitle === 'boolean') state.showPageTitle = prefs.showPageTitle;
     if (prefs.pageNumberFormat) state.pageNumberFormat = prefs.pageNumberFormat;
@@ -5503,6 +5928,8 @@ async function restoreLastSessionOnStart() {
     document.getElementById('toggleFade').checked = state.fadePrev;
     document.getElementById('toggleRotCues').checked = state.showRotCues;
     document.getElementById('toggleSizeGuides').checked = state.showSizeGuides;
+    const mf1El = document.getElementById('toggleMinifig1to1');
+    if (mf1El) mf1El.checked = state.showMinifig1to1;
     const dupEl = document.getElementById('toggleDetectDuplicates');
     if (dupEl) dupEl.checked = state.detectDuplicates;
 
@@ -5869,7 +6296,7 @@ async function renderPageToJpegBytes(page, pxW, pxH) {
       ctx.font = `800 ${Math.round(Math.min(slotH * 0.11, 44))}px -apple-system, sans-serif`;
       ctx.fillText(String(step.num), sx + 12, sy + 10);
 
-      // PLI Box (shows finished submodel thumbnail + ×N or Connect verb on attachment steps, or raw parts otherwise)
+      // PLI Box (shows finished submodel/minifigure thumbnail + ×N or Connect verb on prep & attachment steps, or raw parts otherwise)
       const pliX = sx + Math.round(Math.min(slotH * 0.14, 62)), pliY = sy + 10;
       const pliH = Math.min(58, slotH * 0.22);
       if (step.attachedSubmodel) {
@@ -5893,6 +6320,48 @@ async function renderPageToJpegBytes(page, pxW, pxH) {
         ctx.fillStyle = theme.text;
         ctx.font = `600 ${Math.round(pliH * 0.24)}px -apple-system, sans-serif`;
         ctx.fillText(att.name || 'Submodel', tx, pliY + Math.round(pliH * 0.56), Math.max(40, attBoxW - (tx - pliX) - 8));
+      } else if (step.minifigPrep) {
+        const prep = step.minifigPrep;
+        const prepBoxW = Math.min(slotW - (pliX - sx) - 14, Math.max(175, pliH * 3.8));
+        drawRRect(pliX, pliY, prepBoxW, pliH, 10);
+        ctx.fillStyle = theme.calloutBg;
+        ctx.fill();
+        ctx.strokeStyle = theme.calloutBorder;
+        ctx.lineWidth = 1.8;
+        ctx.stroke();
+        const prepUrl = getMinifigThumb(prep.canonicalParts, `prep_${prep.id}`, MINIFIG_BUILD_CAMERA.az, MINIFIG_BUILD_CAMERA.el, 120, 120);
+        if (prepUrl) {
+          const prepImg = await loadImgPromise(prepUrl);
+          drawContain(ctx, prepImg, pliX + 6, pliY + 4, pliH * 1.0, pliH - 8);
+        }
+        const tx = pliX + 6 + pliH * 1.0 + 8;
+        ctx.fillStyle = theme.accent;
+        ctx.font = `800 ${Math.round(pliH * 0.28)}px -apple-system, sans-serif`;
+        ctx.fillText(prep.label || 'Position', tx, pliY + Math.round(pliH * 0.16), Math.max(40, prepBoxW - (tx - pliX) - 8));
+        ctx.fillStyle = theme.text;
+        ctx.font = `600 ${Math.round(pliH * 0.23)}px -apple-system, sans-serif`;
+        ctx.fillText(prep.name || 'Minifigure', tx, pliY + Math.round(pliH * 0.56), Math.max(40, prepBoxW - (tx - pliX) - 8));
+      } else if (step.attachedMinifig) {
+        const att = step.attachedMinifig;
+        const attBoxW = Math.min(slotW - (pliX - sx) - 14, Math.max(150, pliH * 3.3));
+        drawRRect(pliX, pliY, attBoxW, pliH, 10);
+        ctx.fillStyle = theme.calloutBg;
+        ctx.fill();
+        ctx.strokeStyle = theme.calloutBorder;
+        ctx.lineWidth = 1.8;
+        ctx.stroke();
+        const attUrl = getMinifigThumb(att.previewParts || att.canonicalParts, `att_${att.id}`, 38, 26, 120, 120);
+        if (attUrl) {
+          const attImg = await loadImgPromise(attUrl);
+          drawContain(ctx, attImg, pliX + 6, pliY + 4, pliH * 1.0, pliH - 8);
+        }
+        const tx = pliX + 6 + pliH * 1.0 + 8;
+        ctx.fillStyle = theme.accent;
+        ctx.font = `900 ${Math.round(pliH * 0.36)}px -apple-system, sans-serif`;
+        ctx.fillText(`×${att.repeatCount || 1}`, tx, pliY + Math.round(pliH * 0.14));
+        ctx.fillStyle = theme.text;
+        ctx.font = `600 ${Math.round(pliH * 0.24)}px -apple-system, sans-serif`;
+        ctx.fillText(att.name || 'Minifigure', tx, pliY + Math.round(pliH * 0.56), Math.max(40, attBoxW - (tx - pliX) - 8));
       } else {
         const pliMap = new Map();
         for (const p of step.parts) { const k = `${p.p}:${p.c}`; if (!pliMap.has(k)) pliMap.set(k, { part: p, qty: 0 }); pliMap.get(k).qty++; }
@@ -5912,7 +6381,7 @@ async function renderPageToJpegBytes(page, pxW, pxH) {
         }
       }
 
-      // 3D Step Render
+      // 3D Step Render (+ optional true physical 1:1 Minifigure View card on printed paper!)
       const prev = getPreviousPartsForStep(state.model, ch, step);
       const cam = getStepCamera(step);
       const ov = state.overrides[step.id] || {};
@@ -5922,7 +6391,49 @@ async function renderPageToJpegBytes(page, pxW, pxH) {
         showArrows: true, accent: theme.accent, ov, partOffsets: ov.partOffsets || {},
       });
       const stepImg = await loadImgPromise(snap.url);
-      drawContain(ctx, stepImg, sx + 10, sy + pliH + 18, slotW - 20, slotH - pliH - 28);
+      const isMfBuild = Boolean((step.isStandaloneFigure || ch.kind === 'minifigure') && !step.isMinifigPoseStep);
+      const renderTopY = sy + pliH + 18;
+      const renderAvailH = slotH - pliH - 28;
+      if (state.showMinifig1to1 && isMfBuild) {
+        const [, pdfHIn] = getActivePagePhysicalInches();
+        const mf1 = renderMinifigOneToOne(step.parts, pxH, pdfHIn, Math.round(slotW * 0.34), Math.round(renderAvailH * 0.72), theme.accent);
+        const cardPad = 12;
+        const headerH = 22;
+        const cardW = Math.max(82, mf1.displayPxW + cardPad * 2 + 12);
+        const cardH = Math.min(renderAvailH - 4, mf1.displayPxH + headerH + cardPad * 2);
+        const cardX = sx + slotW - cardW - 12;
+        const cardY = renderTopY + Math.round((renderAvailH - cardH) / 2);
+        drawContain(ctx, stepImg, sx + 10, renderTopY, Math.max(40, cardX - (sx + 18)), renderAvailH);
+
+        drawRRect(cardX, cardY, cardW, cardH, 12);
+        ctx.fillStyle = theme.calloutBg;
+        ctx.fill();
+        ctx.strokeStyle = theme.calloutBorder;
+        ctx.lineWidth = 1.8;
+        ctx.stroke();
+
+        ctx.fillStyle = theme.accent;
+        ctx.font = `800 12px -apple-system, sans-serif`;
+        ctx.fillText(`1:1${mf1.isExact ? '' : ' Fit'} · ${Math.round(mf1.heightMm)} mm`, cardX + cardPad, cardY + 8);
+        const mf1Img = await loadImgPromise(mf1.url);
+        const imgX = cardX + Math.round((cardW - 10 - mf1.displayPxW) / 2);
+        const imgY = cardY + headerH + Math.round((cardH - headerH - cardPad - mf1.displayPxH) / 2);
+        ctx.drawImage(mf1Img, imgX, imgY, mf1.displayPxW, mf1.displayPxH);
+
+        // Vertical height bracket next to 1:1 figure
+        const rx = imgX + mf1.displayPxW + 5;
+        const ry0 = imgY + Math.round(mf1.displayPxH * 0.04);
+        const ry1 = imgY + Math.round(mf1.displayPxH * 0.96);
+        ctx.strokeStyle = theme.muted;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(rx - 3, ry0); ctx.lineTo(rx + 3, ry0);
+        ctx.moveTo(rx, ry0); ctx.lineTo(rx, ry1);
+        ctx.moveTo(rx - 3, ry1); ctx.lineTo(rx + 3, ry1);
+        ctx.stroke();
+      } else {
+        drawContain(ctx, stepImg, sx + 10, renderTopY, slotW - 20, renderAvailH);
+      }
 
       // Final step of a duplicate submodel: show prominent ×N badge ONLY on this last step
       if (step.isSubmodelFinal) {
@@ -6114,6 +6625,8 @@ document.getElementById('highlightColor').oninput = (e) => { state.highlightColo
 document.getElementById('toggleFade').onchange = (e) => { state.fadePrev = e.target.checked; renderAll(); };
 document.getElementById('toggleRotCues').onchange = (e) => { state.showRotCues = e.target.checked; renderAll(); };
 document.getElementById('toggleSizeGuides').onchange = (e) => { state.showSizeGuides = e.target.checked; renderAll(); };
+const mf1to1ToggleEl = document.getElementById('toggleMinifig1to1');
+if (mf1to1ToggleEl) mf1to1ToggleEl.onchange = (e) => { state.showMinifig1to1 = e.target.checked; renderAll(); };
 const setStepBorders = (e) => { state.showStepBorders = e.target.checked; renderAll(); };
 document.getElementById('toggleStepBorders').onchange = setStepBorders;
 document.getElementById('toggleStepBordersSetup').onchange = setStepBorders;
