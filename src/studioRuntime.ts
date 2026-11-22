@@ -201,10 +201,11 @@ function normId(raw) {
   return String(raw || '').trim().replace(/\\/g, '/').toLowerCase().replace(/^ldraw\//,'').replace(/^parts\//,'').replace(/^p\//,'').replace(/\.dat$/i,'');
 }
 
-// BrickLink Studio un-expanded torso assemblies (bl_973pb*c01) have their local origin at waist corner
+// BrickLink Studio un-expanded torso assemblies (bl_973pb*c01, bl_973c*) have their local origin at waist corner
 // instead of LDraw 973c01's neck-base origin: shifted by (-20, -32, +10) in LDraw coords.
 function isBrickLinkTorsoAssemblyId(k) {
-  return /^bl_973p[a-z0-9]+c\d+$/i.test(k);
+  const clean = normId(k).replace(/-bl$/, '');
+  return /^bl_973(?:p[a-z0-9]*)?c\d+[a-z]?$/i.test(clean);
 }
 
 // Map BrickLink Studio / decorated / printed part IDs (bl_*, *-bl, *pb####*, *_torso)
@@ -222,9 +223,8 @@ function getPartIdFallbacks(raw) {
     add('973');
     return out;
   }
-  if (/^973p[a-z0-9]+c\d+$/i.test(noBl)) {
+  if (/^973(?:p[a-z0-9]*)?c\d+[a-z]?$/i.test(noBl) || /^76382(?:p[a-z0-9]*)?(?:c\d+[a-z]?)?$/i.test(noBl)) {
     add('973c01');
-    add('973');
     return out;
   }
   if (/^973p[a-z0-9]+$/i.test(noBl)) {
@@ -463,8 +463,91 @@ function projectWorldToNdc(pt, mvp) {
   return [x/w, y/w, z/w];
 }
 
+// Virtual LDraw definitions for Minifig Torso (973) & Torso Assembly (973c01) so un-expanded
+// BrickLink Studio torso assemblies (e.g., bl_973pb*c01) immediately reuse real embedded LDraw
+// arms (3818/3819), hands (3820), and torso subparts (s/973s01) already present in the model!
+const VIRTUAL_973_WITH_SUBPART = [
+  '1 16 0 0 0 1 0 0 0 1 0 0 0 1 s/973s01.dat',
+  '4 16 -19 32 -10 19 32 -10 19 29 -10 -19 29 -10',
+  '4 16 14.345 2 -10 -14.345 2 -10 -19 29 -10 19 29 -10',
+  '4 16 12 0 -10 -12 0 -10 -14.345 2 -10 14.345 2 -10',
+  '4 16 -19 29 10 19 29 10 19 32 10 -19 32 10',
+  '4 16 19 29 10 -19 29 10 -14.345 2 10 14.345 2 10',
+  '4 16 14.345 2 10 -14.345 2 10 -12 0 10 12 0 10',
+];
+
+const VIRTUAL_973_SOLID = [
+  // Front & back tapered torso faces (exact LDraw 973.dat coordinates)
+  '4 16 -19 32 -10 19 32 -10 19 29 -10 -19 29 -10',
+  '4 16 14.345 2 -10 -14.345 2 -10 -19 29 -10 19 29 -10',
+  '4 16 12 0 -10 -12 0 -10 -14.345 2 -10 14.345 2 -10',
+  '4 16 -19 29 10 19 29 10 19 32 10 -19 32 10',
+  '4 16 19 29 10 -19 29 10 -14.345 2 10 14.345 2 10',
+  '4 16 14.345 2 10 -14.345 2 10 -12 0 10 12 0 10',
+  // Left & right sides (waist band, sloped torso walls, shoulder bevels)
+  '4 16 -19 32 -10 -19 29 -10 -19 29 10 -19 32 10',
+  '4 16 -19 29 -10 -14.345 2 -10 -14.345 2 10 -19 29 10',
+  '4 16 -14.345 2 -10 -12 0 -10 -12 0 10 -14.345 2 10',
+  '4 16 19 32 10 19 29 10 19 29 -10 19 32 -10',
+  '4 16 19 29 10 14.345 2 10 14.345 2 -10 19 29 -10',
+  '4 16 14.345 2 10 12 0 10 12 0 -10 14.345 2 -10',
+  // Shoulder top & waist bottom caps
+  '4 16 -12 0 -10 12 0 -10 12 0 10 -12 0 10',
+  '4 16 -19 32 10 19 32 10 19 32 -10 -19 32 -10',
+  // Neck post (r=6, y=0..-12)
+  '1 16 0 0 0 6 0 0 0 -12 0 0 0 6 4-4cyli.dat',
+  '1 16 0 -12 0 6 0 0 0 1 0 0 0 6 4-4disc.dat',
+  '1 16 0 0 0 6 0 0 0 1 0 0 0 6 4-4edge.dat',
+  '1 16 0 -12 0 6 0 0 0 1 0 0 0 6 4-4edge.dat',
+  // Clean outer silhouette edges
+  '2 24 -19 32 -10 19 32 -10', '2 24 -19 32 10 19 32 10',
+  '2 24 -19 32 -10 -19 29 -10', '2 24 19 32 -10 19 29 -10',
+  '2 24 -19 32 10 -19 29 10', '2 24 19 32 10 19 29 10',
+  '2 24 -19 29 -10 -14.345 2 -10', '2 24 19 29 -10 14.345 2 -10',
+  '2 24 -19 29 10 -14.345 2 10', '2 24 19 29 10 14.345 2 10',
+  '2 24 -14.345 2 -10 -12 0 -10', '2 24 14.345 2 -10 12 0 -10',
+  '2 24 -14.345 2 10 -12 0 10', '2 24 14.345 2 10 12 0 10',
+  '2 24 -12 0 -10 12 0 -10', '2 24 -12 0 10 12 0 10',
+  '2 24 -19 32 -10 -19 32 10', '2 24 19 32 -10 19 32 10',
+  '2 24 -12 0 -10 -12 0 10', '2 24 12 0 -10 12 0 10',
+];
+
+const VIRTUAL_973C01_LINES = [
+  '1 16 0 0 0 1 0 0 0 1 0 0 0 1 973.dat',
+  '1 16 -15.552 9 0 0.985 -0.17 0 0.17 0.985 0 0 0 1 3818.dat',
+  '1 16 15.552 9 0 0.985 0.17 0 -0.17 0.985 0 0 0 1 3819.dat',
+  '1 14 -23.6904 26.774 -9.8982 0.985 -0.1202 0.1202 0.17 0.6964 -0.6964 0 0.707 0.707 3820.dat',
+  '1 14 23.6904 26.774 -9.8982 0.985 0.1202 -0.1202 -0.17 0.6964 -0.6964 0 0.707 0.707 3820.dat',
+];
+
+function hasRawDatKey(k) {
+  return embeddedDatRaw.has(k) || userLibRaw.has(k);
+}
+
+function lookupVirtualMinifigDat(targetKey, offset) {
+  if (targetKey === '973c01') {
+    if ((hasRawDatKey('3818') || hasRawDatKey('3819')) && hasRawDatKey('3820')) {
+      return { key: '973c01', lines: VIRTUAL_973C01_LINES, offset, virtual: true };
+    }
+    return null;
+  }
+  if (targetKey === '973') {
+    if (hasRawDatKey('s/973s01') || hasRawDatKey('973s01')) {
+      return { key: '973', lines: VIRTUAL_973_WITH_SUBPART, offset, virtual: true };
+    }
+    return { key: '973', lines: VIRTUAL_973_SOLID, offset, virtual: true };
+  }
+  if (targetKey === '3819' && hasRawDatKey('3818')) {
+    return { key: '3819', lines: ['1 16 0 0 0 -1 0 0 0 1 0 0 0 1 3818.dat'], offset, virtual: true };
+  }
+  if (targetKey === '3818' && hasRawDatKey('3819')) {
+    return { key: '3818', lines: ['1 16 0 0 0 -1 0 0 0 1 0 0 0 1 3819.dat'], offset, virtual: true };
+  }
+  return null;
+}
+
 // Fast recursive LDraw .dat compiler (checks embedded .io model2.ldr first, then user-imported LDraw Library!)
-function lookupEmbeddedDat(ref) {
+function lookupEmbeddedDat(ref, allowVirtual = true) {
   const k = normId(ref);
   const stripped = k.replace(/^(48|8|s)\//, '');
   const base = k.split('/').pop();
@@ -474,24 +557,28 @@ function lookupEmbeddedDat(ref) {
     if (store.has(base)) return { key: base, lines: store.get(base), offset: null };
   }
   const fbs = getPartIdFallbacks(k);
+  const offset = isBrickLinkTorsoAssemblyId(k) ? [-20, -32, 10] : null;
   if (fbs.length > 0) {
-    const offset = isBrickLinkTorsoAssemblyId(k) ? [-20, -32, 10] : null;
     for (const fb of fbs) {
       for (const store of [embeddedDatRaw, userLibRaw]) {
         if (store.has(fb)) return { key: fb, lines: store.get(fb), offset };
       }
     }
   }
+  if (allowVirtual) {
+    const directVirt = lookupVirtualMinifigDat(k, null);
+    if (directVirt) return directVirt;
+    for (const fb of fbs) {
+      const fbVirt = lookupVirtualMinifigDat(fb, offset);
+      if (fbVirt) return fbVirt;
+    }
+  }
   return null;
 }
 
-function compileEmbeddedDat(partId) {
-  const k = normId(partId);
-  if (embeddedDatCompiled.has(k)) return embeddedDatCompiled.get(k);
-  const found = lookupEmbeddedDat(k);
-  if (!found) { embeddedDatCompiled.set(k, null); return null; }
-
-  const tris = [], norms = [], edges = [];
+function compileDatEntry(found) {
+  const tris = [], norms = [], edges = [], triCols = [];
+  let hasSubColor = false;
   let minX=Infinity,minY=Infinity,minZ=Infinity,maxX=-Infinity,maxY=-Infinity,maxZ=-Infinity;
 
   const upd = (p) => {
@@ -500,7 +587,7 @@ function compileEmbeddedDat(partId) {
     if(p[2]<minZ)minZ=p[2]; if(p[2]>maxZ)maxZ=p[2];
   };
   const ld2gl = (pt) => [pt[0], -pt[1], -pt[2]];
-  const emitTri = (la, lb, lc) => {
+  const emitTri = (la, lb, lc, colId = 16) => {
     const a = ld2gl(la), b = ld2gl(lb), c = ld2gl(lc);
     const ux=b[0]-a[0], uy=b[1]-a[1], uz=b[2]-a[2];
     const vx=c[0]-a[0], vy=c[1]-a[1], vz=c[2]-a[2];
@@ -509,6 +596,8 @@ function compileEmbeddedDat(partId) {
     nx/=nl; ny/=nl; nz/=nl;
     tris.push(a[0],a[1],a[2], b[0],b[1],b[2], c[0],c[1],c[2]);
     norms.push(nx,ny,nz, nx,ny,nz, nx,ny,nz);
+    triCols.push(colId);
+    if (colId !== 16) hasSubColor = true;
     upd(a); upd(b); upd(c);
   };
   const emitEdge = (la, lb) => {
@@ -518,7 +607,7 @@ function compileEmbeddedDat(partId) {
   };
 
   // Lightweight 8-sided cylinder stud (flush seated, 5x faster than 16/48-sided stud.dat!)
-  const emitFastStud = (px, py, pz, pm, hollow) => {
+  const emitFastStud = (px, py, pz, pm, hollow, colId) => {
     const segs = 8, r = 6;
     const tp = (x, y, z) => { const v = m3v(pm, x, y, z); return [px+v[0], py+v[1], pz+v[2]]; };
     const topC = tp(0, -4, 0);
@@ -526,21 +615,31 @@ function compileEmbeddedDat(partId) {
       const a0 = (i/segs)*Math.PI*2, a1 = ((i+1)/segs)*Math.PI*2;
       const t0 = tp(Math.cos(a0)*r, -4, Math.sin(a0)*r), t1 = tp(Math.cos(a1)*r, -4, Math.sin(a1)*r);
       const b0 = tp(Math.cos(a0)*r, 0.4, Math.sin(a0)*r), b1 = tp(Math.cos(a1)*r, 0.4, Math.sin(a1)*r);
-      emitTri(b0, b1, t1); emitTri(b0, t1, t0);
-      if (!hollow) emitTri(topC, t0, t1);
+      emitTri(b0, b1, t1, colId); emitTri(b0, t1, t0, colId);
+      if (!hollow) emitTri(topC, t0, t1, colId);
       emitEdge(t0, t1);
     }
   };
 
-  // Synthesize LDraw arc primitives (low-poly 8-10 segs to stay fast on iPhone!)
-  const emitSynthPrim = (base, px, py, pz, pm) => {
-    const m = base.match(/^(\d+)-(\d+)(cyli|cylo|disc|edge|ring\d+|chrd|ndis)$/);
+  // Synthesize LDraw arc & basic primitives (low-poly 8-10 segs to stay fast on iPhone!)
+  const emitSynthPrim = (base, px, py, pz, pm, colId) => {
+    const tp = (x, y, z) => { const v = m3v(pm, x, y, z); return [px+v[0], py+v[1], pz+v[2]]; };
+    if (base === 'rect' || base === 'rect2p') {
+      const p0 = tp(-1,0,-1), p1 = tp(1,0,-1), p2 = tp(1,0,1), p3 = tp(-1,0,1);
+      emitTri(p0, p1, p2, colId); emitTri(p0, p2, p3, colId);
+      if (base === 'rect') {
+        emitEdge(p0, p1); emitEdge(p1, p2); emitEdge(p2, p3); emitEdge(p3, p0);
+      } else {
+        emitEdge(p0, p1); emitEdge(p2, p3);
+      }
+      return true;
+    }
+    const m = base.match(/^(\d+)-(\d+)(cyli|cylo|cylc|disc|edge|ring\d+|chrd|ndis)$/);
     if (!m) return false;
     const num = +m[1], den = +m[2], kind = m[3];
     const frac = Math.min(1, num / den);
     const segs = Math.max(2, Math.round(10 * frac));
     const maxA = frac * Math.PI * 2;
-    const tp = (x, y, z) => { const v = m3v(pm, x, y, z); return [px+v[0], py+v[1], pz+v[2]]; };
     if (kind === 'edge') {
       for (let i = 0; i < segs; i++) {
         const a0 = (i/segs)*maxA, a1 = ((i+1)/segs)*maxA;
@@ -548,12 +647,18 @@ function compileEmbeddedDat(partId) {
       }
       return true;
     }
-    if (kind === 'cyli' || kind === 'cylo') {
+    if (kind === 'cyli' || kind === 'cylo' || kind === 'cylc') {
+      const topC = kind === 'cylc' ? tp(0, 0, 0) : null;
+      const botC = kind === 'cylc' ? tp(0, 1, 0) : null;
       for (let i = 0; i < segs; i++) {
         const a0 = (i/segs)*maxA, a1 = ((i+1)/segs)*maxA;
         const t0 = tp(Math.cos(a0), 0, Math.sin(a0)), t1 = tp(Math.cos(a1), 0, Math.sin(a1));
         const b0 = tp(Math.cos(a0), 1, Math.sin(a0)), b1 = tp(Math.cos(a1), 1, Math.sin(a1));
-        emitTri(t0, t1, b1); emitTri(t0, b1, b0);
+        emitTri(t0, t1, b1, colId); emitTri(t0, b1, b0, colId);
+        if (topC) {
+          emitTri(topC, t0, t1, colId);
+          emitTri(botC, b1, b0, colId);
+        }
       }
       return true;
     }
@@ -561,7 +666,15 @@ function compileEmbeddedDat(partId) {
       const c = tp(0, 0, 0);
       for (let i = 0; i < segs; i++) {
         const a0 = (i/segs)*maxA, a1 = ((i+1)/segs)*maxA;
-        emitTri(c, tp(Math.cos(a0), 0, Math.sin(a0)), tp(Math.cos(a1), 0, Math.sin(a1)));
+        emitTri(c, tp(Math.cos(a0), 0, Math.sin(a0)), tp(Math.cos(a1), 0, Math.sin(a1)), colId);
+      }
+      return true;
+    }
+    if (kind === 'chrd') {
+      const pStart = tp(1, 0, 0);
+      for (let i = 1; i < segs; i++) {
+        const a0 = (i/segs)*maxA, a1 = ((i+1)/segs)*maxA;
+        emitTri(pStart, tp(Math.cos(a0), 0, Math.sin(a0)), tp(Math.cos(a1), 0, Math.sin(a1)), colId);
       }
       return true;
     }
@@ -571,29 +684,36 @@ function compileEmbeddedDat(partId) {
         const a0 = (i/segs)*maxA, a1 = ((i+1)/segs)*maxA;
         const i0 = tp(Math.cos(a0)*ri,0,Math.sin(a0)*ri), i1 = tp(Math.cos(a1)*ri,0,Math.sin(a1)*ri);
         const o0 = tp(Math.cos(a0)*ro,0,Math.sin(a0)*ro), o1 = tp(Math.cos(a1)*ro,0,Math.sin(a1)*ro);
-        emitTri(i0, o0, o1); emitTri(i0, o1, i1);
+        emitTri(i0, o0, o1, colId); emitTri(i0, o1, i1, colId);
       }
       return true;
     }
     return false;
   };
 
-  const walk = (lines, px, py, pz, pm, depth) => {
+  const resolveLineCol = (rawColStr, curColor) => {
+    const c = parseInt(rawColStr, 10);
+    return (isFinite(c) && c !== 16 && c !== 24) ? c : curColor;
+  };
+
+  const walk = (lines, px, py, pz, pm, depth, curColor) => {
     if (depth > 8 || tris.length > 18000) return;
     for (const raw of lines) {
       const ch = raw[0];
       if (ch === '3' && raw[1] === ' ') {
         const t = raw.split(/\s+/);
         if (t.length >= 11) {
+          const colId = resolveLineCol(t[1], curColor);
           const a = m3v(pm,+t[2],+t[3],+t[4]), b = m3v(pm,+t[5],+t[6],+t[7]), c = m3v(pm,+t[8],+t[9],+t[10]);
-          emitTri([px+a[0],py+a[1],pz+a[2]], [px+b[0],py+b[1],pz+b[2]], [px+c[0],py+c[1],pz+c[2]]);
+          emitTri([px+a[0],py+a[1],pz+a[2]], [px+b[0],py+b[1],pz+b[2]], [px+c[0],py+c[1],pz+c[2]], colId);
         }
       } else if (ch === '4' && raw[1] === ' ') {
         const t = raw.split(/\s+/);
         if (t.length >= 14) {
+          const colId = resolveLineCol(t[1], curColor);
           const a = m3v(pm,+t[2],+t[3],+t[4]), b = m3v(pm,+t[5],+t[6],+t[7]), c = m3v(pm,+t[8],+t[9],+t[10]), d = m3v(pm,+t[11],+t[12],+t[13]);
           const pa=[px+a[0],py+a[1],pz+a[2]], pb=[px+b[0],py+b[1],pz+b[2]], pc=[px+c[0],py+c[1],pz+c[2]], pd=[px+d[0],py+d[1],pz+d[2]];
-          emitTri(pa, pb, pc); emitTri(pa, pc, pd);
+          emitTri(pa, pb, pc, colId); emitTri(pa, pc, pd, colId);
         }
       } else if (ch === '2' && raw[1] === ' ') {
         const t = raw.split(/\s+/);
@@ -604,6 +724,7 @@ function compileEmbeddedDat(partId) {
       } else if (ch === '1' && raw[1] === ' ') {
         const t = raw.split(/\s+/);
         if (t.length >= 15) {
+          const childCol = resolveLineCol(t[1], curColor);
           const lx=+t[2], ly=+t[3], lz=+t[4];
           const lm=[+t[5],+t[6],+t[7], +t[8],+t[9],+t[10], +t[11],+t[12],+t[13]];
           const v = m3v(pm, lx, ly, lz);
@@ -613,28 +734,48 @@ function compileEmbeddedDat(partId) {
           const base = ref.split('/').pop();
           // Fast studs & skip hidden underside tubes/recesses!
           if (base === 'stud' || base === 'stud2' || base === 'stud2a' || base === 'studp01') {
-            emitFastStud(nx, ny, nz, nm, base.startsWith('stud2')); continue;
+            emitFastStud(nx, ny, nz, nm, base.startsWith('stud2'), childCol); continue;
           }
           if (/^(stud3|stud4|stud4a|stud10|stud15|axlehol[2-9]|axleho10|npeghol|beamhol)/.test(base)) continue;
           // Synthesize 48/ hi-res arcs as fast 10-sided primitives instead of 48-sided!
-          if (emitSynthPrim(base, nx, ny, nz, nm)) continue;
+          if (emitSynthPrim(base, nx, ny, nz, nm, childCol)) continue;
           const sub = lookupEmbeddedDat(ref);
-          if (sub) walk(sub.lines, nx, ny, nz, nm, depth + 1);
+          if (sub) walk(sub.lines, nx, ny, nz, nm, depth + 1, childCol);
         }
       }
     }
   };
   const [rootOx, rootOy, rootOz] = found.offset || [0, 0, 0];
-  walk(found.lines, rootOx, rootOy, rootOz, R_ID, 0);
+  walk(found.lines, rootOx, rootOy, rootOz, R_ID, 0, 16);
 
-  if (tris.length === 0) { embeddedDatCompiled.set(k, null); return null; }
-  const res = {
+  if (tris.length === 0) return null;
+  return {
     tris: new Float32Array(tris),
     norms: new Float32Array(norms),
     edges: new Float32Array(edges),
+    triCols: hasSubColor ? new Int16Array(triCols) : null,
     min: [minX, minY, minZ],
     max: [maxX, maxY, maxZ],
   };
+}
+
+function compileEmbeddedDat(partId) {
+  const k = normId(partId);
+  if (embeddedDatCompiled.has(k)) return embeddedDatCompiled.get(k);
+  const found = lookupEmbeddedDat(k);
+  let res = found ? compileDatEntry(found) : null;
+  // If a direct embedded stub produced 0 triangles (missing subparts), try canonical base fallbacks too
+  if (!res) {
+    const offset = isBrickLinkTorsoAssemblyId(k) ? [-20, -32, 10] : null;
+    for (const fb of getPartIdFallbacks(k)) {
+      if (found && found.key === fb) continue;
+      const fbFound = lookupEmbeddedDat(fb);
+      if (fbFound) {
+        res = compileDatEntry(offset ? { ...fbFound, offset } : fbFound);
+        if (res) break;
+      }
+    }
+  }
   embeddedDatCompiled.set(k, res);
   return res;
 }
@@ -781,6 +922,145 @@ function buildMeshBuffers(prevParts, newParts, opts) {
         addCyl(startX + ix*20, 1.8, startZ + iz*20, 5.8, 5.8, 4.4, 'y', 8, m, ox, oy, oz, hinge, col, eCol, aByte);
   };
 
+  // Tapered arbitrary-axis limb segment (for sculpted minifigure arms & wrists)
+  const addLimb = (p0, p1, r0, r1, segs, m, ox, oy, oz, hinge, col, eCol, aByte, capEdges = false) => {
+    const dx = p1[0]-p0[0], dy = p1[1]-p0[1], dz = p1[2]-p0[2];
+    const len = Math.hypot(dx, dy, dz);
+    if (len < 0.1) return;
+    const ux = dx/len, uy = dy/len, uz = dz/len;
+    const rx = Math.abs(uy) < 0.9 ? 0 : 1, ry = Math.abs(uy) < 0.9 ? 1 : 0, rz = 0;
+    let bx = uy*rz - uz*ry, by = uz*rx - ux*rz, bz = ux*ry - uy*rx;
+    const bl = Math.hypot(bx, by, bz) || 1; bx/=bl; by/=bl; bz/=bl;
+    const cx = by*uz - bz*uy, cy = bz*ux - bx*uz, cz = bx*uy - by*ux;
+    const c0 = xformPt(p0, m, ox, oy, oz, hinge);
+    const c1 = xformPt(p1, m, ox, oy, oz, hinge);
+    const n0 = xformNorm([-ux, -uy, -uz], m, hinge);
+    const n1 = xformNorm([ux, uy, uz], m, hinge);
+    const ringPt = (center, r, ang) => xformPt([
+      center[0] + (Math.cos(ang)*bx + Math.sin(ang)*cx)*r,
+      center[1] + (Math.cos(ang)*by + Math.sin(ang)*cy)*r,
+      center[2] + (Math.cos(ang)*bz + Math.sin(ang)*cz)*r,
+    ], m, ox, oy, oz, hinge);
+    for (let i = 0; i < segs; i++) {
+      const a0 = (i/segs)*Math.PI*2, a1 = ((i+1)/segs)*Math.PI*2, am = (a0+a1)/2;
+      const sn = xformNorm([
+        Math.cos(am)*bx + Math.sin(am)*cx,
+        Math.cos(am)*by + Math.sin(am)*cy,
+        Math.cos(am)*bz + Math.sin(am)*cz,
+      ], m, hinge);
+      const v00 = ringPt(p0, r0, a0), v01 = ringPt(p0, r0, a1);
+      const v10 = ringPt(p1, r1, a0), v11 = ringPt(p1, r1, a1);
+      pushTri(v00, v01, v11, sn, col, aByte);
+      pushTri(v00, v11, v10, sn, col, aByte);
+      if (r0 > 0.1) pushTri(c0, v01, v00, n0, col, aByte);
+      if (r1 > 0.1) pushTri(c1, v10, v11, n1, col, aByte);
+      if (capEdges && includeEdges) {
+        pushEdge(v10, v11, eCol, aByte);
+      }
+    }
+  };
+
+  // Sculpted authentic LEGO minifigure torso (exact LDraw 973.dat trapezoid + optional arms & yellow C-hands)
+  const addMinifigTorso = (sh, withArms, m, ox, oy, oz, hinge, col, eCol, handCol, handEdge, aByte) => {
+    const [sx, sy, sz] = sh;
+    const tp = (x, y, z) => xformPt([sx + x, sy + y, sz + z], m, ox, oy, oz, hinge);
+    const quad = (p0, p1, p2, p3, nLocal) => {
+      const a = tp(p0[0], p0[1], p0[2]), b = tp(p1[0], p1[1], p1[2]);
+      const c = tp(p2[0], p2[1], p2[2]), d = tp(p3[0], p3[1], p3[2]);
+      const wn = xformNorm(nLocal, m, hinge);
+      pushTri(a, b, c, wn, col, aByte);
+      pushTri(a, c, d, wn, col, aByte);
+    };
+    const edge = (p0, p1) => {
+      if (!includeEdges) return;
+      pushEdge(tp(p0[0], p0[1], p0[2]), tp(p1[0], p1[1], p1[2]), eCol, aByte);
+    };
+
+    // Tapered torso tiers matching LDraw 973.dat (waist y=-32, band y=-29, bevel y=-2, top y=0, depth z=±10)
+    const tiers = [
+      { y0: -32, w0: 19, y1: -29, w1: 19 },
+      { y0: -29, w0: 19, y1: -2,  w1: 14.345 },
+      { y0: -2,  w0: 14.345, y1: 0, w1: 12 },
+    ];
+    for (const t of tiers) {
+      // Front (+Z) & Back (-Z)
+      quad([-t.w0, t.y0, 10], [t.w0, t.y0, 10], [t.w1, t.y1, 10], [-t.w1, t.y1, 10], [0, 0, 1]);
+      quad([t.w0, t.y0, -10], [-t.w0, t.y0, -10], [-t.w1, t.y1, -10], [t.w1, t.y1, -10], [0, 0, -1]);
+      // Sloped Left (-X) & Right (+X) walls
+      const dy = t.y1 - t.y0, dw = t.w0 - t.w1;
+      const nl = Math.hypot(dy, dw) || 1;
+      quad([-t.w0, t.y0, -10], [-t.w0, t.y0, 10], [-t.w1, t.y1, 10], [-t.w1, t.y1, -10], [-dy/nl, dw/nl, 0]);
+      quad([t.w0, t.y0, 10], [t.w0, t.y0, -10], [t.w1, t.y1, -10], [t.w1, t.y1, 10], [dy/nl, dw/nl, 0]);
+    }
+    // Top & bottom caps
+    quad([-12, 0, 10], [12, 0, 10], [12, 0, -10], [-12, 0, -10], [0, 1, 0]);
+    quad([-19, -32, -10], [19, -32, -10], [19, -32, 10], [-19, -32, 10], [0, -1, 0]);
+    // Clean outer silhouette edges
+    for (const z of [-10, 10]) {
+      edge([-19, -32, z], [19, -32, z]);
+      edge([-19, -32, z], [-19, -29, z]); edge([19, -32, z], [19, -29, z]);
+      edge([-19, -29, z], [-14.345, -2, z]); edge([19, -29, z], [14.345, -2, z]);
+      edge([-14.345, -2, z], [-12, 0, z]); edge([14.345, -2, z], [12, 0, z]);
+      edge([-12, 0, z], [12, 0, z]);
+    }
+    edge([-19, -32, -10], [-19, -32, 10]); edge([19, -32, -10], [19, -32, 10]);
+    edge([-12, 0, -10], [-12, 0, 10]); edge([12, 0, -10], [12, 0, 10]);
+    // Neck post
+    addCyl(sx, sy + 5.6, sz, 5.8, 5.8, 11.2, 'y', 12, m, ox, oy, oz, hinge, col, eCol, aByte);
+
+    if (!withArms) return;
+
+    // Sculpted angled LEGO minifigure arms & yellow C-shaped hands (matching LDraw 973c01.dat)
+    for (const s of [-1, 1]) {
+      // Rounded shoulder cap seated flush against torso slope + upper arm + forward-angled forearm
+      addLimb([sx + s*14.6, sy - 9.0, sz], [sx + s*18.6, sy - 9.4, sz], 4.6, 4.7, 10, m, ox, oy, oz, hinge, col, eCol, aByte);
+      addLimb([sx + s*18.0, sy - 6.2, sz], [sx + s*18.6, sy - 9.6, sz], 3.4, 4.9, 10, m, ox, oy, oz, hinge, col, eCol, aByte);
+      addLimb([sx + s*18.6, sy - 9.4, sz], [sx + s*21.0, sy - 20.6, sz + 0.6], 4.9, 4.6, 10, m, ox, oy, oz, hinge, col, eCol, aByte);
+      addLimb([sx + s*21.0, sy - 20.6, sz + 0.6], [sx + s*23.3, sy - 26.4, sz + 9.2], 4.5, 3.8, 10, m, ox, oy, oz, hinge, col, eCol, aByte, true);
+      // Wrist pin (yellow)
+      addLimb([sx + s*23.3, sy - 26.4, sz + 9.2], [sx + s*23.6, sy - 27.0, sz + 11.4], 2.5, 2.5, 8, m, ox, oy, oz, hinge, handCol, handEdge, aByte);
+      // C-shaped LEGO hand claw (250° arc opening forward toward +Z, grip axis tilted slightly forward)
+      const hc = [sx + s*23.8, sy - 27.4, sz + 14.0];
+      const segs = 8, rOut = 5.4, rIn = 3.2, hh = 3.1;
+      // Local hand basis: up axis tilted forward ~18°, forward axis points +Z/-Y
+      const ux = 0, uy = 0.951, uz = 0.309;
+      const fx = 0, fy = -0.309, fz = 0.951;
+      const hpt = (r, ang, hOff) => xformPt([
+        hc[0] + Math.sin(ang)*r + ux*hOff,
+        hc[1] + Math.cos(ang)*r*fy + uy*hOff,
+        hc[2] + Math.cos(ang)*r*fz + uz*hOff,
+      ], m, ox, oy, oz, hinge);
+      const startA = 0.72, endA = Math.PI * 2 - 0.72;
+      const nTop = xformNorm([ux, uy, uz], m, hinge);
+      const nBot = xformNorm([-ux, -uy, -uz], m, hinge);
+      for (let i = 0; i < segs; i++) {
+        const a0 = startA + (i / segs) * (endA - startA);
+        const a1 = startA + ((i + 1) / segs) * (endA - startA);
+        const am = (a0 + a1) / 2;
+        const outN = xformNorm([Math.sin(am), Math.cos(am)*fy, Math.cos(am)*fz], m, hinge);
+        const inN = [-outN[0], -outN[1], -outN[2]];
+        const ot0 = hpt(rOut, a0, hh), ot1 = hpt(rOut, a1, hh), ob0 = hpt(rOut, a0, -hh), ob1 = hpt(rOut, a1, -hh);
+        const it0 = hpt(rIn, a0, hh),  it1 = hpt(rIn, a1, hh),  ib0 = hpt(rIn, a0, -hh),  ib1 = hpt(rIn, a1, -hh);
+        pushTri(ob0, ob1, ot1, outN, handCol, aByte); pushTri(ob0, ot1, ot0, outN, handCol, aByte);
+        pushTri(it0, it1, ib1, inN, handCol, aByte);  pushTri(it0, ib1, ib0, inN, handCol, aByte);
+        pushTri(it0, ot0, ot1, nTop, handCol, aByte); pushTri(it0, ot1, it1, nTop, handCol, aByte);
+        pushTri(ob0, ib0, ib1, nBot, handCol, aByte); pushTri(ob0, ib1, ob1, nBot, handCol, aByte);
+        if (includeEdges) {
+          pushEdge(ot0, ot1, handEdge, aByte);
+          pushEdge(ob0, ob1, handEdge, aByte);
+        }
+        if (i === 0) {
+          const capN = xformNorm([-Math.cos(a0), Math.sin(a0)*fy, Math.sin(a0)*fz], m, hinge);
+          pushTri(ib0, ob0, ot0, capN, handCol, aByte); pushTri(ib0, ot0, it0, capN, handCol, aByte);
+        }
+        if (i === segs - 1) {
+          const capN = xformNorm([Math.cos(a1), -Math.sin(a1)*fy, -Math.sin(a1)*fz], m, hinge);
+          pushTri(ob1, ib1, it1, capN, handCol, aByte); pushTri(ob1, it1, ot1, capN, handCol, aByte);
+        }
+      }
+    }
+  };
+
   const emitSingleLeaf = (leafPart, isNew, isSelected, offX, offY, offZ, hingeRad, parentId = null) => {
     const def = resolvePart(leafPart.p);
     const cInfo = COLORS[leafPart.c] || COLORS[71];
@@ -811,13 +1091,33 @@ function buildMeshBuffers(prevParts, newParts, opts) {
 
     const compiled = compileEmbeddedDat(leafPart.p);
     if (compiled) {
-      const T = compiled.tris, N = compiled.norms, E = compiled.edges;
-      for (let i = 0; i < T.length; i += 9) {
+      const T = compiled.tris, N = compiled.norms, E = compiled.edges, TC = compiled.triCols;
+      const subColCache = TC && !isSelected && !overrideHex ? new Map() : null;
+      for (let i = 0, ti = 0; i < T.length; i += 9, ti++) {
         const a = xformPt([T[i],T[i+1],T[i+2]], m, ox, oy, oz, hingeRad);
         const b = xformPt([T[i+3],T[i+4],T[i+5]], m, ox, oy, oz, hingeRad);
         const c = xformPt([T[i+6],T[i+7],T[i+8]], m, ox, oy, oz, hingeRad);
         const n = xformNorm([N[i],N[i+1],N[i+2]], m, hingeRad);
-        pushTri(a, b, c, n, baseCol, aByte);
+        let triRgb = baseCol;
+        let triAlpha = aByte;
+        if (subColCache) {
+          const cid = TC[ti];
+          if (cid !== 16 && COLORS[cid]) {
+            let cached = subColCache.get(cid);
+            if (!cached) {
+              const sc = COLORS[cid];
+              const scTrans = (sc.alpha || 1) < 0.96;
+              cached = {
+                rgb: hexToRgb255(sc.hex, fadeMix),
+                alpha: scTrans ? Math.round(255 * (sc.alpha || 0.7) * (isFaded ? Math.max(0.55, opts.fadeOpacity) : 1)) : 255,
+              };
+              subColCache.set(cid, cached);
+            }
+            triRgb = cached.rgb;
+            triAlpha = cached.alpha;
+          }
+        }
+        pushTri(a, b, c, n, triRgb, triAlpha);
       }
       if ((includeEdges || isNew || isSelected) && E.length > 0) {
         for (let i = 0; i < E.length; i += 6) {
@@ -846,15 +1146,16 @@ function buildMeshBuffers(prevParts, newParts, opts) {
       addBox(-8.5,-17,0, 14,22,14, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
       addBox(8.5,-17,0, 14,22,14, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
     } else if (def.shape === 'mf_torso_body') {
-      // Bare minifigure torso (matches LDraw 973.dat origin: y=0 shoulders, y=-32 waist, neck +0..+10)
-      addBox(0,-16,0, 30,32,15, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
-      addCyl(0,5.0,0, 5.8,5.8,10,'y',10, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
+      // Bare minifigure torso (exact LDraw 973.dat proportions: y=0 shoulders, y=-32 waist, neck +0..+11.2)
+      addMinifigTorso([0, 0, 0], false, m, ox, oy, oz, hingeRad, baseCol, edgeCol, baseCol, edgeCol, aByte);
     } else if (def.shape === 'mf_torso') {
       const sh = isBrickLinkTorsoAssemblyId(normId(leafPart.p)) ? [-20, 32, -10] : [0, 0, 0];
-      addBox(sh[0],sh[1]-16,sh[2], 30,32,15, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
-      addBox(sh[0]-18.5,sh[1]-17,sh[2], 7,24,8, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
-      addBox(sh[0]+18.5,sh[1]-17,sh[2], 7,24,8, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
-      addCyl(sh[0],sh[1]+5.0,sh[2], 5.8,5.8,10,'y',10, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
+      const yellowInfo = COLORS[14];
+      const handCol = (isSelected || overrideHex) ? baseCol : hexToRgb255(yellowInfo.hex, fadeMix);
+      const handEdge = (isSelected || overrideHex)
+        ? edgeCol
+        : (isNew && opts.highlightNew ? hexToRgb255(opts.highlightColor, 0) : hexToRgb255(yellowInfo.edge, fadeMix * 0.85));
+      addMinifigTorso(sh, true, m, ox, oy, oz, hingeRad, baseCol, edgeCol, handCol, handEdge, aByte);
     } else if (def.shape === 'mf_head') {
       // Authentic LEGO minifigure head proportions (matches LDraw 3626c / 28621: crown y=0, neck bottom y=-24)
       addCyl(0, 2.0, 0, 5.8, 5.8, 4.4, 'y', 10, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
@@ -1330,10 +1631,13 @@ function computeLeafWorldBox(part) {
   else {
     const def = resolvePart(part.p);
     const hx = (def.sx*20)/2, hz = (def.sz*20)/2;
-    if (def.shape === 'mf_torso' || def.shape === 'mf_torso_body') {
-      const sh = (def.shape === 'mf_torso' && isBrickLinkTorsoAssemblyId(normId(part.p))) ? [-20, 32, -10] : [0, 0, 0];
-      lMin = [sh[0] - hx, sh[1] - def.h, sh[2] - hz];
-      lMax = [sh[0] + hx, sh[1] + 10, sh[2] + hz];
+    if (def.shape === 'mf_torso_body') {
+      lMin = [-19, -32, -10];
+      lMax = [19, 11.2, 10];
+    } else if (def.shape === 'mf_torso') {
+      const sh = isBrickLinkTorsoAssemblyId(normId(part.p)) ? [-20, 32, -10] : [0, 0, 0];
+      lMin = [sh[0] - 27, sh[1] - 32, sh[2] - 10];
+      lMax = [sh[0] + 27, sh[1] + 11.2, sh[2] + 19];
     } else if (def.shape === 'mf_head') {
       lMin = [-12.6, -24, -12.6];
       lMax = [12.6, 4.2, 12.6];
@@ -4719,12 +5023,28 @@ async function fetchMissingPartsOnline() {
   // Gather missing leaf part IDs from current model (or starter set if no model loaded)
   const queue = [];
   const queued = new Set();
+  const visitedLoaded = new Set();
   const enqueue = (rawId) => {
     const k = normId(rawId);
     const base = k.split('/').pop();
-    if (!k || queued.has(k) || lookupEmbeddedDat(k)) return;
-    // Skip standard studs/arcs we already synthesize procedurally at high speed!
-    if (/^(stud|stud2|stud2a|stud3|stud4|stud4a|stud10|stud15|studp01|axlehol|npeghol|beamhol|\d+-\d+(cyli|cylo|disc|edge|ring\d+|chrd|ndis))$/.test(base)) return;
+    if (!k || queued.has(k)) return;
+    // Skip standard studs/arcs/rects we already synthesize procedurally at high speed!
+    if (/^(stud|stud2|stud2a|stud3|stud4|stud4a|stud10|stud15|studp01|axlehol|npeghol|beamhol|rect|\d+-\d+(cyli|cylo|cylc|disc|edge|ring\d+|chrd|ndis))$/.test(base)) return;
+    // If already loaded as a real .dat (not a virtual synthesis), walk its nested type-1 subparts so partial shortcuts still fetch missing children!
+    const existing = lookupEmbeddedDat(k, false);
+    if (existing) {
+      if (!visitedLoaded.has(existing.key)) {
+        visitedLoaded.add(existing.key);
+        for (const line of existing.lines) {
+          const tr = line.trim();
+          if (tr.startsWith('1 ')) {
+            const toks = tr.split(/\s+/);
+            if (toks.length >= 15) enqueue(toks.slice(14).join(' '));
+          }
+        }
+      }
+      return;
+    }
     // BrickLink-proprietary printed/prefixed IDs (bl_*, *-bl, *pb####*, *_torso) never exist verbatim
     // in official LDraw mirrors — directly enqueue their canonical unprinted base LDraw ID!
     if (!k.includes('/') && /^(?:bl_|.*-bl$|.*(?:pb|ps|pat|pr)\d+|.*_torso$)/i.test(k)) {
