@@ -75,6 +75,14 @@ import {
   estimateBomCellGeometry,
 } from './engine/pageTypography';
 
+const BRAND_LOGO_ROTATION_DEG = 12;
+const BRAND_LOGO_PATHS: ReadonlyArray<readonly [string, string]> = [
+  ['M24.8 7.8 Q17.9 12.8 13.7 20.2 L16.3 19.7 Q13.8 23.2 11.6 26.6 Q11.3 31.1 11.6 35.3 L14.9 32.7 Q13.9 38.0 13.3 42.8 Q14.6 45.2 15.8 47.2 L18.2 42.8 Q19.8 48.9 21.1 54.7 Q14.1 52.2 6.7 49.4 L13.1 48.9 Q12.0 46.5 11.1 43.7 Q7.5 38.4 3.3 32.7 L8.9 35.6 Q8.9 31.0 9.8 26.2 Q9.4 20.7 8.7 14.7 L11.7 19.3 Q17.3 12.2 24.8 7.8 Z', '#38bdf8'],
+  ['M31.7 7.1 Q34.8 10.1 37.5 15.7 L40.5 12.6 Q39.4 17.0 38.6 21.0 Q39.3 24.7 39.7 28.3 L44.0 25.1 Q41.5 30.5 39.5 35.5 Q39.5 39.0 39.4 42.1 L45.1 39.1 Q41.3 43.9 38.0 48.3 Q37.7 50.7 37.2 52.6 L43.4 51.6 Q37.7 54.5 32.1 57.0 Q31.0 52.0 30.1 46.7 L33.7 51.3 Q34.4 49.7 35.3 47.6 Q34.4 43.5 33.2 39.1 L36.2 41.6 Q36.7 38.7 37.0 35.4 Q35.0 30.9 32.5 26.0 L36.9 28.4 Q36.8 24.9 36.5 21.3 Q34.9 18.4 32.8 15.4 L35.5 16.3 Q34.0 10.5 31.7 7.1 Z', '#7c152e'],
+  ['M38.5 8.3 Q46.1 12.5 51.9 18.8 L54.4 14.1 Q54.1 19.9 54.2 25.1 Q55.2 29.4 55.5 33.5 L60.9 30.3 Q57.1 36.0 53.8 41.3 Q53.3 43.4 52.6 45.4 L58.5 45.0 Q51.8 48.7 45.4 51.9 Q46.2 46.3 47.4 40.3 L49.8 43.9 Q50.7 42.4 51.6 40.6 Q50.8 36.2 49.6 31.4 L52.8 33.4 Q52.8 29.7 52.3 25.6 Q50.1 22.7 47.5 19.6 L50.0 19.8 Q45.5 13.1 38.5 8.3 Z', '#ed7d1f'],
+];
+const BRAND_LOGO_SVG_BODY = `<g transform="rotate(${BRAND_LOGO_ROTATION_DEG} 32 32)">${BRAND_LOGO_PATHS.map(([d, col]) => `<path d="${d}" fill="${col}"/>`).join('')}</g>`;
+
 let initialized = false;
 
 export function initBrickInstructionCreator(): void {
@@ -5316,7 +5324,7 @@ function renderAll() {
     document.getElementById('desktopModelMeta').textContent = '';
     document.getElementById('menuModelName').textContent = 'No model loaded';
     if (typeBadgeEl) typeBadgeEl.classList.add('hidden');
-    if (fileTypeEl) { fileTypeEl.textContent = 'Import a .io or .ldr file to get started.'; fileTypeEl.classList.remove('hidden'); }
+    if (fileTypeEl) { fileTypeEl.textContent = 'Import a model below to get started.'; fileTypeEl.classList.remove('hidden'); }
     if (statsEl) { statsEl.innerHTML = ''; statsEl.classList.add('hidden'); }
     document.getElementById('contextOverlay').classList.add('hidden');
     syncMenuControls();
@@ -5485,7 +5493,7 @@ function renderAll() {
         ${layout.brandGroupRect.w > 0 ? `
           <a href="${PROGRAM_URL}" target="_blank" rel="noopener noreferrer" data-cover-link="true" title="Open ${PROGRAM_NAME}" class="absolute z-10 flex items-stretch hover:opacity-90 active:scale-[0.98] transition cursor-pointer" style="right:${layout.pad}px;bottom:${layout.pad}px;height:${layout.brandGroupRect.h}px;gap:${layout.brandGap}px;text-decoration:none;">
             <div class="flex items-center shrink-0 shadow-xs overflow-hidden" style="min-width:${layout.brandCardRect.w}px;height:${layout.brandCardRect.h}px;border-radius:${layout.cardRadius}px;padding:0 ${brandPadX}px;gap:${brandInnerGap}px;background:${badgeSurface};border:1px solid ${badgeBorder};backdrop-filter:blur(6px);">
-              <svg class="shrink-0" style="width:${layout.brandIconSize}px;height:${layout.brandIconSize}px;" viewBox="0 0 64 64" fill="none" aria-hidden="true"><g transform="rotate(14 32 32)"><path d="M24.2 8.2 C9.0 15.8 7.2 31.8 14.8 40.4 L10.2 40.8 L19.6 50.4 L19.8 37.6 L17.4 39.4 C11.6 31.4 13.8 17.6 24.2 8.2 Z" fill="#38bdf8"/><path d="M32.0 4.6 C34.5 11.8 35.5 34.4 35.8 45.8 L40.5 43.9 L32.0 59.8 L23.5 43.9 L28.2 45.8 C28.5 34.4 29.5 11.8 32.0 4.6 Z" fill="#1a73e8"/><path d="M39.8 7.8 C50.4 17.6 52.0 34.2 45.2 43.4 L42.8 41.6 L42.2 54.6 L52.4 44.8 L47.8 44.3 C57.2 34.8 55.2 15.6 39.8 7.8 Z" fill="#1d48b8"/></g></svg>
+              <svg class="shrink-0" style="width:${layout.brandIconSize}px;height:${layout.brandIconSize}px;" viewBox="0 0 64 64" fill="none" aria-hidden="true">${BRAND_LOGO_SVG_BODY}</svg>
               <div class="min-w-0 leading-tight" style="color:${badgeTextColor};">
                 <div class="font-extrabold tracking-tight whitespace-nowrap" style="font-size:${layout.brandTitleFontPx}px;line-height:1.14;">Brick Instruction</div>
                 <div class="font-semibold opacity-75 whitespace-nowrap" style="font-size:${layout.brandTitleFontPx}px;line-height:1.14;">Creator</div>
@@ -5529,7 +5537,7 @@ function renderAll() {
       <div class="relative w-full h-full text-center flex flex-col items-center justify-center overflow-hidden ${guideCls}" style="padding:${padPx + Math.round(typo.pt(8))}px;${bm.bgSrc ? `background-image:url(${bm.bgSrc});background-size:cover;background-position:center;` : ''}">
         <a href="${PROGRAM_URL}" target="_blank" rel="noopener noreferrer" data-cover-link="true" title="Open ${PROGRAM_NAME}" class="inline-flex flex-col items-center hover:opacity-90 transition cursor-pointer" style="gap:${Math.round(typo.pt(12))}px;text-decoration:none;">
           <div class="flex items-center justify-center shadow-sm" style="width:${typo.back.logoBox}px;height:${typo.back.logoBox}px;border-radius:${Math.round(typo.back.logoBox * 0.28)}px;background:${theme.pliBg};border:1px solid ${theme.pliBorder}">
-            <svg style="width:${typo.back.logoIcon}px;height:${typo.back.logoIcon}px" viewBox="0 0 64 64" fill="none" aria-hidden="true"><g transform="rotate(14 32 32)"><path d="M24.2 8.2 C9.0 15.8 7.2 31.8 14.8 40.4 L10.2 40.8 L19.6 50.4 L19.8 37.6 L17.4 39.4 C11.6 31.4 13.8 17.6 24.2 8.2 Z" fill="#38bdf8"/><path d="M32.0 4.6 C34.5 11.8 35.5 34.4 35.8 45.8 L40.5 43.9 L32.0 59.8 L23.5 43.9 L28.2 45.8 C28.5 34.4 29.5 11.8 32.0 4.6 Z" fill="#1a73e8"/><path d="M39.8 7.8 C50.4 17.6 52.0 34.2 45.2 43.4 L42.8 41.6 L42.2 54.6 L52.4 44.8 L47.8 44.3 C57.2 34.8 55.2 15.6 39.8 7.8 Z" fill="#1d48b8"/></g></svg>
+            <svg style="width:${typo.back.logoIcon}px;height:${typo.back.logoIcon}px" viewBox="0 0 64 64" fill="none" aria-hidden="true">${BRAND_LOGO_SVG_BODY}</svg>
           </div>
           <span class="font-semibold" style="color:${theme.muted};font-size:${typo.back.creditFont}px">${escHtml(credit)}</span>
         </a>
@@ -7899,18 +7907,13 @@ function drawWrappedText(ctx, text, x, y, maxW, lineH, maxLines = 2) {
 
 function drawBrandLogoCanvas(ctx, x, y, size) {
   if (typeof Path2D === 'undefined') return;
-  const logoPaths = [
-    ['M24.2 8.2 C9.0 15.8 7.2 31.8 14.8 40.4 L10.2 40.8 L19.6 50.4 L19.8 37.6 L17.4 39.4 C11.6 31.4 13.8 17.6 24.2 8.2 Z', '#38bdf8'],
-    ['M32.0 4.6 C34.5 11.8 35.5 34.4 35.8 45.8 L40.5 43.9 L32.0 59.8 L23.5 43.9 L28.2 45.8 C28.5 34.4 29.5 11.8 32.0 4.6 Z', '#1a73e8'],
-    ['M39.8 7.8 C50.4 17.6 52.0 34.2 45.2 43.4 L42.8 41.6 L42.2 54.6 L52.4 44.8 L47.8 44.3 C57.2 34.8 55.2 15.6 39.8 7.8 Z', '#1d48b8'],
-  ];
   ctx.save();
   ctx.translate(x, y);
   ctx.scale(size / 64, size / 64);
   ctx.translate(32, 32);
-  ctx.rotate((14 * Math.PI) / 180);
+  ctx.rotate((BRAND_LOGO_ROTATION_DEG * Math.PI) / 180);
   ctx.translate(-32, -32);
-  for (const [d, col] of logoPaths) { ctx.fillStyle = col; ctx.fill(new Path2D(d)); }
+  for (const [d, col] of BRAND_LOGO_PATHS) { ctx.fillStyle = col; ctx.fill(new Path2D(d)); }
   ctx.restore();
 }
 
