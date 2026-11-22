@@ -2884,14 +2884,6 @@ function optimizeMinifigPlacementCameras(chapters) {
         step.el = chosen.el;
         step.cue = sec.lastModelCam ? chosen.cue : 'none';
 
-        const prevStep = i > 0 ? steps[i - 1] : null;
-        if (prevStep && prevStep.isMinifigPoseStep && prevStep.minifigPrep?.id === step.attachedMinifig.id) {
-          prevStep.side = 'top';
-          prevStep.corner = chosen.corner;
-          prevStep.az = chosen.az;
-          prevStep.el = Math.min(28, Math.max(18, chosen.el));
-        }
-
         sec.lastModelCam = {
           side: chosen.side,
           corner: chosen.corner,
