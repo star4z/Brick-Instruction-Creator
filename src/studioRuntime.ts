@@ -20,6 +20,7 @@ import {
   MINIFIG_BUILD_CAMERA,
   MINIFIG_POSE_CAMERA,
   classifyMinifigGroupKind,
+  classifyMinifigLeafRole,
   computeMinifigOneToOneLayout,
   extractMinifigureGroups,
   normalizeCompositeThumbPart,
