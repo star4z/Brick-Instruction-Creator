@@ -29,4 +29,8 @@ npm run dev
 - `npm test` — Run Vitest engine verification suite
 - `npm run build` — Typecheck, production build, and Neocities file-size/extension compliance check
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design specification.
+## Design Documentation
+
+All architecture specs and feature design proposals live in [`docs/`](docs/README.md) and are updated as the project evolves:
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — Core system architecture & invariants
+- [docs/SUBDIVISION_DESIGN.md](docs/SUBDIVISION_DESIGN.md) — Large & elongated model subdivision on import
