@@ -24,6 +24,11 @@ import {
   normalizeMinifigureForBuild,
 } from './engine/minifigPose';
 import {
+  DEFAULT_STUDIO_CAMERA,
+  chooseMinifigPlacementCamera,
+  computeStudioRotationCue,
+} from './engine/minifigCamera';
+import {
   BUILT_IN_THEMES,
   BUILT_IN_THEME_IDS,
   applyThemeBackgroundToElement,
@@ -2418,6 +2423,115 @@ function prepareSubdivisionData(parsed) {
   return { boxes, roles, adjacency, inputs };
 }
 
+function extractTargetBoxesForMinifig(partsList) {
+  const out = [];
+  for (const p of partsList || []) {
+    if (p.children && p.children.length > 0) {
+      for (const ch of p.children) {
+        out.push({
+          box: computeLeafWorldBox(ch),
+          role: classifyMinifigLeafRole(ch.p, resolvePart(ch.p).name),
+        });
+      }
+    } else {
+      out.push({
+        box: computeLeafWorldBox(p),
+        role: classifyMinifigLeafRole(p.p, resolvePart(p.p).name),
+      });
+    }
+  }
+  return out;
+}
+
+function appendOccluderBoxes(partsList, out) {
+  for (const p of partsList || []) {
+    if (p.children && p.children.length > 0) {
+      for (const ch of p.children) {
+        const col = COLORS[ch.c];
+        out.push({
+          box: computeLeafWorldBox(ch),
+          transparent: Boolean(col && typeof col.alpha === 'number' && col.alpha < 0.99),
+        });
+      }
+    } else {
+      const col = COLORS[p.c];
+      out.push({
+        box: computeLeafWorldBox(p),
+        transparent: Boolean(col && typeof col.alpha === 'number' && col.alpha < 0.99),
+      });
+    }
+  }
+}
+
+function getDefaultStepCam(step) {
+  const side = step.side || 'top';
+  const corner = step.corner || 'front_right';
+  const cObj = CORNERS.find(c => c.id === corner) || CORNERS[0];
+  return {
+    side,
+    corner,
+    az: typeof step.az === 'number' ? step.az : cObj.az,
+    el: typeof step.el === 'number' ? step.el : (side === 'bottom' ? -30 : 30),
+  };
+}
+
+// Ensures every minifigure placement step uses an unobstructed camera angle (never hiding behind the model!)
+// and keeps paired pre-placement pose steps + subsequent model rotation cues in sync.
+function optimizeMinifigPlacementCameras(chapters) {
+  const sectionState = new Map();
+  for (const ch of chapters) {
+    if (ch.kind === 'submodel' || ch.kind === 'minifigure') continue;
+    const secKey = ch.sectionId || ch.id;
+    if (!sectionState.has(secKey)) {
+      sectionState.set(secKey, { occluders: [], lastModelCam: null });
+    }
+    const sec = sectionState.get(secKey);
+    const steps = ch.steps || [];
+
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i];
+      if (step.isStandaloneFigure || step.isMinifigPoseStep) continue;
+
+      if (step.attachedMinifig) {
+        const prevCam = sec.lastModelCam || DEFAULT_STUDIO_CAMERA;
+        const targets = extractTargetBoxesForMinifig(step.parts);
+        const chosen = chooseMinifigPlacementCamera(
+          targets,
+          sec.occluders,
+          step.attachedMinifig.worldForward,
+          prevCam,
+        );
+        step.side = chosen.side;
+        step.corner = chosen.corner;
+        step.az = chosen.az;
+        step.el = chosen.el;
+        step.cue = sec.lastModelCam ? chosen.cue : 'none';
+
+        const prevStep = i > 0 ? steps[i - 1] : null;
+        if (prevStep && prevStep.isMinifigPoseStep && prevStep.minifigPrep?.id === step.attachedMinifig.id) {
+          prevStep.side = 'top';
+          prevStep.corner = chosen.corner;
+          prevStep.az = chosen.az;
+          prevStep.el = Math.min(28, Math.max(18, chosen.el));
+        }
+
+        sec.lastModelCam = {
+          side: chosen.side,
+          corner: chosen.corner,
+          az: chosen.az,
+          el: chosen.el,
+        };
+        appendOccluderBoxes(step.parts, sec.occluders);
+      } else {
+        const curCam = getDefaultStepCam(step);
+        step.cue = sec.lastModelCam ? computeStudioRotationCue(sec.lastModelCam, curCam) : 'none';
+        sec.lastModelCam = curCam;
+        appendOccluderBoxes(step.parts, sec.occluders);
+      }
+    }
+  }
+}
+
 // ZERO-FLOATING CHASSIS-FIRST STEP GENERATOR (with automatic duplicate submodel & subdivision chapters!)
 function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
   const perStep = state.pacing === 'few' ? 3 : state.pacing === 'many' ? 12 : 6;
@@ -2757,6 +2871,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
           canonicalParts: nm.canonicalParts,
           needsTransform: nm.needsTransform,
           transformLabel: nm.transformLabel,
+          worldForward: nm.worldForward,
         },
         parts: nm.worldParts,
       });
@@ -2817,6 +2932,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
         }
       });
 
+      optimizeMinifigPlacementCameras(chapters);
       return {
         title: parsed.title,
         subtitle: `${parts.length} pieces · ${globalStep} steps · ${bagSections.length} build bags`,
@@ -3204,6 +3320,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
         });
       }
 
+      optimizeMinifigPlacementCameras(chapters);
       const modCount = moduleSecs.length + (bogieCanonical ? 1 : 0);
       return {
         title: parsed.title,
@@ -3296,6 +3413,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
           canonicalParts: nm.canonicalParts,
           needsTransform: nm.needsTransform,
           transformLabel: nm.transformLabel,
+          worldForward: nm.worldForward,
         },
         parts: nm.worldParts,
       });
@@ -3522,6 +3640,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
     flushMainSteps();
   });
 
+  optimizeMinifigPlacementCameras(chapters);
   const dupSummary = dupGroups.length > 0 ? ` · ${dupGroups.length} repeated submodel${dupGroups.length === 1 ? '' : 's'}` : '';
   return { title: parsed.title, subtitle: `${parts.length} pieces · ${globalStep} steps${dupSummary}`, chapters, _parsed: parsed, _mode: mode, _subdivisionPlan: null };
 }
@@ -4503,7 +4622,10 @@ function renderAll() {
         ? getMinifigThumb(
             step.attachedMinifig.previewParts || step.attachedMinifig.canonicalParts,
             `att_${step.attachedMinifig.id}`,
-            38, 26, 120, 120,
+            Math.round(cam.az),
+            Math.round(Math.min(30, Math.max(16, cam.el))),
+            120,
+            120,
           )
         : null;
       const isMfBuild = Boolean((step.isStandaloneFigure || ch.kind === 'minifigure') && !step.isMinifigPoseStep);
@@ -7082,6 +7204,9 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
         ctx.strokeRect(sx, sy, slotW, slotH);
       }
 
+      const cam = getStepCamera(step);
+      const ov = state.overrides[step.id] || {};
+
       // Step number
       ctx.fillStyle = theme.text;
       ctx.font = `800 ${stepNumPx}px -apple-system, sans-serif`;
@@ -7157,7 +7282,14 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
         ctx.save();
         drawRRect(pliX, pliY, attBoxW, pliH, pliRadius);
         ctx.clip();
-        const attUrl = getMinifigThumb(att.previewParts || att.canonicalParts, `att_${att.id}`, 38, 26, 120, 120);
+        const attUrl = getMinifigThumb(
+          att.previewParts || att.canonicalParts,
+          `att_${att.id}`,
+          Math.round(cam.az),
+          Math.round(Math.min(30, Math.max(16, cam.el))),
+          120,
+          120,
+        );
         if (attUrl) {
           const attImg = await loadImgPromise(attUrl);
           drawContain(ctx, attImg, pliX + 6, pliY + 4, pliH * 1.0, pliH - 8);
@@ -7191,10 +7323,34 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
         }
       }
 
+      let badgeRightX = sx + slotW - 10;
+      if (state.showRotCues && step.cue && step.cue !== 'none') {
+        const cueLabel = step.cue === 'flip_vertical' ? '↻ Flip Over' : step.cue === 'yaw_180' ? '↻ Turn 180°' : '↻ Rotate 90°';
+        const cueFont = Math.max(10, Math.round(Math.min(pliH * 0.24, 13)));
+        ctx.font = `700 ${cueFont}px -apple-system, sans-serif`;
+        const cueW = Math.round(ctx.measureText(cueLabel).width + 18);
+        const cueH = Math.round(cueFont * 1.9);
+        const cueX = badgeRightX - cueW;
+        const cueY = sy + 12;
+        drawRRect(cueX, cueY, cueW, cueH, cueH / 2);
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+        ctx.strokeStyle = theme.accent;
+        ctx.lineWidth = 1.6;
+        ctx.stroke();
+        ctx.fillStyle = '#202124';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(cueLabel, cueX + cueW / 2, cueY + cueH / 2 + 0.5);
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        badgeRightX = cueX - 6;
+      }
+
       if (step.stepHint) {
         ctx.font = '700 11px -apple-system, sans-serif';
         const hintW = Math.min(slotW * 0.42, ctx.measureText(step.stepHint).width + 18);
-        const hintX = sx + slotW - hintW - 10;
+        const hintX = badgeRightX - hintW;
         const hintY = sy + 12;
         drawRRect(hintX, hintY, hintW, 22, 11);
         ctx.fillStyle = '#ffffff';
@@ -7208,8 +7364,6 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
 
       // 3D Step Render (+ optional true physical 1:1 Minifigure View card on printed paper!)
       const prev = getPreviousPartsForStep(state.model, ch, step);
-      const cam = getStepCamera(step);
-      const ov = state.overrides[step.id] || {};
       const effectivePartOffsets = step.defaultPartOffsets
         ? { ...step.defaultPartOffsets, ...(ov.partOffsets || {}) }
         : (ov.partOffsets || {});

@@ -65,6 +65,8 @@ export interface NormalizedMinifigResult {
   needsTransform: boolean;
   transformLabel: string;
   metrics: MinifigMetrics;
+  worldForward: Vec3;
+  worldUp: Vec3;
 }
 
 export interface OneToOneLayout {
@@ -1041,6 +1043,8 @@ export function normalizeMinifigureForBuild(
       widthMm: widthLdu * LDU_TO_MM,
       heightMm: heightLdu * LDU_TO_MM,
     },
+    worldForward: bodyFwd,
+    worldUp: bodyUp,
   };
 }
 
