@@ -4300,19 +4300,34 @@ function updateErrorIndicators() {
   }
 }
 
-function dismissErrorBanner() {
+let errorBannerFadeTimer = null;
+function dismissErrorBanner(immediate = false) {
   clearTimeout(errorBannerTimer);
-  document.getElementById('errorBanner')?.classList.add('hidden');
+  clearTimeout(errorBannerFadeTimer);
+  const el = document.getElementById('errorBanner');
+  if (!el) return;
+  if (immediate || el.classList.contains('hidden')) {
+    el.classList.add('hidden');
+    el.classList.remove('opacity-0', 'pointer-events-none');
+    return;
+  }
+  el.classList.add('opacity-0', 'pointer-events-none');
+  errorBannerFadeTimer = setTimeout(() => {
+    el.classList.add('hidden');
+    el.classList.remove('opacity-0', 'pointer-events-none');
+  }, 300);
 }
 
 function showImportErrorBanner() {
   const n = state.diagnostics.length;
-  if (n === 0) { dismissErrorBanner(); return; }
+  if (n === 0) { dismissErrorBanner(true); return; }
   const txt = document.getElementById('errorBannerText');
   if (txt) txt.textContent = n === 1 ? 'There is 1 error.' : `There are ${n} errors.`;
-  document.getElementById('errorBanner').classList.remove('hidden');
+  const el = document.getElementById('errorBanner');
   clearTimeout(errorBannerTimer);
-  errorBannerTimer = setTimeout(dismissErrorBanner, 12000);
+  clearTimeout(errorBannerFadeTimer);
+  el.classList.remove('hidden', 'opacity-0', 'pointer-events-none');
+  errorBannerTimer = setTimeout(() => dismissErrorBanner(false), 4500);
 }
 
 function escHtml(s) {
@@ -5060,9 +5075,11 @@ document.querySelectorAll('.mode-btn').forEach(b => {
 });
 
 document.getElementById('prevPage').onclick = () => {
+  dismissErrorBanner();
   if (state.pageIdx > 0) { state.pageIdx--; state.bomShortcutVisible = false; state.selectedPartIds.clear(); resetZoom(); renderAll(); }
 };
 document.getElementById('nextPage').onclick = () => {
+  dismissErrorBanner();
   if (state.pageIdx < state.pages.length - 1) { state.pageIdx++; state.bomShortcutVisible = false; state.selectedPartIds.clear(); resetZoom(); renderAll(); }
 };
 document.getElementById('btnZoomIn').onclick = () => setZoom(state.zoom * 1.22);
