@@ -72,7 +72,7 @@ export function StepTreeSidebar() {
                   ? 'bg-[#fff3e8] border-[#d9480f] text-[#d9480f]'
                   : 'bg-white border-[#dcd9d0] text-[#5a5f66] hover:text-[#17191c]'
               }`}
-              title="Pin Page Break before this step (locks downstream pagination)"
+              title="Page Break before this step (keeps following pages from shifting)"
             >
               <Pin className="w-3.5 h-3.5" />
             </button>

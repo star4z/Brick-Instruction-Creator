@@ -519,7 +519,7 @@ export function PageCanvas() {
                       {ov?.pinPageBreakBefore && (
                         <span
                           className="p-1 rounded-md bg-[#fff3e8] text-[#d9480f] border border-[#f5c7a3]"
-                          title="Pinned Page Break"
+                          title="Page Break"
                         >
                           <Pin className="w-3 h-3" />
                         </span>

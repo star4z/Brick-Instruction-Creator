@@ -147,7 +147,7 @@ export function TopBar({ onOpenMobileSteps, onOpenMobileInspector }: Props) {
           type="button"
           onClick={() => reimportInputRef.current?.click()}
           className="hidden xl:inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full border border-[#dadce0] bg-white text-[#202124] text-xs font-medium hover:bg-[#f1f3f4] transition cursor-pointer shrink-0"
-          title="Replace model geometry while keeping all your existing step edits and pinned page breaks"
+          title="Replace model geometry while keeping all your existing step edits and page breaks"
         >
           <GitCompareArrows className="w-4 h-4 text-[#1a73e8]" />
           <span>Update Model</span>

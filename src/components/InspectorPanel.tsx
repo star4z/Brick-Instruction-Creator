@@ -488,7 +488,7 @@ export function InspectorPanel() {
           <>
             {!selectedStep ? (
               <div className="p-4 rounded-2xl bg-[#f8f9fa] border border-[#dadce0] text-center text-[#5f6368]">
-                Select any step on the manual page to adjust its camera angle, pinned page break, or piece position.
+                Select any step on the manual page to adjust its camera angle, page break, or piece position.
               </div>
             ) : (
               <>
@@ -513,12 +513,12 @@ export function InspectorPanel() {
                   )}
                 </div>
 
-                {/* Pinned Page Break & Local Step Count */}
+                {/* Page Break & Local Step Count */}
                 <section className="space-y-3 p-3.5 rounded-2xl bg-[#f8f9fa] border border-[#e8eaed]">
                   <div className="flex items-center justify-between">
                     <label className="flex items-center gap-2 font-semibold text-[#202124] cursor-pointer">
                       <Pin className="w-4 h-4 text-[#1a73e8]" />
-                      <span>Start New Page Here</span>
+                      <span>Page Break</span>
                     </label>
                     <input
                       type="checkbox"
