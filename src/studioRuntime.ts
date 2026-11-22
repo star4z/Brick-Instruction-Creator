@@ -5260,11 +5260,24 @@ document.getElementById('desktopModelChip').onclick = openMenu;
 document.getElementById('btnCloseMenu').onclick = closeMenu;
 document.getElementById('menuDismissArea').onclick = closeMenu;
 
-document.getElementById('btnStylePop').onclick = () => {
-  document.getElementById('stylePopover').classList.toggle('hidden');
+const stylePopEl = document.getElementById('stylePopover');
+const btnStylePopEl = document.getElementById('btnStylePop');
+btnStylePopEl.onclick = () => {
+  stylePopEl.classList.toggle('hidden');
   syncMenuControls();
 };
-document.getElementById('btnCloseStyle').onclick = () => document.getElementById('stylePopover').classList.add('hidden');
+document.getElementById('btnCloseStyle').onclick = () => stylePopEl.classList.add('hidden');
+document.addEventListener('pointerdown', (e) => {
+  if (!stylePopEl || stylePopEl.classList.contains('hidden')) return;
+  const t = e.target;
+  if (t instanceof Node && (stylePopEl.contains(t) || (btnStylePopEl && btnStylePopEl.contains(t)))) return;
+  stylePopEl.classList.add('hidden');
+}, true);
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && stylePopEl && !stylePopEl.classList.contains('hidden')) {
+    stylePopEl.classList.add('hidden');
+  }
+});
 
 document.getElementById('btnPageOverview').onclick = () => {
   renderOverviewModal();
