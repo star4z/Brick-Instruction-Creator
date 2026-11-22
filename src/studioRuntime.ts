@@ -4246,7 +4246,7 @@ function renderAll() {
                 <div class="relative z-10 shrink-0 flex items-start justify-between gap-1.5">
                   <div class="flex items-start gap-1.5 flex-wrap">
                     <span class="${isTightSlot ? 'text-lg' : 'text-2xl'} font-extrabold leading-none">${step.num}</span>
-                    ${ov.pin ? '<span class="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-900">Locked</span>' : ''}
+                    ${ov.pin ? `<span class="no-print inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-[#1a73e8]/15 text-[#1a73e8]" title="Pinned page break: Step ${step.num} always starts a new page so earlier edits won't shift later pages"><svg class="w-2.5 h-2.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg><span>Page Break</span></span>` : ''}
 
                     ${step.attachedSubmodel ? `
                       <div data-drag="pli" data-step="${step.id}" class="draggable-el flex items-center gap-2 px-2 py-1 rounded-xl shadow-xs ${isArrangeMode ? 'cursor-move' : ''}" style="background:${theme.calloutBg};border:${pliSel ? `2px solid ${theme.accent}` : `1.5px solid ${theme.calloutBorder}`};transform:translate(${pliPos.x}px,${pliPos.y}px) scale(${pliScale});transform-origin:top left;">
@@ -4840,6 +4840,16 @@ function renderContextOverlay(page) {
   if (state.mode === 'arrange') {
     const pliPct = Math.round((ov.pliScale || 1.0) * 100);
     const hasSub = Boolean(step.subassembly);
+    const isPinned = Boolean(ov.pin);
+    const slotIdx = (page.slots || []).findIndex(s => s.step.id === step.id);
+    const pinBtnLabel = isPinned
+      ? 'Page Break Pinned'
+      : (slotIdx > 0 ? `Start New Page at Step ${step.num}` : 'Pin Page Break');
+    const pinBtnTitle = isPinned
+      ? `Remove pinned page break before Step ${step.num}`
+      : (slotIdx > 0
+        ? `Move Step ${step.num} to the start of a new page and keep it anchored there`
+        : `Keep Step ${step.num} at the start of a new page so earlier edits won't shift later pages`);
     box.innerHTML = `
       <div class="pointer-events-auto glass-pill rounded-3xl p-3 w-full space-y-2 text-xs">
         <div class="flex items-center justify-between gap-2 flex-wrap">
@@ -4855,6 +4865,10 @@ function renderContextOverlay(page) {
         <div class="flex items-center gap-1.5 flex-wrap">
           <button id="btnInsText" class="px-2.5 py-1.5 rounded-full bg-[#1a73e8] text-white font-semibold">+ Text Note</button>
           <button id="btnInsImg" class="px-2.5 py-1.5 rounded-full bg-black/5 dark:bg-white/10 font-semibold">+ Image / Logo</button>
+          <button id="btnArrangePinBreak" title="${escHtml(pinBtnTitle)}" aria-pressed="${isPinned ? 'true' : 'false'}" class="px-2.5 py-1.5 rounded-full font-semibold inline-flex items-center gap-1 transition ${isPinned ? 'bg-[#1a73e8] text-white' : 'bg-black/5 dark:bg-white/10'}">
+            <svg class="w-3 h-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>
+            <span>${pinBtnLabel}</span>
+          </button>
           ${hasSub ? `<button id="btnToggleCallout" class="px-2.5 py-1.5 rounded-full bg-black/5 dark:bg-white/10 font-semibold">${ov.calloutAsPages ? 'Convert to Callout Box' : 'Convert to Full Page'}</button>` : ''}
           ${hasSub && !ov.calloutAsPages ? `<button id="btnCalloutDir" class="px-2.5 py-1.5 rounded-full bg-black/5 dark:bg-white/10 font-semibold">${ov.calloutDir === 'vertical' ? 'Side-by-Side' : 'Stack Vertically'}</button>` : ''}
           ${state.selectedArrangeEl?.kind === 'insert' ? `<button id="btnDelInsert" class="px-2.5 py-1.5 rounded-full bg-red-500/15 text-red-600 font-semibold">Delete Selected</button>` : ''}
@@ -4874,6 +4888,26 @@ function renderContextOverlay(page) {
       renderAll();
     };
     box.querySelector('#btnInsImg').onclick = () => document.getElementById('insertImageInput').click();
+    box.querySelector('#btnArrangePinBreak').onclick = () => {
+      pushUndo();
+      const nextOv = { ...(state.overrides[step.id] || {}) };
+      const nextPinned = !isPinned;
+      if (nextPinned) nextOv.pin = true;
+      else delete nextOv.pin;
+      state.overrides[step.id] = nextOv;
+      rebuildPages();
+      const targetIdx = state.pages.findIndex(pg => pg.slots?.some(sl => sl.step.id === step.id));
+      if (targetIdx >= 0) state.pageIdx = targetIdx;
+      const targetPg = state.pages[state.pageIdx];
+      renderAll();
+      if (nextPinned) {
+        showToast(slotIdx > 0 && targetPg
+          ? `Step ${step.num} now starts a new page (Page ${targetPg.num}).`
+          : `Pinned page break before Step ${step.num} — earlier edits won't shift later pages.`);
+      } else {
+        showToast(`Removed page break before Step ${step.num} — pages can reflow freely.`);
+      }
+    };
     if (hasSub) {
       box.querySelector('#btnToggleCallout').onclick = () => { pushUndo(); state.overrides[step.id] = { ...ov, calloutAsPages: !ov.calloutAsPages }; renderAll(); };
       const dirBtn = box.querySelector('#btnCalloutDir');
@@ -5098,20 +5132,82 @@ function syncMenuControls() {
 
 function renderOverviewModal() {
   const list = document.getElementById('overviewList');
+  const prevScrollTop = list.scrollTop;
   list.innerHTML = '';
+
+  const pinSvg = '<svg class="w-3 h-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>';
+
+  let pinnedCount = 0;
+  for (const pg of state.pages) {
+    const fs = pg.slots?.[0]?.step;
+    if (fs && state.overrides[fs.id]?.pin) pinnedCount++;
+  }
+
+  const clearBtn = document.getElementById('btnClearAllPins');
+  if (clearBtn) {
+    if (pinnedCount > 0) {
+      clearBtn.textContent = `Clear ${pinnedCount}`;
+      clearBtn.title = `Remove all ${pinnedCount} pinned page break${pinnedCount === 1 ? '' : 's'}`;
+      clearBtn.classList.remove('hidden');
+      clearBtn.onclick = () => {
+        pushUndo();
+        for (const sid of Object.keys(state.overrides)) {
+          if (state.overrides[sid]?.pin) {
+            const nextOv = { ...state.overrides[sid] };
+            delete nextOv.pin;
+            state.overrides[sid] = nextOv;
+          }
+        }
+        renderAll();
+        renderOverviewModal();
+        showToast('Cleared all pinned page breaks — pages can reflow freely.');
+      };
+    } else {
+      clearBtn.classList.add('hidden');
+      clearBtn.onclick = null;
+    }
+  }
+
   state.pages.forEach((pg, idx) => {
     const active = idx === state.pageIdx;
-    const row = document.createElement('div');
-    row.className = `flex items-center justify-between gap-2 px-3 py-2.5 rounded-2xl border cursor-pointer transition ${active ? 'border-[#1a73e8] bg-[#1a73e8]/10' : 'border-[var(--border)] bg-[var(--background)]'}`;
     const firstStep = pg.slots?.[0]?.step;
-    const pinned = firstStep && state.overrides[firstStep.id]?.pin;
+    const pinned = Boolean(firstStep && state.overrides[firstStep.id]?.pin);
+
+    if (pinned && firstStep) {
+      const divider = document.createElement('div');
+      divider.className = 'flex items-center gap-2 px-2 pt-1 text-[10px] font-bold text-[#1a73e8] select-none';
+      divider.innerHTML = `
+        <div class="flex-1 border-t border-dashed border-[#1a73e8]/55"></div>
+        <span class="inline-flex items-center gap-1 whitespace-nowrap">
+          ${pinSvg}
+          <span>Page Break · Step ${firstStep.num} always starts a new page</span>
+        </span>
+        <div class="flex-1 border-t border-dashed border-[#1a73e8]/55"></div>`;
+      list.appendChild(divider);
+    }
+
+    const row = document.createElement('div');
+    if (active) row.dataset.active = 'true';
+    row.className = `flex items-center justify-between gap-2 px-3 py-2.5 rounded-2xl border cursor-pointer transition ${active ? 'border-[#1a73e8] bg-[#1a73e8]/10' : 'border-[var(--border)] bg-[var(--background)]'}`;
+
+    const stepRange = pg.slots?.length
+      ? (pg.slots.length === 1 ? `Step ${pg.slots[0].step.num}` : `Steps ${pg.slots[0].step.num}–${pg.slots[pg.slots.length - 1].step.num}`)
+      : null;
+    const primaryLabel = stepRange ? `Page ${pg.num} · ${stepRange}` : `Page ${pg.num} · ${pg.label}`;
+    const showChapterSub = Boolean(pg.chapterName && (stepRange || pg.chapterName !== pg.label));
+    const pinTitle = firstStep
+      ? (pinned
+        ? `Remove pinned page break before Step ${firstStep.num}`
+        : `Keep Step ${firstStep.num} at the start of a new page so earlier edits won't shift later pages`)
+      : '';
+
     row.innerHTML = `
       <div class="min-w-0">
-        <div class="font-bold truncate">Page ${pg.num} · ${pg.label}</div>
-        ${pg.chapterName ? `<div class="text-[11px] text-[var(--muted-foreground)] truncate">${pg.chapterName}</div>` : ''}
+        <div class="font-bold truncate">${escHtml(primaryLabel)}</div>
+        ${showChapterSub ? `<div class="text-[11px] text-[var(--muted-foreground)] truncate">${escHtml(pg.chapterName)}</div>` : ''}
       </div>
       <div class="flex items-center gap-1 shrink-0">
-        ${firstStep ? `<button class="ov-pin px-2.5 py-1 rounded-full text-[11px] font-semibold border ${pinned ? 'bg-[#1a73e8] text-white border-transparent' : 'border-[var(--border)] bg-[var(--card)]'}">${pinned ? '🔒 Locked' : 'Lock Page'}</button>` : ''}
+        ${firstStep ? `<button type="button" title="${escHtml(pinTitle)}" aria-pressed="${pinned ? 'true' : 'false'}" class="ov-pin px-2.5 py-1 rounded-full text-[11px] font-semibold border inline-flex items-center gap-1 transition ${pinned ? 'bg-[#1a73e8] text-white border-transparent' : 'border-[var(--border)] bg-[var(--card)] hover:border-[#1a73e8]/60'}">${pinSvg}<span>${pinned ? 'Pinned' : 'Pin Break'}</span></button>` : ''}
       </div>`;
     row.onclick = () => {
       state.pageIdx = idx;
@@ -5126,13 +5222,21 @@ function renderOverviewModal() {
       pinBtn.onclick = (e) => {
         e.stopPropagation();
         pushUndo();
-        state.overrides[firstStep.id] = { ...(state.overrides[firstStep.id] || {}), pin: !pinned };
+        const nextOv = { ...(state.overrides[firstStep.id] || {}) };
+        if (pinned) delete nextOv.pin;
+        else nextOv.pin = true;
+        state.overrides[firstStep.id] = nextOv;
         renderAll();
         renderOverviewModal();
+        showToast(pinned
+          ? `Removed page break before Step ${firstStep.num} — pages can reflow freely.`
+          : `Pinned page break before Step ${firstStep.num} — earlier edits won't shift later pages.`);
       };
     }
     list.appendChild(row);
   });
+
+  list.scrollTop = prevScrollTop;
 }
 
 // =========================================================================
@@ -6877,7 +6981,10 @@ document.getElementById('themeImportInput').onchange = async (e) => {
 
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
-  if (themeEditorModalEl && !themeEditorModalEl.classList.contains('hidden')) {
+  const ovModal = document.getElementById('overviewModal');
+  if (ovModal && !ovModal.classList.contains('hidden')) {
+    ovModal.classList.add('hidden');
+  } else if (themeEditorModalEl && !themeEditorModalEl.classList.contains('hidden')) {
     closeThemeEditor();
   } else if (stylePopEl && !stylePopEl.classList.contains('hidden')) {
     setStylePopoverOpen(false);
@@ -6886,9 +6993,15 @@ document.addEventListener('keydown', (e) => {
 
 document.getElementById('btnPageOverview').onclick = () => {
   renderOverviewModal();
-  document.getElementById('overviewModal').classList.remove('hidden');
+  const modal = document.getElementById('overviewModal');
+  modal.classList.remove('hidden');
+  const activeRow = modal.querySelector('[data-active="true"]');
+  if (activeRow) activeRow.scrollIntoView({ block: 'center' });
 };
 document.getElementById('btnCloseOverview').onclick = () => document.getElementById('overviewModal').classList.add('hidden');
+document.getElementById('overviewModal').onclick = (e) => {
+  if (e.target === e.currentTarget) e.currentTarget.classList.add('hidden');
+};
 
 document.getElementById('btnUndo').onclick = () => {
   if (!state.undoStack.length) return;

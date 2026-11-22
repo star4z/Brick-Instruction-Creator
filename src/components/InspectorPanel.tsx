@@ -5,9 +5,9 @@ import {
   BookOpen,
   Camera,
   Database,
-  Lock,
   Move3d,
   Palette,
+  Pin,
   RotateCcw,
   Upload,
 } from 'lucide-react';
@@ -488,7 +488,7 @@ export function InspectorPanel() {
           <>
             {!selectedStep ? (
               <div className="p-4 rounded-2xl bg-[#f8f9fa] border border-[#dadce0] text-center text-[#5f6368]">
-                Select any step on the manual page to adjust its camera angle, page break lock, or piece position.
+                Select any step on the manual page to adjust its camera angle, pinned page break, or piece position.
               </div>
             ) : (
               <>
@@ -513,11 +513,11 @@ export function InspectorPanel() {
                   )}
                 </div>
 
-                {/* Page Lock & Local Step Count */}
+                {/* Pinned Page Break & Local Step Count */}
                 <section className="space-y-3 p-3.5 rounded-2xl bg-[#f8f9fa] border border-[#e8eaed]">
                   <div className="flex items-center justify-between">
                     <label className="flex items-center gap-2 font-semibold text-[#202124] cursor-pointer">
-                      <Lock className="w-4 h-4 text-[#1a73e8]" />
+                      <Pin className="w-4 h-4 text-[#1a73e8]" />
                       <span>Start New Page Here</span>
                     </label>
                     <input
@@ -532,7 +532,7 @@ export function InspectorPanel() {
                     />
                   </div>
                   <p className="text-[11px] text-[#5f6368] leading-relaxed">
-                    Keeps this step and all following pages locked in place when you edit earlier steps.
+                    Keeps this step at the start of a new page so editing earlier steps won&apos;t shift later pages. Pages remain editable.
                   </p>
 
                   <div className="space-y-1.5 pt-1">
