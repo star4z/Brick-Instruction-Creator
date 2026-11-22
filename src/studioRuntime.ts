@@ -8,6 +8,7 @@ import {
   classifySubdivisionPartFlags,
   mergeProposedSections,
   recomputeProposalWithCount,
+  sectionsShareEdge,
   splitProposedSection,
 } from './engine/subdivisionAnalyzer';
 import { compileDatEntry as compileLDrawDatEntry } from './engine/datCompiler';
@@ -2518,11 +2519,60 @@ function buildSpatialAdjacency(parts, boxes, roles, sideCaps = null) {
       parts[i]._floatHeight = res.floatHeight;
     }
   }
-  return adj;
-}
 
-function classifyMinifigPieceFast(part) {
-  return classifyMinifigGroupKind(part, (pid) => resolvePart(pid).name);
+  // Pass 3: Bridge small non-figure sub-assemblies (e.g., 2–16 part bogies, pantographs, headlights, mirrors)
+  // that have a tiny CAD clearance gap (<= 12 LDU) to the main structure so they never detach during subdivision.
+  const compVisited = new Uint8Array(n);
+  const subComps = [];
+  for (let i = 0; i < n; i++) {
+    if (compVisited[i] || roles[i] === 'figure') continue;
+    const comp = [];
+    const q = [i];
+    compVisited[i] = 1;
+    let head = 0;
+    while (head < q.length) {
+      const u = q[head++];
+      comp.push(u);
+      for (const v of adj[u]) {
+        if (!compVisited[v] && roles[v] !== 'figure') {
+          compVisited[v] = 1;
+          q.push(v);
+        }
+      }
+    }
+    subComps.push(comp);
+  }
+  if (subComps.length > 1) {
+    subComps.sort((a, b) => b.length - a.length);
+    const compIdOf = new Int32Array(n).fill(-1);
+    subComps.forEach((comp, cid) => {
+      for (const u of comp) compIdOf[u] = cid;
+    });
+    for (let cid = 1; cid < subComps.length; cid++) {
+      const comp = subComps[cid];
+      if (comp.length > 16) continue;
+      let bestU = -1, bestV = -1, bestD = 12;
+      for (const u of comp) {
+        const bu = boxes[u];
+        for (let v = 0; v < n; v++) {
+          if (compIdOf[v] < 0 || compIdOf[v] === cid || roles[v] === 'wheel' || roles[v] === 'figure') continue;
+          const bv = boxes[v];
+          const gx = Math.max(0, bu.min[0] - bv.max[0], bv.min[0] - bu.max[0]);
+          const gy = Math.max(0, bu.min[1] - bv.max[1], bv.min[1] - bu.max[1]);
+          const gz = Math.max(0, bu.min[2] - bv.max[2], bv.min[2] - bu.max[2]);
+          const d = Math.hypot(gx, gy, gz);
+          if (d < bestD) { bestD = d; bestU = u; bestV = v; }
+        }
+      }
+      if (bestU >= 0 && bestV >= 0) {
+        adj[bestU].push(bestV);
+        adj[bestV].push(bestU);
+        const targetCid = compIdOf[bestV];
+        for (const u of comp) compIdOf[u] = targetCid;
+      }
+    }
+  }
+  return adj;
 }
 
 function hasEmbeddedAxleHole(pid) {
@@ -2538,9 +2588,12 @@ function prepareSubdivisionData(parsed) {
   const roles = parts.map(p => classifyPartRole(p));
   const sideCaps = parts.map((p, i) => canConnectSideways(p, roles[i]));
   const adjacency = buildSpatialAdjacency(parts, boxes, roles, sideCaps);
+  const {
+    groups: minifigGroups,
+    claimed: mfClaimed,
+  } = extractMinifigureGroups(parts, boxes, (pid) => resolvePart(pid).name);
   const inputs = parts.map((p, index) => {
     const def = resolvePart(p.p);
-    const mf = classifyMinifigPieceFast(p);
     const m = p.m || R_ID;
     const isUpright = Math.abs(m[4]) >= 0.7;
     const isInverted = m[4] <= -0.7;
@@ -2561,12 +2614,12 @@ function prepareSubdivisionData(parsed) {
       colorId: p.c,
       box: boxes[index],
       ...flags,
-      isMinifig: mf === 'legs' || mf === 'torso' || mf === 'head',
+      isMinifig: Boolean(mfClaimed[index]),
       submodelKey: p.sub || undefined,
       submodelInstanceId: lastSub ? String(lastSub.instId) : undefined,
     };
   });
-  return { boxes, roles, adjacency, inputs };
+  return { boxes, roles, adjacency, inputs, mfClaimed, minifigGroups };
 }
 
 function extractTargetBoxesForMinifig(partsList) {
@@ -3418,7 +3471,18 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
           joinSteps.push(...connectorSteps);
         }
       } else {
-        attachQueue.forEach((item, aIdx) => {
+        const pendingAttach = [...attachQueue];
+        let pendingJoin = [...joinIndices];
+        const countTouchEdges = (indices, targetSet) => {
+          let edges = 0;
+          for (const pi of indices) {
+            for (const nb of (adj[pi] || [])) {
+              if (targetSet.has(nb)) edges++;
+            }
+          }
+          return edges;
+        };
+        const emitAttachItem = (item, isFirst) => {
           for (const pi of item.indices) joinedPlaced.add(pi);
           globalStep++;
           joinSteps.push({
@@ -3434,15 +3498,43 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
               repeatCount: 1,
               totalRepeatCount: 1,
               isSectionAttach: true,
-              attachVerb: aIdx === 0 ? 'Place' : 'Connect',
+              attachVerb: isFirst ? 'Place' : 'Connect',
               canonicalParts: item.canonicalParts,
             },
           });
-        });
+        };
 
-        if (joinIndices.length > 0) {
+        if (pendingAttach.length > 0) {
+          emitAttachItem(pendingAttach.shift(), true);
+        }
+        while (pendingAttach.length > 0) {
+          let bestIdx = -1, bestEdges = 0;
+          for (let i = 0; i < pendingAttach.length; i++) {
+            const edges = countTouchEdges(pendingAttach[i].indices, joinedPlaced);
+            if (edges > bestEdges) { bestEdges = edges; bestIdx = i; }
+          }
+          if (bestIdx >= 0) {
+            emitAttachItem(pendingAttach.splice(bestIdx, 1)[0], false);
+            continue;
+          }
+          if (pendingJoin.length > 0 && countTouchEdges(pendingJoin, joinedPlaced) > 0) {
+            const { steps: bridgeSteps, placed: afterBridge } = buildStepsForIndexList(
+              pendingJoin,
+              'join_conn',
+              joinedPlaced,
+              adaptiveMaxSpread,
+            );
+            for (const pi of afterBridge) joinedPlaced.add(pi);
+            joinSteps.push(...bridgeSteps);
+            pendingJoin = [];
+            continue;
+          }
+          emitAttachItem(pendingAttach.shift(), false);
+        }
+
+        if (pendingJoin.length > 0) {
           const { steps: connectorSteps } = buildStepsForIndexList(
-            joinIndices,
+            pendingJoin,
             'join_conn',
             joinedPlaced,
             adaptiveMaxSpread,
@@ -8323,6 +8415,8 @@ function getPreviewPartMaps() {
   if (prop && prop.sections?.length) {
     const spanRef = Math.max(160, impState.assessment?.longestSpanLdu || 320);
     const explodeDist = Math.min(240, Math.max(48, spanRef * 0.24)) * (impState.explodePct / 100);
+    const renderedGroups = [];
+    const coveredIndices = new Set();
 
     prop.sections.forEach((sec) => {
       const isHighlighted = !impState.highlightedSecId || impState.highlightedSecId === sec.id;
@@ -8333,11 +8427,14 @@ function getPreviewPartMaps() {
       groups.forEach((grp, gIdx) => {
         const sign = groups.length === 2 && gIdx === 1 ? -1 : 1;
         const ox = (sec.explodeOffset?.[0] || 0) * explodeDist * sign;
-        const oy = (sec.explodeOffset?.[1] || 0) * explodeDist * (gIdx === 1 && groups.length === 2 ? 1 : 1);
+        const oy = (sec.explodeOffset?.[1] || 0) * explodeDist;
         const oz = (sec.explodeOffset?.[2] || 0) * explodeDist * sign;
         const colHex = groups.length === 2 && gIdx === 1 ? '#38bdf8' : sec.previewColor;
 
+        renderedGroups.push({ indices: grp, ox, oy, oz, isHighlighted });
+
         for (const pi of grp) {
+          coveredIndices.add(pi);
           const p = parts[pi];
           if (!p) continue;
           if (explodeDist > 1) partOffsets[p.id] = { x: ox, y: oy, z: oz, arrow: false };
@@ -8346,6 +8443,46 @@ function getPreviewPartMaps() {
         }
       });
     });
+
+    // Move each minifigure assembly together with its closest host section so seated drivers &
+    // passengers ride inside their car in the 3D exploded preview instead of floating in empty space!
+    const boxes = impState.prep?.boxes;
+    const minifigGroups = impState.prep?.minifigGroups || [];
+    if (boxes && renderedGroups.length > 0 && minifigGroups.length > 0) {
+      for (const mg of minifigGroups) {
+        let minX = Infinity, minY = Infinity, minZ = Infinity;
+        let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+        for (const idx of mg.indices) {
+          const b = boxes[idx];
+          if (!b) continue;
+          if (b.min[0] < minX) minX = b.min[0]; if (b.max[0] > maxX) maxX = b.max[0];
+          if (b.min[1] < minY) minY = b.min[1]; if (b.max[1] > maxY) maxY = b.max[1];
+          if (b.min[2] < minZ) minZ = b.min[2]; if (b.max[2] > maxZ) maxZ = b.max[2];
+        }
+        if (!isFinite(minX)) continue;
+        let bestGrp = renderedGroups[0], bestD = Infinity;
+        for (const rg of renderedGroups) {
+          for (const pi of rg.indices) {
+            const b = boxes[pi];
+            if (!b) continue;
+            const gx = Math.max(0, minX - b.max[0], b.min[0] - maxX);
+            const gy = Math.max(0, minY - b.max[1], b.min[1] - maxY);
+            const gz = Math.max(0, minZ - b.max[2], b.min[2] - maxZ);
+            const d = Math.hypot(gx, gy, gz);
+            if (d < bestD) { bestD = d; bestGrp = rg; }
+          }
+        }
+        for (const idx of mg.indices) {
+          if (coveredIndices.has(idx)) continue;
+          const p = parts[idx];
+          if (!p) continue;
+          if (explodeDist > 1) {
+            partOffsets[p.id] = { x: bestGrp.ox, y: bestGrp.oy, z: bestGrp.oz, arrow: false };
+          }
+          if (dimPartIds && !bestGrp.isHighlighted) dimPartIds.add(p.id);
+        }
+      }
+    }
   }
   return { parts, partOffsets, partColorOverrides, dimPartIds };
 }
@@ -8500,7 +8637,13 @@ function renderImportAssistantUI() {
     const isHi = impState.highlightedSecId === sec.id;
     const isRep = sec.repeatPartIndexGroups && sec.repeatPartIndexGroups.length > 1;
     const pcs = sec.partIndices.length;
-    const canMerge = active.sections.length > 2 && idx < active.sections.length - 1;
+    const canMerge =
+      active.sections.length > 2 &&
+      idx < active.sections.length - 1 &&
+      Boolean(
+        impState.prep?.adjacency &&
+          sectionsShareEdge(sec, active.sections[idx + 1], impState.prep.adjacency),
+      );
     const canSplit = !isRep && pcs >= 10 && active.sections.length < 8;
     return `
       <div data-sec-row="${sec.id}" class="flex items-center gap-2 px-2.5 py-2 rounded-2xl border transition cursor-pointer ${isHi ? 'border-[#1a73e8] bg-[#1a73e8]/10' : 'border-[var(--border)] bg-[var(--background)]'}">

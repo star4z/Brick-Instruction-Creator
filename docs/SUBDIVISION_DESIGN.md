@@ -70,54 +70,63 @@ flowchart TD
 
 ## 4. Subdivision Analysis Algorithms (`src/engine/subdivisionAnalyzer.ts`)
 
-The pure-TypeScript analyzer evaluates five complementary LEGO-native strategies, scores each (`0–100`), and ranks the top proposals:
+The pure-TypeScript analyzer evaluates five complementary LEGO-native strategies, scores each (`0–100`), and ranks the top proposals—enforcing a **strict zero-floating invariant** across every section of every proposal:
+
+> **Zero-Floating Section Invariant** (verified by [`verifyProposalZeroFloating`](../src/engine/subdivisionAnalyzer.ts)):
+> Every proposed section (and every copy inside `repeatPartIndexGroups`, plus any optional articulated `Center Joint & Bogie` or symmetric `Center Connector`) MUST be a **single connected component** in the physical adjacency graph (`isConnectedSubgraph === true`). No section may contain floating parts, detached roof chunks, or scattered debris.
+
+### Core Primitive: Anchored Connected Graph Partitioner (`enforceConnectedPartition`)
+1. **Per-Component Partitioning**: Extracts global connected components first so genuinely separate builds (e.g., a train and a separate trackside platform `> 16 LDU` away) stay in their own standalone connected sections instead of floating inside another section. Small CAD-clearance sub-assemblies (`≤ 16` parts within `12 LDU` in [`buildSpatialAdjacency`](../src/studioRuntime.ts)) are bridged beforehand so bogies, pantographs, headlights, and mirrors remain attached to the model.
+2. **Locked Connected Cores**: For each spatial bucket, locks its largest connected component as an anchored core.
+3. **Priority Frontier Expansion**: Claims all remaining/detached bricks strictly across physical `adjacency` edges into an already-connected core (weighted by spatial fidelity, shared-edge strength, and balance), inductively guaranteeing 100% single-component connectivity at every step.
+4. **Articulation-Guarded Boundary Smoothing**: Moves boundary bricks to an adjacent section with stronger physical attachment **only** when an early-exit BFS cut-vertex check (`wouldStayConnectedWithout`) confirms removing the brick does not split its current section.
 
 ### Strategy A: Longitudinal Halves & Segments (`longitudinal_halves`)
 *Best for elongated models (trains, light rail vehicles, ships, bridges, fuselages).*
 1. **2D PCA Principal Horizontal Axis**: Computes the dominant lengthwise axis on horizontal XZ part centroids (snapping nearly orthogonal axes within ~5° to exact X or Z), so diagonal models split just as cleanly as axis-aligned ones.
 2. **Rigid Stud-Clutch Graph & Intact Bogie Detection**: Builds a strict stud-clutch graph ([`buildStudClutchAdjacency`](../src/engine/subdivisionAnalyzer.ts)) that distinguishes genuine stud/SNOT/pin connections from sliding smooth-tile seams, swiveling bogie pins (`4025`/`2878`/turntables), opposing pinhole coupler tongues (`3176`/`2444`/`32001`), vertical Technic axles, and concave-scoop hollow AABB overlaps. Detects explicit and geometric train bogies (standard RC wheel holders + wheels as well as brick-built horizontal-axle bogies) behind a car-body firewall so a cut plane **never** slices a middle bogie in half.
 3. **Minimum-Bridge Transverse Cut Sweep**: Sweeps candidate transverse cut planes around ideal split fractions (within `±14%` of length) to minimize rigid stud cut edges and piece imbalance, snapping directly onto a detected vertical Technic pivot rod when an articulated joint is present.
-4. **Stud-Owned Seam Assignment & Articulated Joint Isolation**:
+4. **Zero-Floating Connected Partition & Articulated Joint Isolation**:
    - Any brick crossing the cut plane that connects by studs to **only one half** (such as curved articulation scoops and protruding coupler tongues) is reassigned back to that corresponding half rather than dumped into the middle section.
-   - Only genuine two-sided rigid bridge bricks — or, for articulated models, the **intact middle bogie**, the **vertical Technic rod**, and the **floating circular cross-axle pieces** coaxial with the rod (`4032`, `3941`, `3713`, `4265c`, gears, bushes, or embedded `axlehol` parts) — remain in the Center Join section.
-   - Detached small fragments are only moved to Join if they actually touch the cut/join zone (never pulling distant roof details or minifig accessories into the middle section).
-   - For articulated joints, [`buildManualFromParsed`](../src/studioRuntime.ts) builds the intact **Middle Bogie** as its own zoomed-in chapter and sequences **Connect Halves & Finish** in true physical assembly order with 3D directional arrows and step badges:
+   - For **articulated 2-half trains**, when the **intact middle bogie**, **vertical Technic rod**, and coaxial **floating circular cross-axle pieces** (`4032`, `3941`, `3713`, `4265c`, gears, bushes, or embedded `axlehol` parts) form a single connected joint assembly, they stay centered (`explodeOffset: [0, 0, 0]`) in `Center Joint & Bogie`, while any non-articulated roof/wall/floor bricks stay connected on Front/Rear Half (never dumped into a floating debris cloud). [`buildManualFromParsed`](../src/studioRuntime.ts) builds the intact **Middle Bogie** as its own zoomed-in chapter and sequences **Connect Halves & Finish** in true physical assembly order:
      1. **Place** First Half
      2. **Drop into scoop** — floating circular cross-axle pieces into the open scoop cavity
      3. **Slide halves together** — Second Half slides in around the center pieces
      4. **Push rod through** — vertical Technic rod with 1:1 actual-size guide
      5. **Attach bogie to rod** — pre-built Middle Bogie pushes up onto the protruding end of the rod
-5. **Identical Half Detection**: Compares part+color multisets and centroid-relative quantized distance profiles (invariant under 180° rotation and reflection) to detect `2×` identical halves.
-6. **Zoom Gain Estimate**: Computes `fullDiagonal / maxSectionDiagonal` to show the expected zoom improvement (e.g., `~1.9× larger bricks per step`).
+   - For **general 2-half, 3-segment, or N-segment splits** (without an articulated 2-half joint or a single-connected symmetric center coupler), runs `enforceConnectedPartition` directly on the primary connected component with **no floating Join debris cloud** so every segment (`Front Section`, `Middle Section`, `Rear Section`) is a solid, single-connected-component build that snaps directly onto its neighbor.
+5. **Identical Half Detection (`2×` Collapse)**: Compares part+color multisets and centroid-relative quantized distance profiles (invariant under 180° rotation and reflection) to detect `2×` identical halves. Only emits a separate `Center Connector` when both halves match **and** the center connector itself is a single connected component touching both halves.
+6. **Zoom Gain Estimate**: Computes `fullDiagonal / maxSectionDiagonal` to show the expected zoom improvement (e.g., `~2.3× larger bricks per step`).
 
 ### Strategy B: Modular Floors & Vertical Layers (`horizontal_floors`)
 *Best for modular buildings, towers, and multi-story structures (`spanY >= 72 LDU`).*
-- Sweeps horizontal planes at plate resolution (`8 LDU`) to score cross-plane edges, spanning parts, and smooth-tile perimeter tops (`isTile`).
+- Sweeps horizontal planes at plate resolution (`8 LDU`) to score cross-plane edges, spanning parts, and smooth-tile perimeter tops (`isTile`), then runs `enforceConnectedPartition` so every floor is 100% internally connected.
 - Sharp local minima flanked by smooth tiles indicate detachable **Ground Floor / Floor N / Roof** modular seams (`modular_chapters`); tightly interlocked stacks produce vertical **Numbered Bags**.
 
 ### Strategy C: Structural Modules (`structural_modules`)
 *Best for vehicles, spaceships, mechs, and multi-pod assemblies.*
-- Uses farthest-point spatial seeding, balanced multi-source BFS growth along physical connections, and boundary modularity smoothing to isolate cohesive modules.
+- Uses farthest-point spatial seeding inside the primary connected component, balanced multi-source BFS growth along physical connections, and articulation-guarded boundary modularity smoothing (`wouldStayConnectedWithout`) to isolate cohesive, 100% connected modules ordered in a grounded contact sequence.
 
 ### Strategy D: Numbered Build Bags (`numbered_bags`)
 *Universal fallback—valid on any model.*
-- Runs a fast grounded bottom-up topological traversal and splits into balanced bags snapped to vertical height-layer transitions.
+- Runs a spatially cohesive bottom-up grounded traversal, enforces per-bag single-component connectivity via `enforceConnectedPartition`, and orders bags via `orderConnectedSections` so **both** each individual bag **and** every cumulative prefix (`Bag 1 … Bag m`) are 100% connected.
 
 ### Strategy E: Spatial Sectors / Baseplate Grid (`spatial_sectors`)
 *Best for wide, flat dioramas and landscapes (`maxHoriz >= 480 LDU`, `minHoriz >= 240 LDU`).*
-- Splits into `2×2` quadrants with seam-bridging bricks routed to a **Seam Join & Connectors** step.
+- Splits into `2×2` connected quadrants via `enforceConnectedPartition` with zero floating seam pieces.
 
 ### Interactive Refinement Helpers
 - [`recomputeProposalWithCount`](../src/engine/subdivisionAnalyzer.ts): Re-partitions live when the user clicks `−` / `+` on the section count stepper or toggles `2×` collapse.
-- [`mergeProposedSections`](../src/engine/subdivisionAnalyzer.ts): Combines two adjacent sections without dropping parts.
-- [`splitProposedSection`](../src/engine/subdivisionAnalyzer.ts): Bisects a single oversized section along its own 2D PCA axis.
+- [`mergeProposedSections`](../src/engine/subdivisionAnalyzer.ts): Combines two physically touching sections (`sectionsShareEdge`), refusing merges that would create disconnected floating parts.
+- [`splitProposedSection`](../src/engine/subdivisionAnalyzer.ts): Bisects a single oversized section along its own 2D PCA axis using `enforceConnectedPartition` so both resulting halves remain 100% connected.
 
 ---
 
 ## 5. Companion Readability Safeguards
 
 1. **Spatial Spread Guard**: In [`stepGenerator.ts`](../src/engine/stepGenerator.ts) and [`studioRuntime.ts`](../src/studioRuntime.ts), candidate grouping enforces a maximum 3D distance (`220 LDU` in `stepGenerator.ts`; `120 LDU` on elongated models `≥ 400 LDU` in `studioRuntime.ts`) so opposite-end pieces aren't lumped into one step.
-2. **Local Detail Framing (Phase 4)**: Optional auto-zoom with a subtle full-model silhouette locator inset for single-end detail steps after halves are connected.
+2. **Contact-Ordered Final Assembly**: In `Connect Sections & Finish` ([`studioRuntime.ts`](../src/studioRuntime.ts)), completed sections attach strictly in physical-contact order (attaching any bridging `Center Connector` onto Half #1 before connecting Half #2 when halves do not touch directly) so no section ever floats during final assembly.
+3. **Local Detail Framing (Phase 4)**: Optional auto-zoom with a subtle full-model silhouette locator inset for single-end detail steps after halves are connected.
 
 ---
 
@@ -129,9 +138,9 @@ The upgraded `#importModal` in [`index.html`](../index.html) adapts automaticall
 
 ### Live 3D Preview Controls
 - **Orbit**: 1-finger touch drag or mouse drag directly on the WebGL canvas (`WebGLBrickEngine`), reusing uploaded GPU buffers with zero re-uploads while orbiting.
-- **Explode Slider (`0%–100%`)**: Translates each section outward along its computed `explodeOffset` vector (pulling halves apart horizontally, lifting center couplers upward, lifting modular floors vertically, or separating quadrants diagonally).
+- **Explode Slider (`0%–100%`)**: Translates each connected section outward along its computed `explodeOffset` vector (pulling segments apart horizontally, keeping articulated bogie/rod joints centered on track level, lifting modular floors vertically, or separating quadrants diagonally). Whole-minifigure assemblies (via `extractMinifigureGroups`, including headgear/accessories while excluding seats/furniture) track their closest host section's `explodeOffset` so seated drivers and passengers ride inside their car instead of floating in empty space.
 - **Color Mode Toggle**: Switch between colorblind-safe **Section Colors** and true **Brick Colors** (tapping any section row dims all other sections to highlight it).
-- **Section Customization**: Toggle **Build & Connect** vs. **Numbered Bags**, adjust section count (`−` / `+`), toggle **2× Identical Halves**, rename sections inline, and 1-click **Split** or **Merge ↓**.
+- **Section Customization**: Toggle **Build & Connect** vs. **Numbered Bags**, adjust section count (`−` / `+`), toggle **2× Identical Halves**, rename sections inline, and 1-click **Split** or **Merge ↓** (shown only between physically touching sections).
 
 ---
 

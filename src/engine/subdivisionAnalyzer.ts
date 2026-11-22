@@ -580,6 +580,468 @@ function getConnectedComponents(indices: number[], adjacency: number[][]): numbe
   return comps;
 }
 
+/**
+ * Returns true iff the induced subgraph on `indices` is a single connected component
+ * (zero floating parts or disconnected fragments inside the section).
+ */
+export function isConnectedSubgraph(indices: number[], adjacency: number[][]): boolean {
+  if (indices.length <= 1) return true;
+  const allowed = new Set(indices);
+  const visited = new Set<number>();
+  const queue = [indices[0]];
+  visited.add(indices[0]);
+  let head = 0;
+  while (head < queue.length) {
+    const u = queue[head++];
+    for (const v of adjacency[u] ?? []) {
+      if (allowed.has(v) && !visited.has(v)) {
+        visited.add(v);
+        queue.push(v);
+      }
+    }
+  }
+  return visited.size === allowed.size;
+}
+
+/**
+ * Early-exit BFS check verifying that removing `node` from a connected `clusterSet`
+ * does NOT split `clusterSet` into disconnected floating pieces (i.e. `node` is not a cut-vertex).
+ */
+function wouldStayConnectedWithout(
+  clusterSet: Set<number>,
+  node: number,
+  adjacency: number[][],
+): boolean {
+  const nbs: number[] = [];
+  for (const nb of adjacency[node] ?? []) {
+    if (nb !== node && clusterSet.has(nb)) nbs.push(nb);
+  }
+  if (nbs.length <= 1) return true;
+
+  const targetSet = new Set(nbs);
+  const visited = new Set<number>([nbs[0]]);
+  targetSet.delete(nbs[0]);
+  const queue = [nbs[0]];
+  let head = 0;
+  while (head < queue.length && targetSet.size > 0) {
+    const u = queue[head++];
+    for (const v of adjacency[u] ?? []) {
+      if (v === node || visited.has(v) || !clusterSet.has(v)) continue;
+      visited.add(v);
+      targetSet.delete(v);
+      if (targetSet.size === 0) return true;
+      queue.push(v);
+    }
+  }
+  return targetSet.size === 0;
+}
+
+function indexSetsTouch(setA: Set<number>, setB: Set<number>, adjacency: number[][]): boolean {
+  const [smaller, larger] = setA.size <= setB.size ? [setA, setB] : [setB, setA];
+  for (const u of smaller) {
+    for (const nb of adjacency[u] ?? []) {
+      if (larger.has(nb)) return true;
+    }
+  }
+  return false;
+}
+
+function countSharedEdgesBetween(setA: Set<number>, setB: Set<number>, adjacency: number[][]): number {
+  const [smaller, larger] = setA.size <= setB.size ? [setA, setB] : [setB, setA];
+  let count = 0;
+  for (const u of smaller) {
+    for (const nb of adjacency[u] ?? []) {
+      if (larger.has(nb)) count++;
+    }
+  }
+  return count;
+}
+
+function boxGap3D(
+  a: { min: Vec3; max: Vec3 },
+  b: { min: Vec3; max: Vec3 },
+): number {
+  const gx = Math.max(0, a.min[0] - b.max[0], b.min[0] - a.max[0]);
+  const gy = Math.max(0, a.min[1] - b.max[1], b.min[1] - a.max[1]);
+  const gz = Math.max(0, a.min[2] - b.max[2], b.min[2] - a.max[2]);
+  return Math.hypot(gx, gy, gz);
+}
+
+/**
+ * Returns true iff two proposed sections share at least one physical adjacency edge
+ * (meaning merging them preserves single-component connectivity with zero floating parts).
+ */
+export function sectionsShareEdge(
+  secA: ProposedSection,
+  secB: ProposedSection,
+  adjacency: number[][],
+): boolean {
+  const setA = new Set<number>(
+    secA.repeatPartIndexGroups ? secA.repeatPartIndexGroups.flat() : secA.partIndices,
+  );
+  const setB = new Set<number>(
+    secB.repeatPartIndexGroups ? secB.repeatPartIndexGroups.flat() : secB.partIndices,
+  );
+  return indexSetsTouch(setA, setB, adjacency);
+}
+
+/**
+ * Verifies that every section (and every copy in repeat groups) in a subdivision proposal
+ * is a single connected subgraph with zero floating parts.
+ */
+export function verifyProposalZeroFloating(
+  proposal: SubdivisionProposal,
+  adjacency: number[][],
+): { valid: boolean; disconnectedSectionIds: string[] } {
+  const disconnectedSectionIds: string[] = [];
+  for (const sec of proposal.sections) {
+    const groups =
+      sec.repeatPartIndexGroups && sec.repeatPartIndexGroups.length > 0
+        ? sec.repeatPartIndexGroups
+        : [sec.partIndices];
+    for (const grp of groups) {
+      if (!isConnectedSubgraph(grp, adjacency)) {
+        disconnectedSectionIds.push(sec.id);
+        break;
+      }
+    }
+  }
+  return {
+    valid: disconnectedSectionIds.length === 0,
+    disconnectedSectionIds,
+  };
+}
+
+/**
+ * Anchored Connected Graph Partitioner:
+ * Given a single connected component and an initial spatial bucket assignment (0..k-1),
+ * guarantees that EVERY resulting section is a single connected component in `adjacency`
+ * (zero floating parts or disconnected fragments), while maximizing spatial fidelity and seam cleanliness.
+ */
+function enforceConnectedPartition(
+  component: number[],
+  initialBucketOf: Map<number, number>,
+  k: number,
+  adjacency: number[][],
+  options: {
+    minSegmentSize?: number;
+    smoothingPasses?: number;
+    lockedNodes?: Set<number>;
+    scoreCandidate?: (
+      node: number,
+      targetBucketId: number,
+      edgesToTarget: number,
+      targetSize: number,
+      idealSize: number,
+    ) => number;
+  } = {},
+): { segments: number[][]; bucketIds: number[] } {
+  const minSegSize = options.minSegmentSize ?? 4;
+  const smoothingPasses = options.smoothingPasses ?? 2;
+  const lockedNodes = options.lockedNodes;
+
+  const rawBuckets: number[][] = Array.from({ length: k }, () => []);
+  for (const idx of component) {
+    const b = initialBucketOf.get(idx) ?? 0;
+    const clamped = Math.max(0, Math.min(k - 1, b));
+    rawBuckets[clamped].push(idx);
+  }
+
+  // 1. Lock the largest connected component of each non-empty spatial bucket as its anchored core.
+  const segSets: Set<number>[] = [];
+  const bucketIds: number[] = [];
+  const segOf = new Map<number, number>();
+  const unassigned = new Set<number>();
+
+  for (let b = 0; b < k; b++) {
+    if (rawBuckets[b].length === 0) continue;
+    const comps = getConnectedComponents(rawBuckets[b], adjacency);
+    const core = comps[0];
+    const segIdx = segSets.length;
+    const set = new Set<number>(core);
+    segSets.push(set);
+    bucketIds.push(b);
+    for (const u of core) segOf.set(u, segIdx);
+    for (let ci = 1; ci < comps.length; ci++) {
+      for (const u of comps[ci]) unassigned.add(u);
+    }
+  }
+
+  if (segSets.length <= 1) {
+    return { segments: [component], bucketIds: [bucketIds[0] ?? 0] };
+  }
+
+  const idealSize = component.length / segSets.length;
+
+  // 2. Anchored Priority Frontier Expansion:
+  //    Claim every detached/unassigned node ONLY across physical edges into an already-connected segment.
+  const frontier = new Set<number>();
+  for (const u of unassigned) {
+    for (const nb of adjacency[u] ?? []) {
+      if (segOf.has(nb)) {
+        frontier.add(u);
+        break;
+      }
+    }
+  }
+
+  while (unassigned.size > 0 && frontier.size > 0) {
+    let bestNode = -1;
+    let bestSeg = -1;
+    let bestScore = -Infinity;
+
+    for (const v of frontier) {
+      const edgeCounts = new Map<number, number>();
+      for (const nb of adjacency[v] ?? []) {
+        const s = segOf.get(nb);
+        if (s !== undefined) edgeCounts.set(s, (edgeCounts.get(s) ?? 0) + 1);
+      }
+      const origBucket = initialBucketOf.get(v) ?? 0;
+
+      for (const [s, ec] of edgeCounts.entries()) {
+        const bId = bucketIds[s];
+        let score: number;
+        if (options.scoreCandidate) {
+          score = options.scoreCandidate(v, bId, ec, segSets[s].size, idealSize);
+        } else {
+          const sameBucketBonus = bId === origBucket ? 40 : -Math.abs(bId - origBucket) * 14;
+          const balancePenalty =
+            segSets[s].size > idealSize * 1.25
+              ? (segSets[s].size - idealSize * 1.25) * 0.4
+              : 0;
+          score = sameBucketBonus + ec * 12 - balancePenalty;
+        }
+        if (score > bestScore) {
+          bestScore = score;
+          bestNode = v;
+          bestSeg = s;
+        }
+      }
+    }
+
+    if (bestNode < 0 || bestSeg < 0) break;
+    segOf.set(bestNode, bestSeg);
+    segSets[bestSeg].add(bestNode);
+    unassigned.delete(bestNode);
+    frontier.delete(bestNode);
+
+    for (const nb of adjacency[bestNode] ?? []) {
+      if (unassigned.has(nb)) frontier.add(nb);
+    }
+  }
+
+  // 3. Connectivity-Preserving Boundary Smoothing (with strict articulation-point check)
+  const minKeep = Math.max(minSegSize, Math.floor(component.length * 0.05));
+  for (let pass = 0; pass < smoothingPasses; pass++) {
+    let moved = 0;
+    for (const u of component) {
+      if (lockedNodes?.has(u)) continue;
+      const curr = segOf.get(u);
+      if (curr === undefined || segSets[curr].size <= minKeep) continue;
+
+      const edgeCounts = new Map<number, number>();
+      for (const nb of adjacency[u] ?? []) {
+        const ns = segOf.get(nb);
+        if (ns !== undefined) edgeCounts.set(ns, (edgeCounts.get(ns) ?? 0) + 1);
+      }
+      const sameEdges = edgeCounts.get(curr) ?? 0;
+      const origBucket = initialBucketOf.get(u) ?? bucketIds[curr];
+
+      let bestTarget = curr;
+      let bestTargetScore = sameEdges + (bucketIds[curr] === origBucket ? 0.4 : 0);
+
+      for (const [ns, ec] of edgeCounts.entries()) {
+        if (ns === curr) continue;
+        if (segSets[ns].size > idealSize * 1.45) continue;
+        const candScore = ec + (bucketIds[ns] === origBucket ? 0.4 : 0);
+        if (candScore > bestTargetScore && ec >= sameEdges) {
+          bestTargetScore = candScore;
+          bestTarget = ns;
+        }
+      }
+
+      if (bestTarget !== curr && wouldStayConnectedWithout(segSets[curr], u, adjacency)) {
+        segSets[curr].delete(u);
+        segSets[bestTarget].add(u);
+        segOf.set(u, bestTarget);
+        moved++;
+      }
+    }
+    if (moved === 0) break;
+  }
+
+  // 4. Absorb any undersized sliver segments into their most-connected neighbor segment
+  const activeMask = segSets.map(() => true);
+  let activeCount = segSets.length;
+  while (activeCount > 1) {
+    let tinyIdx = -1;
+    let tinySize = minSegSize;
+    for (let s = 0; s < segSets.length; s++) {
+      if (activeMask[s] && segSets[s].size < tinySize) {
+        tinySize = segSets[s].size;
+        tinyIdx = s;
+      }
+    }
+    if (tinyIdx < 0) break;
+
+    let bestNb = -1;
+    let bestEdges = -1;
+    for (let other = 0; other < segSets.length; other++) {
+      if (!activeMask[other] || other === tinyIdx) continue;
+      const shared = countSharedEdgesBetween(segSets[tinyIdx], segSets[other], adjacency);
+      if (shared > bestEdges) {
+        bestEdges = shared;
+        bestNb = other;
+      }
+    }
+    if (bestNb < 0 || bestEdges <= 0) break;
+    for (const u of segSets[tinyIdx]) {
+      segSets[bestNb].add(u);
+      segOf.set(u, bestNb);
+    }
+    segSets[tinyIdx].clear();
+    activeMask[tinyIdx] = false;
+    activeCount--;
+  }
+
+  const outSegments: number[][] = [];
+  const outBucketIds: number[] = [];
+  for (let s = 0; s < segSets.length; s++) {
+    if (activeMask[s] && segSets[s].size > 0) {
+      outSegments.push(Array.from(segSets[s]));
+      outBucketIds.push(bucketIds[s]);
+    }
+  }
+  return { segments: outSegments, bucketIds: outBucketIds };
+}
+
+/**
+ * Orders a list of connected segments from the same global component into a grounded,
+ * cumulative-connected build sequence: segment 0 starts at the lowest base, and each
+ * subsequent segment shares at least one physical edge with previously placed segments.
+ */
+function orderConnectedSections(
+  segments: number[][],
+  allParts: SubdivisionPartInput[],
+  adjacency: number[][],
+): number[][] {
+  if (segments.length <= 1) return segments;
+  const sets = segments.map((s) => new Set(s));
+  const minYs = segments.map((s) =>
+    s.reduce((acc, idx) => Math.min(acc, allParts[idx].box.min[1]), Infinity),
+  );
+
+  let first = 0;
+  for (let i = 1; i < segments.length; i++) {
+    if (
+      minYs[i] < minYs[first] - 4 ||
+      (Math.abs(minYs[i] - minYs[first]) <= 4 && segments[i].length > segments[first].length)
+    ) {
+      first = i;
+    }
+  }
+
+  const placedMask = segments.map(() => false);
+  const placedNodes = new Set<number>(segments[first]);
+  const ordered: number[][] = [segments[first]];
+  placedMask[first] = true;
+
+  while (ordered.length < segments.length) {
+    let bestIdx = -1;
+    let bestScore = -Infinity;
+    for (let i = 0; i < segments.length; i++) {
+      if (placedMask[i]) continue;
+      const shared = countSharedEdgesBetween(sets[i], placedNodes, adjacency);
+      if (shared <= 0) continue;
+      const score = shared * 2.5 - minYs[i] * 0.2;
+      if (score > bestScore) {
+        bestScore = score;
+        bestIdx = i;
+      }
+    }
+    if (bestIdx < 0) {
+      for (let i = 0; i < segments.length; i++) {
+        if (!placedMask[i]) {
+          bestIdx = i;
+          break;
+        }
+      }
+    }
+    if (bestIdx < 0) break;
+    placedMask[bestIdx] = true;
+    ordered.push(segments[bestIdx]);
+    for (const u of segments[bestIdx]) placedNodes.add(u);
+  }
+  return ordered;
+}
+
+/**
+ * Places secondary global components (e.g. a separate station platform vs an unlinked bogie/detail
+ * resting directly against a car section):
+ * - Components physically resting within 16 LDU of an existing non-join section attach to that section
+ *   (e.g. an unlinked wheel bogie directly underneath a car floor or a tiny roof tile on top of a car).
+ * - Genuinely separate assemblies (> 16 LDU away) stay in their own standalone connected sections
+ *   so they NEVER float far away beside an unrelated section!
+ */
+function placeSecondaryGlobalComponents(
+  sections: ProposedSection[],
+  secondaryComps: number[][],
+  allParts: SubdivisionPartInput[],
+  adjacency: number[][],
+  globalCenter: Vec3,
+  outputMode: SubdivisionOutputMode,
+  allowProximityFold = false,
+): void {
+  const standalone: number[][] = [];
+  for (const comp of secondaryComps) {
+    if (comp.length === 0) continue;
+    if (allowProximityFold) {
+      const compBounds = computeModelBounds(comp.map((i) => allParts[i]));
+      let bestSec: ProposedSection | null = null;
+      let bestGap = 16;
+      for (const sec of sections) {
+        if (sec.role === 'join' || sec.repeatPartIndexGroups) continue;
+        for (const pi of sec.partIndices) {
+          const g = boxGap3D(compBounds, allParts[pi].box);
+          if (g < bestGap) {
+            bestGap = g;
+            bestSec = sec;
+          }
+        }
+      }
+      if (bestSec) {
+        bestSec.partIndices.push(...comp);
+        bestSec.partIds.push(...comp.map((i) => allParts[i].id));
+        continue;
+      }
+    }
+    standalone.push(comp);
+  }
+
+  standalone.forEach((comp, idx) => {
+    const sb = computeModelBounds(comp.map((i) => allParts[i]));
+    const dx = sb.center[0] - globalCenter[0];
+    const dz = sb.center[2] - globalCenter[2];
+    const hLen = Math.hypot(dx, dz) || 1;
+    const secIdx = sections.length;
+    sections.push({
+      id: `sec_extra_${idx + 1}`,
+      name:
+        outputMode === 'numbered_bags'
+          ? `Bag ${secIdx + 1} (Separate Build)`
+          : standalone.length === 1
+            ? 'Separate Assembly'
+            : `Separate Assembly ${idx + 1}`,
+      partIndices: comp,
+      partIds: comp.map((i) => allParts[i].id),
+      role: outputMode === 'numbered_bags' ? 'bag' : 'module',
+      cutEdgeCount: countCutEdges(comp, adjacency),
+      explodeOffset: [dx / hLen, 0, dz / hLen],
+      previewColor: SECTION_PREVIEW_PALETTE[secIdx % SECTION_PREVIEW_PALETTE.length],
+    });
+  });
+}
+
 function countCutEdges(indices: number[], adjacency: number[][]): number {
   const set = new Set(indices);
   let cut = 0;
@@ -1026,22 +1488,33 @@ export function buildLongitudinalHalvesProposal(
   const active = allParts.filter((p) => !p.isMinifig);
   if (active.length < 16) return null;
 
+  const globalComps = getConnectedComponents(
+    active.map((p) => p.index),
+    adjacency,
+  );
+  const primaryComp = globalComps[0] ?? [];
+  const secondaryComps = globalComps.slice(1);
+  if (primaryComp.length < 16) return null;
+
+  const primaryParts = primaryComp.map((i) => allParts[i]);
+  const primarySet = new Set(primaryComp);
   const k = Math.max(2, Math.min(6, Math.round(segmentCount)));
-  const pca = computeHorizontalPrincipalAxis(active);
+  const pca = computeHorizontalPrincipalAxis(primaryParts);
   if (pca.majorSpan < 120) return null;
 
   const [ux, uz] = pca.axis;
   const [mx, mz] = pca.centerXZ;
-  const bounds = computeModelBounds(active);
+  const bounds = computeModelBounds(primaryParts);
+  const allBounds = computeModelBounds(active);
 
-  // Project each active part's AABB onto PC1
+  // Project each primary part's AABB onto PC1
   const projMin = new Map<number, number>();
   const projMax = new Map<number, number>();
   const projCenter = new Map<number, number>();
   let globalMinP = Infinity;
   let globalMaxP = -Infinity;
 
-  for (const p of active) {
+  for (const p of primaryParts) {
     const corners: Array<[number, number]> = [
       [p.box.min[0], p.box.min[2]],
       [p.box.max[0], p.box.min[2]],
@@ -1065,7 +1538,7 @@ export function buildLongitudinalHalvesProposal(
   // Build strict stud-clutch adjacency graph & detect intact wheel bogies
   const studAdjacency = buildStudClutchAdjacency(allParts, adjacency);
   const detectedBogies = detectIntactBogies(
-    active,
+    primaryParts,
     allParts,
     adjacency,
     studAdjacency,
@@ -1078,7 +1551,7 @@ export function buildLongitudinalHalvesProposal(
     for (const idx of bogie.indices) partToBogie.set(idx, bogie);
   }
 
-  const verticalPivotRods = active.filter((p) => isVerticalPivotRod(p));
+  const verticalPivotRods = primaryParts.filter((p) => isVerticalPivotRod(p));
 
   const totalProjSpan = Math.max(1, globalMaxP - globalMinP);
   const cutPositions: number[] = [];
@@ -1098,7 +1571,7 @@ export function buildLongitudinalHalvesProposal(
       let studCutEdges = 0;
       let physCutEdges = 0;
 
-      for (const p of active) {
+      for (const p of primaryParts) {
         const lo = projMin.get(p.index)!;
         const hi = projMax.get(p.index)!;
         const c = projCenter.get(p.index)!;
@@ -1111,23 +1584,25 @@ export function buildLongitudinalHalvesProposal(
         if (c < t) leftCount++;
       }
 
-      for (const p of active) {
+      for (const p of primaryParts) {
         const ca = projCenter.get(p.index)!;
         if (ca >= t) continue;
         for (const nb of studAdjacency[p.index] ?? []) {
+          if (!primarySet.has(nb)) continue;
           const cb = projCenter.get(nb);
           if (cb !== undefined && cb >= t && !partToBogie.has(p.index) && !partToBogie.has(nb)) {
             studCutEdges++;
           }
         }
         for (const nb of adjacency[p.index] ?? []) {
+          if (!primarySet.has(nb)) continue;
           const cb = projCenter.get(nb);
           if (cb !== undefined && cb >= t) physCutEdges++;
         }
       }
 
-      const fracDiff = Math.abs(leftCount / active.length - idealFrac);
-      const score = spanning * 4.5 + studCutEdges * 3.2 + physCutEdges * 0.6 + fracDiff * active.length * 1.8;
+      const fracDiff = Math.abs(leftCount / primaryParts.length - idealFrac);
+      const score = spanning * 4.5 + studCutEdges * 3.2 + physCutEdges * 0.6 + fracDiff * primaryParts.length * 1.8;
       if (score < bestScore) {
         bestScore = score;
         bestT = t;
@@ -1148,7 +1623,7 @@ export function buildLongitudinalHalvesProposal(
     cutPositions.push(snappedT);
   }
 
-  // Identify protected middle-joint assemblies at each cut plane:
+  // Identify protected middle-joint assemblies at each cut plane (used for articulated 2-half trains):
   // 1. Intact middle bogie(s) straddling a cut plane (NEVER cut in half!)
   // 2. Vertical Technic pivot rod(s) at the cut plane
   // 3. Circular cross-axle pieces (4032, 3941, 3713, 4265c, etc.) coaxial with a pivot rod
@@ -1195,7 +1670,7 @@ export function buildLongitudinalHalvesProposal(
     const rMinY = rod.box.min[1];
     const rMaxY = rod.box.max[1];
 
-    for (const p of active) {
+    for (const p of primaryParts) {
       if (cutBogieSet.has(p.index) || pivotRodSet.has(p.index)) continue;
       if (!p.isAxleCollar) continue;
       const distXZ = Math.hypot(p.box.center[0] - rx, p.box.center[2] - rz);
@@ -1227,7 +1702,7 @@ export function buildLongitudinalHalvesProposal(
     ...floatingCollarSet,
   ]);
 
-  // Initial segment assignment for non-protected parts
+  // Initial segment assignment for non-protected parts inside primaryComp
   const segOwner = new Map<number, number>();
   const rawSpanning: number[] = [];
 
@@ -1241,7 +1716,7 @@ export function buildLongitudinalHalvesProposal(
     }
   }
 
-  for (const p of active) {
+  for (const p of primaryParts) {
     if (protectedJoinSet.has(p.index) || segOwner.has(p.index)) continue;
     const lo = projMin.get(p.index)!;
     const hi = projMax.get(p.index)!;
@@ -1288,8 +1763,6 @@ export function buildLongitudinalHalvesProposal(
     }
 
     // Pass 2: Stud-connected components of remaining spanning bricks.
-    // If an entire stud-connected spanning sub-cluster connects by studs ONLY to 1 half,
-    // assign the whole cluster to that half!
     if (remainingSpanning.length > 0) {
       const spanComps = getConnectedComponents(remainingSpanning, studAdjacency);
       const stillBridging: number[] = [];
@@ -1334,107 +1807,267 @@ export function buildLongitudinalHalvesProposal(
     }
   }
 
-  // If too many rigid bricks still physically bridge the cut (> 35% of parts, e.g. long overlapping Technic frame),
-  // assign them by center so halves stay balanced and prefer Numbered Bags mode.
   const totalJoinCandidateCount = remainingSpanning.length + protectedJoinSet.size;
-  const heavySpanning =
-    remainingSpanning.length > Math.max(20, Math.floor(active.length * 0.35)) &&
-    pivotRodSet.size === 0 &&
-    cutBogieSet.size === 0;
-
-  const rawSegments: number[][] = Array.from({ length: k }, () => []);
-  for (const [idx, segIdx] of segOwner.entries()) {
-    rawSegments[segIdx].push(idx);
-  }
-
-  const finishJoinIndices: number[] = [];
-  if (heavySpanning) {
-    for (const idx of [...remainingSpanning, ...protectedJoinSet]) {
-      const c = projCenter.get(idx)!;
-      let segIdx = 0;
-      while (segIdx < cutPositions.length && c >= cutPositions[segIdx]) segIdx++;
-      rawSegments[segIdx].push(idx);
-    }
-  } else {
-    finishJoinIndices.push(...remainingSpanning);
-  }
-
-  const allJoinSet = new Set<number>(
-    heavySpanning
-      ? []
-      : [...cutBogieSet, ...pivotRodSet, ...floatingCollarSet, ...finishJoinIndices],
-  );
-
-  // Enforce internal connectivity inside each segment:
-  // ONLY move a small detached fragment to Join if it is actually adjacent to the cut plane
-  // AND connected to the join zone (never pull stray roof/end details 20 studs away into Center Join!).
-  const cleanSegments: number[][] = [];
-  for (const seg of rawSegments) {
-    if (seg.length === 0) continue;
-    const comps = getConnectedComponents(seg, adjacency);
-    if (comps.length <= 1) {
-      cleanSegments.push(seg);
-    } else {
-      cleanSegments.push(comps[0]);
-      for (let ci = 1; ci < comps.length; ci++) {
-        const comp = comps[ci];
-        const nearCutPlane = comp.some((idx) => {
-          const lo = projMin.get(idx)!;
-          const hi = projMax.get(idx)!;
-          return cutPositions.some((t) => lo <= t + 36 && hi >= t - 36);
-        });
-        const touchesJoin = comp.some((idx) =>
-          (adjacency[idx] ?? []).some((nb) => allJoinSet.has(nb)),
-        );
-        const isSmallFragment = comp.length <= Math.max(8, Math.floor(seg.length * 0.25));
-
-        if (!heavySpanning && isSmallFragment && nearCutPlane && touchesJoin) {
-          // If it's stud-connected ONLY to a cut bogie or is a floating collar on the pivot rod, classify accurately
-          const touchesCutBogie = comp.some((idx) =>
-            (adjacency[idx] ?? []).some((nb) => cutBogieSet.has(nb)),
-          );
-          if (touchesCutBogie && comp.every((idx) => allParts[idx].box.max[1] <= Math.max(...cutBogieList.map((b) => b.maxY), -Infinity) + 20)) {
-            for (const idx of comp) {
-              cutBogieSet.add(idx);
-              allJoinSet.add(idx);
-            }
-          } else {
-            for (const idx of comp) {
-              finishJoinIndices.push(idx);
-              allJoinSet.add(idx);
-            }
-          }
-        } else {
-          cleanSegments[cleanSegments.length - 1].push(...comp);
-        }
-      }
-    }
-  }
-
-  if (cleanSegments.length < 2) return null;
-
-  const bogiePartIndices = heavySpanning ? [] : Array.from(cutBogieSet);
-  const pivotRodIndices = heavySpanning ? [] : Array.from(pivotRodSet);
-  const floatingCollarIndices = heavySpanning ? [] : Array.from(floatingCollarSet);
-  const joinIndices = heavySpanning
-    ? []
-    : [...floatingCollarIndices, ...pivotRodIndices, ...bogiePartIndices, ...finishJoinIndices];
-
-  // Check if 2 halves are structurally identical (e.g., symmetrical train car ends!)
-  const isIdenticalHalves =
-    allowRepeatCollapse &&
-    cleanSegments.length === 2 &&
-    areSectionsStructurallyIdentical(cleanSegments[0], cleanSegments[1], allParts);
-
-  const outputMode: SubdivisionOutputMode = heavySpanning ? 'numbered_bags' : 'modular_chapters';
-  const sections: ProposedSection[] = [];
-  const midSeg = (cleanSegments.length - 1) / 2;
-
   const segLabel = (idx: number, total: number): string => {
     if (total === 2) return idx === 0 ? 'Front Half' : 'Rear Half';
     if (total === 3) return idx === 0 ? 'Front Section' : idx === 1 ? 'Middle Section' : 'Rear Section';
     return `Section ${idx + 1}`;
   };
+
+  let cleanSegments: number[][] = [];
+  let bogiePartIndices: number[] = [];
+  let pivotRodIndices: number[] = [];
+  let floatingCollarIndices: number[] = [];
+  let finishJoinIndices: number[] = [];
+  let joinIndices: number[] = [];
+  let hasArticulatedJoint = false;
+  let isIdenticalHalves = false;
+  let heavySpanning = false;
+
+  // --- CASE 1: Articulated 2-Half Train (Intact Middle Bogie + Vertical Technic Pivot Rod + Cross-Axle Collars) ---
+  // Only activate when k === 2 AND the protected joint itself is a single connected assembly!
+  const protectedList = Array.from(protectedJoinSet);
+  const canUseArticulated2Half =
+    k === 2 &&
+    (pivotRodSet.size > 0 || cutBogieSet.size > 0) &&
+    protectedList.length > 0 &&
+    isConnectedSubgraph(protectedList, adjacency);
+
+  if (canUseArticulated2Half) {
+    // Assign any non-articulated spanning bricks back into a half (NEVER dump disconnected roof/wall debris into Join!)
+    const halfBucketOf = new Map<number, number>(segOwner);
+    for (const idx of remainingSpanning) {
+      const c = projCenter.get(idx)!;
+      halfBucketOf.set(idx, c < cutPositions[0] ? 0 : 1);
+    }
+
+    const nonJoinPrimary = primaryComp.filter((i) => !protectedJoinSet.has(i));
+    const nonJoinComps = getConnectedComponents(nonJoinPrimary, adjacency);
+
+    // Build 2 strictly connected halves from nonJoinPrimary:
+    const half0Set = new Set<number>();
+    const half1Set = new Set<number>();
+    const half0Candidates: number[][] = [];
+    const half1Candidates: number[][] = [];
+
+    for (const comp of nonJoinComps) {
+      const has0 = comp.some((u) => (halfBucketOf.get(u) ?? 0) === 0);
+      const has1 = comp.some((u) => (halfBucketOf.get(u) ?? 0) === 1);
+      if (has0 && has1) {
+        // Component spans both halves (e.g. a roof bridge across the articulation): split cleanly via enforceConnectedPartition!
+        const { segments, bucketIds } = enforceConnectedPartition(comp, halfBucketOf, 2, adjacency, {
+          minSegmentSize: 3,
+          smoothingPasses: 2,
+        });
+        segments.forEach((seg, sIdx) => {
+          if ((bucketIds[sIdx] ?? sIdx) === 0) half0Candidates.push(seg);
+          else half1Candidates.push(seg);
+        });
+      } else if (has0) {
+        half0Candidates.push(comp);
+      } else {
+        half1Candidates.push(comp);
+      }
+    }
+
+    // Pick the single primary connected body for each half; any secondary fragment detached solely
+    // by removing protectedJoinSet either belongs to the middle bogie/joint (if touching it) or cancels articulated mode.
+    half0Candidates.sort((a, b) => b.length - a.length);
+    half1Candidates.sort((a, b) => b.length - a.length);
+    const main0 = half0Candidates[0] ?? [];
+    const main1 = half1Candidates[0] ?? [];
+    for (const u of main0) half0Set.add(u);
+    for (const u of main1) half1Set.add(u);
+
+    const strayFragments = [...half0Candidates.slice(1), ...half1Candidates.slice(1)];
+    let articulatedClean = main0.length >= 6 && main1.length >= 6;
+
+    for (const frag of strayFragments) {
+      // If a small fragment directly touches the middle bogie/joint, fold it into the connected joint!
+      const touchesJoint = frag.some((u) => (adjacency[u] ?? []).some((nb) => protectedJoinSet.has(nb)));
+      if (touchesJoint && frag.length <= Math.max(8, Math.floor(primaryComp.length * 0.1))) {
+        const touchesBogie = frag.some((u) => (adjacency[u] ?? []).some((nb) => cutBogieSet.has(nb)));
+        if (
+          touchesBogie &&
+          frag.every((u) => allParts[u].box.max[1] <= Math.max(...cutBogieList.map((b) => b.maxY), -Infinity) + 20)
+        ) {
+          for (const u of frag) {
+            cutBogieSet.add(u);
+            protectedJoinSet.add(u);
+          }
+        } else {
+          for (const u of frag) {
+            finishJoinIndices.push(u);
+            protectedJoinSet.add(u);
+          }
+        }
+      } else {
+        // Removing the joint would create floating chunks inside a half -> fall back to connected k-partition!
+        articulatedClean = false;
+        break;
+      }
+    }
+
+    if (articulatedClean) {
+      const h0 = Array.from(half0Set);
+      const h1 = Array.from(half1Set);
+      const joinAll = [
+        ...Array.from(floatingCollarSet),
+        ...Array.from(pivotRodSet),
+        ...Array.from(cutBogieSet),
+        ...finishJoinIndices,
+      ];
+      if (
+        isConnectedSubgraph(h0, adjacency) &&
+        isConnectedSubgraph(h1, adjacency) &&
+        isConnectedSubgraph(joinAll, adjacency)
+      ) {
+        cleanSegments = [h0, h1];
+        bogiePartIndices = Array.from(cutBogieSet);
+        pivotRodIndices = Array.from(pivotRodSet);
+        floatingCollarIndices = Array.from(floatingCollarSet);
+        joinIndices = joinAll;
+        hasArticulatedJoint = true;
+      }
+    }
+  }
+
+  // --- CASE 2: Symmetric 2× Identical Halves with Optional Single-Connected Center Connector ---
+  if (cleanSegments.length === 0 && k === 2 && allowRepeatCollapse) {
+    const t = cutPositions[0];
+    const candLeft: number[] = [];
+    const candRight: number[] = [];
+    const candJoin: number[] = [];
+    for (const p of primaryParts) {
+      const lo = projMin.get(p.index)!;
+      const hi = projMax.get(p.index)!;
+      const c = projCenter.get(p.index)!;
+      if (lo < t - 2.5 && hi > t + 2.5) {
+        candJoin.push(p.index);
+      } else if (c < t) {
+        candLeft.push(p.index);
+      } else {
+        candRight.push(p.index);
+      }
+    }
+
+    if (
+      candLeft.length >= 6 &&
+      candRight.length >= 6 &&
+      isConnectedSubgraph(candLeft, adjacency) &&
+      isConnectedSubgraph(candRight, adjacency) &&
+      areSectionsStructurallyIdentical(candLeft, candRight, allParts)
+    ) {
+      const leftSet = new Set(candLeft);
+      const rightSet = new Set(candRight);
+      const joinValid =
+        candJoin.length === 0 ||
+        (isConnectedSubgraph(candJoin, adjacency) &&
+          indexSetsTouch(new Set(candJoin), leftSet, adjacency) &&
+          indexSetsTouch(new Set(candJoin), rightSet, adjacency));
+      if (joinValid) {
+        cleanSegments = [candLeft, candRight];
+        finishJoinIndices = candJoin;
+        joinIndices = candJoin;
+        isIdenticalHalves = true;
+      }
+    }
+  }
+
+  // --- CASE 3: General Zero-Floating Connected k-Partition (2 Halves, 3 Segments, 4+ Segments) ---
+  // Guarantees ZERO floating join debris clouds and ZERO disconnected parts inside ANY segment!
+  if (cleanSegments.length === 0) {
+    const initialBucketOf = new Map<number, number>();
+    // Preserve stud-absorbed owners & non-cut bogies
+    for (const [idx, s] of segOwner.entries()) {
+      initialBucketOf.set(idx, s);
+    }
+    // Keep any intact bogie (including middle bogies in 3-segment splits) together in its spatial segment
+    for (const bogie of detectedBogies) {
+      let segIdx = 0;
+      while (segIdx < cutPositions.length && bogie.centerP >= cutPositions[segIdx]) segIdx++;
+      for (const idx of bogie.indices) {
+        if (primarySet.has(idx) && !initialBucketOf.has(idx)) {
+          initialBucketOf.set(idx, segIdx);
+        }
+      }
+    }
+    // Assign all remaining parts in primaryComp by projected center
+    for (const p of primaryParts) {
+      if (initialBucketOf.has(p.index)) continue;
+      const c = projCenter.get(p.index)!;
+      let segIdx = 0;
+      while (segIdx < cutPositions.length && c >= cutPositions[segIdx]) segIdx++;
+      initialBucketOf.set(p.index, segIdx);
+    }
+
+    const segCenterTargets = Array.from({ length: k }, (_, s) => {
+      const lo = s === 0 ? globalMinP : cutPositions[s - 1];
+      const hi = s === k - 1 ? globalMaxP : cutPositions[s];
+      return (lo + hi) * 0.5;
+    });
+
+    const minSegSize = Math.max(4, Math.min(10, Math.floor(primaryComp.length / (k * 4))));
+    const { segments } = enforceConnectedPartition(primaryComp, initialBucketOf, k, adjacency, {
+      minSegmentSize: minSegSize,
+      smoothingPasses: 2,
+      scoreCandidate: (node, targetBucketId, edgesToTarget, targetSize, idealSize) => {
+        const origBucket = initialBucketOf.get(node) ?? 0;
+        const c = projCenter.get(node) ?? 0;
+        const distToTarget = Math.abs(c - (segCenterTargets[targetBucketId] ?? 0));
+        const sameBucketBonus = targetBucketId === origBucket ? 36 : -Math.abs(targetBucketId - origBucket) * 14;
+        const distPenalty = (distToTarget / Math.max(40, totalProjSpan)) * 22;
+        const balancePenalty =
+          targetSize > idealSize * 1.28 ? (targetSize - idealSize * 1.28) * 0.35 : 0;
+        return sameBucketBonus + edgesToTarget * 14 - distPenalty - balancePenalty;
+      },
+    });
+
+    if (segments.length < 2) return null;
+
+    // Sort segments in spatial order along PC1 (Front -> Middle -> Rear)
+    cleanSegments = segments.sort((a, b) => {
+      const meanA = a.reduce((acc, idx) => acc + (projCenter.get(idx) ?? 0), 0) / Math.max(1, a.length);
+      const meanB = b.reduce((acc, idx) => acc + (projCenter.get(idx) ?? 0), 0) / Math.max(1, b.length);
+      return meanA - meanB;
+    });
+
+    // Check seam tightness for numbered_bags fallback
+    let totalInternal = 0;
+    let totalCut = 0;
+    for (const seg of cleanSegments) {
+      const segSet = new Set(seg);
+      for (const u of seg) {
+        for (const nb of adjacency[u] ?? []) {
+          if (segSet.has(nb)) totalInternal++;
+          else totalCut++;
+        }
+      }
+    }
+    const cutRatio = totalCut / Math.max(1, totalInternal + totalCut);
+    heavySpanning =
+      remainingSpanning.length > Math.max(20, Math.floor(primaryParts.length * 0.38)) &&
+      cutRatio > 0.28;
+
+    if (
+      allowRepeatCollapse &&
+      !heavySpanning &&
+      cleanSegments.length === 2 &&
+      areSectionsStructurallyIdentical(cleanSegments[0], cleanSegments[1], allParts)
+    ) {
+      isIdenticalHalves = true;
+    }
+  } else if (
+    allowRepeatCollapse &&
+    cleanSegments.length === 2 &&
+    areSectionsStructurallyIdentical(cleanSegments[0], cleanSegments[1], allParts)
+  ) {
+    isIdenticalHalves = true;
+  }
+
+  const outputMode: SubdivisionOutputMode = heavySpanning ? 'numbered_bags' : 'modular_chapters';
+  const sections: ProposedSection[] = [];
+  const midSeg = (cleanSegments.length - 1) / 2;
 
   if (isIdenticalHalves && outputMode === 'modular_chapters') {
     const half0 = cleanSegments[0];
@@ -1457,7 +2090,10 @@ export function buildLongitudinalHalvesProposal(
       const mag = Math.abs(dirSign) < 0.01 ? 0 : dirSign / Math.max(0.5, midSeg);
       sections.push({
         id: `sec_long_${idx + 1}`,
-        name: outputMode === 'numbered_bags' ? `Bag ${idx + 1} (${segLabel(idx, cleanSegments.length)})` : segLabel(idx, cleanSegments.length),
+        name:
+          outputMode === 'numbered_bags'
+            ? `Bag ${idx + 1} (${segLabel(idx, cleanSegments.length)})`
+            : segLabel(idx, cleanSegments.length),
         partIndices: seg,
         partIds: seg.map((i) => allParts[i].id),
         role: outputMode === 'numbered_bags' ? 'bag' : 'module',
@@ -1469,21 +2105,17 @@ export function buildLongitudinalHalvesProposal(
     });
   }
 
-  const hasArticulatedJoint =
-    cleanSegments.length === 2 &&
-    outputMode === 'modular_chapters' &&
-    (pivotRodIndices.length > 0 || bogiePartIndices.length > 0);
-
-  const articulatedJoin: ArticulatedJoinPlan | undefined = hasArticulatedJoint
-    ? {
-        slideAxis: [ux, uz],
-        floatingCollarIndices,
-        pivotRodIndices,
-        bogiePartIndices,
-        bogieName: bogiePartIndices.length > 0 ? 'Middle Bogie' : undefined,
-        finishPartIndices: finishJoinIndices,
-      }
-    : undefined;
+  const articulatedJoin: ArticulatedJoinPlan | undefined =
+    hasArticulatedJoint && outputMode === 'modular_chapters'
+      ? {
+          slideAxis: [ux, uz],
+          floatingCollarIndices,
+          pivotRodIndices,
+          bogiePartIndices,
+          bogieName: bogiePartIndices.length > 0 ? 'Middle Bogie' : undefined,
+          finishPartIndices: finishJoinIndices,
+        }
+      : undefined;
 
   if (joinIndices.length > 0 && outputMode === 'modular_chapters') {
     const joinName = hasArticulatedJoint
@@ -1492,9 +2124,7 @@ export function buildLongitudinalHalvesProposal(
         : bogiePartIndices.length > 0
           ? 'Middle Bogie & Join'
           : 'Center Articulation Joint'
-      : cleanSegments.length === 2
-        ? 'Center Connector & Join'
-        : 'Connect Sections';
+      : 'Center Connector';
 
     sections.push({
       id: 'sec_join_center',
@@ -1503,23 +2133,33 @@ export function buildLongitudinalHalvesProposal(
       partIds: joinIndices.map((i) => allParts[i].id),
       role: 'join',
       cutEdgeCount: countCutEdges(joinIndices, adjacency),
-      // Keep articulated bogie/rod joints cleanly centered on track level between the pulled-apart halves
-      explodeOffset: hasArticulatedJoint ? [0, 0, 0] : [0, 0.85, 0],
+      // Keep articulated bogie/rod joints centered on track level; lift compact symmetric connectors gently
+      explodeOffset: hasArticulatedJoint ? [0, 0, 0] : [0, 0.55, 0],
       previewColor: JOIN_PREVIEW_COLOR,
       articulatedJoin,
     });
   }
 
+  placeSecondaryGlobalComponents(
+    sections,
+    secondaryComps,
+    allParts,
+    adjacency,
+    allBounds.center,
+    outputMode,
+    true,
+  );
+
   const maxSegDiag = Math.max(...cleanSegments.map((s) => computeSectionDiag(s, allParts)), 1);
   const zoomGainEstimate = Math.max(1.1, Math.round((bounds.diag / maxSegDiag) * 10) / 10);
 
   const aspect = pca.minorSpan > 1 ? pca.majorSpan / pca.minorSpan : 1;
-  const spanRatio = totalJoinCandidateCount / active.length;
-  let confidence = 72;
+  const spanRatio = totalJoinCandidateCount / primaryParts.length;
+  let confidence = 74;
   if (aspect >= 2.2) confidence += 14;
   if (aspect >= 3.5) confidence += 6;
-  if (spanRatio <= 0.08) confidence += 8;
-  else if (spanRatio > 0.25 && !hasArticulatedJoint) confidence -= 12;
+  if (spanRatio <= 0.1) confidence += 6;
+  else if (spanRatio > 0.3 && !hasArticulatedJoint) confidence -= 10;
   if (hasArticulatedJoint) confidence += 6;
   if (isIdenticalHalves) confidence += 6;
   confidence = Math.max(45, Math.min(98, Math.round(confidence)));
@@ -1538,7 +2178,7 @@ export function buildLongitudinalHalvesProposal(
 
   const joinNote =
     joinIndices.length > 0
-      ? ` + ${joinIndices.length} connector piece${joinIndices.length === 1 ? '' : 's'}`
+      ? ` + ${joinIndices.length}-piece center connector`
       : '';
   const articulatedDesc = hasArticulatedJoint
     ? [
@@ -1552,10 +2192,10 @@ export function buildLongitudinalHalvesProposal(
   const rationale = isIdenticalHalves
     ? `Both halves match (${cleanSegments[0].length} pcs each${joinNote}) — build once ×2 at ~${zoomGainEstimate}× larger zoom, then connect.`
     : heavySpanning
-      ? `Splits along the ${Math.round(pca.majorSpan / 20)}-stud length into ${cleanSegments.length} balanced stages (tightly interlocked spine).`
+      ? `Splits along the ${Math.round(pca.majorSpan / 20)}-stud length into ${cleanSegments.length} connected stages (tightly interlocked spine).`
       : hasArticulatedJoint && articulatedDesc
         ? `Builds both halves separately (~${zoomGainEstimate}× zoom), then connects via ${articulatedDesc}.`
-        : `Builds ${cleanSegments.length} shorter sections first${joinNote} for ~${zoomGainEstimate}× larger bricks on screen before joining.`;
+        : `Builds ${cleanSegments.length} solid, connected sections first for ~${zoomGainEstimate}× larger bricks on screen before joining.`;
 
   return {
     id: `prop_long_${cleanSegments.length}${isIdenticalHalves ? '_x2' : ''}`,
@@ -1574,7 +2214,8 @@ export function buildLongitudinalHalvesProposal(
 
 /**
  * Strategy B: Horizontal Floors & Vertical Layers (Modular Buildings, Towers, Castles).
- * Sweeps plate-level horizontal planes (8 LDU) to find smooth-tile seams or low-stud transitions.
+ * Sweeps plate-level horizontal planes (8 LDU) to find smooth-tile seams or low-stud transitions,
+ * then enforces strict single-connected-component floors with zero floating parts.
  */
 export function buildHorizontalFloorsProposal(
   allParts: SubdivisionPartInput[],
@@ -1584,7 +2225,18 @@ export function buildHorizontalFloorsProposal(
   const active = allParts.filter((p) => !p.isMinifig);
   if (active.length < 24) return null;
 
-  const bounds = computeModelBounds(active);
+  const globalComps = getConnectedComponents(
+    active.map((p) => p.index),
+    adjacency,
+  );
+  const primaryComp = globalComps[0] ?? [];
+  const secondaryComps = globalComps.slice(1);
+  if (primaryComp.length < 24) return null;
+
+  const primaryParts = primaryComp.map((i) => allParts[i]);
+  const primarySet = new Set(primaryComp);
+  const bounds = computeModelBounds(primaryParts);
+  const allBounds = computeModelBounds(active);
   if (bounds.spanY < 72) return null; // Less than 3 bricks tall
 
   const targetFloors = floorCount
@@ -1602,20 +2254,24 @@ export function buildHorizontalFloorsProposal(
     let tileCount = 0;
     let cutEdges = 0;
 
-    for (const p of active) {
+    for (const p of primaryParts) {
       if (p.box.center[1] < y) below++;
       if (p.box.min[1] < y - 3 && p.box.max[1] > y + 3) spanning++;
       if (p.isTile && Math.abs(p.box.max[1] - y) <= 4.5) tileCount++;
     }
-    if (below < Math.max(6, active.length * 0.12) || active.length - below < Math.max(6, active.length * 0.12)) {
+    if (
+      below < Math.max(6, primaryParts.length * 0.12) ||
+      primaryParts.length - below < Math.max(6, primaryParts.length * 0.12)
+    ) {
       continue;
     }
 
-    for (const p of active) {
+    for (const p of primaryParts) {
       if (p.box.center[1] >= y) continue;
       for (const nb of adjacency[p.index] ?? []) {
+        if (!primarySet.has(nb)) continue;
         const nbPart = allParts[nb];
-        if (nbPart && !nbPart.isMinifig && nbPart.box.center[1] >= y) cutEdges++;
+        if (nbPart && nbPart.box.center[1] >= y) cutEdges++;
       }
     }
 
@@ -1639,19 +2295,53 @@ export function buildHorizontalFloorsProposal(
   if (chosen.length === 0) return null;
   chosen.sort((a, b) => a.y - b.y);
 
-  const buckets: number[][] = Array.from({ length: chosen.length + 1 }, () => []);
-  for (const p of active) {
+  const initialBucketOf = new Map<number, number>();
+  for (const p of primaryParts) {
     let f = 0;
     while (f < chosen.length && p.box.center[1] >= chosen[f].y) f++;
-    buckets[f].push(p.index);
+    initialBucketOf.set(p.index, f);
   }
 
-  const nonEmpty = buckets.filter((b) => b.length >= 4);
+  const floorBandCenters = Array.from({ length: chosen.length + 1 }, (_, f) => {
+    const lo = f === 0 ? bounds.min[1] : chosen[f - 1].y;
+    const hi = f === chosen.length ? bounds.max[1] : chosen[f].y;
+    return (lo + hi) * 0.5;
+  });
+
+  const minFloorSize = Math.max(4, Math.floor(primaryComp.length * 0.08));
+  const { segments } = enforceConnectedPartition(
+    primaryComp,
+    initialBucketOf,
+    chosen.length + 1,
+    adjacency,
+    {
+      minSegmentSize: minFloorSize,
+      smoothingPasses: 2,
+      scoreCandidate: (node, targetBucketId, edgesToTarget, targetSize, idealSize) => {
+        const origBucket = initialBucketOf.get(node) ?? 0;
+        const cy = allParts[node].box.center[1];
+        const yDist = Math.abs(cy - (floorBandCenters[targetBucketId] ?? cy));
+        const sameBonus = targetBucketId === origBucket ? 36 : -Math.abs(targetBucketId - origBucket) * 16;
+        const yPen = (yDist / Math.max(24, bounds.spanY)) * 20;
+        const balPen = targetSize > idealSize * 1.3 ? (targetSize - idealSize * 1.3) * 0.35 : 0;
+        return sameBonus + edgesToTarget * 12 - yPen - balPen;
+      },
+    },
+  );
+
+  // Order connected floors strictly bottom-to-top
+  const nonEmpty = segments
+    .filter((b) => b.length >= 4)
+    .sort((a, b) => {
+      const meanA = a.reduce((acc, idx) => acc + allParts[idx].box.center[1], 0) / a.length;
+      const meanB = b.reduce((acc, idx) => acc + allParts[idx].box.center[1], 0) / b.length;
+      return meanA - meanB;
+    });
   if (nonEmpty.length < 2) return null;
 
   const avgTiles = chosen.reduce((acc, c) => acc + c.tileCount, 0) / chosen.length;
   const avgCut = chosen.reduce((acc, c) => acc + c.cutEdges, 0) / chosen.length;
-  const hasModularTileSeams = avgTiles >= 3 && avgCut <= Math.max(18, active.length * 0.08);
+  const hasModularTileSeams = avgTiles >= 3 && avgCut <= Math.max(18, primaryParts.length * 0.08);
   const outputMode: SubdivisionOutputMode = hasModularTileSeams ? 'modular_chapters' : 'numbered_bags';
 
   const floorName = (idx: number, total: number): string => {
@@ -1678,6 +2368,16 @@ export function buildHorizontalFloorsProposal(
     previewColor: SECTION_PREVIEW_PALETTE[idx % SECTION_PREVIEW_PALETTE.length],
   }));
 
+  placeSecondaryGlobalComponents(
+    sections,
+    secondaryComps,
+    allParts,
+    adjacency,
+    allBounds.center,
+    outputMode,
+    false,
+  );
+
   const maxFloorDiag = Math.max(...nonEmpty.map((s) => computeSectionDiag(s, allParts)), 1);
   const zoomGainEstimate = Math.max(1.1, Math.round((bounds.diag / maxFloorDiag) * 10) / 10);
 
@@ -1702,7 +2402,7 @@ export function buildHorizontalFloorsProposal(
       : `Build Bottom-to-Top in ${nonEmpty.length} Vertical Layers`,
     rationale: hasModularTileSeams
       ? `Detected ${chosen.length} smooth-tile floor seam${chosen.length === 1 ? '' : 's'} with minimal anchor studs between levels.`
-      : `Separates the ${Math.round(bounds.spanY / 24)}-brick-tall build into ${nonEmpty.length} clean horizontal stages.`,
+      : `Separates the ${Math.round(bounds.spanY / 24)}-brick-tall build into ${nonEmpty.length} connected vertical stages.`,
     zoomGainEstimate,
     confidence,
     sections,
@@ -1713,8 +2413,8 @@ export function buildHorizontalFloorsProposal(
 
 /**
  * Strategy C: Structural Modules & Graph Community Clustering.
- * Uses farthest-point seeding + connectivity-preserving boundary refinement to isolate
- * cohesive sub-builds (wings, pods, towers, bogies).
+ * Uses farthest-point seeding + connectivity-preserving boundary refinement (with strict
+ * articulation-point checks) to isolate cohesive, 100% connected sub-builds.
  */
 export function buildStructuralModulesProposal(
   allParts: SubdivisionPartInput[],
@@ -1724,18 +2424,28 @@ export function buildStructuralModulesProposal(
   const active = allParts.filter((p) => !p.isMinifig);
   if (active.length < 24) return null;
 
+  const globalComps = getConnectedComponents(
+    active.map((p) => p.index),
+    adjacency,
+  );
+  const primaryComp = globalComps[0] ?? [];
+  const secondaryComps = globalComps.slice(1);
+  if (primaryComp.length < 24) return null;
+
+  const primaryParts = primaryComp.map((i) => allParts[i]);
+  const primarySet = new Set(primaryComp);
   const k = targetModules
     ? Math.max(2, Math.min(8, Math.round(targetModules)))
-    : Math.max(2, Math.min(5, Math.round(active.length / 130)));
+    : Math.max(2, Math.min(5, Math.round(primaryComp.length / 130)));
 
-  const activeSet = new Set(active.map((p) => p.index));
-  const bounds = computeModelBounds(active);
+  const bounds = computeModelBounds(primaryParts);
+  const allBounds = computeModelBounds(active);
 
-  // 1. Pick k well-separated spatial seeds
+  // 1. Pick k well-separated spatial seeds inside the primary connected component
   const seeds: number[] = [];
-  let firstSeed = active[0].index;
+  let firstSeed = primaryParts[0].index;
   let maxDist = -1;
-  for (const p of active) {
+  for (const p of primaryParts) {
     const d = Math.hypot(
       p.box.center[0] - bounds.center[0],
       p.box.center[1] - bounds.center[1],
@@ -1751,7 +2461,7 @@ export function buildStructuralModulesProposal(
   while (seeds.length < k) {
     let bestIdx = -1;
     let bestMinD = -1;
-    for (const p of active) {
+    for (const p of primaryParts) {
       if (seeds.includes(p.index)) continue;
       let minD = Infinity;
       for (const s of seeds) {
@@ -1772,33 +2482,31 @@ export function buildStructuralModulesProposal(
     seeds.push(bestIdx);
   }
 
-  // 2. Multi-source balanced BFS growth along physical connections
+  // 2. Multi-source balanced BFS growth along physical connections inside primaryComp
   const clusterOf = new Map<number, number>();
-  const clusterSizes = new Array<number>(seeds.length).fill(0);
+  const clusterSets: Set<number>[] = seeds.map((s) => new Set([s]));
   const queues: number[][] = seeds.map((s, cid) => {
     clusterOf.set(s, cid);
-    clusterSizes[cid] = 1;
     return [s];
   });
   const qHeads = new Array<number>(seeds.length).fill(0);
-  const targetSize = active.length / seeds.length;
+  const targetSize = primaryComp.length / seeds.length;
 
   let progress = true;
   while (progress) {
     progress = false;
-    // Always advance the smallest cluster that still has queued frontier nodes
     const order = seeds
       .map((_, cid) => cid)
-      .sort((a, b) => clusterSizes[a] - clusterSizes[b]);
+      .sort((a, b) => clusterSets[a].size - clusterSets[b].size);
     for (const cid of order) {
       const q = queues[cid];
       while (qHeads[cid] < q.length) {
         const u = q[qHeads[cid]++];
         let expanded = false;
         for (const v of adjacency[u] ?? []) {
-          if (!activeSet.has(v) || clusterOf.has(v)) continue;
+          if (!primarySet.has(v) || clusterOf.has(v)) continue;
           clusterOf.set(v, cid);
-          clusterSizes[cid]++;
+          clusterSets[cid].add(v);
           q.push(v);
           expanded = true;
           progress = true;
@@ -1808,35 +2516,15 @@ export function buildStructuralModulesProposal(
     }
   }
 
-  // Assign any disconnected islands to nearest seed
-  for (const p of active) {
-    if (clusterOf.has(p.index)) continue;
-    let bestC = 0;
-    let bestD = Infinity;
-    seeds.forEach((s, cid) => {
-      const sp = allParts[s];
-      const d = Math.hypot(
-        p.box.center[0] - sp.box.center[0],
-        p.box.center[1] - sp.box.center[1],
-        p.box.center[2] - sp.box.center[2],
-      );
-      if (d < bestD) {
-        bestD = d;
-        bestC = cid;
-      }
-    });
-    clusterOf.set(p.index, bestC);
-    clusterSizes[bestC]++;
-  }
-
-  // 3. Lightweight modularity smoothing (move boundary nodes to neighbor with strictly more edges)
+  // 3. Connectivity-preserving modularity smoothing (articulation-point guarded)
   for (let pass = 0; pass < 3; pass++) {
     let moved = 0;
-    for (const p of active) {
-      const curr = clusterOf.get(p.index)!;
-      if (clusterSizes[curr] <= 6) continue;
+    for (const p of primaryParts) {
+      const u = p.index;
+      const curr = clusterOf.get(u);
+      if (curr === undefined || clusterSets[curr].size <= 6) continue;
       const counts = new Map<number, number>();
-      for (const nb of adjacency[p.index] ?? []) {
+      for (const nb of adjacency[u] ?? []) {
         const nc = clusterOf.get(nb);
         if (nc !== undefined) counts.set(nc, (counts.get(nc) ?? 0) + 1);
       }
@@ -1845,36 +2533,61 @@ export function buildStructuralModulesProposal(
       let bestScore = sameEdges;
       for (const [nc, ec] of counts.entries()) {
         if (nc === curr) continue;
-        if (clusterSizes[nc] > targetSize * 1.45) continue;
+        if (clusterSets[nc].size > targetSize * 1.45) continue;
         if (ec > bestScore) {
           bestScore = ec;
           bestC = nc;
         }
       }
-      if (bestC !== curr) {
-        clusterOf.set(p.index, bestC);
-        clusterSizes[curr]--;
-        clusterSizes[bestC]++;
+      if (bestC !== curr && wouldStayConnectedWithout(clusterSets[curr], u, adjacency)) {
+        clusterSets[curr].delete(u);
+        clusterSets[bestC].add(u);
+        clusterOf.set(u, bestC);
         moved++;
       }
     }
     if (moved === 0) break;
   }
 
-  const grouped: number[][] = Array.from({ length: seeds.length }, () => []);
-  for (const p of active) {
-    grouped[clusterOf.get(p.index)!].push(p.index);
+  // 4. Absorb any undersized cluster (< 4 parts) into its most-connected neighbor cluster
+  const activeMask = clusterSets.map((s) => s.size > 0);
+  let activeCount = activeMask.filter(Boolean).length;
+  while (activeCount > 1) {
+    let tinyIdx = -1;
+    let tinySize = 4;
+    for (let c = 0; c < clusterSets.length; c++) {
+      if (activeMask[c] && clusterSets[c].size < tinySize) {
+        tinySize = clusterSets[c].size;
+        tinyIdx = c;
+      }
+    }
+    if (tinyIdx < 0) break;
+    let bestNb = -1;
+    let bestShared = -1;
+    for (let other = 0; other < clusterSets.length; other++) {
+      if (!activeMask[other] || other === tinyIdx) continue;
+      const shared = countSharedEdgesBetween(clusterSets[tinyIdx], clusterSets[other], adjacency);
+      if (shared > bestShared) {
+        bestShared = shared;
+        bestNb = other;
+      }
+    }
+    if (bestNb < 0 || bestShared <= 0) break;
+    for (const u of clusterSets[tinyIdx]) {
+      clusterSets[bestNb].add(u);
+      clusterOf.set(u, bestNb);
+    }
+    clusterSets[tinyIdx].clear();
+    activeMask[tinyIdx] = false;
+    activeCount--;
   }
-  const validGroups = grouped.filter((g) => g.length >= 4);
-  if (validGroups.length < 2) return null;
 
-  // Order modules bottom-to-top, then front-to-back
-  validGroups.sort((a, b) => {
-    const ba = computeModelBounds(a.map((i) => allParts[i]));
-    const bb = computeModelBounds(b.map((i) => allParts[i]));
-    if (Math.abs(ba.min[1] - bb.min[1]) > 24) return ba.min[1] - bb.min[1];
-    return ba.center[0] - bb.center[0];
-  });
+  const rawValidGroups = clusterSets
+    .filter((s, idx) => activeMask[idx] && s.size >= 4)
+    .map((s) => Array.from(s));
+  if (rawValidGroups.length < 2) return null;
+
+  const validGroups = orderConnectedSections(rawValidGroups, allParts, adjacency);
 
   let totalInternal = 0;
   let totalCut = 0;
@@ -1904,10 +2617,20 @@ export function buildStructuralModulesProposal(
       partIds: indices.map((i) => allParts[i].id),
       role: outputMode === 'modular_chapters' ? 'module' : 'bag',
       cutEdgeCount: countCutEdges(indices, adjacency),
-      explodeOffset: [dx / len, Math.max(0, dy / len * 0.5), dz / len],
+      explodeOffset: [dx / len, Math.max(0, (dy / len) * 0.5), dz / len],
       previewColor: SECTION_PREVIEW_PALETTE[idx % SECTION_PREVIEW_PALETTE.length],
     };
   });
+
+  placeSecondaryGlobalComponents(
+    sections,
+    secondaryComps,
+    allParts,
+    adjacency,
+    allBounds.center,
+    outputMode,
+    false,
+  );
 
   const maxModDiag = Math.max(...validGroups.map((g) => computeSectionDiag(g, allParts)), 1);
   const zoomGainEstimate = Math.max(1.1, Math.round((bounds.diag / maxModDiag) * 10) / 10);
@@ -1937,7 +2660,8 @@ export function buildStructuralModulesProposal(
 
 /**
  * Strategy D: Numbered Build Bags (Universal Sequential Staging).
- * Runs a fast grounded topological traversal and places bag dividers at clean milestones.
+ * Produces bags that are BOTH individually 100% connected (zero floating shards in exploded preview
+ * or if toggled to modular chapters) AND cumulatively connected bottom-up for continuous building.
  */
 export function buildNumberedBagsProposal(
   allParts: SubdivisionPartInput[],
@@ -1947,37 +2671,63 @@ export function buildNumberedBagsProposal(
   const active = allParts.filter((p) => !p.isMinifig);
   if (active.length < 18) return null;
 
+  const globalComps = getConnectedComponents(
+    active.map((p) => p.index),
+    adjacency,
+  );
+  const primaryComp = globalComps[0] ?? [];
+  const secondaryComps = globalComps.slice(1);
+  if (primaryComp.length < 18) return null;
+
+  const primaryParts = primaryComp.map((i) => allParts[i]);
+  const primarySet = new Set(primaryComp);
   const k = bagCount
     ? Math.max(2, Math.min(12, Math.round(bagCount)))
-    : Math.max(2, Math.min(8, Math.round(active.length / 180)));
+    : Math.max(2, Math.min(8, Math.round(primaryComp.length / 180)));
 
-  const activeSet = new Set(active.map((p) => p.index));
-  const sortedByY = [...active].sort(
-    (a, b) => a.box.min[1] - b.box.min[1] || a.box.center[0] - b.box.center[0],
+  const pca = computeHorizontalPrincipalAxis(primaryParts);
+  const [ux, uz] = pca.axis;
+  const [mx, mz] = pca.centerXZ;
+  const projOf = (idx: number) =>
+    (allParts[idx].box.center[0] - mx) * ux + (allParts[idx].box.center[2] - mz) * uz;
+
+  const sortedSeeds = [...primaryParts].sort(
+    (a, b) =>
+      Math.round(a.box.min[1] / 8) - Math.round(b.box.min[1] / 8) ||
+      projOf(a.index) - projOf(b.index),
   );
 
-  // Fast grounded topological ordering
   const placed = new Set<number>();
   const ordered: number[] = [];
   const frontier = new Set<number>();
 
-  const seedPart = sortedByY[0].index;
+  const seedPart = sortedSeeds[0].index;
   frontier.add(seedPart);
+  let lastCenter = allParts[seedPart].box.center;
+  const baseMinY = sortedSeeds[0].box.min[1];
 
-  while (ordered.length < active.length) {
+  while (ordered.length < primaryComp.length) {
     let pick = -1;
     if (frontier.size > 0) {
-      let bestY = Infinity;
+      let bestScore = Infinity;
       for (const idx of frontier) {
-        const y = allParts[idx].box.min[1];
-        if (y < bestY) {
-          bestY = y;
+        const b = allParts[idx].box;
+        const yCost = (b.min[1] - baseMinY) * 1.4;
+        const dCost =
+          Math.hypot(
+            b.center[0] - lastCenter[0],
+            b.center[1] - lastCenter[1],
+            b.center[2] - lastCenter[2],
+          ) * 0.45;
+        const sc = yCost + dCost;
+        if (sc < bestScore) {
+          bestScore = sc;
           pick = idx;
         }
       }
       frontier.delete(pick);
     } else {
-      for (const p of sortedByY) {
+      for (const p of sortedSeeds) {
         if (!placed.has(p.index)) {
           pick = p.index;
           break;
@@ -1987,8 +2737,9 @@ export function buildNumberedBagsProposal(
     if (pick < 0) break;
     placed.add(pick);
     ordered.push(pick);
+    lastCenter = allParts[pick].box.center;
     for (const nb of adjacency[pick] ?? []) {
-      if (activeSet.has(nb) && !placed.has(nb)) frontier.add(nb);
+      if (primarySet.has(nb) && !placed.has(nb)) frontier.add(nb);
     }
   }
 
@@ -1999,8 +2750,7 @@ export function buildNumberedBagsProposal(
   for (let b = 1; b < k; b++) {
     const idealIdx = Math.round(b * idealBagSize);
     let bestIdx = idealIdx;
-    let bestYJump = -1;
-    // Prefer splitting right at a vertical height-layer transition near the target bag size
+    let bestYJump = -Infinity;
     for (
       let idx = Math.max(splitPoints[splitPoints.length - 1] + 4, idealIdx - windowRadius);
       idx <= Math.min(ordered.length - 4, idealIdx + windowRadius);
@@ -2018,29 +2768,57 @@ export function buildNumberedBagsProposal(
   }
   splitPoints.push(ordered.length);
 
-  const bounds = computeModelBounds(active);
-  const sections: ProposedSection[] = [];
+  const initialBucketOf = new Map<number, number>();
   for (let b = 0; b < splitPoints.length - 1; b++) {
-    const slice = ordered.slice(splitPoints[b], splitPoints[b + 1]);
-    if (slice.length === 0) continue;
+    for (let pos = splitPoints[b]; pos < splitPoints[b + 1]; pos++) {
+      initialBucketOf.set(ordered[pos], b);
+    }
+  }
+
+  const minBagSize = Math.max(4, Math.min(10, Math.floor(primaryComp.length / (k * 4))));
+  const { segments } = enforceConnectedPartition(primaryComp, initialBucketOf, k, adjacency, {
+    minSegmentSize: minBagSize,
+    smoothingPasses: 2,
+  });
+  if (segments.length < 2 && secondaryComps.length === 0) return null;
+
+  const orderedBags = orderConnectedSections(segments, allParts, adjacency);
+
+  const bounds = computeModelBounds(primaryParts);
+  const allBounds = computeModelBounds(active);
+  const sections: ProposedSection[] = orderedBags.map((slice, b) => {
     const sb = computeModelBounds(slice.map((i) => allParts[i]));
     const dx = sb.center[0] - bounds.center[0];
     const dy = sb.center[1] - bounds.center[1];
     const dz = sb.center[2] - bounds.center[2];
     const len = Math.hypot(dx, dy, dz) || 1;
-    sections.push({
+    return {
       id: `sec_bag_${b + 1}`,
       name: `Bag ${b + 1}`,
       partIndices: slice,
       partIds: slice.map((i) => allParts[i].id),
       role: 'bag',
       cutEdgeCount: countCutEdges(slice, adjacency),
-      explodeOffset: [dx / len * 0.5, (b / Math.max(1, k - 1)) * 0.9, dz / len * 0.5],
+      explodeOffset: [
+        (dx / len) * 0.65,
+        (b / Math.max(1, orderedBags.length - 1)) * 0.6,
+        (dz / len) * 0.65,
+      ],
       previewColor: SECTION_PREVIEW_PALETTE[b % SECTION_PREVIEW_PALETTE.length],
-    });
-  }
+    };
+  });
 
-  const avgBag = Math.round(active.length / sections.length);
+  placeSecondaryGlobalComponents(
+    sections,
+    secondaryComps,
+    allParts,
+    adjacency,
+    allBounds.center,
+    'numbered_bags',
+    false,
+  );
+
+  const avgBag = Math.round(active.length / Math.max(1, sections.length));
   const confidence = active.length >= 400 ? 86 : 78;
   const { estimatedStepCount, estimatedPageCount } = estimateStepsAndPages(
     active.length,
@@ -2052,7 +2830,7 @@ export function buildNumberedBagsProposal(
     strategy: 'numbered_bags',
     outputMode: 'numbered_bags',
     title: `Numbered Build Bags (${sections.length} Bags)`,
-    rationale: `Keeps one continuous zero-floating build divided into ${sections.length} official-style numbered bags (~${avgBag} pcs/bag).`,
+    rationale: `Keeps one continuous zero-floating build divided into ${sections.length} connected numbered bags (~${avgBag} pcs/bag).`,
     confidence,
     sections,
     estimatedStepCount,
@@ -2062,6 +2840,7 @@ export function buildNumberedBagsProposal(
 
 /**
  * Strategy E: Spatial Sector / Baseplate Grid Split (Wide Dioramas & Landscapes).
+ * Partitions into connected quadrants with zero floating seam pieces.
  */
 export function buildSpatialSectorsProposal(
   allParts: SubdivisionPartInput[],
@@ -2070,7 +2849,17 @@ export function buildSpatialSectorsProposal(
   const active = allParts.filter((p) => !p.isMinifig);
   if (active.length < 32) return null;
 
-  const bounds = computeModelBounds(active);
+  const globalComps = getConnectedComponents(
+    active.map((p) => p.index),
+    adjacency,
+  );
+  const primaryComp = globalComps[0] ?? [];
+  const secondaryComps = globalComps.slice(1);
+  if (primaryComp.length < 32) return null;
+
+  const primaryParts = primaryComp.map((i) => allParts[i]);
+  const bounds = computeModelBounds(primaryParts);
+  const allBounds = computeModelBounds(active);
   const minHoriz = Math.min(bounds.spanX, bounds.spanZ);
   const maxHoriz = Math.max(bounds.spanX, bounds.spanZ);
   if (maxHoriz < 480 || minHoriz < 240 || minHoriz / Math.max(24, bounds.spanY) < 1.25) {
@@ -2079,30 +2868,24 @@ export function buildSpatialSectorsProposal(
 
   const midX = bounds.center[0];
   const midZ = bounds.center[2];
-  const quads: number[][] = [[], [], [], []];
-  const seamJoin: number[] = [];
+  const initialBucketOf = new Map<number, number>();
+  let rawSpanning = 0;
 
-  for (const p of active) {
+  for (const p of primaryParts) {
     const crossX = p.box.min[0] < midX - 2.5 && p.box.max[0] > midX + 2.5;
     const crossZ = p.box.min[2] < midZ - 2.5 && p.box.max[2] > midZ + 2.5;
-    if (crossX || crossZ) {
-      seamJoin.push(p.index);
-    } else {
-      const qi = (p.box.center[0] >= midX ? 1 : 0) + (p.box.center[2] >= midZ ? 2 : 0);
-      quads[qi].push(p.index);
-    }
+    if (crossX || crossZ) rawSpanning++;
+    const qi = (p.box.center[0] >= midX ? 1 : 0) + (p.box.center[2] >= midZ ? 2 : 0);
+    initialBucketOf.set(p.index, qi);
   }
 
-  const heavySeam = seamJoin.length > active.length * 0.3;
-  if (heavySeam) {
-    for (const idx of seamJoin) {
-      const p = allParts[idx];
-      const qi = (p.box.center[0] >= midX ? 1 : 0) + (p.box.center[2] >= midZ ? 2 : 0);
-      quads[qi].push(idx);
-    }
-    seamJoin.length = 0;
-  }
+  const { segments, bucketIds } = enforceConnectedPartition(primaryComp, initialBucketOf, 4, adjacency, {
+    minSegmentSize: Math.max(4, Math.floor(primaryComp.length * 0.06)),
+    smoothingPasses: 2,
+  });
+  if (segments.length < 2) return null;
 
+  const heavySeam = rawSpanning > primaryParts.length * 0.3;
   const names = ['Front-Left Sector', 'Front-Right Sector', 'Back-Left Sector', 'Back-Right Sector'];
   const dirs: Vec3[] = [
     [-0.75, 0, -0.75],
@@ -2112,36 +2895,31 @@ export function buildSpatialSectorsProposal(
   ];
 
   const outputMode: SubdivisionOutputMode = heavySeam ? 'numbered_bags' : 'modular_chapters';
-  const sections: ProposedSection[] = [];
-  quads.forEach((indices, qi) => {
-    if (indices.length === 0) return;
-    sections.push({
-      id: `sec_quad_${qi + 1}`,
-      name: names[qi],
+  const sections: ProposedSection[] = segments.map((indices, idx) => {
+    const qi = bucketIds[idx] ?? idx;
+    return {
+      id: `sec_quad_${idx + 1}`,
+      name: names[qi] ?? `Sector ${idx + 1}`,
       partIndices: indices,
       partIds: indices.map((i) => allParts[i].id),
       role: outputMode === 'modular_chapters' ? 'module' : 'bag',
       cutEdgeCount: countCutEdges(indices, adjacency),
-      explodeOffset: dirs[qi],
-      previewColor: SECTION_PREVIEW_PALETTE[qi % SECTION_PREVIEW_PALETTE.length],
-    });
+      explodeOffset: dirs[qi] ?? [0.75, 0, 0],
+      previewColor: SECTION_PREVIEW_PALETTE[idx % SECTION_PREVIEW_PALETTE.length],
+    };
   });
-  if (sections.length < 2) return null;
 
-  if (seamJoin.length > 0 && outputMode === 'modular_chapters') {
-    sections.push({
-      id: 'sec_quad_join',
-      name: 'Seam Join & Connectors',
-      partIndices: seamJoin,
-      partIds: seamJoin.map((i) => allParts[i].id),
-      role: 'join',
-      cutEdgeCount: countCutEdges(seamJoin, adjacency),
-      explodeOffset: [0, 0.85, 0],
-      previewColor: JOIN_PREVIEW_COLOR,
-    });
-  }
+  placeSecondaryGlobalComponents(
+    sections,
+    secondaryComps,
+    allParts,
+    adjacency,
+    allBounds.center,
+    outputMode,
+    false,
+  );
 
-  const maxQuadDiag = Math.max(...quads.filter((q) => q.length > 0).map((q) => computeSectionDiag(q, allParts)), 1);
+  const maxQuadDiag = Math.max(...segments.map((q) => computeSectionDiag(q, allParts)), 1);
   const zoomGainEstimate = Math.max(1.2, Math.round((bounds.diag / maxQuadDiag) * 10) / 10);
   const { estimatedStepCount, estimatedPageCount } = estimateStepsAndPages(
     active.length,
@@ -2149,11 +2927,11 @@ export function buildSpatialSectorsProposal(
   );
 
   return {
-    id: 'prop_sectors_4',
+    id: `prop_sectors_${segments.length}`,
     strategy: 'spatial_sectors',
     outputMode,
-    title: `Baseplate Sectors (${sections.filter((s) => s.role !== 'join').length} Quadrants)`,
-    rationale: `Splits the wide ${Math.round(bounds.spanX / 20)}×${Math.round(bounds.spanZ / 20)}-stud footprint into quadrants for ~${zoomGainEstimate}× clearer detail.`,
+    title: `Baseplate Sectors (${segments.length} Quadrants)`,
+    rationale: `Splits the wide ${Math.round(bounds.spanX / 20)}×${Math.round(bounds.spanZ / 20)}-stud footprint into ${segments.length} connected quadrants for ~${zoomGainEstimate}× clearer detail.`,
     zoomGainEstimate,
     confidence: heavySeam ? 74 : 88,
     sections,
@@ -2231,7 +3009,8 @@ export function recomputeProposalWithCount(
 }
 
 /**
- * Merges two proposed sections cleanly (used by the 1-click Merge button in the Import Assistant).
+ * Merges two physically touching proposed sections cleanly (used by the 1-click Merge button).
+ * Refuses to merge non-adjacent sections that would create disconnected floating parts.
  */
 export function mergeProposedSections(
   proposal: SubdivisionProposal,
@@ -2259,6 +3038,12 @@ export function mergeProposedSections(
     ...(secB.repeatPartIndexGroups ? secB.repeatPartIndexGroups.flat() : secB.partIndices),
   ]);
   const mergedIndices = Array.from(mergedSet);
+
+  // Never merge two non-adjacent sections into a single disconnected section with floating parts
+  if (!isConnectedSubgraph(mergedIndices, adjacency)) {
+    return proposal;
+  }
+
   const merged: ProposedSection = {
     ...secA,
     id: `${secA.id}_m`,
@@ -2287,7 +3072,8 @@ export function mergeProposedSections(
 }
 
 /**
- * Splits a single proposed section into two halves along its own 2D PCA axis.
+ * Splits a single proposed section into two 100% connected halves along its own 2D PCA axis
+ * (zero floating parts in either resulting half).
  */
 export function splitProposedSection(
   proposal: SubdivisionProposal,
@@ -2300,19 +3086,67 @@ export function splitProposedSection(
   const sourceIndices = sec.repeatPartIndexGroups ? sec.repeatPartIndexGroups.flat() : sec.partIndices;
   if (sourceIndices.length < 8) return proposal;
 
+  const comps = getConnectedComponents(sourceIndices, adjacency);
+  if (comps.length > 1) {
+    const leftIdx = comps[0];
+    const rightIdx = comps.slice(1).flat();
+    if (!isConnectedSubgraph(rightIdx, adjacency)) return proposal;
+    const nextColorIdx = proposal.sections.length;
+    const leftSec: ProposedSection = {
+      id: `${sec.id}_a`,
+      name: `${sec.name} A`,
+      partIndices: leftIdx,
+      partIds: leftIdx.map((i) => allParts[i].id),
+      role: sec.role === 'join' ? 'join' : sec.role,
+      cutEdgeCount: countCutEdges(leftIdx, adjacency),
+      explodeOffset: sec.explodeOffset,
+      previewColor: sec.previewColor,
+    };
+    const rightSec: ProposedSection = {
+      id: `${sec.id}_b`,
+      name: `${sec.name} B`,
+      partIndices: rightIdx,
+      partIds: rightIdx.map((i) => allParts[i].id),
+      role: sec.role === 'join' ? 'join' : sec.role,
+      cutEdgeCount: countCutEdges(rightIdx, adjacency),
+      explodeOffset: [sec.explodeOffset[0], sec.explodeOffset[1] + 0.4, sec.explodeOffset[2]],
+      previewColor: SECTION_PREVIEW_PALETTE[nextColorIdx % SECTION_PREVIEW_PALETTE.length],
+    };
+    const nextSections = [...proposal.sections];
+    nextSections.splice(sectionIdx, 1, leftSec, rightSec);
+    return { ...proposal, hasIdenticalHalves: false, sections: nextSections };
+  }
+
   const subset = sourceIndices.map((i) => allParts[i]).filter(Boolean);
   const pca = computeHorizontalPrincipalAxis(subset);
   const [ux, uz] = pca.axis;
   const [mx, mz] = pca.centerXZ;
 
+  const projOf = new Map<number, number>();
   const sorted = [...subset].sort((a, b) => {
     const pa = (a.box.center[0] - mx) * ux + (a.box.center[2] - mz) * uz;
     const pb = (b.box.center[0] - mx) * ux + (b.box.center[2] - mz) * uz;
     return pa - pb;
   });
+  for (const p of subset) {
+    projOf.set(p.index, (p.box.center[0] - mx) * ux + (p.box.center[2] - mz) * uz);
+  }
   const mid = Math.floor(sorted.length / 2);
-  const leftIdx = sorted.slice(0, mid).map((p) => p.index);
-  const rightIdx = sorted.slice(mid).map((p) => p.index);
+  const initialBucketOf = new Map<number, number>();
+  sorted.forEach((p, i) => initialBucketOf.set(p.index, i < mid ? 0 : 1));
+
+  const { segments } = enforceConnectedPartition(sourceIndices, initialBucketOf, 2, adjacency, {
+    minSegmentSize: 3,
+    smoothingPasses: 2,
+  });
+  if (segments.length < 2) return proposal;
+
+  segments.sort((a, b) => {
+    const ma = a.reduce((acc, idx) => acc + (projOf.get(idx) ?? 0), 0) / Math.max(1, a.length);
+    const mb = b.reduce((acc, idx) => acc + (projOf.get(idx) ?? 0), 0) / Math.max(1, b.length);
+    return ma - mb;
+  });
+  const [leftIdx, rightIdx] = segments;
 
   const nextColorIdx = proposal.sections.length;
   const leftSec: ProposedSection = {

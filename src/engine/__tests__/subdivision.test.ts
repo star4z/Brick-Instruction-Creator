@@ -5,11 +5,14 @@ import { generateInstructionPlan } from '../stepGenerator';
 import {
   analyzeModelSubdivisions,
   assessModelSubdivisionNeed,
+  buildSpatialSectorsProposal,
   buildSubdivisionInputsFromCanonical,
   computeHorizontalPrincipalAxis,
+  isConnectedSubgraph,
   mergeProposedSections,
   recomputeProposalWithCount,
   splitProposedSection,
+  verifyProposalZeroFloating,
   type SubdivisionPartInput,
 } from '../subdivisionAnalyzer';
 
@@ -574,5 +577,167 @@ describe('Large & Elongated Model Subdivision Analyzer', () => {
     expect(new Set(joinSec.articulatedJoin!.pivotRodIndices)).toEqual(new Set([vRod]));
     expect(new Set(joinSec.articulatedJoin!.floatingCollarIndices)).toEqual(new Set([roundCollar]));
     expect(joinSec.articulatedJoin!.finishPartIndices).toHaveLength(0);
+    expect(verifyProposalZeroFloating(top, adj).valid).toBe(true);
+  });
+
+  it('guarantees zero floating parts across ALL strategies on an articulated 66-stud light rail train with cut-crossing roofs & pods', () => {
+    const lines: string[] = ['0 Articulated 66-Stud Light Rail Vehicle'];
+    // Floor base: 16 chained 2x4 plates (64 studs)
+    for (let i = 0; i < 16; i++) {
+      const x = -600 + i * 80;
+      lines.push(`1 72 ${x} 0 -20 1 0 0 0 1 0 0 0 1 3020.dat`);
+      lines.push(`1 72 ${x} 0 20 1 0 0 0 1 0 0 0 1 3020.dat`);
+    }
+    // Interlocking floor sub-layer shifted by 40 LDU
+    for (let i = 0; i < 15; i++) {
+      const x = -560 + i * 80;
+      lines.push(`1 71 ${x} -8 0 1 0 0 0 1 0 0 0 1 3020.dat`);
+      lines.push(`1 71 ${x} -8 -30 1 0 0 0 1 0 0 0 1 3023.dat`);
+      lines.push(`1 71 ${x} -8 30 1 0 0 0 1 0 0 0 1 3023.dat`);
+    }
+    // Staggered running-bond side walls
+    for (let i = 0; i < 16; i++) {
+      const x = -600 + i * 80;
+      lines.push(`1 15 ${x} -32 -30 1 0 0 0 1 0 0 0 1 3004.dat`);
+      lines.push(`1 15 ${x} -32 30 1 0 0 0 1 0 0 0 1 3004.dat`);
+    }
+    for (let i = 0; i < 15; i++) {
+      const x = -560 + i * 80;
+      lines.push(`1 4 ${x} -56 -30 1 0 0 0 1 0 0 0 1 3004.dat`);
+      lines.push(`1 4 ${x} -56 30 1 0 0 0 1 0 0 0 1 3004.dat`);
+    }
+    // Overlapping roof deck crossing BOTH 1/3 and 2/3 cut planes
+    for (let i = 0; i < 15; i++) {
+      const x = -560 + i * 80;
+      lines.push(`1 72 ${x} -64 -20 1 0 0 0 1 0 0 0 1 3020.dat`);
+      lines.push(`1 72 ${x} -64 20 1 0 0 0 1 0 0 0 1 3020.dat`);
+    }
+    // Two rooftop AC/pantograph pods sitting directly over the 1/3 and 2/3 cuts
+    for (const podX of [-200, 200]) {
+      for (const dx of [-40, 0, 40]) {
+        lines.push(`1 71 ${podX + dx} -72 0 1 0 0 0 1 0 0 0 1 3022.dat`);
+        lines.push(`1 72 ${podX + dx} -96 0 1 0 0 0 1 0 0 0 1 3003.dat`);
+        lines.push(`1 15 ${podX + dx} -104 0 1 0 0 0 1 0 0 0 1 3069b.dat`);
+      }
+    }
+    // Tiny 1x1 rooftop beacons near cuts & ends
+    for (const bx of [-560, -280, -120, 120, 280, 560]) {
+      lines.push(`1 14 ${bx} -72 20 1 0 0 0 1 0 0 0 1 3024.dat`);
+    }
+    // Asymmetric front nose
+    lines.push(`1 4 -620 -32 0 1 0 0 0 1 0 0 0 1 3003.dat`);
+    lines.push(`1 1 -620 -56 0 1 0 0 0 1 0 0 0 1 3003.dat`);
+
+    const model = parseLDrawSource(lines.join('\n'), 'muni_lrv4_like.ldr', 'ldr');
+    const graph = buildConnectivityGraph(model.parts);
+    const { parts, adjacency } = buildSubdivisionInputsFromCanonical(model, graph);
+
+    expect(graph.components).toHaveLength(1);
+    const { assessment, proposals } = analyzeModelSubdivisions(parts, adjacency);
+    expect(assessment.shouldPrompt).toBe(true);
+    expect(assessment.aspectRatio).toBeGreaterThanOrEqual(3.0);
+
+    const thirds = proposals.find((p) => p.id === 'prop_long_3');
+    expect(thirds).toBeDefined();
+    // Critical regression check: NO floating red 'join' debris cloud!
+    expect(thirds!.sections.filter((s) => s.role === 'join')).toHaveLength(0);
+    expect(thirds!.sections).toHaveLength(3);
+
+    const allToCheck = [
+      ...proposals,
+      recomputeProposalWithCount('longitudinal_halves', parts, adjacency, 2, true),
+      recomputeProposalWithCount('longitudinal_halves', parts, adjacency, 3, false),
+      recomputeProposalWithCount('longitudinal_halves', parts, adjacency, 4, false),
+      recomputeProposalWithCount('structural_modules', parts, adjacency, 3, false),
+      recomputeProposalWithCount('numbered_bags', parts, adjacency, 3, false),
+    ].filter((p): p is NonNullable<typeof p> => p !== null);
+
+    for (const prop of allToCheck) {
+      const check = verifyProposalZeroFloating(prop, adjacency);
+      expect(
+        check.valid,
+        `Proposal ${prop.id} (${prop.strategy}) had disconnected sections: ${check.disconnectedSectionIds.join(', ')}`,
+      ).toBe(true);
+
+      const covered = new Set<number>();
+      for (const sec of prop.sections) {
+        const list = sec.repeatPartIndexGroups ? sec.repeatPartIndexGroups.flat() : sec.partIndices;
+        for (const idx of list) {
+          expect(covered.has(idx)).toBe(false);
+          covered.add(idx);
+        }
+      }
+      expect(covered.size).toBe(parts.length);
+    }
+
+    // Refuses merging non-adjacent sections (Front + Rear, skipping Middle)
+    const refusedMerge = mergeProposedSections(thirds!, 0, 2, parts, adjacency);
+    expect(refusedMerge.sections).toHaveLength(3);
+    expect(verifyProposalZeroFloating(refusedMerge, adjacency).valid).toBe(true);
+
+    // Adjacent merge and subsequent split stay 100% connected
+    const validMerge = mergeProposedSections(thirds!, 0, 1, parts, adjacency);
+    expect(validMerge.sections).toHaveLength(2);
+    expect(verifyProposalZeroFloating(validMerge, adjacency).valid).toBe(true);
+
+    const resplit = splitProposedSection(validMerge, 0, parts, adjacency);
+    expect(resplit.sections).toHaveLength(3);
+    expect(verifyProposalZeroFloating(resplit, adjacency).valid).toBe(true);
+
+    // Numbered Build Bags are ALSO cumulatively connected bottom-up
+    const bags = recomputeProposalWithCount('numbered_bags', parts, adjacency, 3, false)!;
+    const cumulative: number[] = [];
+    for (const bag of bags.sections) {
+      expect(isConnectedSubgraph(bag.partIndices, adjacency)).toBe(true);
+      cumulative.push(...bag.partIndices);
+      expect(isConnectedSubgraph(cumulative, adjacency)).toBe(true);
+    }
+  });
+
+  it('splits wide dioramas into connected Baseplate Sectors with zero floating seam pieces', () => {
+    const lines: string[] = ['0 Wide 28x28 Baseplate Diorama'];
+    for (let ix = 0; ix < 7; ix++) {
+      for (let iz = 0; iz < 14; iz++) {
+        lines.push(`1 2 ${ix * 80} 0 ${iz * 40} 1 0 0 0 1 0 0 0 1 3020.dat`);
+      }
+    }
+    for (let iz = 1; iz < 13; iz += 2) {
+      lines.push(`1 71 240 -8 ${iz * 40} 1 0 0 0 1 0 0 0 1 3020.dat`);
+    }
+    const model = parseLDrawSource(lines.join('\n'), 'diorama.ldr', 'ldr');
+    const graph = buildConnectivityGraph(model.parts);
+    const { parts, adjacency } = buildSubdivisionInputsFromCanonical(model, graph);
+
+    const sectors = buildSpatialSectorsProposal(parts, adjacency);
+    expect(sectors).not.toBeNull();
+    expect(sectors!.sections.length).toBeGreaterThanOrEqual(2);
+    expect(sectors!.sections.filter((s) => s.role === 'join')).toHaveLength(0);
+    expect(verifyProposalZeroFloating(sectors!, adjacency).valid).toBe(true);
+  });
+
+  it('keeps genuinely disconnected distant assemblies in separate sections instead of floating them inside a car section', () => {
+    const base = buildSyntheticTrainChassisLdr();
+    const extra: string[] = [];
+    for (let x = -40; x <= 40; x += 40) {
+      extra.push(`1 6 ${x} 0 320 1 0 0 0 1 0 0 0 1 3003.dat`);
+      extra.push(`1 6 ${x} -24 320 1 0 0 0 1 0 0 0 1 3003.dat`);
+    }
+    const model = parseLDrawSource(`${base}\n${extra.join('\n')}`, 'train_and_bench.ldr', 'ldr');
+    const graph = buildConnectivityGraph(model.parts);
+    const { parts, adjacency } = buildSubdivisionInputsFromCanonical(model, graph);
+
+    expect(graph.components.length).toBe(2);
+    const { proposals } = analyzeModelSubdivisions(parts, adjacency);
+    expect(proposals.length).toBeGreaterThanOrEqual(1);
+    for (const prop of proposals) {
+      expect(verifyProposalZeroFloating(prop, adjacency).valid).toBe(true);
+      const covered = new Set<number>();
+      for (const sec of prop.sections) {
+        for (const idx of sec.repeatPartIndexGroups ? sec.repeatPartIndexGroups.flat() : sec.partIndices) {
+          covered.add(idx);
+        }
+      }
+      expect(covered.size).toBe(parts.length);
+    }
   });
 });
