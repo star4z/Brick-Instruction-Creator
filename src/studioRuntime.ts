@@ -19,6 +19,24 @@ import {
   normalizeMinifigureForBuild,
   vec3Dot,
 } from './engine/minifigPose';
+import {
+  BUILT_IN_THEMES,
+  BUILT_IN_THEME_IDS,
+  applyThemeBackgroundToElement,
+  buildThemeBgCss,
+  createThemeDraftFromBase,
+  fillThemeBackgroundCanvas,
+  loadCustomThemesFromStorage,
+  mergeImportedThemes,
+  normalizeCustomTheme,
+  parseImportedThemesJson,
+  resolveThemeById,
+  saveCustomThemesToStorage,
+  serializeThemeExport,
+  serializeThemesPackExport,
+  slugifyThemeFilename,
+  toHexColor,
+} from './themes/customThemes';
 
 let initialized = false;
 
@@ -94,12 +112,42 @@ const COLORS = {
   484:{name:'Dark Orange',hex:'#a95500',edge:'#5e2f00'},
 };
 
-const THEMES = {
-  blue:      { id:'blue',      name:'Classic Blue',   bg:'linear-gradient(180deg,#d8ecfd 0%,#b7daf9 100%)', text:'#172536', muted:'#4a607a', pliBg:'rgba(255,255,255,0.92)', pliBorder:'#8ab8e6', accent:'#1a73e8', calloutBg:'#fffbe6', calloutBorder:'#eab308', bp:false },
-  white:     { id:'white',     name:'Clean White',    bg:'#ffffff', text:'#202124', muted:'#5f6368', pliBg:'#f8f9fa', pliBorder:'#dadce0', accent:'#1a73e8', calloutBg:'#f1f3f4', calloutBorder:'#bdc1c6', bp:false },
-  dark:      { id:'dark',      name:'Editorial Dark', bg:'linear-gradient(160deg,#1a1d24 0%,#101218 100%)', text:'#f1f3f4', muted:'#9aa0a6', pliBg:'rgba(255,255,255,0.08)', pliBorder:'rgba(255,255,255,0.16)', accent:'#8ab4f8', calloutBg:'rgba(255,255,255,0.06)', calloutBorder:'rgba(255,255,255,0.2)', bp:false },
-  blueprint: { id:'blueprint', name:'Blueprint',      bg:'#0d3b66', text:'#eef6ff', muted:'#9dc4e8', pliBg:'rgba(9,40,72,0.88)', pliBorder:'#5aa9e6', accent:'#64dfdf', calloutBg:'rgba(8,33,58,0.9)', calloutBorder:'#64dfdf', bp:true },
-};
+const THEMES = BUILT_IN_THEMES;
+let customThemes = loadCustomThemesFromStorage();
+
+function getActiveTheme() {
+  return resolveThemeById(state.themeId, customThemes);
+}
+
+function persistCustomThemes() {
+  saveCustomThemesToStorage(customThemes);
+  if (typeof dbPut === 'function') {
+    dbPut('customThemes', customThemes);
+  }
+}
+
+async function shareOrDownloadJsonFile(jsonText, fileName, sharedMsg, savedMsg) {
+  const blob = new Blob([jsonText], { type: 'application/json' });
+  const file = new File([blob], fileName, { type: 'application/json' });
+  if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title: fileName });
+      showToast(sharedMsg);
+      return;
+    } catch (_) {
+      // Fall back to direct file download if Share Sheet is canceled/unavailable
+    }
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+  showToast(savedMsg);
+}
 
 const PAPER_FORMATS = {
   screen: { id:'screen', name:'Screen Fit',     wIn: 11,   hIn: 8.5 },
@@ -3941,7 +3989,7 @@ function renderAll() {
   }
 
   rebuildPages();
-  const theme = THEMES[state.themeId];
+  const theme = getActiveTheme();
   const allSteps = getAllSteps(state.model);
   const allParts = getAllParts(state.model);
   const ft = getModelFileTypeInfo();
@@ -3995,9 +4043,9 @@ function renderAll() {
   frame.style.width = dims.width + 'px';
   frame.style.height = dims.height + 'px';
   frame.style.minHeight = '';
-  frame.style.background = theme.bg;
+  frame.classList.remove('blueprint-grid');
+  applyThemeBackgroundToElement(frame, theme);
   frame.style.color = theme.text;
-  frame.classList.toggle('blueprint-grid', theme.bp);
   frame.innerHTML = '';
 
   const guideCls = (state.showPrintGuides && state.paperFormat !== 'screen') ? 'print-margin-guide' : '';
@@ -5033,11 +5081,78 @@ function syncMenuControls() {
   pg.innerHTML = '';
   for (const t of Object.values(THEMES)) {
     const b = document.createElement('button');
+    b.type = 'button';
     const act = t.id === state.themeId;
-    b.className = `p-2.5 rounded-2xl border text-left transition ${act ? 'border-[#1a73e8] ring-2 ring-[#1a73e8]/25' : 'border-[var(--border)]'}`;
-    b.innerHTML = `<div class="h-6 rounded-lg mb-1.5 border border-black/10" style="background:${t.bg}"></div><div class="text-xs font-semibold">${t.name}</div>`;
+    b.className = `p-2.5 rounded-2xl border text-left transition ${act ? 'border-[#1a73e8] ring-2 ring-[#1a73e8]/25' : 'border-[var(--border)] hover:border-[#1a73e8]/50'}`;
+    const swatch = document.createElement('div');
+    swatch.className = 'h-6 rounded-lg mb-1.5 border border-black/10 relative overflow-hidden';
+    applyThemeBackgroundToElement(swatch, t);
+    const label = document.createElement('div');
+    label.className = 'text-xs font-semibold truncate';
+    label.textContent = t.name;
+    b.appendChild(swatch);
+    b.appendChild(label);
     b.onclick = () => { state.themeId = t.id; renderAll(); };
     pg.appendChild(b);
+  }
+
+  const cg = document.getElementById('customThemeGrid');
+  const exportBtn = document.getElementById('btnExportThemes');
+  if (exportBtn) {
+    exportBtn.classList.toggle('hidden', customThemes.length === 0);
+    exportBtn.title = customThemes.length === 1
+      ? 'Export custom theme (.bictheme.json)'
+      : `Export all ${customThemes.length} custom themes (.bictheme.json)`;
+  }
+  if (cg) {
+    cg.innerHTML = '';
+    cg.classList.toggle('hidden', customThemes.length === 0);
+    for (const t of customThemes) {
+      const card = document.createElement('div');
+      const act = t.id === state.themeId;
+      card.setAttribute('role', 'button');
+      card.tabIndex = 0;
+      card.className = `p-2.5 rounded-2xl border text-left transition cursor-pointer ${act ? 'border-[#1a73e8] ring-2 ring-[#1a73e8]/25' : 'border-[var(--border)] hover:border-[#1a73e8]/50'}`;
+
+      const swatch = document.createElement('div');
+      swatch.className = 'h-6 rounded-lg mb-1.5 border border-black/10 relative overflow-hidden flex items-center justify-end px-1.5';
+      applyThemeBackgroundToElement(swatch, t);
+      const dot = document.createElement('span');
+      dot.className = 'w-2.5 h-2.5 rounded-full border border-white/70 shadow-xs shrink-0';
+      dot.style.background = t.accent;
+      swatch.appendChild(dot);
+
+      const footer = document.createElement('div');
+      footer.className = 'flex items-center justify-between gap-1';
+      const label = document.createElement('span');
+      label.className = 'text-xs font-semibold truncate min-w-0';
+      label.textContent = t.name;
+
+      const editBtn = document.createElement('button');
+      editBtn.type = 'button';
+      editBtn.title = `Edit ${t.name}`;
+      editBtn.setAttribute('aria-label', `Edit ${t.name}`);
+      editBtn.className = 'w-5 h-5 rounded-full flex items-center justify-center shrink-0 text-[var(--muted-foreground)] hover:text-[#1a73e8] hover:bg-black/5 dark:hover:bg-white/10 transition';
+      editBtn.innerHTML = '<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4Z"/></svg>';
+      editBtn.onclick = (e) => {
+        e.stopPropagation();
+        openThemeEditor(t);
+      };
+
+      footer.appendChild(label);
+      footer.appendChild(editBtn);
+      card.appendChild(swatch);
+      card.appendChild(footer);
+      card.onclick = () => { state.themeId = t.id; renderAll(); };
+      card.onkeydown = (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          state.themeId = t.id;
+          renderAll();
+        }
+      };
+      cg.appendChild(card);
+    }
   }
 }
 
@@ -5871,11 +5986,21 @@ renderAll = function () {
 
 async function restoreLastSessionOnStart() {
   await loadSavedBricksLibrary();
+  const dbThemes = await dbGet('customThemes');
+  if (Array.isArray(dbThemes) && dbThemes.length > 0 && customThemes.length === 0) {
+    const restored = dbThemes.map(t => normalizeCustomTheme(t)).filter(Boolean);
+    if (restored.length > 0) {
+      customThemes = restored;
+      saveCustomThemesToStorage(customThemes);
+    }
+  } else if (customThemes.length > 0 && (!Array.isArray(dbThemes) || dbThemes.length === 0)) {
+    dbPut('customThemes', customThemes);
+  }
   const rec = await dbGet('lastModel');
   if (!rec) { renderAll(); return; }
   const prefs = (await dbGet('prefs')) || {};
   try {
-    if (prefs.themeId) state.themeId = prefs.themeId;
+    if (prefs.themeId) state.themeId = resolveThemeById(prefs.themeId, customThemes).id;
     if (prefs.paperFormat) state.paperFormat = prefs.paperFormat;
     if (prefs.orientation) state.orientation = prefs.orientation;
     if (typeof prefs.customWidth === 'number') state.customWidth = prefs.customWidth;
@@ -6037,23 +6162,12 @@ async function renderPageToJpegBytes(page, pxW, pxH) {
   const canvas = document.createElement('canvas');
   canvas.width = pxW; canvas.height = pxH;
   const ctx = canvas.getContext('2d');
-  const theme = THEMES[state.themeId];
+  const theme = getActiveTheme();
   const allParts = getAllParts(state.model);
   const allSteps = getAllSteps(state.model);
 
-  // Fill background
-  if (theme.id === 'blue') {
-    const g = ctx.createLinearGradient(0, 0, 0, pxH); g.addColorStop(0, '#d8ecfd'); g.addColorStop(1, '#b7daf9');
-    ctx.fillStyle = g;
-  } else if (theme.id === 'dark') {
-    const g = ctx.createLinearGradient(0, 0, pxW, pxH); g.addColorStop(0, '#1a1d24'); g.addColorStop(1, '#101218');
-    ctx.fillStyle = g;
-  } else if (theme.id === 'blueprint') {
-    ctx.fillStyle = '#0d3b66';
-  } else {
-    ctx.fillStyle = '#ffffff';
-  }
-  ctx.fillRect(0, 0, pxW, pxH);
+  // Fill background (supports solid, angled gradient, and blueprint grid for built-in & custom themes)
+  fillThemeBackgroundCanvas(ctx, theme, pxW, pxH);
 
   const dens = DENSITY_PAD[state.density] || DENSITY_PAD.balanced;
   const pad = Math.round((dens.pad / 20) * (pxW * 0.04));
@@ -6524,20 +6638,311 @@ document.getElementById('menuDismissArea').onclick = closeMenu;
 
 const stylePopEl = document.getElementById('stylePopover');
 const btnStylePopEl = document.getElementById('btnStylePop');
+
+function updateStylePopoverTail() {
+  if (!stylePopEl || !btnStylePopEl || stylePopEl.classList.contains('hidden')) return;
+  const btnRect = btnStylePopEl.getBoundingClientRect();
+  const popRect = stylePopEl.getBoundingClientRect();
+  const btnCenterX = btnRect.left + btnRect.width / 2;
+  const tailRight = Math.max(24, Math.min(popRect.width - 24, popRect.right - btnCenterX));
+  stylePopEl.style.setProperty('--style-tail-right', `${tailRight.toFixed(1)}px`);
+}
+
+function setStylePopoverOpen(open) {
+  if (!stylePopEl || !btnStylePopEl) return;
+  stylePopEl.classList.toggle('hidden', !open);
+  btnStylePopEl.classList.toggle('style-chip-open', open);
+  btnStylePopEl.setAttribute('aria-expanded', open ? 'true' : 'false');
+  if (open) {
+    syncMenuControls();
+    updateStylePopoverTail();
+  }
+}
+
 btnStylePopEl.onclick = () => {
-  stylePopEl.classList.toggle('hidden');
-  syncMenuControls();
+  setStylePopoverOpen(stylePopEl.classList.contains('hidden'));
 };
-document.getElementById('btnCloseStyle').onclick = () => stylePopEl.classList.add('hidden');
 document.addEventListener('pointerdown', (e) => {
   if (!stylePopEl || stylePopEl.classList.contains('hidden')) return;
   const t = e.target;
   if (t instanceof Node && (stylePopEl.contains(t) || (btnStylePopEl && btnStylePopEl.contains(t)))) return;
-  stylePopEl.classList.add('hidden');
+  setStylePopoverOpen(false);
 }, true);
+
+// Custom Theme Editor Modal + Import / Export
+const themeEditorModalEl = document.getElementById('themeEditorModal');
+let themeEditorDraft = null;
+let themeEditorEditingId = null;
+
+function syncThemeEditorUI() {
+  if (!themeEditorDraft) return;
+  const d = themeEditorDraft;
+  d.bg = buildThemeBgCss(d.bgType, d.bgColor, d.bgColorEnd, d.bgAngle);
+
+  const nameInput = document.getElementById('themeNameInput');
+  if (nameInput && nameInput.value !== d.name) nameInput.value = d.name;
+
+  const setPicker = (id, val, fallback) => {
+    const el = document.getElementById(id);
+    if (el) el.value = toHexColor(val || fallback, d.bgColor);
+  };
+  setPicker('themeColorBg', d.bgColor, '#d8ecfd');
+  setPicker('themeColorBgEnd', d.bgColorEnd, '#b7daf9');
+  setPicker('themeColorText', d.text, '#172536');
+  setPicker('themeColorMuted', d.muted, '#4a607a');
+  setPicker('themeColorAccent', d.accent, '#1a73e8');
+  setPicker('themeColorPliBg', d.pliBg, '#ffffff');
+  setPicker('themeColorPliBorder', d.pliBorder, '#8ab8e6');
+  setPicker('themeColorCalloutBg', d.calloutBg, '#fffbe6');
+  setPicker('themeColorCalloutBorder', d.calloutBorder, '#eab308');
+
+  const bpEl = document.getElementById('themeBlueprintGrid');
+  if (bpEl) bpEl.checked = Boolean(d.bp);
+
+  const isGrad = d.bgType === 'gradient';
+  document.getElementById('themeColorBgEndWrap')?.classList.toggle('hidden', !isGrad);
+  document.getElementById('themeAngleWrap')?.classList.toggle('hidden', !isGrad);
+
+  document.querySelectorAll('.theme-bgtype-btn').forEach(b => {
+    const act = b.getAttribute('data-bg-type') === d.bgType;
+    b.className = `theme-bgtype-btn px-2.5 py-0.5 rounded-full text-[11px] font-semibold transition ${act ? 'bg-[#1a73e8] text-white' : 'text-[var(--muted-foreground)]'}`;
+  });
+  document.querySelectorAll('.theme-angle-btn').forEach(b => {
+    const act = Number(b.getAttribute('data-bg-angle')) === Number(d.bgAngle);
+    b.className = `theme-angle-btn py-1.5 rounded-full border font-semibold transition ${act ? 'border-[#1a73e8] bg-[#1a73e8] text-white' : 'border-[var(--border)] bg-[var(--background)]'}`;
+  });
+
+  // Update live preview card
+  const prevCard = document.getElementById('themePreviewCard');
+  if (prevCard) {
+    applyThemeBackgroundToElement(prevCard, d);
+    prevCard.style.color = d.text;
+    prevCard.style.borderColor = d.pliBorder;
+  }
+  const prevStep = document.getElementById('themePreviewStepNum');
+  if (prevStep) prevStep.style.color = d.text;
+  const prevPli = document.getElementById('themePreviewPli');
+  if (prevPli) {
+    prevPli.style.background = d.pliBg;
+    prevPli.style.border = `1px solid ${d.pliBorder}`;
+    prevPli.style.color = d.text;
+  }
+  const prevCallout = document.getElementById('themePreviewCallout');
+  if (prevCallout) {
+    prevCallout.style.background = d.calloutBg;
+    prevCallout.style.border = `1.5px solid ${d.calloutBorder}`;
+    prevCallout.style.color = d.text;
+  }
+  const prevAccent = document.getElementById('themePreviewAccent');
+  if (prevAccent) prevAccent.style.background = d.accent;
+  const prevMuted = document.getElementById('themePreviewMuted');
+  if (prevMuted) {
+    prevMuted.style.color = d.muted;
+    prevMuted.textContent = state.model?.title || 'Orbital Rover';
+  }
+  const prevPageNum = document.getElementById('themePreviewPageNum');
+  if (prevPageNum) prevPageNum.style.color = d.text;
+}
+
+function openThemeEditor(existingTheme = null) {
+  setStylePopoverOpen(false);
+  if (existingTheme && !existingTheme.builtIn) {
+    themeEditorEditingId = existingTheme.id;
+    themeEditorDraft = {
+      ...existingTheme,
+      bgColor: toHexColor(existingTheme.bgColor, '#ffffff'),
+      bgColorEnd: toHexColor(existingTheme.bgColorEnd, existingTheme.bgColor),
+      text: toHexColor(existingTheme.text, existingTheme.bgColor),
+      muted: toHexColor(existingTheme.muted, existingTheme.bgColor),
+      pliBg: toHexColor(existingTheme.pliBg, existingTheme.bgColor),
+      pliBorder: toHexColor(existingTheme.pliBorder, existingTheme.bgColor),
+      accent: toHexColor(existingTheme.accent, existingTheme.bgColor),
+      calloutBg: toHexColor(existingTheme.calloutBg, existingTheme.bgColor),
+      calloutBorder: toHexColor(existingTheme.calloutBorder, existingTheme.bgColor),
+    };
+    document.getElementById('themeEditorTitle').textContent = 'Edit Custom Theme';
+    document.getElementById('btnThemeEditorDelete').classList.remove('hidden');
+  } else {
+    themeEditorEditingId = null;
+    themeEditorDraft = createThemeDraftFromBase(getActiveTheme());
+    document.getElementById('themeEditorTitle').textContent = 'New Custom Theme';
+    document.getElementById('btnThemeEditorDelete').classList.add('hidden');
+  }
+  syncThemeEditorUI();
+  themeEditorModalEl.classList.remove('hidden');
+}
+
+function closeThemeEditor() {
+  themeEditorModalEl.classList.add('hidden');
+  themeEditorDraft = null;
+  themeEditorEditingId = null;
+}
+
+document.getElementById('btnNewCustomTheme').onclick = () => openThemeEditor(null);
+document.getElementById('btnCloseThemeEditor').onclick = closeThemeEditor;
+document.getElementById('btnThemeEditorCancel').onclick = closeThemeEditor;
+themeEditorModalEl.onclick = (e) => { if (e.target === themeEditorModalEl) closeThemeEditor(); };
+
+document.getElementById('themeNameInput').oninput = (e) => {
+  if (!themeEditorDraft) return;
+  themeEditorDraft.name = e.target.value.slice(0, 40);
+};
+
+document.querySelectorAll('.theme-base-btn').forEach(b => {
+  b.onclick = () => {
+    if (!themeEditorDraft) return;
+    const base = THEMES[b.getAttribute('data-theme-base')] || THEMES.blue;
+    const preservedName = themeEditorDraft.name;
+    const preservedId = themeEditorDraft.id;
+    themeEditorDraft = createThemeDraftFromBase(base, preservedName);
+    themeEditorDraft.id = preservedId;
+    syncThemeEditorUI();
+  };
+});
+
+document.querySelectorAll('.theme-bgtype-btn').forEach(b => {
+  b.onclick = () => {
+    if (!themeEditorDraft) return;
+    themeEditorDraft.bgType = b.getAttribute('data-bg-type') === 'gradient' ? 'gradient' : 'solid';
+    syncThemeEditorUI();
+  };
+});
+
+document.querySelectorAll('.theme-angle-btn').forEach(b => {
+  b.onclick = () => {
+    if (!themeEditorDraft) return;
+    themeEditorDraft.bgAngle = Number(b.getAttribute('data-bg-angle')) || 180;
+    syncThemeEditorUI();
+  };
+});
+
+document.getElementById('themeBlueprintGrid').onchange = (e) => {
+  if (!themeEditorDraft) return;
+  themeEditorDraft.bp = e.target.checked;
+  syncThemeEditorUI();
+};
+
+const bindThemeColorInput = (elId, field) => {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  el.oninput = (e) => {
+    if (!themeEditorDraft) return;
+    themeEditorDraft[field] = e.target.value;
+    syncThemeEditorUI();
+  };
+};
+bindThemeColorInput('themeColorBg', 'bgColor');
+bindThemeColorInput('themeColorBgEnd', 'bgColorEnd');
+bindThemeColorInput('themeColorText', 'text');
+bindThemeColorInput('themeColorMuted', 'muted');
+bindThemeColorInput('themeColorAccent', 'accent');
+bindThemeColorInput('themeColorPliBg', 'pliBg');
+bindThemeColorInput('themeColorPliBorder', 'pliBorder');
+bindThemeColorInput('themeColorCalloutBg', 'calloutBg');
+bindThemeColorInput('themeColorCalloutBorder', 'calloutBorder');
+
+document.getElementById('btnThemeEditorSave').onclick = () => {
+  if (!themeEditorDraft) return;
+  const cleanedName = (document.getElementById('themeNameInput').value || '').trim() || 'Custom Theme';
+  const normalized = normalizeCustomTheme({
+    ...themeEditorDraft,
+    id: themeEditorEditingId || themeEditorDraft.id,
+    name: cleanedName,
+    updatedAt: new Date().toISOString(),
+  });
+  if (!normalized) return;
+
+  const idx = customThemes.findIndex(t => t.id === normalized.id);
+  if (idx >= 0) {
+    customThemes[idx] = { ...normalized, createdAt: customThemes[idx].createdAt || normalized.createdAt };
+  } else {
+    customThemes.push(normalized);
+  }
+  persistCustomThemes();
+  state.themeId = normalized.id;
+  closeThemeEditor();
+  renderAll();
+  showToast(idx >= 0 ? `Updated "${normalized.name}".` : `Saved theme "${normalized.name}".`);
+};
+
+document.getElementById('btnThemeEditorDelete').onclick = () => {
+  if (!themeEditorEditingId) return;
+  const removed = customThemes.find(t => t.id === themeEditorEditingId);
+  customThemes = customThemes.filter(t => t.id !== themeEditorEditingId);
+  persistCustomThemes();
+  if (state.themeId === themeEditorEditingId) {
+    state.themeId = 'blue';
+  }
+  closeThemeEditor();
+  renderAll();
+  showToast(removed ? `Deleted "${removed.name}".` : 'Deleted custom theme.');
+};
+
+document.getElementById('btnThemeEditorExport').onclick = async () => {
+  if (!themeEditorDraft) return;
+  const cleanedName = (document.getElementById('themeNameInput').value || '').trim() || 'Custom Theme';
+  const normalized = normalizeCustomTheme({
+    ...themeEditorDraft,
+    id: themeEditorEditingId || themeEditorDraft.id,
+    name: cleanedName,
+  });
+  if (!normalized) return;
+  const json = serializeThemeExport(normalized);
+  const fileName = `${slugifyThemeFilename(normalized.name)}.bictheme.json`;
+  await shareOrDownloadJsonFile(json, fileName, `Shared "${normalized.name}" theme.`, `Exported ${fileName}`);
+};
+
+document.getElementById('btnExportThemes').onclick = async () => {
+  if (!customThemes.length) { showToast('Create a custom theme first.'); return; }
+  if (customThemes.length === 1) {
+    const t = customThemes[0];
+    const fileName = `${slugifyThemeFilename(t.name)}.bictheme.json`;
+    await shareOrDownloadJsonFile(serializeThemeExport(t), fileName, `Shared "${t.name}" theme.`, `Exported ${fileName}`);
+  } else {
+    const fileName = 'brick-custom-themes.bictheme.json';
+    await shareOrDownloadJsonFile(
+      serializeThemesPackExport(customThemes),
+      fileName,
+      `Shared ${customThemes.length} custom themes.`,
+      `Exported ${customThemes.length} custom themes (${fileName})`,
+    );
+  }
+};
+
+document.getElementById('btnImportTheme').onclick = () => {
+  document.getElementById('themeImportInput').click();
+};
+
+document.getElementById('themeImportInput').onchange = async (e) => {
+  const f = e.target.files?.[0];
+  e.target.value = '';
+  if (!f) return;
+  try {
+    const incoming = parseImportedThemesJson(await f.text());
+    const { merged, importedIds } = mergeImportedThemes(customThemes, incoming);
+    customThemes = merged;
+    persistCustomThemes();
+    if (importedIds.length > 0) {
+      state.themeId = importedIds[0];
+    }
+    renderAll();
+    const first = customThemes.find(t => t.id === importedIds[0]);
+    showToast(
+      importedIds.length === 1 && first
+        ? `Imported theme "${first.name}".`
+        : `Imported ${importedIds.length} custom themes.`,
+    );
+  } catch (err) {
+    showToast(err?.message || 'Could not import theme file.');
+  }
+};
+
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && stylePopEl && !stylePopEl.classList.contains('hidden')) {
-    stylePopEl.classList.add('hidden');
+  if (e.key !== 'Escape') return;
+  if (themeEditorModalEl && !themeEditorModalEl.classList.contains('hidden')) {
+    closeThemeEditor();
+  } else if (stylePopEl && !stylePopEl.classList.contains('hidden')) {
+    setStylePopoverOpen(false);
   }
 });
 
@@ -6734,19 +7139,12 @@ if (menuSubdivideBtn) {
 // Save / Open .bic.json Project (supports iOS Share Sheet + Download!)
 document.getElementById('menuSaveProj').onclick = async () => {
   if (!state.model) return;
-  const payload = JSON.stringify({ version: 3, title: state.model.title, chapters: state.model.chapters, overrides: state.overrides, pageInserts: state.pageInserts, dividerAfter: state.dividerAfter, coverMeta: state.coverMeta, completeMeta: state.completeMeta, backMeta: state.backMeta, bomConfig: state.bomConfig, showStepBorders: state.showStepBorders, showPageTitle: state.showPageTitle, pageNumberFormat: state.pageNumberFormat, detectDuplicates: state.detectDuplicates, themeId: state.themeId, paperFormat: state.paperFormat, orientation: state.orientation, density: state.density, layout: state.layout }, null, 2);
+  const activeTheme = getActiveTheme();
+  const embeddedCustomTheme = activeTheme && !activeTheme.builtIn && !BUILT_IN_THEME_IDS.has(activeTheme.id) ? activeTheme : undefined;
+  const payload = JSON.stringify({ version: 3, title: state.model.title, chapters: state.model.chapters, overrides: state.overrides, pageInserts: state.pageInserts, dividerAfter: state.dividerAfter, coverMeta: state.coverMeta, completeMeta: state.completeMeta, backMeta: state.backMeta, bomConfig: state.bomConfig, showStepBorders: state.showStepBorders, showPageTitle: state.showPageTitle, pageNumberFormat: state.pageNumberFormat, detectDuplicates: state.detectDuplicates, themeId: state.themeId, ...(embeddedCustomTheme ? { customTheme: embeddedCustomTheme } : {}), paperFormat: state.paperFormat, orientation: state.orientation, density: state.density, layout: state.layout }, null, 2);
   const fileName = `${state.model.title.replace(/[^a-z0-9_-]+/gi, '_')}.bic.json`;
-  const blob = new Blob([payload], { type: 'application/json' });
-  const file = new File([blob], fileName, { type: 'application/json' });
   closeMenu();
-  if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
-    try { await navigator.share({ files: [file], title: fileName }); showToast('Shared project file.'); return; } catch (_) {}
-  }
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href = url; a.download = fileName;
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 4000);
-  showToast(`Saved ${fileName}`);
+  await shareOrDownloadJsonFile(payload, fileName, 'Shared project file.', `Saved ${fileName}`);
 };
 document.getElementById('menuLoadProj').onclick = () => document.getElementById('projectLoadInput').click();
 document.getElementById('projectLoadInput').onchange = async (e) => {
@@ -6765,7 +7163,17 @@ document.getElementById('projectLoadInput').onchange = async (e) => {
     if (typeof data.showPageTitle === 'boolean') state.showPageTitle = data.showPageTitle;
     if (data.pageNumberFormat) state.pageNumberFormat = data.pageNumberFormat;
     if (typeof data.detectDuplicates === 'boolean') state.detectDuplicates = data.detectDuplicates;
-    if (data.themeId) state.themeId = data.themeId;
+    if (data.customTheme) {
+      const normalized = normalizeCustomTheme(data.customTheme);
+      if (normalized) {
+        const { merged, importedIds } = mergeImportedThemes(customThemes, [normalized]);
+        customThemes = merged;
+        persistCustomThemes();
+        if (importedIds[0]) state.themeId = importedIds[0];
+      }
+    } else if (data.themeId) {
+      state.themeId = resolveThemeById(data.themeId, customThemes).id;
+    }
     if (data.paperFormat) state.paperFormat = data.paperFormat;
     if (data.orientation) state.orientation = data.orientation;
     if (data.density) state.density = data.density;
@@ -7340,6 +7748,7 @@ window.addEventListener('resize', () => {
   if (impState.parsed && !document.getElementById('importModal').classList.contains('hidden')) {
     drawImportPreviewFrame();
   }
+  updateStylePopoverTail();
 });
 
 // Automatically reload last opened model & session on start!

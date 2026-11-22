@@ -22,6 +22,7 @@
     <input id="projectLoadInput" type="file" accept=".json,.bic.json" class="hidden" />
     <input id="insertImageInput" type="file" accept="image/*" class="hidden" />
     <input id="coverImageInput" type="file" accept="image/*" class="hidden" />
+    <input id="themeImportInput" type="file" accept=".json,.bictheme.json,application/json" class="hidden" />
 
     <!-- ================================================================ -->
     <!-- FLOATING TOP-LEFT PILL: Menu ☰ (+ Model Name chip on desktop)    -->
@@ -60,8 +61,8 @@
           <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5A5.5 5.5 0 0 0 9.5 20H13"/></svg>
         </button>
       </div>
-      <button id="btnStylePop" class="glass-pill h-10 px-3.5 rounded-full flex items-center gap-1.5 text-xs font-semibold hover:scale-[1.02] active:scale-95 transition">
-        <svg class="w-4 h-4 text-[#1a73e8]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="13.5" cy="6.5" r=".6" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".6" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".6" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".6" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></svg>
+      <button id="btnStylePop" aria-haspopup="true" aria-expanded="false" class="glass-pill h-10 px-3.5 rounded-full flex items-center gap-1.5 text-xs font-semibold hover:scale-[1.02] active:scale-95 transition">
+        <svg class="w-4 h-4 text-[#1a73e8] transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="13.5" cy="6.5" r=".6" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".6" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".6" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".6" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></svg>
         <span>Style</span>
       </button>
     </div>
@@ -328,56 +329,205 @@
     </div>
 
     <!-- ================================================================ -->
-    <!-- FLOATING STYLE POPOVER (Top-Right)                               -->
+    <!-- FLOATING STYLE POPOVER (Top-Right, anchored to Style chip)       -->
     <!-- ================================================================ -->
-    <div id="stylePopover" class="no-print hidden fixed top-15 right-3 z-45 w-[min(92vw,310px)] rounded-3xl bg-[var(--card)] border border-[var(--border)] shadow-2xl p-4 space-y-4 text-xs max-h-[75vh] overflow-y-auto">
-      <div class="flex items-center justify-between">
-        <span class="text-sm font-bold">Manual Style</span>
-        <button id="btnCloseStyle" class="w-7 h-7 rounded-full flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/10">✕</button>
-      </div>
-      <div id="presetGrid" class="grid grid-cols-2 gap-2"></div>
+    <div id="stylePopover" role="dialog" aria-label="Style options" class="no-print hidden fixed top-[64px] right-3 z-45 w-[min(92vw,316px)]">
+      <div class="style-popover-tail" aria-hidden="true"></div>
+      <div class="style-popover-body rounded-3xl bg-[var(--card)] border border-[var(--border)] shadow-2xl p-4 space-y-3.5 text-xs max-h-[75vh] overflow-y-auto overscroll-contain">
+        <div id="presetGrid" class="grid grid-cols-2 gap-2"></div>
 
-      <div class="space-y-2.5 pt-3 border-t border-[var(--border)]">
-        <label class="flex items-center justify-between gap-2">
-          <span class="font-medium">Outline New Pieces</span>
-          <div class="flex items-center gap-2">
-            <input id="highlightColor" type="color" value="#ff2d55" class="w-6 h-6 rounded-md border border-[var(--border)] bg-transparent cursor-pointer" />
-            <input id="toggleHighlight" type="checkbox" checked class="w-4 h-4 accent-[#1a73e8]" />
+        <!-- Custom Themes (saved locally across projects, importable & exportable) -->
+        <div class="space-y-2 pt-3 border-t border-[var(--border)]">
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-[11px] font-bold uppercase tracking-wider text-[var(--muted-foreground)]">Custom Themes</span>
+            <div class="flex items-center gap-1">
+              <button id="btnImportTheme" type="button" title="Import theme file (.bictheme.json)" class="px-2 py-1 rounded-full border border-[var(--border)] bg-[var(--background)] text-[11px] font-semibold hover:border-[#1a73e8] transition">Import</button>
+              <button id="btnExportThemes" type="button" title="Export custom themes (.bictheme.json)" class="hidden px-2 py-1 rounded-full border border-[var(--border)] bg-[var(--background)] text-[11px] font-semibold hover:border-[#1a73e8] transition">Export</button>
+            </div>
           </div>
-        </label>
-        <label class="flex items-center justify-between gap-2">
-          <span class="font-medium">Fade Earlier Pieces</span>
-          <input id="toggleFade" type="checkbox" checked class="w-4 h-4 accent-[#1a73e8]" />
-        </label>
-        <div class="space-y-1">
-          <div class="text-[11px] text-[var(--muted-foreground)]">Earlier Piece Visibility</div>
-          <div class="grid grid-cols-4 gap-1">
-            <button data-fade="0.45" class="fade-chip py-1 rounded-full border font-semibold">Soft</button>
-            <button data-fade="0.65" class="fade-chip py-1 rounded-full border font-semibold">Medium</button>
-            <button data-fade="0.82" class="fade-chip py-1 rounded-full border font-semibold">Clear</button>
-            <button data-fade="1.0" class="fade-chip py-1 rounded-full border font-semibold">Full</button>
+          <div id="customThemeGrid" class="grid grid-cols-2 gap-2"></div>
+          <button id="btnNewCustomTheme" type="button" class="w-full py-2 px-3 rounded-2xl border border-dashed border-[var(--border)] bg-[var(--background)] hover:border-[#1a73e8] hover:text-[#1a73e8] font-semibold flex items-center justify-center gap-1.5 transition">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="12" x2="12" y1="5" y2="19"/><line x1="5" x2="19" y1="12" y2="12"/></svg>
+            <span>New Custom Theme</span>
+          </button>
+        </div>
+
+        <div class="space-y-2.5 pt-3 border-t border-[var(--border)]">
+          <label class="flex items-center justify-between gap-2">
+            <span class="font-medium">Outline New Pieces</span>
+            <div class="flex items-center gap-2">
+              <input id="highlightColor" type="color" value="#ff2d55" class="w-6 h-6 rounded-md border border-[var(--border)] bg-transparent cursor-pointer" />
+              <input id="toggleHighlight" type="checkbox" checked class="w-4 h-4 accent-[#1a73e8]" />
+            </div>
+          </label>
+          <label class="flex items-center justify-between gap-2">
+            <span class="font-medium">Fade Earlier Pieces</span>
+            <input id="toggleFade" type="checkbox" checked class="w-4 h-4 accent-[#1a73e8]" />
+          </label>
+          <div class="space-y-1">
+            <div class="text-[11px] text-[var(--muted-foreground)]">Earlier Piece Visibility</div>
+            <div class="grid grid-cols-4 gap-1">
+              <button data-fade="0.45" class="fade-chip py-1 rounded-full border font-semibold">Soft</button>
+              <button data-fade="0.65" class="fade-chip py-1 rounded-full border font-semibold">Medium</button>
+              <button data-fade="0.82" class="fade-chip py-1 rounded-full border font-semibold">Clear</button>
+              <button data-fade="1.0" class="fade-chip py-1 rounded-full border font-semibold">Full</button>
+            </div>
+          </div>
+          <label class="flex items-center justify-between gap-2">
+            <span class="font-medium">Rotation Badges</span>
+            <input id="toggleRotCues" type="checkbox" checked class="w-4 h-4 accent-[#1a73e8]" />
+          </label>
+          <label class="flex items-center justify-between gap-2">
+            <span class="font-medium">1:1 Axle &amp; Beam Guides</span>
+            <input id="toggleSizeGuides" type="checkbox" checked class="w-4 h-4 accent-[#1a73e8]" />
+          </label>
+          <label class="flex items-center justify-between gap-2">
+            <span class="font-medium">1:1 Minifigure View</span>
+            <input id="toggleMinifig1to1" type="checkbox" class="w-4 h-4 accent-[#1a73e8]" />
+          </label>
+          <label class="flex items-center justify-between gap-2">
+            <span class="font-medium">Box Around Each Step</span>
+            <input id="toggleStepBorders" type="checkbox" checked class="w-4 h-4 accent-[#1a73e8]" />
+          </label>
+          <label class="flex items-center justify-between gap-2">
+            <span class="font-medium">Model Title on Pages</span>
+            <input id="togglePageTitle" type="checkbox" checked class="w-4 h-4 accent-[#1a73e8]" />
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- CUSTOM THEME EDITOR MODAL                                        -->
+    <!-- ================================================================ -->
+    <div id="themeEditorModal" class="no-print hidden fixed inset-0 z-50 bg-black/50 backdrop-blur-[2px] flex items-end sm:items-center justify-center p-3">
+      <div class="w-full max-w-md max-h-[86vh] rounded-3xl bg-[var(--card)] border border-[var(--border)] shadow-2xl flex flex-col overflow-hidden text-xs">
+        <div class="p-4 border-b border-[var(--border)] flex items-center justify-between gap-2 shrink-0">
+          <div class="min-w-0">
+            <h2 id="themeEditorTitle" class="text-sm font-bold">New Custom Theme</h2>
+            <p class="text-[11px] text-[var(--muted-foreground)] truncate">Saved locally across all projects</p>
+          </div>
+          <button id="btnCloseThemeEditor" type="button" class="w-8 h-8 rounded-full flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/10 shrink-0">✕</button>
+        </div>
+
+        <div class="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 space-y-4">
+          <!-- Live Mini Page Preview -->
+          <div id="themePreviewCard" class="rounded-2xl border border-black/15 p-3.5 shadow-sm overflow-hidden">
+            <div class="flex items-start justify-between gap-2">
+              <div class="flex items-center gap-2">
+                <span id="themePreviewStepNum" class="text-2xl font-black leading-none">1</span>
+                <div id="themePreviewPli" class="px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1.5">
+                  <span class="w-3.5 h-2.5 rounded-[3px] bg-[#c91a09] inline-block shadow-xs"></span>
+                  <span>2×</span>
+                </div>
+              </div>
+              <div id="themePreviewCallout" class="px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1">
+                <span>Submodel</span>
+                <span id="themePreviewAccent" class="px-1.5 py-0.5 rounded-full text-[9px] font-black text-white">×2</span>
+              </div>
+            </div>
+            <div class="mt-5 pt-1.5 flex items-center justify-between text-[10px] font-medium">
+              <span id="themePreviewMuted">Orbital Rover</span>
+              <span id="themePreviewPageNum" class="font-bold">Page 2</span>
+            </div>
+          </div>
+
+          <!-- Theme Name -->
+          <label class="block space-y-1">
+            <span class="font-semibold text-[var(--muted-foreground)] uppercase tracking-wider text-[10px]">Theme Name</span>
+            <input id="themeNameInput" type="text" maxlength="40" placeholder="e.g. Sunset Studio" class="w-full px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--background)] font-semibold outline-none focus:border-[#1a73e8]" />
+          </label>
+
+          <!-- Quick Base Templates -->
+          <div class="space-y-1.5">
+            <div class="font-semibold text-[var(--muted-foreground)] uppercase tracking-wider text-[10px]">Start From Base</div>
+            <div class="grid grid-cols-4 gap-1.5">
+              <button type="button" data-theme-base="blue" class="theme-base-btn py-1.5 rounded-full border border-[var(--border)] bg-[var(--background)] font-semibold hover:border-[#1a73e8] transition">Blue</button>
+              <button type="button" data-theme-base="white" class="theme-base-btn py-1.5 rounded-full border border-[var(--border)] bg-[var(--background)] font-semibold hover:border-[#1a73e8] transition">White</button>
+              <button type="button" data-theme-base="dark" class="theme-base-btn py-1.5 rounded-full border border-[var(--border)] bg-[var(--background)] font-semibold hover:border-[#1a73e8] transition">Dark</button>
+              <button type="button" data-theme-base="blueprint" class="theme-base-btn py-1.5 rounded-full border border-[var(--border)] bg-[var(--background)] font-semibold hover:border-[#1a73e8] transition">Blueprint</button>
+            </div>
+          </div>
+
+          <!-- Background Style -->
+          <div class="space-y-2.5 pt-3 border-t border-[var(--border)]">
+            <div class="flex items-center justify-between gap-2">
+              <span class="font-semibold text-[var(--muted-foreground)] uppercase tracking-wider text-[10px]">Page Background</span>
+              <div class="inline-flex rounded-full border border-[var(--border)] p-0.5 bg-[var(--background)]">
+                <button type="button" data-bg-type="solid" class="theme-bgtype-btn px-2.5 py-0.5 rounded-full text-[11px] font-semibold">Solid</button>
+                <button type="button" data-bg-type="gradient" class="theme-bgtype-btn px-2.5 py-0.5 rounded-full text-[11px] font-semibold">Gradient</button>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-2">
+              <label class="flex items-center justify-between gap-2 px-2.5 py-2 rounded-xl border border-[var(--border)] bg-[var(--background)]">
+                <span class="font-medium truncate">Background</span>
+                <input id="themeColorBg" type="color" value="#d8ecfd" class="w-6 h-6 rounded-md border border-[var(--border)] bg-transparent cursor-pointer shrink-0" />
+              </label>
+              <label id="themeColorBgEndWrap" class="flex items-center justify-between gap-2 px-2.5 py-2 rounded-xl border border-[var(--border)] bg-[var(--background)]">
+                <span class="font-medium truncate">Gradient End</span>
+                <input id="themeColorBgEnd" type="color" value="#b7daf9" class="w-6 h-6 rounded-md border border-[var(--border)] bg-transparent cursor-pointer shrink-0" />
+              </label>
+            </div>
+
+            <div id="themeAngleWrap" class="grid grid-cols-3 gap-1.5">
+              <button type="button" data-bg-angle="180" class="theme-angle-btn py-1.5 rounded-full border font-semibold">Vertical ↓</button>
+              <button type="button" data-bg-angle="135" class="theme-angle-btn py-1.5 rounded-full border font-semibold">Diagonal ↘</button>
+              <button type="button" data-bg-angle="90" class="theme-angle-btn py-1.5 rounded-full border font-semibold">Horizontal →</button>
+            </div>
+
+            <label class="flex items-center justify-between py-0.5">
+              <span class="font-medium">Blueprint Grid Overlay</span>
+              <input id="themeBlueprintGrid" type="checkbox" class="w-4 h-4 accent-[#1a73e8]" />
+            </label>
+          </div>
+
+          <!-- Palette Colors -->
+          <div class="space-y-2 pt-3 border-t border-[var(--border)]">
+            <div class="font-semibold text-[var(--muted-foreground)] uppercase tracking-wider text-[10px]">Text, Boxes &amp; Accents</div>
+            <div class="grid grid-cols-2 gap-2">
+              <label class="flex items-center justify-between gap-2 px-2.5 py-2 rounded-xl border border-[var(--border)] bg-[var(--background)]">
+                <span class="font-medium truncate">Primary Text</span>
+                <input id="themeColorText" type="color" value="#172536" class="w-6 h-6 rounded-md border border-[var(--border)] bg-transparent cursor-pointer shrink-0" />
+              </label>
+              <label class="flex items-center justify-between gap-2 px-2.5 py-2 rounded-xl border border-[var(--border)] bg-[var(--background)]">
+                <span class="font-medium truncate">Muted Text</span>
+                <input id="themeColorMuted" type="color" value="#4a607a" class="w-6 h-6 rounded-md border border-[var(--border)] bg-transparent cursor-pointer shrink-0" />
+              </label>
+              <label class="flex items-center justify-between gap-2 px-2.5 py-2 rounded-xl border border-[var(--border)] bg-[var(--background)]">
+                <span class="font-medium truncate">Accent</span>
+                <input id="themeColorAccent" type="color" value="#1a73e8" class="w-6 h-6 rounded-md border border-[var(--border)] bg-transparent cursor-pointer shrink-0" />
+              </label>
+              <label class="flex items-center justify-between gap-2 px-2.5 py-2 rounded-xl border border-[var(--border)] bg-[var(--background)]">
+                <span class="font-medium truncate">Parts Box</span>
+                <input id="themeColorPliBg" type="color" value="#ffffff" class="w-6 h-6 rounded-md border border-[var(--border)] bg-transparent cursor-pointer shrink-0" />
+              </label>
+              <label class="flex items-center justify-between gap-2 px-2.5 py-2 rounded-xl border border-[var(--border)] bg-[var(--background)]">
+                <span class="font-medium truncate">Box Border</span>
+                <input id="themeColorPliBorder" type="color" value="#8ab8e6" class="w-6 h-6 rounded-md border border-[var(--border)] bg-transparent cursor-pointer shrink-0" />
+              </label>
+              <label class="flex items-center justify-between gap-2 px-2.5 py-2 rounded-xl border border-[var(--border)] bg-[var(--background)]">
+                <span class="font-medium truncate">Callout Box</span>
+                <input id="themeColorCalloutBg" type="color" value="#fffbe6" class="w-6 h-6 rounded-md border border-[var(--border)] bg-transparent cursor-pointer shrink-0" />
+              </label>
+              <label class="flex items-center justify-between gap-2 px-2.5 py-2 rounded-xl border border-[var(--border)] bg-[var(--background)] col-span-2">
+                <span class="font-medium truncate">Callout Border</span>
+                <input id="themeColorCalloutBorder" type="color" value="#eab308" class="w-6 h-6 rounded-md border border-[var(--border)] bg-transparent cursor-pointer shrink-0" />
+              </label>
+            </div>
           </div>
         </div>
-        <label class="flex items-center justify-between gap-2">
-          <span class="font-medium">Rotation Badges</span>
-          <input id="toggleRotCues" type="checkbox" checked class="w-4 h-4 accent-[#1a73e8]" />
-        </label>
-        <label class="flex items-center justify-between gap-2">
-          <span class="font-medium">1:1 Axle &amp; Beam Guides</span>
-          <input id="toggleSizeGuides" type="checkbox" checked class="w-4 h-4 accent-[#1a73e8]" />
-        </label>
-        <label class="flex items-center justify-between gap-2">
-          <span class="font-medium">1:1 Minifigure View</span>
-          <input id="toggleMinifig1to1" type="checkbox" class="w-4 h-4 accent-[#1a73e8]" />
-        </label>
-        <label class="flex items-center justify-between gap-2">
-          <span class="font-medium">Box Around Each Step</span>
-          <input id="toggleStepBorders" type="checkbox" checked class="w-4 h-4 accent-[#1a73e8]" />
-        </label>
-        <label class="flex items-center justify-between gap-2">
-          <span class="font-medium">Model Title on Pages</span>
-          <input id="togglePageTitle" type="checkbox" checked class="w-4 h-4 accent-[#1a73e8]" />
-        </label>
+
+        <div class="p-3.5 border-t border-[var(--border)] flex items-center justify-between gap-2 shrink-0 bg-[var(--card)]">
+          <div class="flex items-center gap-1.5">
+            <button id="btnThemeEditorExport" type="button" class="px-3 py-2 rounded-full border border-[var(--border)] bg-[var(--background)] font-semibold hover:border-[#1a73e8] transition">Export</button>
+            <button id="btnThemeEditorDelete" type="button" class="hidden px-3 py-2 rounded-full border border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-400 font-semibold">Delete</button>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <button id="btnThemeEditorCancel" type="button" class="px-3.5 py-2 rounded-full font-semibold text-[var(--muted-foreground)]">Cancel</button>
+            <button id="btnThemeEditorSave" type="button" class="px-4 py-2 rounded-full bg-[#1a73e8] text-white font-semibold">Save Theme</button>
+          </div>
+        </div>
       </div>
     </div>
 
