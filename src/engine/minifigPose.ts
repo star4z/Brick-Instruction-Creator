@@ -214,20 +214,21 @@ export interface DetectedMinifigGroup {
   indices: number[];
 }
 
-const CORE_LEGS_ID_RE = /^(?:asm_)?(?:bl_)?(?:3815|3816|3817|970|41879|16709|37364|36036)(?:[^0-9]|$)/i;
-const CORE_TORSO_ID_RE = /^(?:asm_)?(?:bl_)?(?:973|76382|3818|3819|3820)(?:[^0-9]|$)/i;
+const CORE_LEGS_ID_RE = /^(?:asm_)?(?:bl_)?(?:3815|3816|3817|970|971|972|41879|16709|37364|36036)(?:[^0-9]|$)/i;
+const CORE_TORSO_ID_RE = /^(?:asm_)?(?:bl_)?(?:973|3814|76382|3818|3819|3820|981|982|983)(?:[^0-9]|$)/i;
 const CORE_HEAD_ID_RE = /^(?:bl_)?(?:3626|28621)(?:[^0-9]|$)/i;
 
 /** Known LEGO furniture, seating, vehicle control, mount, and train part IDs that are never part of a minifigure. */
 const NON_MINIFIG_PART_ID_RE =
   /^(?:bl_)?(?:4079|4598|30149|29602|65767|61482|60583|90195|3828|3829|73081|2819|30663|4491|2491|4719|30187|50859|15396|25214|38339|38340|29085|28740|bb892)(?:[^0-9]|$)/i;
 
-/** Known LEGO minifigure hair, headgear, and wearable neckwear part IDs. */
+/** Known LEGO minifigure hair and headgear part IDs. */
 const HEADGEAR_ID_RE =
-  /^(?:bl_)?(?:76925|26066|11303|66913|21778|98385|11256|61976|25376|3842|3901|4530|62810|92081|20595|25972|28551|23186|88283|64798|87991|92746|15500|21268|21269|24791|25409|35699|68212|79768)(?:[^0-9]|$)/i;
+  /^(?:bl_)?(?:76925|26066|11303|66913|21778|98385|11256|25376|3842|3901|4530|62810|92081|20595|25972|28551|23186|88283|64798|87991|92746|15500|21268|21269|24791|25409|35699|68212|79768)(?:[^0-9]|$)/i;
 
+/** Known LEGO minifigure bags, purses, satchels, and wearable/handheld accessory part IDs. */
 const WEARABLE_ACCESSORY_ID_RE =
-  /^(?:bl_)?(?:93091|24093|93555|65632|19918|26093|85974)(?:[^0-9]|$)/i;
+  /^(?:bl_)?(?:61976|93091|93082|10169|18987|25866|65768|92590|35654|4449|40239|77983|93221|26073|15619|24093|93555|65632|19918|26093|85974)(?:[^0-9]|$)/i;
 
 /** Furniture, seats, fixtures, and large architectural parts that must NEVER be bundled into a minifigure build step. */
 const NON_MINIFIG_FURNITURE_RE =
@@ -241,7 +242,7 @@ const MINIFIG_WEARABLE_NAME_RE =
   /\b(hair|helmet|hat|cap|hood|headgear|visor|crown|scarf|cape|cloak|armor|armour|backpack|ponytail|wig|beard|moustache|mustache|glasses|goggles|headphones?|earmuffs?|neckwear|collar|epaulette|pauldron|quiver|scabbard|jetpack|tiara|turban|beanie|beret|bandana|headband)\b/i;
 
 const MINIFIG_ACCESSORY_NAME_RE =
-  /\b(utensil|mug|cup|goblet|bottle|broom|wand|sword|lightsaber|blaster|camera|briefcase|suitcase|handbag|purse|satchel|bag|book|newspaper|letter|phone|walkie|radio|microphone|guitar|umbrella|torch|lantern|flashlight|wrench|hammer|shovel|pickaxe|binoculars|magnifying|megaphone|trophy|clipboard|laptop)\b|minifig.*accessory/i;
+  /\b(utensil|mug|cup|goblet|bottle|broom|wand|sword|lightsaber|blaster|camera|briefcase|suitcase|handbag|purse|satchel|tote|pouch|bag|book|newspaper|letter|phone|walkie|radio|microphone|guitar|umbrella|torch|lantern|flashlight|wrench|hammer|shovel|pickaxe|binoculars|magnifying|megaphone|trophy|clipboard|laptop)\b|minifig.*accessory/i;
 
 function isCoreBodyId(k: string): boolean {
   return CORE_LEGS_ID_RE.test(k) || CORE_TORSO_ID_RE.test(k) || CORE_HEAD_ID_RE.test(k) || /_(?:torso|leg_?[lr]|arm_?[lr])$/i.test(k);
@@ -268,7 +269,7 @@ export function isNonMinifigPart(partId: string, partName = '', childPartIds: st
   if (!name) return false;
 
   // Core body part names always win over print descriptions (e.g. "Minifig Torso with Train Pattern")
-  if (/\bhips\b|minifig.*(?:leg|torso|arm|hand|head\b)|torso assembly/i.test(name)) {
+  if (/\bhips\b|minifig.*(?:leg|torso|arm|hand|head\b)|torso assembly|\b(?:arm|leg),?\s*(?:left|right)\b/i.test(name)) {
     return false;
   }
 
@@ -307,12 +308,15 @@ export function classifyMinifigGroupKind(
   }
 
   const allIds = [k, ...childIds];
-  if (allIds.some((id) => CORE_LEGS_ID_RE.test(id)) || /\bhips\b|minifig.*leg/i.test(name)) {
+  if (
+    allIds.some((id) => CORE_LEGS_ID_RE.test(id)) ||
+    /\bhips\b|minifig.*leg|\bleg,?\s*(?:left|right)\b/i.test(name)
+  ) {
     return 'legs';
   }
   if (
     allIds.some((id) => CORE_TORSO_ID_RE.test(id) || /_(?:torso|arm_?[lr])$/i.test(id)) ||
-    /minifig.*torso|torso assembly|minifig.*arm|minifig.*hand/i.test(name)
+    /minifig.*torso|torso assembly|\btorso\b|minifig.*arm|\barm,?\s*(?:left|right)\b|minifig.*hand\b|^\s*hand\s*$/i.test(name)
   ) {
     return 'torso';
   }
@@ -336,31 +340,58 @@ export function classifyMinifigLeafRole(partId: string, partName = ''): MinifigL
   if (isNonMinifigPart(k, name)) {
     return 'accessory';
   }
-  if (/^(?:bl_)?3815(?!c\d)(?:[^0-9]|$)/i.test(k) || (/\bhips\b/i.test(name) && !/\blegs?\b/i.test(name))) {
+  if (
+    /^(?:bl_)?(?:3815|970)(?!c\d)(?:[^0-9]|$)/i.test(k) ||
+    (/\bhips\b/i.test(name) && !/\blegs?\b/i.test(name))
+  ) {
     return 'hips';
   }
-  if (/^(?:bl_)?3816(?:[^0-9]|$)/i.test(k) || /minifig.*leg.*right/i.test(name) || /_leg_?r\b/i.test(k)) {
+  if (
+    /^(?:bl_)?(?:3816|971)(?:[^0-9]|$)/i.test(k) ||
+    /minifig.*leg.*right|\bleg,?\s*right\b|\bright\s+leg\b/i.test(name) ||
+    /_leg_?r\b/i.test(k)
+  ) {
     return 'leg_r';
   }
-  if (/^(?:bl_)?3817(?:[^0-9]|$)/i.test(k) || /minifig.*leg.*left/i.test(name) || /_leg_?l\b/i.test(k)) {
+  if (
+    /^(?:bl_)?(?:3817|972)(?:[^0-9]|$)/i.test(k) ||
+    /minifig.*leg.*left|\bleg,?\s*left\b|\bleft\s+leg\b/i.test(name) ||
+    /_leg_?l\b/i.test(k)
+  ) {
     return 'leg_l';
   }
   if (
-    /^(?:bl_)?(?:3815c|970|41879|16709|37364|36036)(?:[^0-9]|$)/i.test(k) ||
+    /^(?:bl_)?(?:3815c|970c|41879|16709|37364|36036)(?:[^0-9]|$)/i.test(k) ||
     /\bhips\b.*leg|minifig.*legs/i.test(name)
   ) {
     return 'legs_unit';
   }
-  if (/^(?:bl_)?3818(?:[^0-9]|$)/i.test(k) || /minifig.*arm.*right/i.test(name) || /_arm_?r\b/i.test(k)) {
+  if (
+    /^(?:bl_)?(?:3818|982)(?:[^0-9]|$)/i.test(k) ||
+    /minifig.*arm.*right|\barm,?\s*right\b|\bright\s+arm\b/i.test(name) ||
+    /_arm_?r\b/i.test(k)
+  ) {
     return 'arm_r';
   }
-  if (/^(?:bl_)?3819(?:[^0-9]|$)/i.test(k) || /minifig.*arm.*left/i.test(name) || /_arm_?l\b/i.test(k)) {
+  if (
+    /^(?:bl_)?(?:3819|981)(?:[^0-9]|$)/i.test(k) ||
+    /minifig.*arm.*left|\barm,?\s*left\b|\bleft\s+arm\b/i.test(name) ||
+    /_arm_?l\b/i.test(k)
+  ) {
     return 'arm_l';
   }
-  if (/^(?:bl_)?3820(?:[^0-9]|$)/i.test(k) || /minifig.*hand/i.test(name)) {
+  if (
+    /^(?:bl_)?(?:3820|983)(?:[^0-9]|$)/i.test(k) ||
+    ((/minifig.*hand\b|^\s*(?:printed\s+)?hand\s*$/i.test(name)) &&
+      !/\bhand\s*(?:bag|cart|gun|saw|truck|mirror|rail)\b/i.test(name))
+  ) {
     return 'hand';
   }
-  if (/^(?:bl_)?(?:973|76382)(?:[^0-9]|$)/i.test(k) || /_torso$/i.test(k) || /minifig.*torso/i.test(name)) {
+  if (
+    /^(?:bl_)?(?:973|3814|76382)(?:[^0-9]|$)/i.test(k) ||
+    /_torso$/i.test(k) ||
+    ((/minifig.*torso|\btorso\b/i.test(name)) && !/\barm\b|\bhand\b/i.test(name))
+  ) {
     return 'torso';
   }
   if (CORE_HEAD_ID_RE.test(k) || /minifig.*head\b/i.test(name)) {
@@ -374,6 +405,42 @@ export function classifyMinifigLeafRole(partId: string, partName = ''): MinifigL
   }
   return 'accessory';
 }
+
+/**
+ * Returns true when an accessory is a purse, handbag, satchel, messenger bag,
+ * tote, briefcase, suitcase, or shoulder-strap instrument whose physical fit
+ * commonly requires keeping the adjacent/holding minifigure arm posed in the
+ * initial build step.
+ */
+export function isArmPosingAccessory(partId: string, partName = ''): boolean {
+  const k = normPartId(partId).replace(/-bl$/, '');
+  const name = (partName || '').toLowerCase();
+  if (
+    /^(?:bl_)?(?:61976|93091|93082|10169|18987|25866|65768|92590|35654|40239|77983|93221|26073|15619|68495|80316|4449|3896|4523|18759|11640|25975|11099|65205|93564)(?:$|[^0-9])/i.test(
+      k,
+    )
+  ) {
+    return true;
+  }
+  return /\b(purse|handbag|satchel|messenger\s*bag|shoulder\s*bag|crossbody|tote|pouch|briefcase|suitcase|shopping\s*bag|duffel|duffle|knapsack|sack|guitar|accordion|banjo|keytar|violin|cello|bagpipe|bag)\b/i.test(
+    name,
+  );
+}
+
+// Official LDraw 973c01.dat neutral arm matrices converted to GL (+Y up, +Z front):
+// Right arm (3818/982, x = -15.552): hangs down & slightly outward (-X), forearm forward (+Z)
+const ARM_R_CANONICAL_GL: Mat3 = mat3Orthonormalize([
+  0.9854, 0.17, 0,
+  -0.17, 0.9854, 0,
+  0, 0, 1,
+]);
+// Left arm (3819/981, x = +15.552): hangs down & slightly outward (+X), forearm forward (+Z)
+const ARM_L_CANONICAL_GL: Mat3 = mat3Orthonormalize([
+  0.9854, -0.17, 0,
+  0.17, 0.9854, 0,
+  0, 0, 1,
+]);
+const REFLECT_X: Mat3 = [-1, 0, 0, 0, 1, 0, 0, 0, 1];
 
 function deepClonePart(part: RuntimePart, idPrefix: string): RuntimePart {
   const clone: RuntimePart = {
@@ -460,6 +527,25 @@ function pointToBoxDistance(pt: Vec3, box: WorldBox): number {
   return Math.hypot(dx, dy, dz);
 }
 
+function boxToBoxDistance(a: WorldBox, b: WorldBox): number {
+  const dx = Math.max(a.min[0] - b.max[0], 0, b.min[0] - a.max[0]);
+  const dy = Math.max(a.min[1] - b.max[1], 0, b.min[1] - a.max[1]);
+  const dz = Math.max(a.min[2] - b.max[2], 0, b.min[2] - a.max[2]);
+  return Math.hypot(dx, dy, dz);
+}
+
+function boxOverlapDepth(a: WorldBox, b: WorldBox): number {
+  const ox = Math.min(a.max[0], b.max[0]) - Math.max(a.min[0], b.min[0]);
+  const oy = Math.min(a.max[1], b.max[1]) - Math.max(a.min[1], b.min[1]);
+  const oz = Math.min(a.max[2], b.max[2]) - Math.max(a.min[2], b.min[2]);
+  if (ox <= 0 || oy <= 0 || oz <= 0) return 0;
+  return Math.min(ox, oy, oz);
+}
+
+function boxVolume(b: WorldBox): number {
+  return Math.max(0, b.max[0] - b.min[0]) * Math.max(0, b.max[1] - b.min[1]) * Math.max(0, b.max[2] - b.min[2]);
+}
+
 export function describeMinifigTransform(ps: MinifigPoseSummary): string {
   const acts: string[] = [];
   if (ps.legsBent) acts.push('Sit legs');
@@ -481,7 +567,9 @@ interface TaggedLeaf {
 /**
  * Converts a minifigure group from its arbitrary world-space placement pose
  * (e.g. seated, facing backward, tilted, arms raised, head turned) into:
- *  - canonicalParts: standing straight up at origin, facing +Z (toward camera)
+ *  - canonicalParts: standing straight up at origin, facing +Z (toward camera),
+ *    with arms returned to their default hanging position except when required
+ *    to hold/clear an accessory such as a purse or two-handed item
  *  - posedPreviewParts: exact placement pose & orientation centered at origin
  *  - poseSummary & transformLabel describing the pre-placement transformation
  */
@@ -501,6 +589,8 @@ export function normalizeMinifigureForBuild(
 
   // Collect all leaves and classify their roles (with structural fallback for custom printed Studio assemblies)
   const leaves: TaggedLeaf[] = [];
+  const torsoAsmParents = new Set<RuntimePart>();
+
   for (const parent of canonicalParts) {
     const parentId = normPartId(parent.p);
     const parentName = resolveName(parent.p).toLowerCase();
@@ -508,7 +598,8 @@ export function normalizeMinifigureForBuild(
       /(?:asm_)?(?:bl_)?(?:3815|970|41879|16709)/i.test(parentId) ||
       /\bhips\b|minifig.*leg/i.test(parentName);
     const isTorsoAsm =
-      /(?:asm_)?(?:bl_)?973/i.test(parentId) || /minifig.*torso|torso assembly/i.test(parentName);
+      /(?:asm_)?(?:bl_)?(?:973|3814|76382)/i.test(parentId) ||
+      /\btorso\b/i.test(parentName);
 
     if (parent.children && parent.children.length > 0) {
       const childItems: TaggedLeaf[] = parent.children.map((ch) => ({
@@ -517,12 +608,13 @@ export function normalizeMinifigureForBuild(
         role: classifyMinifigLeafRole(ch.p, resolveName(ch.p)),
       }));
 
+      if (isTorsoAsm || childItems.some((c) => c.role === 'torso')) torsoAsmParents.add(parent);
+
       // Fallback role inference for custom Studio printed child IDs inside a legs assembly
       if (isLegsAsm && childItems.length === 3) {
         const hasHips = childItems.some((c) => c.role === 'hips');
         const hasLegs = childItems.filter((c) => c.role === 'leg_r' || c.role === 'leg_l').length;
         if (!hasHips || hasLegs < 2) {
-          // Pick hips as the child not classified as a leg (preferring highest Y in world or smallest vertical span)
           let hipsItem = childItems.find((c) => c.role === 'hips');
           if (!hipsItem) {
             hipsItem = childItems.reduce((best, cur) => (cur.leaf.y > best.leaf.y ? cur : best), childItems[0]);
@@ -541,7 +633,17 @@ export function normalizeMinifigureForBuild(
           (c) => c.role !== 'arm_r' && c.role !== 'arm_l' && c.role !== 'hand',
         );
         if (nonArmHand.length > 0) {
-          nonArmHand[0].role = 'torso';
+          // Prefer largest-volume body piece so custom-ID arms/hands are not mistakenly picked as the torso
+          let bestTorso = nonArmHand[0];
+          let bestVol = boxVolume(computeBox(bestTorso.leaf));
+          for (let i = 1; i < nonArmHand.length; i++) {
+            const v = boxVolume(computeBox(nonArmHand[i].leaf));
+            if (v > bestVol) {
+              bestVol = v;
+              bestTorso = nonArmHand[i];
+            }
+          }
+          bestTorso.role = 'torso';
         }
       }
 
@@ -580,6 +682,40 @@ export function normalizeMinifigureForBuild(
     lf.y = rel[1];
     lf.z = rel[2];
     lf.m = mat3Multiply(R_inv, lf.m || R_IDENTITY);
+  }
+
+  // 2b. Canonical-frame structural fallback for custom/unknown child IDs inside torso assemblies
+  for (const torsoParent of torsoAsmParents) {
+    const pLeaves = leaves.filter((l) => l.parent === torsoParent);
+    const unclassified = pLeaves.filter((l) => l.role === 'accessory');
+    if (unclassified.length === 0) continue;
+
+    let hasArmR = pLeaves.some((l) => l.role === 'arm_r');
+    let hasArmL = pLeaves.some((l) => l.role === 'arm_l');
+
+    // First identify arms by their canonical shoulder peg location (±15.552, -9, 0) in torso frame
+    for (const item of unclassified) {
+      const lf = item.leaf;
+      const distR = Math.hypot(lf.x + 15.552, lf.y + 9, lf.z);
+      const distL = Math.hypot(lf.x - 15.552, lf.y + 9, lf.z);
+      const inShoulderBand =
+        Math.abs(lf.x) >= 9 && Math.abs(lf.x) <= 22 && lf.y >= -16 && lf.y <= 2 && Math.abs(lf.z) <= 8;
+      if (!hasArmR && (distR <= 8 || (inShoulderBand && lf.x < 0))) {
+        item.role = 'arm_r';
+        hasArmR = true;
+      } else if (!hasArmL && (distL <= 8 || (inShoulderBand && lf.x > 0))) {
+        item.role = 'arm_l';
+        hasArmL = true;
+      }
+    }
+
+    // Any remaining unclassified children inside a standard torso assembly (<= 5 parts) are hands
+    const stillUnclassified = pLeaves.filter((l) => l.role === 'accessory');
+    if (stillUnclassified.length > 0 && pLeaves.length <= 5 && (hasArmR || hasArmL)) {
+      for (const item of stillUnclassified) {
+        item.role = 'hand';
+      }
+    }
   }
 
   // 3. Un-pose Hips & Legs -> standing straight down (m = R_IDENTITY)
@@ -633,14 +769,26 @@ export function normalizeMinifigureForBuild(
     }
   }
 
-  // 4. Un-pose Arms & Hands -> neutral hanging pose at sides (carrying matched hands & handheld accessories)
+  // 4. Un-pose Arms & Hands -> default hanging pose at sides, EXCEPT when an arm pose
+  //    is physically required for an accessory such as a purse/satchel/two-handed item
+  //    or would cause the arm/hand/carried item to collide with the body, accessories, or floor.
   let armsPosedDeg = 0;
   const armEntries = leaves.filter((l) => l.role === 'arm_r' || l.role === 'arm_l');
   const handEntries = leaves.filter((l) => l.role === 'hand');
   const accessoryEntries = leaves.filter((l) => l.role === 'accessory');
 
   if (armEntries.length > 0) {
-    // Compute arm boxes BEFORE moving arms so hands match unambiguously to their arm
+    // Compute standing body & floor bounds after legs have been straightened
+    const standingBodyBoxes = leaves
+      .filter((l) => l.role === 'torso' || l.role === 'hips' || l.role === 'leg_r' || l.role === 'leg_l' || l.role === 'legs_unit')
+      .map((l) => computeBox(l.leaf));
+    const legBoxes = leaves
+      .filter((l) => l.role === 'leg_r' || l.role === 'leg_l' || l.role === 'legs_unit')
+      .map((l) => computeBox(l.leaf));
+    const hasFeetFloor = legBoxes.length > 0;
+    const feetMinY = hasFeetFloor ? Math.min(...legBoxes.map((b) => b.min[1])) : -Infinity;
+
+    // Compute arm, hand, and accessory boxes BEFORE moving arms so matching & collision checks are exact
     const armBoxes = armEntries.map((ae) => computeBox(ae.leaf));
     const claimedHands = new Set<TaggedLeaf>();
     const claimedAccessories = new Set<TaggedLeaf>();
@@ -667,39 +815,163 @@ export function normalizeMinifigureForBuild(
       }
     }
 
-    for (const ae of armEntries) {
-      const rawDet = mat3Determinant(ae.leaf.m || R_IDENTITY);
-      const armM = mat3Orthonormalize(ae.leaf.m);
+    const handBoxes = new Map<TaggedLeaf, WorldBox>();
+    for (const he of handEntries) handBoxes.set(he, computeBox(he.leaf));
+
+    const accBoxes = new Map<TaggedLeaf, WorldBox>();
+    for (const acc of accessoryEntries) accBoxes.set(acc, computeBox(acc.leaf));
+
+    // Map each accessory to the arm(s) currently gripping it (supports two-handed detection)
+    const armToHeldAccessories = new Map<TaggedLeaf, TaggedLeaf[]>();
+    const accToGrippingArms = new Map<TaggedLeaf, TaggedLeaf[]>();
+    for (const ae of armEntries) armToHeldAccessories.set(ae, []);
+    for (const acc of accessoryEntries) {
+      const accBox = accBoxes.get(acc)!;
+      const accPos: Vec3 = [acc.leaf.x, acc.leaf.y, acc.leaf.z];
+      const gripping: TaggedLeaf[] = [];
+      for (const ae of armEntries) {
+        const matchedHands = armToHands.get(ae) || [];
+        const touchesHand = matchedHands.some((he) => {
+          const hb = handBoxes.get(he)!;
+          return pointToBoxDistance(accPos, hb) <= 18 || boxToBoxDistance(accBox, hb) <= 8;
+        });
+        if (touchesHand) {
+          gripping.push(ae);
+          armToHeldAccessories.get(ae)!.push(acc);
+        }
+      }
+      accToGrippingArms.set(acc, gripping);
+    }
+
+    const simulateLeafBox = (leaf: RuntimePart, pivot: Vec3, rot: Mat3, overrideM?: Mat3): WorldBox => {
+      const sim: RuntimePart = { ...leaf, m: leaf.m ? ([...leaf.m] as Mat3) : ([...R_IDENTITY] as Mat3) };
+      rotateLeafAroundPivot(sim, pivot, rot);
+      if (overrideM) sim.m = overrideM;
+      return computeBox(sim);
+    };
+
+    armEntries.forEach((ae, armIdx) => {
+      const rawM = ae.leaf.m || R_IDENTITY;
+      const isMirrored = mat3Determinant(rawM) < 0;
+      const armM = mat3Orthonormalize(isMirrored ? mat3Multiply(rawM, REFLECT_X) : rawM);
       const u = mat3Col(armM, 0); // shoulder hinge pin axis
-      // Only un-rotate around shoulder pin when the arm is properly oriented (not mirrored / flipped sideways)
-      if (u[0] > 0.5 && Math.abs(u[2]) < 0.35 && rawDet > 0) {
+      const isRightArm = ae.role === 'arm_r' || (ae.role !== 'arm_l' && ae.leaf.x < 0);
+
+      let R_armNeutral: Mat3;
+      if (u[0] > 0.5 && Math.abs(u[2]) < 0.08) {
+        // Pure shoulder-pin rotation: preserve this arm's exact shoulder-pin tilt
         const fTarget = vec3Norm([-u[0] * u[2], -u[1] * u[2], 1 - u[2] * u[2]]);
         const upTarget = vec3Norm(vec3Cross(fTarget, u));
-        const R_armNeutral = mat3FromCols(u, upTarget, fTarget);
-        const armAngle = mat3AngleDeg(armM, R_armNeutral);
-        armsPosedDeg = Math.max(armsPosedDeg, armAngle);
-        if (armAngle > 4) {
-          const R_corr = mat3Multiply(R_armNeutral, mat3Transpose(armM));
-          const pivot: Vec3 = [ae.leaf.x, ae.leaf.y, ae.leaf.z];
-          ae.leaf.m = R_armNeutral;
+        R_armNeutral = mat3FromCols(u, upTarget, fTarget);
+      } else {
+        // Off-pin / yawed / splayed / flipped rotation: snap cleanly to canonical LDraw neutral hanging pose
+        R_armNeutral = isRightArm ? ARM_R_CANONICAL_GL : ARM_L_CANONICAL_GL;
+      }
 
-          const matchedHands = armToHands.get(ae) || [];
-          for (const he of matchedHands) {
-            const handBoxBefore = computeBox(he.leaf);
-            // Carry any small handheld accessory touching this hand rigidly along with the arm
-            for (const acc of accessoryEntries) {
-              if (claimedAccessories.has(acc)) continue;
-              const accPos: Vec3 = [acc.leaf.x, acc.leaf.y, acc.leaf.z];
-              if (pointToBoxDistance(accPos, handBoxBefore) <= 18) {
-                claimedAccessories.add(acc);
-                rotateLeafAroundPivot(acc.leaf, pivot, R_corr);
-              }
+      const armAngle = mat3AngleDeg(armM, R_armNeutral);
+      if (armAngle <= 4) return;
+
+      const R_corr = mat3Multiply(R_armNeutral, mat3Transpose(armM));
+      const pivot: Vec3 = [ae.leaf.x, ae.leaf.y, ae.leaf.z];
+      const finalArmM = isMirrored ? mat3Multiply(R_armNeutral, REFLECT_X) : R_armNeutral;
+      const matchedHands = armToHands.get(ae) || [];
+      const heldAccessories = armToHeldAccessories.get(ae) || [];
+      const heldSet = new Set(heldAccessories);
+
+      // Decide whether this arm MUST keep its posed angle for an accessory (e.g. purse/satchel/two-handed item)
+      let keepPosedForAccessory = false;
+
+      // 1) Two-handed grip or explicit purse/handbag/satchel/shoulder-bag held in this hand
+      for (const acc of heldAccessories) {
+        const gripping = accToGrippingArms.get(acc) || [];
+        if (gripping.length >= 2) {
+          keepPosedForAccessory = true;
+          break;
+        }
+        if (isArmPosingAccessory(acc.leaf.p, resolveName(acc.leaf.p))) {
+          keepPosedForAccessory = true;
+          break;
+        }
+      }
+
+      // 2) Simulate moving arm + matched hands to default neutral pose and test against non-held accessories
+      if (!keepPosedForAccessory && accessoryEntries.length > 0) {
+        const posedArmBox = armBoxes[armIdx];
+        const posedHandBoxes = matchedHands.map((he) => handBoxes.get(he)!);
+        const simArmBox = simulateLeafBox(ae.leaf, pivot, R_corr, finalArmM);
+        const simHandBoxes = matchedHands.map((he) => simulateLeafBox(he.leaf, pivot, R_corr));
+        const posedLimbBoxes = [posedArmBox, ...posedHandBoxes];
+        const simLimbBoxes = [simArmBox, ...simHandBoxes];
+
+        for (const acc of accessoryEntries) {
+          if (heldSet.has(acc)) continue;
+          const accBox = accBoxes.get(acc)!;
+
+          // 2a) Geometric collision: moving arm to neutral clips into a body/shoulder accessory (e.g. crossbody purse)
+          const overlapBefore = Math.max(...posedLimbBoxes.map((b) => boxOverlapDepth(b, accBox)));
+          const overlapAfter = Math.max(...simLimbBoxes.map((b) => boxOverlapDepth(b, accBox)));
+          if (overlapAfter > 2.0 && overlapAfter > overlapBefore + 1.5) {
+            keepPosedForAccessory = true;
+            break;
+          }
+
+          // 2b) Known purse / satchel / shoulder bag hanging on this arm's side within arm proximity
+          if (isArmPosingAccessory(acc.leaf.p, resolveName(acc.leaf.p))) {
+            const onThisSide = isRightArm
+              ? accBox.min[0] < -6 && accBox.center[0] < 4
+              : accBox.max[0] > 6 && accBox.center[0] > -4;
+            const nearArmPath =
+              boxToBoxDistance(simArmBox, accBox) <= 10 ||
+              boxToBoxDistance(posedArmBox, accBox) <= 10 ||
+              simHandBoxes.some((hb) => boxToBoxDistance(hb, accBox) <= 10);
+            if (onThisSide && nearArmPath) {
+              keepPosedForAccessory = true;
+              break;
             }
-            rotateLeafAroundPivot(he.leaf, pivot, R_corr);
           }
         }
       }
-    }
+
+      // 3) Check carried handheld accessories for new body/legs collision or dipping below feet
+      if (!keepPosedForAccessory && heldAccessories.length > 0) {
+        for (const acc of heldAccessories) {
+          const beforeAccBox = accBoxes.get(acc)!;
+          const afterAccBox = simulateLeafBox(acc.leaf, pivot, R_corr);
+
+          // 3a) Would the carried accessory dip below the standing minifigure's feet?
+          if (hasFeetFloor && afterAccBox.min[1] < feetMinY - 2.0 && beforeAccBox.min[1] >= feetMinY - 2.0) {
+            keepPosedForAccessory = true;
+            break;
+          }
+
+          // 3b) Would the carried accessory clip into the torso, hips, or legs?
+          for (const bodyBox of standingBodyBoxes) {
+            const ovBefore = boxOverlapDepth(beforeAccBox, bodyBox);
+            const ovAfter = boxOverlapDepth(afterAccBox, bodyBox);
+            if (ovAfter > 2.5 && ovAfter > ovBefore + 1.5) {
+              keepPosedForAccessory = true;
+              break;
+            }
+          }
+          if (keepPosedForAccessory) break;
+        }
+      }
+
+      if (keepPosedForAccessory) return;
+
+      // Reset arm (and rigidly carry matched hands & clear handheld accessories) to default hanging pose
+      armsPosedDeg = Math.max(armsPosedDeg, armAngle);
+      ae.leaf.m = finalArmM;
+
+      for (const he of matchedHands) {
+        rotateLeafAroundPivot(he.leaf, pivot, R_corr);
+      }
+      for (const acc of heldAccessories) {
+        if (claimedAccessories.has(acc)) continue;
+        claimedAccessories.add(acc);
+        rotateLeafAroundPivot(acc.leaf, pivot, R_corr);
+      }
+    });
   }
 
   // 5. Un-pose Head & attached Headgear -> facing straight forward (+Z)
@@ -787,7 +1059,7 @@ export function normalizeCompositeThumbPart(
   const k = normPartId(part.p);
   const name = resolveName(part.p).toLowerCase();
   const isMfComposite =
-    /(?:asm_)?(?:bl_)?(?:3815|970|973|41879|16709)/i.test(k) ||
+    /(?:asm_)?(?:bl_)?(?:3815|970|973|3814|76382|41879|16709)/i.test(k) ||
     /minifig|torso|hips/i.test(name) ||
     part.children.some((ch) => {
       const r = classifyMinifigLeafRole(ch.p, resolveName(ch.p));

@@ -307,10 +307,17 @@ function getPartIdFallbacks(raw) {
   if (/^\d{3,}[a-z]$/i.test(effective)) add(effective.slice(0, -1));
   if (/^\d{3,}c\d+$/i.test(effective)) add(effective.replace(/c\d+$/i, ''));
 
-  // Known exact LDraw mold equivalences
+  // Known exact LDraw / BrickLink mold equivalences
   if (effective === '28621') { add('3626c'); add('3626b'); add('3626'); }
   if (effective === '3626c') { add('3626b'); add('3626'); }
   if (/^970c\d+$/i.test(effective)) { add('970c00'); add('3815c01'); }
+  if (effective === '970') { add('3815'); }
+  if (effective === '971') { add('3816'); }
+  if (effective === '972') { add('3817'); }
+  if (effective === '3814') { add('973'); }
+  if (effective === '981') { add('3819'); }
+  if (effective === '982') { add('3818'); }
+  if (effective === '983') { add('3820'); }
 
   return out;
 }
@@ -336,14 +343,26 @@ const KNOWN_EXTRA_PART_NAMES = {
   '11477': 'Curved Slope 2×1',
   '41740': 'Plate 1×4 (2 Studs)',
   '15068': 'Curved Slope 2×2×2/3',
-  '93091': 'Minifigure Accessory',
+  '61976': 'Minifigure Messenger Bag',
+  '93091': 'Minifigure Handbag / Purse',
+  '93082': 'Minifigure Purse / Handbag',
+  '92590': 'Minifigure Backpack / Bag',
+  '10169': 'Minifigure Bag with Handle',
+  '4449': 'Minifigure Suitcase / Briefcase',
   '24093': 'Minifigure Accessory',
+  '3814': 'Minifigure Torso',
   '3815': 'Minifigure Hips',
   '3816': 'Minifigure Leg (Right)',
   '3817': 'Minifigure Leg (Left)',
   '3818': 'Minifigure Arm (Right)',
   '3819': 'Minifigure Arm (Left)',
   '3820': 'Minifigure Hand',
+  '970': 'Minifigure Hips',
+  '971': 'Minifigure Leg (Right)',
+  '972': 'Minifigure Leg (Left)',
+  '981': 'Minifigure Arm (Left)',
+  '982': 'Minifigure Arm (Right)',
+  '983': 'Minifigure Hand',
 };
 
 function getHumanPartName(pid) {
@@ -1318,7 +1337,7 @@ function isAssemblySubfile(sf) {
   if (sf.lines.some(l => /^0\s+IsAssembly\s+True/i.test(l))) return true;
   if (sf.lines.some(l => /^0\s+FlexibleBrick:/i.test(l))) return true;
   const nk = normId(sf.name);
-  if (/^(bl_)?(973|3815|970|970c|3815c)[a-z0-9_]*c\d+/i.test(nk)) return true;
+  if (/^(bl_)?(973|76382|3815|970|970c|3815c)[a-z0-9_]*c\d+/i.test(nk)) return true;
   return false;
 }
 

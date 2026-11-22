@@ -4,11 +4,14 @@ import {
   MM_PER_INCH,
   R_IDENTITY,
   classifyMinifigGroupKind,
+  classifyMinifigLeafRole,
   computeMinifigOneToOneLayout,
   extractMinifigureGroups,
+  isArmPosingAccessory,
   isNonMinifigPart,
   mat3AngleDeg,
   mat3Col,
+  mat3Determinant,
   mat3Multiply,
   mat3Orthonormalize,
   mat3Vec,
@@ -316,6 +319,386 @@ describe('Minifigure Standing Normalization & 1:1 Scale', () => {
     expect(tight.isExact).toBe(false);
     expect(tight.displayPxH).toBeLessThanOrEqual(60);
     expect(tight.displayPxW).toBeLessThanOrEqual(40);
+  });
+
+  it('classifies BrickLink body IDs (981/982/983, 970/971/972, 3814/76382) without false-matching 5-digit bricks', () => {
+    expect(classifyMinifigLeafRole('982', 'Arm, Right')).toBe('arm_r');
+    expect(classifyMinifigLeafRole('981', 'Arm, Left')).toBe('arm_l');
+    expect(classifyMinifigLeafRole('983', 'Hand')).toBe('hand');
+    expect(classifyMinifigLeafRole('971', 'Leg, Right')).toBe('leg_r');
+    expect(classifyMinifigLeafRole('972', 'Leg, Left')).toBe('leg_l');
+    expect(classifyMinifigLeafRole('970', 'Hips')).toBe('hips');
+    expect(classifyMinifigLeafRole('3814', 'Torso Plain')).toBe('torso');
+    expect(classifyMinifigLeafRole('76382pfo', 'Minifig Torso')).toBe('torso');
+    expect(classifyMinifigLeafRole('61976', 'Minifigure Messenger Bag')).toBe('accessory');
+    expect(isArmPosingAccessory('61976', 'Minifigure Messenger Bag')).toBe(true);
+    expect(isArmPosingAccessory('93091', 'Minifigure Handbag / Purse')).toBe(true);
+    expect(isArmPosingAccessory('3899', 'Minifigure Mug')).toBe(false);
+
+    // Must NOT misclassify 5-digit bricks/tiles/hair starting with 981/982/983
+    expect(classifyMinifigLeafRole('98138', 'Tile, Round 1 x 1')).toBe('accessory');
+    expect(classifyMinifigLeafRole('98283', 'Brick, Modified 1 x 2 with Masonry Profile')).toBe('accessory');
+    expect(classifyMinifigLeafRole('98385', 'Minifigure Hair')).toBe('headgear');
+  });
+
+  it('resets BrickLink Studio raised right arm (982/981/983 + custom IDs + off-pin/mirrored) to default position in build step and PLI thumb', () => {
+    // Official GL neutral right arm (3818/982): outward tilt at x = -15.552
+    const ARM_R_GL: Mat3 = mat3Orthonormalize([0.9854, 0.17, 0, -0.17, 0.9854, 0, 0, 0, 1]);
+    const ARM_L_GL: Mat3 = mat3Orthonormalize([0.9854, -0.17, 0, 0.17, 0.9854, 0, 0, 0, 1]);
+
+    // Right arm raised 70 deg forward AND yawed 25 deg off-pin (typical Studio free-rotate)
+    const armRPosedM = mat3Multiply(rotY(25), mat3Multiply(ARM_R_GL, rotX(-70)));
+    const shoulderR: [number, number, number] = [-15.552, -9, 0];
+    const wristOffsetR: [number, number, number] = [-5, -18, 10];
+    const handDeltaR = mat3Vec(armRPosedM, ...wristOffsetR);
+
+    const blNames: Record<string, string> = {
+      asm_973c27_330: 'Torso Plain / Olive Green Arms / Yellow Hands',
+      '3814': 'Torso Plain',
+      '982': 'Arm, Right',
+      '981': 'Arm, Left',
+      '983': 'Hand',
+      '3626c': 'Minifigure Head',
+    };
+    const blResolve = (pid: string) => blNames[pid] || pid;
+
+    const torsoComposite: RuntimePart = {
+      id: 'torso_asm',
+      p: 'asm_973c27_330',
+      c: 330,
+      x: 0,
+      y: 0,
+      z: 0,
+      m: R_IDENTITY,
+      children: [
+        { id: 't', p: '3814', c: 330, x: 0, y: 0, z: 0, m: R_IDENTITY },
+        { id: 'ar', p: '982', c: 330, x: shoulderR[0], y: shoulderR[1], z: shoulderR[2], m: armRPosedM },
+        { id: 'al', p: '981', c: 330, x: 15.552, y: -9, z: 0, m: ARM_L_GL },
+        {
+          id: 'hr',
+          p: '983',
+          c: 14,
+          x: shoulderR[0] + handDeltaR[0],
+          y: shoulderR[1] + handDeltaR[1],
+          z: shoulderR[2] + handDeltaR[2],
+          m: armRPosedM,
+        },
+        { id: 'hl', p: '983', c: 14, x: 23.69, y: -26.77, z: 9.9, m: ARM_L_GL },
+      ],
+    };
+
+    const res = normalizeMinifigureForBuild(
+      [torsoComposite, { id: 'head', p: '3626c', c: 14, x: 0, y: 24, z: 0, m: R_IDENTITY }],
+      blResolve,
+      simpleBox,
+      'bl_mf',
+    );
+    const canonArmR = res.canonicalParts[0].children![1];
+    const canonHandR = res.canonicalParts[0].children![3];
+    expect(mat3AngleDeg(mat3Orthonormalize(canonArmR.m), ARM_R_GL)).toBeLessThan(0.5);
+    expect(res.poseSummary.armsMoved).toBe(true);
+    expect(res.poseSummary.armsPosedDeg).toBeGreaterThan(60);
+
+    // Hand followed the arm cleanly back to the neutral wrist offset
+    const expectedHandR = mat3Vec(ARM_R_GL, ...wristOffsetR);
+    expect(canonHandR.x - canonArmR.x).toBeCloseTo(expectedHandR[0], 1);
+    expect(canonHandR.y - canonArmR.y).toBeCloseTo(expectedHandR[1], 1);
+    expect(canonHandR.z - canonArmR.z).toBeCloseTo(expectedHandR[2], 1);
+
+    // PLI thumbnail normalization ALSO returns the torso with default hanging arms
+    const thumb = normalizeCompositeThumbPart(torsoComposite, blResolve, simpleBox);
+    expect(mat3AngleDeg(mat3Orthonormalize(thumb.children![1].m), ARM_R_GL)).toBeLessThan(0.5);
+
+    // Mirrored arm (det < 0) also un-poses cleanly while preserving negative determinant
+    const reflectX: Mat3 = [-1, 0, 0, 0, 1, 0, 0, 0, 1];
+    const mirroredPosed = mat3Multiply(mat3Multiply(ARM_L_GL, rotX(60)), reflectX);
+    const customTorso: RuntimePart = {
+      id: 'custom_torso',
+      p: 'asm_973pb999c01_1',
+      c: 1,
+      x: 0,
+      y: 0,
+      z: 0,
+      m: R_IDENTITY,
+      children: [
+        { id: 'c_body', p: 'custom_body_x', c: 1, x: 0, y: 0, z: 0, m: R_IDENTITY },
+        { id: 'c_arm_l', p: 'custom_arm_x', c: 1, x: 15.552, y: -9, z: 0, m: mirroredPosed },
+        { id: 'c_hand_l', p: 'custom_hand_x', c: 14, x: 20, y: -15, z: 18, m: mat3Multiply(ARM_L_GL, rotX(60)) },
+      ],
+    };
+    const customBox = (p: RuntimePart): WorldBox => {
+      if (p.children?.length) return simpleBox(p);
+      const half = p.p === 'custom_body_x' ? [18, 16, 10] : p.p === 'custom_arm_x' ? [6, 12, 6] : [4, 4, 4];
+      return {
+        min: [p.x - half[0], p.y - half[1], p.z - half[2]],
+        max: [p.x + half[0], p.y + half[1], p.z + half[2]],
+        center: [p.x, p.y, p.z],
+      };
+    };
+    const resCustom = normalizeMinifigureForBuild(
+      [customTorso],
+      (pid) => (pid === 'asm_973pb999c01_1' ? 'Printed Torso Assembly' : pid),
+      customBox,
+      'cust',
+    );
+    const canonCustomArm = resCustom.canonicalParts[0].children![1];
+    expect(mat3Determinant(canonCustomArm.m!)).toBeLessThan(0);
+    expect(mat3AngleDeg(mat3Orthonormalize(mat3Multiply(canonCustomArm.m!, reflectX)), ARM_L_GL)).toBeLessThan(0.5);
+  });
+
+  it('keeps an arm posed when holding a purse (93091) while resetting the other empty raised arm to default', () => {
+    const ARM_R_GL: Mat3 = mat3Orthonormalize([0.9854, 0.17, 0, -0.17, 0.9854, 0, 0, 0, 1]);
+    const ARM_L_GL: Mat3 = mat3Orthonormalize([0.9854, -0.17, 0, 0.17, 0.9854, 0, 0, 0, 1]);
+
+    // Right arm raised 45 deg holding a purse (93091); left arm raised 70 deg empty
+    const armRPosed = mat3Multiply(ARM_R_GL, rotX(-45));
+    const armLPosed = mat3Multiply(ARM_L_GL, rotX(-70));
+    const shR: [number, number, number] = [-15.552, -9, 0];
+    const shL: [number, number, number] = [15.552, -9, 0];
+    const handRDelta = mat3Vec(armRPosed, -5, -18, 10);
+    const handLDelta = mat3Vec(armLPosed, 5, -18, 10);
+    const purseDelta = mat3Vec(armRPosed, -6, -24, 14);
+
+    const purseNames: Record<string, string> = {
+      ...NAMES,
+      '93091': 'Minifigure Handbag / Purse',
+    };
+    const res = normalizeMinifigureForBuild(
+      [
+        {
+          id: 'torso_asm',
+          p: 'asm_973c01_26',
+          c: 26,
+          x: 0,
+          y: 0,
+          z: 0,
+          m: R_IDENTITY,
+          children: [
+            { id: 'torso', p: '973', c: 26, x: 0, y: 0, z: 0, m: R_IDENTITY },
+            { id: 'arm_r', p: '3818', c: 26, x: shR[0], y: shR[1], z: shR[2], m: armRPosed },
+            { id: 'arm_l', p: '3819', c: 26, x: shL[0], y: shL[1], z: shL[2], m: armLPosed },
+            { id: 'hand_r', p: '3820', c: 14, x: shR[0] + handRDelta[0], y: shR[1] + handRDelta[1], z: shR[2] + handRDelta[2], m: armRPosed },
+            { id: 'hand_l', p: '3820', c: 14, x: shL[0] + handLDelta[0], y: shL[1] + handLDelta[1], z: shL[2] + handLDelta[2], m: armLPosed },
+          ],
+        },
+        {
+          id: 'purse',
+          p: '93091',
+          c: 29,
+          x: shR[0] + purseDelta[0],
+          y: shR[1] + purseDelta[1],
+          z: shR[2] + purseDelta[2],
+          m: armRPosed,
+        },
+      ],
+      (pid) => purseNames[pid] || pid,
+      simpleBox,
+      'purse_fig',
+    );
+
+    const canonArmR = res.canonicalParts[0].children![1];
+    const canonArmL = res.canonicalParts[0].children![2];
+    // Right arm stayed posed at 45 deg for the purse!
+    expect(mat3AngleDeg(mat3Orthonormalize(canonArmR.m), armRPosed)).toBeLessThan(0.5);
+    // Left arm (no purse) returned to default neutral hanging position!
+    expect(mat3AngleDeg(mat3Orthonormalize(canonArmL.m), ARM_L_GL)).toBeLessThan(0.5);
+    expect(res.poseSummary.armsMoved).toBe(true);
+    expect(res.poseSummary.armsPosedDeg).toBeCloseTo(70, 0);
+  });
+
+  it('keeps an arm posed to clear a crossbody satchel/messenger bag (61976) on that hip while resetting the opposite arm', () => {
+    const ARM_R_GL: Mat3 = mat3Orthonormalize([0.9854, 0.17, 0, -0.17, 0.9854, 0, 0, 0, 1]);
+    const ARM_L_GL: Mat3 = mat3Orthonormalize([0.9854, -0.17, 0, 0.17, 0.9854, 0, 0, 0, 1]);
+
+    const armRPosed = mat3Multiply(ARM_R_GL, rotX(-40));
+    const armLPosed = mat3Multiply(ARM_L_GL, rotX(-65));
+    const shR: [number, number, number] = [-15.552, -9, 0];
+    const shL: [number, number, number] = [15.552, -9, 0];
+    const handRDelta = mat3Vec(armRPosed, -5, -18, 10);
+    const handLDelta = mat3Vec(armLPosed, 5, -18, 10);
+
+    const satchelBox = (part: RuntimePart): WorldBox => {
+      if (part.p === '61976') {
+        // Crossbody pouch hanging right against the right hip/side
+        return {
+          min: [part.x - 6, part.y - 10, part.z - 6],
+          max: [part.x + 6, part.y + 10, part.z + 6],
+          center: [part.x, part.y, part.z],
+        };
+      }
+      return simpleBox(part);
+    };
+
+    const res = normalizeMinifigureForBuild(
+      [
+        {
+          id: 'torso_asm',
+          p: 'asm_973c01_26',
+          c: 26,
+          x: 0,
+          y: 0,
+          z: 0,
+          m: R_IDENTITY,
+          children: [
+            { id: 'torso', p: '973', c: 26, x: 0, y: 0, z: 0, m: R_IDENTITY },
+            { id: 'arm_r', p: '3818', c: 26, x: shR[0], y: shR[1], z: shR[2], m: armRPosed },
+            { id: 'arm_l', p: '3819', c: 26, x: shL[0], y: shL[1], z: shL[2], m: armLPosed },
+            { id: 'hand_r', p: '3820', c: 14, x: shR[0] + handRDelta[0], y: shR[1] + handRDelta[1], z: shR[2] + handRDelta[2], m: armRPosed },
+            { id: 'hand_l', p: '3820', c: 14, x: shL[0] + handLDelta[0], y: shL[1] + handLDelta[1], z: shL[2] + handLDelta[2], m: armLPosed },
+          ],
+        },
+        { id: 'satchel', p: '61976', c: 70, x: -22, y: -24, z: 0, m: R_IDENTITY },
+      ],
+      (pid) => (pid === '61976' ? 'Minifigure Messenger Bag' : resolveName(pid)),
+      satchelBox,
+      'satchel_fig',
+    );
+
+    const canonArmR = res.canonicalParts[0].children![1];
+    const canonArmL = res.canonicalParts[0].children![2];
+    expect(mat3AngleDeg(mat3Orthonormalize(canonArmR.m), armRPosed)).toBeLessThan(0.5);
+    expect(mat3AngleDeg(mat3Orthonormalize(canonArmL.m), ARM_L_GL)).toBeLessThan(0.5);
+  });
+
+  it('keeps an arm posed via 3D clearance guard if lowering an unknown bulky accessory would dip below the feet', () => {
+    const ARM_L_GL: Mat3 = mat3Orthonormalize([0.9854, -0.17, 0, 0.17, 0.9854, 0, 0, 0, 1]);
+    const armLPosed = mat3Multiply(ARM_L_GL, rotX(-55));
+    const shL: [number, number, number] = [15.552, -9, 0];
+    const handLDelta = mat3Vec(armLPosed, 5, -18, 10);
+    const propDelta = mat3Vec(armLPosed, 5, -30, 12);
+
+    const propBox = (part: RuntimePart): WorldBox => {
+      if (part.p === 'custom_tall_item') {
+        // Tall hanging item (54 LDU tall) whose bottom (~-45) clears feet (-72) when arm is raised,
+        // but would dip ~7 LDU below the feet (~-79 < -72) if the arm were lowered to neutral
+        const m = part.m || R_IDENTITY;
+        const min: [number, number, number] = [Infinity, Infinity, Infinity];
+        const max: [number, number, number] = [-Infinity, -Infinity, -Infinity];
+        for (const sx of [-5, 5]) {
+          for (const sy of [-42, 12]) {
+            for (const sz of [-5, 5]) {
+              const v = mat3Vec(m, sx, sy, sz);
+              min[0] = Math.min(min[0], part.x + v[0]);
+              min[1] = Math.min(min[1], part.y + v[1]);
+              min[2] = Math.min(min[2], part.z + v[2]);
+              max[0] = Math.max(max[0], part.x + v[0]);
+              max[1] = Math.max(max[1], part.y + v[1]);
+              max[2] = Math.max(max[2], part.z + v[2]);
+            }
+          }
+        }
+        return { min, max, center: [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2] };
+      }
+      return simpleBox(part);
+    };
+
+    const res = normalizeMinifigureForBuild(
+      [
+        {
+          id: 'legs_asm',
+          p: 'asm_970c00_0',
+          c: 0,
+          x: 0,
+          y: -48,
+          z: 0,
+          m: R_IDENTITY,
+          children: [
+            { id: 'hips', p: '3815', c: 0, x: 0, y: -32, z: 0, m: R_IDENTITY },
+            { id: 'leg_r', p: '3816', c: 0, x: -10, y: -56, z: 0, m: R_IDENTITY },
+            { id: 'leg_l', p: '3817', c: 0, x: 10, y: -56, z: 0, m: R_IDENTITY },
+          ],
+        },
+        {
+          id: 'torso_asm',
+          p: 'asm_973c01_26',
+          c: 26,
+          x: 0,
+          y: 0,
+          z: 0,
+          m: R_IDENTITY,
+          children: [
+            { id: 'torso', p: '973', c: 26, x: 0, y: 0, z: 0, m: R_IDENTITY },
+            { id: 'arm_l', p: '3819', c: 26, x: shL[0], y: shL[1], z: shL[2], m: armLPosed },
+            { id: 'hand_l', p: '3820', c: 14, x: shL[0] + handLDelta[0], y: shL[1] + handLDelta[1], z: shL[2] + handLDelta[2], m: armLPosed },
+          ],
+        },
+        {
+          id: 'tall_prop',
+          p: 'custom_tall_item',
+          c: 4,
+          x: shL[0] + propDelta[0],
+          y: shL[1] + propDelta[1],
+          z: shL[2] + propDelta[2],
+          m: armLPosed,
+        },
+      ],
+      resolveName,
+      propBox,
+      'tall_fig',
+    );
+
+    const canonArmL = res.canonicalParts[1].children![1];
+    expect(mat3AngleDeg(mat3Orthonormalize(canonArmL.m), armLPosed)).toBeLessThan(0.5);
+    expect(res.poseSummary.armsMoved).toBe(false);
+  });
+
+  it('keeps both arms posed when holding a shared two-handed accessory', () => {
+    const ARM_R_GL: Mat3 = mat3Orthonormalize([0.9854, 0.17, 0, -0.17, 0.9854, 0, 0, 0, 1]);
+    const ARM_L_GL: Mat3 = mat3Orthonormalize([0.9854, -0.17, 0, 0.17, 0.9854, 0, 0, 0, 1]);
+    const armRPosed = mat3Multiply(ARM_R_GL, rotX(-60));
+    const armLPosed = mat3Multiply(ARM_L_GL, rotX(-60));
+    const shR: [number, number, number] = [-15.552, -9, 0];
+    const shL: [number, number, number] = [15.552, -9, 0];
+    const handRDelta = mat3Vec(armRPosed, -5, -18, 10);
+    const handLDelta = mat3Vec(armLPosed, 5, -18, 10);
+
+    const barBox = (part: RuntimePart): WorldBox => {
+      if (part.p === 'custom_bar') {
+        return {
+          min: [part.x - 28, part.y - 3, part.z - 3],
+          max: [part.x + 28, part.y + 3, part.z + 3],
+          center: [part.x, part.y, part.z],
+        };
+      }
+      return simpleBox(part);
+    };
+
+    const res = normalizeMinifigureForBuild(
+      [
+        {
+          id: 'torso_asm',
+          p: 'asm_973c01_26',
+          c: 26,
+          x: 0,
+          y: 0,
+          z: 0,
+          m: R_IDENTITY,
+          children: [
+            { id: 'torso', p: '973', c: 26, x: 0, y: 0, z: 0, m: R_IDENTITY },
+            { id: 'arm_r', p: '3818', c: 26, x: shR[0], y: shR[1], z: shR[2], m: armRPosed },
+            { id: 'arm_l', p: '3819', c: 26, x: shL[0], y: shL[1], z: shL[2], m: armLPosed },
+            { id: 'hand_r', p: '3820', c: 14, x: shR[0] + handRDelta[0], y: shR[1] + handRDelta[1], z: shR[2] + handRDelta[2], m: armRPosed },
+            { id: 'hand_l', p: '3820', c: 14, x: shL[0] + handLDelta[0], y: shL[1] + handLDelta[1], z: shL[2] + handLDelta[2], m: armLPosed },
+          ],
+        },
+        {
+          id: 'bar',
+          p: 'custom_bar',
+          c: 72,
+          x: 0,
+          y: shR[1] + handRDelta[1],
+          z: shR[2] + handRDelta[2],
+          m: R_IDENTITY,
+        },
+      ],
+      resolveName,
+      barBox,
+      'two_hand',
+    );
+
+    expect(mat3AngleDeg(mat3Orthonormalize(res.canonicalParts[0].children![1].m), armRPosed)).toBeLessThan(0.5);
+    expect(mat3AngleDeg(mat3Orthonormalize(res.canonicalParts[0].children![2].m), armLPosed)).toBeLessThan(0.5);
+    expect(res.poseSummary.armsMoved).toBe(false);
   });
 });
 
