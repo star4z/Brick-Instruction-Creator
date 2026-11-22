@@ -10,6 +10,11 @@ import type {
   Vec3,
 } from '../types/manual';
 import {
+  computeGroundPlaneY,
+  computeHeightAboveGround,
+  isBoxGrounded,
+} from './floatingCheck';
+import {
   transformNormal,
   transformPoint,
   vec3Dist,
@@ -353,25 +358,32 @@ export function buildConnectivityGraph(
     components.push(comp);
   }
 
-  // Identify genuinely floating singletons (when model has >1 part)
+  // Identify genuinely floating singletons (elevated above the model's ground plane, when model has >1 part)
   const floatingWarnings: FloatingPartWarning[] = [];
   if (parts.length > 1) {
+    const aabbList = parts.map((p) => aabbs.get(p.id)!);
+    const groundY = computeGroundPlaneY(
+      aabbList,
+      (idx) => (adjacency[parts[idx].id]?.length ?? 0) > 0,
+    );
     for (const comp of components) {
       if (comp.length === 1) {
         const inst = parts.find((p) => p.id === comp[0])!;
         const box = aabbs.get(inst.id)!;
+        if (isBoxGrounded(box, groundY)) continue;
         let nearest = Infinity;
         for (const other of parts) {
           if (other.id === inst.id) continue;
           const d = aabbGap(box, aabbs.get(other.id)!);
           if (d < nearest) nearest = d;
         }
+        const floatHeight = computeHeightAboveGround(box, groundY);
         floatingWarnings.push({
           partId: inst.partId,
           partName: inst.partName,
           instanceId: inst.id,
           nearestDistance: Math.round(nearest * 10) / 10,
-          message: `${inst.partName} (${inst.partId}) has no detected physical connection (nearest part is ${nearest.toFixed(1)} LDU away).`,
+          message: `${inst.partName} (${inst.partId}) is floating ${(floatHeight / 20).toFixed(2)} studs above the ground with no detected physical connection (nearest part is ${nearest.toFixed(1)} LDU away).`,
         });
       }
     }

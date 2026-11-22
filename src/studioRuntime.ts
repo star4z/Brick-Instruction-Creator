@@ -12,6 +12,10 @@ import {
 } from './engine/subdivisionAnalyzer';
 import { compileDatEntry as compileLDrawDatEntry } from './engine/datCompiler';
 import {
+  classifyDetachedPart,
+  computeGroundPlaneY,
+} from './engine/floatingCheck';
+import {
   MINIFIG_BUILD_CAMERA,
   classifyMinifigGroupKind,
   computeMinifigOneToOneLayout,
@@ -2317,9 +2321,12 @@ function buildSpatialAdjacency(parts, boxes, roles, sideCaps = null) {
     }
   }
 
-  // Fallback for any isolated wheel/detail whose axle wasn't tagged wheel_holder: connect to nearest structural/axle neighbor
+  // Pass 1: Fallback for any isolated wheel/detail whose axle wasn't tagged wheel_holder: connect to nearest structural/axle neighbor
+  const fallbackDist = new Float64Array(n);
+  fallbackDist.fill(-1);
   for (let i = 0; i < n; i++) {
     parts[i]._detachedGap = 0;
+    parts[i]._floatHeight = 0;
     if (adj[i].length > 0) continue;
     let bestJ = -1, bestD = 12;
     for (let j = 0; j < n; j++) {
@@ -2332,9 +2339,27 @@ function buildSpatialAdjacency(parts, boxes, roles, sideCaps = null) {
     }
     if (bestJ >= 0) {
       adj[i].push(bestJ); adj[bestJ].push(i);
-      if (bestD > 4.5) parts[i]._detachedGap = Math.round(bestD * 10) / 10;
+      fallbackDist[i] = bestD;
     } else {
-      parts[i]._detachedGap = Infinity;
+      fallbackDist[i] = Infinity;
+    }
+  }
+
+  // Pass 2: Ground-aware floating/weak-connection classification.
+  // Standalone pieces resting on the model's ground plane (e.g., loose props/accessories)
+  // are NOT flagged as floating; only pieces actually elevated above ground are flagged.
+  if (n > 1) {
+    const groundY = computeGroundPlaneY(boxes, (idx) => adj[idx].length > 0);
+    for (let i = 0; i < n; i++) {
+      if (fallbackDist[i] < 0) continue;
+      const res = classifyDetachedPart({
+        box: boxes[i],
+        groundY,
+        nearestGapLdu: fallbackDist[i],
+        isWheel: roles[i] === 'wheel',
+      });
+      parts[i]._detachedGap = res.detachedGap;
+      parts[i]._floatHeight = res.floatHeight;
     }
   }
   return adj;
@@ -2398,6 +2423,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
   const layerY = parts.map((p, i) => computeBuildLayerY(p, boxes[i]));
 
   if (mode === 'keep' && parsed.hasSteps) {
+    for (const p of parts) { p._detachedGap = 0; p._floatHeight = 0; }
     const bySub = new Map();
     for (const p of parts) {
       const k = cleanSubName(p.sub);
@@ -2433,6 +2459,9 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
     kinds: mfKinds,
     claimed: mfClaimed,
   } = extractMinifigureGroups(parts, boxes, (pid) => resolvePart(pid).name);
+  for (let i = 0; i < parts.length; i++) {
+    if (mfClaimed[i]) parts[i]._floatHeight = 0;
+  }
 
   // 1b. Automatic Duplicate Submodel Detection (explicit submodels + geometric-only duplicates!)
   const dupGroups = detectDuplicateSubassemblies(parts, boxes, adj, roles).filter(g =>
@@ -6126,7 +6155,9 @@ function computeModelDiagnostics() {
           severity: isCompletelyFloating ? 'error' : 'warning',
           title: isCompletelyFloating ? `Floating piece: ${name}` : `Weak connection: ${name}`,
           detail: isCompletelyFloating
-            ? `Part "${p.p}" in Step ${step.num} had no nearby pieces touching it and was placed on its own.`
+            ? (p._floatHeight && p._floatHeight > 0
+                ? `Part "${p.p}" in Step ${step.num} is floating ${(p._floatHeight / 20).toFixed(2)} studs above the ground with no nearby pieces touching it.`
+                : `Part "${p.p}" in Step ${step.num} had no nearby pieces touching it and was placed on its own.`)
             : `Part "${p.p}" in Step ${step.num} was ${(p._detachedGap / 20).toFixed(2)} studs away from its nearest neighbor.`,
           stepNum: step.num,
           stepId: step.id,

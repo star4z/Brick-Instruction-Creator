@@ -60,7 +60,7 @@ flowchart LR
   - `strength`: Numeric mechanical strength weight
   - `direction`: World-space attachment normal vector (used for SNOT detection & exploded insertion arrows)
   - `toleranceGap`: Distance in LDU (flags loose Studio gaps within tolerance)
-- **Connected Components**: Partitioned into build **Chapters** (sorted smallest accessory/minifigure first, largest main model last, or user-reordered). Singleton unattached parts outside snap tolerance generate non-blocking **Floating Part Warnings**.
+- **Connected Components**: Partitioned into build **Chapters** (sorted smallest accessory/minifigure first, largest main model last, or user-reordered). Singleton unattached parts are checked against the model's reference ground plane (anchored to connected parts, with a `10` LDU / 1.25-plate tolerance for baseplates and flanged train wheels): standalone props resting on the ground are accepted cleanly, while unattached parts elevated above the ground generate non-blocking **Floating Part Warnings**.
 
 ### 3.3 Instruction Plan & Semantic Overrides
 - `InstructionPlan`:
