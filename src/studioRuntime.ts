@@ -18,6 +18,7 @@ import {
 } from './engine/floatingCheck';
 import {
   MINIFIG_BUILD_CAMERA,
+  MINIFIG_POSE_CAMERA,
   classifyMinifigGroupKind,
   computeMinifigOneToOneLayout,
   extractMinifigureGroups,
@@ -770,7 +771,7 @@ function buildMeshBuffers(prevParts, newParts, opts) {
     lnCol.push4(col[0],col[1],col[2],aByte); lnCol.push4(col[0],col[1],col[2],aByte);
   };
 
-  const addBox = (cx, cy, cz, w, h, d, m, ox, oy, oz, hinge, col, eCol, aByte) => {
+  const addBox = (cx, cy, cz, w, h, d, m, ox, oy, oz, hinge, col, eCol, aByte, eAlpha = aByte) => {
     const hw=w/2, hh=h/2, hd=d/2;
     if (heroQuality && hw > 1.2 && hh > 1.2 && hd > 1.2) {
       // Micro-beveled LEGO ABS brick: inset main faces + 12 chamfered 45° edges + 8 corner facets
@@ -844,7 +845,7 @@ function buildMeshBuffers(prevParts, newParts, opts) {
     }
     if (includeEdges) {
       for (const [i,j] of [[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]])
-        pushEdge(v[i], v[j], eCol, aByte);
+        pushEdge(v[i], v[j], eCol, eAlpha);
     }
   };
 
@@ -926,6 +927,151 @@ function buildMeshBuffers(prevParts, newParts, opts) {
       pushTri(h0, h1, t, sn, col, 255);
       pushTri(shaftEnd, h1, h0, [-ux,-uy,-uz], col, 255);
     }
+  };
+
+  // Curved 3D Rotation Arc Arrow (shows FROM starting pose -> TO target pose around any 3D joint/axis!)
+  const addCurvedArrow3D = (ind) => {
+    const totalAng = ((ind.angleDeg || 0) * Math.PI) / 180;
+    const r = ind.radius || 22;
+    if (totalAng < 0.12 || r < 4) return;
+    const al = Math.hypot(ind.axis[0], ind.axis[1], ind.axis[2]) || 1;
+    const ax = [ind.axis[0] / al, ind.axis[1] / al, ind.axis[2] / al];
+    const sd = ind.startDir;
+    const d0 = sd[0] * ax[0] + sd[1] * ax[1] + sd[2] * ax[2];
+    let u0 = [sd[0] - ax[0] * d0, sd[1] - ax[1] * d0, sd[2] - ax[2] * d0];
+    const u0l = Math.hypot(u0[0], u0[1], u0[2]);
+    if (u0l < 1e-4) return;
+    u0 = [u0[0] / u0l, u0[1] / u0l, u0[2] / u0l];
+    const u1 = [
+      ax[1] * u0[2] - ax[2] * u0[1],
+      ax[2] * u0[0] - ax[0] * u0[2],
+      ax[0] * u0[1] - ax[1] * u0[0],
+    ];
+    const lat = ind.lateralOffset || [0, 0, 0];
+    const ctr = [ind.pivot[0] + lat[0], ind.pivot[1] + lat[1], ind.pivot[2] + lat[2]];
+    const col = hexToRgb255(ind.color || opts.accent || '#f97316', 0);
+    const ink = [24, 34, 48];
+
+    const radAt = (a) => {
+      const ca = Math.cos(a), sa = Math.sin(a);
+      return [ca * u0[0] + sa * u1[0], ca * u0[1] + sa * u1[1], ca * u0[2] + sa * u1[2]];
+    };
+    const arcPt = (a, radScale = 1) => {
+      const rd = radAt(a);
+      return [ctr[0] + rd[0] * r * radScale, ctr[1] + rd[1] * r * radScale, ctr[2] + rd[2] * r * radScale];
+    };
+
+    const arcLen = r * totalAng;
+    const headLen = Math.min(10.5, Math.max(5.5, arcLen * 0.34));
+    const headAng = Math.min(totalAng * 0.42, headLen / Math.max(6, r));
+    const shaftEndAng = Math.max(0.05, totalAng - headAng);
+    const isBodyYaw = ind.kind === 'body_yaw';
+    const tubeR = isBodyYaw ? 1.85 : 2.05;
+    const coneR = isBodyYaw ? 5.1 : 5.5;
+    const segs = Math.max(10, Math.min(32, Math.ceil(((shaftEndAng * 180) / Math.PI) / 7)));
+    const crossSegs = 8;
+
+    // 1. Start anchor marker ("FROM" node at angle = 0)
+    const startC = arcPt(0);
+    const nodeR = tubeR * 1.75;
+    const nodeH = tubeR * 0.95;
+    const nodeSegs = 10;
+    const nTopC = [startC[0] + ax[0] * nodeH, startC[1] + ax[1] * nodeH, startC[2] + ax[2] * nodeH];
+    const nBotC = [startC[0] - ax[0] * nodeH, startC[1] - ax[1] * nodeH, startC[2] - ax[2] * nodeH];
+    for (let k = 0; k < nodeSegs; k++) {
+      const p0 = (k / nodeSegs) * Math.PI * 2, p1 = ((k + 1) / nodeSegs) * Math.PI * 2, pm = (p0 + p1) / 2;
+      const dA = [Math.cos(p0) * u0[0] + Math.sin(p0) * u1[0], Math.cos(p0) * u0[1] + Math.sin(p0) * u1[1], Math.cos(p0) * u0[2] + Math.sin(p0) * u1[2]];
+      const dB = [Math.cos(p1) * u0[0] + Math.sin(p1) * u1[0], Math.cos(p1) * u0[1] + Math.sin(p1) * u1[1], Math.cos(p1) * u0[2] + Math.sin(p1) * u1[2]];
+      const sn = [Math.cos(pm) * u0[0] + Math.sin(pm) * u1[0], Math.cos(pm) * u0[1] + Math.sin(pm) * u1[1], Math.cos(pm) * u0[2] + Math.sin(pm) * u1[2]];
+      const t0 = [nTopC[0] + dA[0] * nodeR, nTopC[1] + dA[1] * nodeR, nTopC[2] + dA[2] * nodeR];
+      const t1 = [nTopC[0] + dB[0] * nodeR, nTopC[1] + dB[1] * nodeR, nTopC[2] + dB[2] * nodeR];
+      const b0 = [nBotC[0] + dA[0] * nodeR, nBotC[1] + dA[1] * nodeR, nBotC[2] + dA[2] * nodeR];
+      const b1 = [nBotC[0] + dB[0] * nodeR, nBotC[1] + dB[1] * nodeR, nBotC[2] + dB[2] * nodeR];
+      pushTri(b0, b1, t1, sn, col, 255); pushTri(b0, t1, t0, sn, col, 255);
+      pushTri(nTopC, t0, t1, ax, col, 255);
+      pushTri(nBotC, b1, b0, [-ax[0], -ax[1], -ax[2]], col, 255);
+      pushEdge(t0, t1, ink, 220);
+      pushEdge(b0, b1, ink, 220);
+    }
+
+    // Crisp start & target reference ticks for whole-body/head turns so "from -> to" is unmistakable
+    if (isBodyYaw || ind.kind === 'head') {
+      pushEdge(arcPt(0, 0.72), arcPt(0, 0.96), ink, 210);
+      pushEdge(arcPt(totalAng, 0.72), arcPt(totalAng, 0.96), col, 240);
+    }
+
+    // 2. Smooth 3D curved tube shaft with crisp inner & outer silhouette rails
+    const ringAt = (a) => {
+      const c = arcPt(a);
+      const rd = radAt(a);
+      const pts = [];
+      const norms = [];
+      for (let k = 0; k < crossSegs; k++) {
+        const phi = (k / crossSegs) * Math.PI * 2;
+        const cp = Math.cos(phi), sp = Math.sin(phi);
+        const n = [cp * rd[0] + sp * ax[0], cp * rd[1] + sp * ax[1], cp * rd[2] + sp * ax[2]];
+        norms.push(n);
+        pts.push([c[0] + n[0] * tubeR, c[1] + n[1] * tubeR, c[2] + n[2] * tubeR]);
+      }
+      return { pts, norms };
+    };
+
+    let prevRing = ringAt(0);
+    const halfCross = crossSegs >> 1;
+    for (let i = 1; i <= segs; i++) {
+      const a = (i / segs) * shaftEndAng;
+      const curRing = ringAt(a);
+      for (let k = 0; k < crossSegs; k++) {
+        const kn = (k + 1) % crossSegs;
+        const n = [
+          (prevRing.norms[k][0] + prevRing.norms[kn][0] + curRing.norms[k][0] + curRing.norms[kn][0]) * 0.25,
+          (prevRing.norms[k][1] + prevRing.norms[kn][1] + curRing.norms[k][1] + curRing.norms[kn][1]) * 0.25,
+          (prevRing.norms[k][2] + prevRing.norms[kn][2] + curRing.norms[k][2] + curRing.norms[kn][2]) * 0.25,
+        ];
+        pushTri(prevRing.pts[k], prevRing.pts[kn], curRing.pts[kn], n, col, 255);
+        pushTri(prevRing.pts[k], curRing.pts[kn], curRing.pts[k], n, col, 255);
+      }
+      pushEdge(prevRing.pts[0], curRing.pts[0], ink, 225);
+      pushEdge(prevRing.pts[halfCross], curRing.pts[halfCross], ink, 225);
+      prevRing = curRing;
+    }
+
+    // 3. Sharp 3D cone arrowhead pointing directly into the target pose ("TO" tip)
+    const baseC = arcPt(shaftEndAng);
+    const tip = arcPt(totalAng);
+    const cdx = tip[0] - baseC[0], cdy = tip[1] - baseC[1], cdz = tip[2] - baseC[2];
+    const clen = Math.hypot(cdx, cdy, cdz) || 1;
+    const cu = [cdx / clen, cdy / clen, cdz / clen];
+    const rdEnd = radAt(shaftEndAng);
+    const dEnd = rdEnd[0] * cu[0] + rdEnd[1] * cu[1] + rdEnd[2] * cu[2];
+    let b1 = [rdEnd[0] - cu[0] * dEnd, rdEnd[1] - cu[1] * dEnd, rdEnd[2] - cu[2] * dEnd];
+    const b1l = Math.hypot(b1[0], b1[1], b1[2]) || 1;
+    b1 = [b1[0] / b1l, b1[1] / b1l, b1[2] / b1l];
+    const b2 = [
+      cu[1] * b1[2] - cu[2] * b1[1],
+      cu[2] * b1[0] - cu[0] * b1[2],
+      cu[0] * b1[1] - cu[1] * b1[0],
+    ];
+    const coneSegs = 10;
+    const coneRing = (ang) => [
+      baseC[0] + (Math.cos(ang) * b1[0] + Math.sin(ang) * b2[0]) * coneR,
+      baseC[1] + (Math.cos(ang) * b1[1] + Math.sin(ang) * b2[1]) * coneR,
+      baseC[2] + (Math.cos(ang) * b1[2] + Math.sin(ang) * b2[2]) * coneR,
+    ];
+    for (let k = 0; k < coneSegs; k++) {
+      const a0 = (k / coneSegs) * Math.PI * 2, a1 = ((k + 1) / coneSegs) * Math.PI * 2, am = (a0 + a1) / 2;
+      const sn = [
+        Math.cos(am) * b1[0] + Math.sin(am) * b2[0],
+        Math.cos(am) * b1[1] + Math.sin(am) * b2[1],
+        Math.cos(am) * b1[2] + Math.sin(am) * b2[2],
+      ];
+      const h0 = coneRing(a0), h1 = coneRing(a1);
+      pushTri(h0, h1, tip, sn, col, 255);
+      pushTri(baseC, h1, h0, [-cu[0], -cu[1], -cu[2]], col, 255);
+      pushEdge(h0, h1, ink, 225);
+    }
+    pushEdge(coneRing(0), tip, ink, 225);
+    pushEdge(coneRing(Math.PI), tip, ink, 225);
   };
 
   const addTopStuds = (def, m, ox, oy, oz, hinge, col, eCol, aByte) => {
@@ -1077,38 +1223,55 @@ function buildMeshBuffers(prevParts, newParts, opts) {
     }
   };
 
-  const emitSingleLeaf = (leafPart, isNew, isSelected, offX, offY, offZ, hingeRad, parentId = null) => {
+  const emitSingleLeaf = (leafPart, isNew, isSelected, offX, offY, offZ, hingeRad, parentId = null, isGhost = false) => {
     const def = resolvePart(leafPart.p);
     const cInfo = COLORS[leafPart.c] || COLORS[71];
     const lookupId = parentId || leafPart.id;
-    const overrideHex = opts.partColorOverrides?.[lookupId] || opts.partColorOverrides?.[leafPart.id] || null;
-    const isDimmed = Boolean(opts.dimPartIds && (opts.dimPartIds.has(lookupId) || opts.dimPartIds.has(leafPart.id)));
+    const overrideHex = isGhost ? null : (opts.partColorOverrides?.[lookupId] || opts.partColorOverrides?.[leafPart.id] || null);
+    const isDimmed = !isGhost && Boolean(opts.dimPartIds && (opts.dimPartIds.has(lookupId) || opts.dimPartIds.has(leafPart.id)));
     const isFaded = (!isNew && opts.fadePrev) || isDimmed;
-    const isRealTrans = !overrideHex && (cInfo.alpha || 1) < 0.96;
+    const isRealTrans = !isGhost && !overrideHex && (cInfo.alpha || 1) < 0.96;
     // Fade solid earlier bricks via clean color muting (NOT alpha transparency with depthMask=false!)
     // so bricks underneath ALWAYS stay properly depth-occluded by plates above them!
-    const fadeMix = isDimmed
-      ? 0.72
-      : isFaded
-        ? Math.max(0, Math.min(0.76, (1.0 - opts.fadeOpacity) * 0.95 + (opts.fadeOpacity < 0.99 ? 0.16 : 0)))
-        : 0;
+    const fadeMix = isGhost
+      ? 0.62
+      : isDimmed
+        ? 0.72
+        : isFaded
+          ? Math.max(0, Math.min(0.76, (1.0 - opts.fadeOpacity) * 0.95 + (opts.fadeOpacity < 0.99 ? 0.16 : 0)))
+          : 0;
+    const hasSelectiveHighlight = Boolean(opts.highlightOnlyPartIds);
+    const matchesSelectiveHighlight = hasSelectiveHighlight && (opts.highlightOnlyPartIds.has(leafPart.id) || opts.highlightOnlyPartIds.has(lookupId));
+    const shouldHighlight = !isGhost && isNew && (
+      hasSelectiveHighlight ? matchesSelectiveHighlight : Boolean(opts.highlightNew)
+    );
+    const hlColorHex = (hasSelectiveHighlight && !opts.highlightNew) ? '#f97316' : (opts.highlightColor || '#f97316');
     const baseHex = overrideHex || cInfo.hex;
-    const baseCol = isSelected ? [26, 115, 232] : hexToRgb255(baseHex, fadeMix);
-    const edgeCol = isSelected
-      ? [255, 255, 255]
-      : overrideHex
-        ? hexToRgb255('#1e293b', isDimmed ? 0.72 : 0.25)
-        : (isNew && opts.highlightNew ? hexToRgb255(opts.highlightColor, 0) : hexToRgb255(cInfo.edge, fadeMix * 0.85));
-    const aByte = isRealTrans
-      ? Math.round(255 * (cInfo.alpha || 0.7) * (isFaded ? Math.max(0.55, opts.fadeOpacity) : 1))
-      : 255;
+    const baseCol = isGhost
+      ? hexToRgb255(baseHex, 0.58)
+      : isSelected
+        ? [26, 115, 232]
+        : hexToRgb255(baseHex, fadeMix);
+    const edgeCol = isGhost
+      ? [51, 65, 85]
+      : isSelected
+        ? [255, 255, 255]
+        : overrideHex
+          ? hexToRgb255('#1e293b', isDimmed ? 0.72 : 0.25)
+          : (shouldHighlight ? hexToRgb255(hlColorHex, 0) : hexToRgb255(cInfo.edge, fadeMix * 0.85));
+    const aByte = isGhost
+      ? 82
+      : isRealTrans
+        ? Math.round(255 * (cInfo.alpha || 0.7) * (isFaded ? Math.max(0.55, opts.fadeOpacity) : 1))
+        : 255;
+    const edgeAlpha = isGhost ? 185 : aByte;
     const m = leafPart.m || R_ID;
     const ox = leafPart.x + offX, oy = leafPart.y + offY, oz = leafPart.z + offZ;
 
     const compiled = compileEmbeddedDat(leafPart.p);
     if (compiled) {
       const T = compiled.tris, N = compiled.norms, E = compiled.edges, TC = compiled.triCols;
-      const subColCache = TC && !isSelected && !overrideHex ? new Map() : null;
+      const subColCache = TC && !isSelected && !overrideHex && !isGhost ? new Map() : null;
       for (let i = 0, ti = 0; i < T.length; i += 9, ti++) {
         const a = xformPt([T[i],T[i+1],T[i+2]], m, ox, oy, oz, hingeRad);
         const b = xformPt([T[i+3],T[i+4],T[i+5]], m, ox, oy, oz, hingeRad);
@@ -1135,11 +1298,11 @@ function buildMeshBuffers(prevParts, newParts, opts) {
         }
         pushTri(a, b, c, n, triRgb, triAlpha);
       }
-      if ((includeEdges || isNew || isSelected) && E.length > 0) {
+      if ((includeEdges || isNew || isSelected || isGhost) && E.length > 0) {
         for (let i = 0; i < E.length; i += 6) {
           const a = xformPt([E[i],E[i+1],E[i+2]], m, ox, oy, oz, hingeRad);
           const b = xformPt([E[i+3],E[i+4],E[i+5]], m, ox, oy, oz, hingeRad);
-          pushEdge(a, b, edgeCol, aByte);
+          pushEdge(a, b, edgeCol, edgeAlpha);
         }
       }
       return;
@@ -1149,7 +1312,7 @@ function buildMeshBuffers(prevParts, newParts, opts) {
     if (def.shape === 'bar') addCyl(0, def.centered ? 0 : -h/2, 0, 3.8,3.8,h,'y',10, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
     else if (def.shape === 'round') { addCyl(0,-h/2,0, (def.sx*20)/2-0.3,(def.sx*20)/2-0.3,h,'y',12, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte); addTopStuds(def, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte); }
     else if (def.shape === 'snot4' || def.shape === 'snot1') {
-      addBox(0,-h/2,0, w,h,d, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
+      addBox(0,-h/2,0, w,h,d, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha);
       addTopStuds(def, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
       addCyl(w/2+1.9,-h/2,0, 5.8,5.8,4.6,'x',10, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
       if (def.shape === 'snot4') {
@@ -1158,19 +1321,19 @@ function buildMeshBuffers(prevParts, newParts, opts) {
         addCyl(0,-h/2,-d/2-1.9, 5.8,5.8,4.6,'z',10, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
       }
     } else if (def.shape === 'mf_legs') {
-      addBox(0,-3,0, 32,6,16, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
-      addBox(-8.5,-17,0, 14,22,14, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
-      addBox(8.5,-17,0, 14,22,14, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
+      addBox(0,-3,0, 32,6,16, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha);
+      addBox(-8.5,-17,0, 14,22,14, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha);
+      addBox(8.5,-17,0, 14,22,14, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha);
     } else if (def.shape === 'mf_torso_body') {
       // Bare minifigure torso (exact LDraw 973.dat proportions: y=0 shoulders, y=-32 waist, neck +0..+11.2)
       addMinifigTorso([0, 0, 0], false, m, ox, oy, oz, hingeRad, baseCol, edgeCol, baseCol, edgeCol, aByte);
     } else if (def.shape === 'mf_torso') {
       const sh = isBrickLinkTorsoAssemblyId(normId(leafPart.p)) ? [-20, 32, -10] : [0, 0, 0];
       const yellowInfo = COLORS[14];
-      const handCol = (isSelected || overrideHex) ? baseCol : hexToRgb255(yellowInfo.hex, fadeMix);
-      const handEdge = (isSelected || overrideHex)
+      const handCol = (isSelected || overrideHex || isGhost) ? baseCol : hexToRgb255(yellowInfo.hex, fadeMix);
+      const handEdge = (isSelected || overrideHex || isGhost)
         ? edgeCol
-        : (isNew && opts.highlightNew ? hexToRgb255(opts.highlightColor, 0) : hexToRgb255(yellowInfo.edge, fadeMix * 0.85));
+        : (shouldHighlight ? hexToRgb255(hlColorHex, 0) : hexToRgb255(yellowInfo.edge, fadeMix * 0.85));
       addMinifigTorso(sh, true, m, ox, oy, oz, hingeRad, baseCol, edgeCol, handCol, handEdge, aByte);
     } else if (def.shape === 'mf_head') {
       // Authentic LEGO minifigure head proportions (matches LDraw 3626c / 28621: crown y=0, neck bottom y=-24)
@@ -1181,9 +1344,9 @@ function buildMeshBuffers(prevParts, newParts, opts) {
       addCyl(0, -22.5, 0, 8.0, 8.0, 3.2, 'y', 12, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
     } else if (def.shape === 'mf_helmet') {
       addCyl(0,-12,0, 11.5,12.2,20,'y',12, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
-      addBox(0,-11,10, 16,8,5, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
+      addBox(0,-11,10, 16,8,5, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha);
     } else {
-      addBox(0,-h/2,0, w,h,d, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
+      addBox(0,-h/2,0, w,h,d, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha);
       addTopStuds(def, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
     }
   };
@@ -1217,6 +1380,20 @@ function buildMeshBuffers(prevParts, newParts, opts) {
   prevParts.forEach(p => emitPart(p, false));
   const prevOpEnd = opPos.len, prevTrEnd = trPos.len;
   newParts.forEach(p => emitPart(p, true));
+
+  // Starting-pose translucent ghost limbs & 3D curved rotation indicators (for minifigure Prepare steps!)
+  if (Array.isArray(opts.ghostParts) && opts.ghostParts.length > 0) {
+    for (const gp of opts.ghostParts) {
+      if (gp.children && gp.children.length > 0) {
+        for (const ch of gp.children) emitSingleLeaf(ch, false, false, 0, 0, 0, 0, gp.id, true);
+      } else {
+        emitSingleLeaf(gp, false, false, 0, 0, 0, 0, gp.id, true);
+      }
+    }
+  }
+  if (Array.isArray(opts.minifigIndicators) && opts.minifigIndicators.length > 0) {
+    for (const ind of opts.minifigIndicators) addCurvedArrow3D(ind);
+  }
 
   const opP = opPos.slice(), trP = trPos.slice();
   const opN = opNorm.slice(), trN = trNorm.slice();
@@ -3036,13 +3213,14 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
     const appendMinifigPlacementSteps = (targetSteps, nm, idPrefix) => {
       if (nm.needsTransform) {
         globalStep++;
+        const poseCam = nm.poseCamera || MINIFIG_POSE_CAMERA;
         targetSteps.push({
           id: `${idPrefix}_mfpose_${nm.id}_s${globalStep}`,
           num: globalStep,
-          side: 'top',
-          corner: 'front_right',
-          az: 38,
-          el: 26,
+          side: poseCam.side,
+          corner: poseCam.corner,
+          az: poseCam.az,
+          el: poseCam.el,
           cue: 'none',
           isMinifigPoseStep: true,
           minifigPrep: {
@@ -3051,8 +3229,11 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
             label: nm.transformLabel,
             canonicalParts: nm.canonicalParts,
             poseSummary: nm.poseSummary,
+            indicators: nm.poseIndicators || [],
+            ghostParts: nm.poseGhostParts || [],
+            rotatedPartIds: nm.rotatedPartIds || [],
           },
-          parts: nm.posedPreviewParts,
+          parts: nm.posedFrontParts || nm.posedPreviewParts,
         });
       }
       globalStep++;
@@ -3617,13 +3798,14 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
       // Position / rotate / pose minifigure right before placing it on the model!
       if (nm.needsTransform) {
         globalStep++;
+        const poseCam = nm.poseCamera || MINIFIG_POSE_CAMERA;
         curSteps.push({
           id: `ac${secIdx + 1}_mfpose_${nm.id}_s${globalStep}`,
           num: globalStep,
-          side: 'top',
-          corner: 'front_right',
-          az: 38,
-          el: 26,
+          side: poseCam.side,
+          corner: poseCam.corner,
+          az: poseCam.az,
+          el: poseCam.el,
           cue: 'none',
           isMinifigPoseStep: true,
           minifigPrep: {
@@ -3632,8 +3814,11 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
             label: nm.transformLabel,
             canonicalParts: nm.canonicalParts,
             poseSummary: nm.poseSummary,
+            indicators: nm.poseIndicators || [],
+            ghostParts: nm.poseGhostParts || [],
+            rotatedPartIds: nm.rotatedPartIds || [],
           },
-          parts: nm.posedPreviewParts,
+          parts: nm.posedFrontParts || nm.posedPreviewParts,
         });
       }
       globalStep++;
@@ -4838,12 +5023,18 @@ function renderAll() {
       const effectivePartOffsets = step.defaultPartOffsets
         ? { ...step.defaultPartOffsets, ...(ov.partOffsets || {}) }
         : (ov.partOffsets || {});
+      const mfPrep = step.isMinifigPoseStep ? step.minifigPrep : null;
       const opts = {
         highlightNew: state.highlightNew, highlightColor: state.highlightColor,
         fadePrev: state.fadePrev, fadeOpacity: state.fadeOpacity,
         showArrows: true, accent: theme.accent, ov,
         partOffsets: effectivePartOffsets,
         selectedPartIds: state.mode === 'select' && state.selectedStepId === step.id ? state.selectedPartIds : null,
+        ...(mfPrep ? {
+          minifigIndicators: mfPrep.indicators || [],
+          ghostParts: mfPrep.ghostParts || [],
+          highlightOnlyPartIds: new Set(mfPrep.rotatedPartIds || []),
+        } : {}),
       };
       const rw = slots.length === 1 ? 760 : 500, rh = slots.length === 1 ? 500 : 360;
       const snap = renderSnapshot(prev, step.parts, cam.az, cam.el, rw, rh, modelScale, opts);
@@ -5048,6 +5239,14 @@ function renderAll() {
                       </div>
                     </div>` : ''}
                 </div>
+                ${step.isMinifigPoseStep && step.minifigPrep?.indicators?.length > 0 ? `
+                  <div class="shrink-0 flex items-center justify-center flex-wrap pointer-events-none" style="gap:${Math.round(typo.pt(4))}px;margin-top:${Math.round(typo.pt(4))}px">
+                    ${step.minifigPrep.indicators.map(ind => `
+                      <span class="inline-flex items-center font-bold rounded-full shadow-xs bg-white/90 text-[#1e293b] whitespace-nowrap" style="gap:${Math.round(typo.pt(3.5))}px;padding:${Math.round(typo.pt(1.5))}px ${Math.round(typo.pt(6))}px;font-size:${st.cueFont}px;border:1.5px solid ${ind.color || theme.accent}">
+                        <span class="rounded-full shrink-0" style="width:${Math.max(6, Math.round(st.cueFont * 0.72))}px;height:${Math.max(6, Math.round(st.cueFont * 0.72))}px;background:${ind.color || theme.accent}"></span>
+                        <span>${escHtml(ind.label)}</span>
+                      </span>`).join('')}
+                  </div>` : ''}
               </div>`;
           }).join('')}
         </div>
@@ -5543,7 +5742,11 @@ function renderContextOverlay(page) {
     const scalePct = Math.round((ov.modelScale || 1.0) * 100);
     const fMode = ov.focusMode || 'auto';
     const isMfBuild = Boolean((step.isStandaloneFigure || ch.kind === 'minifigure') && !step.isMinifigPoseStep);
-    const isFront34 = Math.abs(cam.az - MINIFIG_BUILD_CAMERA.az) <= 4 && Math.abs(cam.el - MINIFIG_BUILD_CAMERA.el) <= 4;
+    const isMfStep = isMfBuild || Boolean(step.isMinifigPoseStep);
+    const mfDefaultCam = step.isMinifigPoseStep
+      ? { side: 'top', corner: step.corner || MINIFIG_POSE_CAMERA.corner, az: step.az ?? MINIFIG_POSE_CAMERA.az, el: step.el ?? MINIFIG_POSE_CAMERA.el }
+      : MINIFIG_BUILD_CAMERA;
+    const isFront34 = isMfStep && Math.abs(cam.az - mfDefaultCam.az) <= 4 && Math.abs(cam.el - mfDefaultCam.el) <= 4;
     box.innerHTML = `
       <div class="pointer-events-auto glass-pill rounded-3xl p-3 w-full space-y-2 text-xs">
         <div class="flex items-center justify-between gap-2 flex-wrap">
@@ -5566,7 +5769,7 @@ function renderContextOverlay(page) {
         </div>
         <div class="flex items-center justify-between gap-1.5 flex-wrap">
           <div class="flex gap-1 flex-wrap">
-            ${isMfBuild ? `<button id="btnMfFront34" class="px-2.5 py-1 rounded-full text-[11px] font-semibold ${isFront34 ? 'bg-[#1a73e8]/15 text-[#1a73e8] ring-1 ring-[#1a73e8]' : 'bg-black/5 dark:bg-white/10'}">Front 3/4</button>` : ''}
+            ${isMfStep ? `<button id="btnMfFront34" class="px-2.5 py-1 rounded-full text-[11px] font-semibold ${isFront34 ? 'bg-[#1a73e8]/15 text-[#1a73e8] ring-1 ring-[#1a73e8]' : 'bg-black/5 dark:bg-white/10'}">Front 3/4</button>` : ''}
             ${CORNERS.map(c => `<button data-corner="${c.id}" class="corner-btn px-2.5 py-1 rounded-full text-[11px] font-semibold ${!isFront34 && cam.corner === c.id ? 'bg-[#1a73e8]/15 text-[#1a73e8] ring-1 ring-[#1a73e8]' : 'bg-black/5 dark:bg-white/10'}">${c.label}</button>`).join('')}
           </div>
           <button id="btnApplyFollowing" class="px-3 py-1 rounded-full bg-[#1a73e8] text-white text-[11px] font-semibold">Apply to Following</button>
@@ -5592,7 +5795,7 @@ function renderContextOverlay(page) {
     box.querySelector('#camBot').onclick = () => setCam({ side: 'bottom' });
     const mf34Btn = box.querySelector('#btnMfFront34');
     if (mf34Btn) {
-      mf34Btn.onclick = () => setCam({ side: 'top', corner: 'front_right', az: MINIFIG_BUILD_CAMERA.az, el: MINIFIG_BUILD_CAMERA.el });
+      mf34Btn.onclick = () => setCam({ side: 'top', corner: mfDefaultCam.corner, az: mfDefaultCam.az, el: mfDefaultCam.el });
     }
     const mf1to1Btn = box.querySelector('#btnToggleMf1to1Quick');
     if (mf1to1Btn) {
@@ -7605,15 +7808,22 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       const effectivePartOffsets = step.defaultPartOffsets
         ? { ...step.defaultPartOffsets, ...(ov.partOffsets || {}) }
         : (ov.partOffsets || {});
+      const mfPrep = step.isMinifigPoseStep ? step.minifigPrep : null;
       const snap = renderSnapshot(prev, step.parts, cam.az, cam.el, 760, 520, ov.modelScale || 1.0, {
         highlightNew: state.highlightNew, highlightColor: state.highlightColor,
         fadePrev: state.fadePrev, fadeOpacity: state.fadeOpacity,
         showArrows: true, accent: theme.accent, ov, partOffsets: effectivePartOffsets,
+        ...(mfPrep ? {
+          minifigIndicators: mfPrep.indicators || [],
+          ghostParts: mfPrep.ghostParts || [],
+          highlightOnlyPartIds: new Set(mfPrep.rotatedPartIds || []),
+        } : {}),
       });
       const stepImg = await loadImgPromise(snap.url);
       const isMfBuild = Boolean((step.isStandaloneFigure || ch.kind === 'minifigure') && !step.isMinifigPoseStep);
+      const poseLegendH = (mfPrep && mfPrep.indicators && mfPrep.indicators.length > 0) ? Math.round(typo.pt(22)) : 0;
       const renderTopY = sy + st.slotPad + pliH + Math.round(typo.pt(8));
-      const renderAvailH = slotH - st.slotPad * 2 - pliH - Math.round(typo.pt(10));
+      const renderAvailH = Math.max(40, slotH - st.slotPad * 2 - pliH - Math.round(typo.pt(10)) - poseLegendH);
       if (state.showMinifig1to1 && isMfBuild) {
         const mf1 = renderMinifigOneToOne(step.parts, pxH, hIn, Math.round(slotW * 0.34), Math.round(renderAvailH * 0.72), theme.accent);
         const cardPad = Math.round(typo.pt(8));
@@ -7660,6 +7870,39 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
         ctx.restore();
       } else {
         drawContain(ctx, stepImg, sx + st.slotPad, renderTopY, slotW - st.slotPad * 2, renderAvailH);
+      }
+
+      // Color-coded rotation indicator pills at bottom of minifigure Prepare steps
+      if (mfPrep && mfPrep.indicators && mfPrep.indicators.length > 0) {
+        const pillFont = Math.max(9, st.cueFont);
+        ctx.font = `700 ${pillFont}px -apple-system, sans-serif`;
+        const pillH = Math.round(pillFont * 1.85), pillGap = Math.round(typo.pt(6)), dotR = Math.max(3, pillFont * 0.34);
+        const pills = mfPrep.indicators.map(ind => {
+          const textW = ctx.measureText(ind.label || '').width;
+          return { ind, w: Math.ceil(textW + pillFont * 2.1) };
+        });
+        const totalW = pills.reduce((sum, p) => sum + p.w, 0) + pillGap * Math.max(0, pills.length - 1);
+        let pxCur = sx + Math.max(st.slotPad, Math.round((slotW - totalW) / 2));
+        const pyCur = sy + slotH - pillH - st.slotPad;
+        for (const p of pills) {
+          if (pxCur + p.w > sx + slotW - st.slotPad) break;
+          const pCol = p.ind.color || theme.accent;
+          drawRRect(pxCur, pyCur, p.w, pillH, pillH / 2);
+          ctx.fillStyle = 'rgba(255,255,255,0.92)';
+          ctx.fill();
+          ctx.strokeStyle = pCol;
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+          ctx.fillStyle = pCol;
+          ctx.beginPath();
+          ctx.arc(pxCur + Math.round(pillFont * 0.9), pyCur + pillH / 2, dotR, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#1e293b';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(p.ind.label || '', pxCur + Math.round(pillFont * 1.5), pyCur + pillH / 2 + 0.5);
+          ctx.textBaseline = 'top';
+          pxCur += p.w + pillGap;
+        }
       }
 
       // Final step of a duplicate submodel: show prominent ×N badge ONLY on this last step

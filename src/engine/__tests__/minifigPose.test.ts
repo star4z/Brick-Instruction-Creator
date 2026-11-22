@@ -934,3 +934,160 @@ describe('Minifigure Group Extraction & Chair/Furniture Exclusion', () => {
   });
 });
 
+describe('Front-Facing Minifig Pose Step & 3D Rotation Indicators', () => {
+  it('faces posedFrontParts toward the camera (+Z) with legs & yaw rotation indicators, aligned ghosts, and selective highlights', () => {
+    const worldRot = rotY(180); // seated passenger facing away from camera (-Z)
+    const legSeatedM = mat3Multiply(worldRot, rotX(-90));
+
+    const worldParts: RuntimePart[] = [
+      {
+        id: 'legs_asm',
+        p: 'asm_970c00_0',
+        c: 0,
+        x: 120,
+        y: 32,
+        z: -60,
+        m: R_IDENTITY,
+        children: [
+          { id: 'hips', p: '3815', c: 0, x: 120, y: 40, z: -60, m: worldRot },
+          { id: 'leg_r', p: '3816', c: 0, x: 128, y: 28, z: -60, m: legSeatedM },
+          { id: 'leg_l', p: '3817', c: 0, x: 112, y: 28, z: -60, m: legSeatedM },
+        ],
+      },
+      {
+        id: 'torso_asm',
+        p: 'asm_973c01_26',
+        c: 26,
+        x: 120,
+        y: 72,
+        z: -60,
+        m: R_IDENTITY,
+        children: [
+          { id: 'torso', p: '973', c: 26, x: 120, y: 72, z: -60, m: worldRot },
+          { id: 'arm_r', p: '3818', c: 26, x: 135.552, y: 64, z: -60, m: mat3Multiply(worldRot, ARM_R_NEUTRAL) },
+          { id: 'arm_l', p: '3819', c: 26, x: 104.448, y: 64, z: -60, m: mat3Multiply(worldRot, ARM_L_NEUTRAL) },
+        ],
+      },
+      { id: 'head', p: '3626c', c: 14, x: 120, y: 96, z: -60, m: worldRot },
+      { id: 'hair', p: '21778', c: 0, x: 120, y: 96, z: -60, m: worldRot },
+    ];
+
+    const res = normalizeMinifigureForBuild(worldParts, resolveName, simpleBox, 'seated');
+
+    // posedFrontParts faces +Z (toward camera!) while legs remain seated forward (+Z)
+    const frontTorso = res.posedFrontParts[1].children![0];
+    const frontLegR = res.posedFrontParts[0].children![1];
+    const frontLegL = res.posedFrontParts[0].children![2];
+    expect(mat3Col(frontTorso.m!, 2)[2]).toBeCloseTo(1, 3);
+    expect(mat3Vec(frontLegR.m!, 0, -1, 0)[2]).toBeCloseTo(1, 3);
+    expect(mat3Vec(frontLegL.m!, 0, -1, 0)[2]).toBeCloseTo(1, 3);
+    expect(res.poseCamera.az).toBeGreaterThan(0);
+
+    // Indicators: merged 90-deg forward legs arc + 180-deg base yaw arc (sweeping opposite side from +X leg arc!)
+    const legsInd = res.poseIndicators.find((i) => i.kind === 'legs');
+    const yawInd = res.poseIndicators.find((i) => i.kind === 'body_yaw');
+    expect(legsInd).toBeDefined();
+    expect(legsInd!.angleDeg).toBeCloseTo(90, 0);
+    expect(legsInd!.startDir[1]).toBeCloseTo(-1, 2);
+    expect(legsInd!.endDir[2]).toBeCloseTo(1, 2);
+    expect(legsInd!.label).toBe('Legs 90° forward');
+
+    expect(yawInd).toBeDefined();
+    expect(yawInd!.angleDeg).toBeCloseTo(180, 0);
+    expect(yawInd!.startDir[2]).toBeCloseTo(1, 2);
+    expect(yawInd!.endDir[2]).toBeCloseTo(-1, 2);
+    expect(yawInd!.axis[1]).toBeLessThan(0); // wraps opposite (-X) side to stay clear of +X leg arc
+    expect(yawInd!.label).toBe('Turn figure 180°');
+
+    // Standing ghost legs align cleanly upright right below the seated hips
+    expect(res.poseGhostParts).toHaveLength(2);
+    for (const gp of res.poseGhostParts) {
+      expect(mat3AngleDeg(mat3Orthonormalize(gp.m), R_IDENTITY)).toBeLessThan(0.5);
+    }
+
+    // Selective highlight contains ONLY the legs (stationary torso/head/hair excluded)
+    expect(res.rotatedPartIds).toContain(frontLegR.id);
+    expect(res.rotatedPartIds).toContain(frontLegL.id);
+    expect(res.rotatedPartIds).not.toContain(frontTorso.id);
+    expect(res.rotatedPartIds).not.toContain(res.posedFrontParts[2].id);
+    expect(res.rotatedPartIds).not.toContain(res.posedFrontParts[3].id);
+  });
+
+  it('emits separate leg indicators for asymmetric walking poses and picks front-left camera when only right arm moves', () => {
+    const walkingParts: RuntimePart[] = [
+      {
+        id: 'legs_asm',
+        p: 'asm_970c00_0',
+        c: 0,
+        x: 0,
+        y: 32,
+        z: 0,
+        m: R_IDENTITY,
+        children: [
+          { id: 'hips', p: '3815', c: 0, x: 0, y: 40, z: 0, m: R_IDENTITY },
+          { id: 'leg_r', p: '3816', c: 0, x: -8, y: 28, z: 0, m: rotX(30) }, // back 30 deg
+          { id: 'leg_l', p: '3817', c: 0, x: 8, y: 28, z: 0, m: rotX(-35) }, // forward 35 deg
+        ],
+      },
+      { id: 'torso', p: '973', c: 26, x: 0, y: 72, z: 0, m: R_IDENTITY },
+    ];
+    const walkRes = normalizeMinifigureForBuild(walkingParts, resolveName, simpleBox, 'walk');
+    const legRInd = walkRes.poseIndicators.find((i) => i.kind === 'leg_r');
+    const legLInd = walkRes.poseIndicators.find((i) => i.kind === 'leg_l');
+    expect(legRInd).toBeDefined();
+    expect(legLInd).toBeDefined();
+    expect(legRInd!.label).toContain('back');
+    expect(legLInd!.label).toContain('forward');
+
+    // Only right arm raised forward -> camera chooses front-left 3/4 (az < 0) so right arm is unobstructed
+    const rightArmParts: RuntimePart[] = [
+      {
+        id: 'torso_asm',
+        p: 'asm_973c01_26',
+        c: 26,
+        x: 0,
+        y: 0,
+        z: 0,
+        m: R_IDENTITY,
+        children: [
+          { id: 'torso', p: '973', c: 26, x: 0, y: 0, z: 0, m: R_IDENTITY },
+          { id: 'arm_r', p: '3818', c: 26, x: -15.552, y: -8, z: 0, m: mat3Multiply(ARM_R_NEUTRAL, rotX(-75)) },
+          { id: 'arm_l', p: '3819', c: 26, x: 15.552, y: -8, z: 0, m: ARM_L_NEUTRAL },
+        ],
+      },
+    ];
+    const armRes = normalizeMinifigureForBuild(rightArmParts, resolveName, simpleBox, 'armr');
+    const armRInd = armRes.poseIndicators.find((i) => i.kind === 'arm_r');
+    expect(armRInd).toBeDefined();
+    expect(armRInd!.angleDeg).toBeCloseTo(75, 0);
+    expect(armRes.poseCamera.corner).toBe('front_left');
+    expect(armRes.poseCamera.az).toBeLessThan(0);
+  });
+
+  it('generates head turn and reclining body tilt indicators while keeping front facing +Z', () => {
+    const worldM = mat3Multiply(rotY(90), rotX(-25));
+    const headM = mat3Multiply(worldM, rotY(45));
+    const parts: RuntimePart[] = [
+      { id: 't', p: '973', c: 1, x: 0, y: 0, z: 0, m: worldM },
+      { id: 'h', p: '3626c', c: 14, x: 0, y: 24, z: 0, m: headM },
+      { id: 'hr', p: '21778', c: 0, x: 0, y: 24, z: 0, m: headM },
+    ];
+    const res = normalizeMinifigureForBuild(parts, resolveName, simpleBox, 'tilt');
+
+    const frontTorsoFwd = mat3Col(res.posedFrontParts[0].m!, 2);
+    expect(frontTorsoFwd[2]).toBeGreaterThan(0.85);
+    expect(Math.abs(frontTorsoFwd[0])).toBeLessThan(0.05);
+
+    const headInd = res.poseIndicators.find((i) => i.kind === 'head');
+    const tiltInd = res.poseIndicators.find((i) => i.kind === 'body_tilt');
+    const yawInd = res.poseIndicators.find((i) => i.kind === 'body_yaw');
+    expect(headInd).toBeDefined();
+    expect(headInd!.angleDeg).toBeCloseTo(45, 0);
+    expect(tiltInd).toBeDefined();
+    expect(tiltInd!.angleDeg).toBeCloseTo(25, 0);
+    expect(yawInd).toBeDefined();
+    expect(yawInd!.angleDeg).toBeCloseTo(90, 0);
+  });
+});
+
+

@@ -58,9 +58,45 @@ export interface MinifigMetrics {
   heightMm: number;
 }
 
+export type MinifigIndicatorKind =
+  | 'legs'
+  | 'leg_r'
+  | 'leg_l'
+  | 'arm_r'
+  | 'arm_l'
+  | 'head'
+  | 'body_tilt'
+  | 'body_yaw';
+
+export interface MinifigRotationIndicator {
+  kind: MinifigIndicatorKind;
+  label: string;
+  partIds: string[];
+  pivot: Vec3;
+  axis: Vec3;
+  startDir: Vec3;
+  endDir: Vec3;
+  angleDeg: number;
+  radius: number;
+  lateralOffset: Vec3;
+  color: string;
+}
+
+export interface MinifigPoseCamera {
+  side: 'top';
+  corner: 'front_right' | 'front_left';
+  az: number;
+  el: number;
+}
+
 export interface NormalizedMinifigResult {
   canonicalParts: RuntimePart[];
   posedPreviewParts: RuntimePart[];
+  posedFrontParts: RuntimePart[];
+  poseCamera: MinifigPoseCamera;
+  poseIndicators: MinifigRotationIndicator[];
+  poseGhostParts: RuntimePart[];
+  rotatedPartIds: string[];
   poseSummary: MinifigPoseSummary;
   needsTransform: boolean;
   transformLabel: string;
@@ -93,6 +129,14 @@ export const MINIFIG_BUILD_CAMERA = {
   corner: 'front_right' as const,
   az: 26,
   el: 16,
+};
+
+/** Default front 3/4 portrait camera preset for minifigure pose/rotation preparation steps. */
+export const MINIFIG_POSE_CAMERA: MinifigPoseCamera = {
+  side: 'top',
+  corner: 'front_right',
+  az: 32,
+  el: 20,
 };
 
 export const R_IDENTITY: Mat3 = [1, 0, 0, 0, 1, 0, 0, 0, 1];
@@ -561,9 +605,31 @@ export function describeMinifigTransform(ps: MinifigPoseSummary): string {
 }
 
 interface TaggedLeaf {
+  idx: number;
   leaf: RuntimePart;
   parent: RuntimePart;
   role: MinifigLeafRole;
+}
+
+const INDICATOR_COLOR_LIMB = '#f97316';
+const INDICATOR_COLOR_BODY_TILT = '#0ea5e9';
+const INDICATOR_COLOR_BODY_YAW = '#2563eb';
+
+function mat3RotY(rad: number): Mat3 {
+  const c = Math.cos(rad);
+  const s = Math.sin(rad);
+  return [c, 0, s, 0, 1, 0, -s, 0, c];
+}
+
+function projectPerp(v: Vec3, axis: Vec3): Vec3 {
+  const d = vec3Dot(v, axis);
+  const p: Vec3 = [v[0] - axis[0] * d, v[1] - axis[1] * d, v[2] - axis[2] * d];
+  if (Math.hypot(p[0], p[1], p[2]) < 1e-4) {
+    const fb: Vec3 = Math.abs(axis[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0];
+    const df = vec3Dot(fb, axis);
+    return vec3Norm([fb[0] - axis[0] * df, fb[1] - axis[1] * df, fb[2] - axis[2] * df]);
+  }
+  return vec3Norm(p);
 }
 
 /**
@@ -573,6 +639,8 @@ interface TaggedLeaf {
  *    with arms returned to their default hanging position except when required
  *    to hold/clear an accessory such as a purse or two-handed item
  *  - posedPreviewParts: exact placement pose & orientation centered at origin
+ *  - posedFrontParts: exact posed figure un-yawed so its front faces +Z (toward camera)
+ *  - poseIndicators & poseGhostParts: 3D rotation arcs + aligned starting-pose ghosts
  *  - poseSummary & transformLabel describing the pre-placement transformation
  */
 export function normalizeMinifigureForBuild(
@@ -583,6 +651,7 @@ export function normalizeMinifigureForBuild(
 ): NormalizedMinifigResult {
   const canonicalParts = groupParts.map((p) => deepClonePart(p, `${idPrefix}_std`));
   const posedPreviewParts = groupParts.map((p) => deepClonePart(p, `${idPrefix}_pose`));
+  const posedFrontParts = groupParts.map((p) => deepClonePart(p, `${idPrefix}_front`));
 
   // Center posedPreviewParts at origin with bottom at Y=0 while preserving exact placement orientation & limb poses
   recenterComposites(posedPreviewParts);
@@ -591,9 +660,11 @@ export function normalizeMinifigureForBuild(
 
   // Collect all leaves and classify their roles (with structural fallback for custom printed Studio assemblies)
   const leaves: TaggedLeaf[] = [];
+  const frontLeaves: TaggedLeaf[] = [];
   const torsoAsmParents = new Set<RuntimePart>();
 
-  for (const parent of canonicalParts) {
+  canonicalParts.forEach((parent, parentIdx) => {
+    const frontParent = posedFrontParts[parentIdx];
     const parentId = normPartId(parent.p);
     const parentName = resolveName(parent.p).toLowerCase();
     const isLegsAsm =
@@ -605,6 +676,7 @@ export function normalizeMinifigureForBuild(
 
     if (parent.children && parent.children.length > 0) {
       const childItems: TaggedLeaf[] = parent.children.map((ch) => ({
+        idx: 0,
         leaf: ch,
         parent,
         role: classifyMinifigLeafRole(ch.p, resolveName(ch.p)),
@@ -649,15 +721,23 @@ export function normalizeMinifigureForBuild(
         }
       }
 
-      leaves.push(...childItems);
-    } else {
-      leaves.push({
-        leaf: parent,
-        parent,
-        role: classifyMinifigLeafRole(parent.p, resolveName(parent.p)),
+      childItems.forEach((item, ci) => {
+        item.idx = leaves.length;
+        leaves.push(item);
+        frontLeaves.push({
+          idx: item.idx,
+          leaf: frontParent.children![ci],
+          parent: frontParent,
+          role: item.role,
+        });
       });
+    } else {
+      const role = classifyMinifigLeafRole(parent.p, resolveName(parent.p));
+      const idx = leaves.length;
+      leaves.push({ idx, leaf: parent, parent, role });
+      frontLeaves.push({ idx, leaf: frontParent, parent: frontParent, role });
     }
-  }
+  });
 
   // 1. Determine body reference frame from torso -> hips -> legs_unit -> head -> first leaf
   const refEntry =
@@ -666,6 +746,7 @@ export function normalizeMinifigureForBuild(
     leaves.find((l) => l.role === 'legs_unit') ||
     leaves.find((l) => l.role === 'head') ||
     leaves[0];
+  const refIdx = refEntry ? refEntry.idx : 0;
 
   const R_body = mat3Orthonormalize(refEntry?.leaf.m);
   const R_inv = mat3Transpose(R_body);
@@ -674,7 +755,35 @@ export function normalizeMinifigureForBuild(
   const bodyUp = mat3Col(R_body, 1);
   const bodyFwd = mat3Col(R_body, 2);
   const bodyTiltDeg = Math.acos(Math.max(-1, Math.min(1, bodyUp[1]))) * (180 / Math.PI);
-  const bodyYawDeg = Math.atan2(bodyFwd[0], bodyFwd[2]) * (180 / Math.PI);
+  const horizFwdLen = Math.hypot(bodyFwd[0], bodyFwd[2]);
+  let yawRad: number;
+  if (horizFwdLen > 0.25) {
+    yawRad = Math.atan2(bodyFwd[0], bodyFwd[2]);
+  } else {
+    const bodyRight = mat3Col(R_body, 0);
+    yawRad = Math.atan2(-bodyRight[2], bodyRight[0]);
+  }
+  const bodyYawDeg = yawRad * (180 / Math.PI);
+
+  // 1b. Build posedFrontParts: un-yaw around world Y so the minifigure ALWAYS faces +Z (toward camera & key light)
+  // while preserving every limb articulation and any intentional torso tilt!
+  const R_unyaw = mat3RotY(-yawRad);
+  for (const entry of frontLeaves) {
+    const lf = entry.leaf;
+    const rel = mat3Vec(R_unyaw, lf.x - refOrigin[0], lf.y - refOrigin[1], lf.z - refOrigin[2]);
+    lf.x = rel[0];
+    lf.y = rel[1];
+    lf.z = rel[2];
+    lf.m = mat3Multiply(R_unyaw, lf.m || R_IDENTITY);
+  }
+  recenterComposites(posedFrontParts);
+  const frontBox = computeGroupBox(posedFrontParts, computeBox);
+  translateParts(posedFrontParts, -frontBox.center[0], -frontBox.min[1], -frontBox.center[2]);
+  const centeredFrontBox = computeGroupBox(posedFrontParts, computeBox);
+
+  const frontRefLeaf = frontLeaves[refIdx]?.leaf;
+  const R_torsoFront = mat3Orthonormalize(frontRefLeaf?.m);
+  const torsoPosFront: Vec3 = frontRefLeaf ? [frontRefLeaf.x, frontRefLeaf.y, frontRefLeaf.z] : [0, 0, 0];
 
   // 2. Transform EVERY leaf into the upright, front-facing (+Z) torso body frame
   for (const entry of leaves) {
@@ -719,16 +828,22 @@ export function normalizeMinifigureForBuild(
       }
     }
   }
+  for (let i = 0; i < leaves.length; i++) {
+    frontLeaves[i].role = leaves[i].role;
+  }
 
   // 3. Un-pose Hips & Legs -> standing straight down (m = R_IDENTITY)
   let legsPosedDeg = 0;
+  let hipsPosedDeg = 0;
   const hipsEntry = leaves.find((l) => l.role === 'hips');
   const legEntries = leaves.filter((l) => l.role === 'leg_r' || l.role === 'leg_l');
   const legsUnitEntries = leaves.filter((l) => l.role === 'legs_unit');
+  const movedLegAngles = new Map<number, number>();
 
   if (hipsEntry) {
     const hipsM = mat3Orthonormalize(hipsEntry.leaf.m);
     const hipsAngle = mat3AngleDeg(hipsM, R_IDENTITY);
+    hipsPosedDeg = hipsAngle;
     if (hipsAngle > 1.5) {
       legsPosedDeg = Math.max(legsPosedDeg, hipsAngle);
       const R_hipsCorr = mat3Transpose(hipsM);
@@ -744,7 +859,9 @@ export function normalizeMinifigureForBuild(
     for (const leg of legEntries) {
       const legM = mat3Orthonormalize(leg.leaf.m);
       const legAngle = mat3AngleDeg(legM, R_IDENTITY);
-      legsPosedDeg = Math.max(legsPosedDeg, legAngle);
+      const combinedAngle = Math.max(legAngle, hipsAngle);
+      legsPosedDeg = Math.max(legsPosedDeg, combinedAngle);
+      if (combinedAngle > 10) movedLegAngles.set(leg.idx, combinedAngle);
       if (legAngle > 1.5) {
         // Standard LDraw hip hinge pin sits 12 LDU below hips origin (0, -12, 0 in GL space)
         const isPurePitch = Math.abs(legM[0]) > 0.88;
@@ -765,6 +882,7 @@ export function normalizeMinifigureForBuild(
       const legM = mat3Orthonormalize(leg.leaf.m);
       const legAngle = mat3AngleDeg(legM, R_IDENTITY);
       legsPosedDeg = Math.max(legsPosedDeg, legAngle);
+      if (legAngle > 10) movedLegAngles.set(leg.idx, legAngle);
       if (legAngle > 1.5) {
         leg.leaf.m = [...R_IDENTITY] as Mat3;
       }
@@ -778,6 +896,13 @@ export function normalizeMinifigureForBuild(
   const armEntries = leaves.filter((l) => l.role === 'arm_r' || l.role === 'arm_l');
   const handEntries = leaves.filter((l) => l.role === 'hand');
   const accessoryEntries = leaves.filter((l) => l.role === 'accessory');
+  const movedArmInfo: Array<{
+    armIdx: number;
+    role: 'arm_r' | 'arm_l';
+    angleDeg: number;
+    handIndices: number[];
+    accIndices: number[];
+  }> = [];
 
   if (armEntries.length > 0) {
     // Compute standing body & floor bounds after legs have been straightened
@@ -968,10 +1093,21 @@ export function normalizeMinifigureForBuild(
       for (const he of matchedHands) {
         rotateLeafAroundPivot(he.leaf, pivot, R_corr);
       }
+      const carriedAccIndices: number[] = [];
       for (const acc of heldAccessories) {
         if (claimedAccessories.has(acc)) continue;
         claimedAccessories.add(acc);
+        carriedAccIndices.push(acc.idx);
         rotateLeafAroundPivot(acc.leaf, pivot, R_corr);
+      }
+      if (armAngle > 10 && (ae.role === 'arm_r' || ae.role === 'arm_l')) {
+        movedArmInfo.push({
+          armIdx: ae.idx,
+          role: ae.role,
+          angleDeg: armAngle,
+          handIndices: matchedHands.map((h) => h.idx),
+          accIndices: carriedAccIndices,
+        });
       }
     });
   }
@@ -1030,9 +1166,341 @@ export function normalizeMinifigureForBuild(
     poseSummary.bodyTilted ||
     poseSummary.bodyRotated;
 
+  // 7. Build 3D Rotation Indicators, Aligned Starting-Pose Ghost Limbs, and Selective Rotated Part IDs
+  const poseIndicators: MinifigRotationIndicator[] = [];
+  const poseGhostParts: RuntimePart[] = [];
+  const rotatedPartIdSet = new Set<string>();
+
+  const canonRefLeaf = leaves[refIdx]?.leaf;
+  const torsoPosCanon: Vec3 = canonRefLeaf ? [canonRefLeaf.x, canonRefLeaf.y, canonRefLeaf.z] : [0, 0, 0];
+
+  const makeGhostLeaf = (leafIdx: number): RuntimePart => {
+    const src = leaves[leafIdx].leaf;
+    const relX = src.x - torsoPosCanon[0];
+    const relY = src.y - torsoPosCanon[1];
+    const relZ = src.z - torsoPosCanon[2];
+    const rotRel = mat3Vec(R_torsoFront, relX, relY, relZ);
+    return {
+      ...src,
+      id: `${idPrefix}_ghost_${src.id}`,
+      x: torsoPosFront[0] + rotRel[0],
+      y: torsoPosFront[1] + rotRel[1],
+      z: torsoPosFront[2] + rotRel[2],
+      m: mat3Multiply(R_torsoFront, src.m || R_IDENTITY),
+    };
+  };
+
+  const torsoRight = mat3Col(R_torsoFront, 0);
+  const torsoUp = mat3Col(R_torsoFront, 1);
+  const torsoFwd = mat3Col(R_torsoFront, 2);
+  const torsoDown: Vec3 = [-torsoUp[0], -torsoUp[1], -torsoUp[2]];
+
+  // 7a. Legs Indicators (merged when both legs bend together, or separate per leg for asymmetric walking poses)
+  if (poseSummary.legsBent) {
+    const frontHips = hipsEntry ? frontLeaves[hipsEntry.idx].leaf : null;
+    const hipPinOffset = mat3Vec(R_torsoFront, 0, -12, 0);
+    const legSpecs: Array<{
+      idx: number;
+      role: MinifigLeafRole;
+      frontLeaf: RuntimePart;
+      pivot: Vec3;
+      startDir: Vec3;
+      endDir: Vec3;
+      axis: Vec3;
+      angleDeg: number;
+      fwdDot: number;
+    }> = [];
+
+    for (const [legIdx] of movedLegAngles.entries()) {
+      const fl = frontLeaves[legIdx].leaf;
+      const role = frontLeaves[legIdx].role;
+      const startDir = vec3Norm(torsoDown);
+      const endDir = vec3Norm(mat3Vec(mat3Orthonormalize(fl.m), 0, -1, 0));
+      const dot = Math.max(-1, Math.min(1, vec3Dot(startDir, endDir)));
+      const angleDeg = Math.acos(dot) * (180 / Math.PI);
+      if (angleDeg <= 10) continue;
+      const cross = vec3Cross(startDir, endDir);
+      const axis =
+        Math.hypot(cross[0], cross[1], cross[2]) > 1e-3
+          ? vec3Norm(cross)
+          : vec3Norm([-torsoRight[0], -torsoRight[1], -torsoRight[2]]);
+      const pivot: Vec3 = frontHips
+        ? [
+            role === 'legs_unit' ? frontHips.x : fl.x,
+            frontHips.y + hipPinOffset[1],
+            frontHips.z + hipPinOffset[2],
+          ]
+        : [fl.x, fl.y, fl.z];
+      legSpecs.push({
+        idx: legIdx,
+        role,
+        frontLeaf: fl,
+        pivot,
+        startDir,
+        endDir,
+        axis,
+        angleDeg,
+        fwdDot: vec3Dot(endDir, torsoFwd),
+      });
+    }
+
+    const rSpec = legSpecs.find((s) => s.role === 'leg_r');
+    const lSpec = legSpecs.find((s) => s.role === 'leg_l');
+    const canMergeLegs =
+      Boolean(rSpec && lSpec) &&
+      Math.abs(rSpec!.angleDeg - lSpec!.angleDeg) < 10 &&
+      vec3Dot(rSpec!.endDir, lSpec!.endDir) > 0.96;
+
+    if (canMergeLegs && rSpec && lSpec) {
+      const avgDeg = Math.round((rSpec.angleDeg + lSpec.angleDeg) / 2);
+      const dirWord = lSpec.fwdDot > 0.15 ? 'forward' : lSpec.fwdDot < -0.15 ? 'back' : '';
+      const partIds = [rSpec.frontLeaf.id, lSpec.frontLeaf.id];
+      if (frontHips && hipsPosedDeg > 10) partIds.push(frontHips.id);
+      for (const pid of partIds) rotatedPartIdSet.add(pid);
+      poseGhostParts.push(makeGhostLeaf(rSpec.idx), makeGhostLeaf(lSpec.idx));
+
+      const legBoxL = computeBox(lSpec.frontLeaf);
+      const midPivot: Vec3 = [
+        (rSpec.pivot[0] + lSpec.pivot[0]) / 2,
+        (rSpec.pivot[1] + lSpec.pivot[1]) / 2,
+        (rSpec.pivot[2] + lSpec.pivot[2]) / 2,
+      ];
+      const sideDist = Math.max(22, Math.abs(legBoxL.max[0] - midPivot[0]) + 7);
+      poseIndicators.push({
+        kind: 'legs',
+        label: dirWord ? `Legs ${avgDeg}° ${dirWord}` : `Legs ${avgDeg}°`,
+        partIds,
+        pivot: midPivot,
+        axis: lSpec.axis,
+        startDir: lSpec.startDir,
+        endDir: lSpec.endDir,
+        angleDeg: avgDeg,
+        radius: 24,
+        lateralOffset: [torsoRight[0] * sideDist, torsoRight[1] * sideDist, torsoRight[2] * sideDist],
+        color: INDICATOR_COLOR_LIMB,
+      });
+    } else {
+      for (const spec of legSpecs) {
+        const deg = Math.round(spec.angleDeg);
+        const dirWord = spec.fwdDot > 0.15 ? 'forward' : spec.fwdDot < -0.15 ? 'back' : '';
+        const isRight = spec.role === 'leg_r';
+        const isLeft = spec.role === 'leg_l';
+        const kind: MinifigIndicatorKind = isRight ? 'leg_r' : isLeft ? 'leg_l' : 'legs';
+        const prefix = isRight ? 'Right leg' : isLeft ? 'Left leg' : 'Legs';
+        const sideSign = isRight ? -1 : 1;
+        const sideDist = spec.role === 'legs_unit' ? 22 : 14;
+        const partIds = [spec.frontLeaf.id];
+        if (frontHips && hipsPosedDeg > 10) partIds.push(frontHips.id);
+        for (const pid of partIds) rotatedPartIdSet.add(pid);
+        poseGhostParts.push(makeGhostLeaf(spec.idx));
+
+        poseIndicators.push({
+          kind,
+          label: dirWord ? `${prefix} ${deg}° ${dirWord}` : `${prefix} ${deg}°`,
+          partIds,
+          pivot: spec.pivot,
+          axis: spec.axis,
+          startDir: spec.startDir,
+          endDir: spec.endDir,
+          angleDeg: deg,
+          radius: 24,
+          lateralOffset: [
+            torsoRight[0] * sideSign * sideDist,
+            torsoRight[1] * sideSign * sideDist,
+            torsoRight[2] * sideSign * sideDist,
+          ],
+          color: INDICATOR_COLOR_LIMB,
+        });
+      }
+    }
+  }
+
+  // 7b. Arms Indicators (only for arms actually reset in canonical build — excludes purse/accessory-locked arms!)
+  for (const info of movedArmInfo) {
+    const frontArm = frontLeaves[info.armIdx].leaf;
+    const pivot: Vec3 = [frontArm.x, frontArm.y, frontArm.z];
+    const rawFrontM = frontArm.m || R_IDENTITY;
+    const isMirrored = mat3Determinant(rawFrontM) < 0;
+    const frontArmM = mat3Orthonormalize(isMirrored ? mat3Multiply(rawFrontM, REFLECT_X) : rawFrontM);
+    const pinAxis = vec3Norm(mat3Col(frontArmM, 0));
+
+    let rawStart: Vec3;
+    let rawEnd: Vec3;
+    if (info.handIndices.length > 0) {
+      const ghostHand = makeGhostLeaf(info.handIndices[0]);
+      const frontHand = frontLeaves[info.handIndices[0]].leaf;
+      rawStart = [ghostHand.x - pivot[0], ghostHand.y - pivot[1], ghostHand.z - pivot[2]];
+      rawEnd = [frontHand.x - pivot[0], frontHand.y - pivot[1], frontHand.z - pivot[2]];
+    } else {
+      const rawCanonM = leaves[info.armIdx].leaf.m || R_IDENTITY;
+      const canonM = mat3Orthonormalize(isMirrored ? mat3Multiply(rawCanonM, REFLECT_X) : rawCanonM);
+      const canonAttachedM = mat3Multiply(R_torsoFront, canonM);
+      rawStart = mat3Vec(canonAttachedM, 0, -1, 0.35);
+      rawEnd = mat3Vec(frontArmM, 0, -1, 0.35);
+    }
+
+    const startDir = projectPerp(rawStart, pinAxis);
+    const endDir = projectPerp(rawEnd, pinAxis);
+    const signedAng = Math.atan2(vec3Dot(pinAxis, vec3Cross(startDir, endDir)), vec3Dot(startDir, endDir));
+    const angleDeg = Math.round(Math.abs(signedAng) * (180 / Math.PI));
+    if (angleDeg <= 10) continue;
+
+    const arcAxis: Vec3 = signedAng >= 0 ? pinAxis : [-pinAxis[0], -pinAxis[1], -pinAxis[2]];
+    const endLocal = mat3Vec(mat3Transpose(R_torsoFront), endDir[0], endDir[1], endDir[2]);
+    const dirWord = endLocal[1] > 0.35 ? 'up' : endLocal[2] > 0.25 ? 'forward' : endLocal[2] < -0.25 ? 'back' : '';
+    const sideSign = info.role === 'arm_l' ? 1 : -1;
+    const sideName = info.role === 'arm_l' ? 'Left arm' : 'Right arm';
+
+    const partIds = [
+      frontArm.id,
+      ...info.handIndices.map((hi) => frontLeaves[hi].leaf.id),
+      ...info.accIndices.map((ai) => frontLeaves[ai].leaf.id),
+    ];
+    for (const pid of partIds) rotatedPartIdSet.add(pid);
+    poseGhostParts.push(makeGhostLeaf(info.armIdx), ...info.handIndices.map(makeGhostLeaf));
+
+    poseIndicators.push({
+      kind: info.role,
+      label: dirWord ? `${sideName} ${angleDeg}° ${dirWord}` : `${sideName} ${angleDeg}°`,
+      partIds,
+      pivot,
+      axis: arcAxis,
+      startDir,
+      endDir,
+      angleDeg,
+      radius: 21,
+      lateralOffset: [
+        torsoRight[0] * sideSign * 11,
+        torsoRight[1] * sideSign * 11,
+        torsoRight[2] * sideSign * 11,
+      ],
+      color: INDICATOR_COLOR_LIMB,
+    });
+  }
+
+  // 7c. Head Turn Indicator
+  if (poseSummary.headTurned && headEntry) {
+    const frontHead = frontLeaves[headEntry.idx].leaf;
+    const frontHeadgear = headgearEntries.map((hg) => frontLeaves[hg.idx].leaf);
+    const headGroupBox = computeGroupBox([frontHead, ...frontHeadgear], computeBox);
+
+    const startDir = projectPerp(torsoFwd, torsoUp);
+    const endDir = projectPerp(mat3Col(mat3Orthonormalize(frontHead.m), 2), torsoUp);
+    const signedAng = Math.atan2(vec3Dot(torsoUp, vec3Cross(startDir, endDir)), vec3Dot(startDir, endDir));
+    const angleDeg = Math.round(Math.abs(signedAng) * (180 / Math.PI));
+    if (angleDeg > 10) {
+      const arcAxis: Vec3 = signedAng >= 0 ? torsoUp : [-torsoUp[0], -torsoUp[1], -torsoUp[2]];
+      const partIds = [frontHead.id, ...frontHeadgear.map((hg) => hg.id)];
+      for (const pid of partIds) rotatedPartIdSet.add(pid);
+
+      const headSpan = Math.max(
+        headGroupBox.max[0] - headGroupBox.min[0],
+        headGroupBox.max[2] - headGroupBox.min[2],
+      );
+      poseIndicators.push({
+        kind: 'head',
+        label: `Turn head ${angleDeg}°`,
+        partIds,
+        pivot: [headGroupBox.center[0], headGroupBox.max[1] + 5, headGroupBox.center[2]],
+        axis: arcAxis,
+        startDir,
+        endDir,
+        angleDeg,
+        radius: Math.max(14, Math.min(20, headSpan * 0.58)),
+        lateralOffset: [0, 0, 0],
+        color: INDICATOR_COLOR_LIMB,
+      });
+    }
+  }
+
+  // 7d. Whole-Body Tilt Indicator
+  if (poseSummary.bodyTilted) {
+    const startDir: Vec3 = [0, 1, 0];
+    const endDir = vec3Norm(torsoUp);
+    const cross = vec3Cross(startDir, endDir);
+    const axis = Math.hypot(cross[0], cross[1], cross[2]) > 1e-3 ? vec3Norm(cross) : ([1, 0, 0] as Vec3);
+    const deg = Math.round(bodyTiltDeg);
+    const sideDist = Math.max(24, centeredFrontBox.max[0] - centeredFrontBox.center[0] + 10);
+    poseIndicators.push({
+      kind: 'body_tilt',
+      label: `Tilt figure ${deg}°`,
+      partIds: [],
+      pivot: [centeredFrontBox.center[0], centeredFrontBox.center[1], centeredFrontBox.center[2]],
+      axis,
+      startDir,
+      endDir,
+      angleDeg: deg,
+      radius: 28,
+      lateralOffset: [sideDist, 0, 0],
+      color: INDICATOR_COLOR_BODY_TILT,
+    });
+  }
+
+  // 7e. Whole-Body Yaw Rotation Indicator (placed cleanly below figure, ghost legs, and all limb arcs)
+  if (poseSummary.bodyRotated) {
+    const absDeg = Math.min(180, Math.round(Math.abs(bodyYawDeg)));
+    let lowestY = centeredFrontBox.min[1];
+    if (poseGhostParts.length > 0) {
+      const ghostBox = computeGroupBox(poseGhostParts, computeBox);
+      if (ghostBox.min[1] < lowestY) lowestY = ghostBox.min[1];
+    }
+    for (const ind of poseIndicators) {
+      const u0 = projectPerp(ind.startDir, ind.axis);
+      const u1 = vec3Norm(vec3Cross(ind.axis, u0));
+      const cy = ind.pivot[1] + ind.lateralOffset[1];
+      const maxRad = (ind.angleDeg * Math.PI) / 180;
+      for (let s = 0; s <= 6; s++) {
+        const a = (s / 6) * maxRad;
+        const py = cy + ind.radius * (Math.cos(a) * u0[1] + Math.sin(a) * u1[1]) - 5;
+        if (py < lowestY) lowestY = py;
+      }
+    }
+    const baseY = lowestY - 12;
+    const startDir: Vec3 = [0, 0, 1];
+    const endDir: Vec3 =
+      absDeg >= 175 ? [0, 0, -1] : [Math.sin(yawRad), 0, Math.cos(yawRad)];
+    const hasPlusXLimbArc = poseIndicators.some((ind) => ind.lateralOffset[0] > 4);
+    const arcAxis: Vec3 =
+      absDeg >= 175
+        ? (hasPlusXLimbArc ? [0, -1, 0] : [0, 1, 0])
+        : (bodyYawDeg >= 0 ? [0, 1, 0] : [0, -1, 0]);
+    const horizSpan = Math.max(
+      centeredFrontBox.max[0] - centeredFrontBox.min[0],
+      centeredFrontBox.max[2] - centeredFrontBox.min[2],
+    );
+    poseIndicators.push({
+      kind: 'body_yaw',
+      label: absDeg >= 165 ? 'Turn figure 180°' : `Turn figure ${absDeg}°`,
+      partIds: [],
+      pivot: [0, baseY, 0],
+      axis: arcAxis,
+      startDir,
+      endDir,
+      angleDeg: absDeg,
+      radius: Math.max(24, Math.min(34, horizSpan * 0.62)),
+      lateralOffset: [0, 0, 0],
+      color: INDICATOR_COLOR_BODY_YAW,
+    });
+  }
+
+  // 7f. Smart front 3/4 camera: always faces the minifig (+Z), choosing front-left when ONLY right-side limbs move
+  const hasRightOnlyLimb =
+    poseIndicators.some((ind) => ind.kind === 'leg_r' || ind.kind === 'arm_r') &&
+    !poseIndicators.some(
+      (ind) => ind.kind === 'legs' || ind.kind === 'leg_l' || ind.kind === 'arm_l' || ind.kind === 'body_tilt',
+    );
+  const poseCamera: MinifigPoseCamera = hasRightOnlyLimb
+    ? { side: 'top', corner: 'front_left', az: -MINIFIG_POSE_CAMERA.az, el: MINIFIG_POSE_CAMERA.el }
+    : { ...MINIFIG_POSE_CAMERA };
+
   return {
     canonicalParts,
     posedPreviewParts,
+    posedFrontParts,
+    poseCamera,
+    poseIndicators,
+    poseGhostParts,
+    rotatedPartIds: Array.from(rotatedPartIdSet),
     poseSummary,
     needsTransform,
     transformLabel: describeMinifigTransform(poseSummary),
