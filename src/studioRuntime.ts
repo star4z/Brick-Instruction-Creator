@@ -2613,7 +2613,7 @@ function renderAll() {
             <span class="px-2.5 py-0.5 rounded-full" style="background:${theme.pliBg};border:1px solid ${theme.pliBorder}">${allSteps.length} Steps</span>
           </div>
           <span class="inline-flex items-center gap-1.5" style="color:${theme.muted}">
-            <svg class="w-4 h-4 shrink-0" viewBox="0 0 64 64" fill="none" aria-hidden="true"><g transform="rotate(20 32 32)"><path d="M24.2 7.6 C8.4 15.6 6.2 35.8 16.2 45.4 L11.4 45.8 L22.0 56.0 L21.0 42.4 L18.8 44.3 C11.8 34.8 13.6 17.6 24.2 7.6 Z" fill="#38bdf8"/><path d="M32.0 4.8 C34.5 11.8 35.5 33.8 35.8 45.4 L40.4 43.5 L32.0 59.4 L23.6 43.5 L28.2 45.4 C28.5 33.8 29.5 11.8 32.0 4.8 Z" fill="#1a73e8"/><path d="M39.8 7.6 C50.4 17.6 52.2 34.8 45.2 44.3 L43.0 42.4 L42.0 56.0 L52.6 45.8 L47.8 45.4 C57.8 35.8 55.6 15.6 39.8 7.6 Z" fill="#1d48b8"/></g></svg>
+            <svg class="w-4 h-4 shrink-0" viewBox="0 0 64 64" fill="none" aria-hidden="true"><g transform="rotate(14 32 32)"><path d="M24.2 8.2 C9.0 15.8 7.2 31.8 14.8 40.4 L10.2 40.8 L19.6 50.4 L19.8 37.6 L17.4 39.4 C11.6 31.4 13.8 17.6 24.2 8.2 Z" fill="#38bdf8"/><path d="M32.0 4.6 C34.5 11.8 35.5 34.4 35.8 45.8 L40.5 43.9 L32.0 59.8 L23.5 43.9 L28.2 45.8 C28.5 34.4 29.5 11.8 32.0 4.6 Z" fill="#1a73e8"/><path d="M39.8 7.8 C50.4 17.6 52.0 34.2 45.2 43.4 L42.8 41.6 L42.2 54.6 L52.4 44.8 L47.8 44.3 C57.2 34.8 55.2 15.6 39.8 7.8 Z" fill="#1d48b8"/></g></svg>
             <span>Brick Instruction Creator</span>
           </span>
         </div>
@@ -2647,7 +2647,7 @@ function renderAll() {
     frame.innerHTML = `
       <div class="relative w-full h-full text-center flex flex-col items-center justify-center gap-3 overflow-hidden ${guideCls}" style="padding:${padPx + 10}px;${bm.bgSrc ? `background-image:url(${bm.bgSrc});background-size:cover;background-position:center;` : ''}">
         <div class="w-16 h-16 sm:w-20 sm:h-20 rounded-3xl flex items-center justify-center shadow-sm" style="background:${theme.pliBg};border:1px solid ${theme.pliBorder}">
-          <svg class="w-11 h-11 sm:w-14 sm:h-14" viewBox="0 0 64 64" fill="none" aria-hidden="true"><g transform="rotate(20 32 32)"><path d="M24.2 7.6 C8.4 15.6 6.2 35.8 16.2 45.4 L11.4 45.8 L22.0 56.0 L21.0 42.4 L18.8 44.3 C11.8 34.8 13.6 17.6 24.2 7.6 Z" fill="#38bdf8"/><path d="M32.0 4.8 C34.5 11.8 35.5 33.8 35.8 45.4 L40.4 43.5 L32.0 59.4 L23.6 43.5 L28.2 45.4 C28.5 33.8 29.5 11.8 32.0 4.8 Z" fill="#1a73e8"/><path d="M39.8 7.6 C50.4 17.6 52.2 34.8 45.2 44.3 L43.0 42.4 L42.0 56.0 L52.6 45.8 L47.8 45.4 C57.8 35.8 55.6 15.6 39.8 7.6 Z" fill="#1d48b8"/></g></svg>
+          <svg class="w-11 h-11 sm:w-14 sm:h-14" viewBox="0 0 64 64" fill="none" aria-hidden="true"><g transform="rotate(14 32 32)"><path d="M24.2 8.2 C9.0 15.8 7.2 31.8 14.8 40.4 L10.2 40.8 L19.6 50.4 L19.8 37.6 L17.4 39.4 C11.6 31.4 13.8 17.6 24.2 8.2 Z" fill="#38bdf8"/><path d="M32.0 4.6 C34.5 11.8 35.5 34.4 35.8 45.8 L40.5 43.9 L32.0 59.8 L23.5 43.9 L28.2 45.8 C28.5 34.4 29.5 11.8 32.0 4.6 Z" fill="#1a73e8"/><path d="M39.8 7.8 C50.4 17.6 52.0 34.2 45.2 43.4 L42.8 41.6 L42.2 54.6 L52.4 44.8 L47.8 44.3 C57.2 34.8 55.2 15.6 39.8 7.8 Z" fill="#1d48b8"/></g></svg>
         </div>
         <span class="text-xs sm:text-sm font-semibold" style="color:${theme.muted}">${escHtml(credit)}</span>
       </div>`;
@@ -4475,15 +4475,15 @@ function drawContain(ctx, img, x, y, w, h) {
 function drawBrandLogoCanvas(ctx, x, y, size) {
   if (typeof Path2D === 'undefined') return;
   const logoPaths = [
-    ['M24.2 7.6 C8.4 15.6 6.2 35.8 16.2 45.4 L11.4 45.8 L22.0 56.0 L21.0 42.4 L18.8 44.3 C11.8 34.8 13.6 17.6 24.2 7.6 Z', '#38bdf8'],
-    ['M32.0 4.8 C34.5 11.8 35.5 33.8 35.8 45.4 L40.4 43.5 L32.0 59.4 L23.6 43.5 L28.2 45.4 C28.5 33.8 29.5 11.8 32.0 4.8 Z', '#1a73e8'],
-    ['M39.8 7.6 C50.4 17.6 52.2 34.8 45.2 44.3 L43.0 42.4 L42.0 56.0 L52.6 45.8 L47.8 45.4 C57.8 35.8 55.6 15.6 39.8 7.6 Z', '#1d48b8'],
+    ['M24.2 8.2 C9.0 15.8 7.2 31.8 14.8 40.4 L10.2 40.8 L19.6 50.4 L19.8 37.6 L17.4 39.4 C11.6 31.4 13.8 17.6 24.2 8.2 Z', '#38bdf8'],
+    ['M32.0 4.6 C34.5 11.8 35.5 34.4 35.8 45.8 L40.5 43.9 L32.0 59.8 L23.5 43.9 L28.2 45.8 C28.5 34.4 29.5 11.8 32.0 4.6 Z', '#1a73e8'],
+    ['M39.8 7.8 C50.4 17.6 52.0 34.2 45.2 43.4 L42.8 41.6 L42.2 54.6 L52.4 44.8 L47.8 44.3 C57.2 34.8 55.2 15.6 39.8 7.8 Z', '#1d48b8'],
   ];
   ctx.save();
   ctx.translate(x, y);
   ctx.scale(size / 64, size / 64);
   ctx.translate(32, 32);
-  ctx.rotate((20 * Math.PI) / 180);
+  ctx.rotate((14 * Math.PI) / 180);
   ctx.translate(-32, -32);
   for (const [d, col] of logoPaths) { ctx.fillStyle = col; ctx.fill(new Path2D(d)); }
   ctx.restore();
