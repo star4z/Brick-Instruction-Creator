@@ -58,6 +58,7 @@ import {
   normalizeCoverMeta,
 } from './cover/coverLayout';
 import { buildQrSvg, drawQrCanvas } from './cover/qrCode';
+import { StudioPhotoRenderer } from './cover/studioPhotoRenderer';
 import { buildPdfBinary, canvasRectToPdfLink } from './export/pdfBinary';
 import {
   computeCanonicalPageMetrics,
@@ -747,11 +748,20 @@ function buildMeshBuffers(prevParts, newParts, opts) {
   const trPos = new FloatBuf(2048), trNorm = new FloatBuf(2048), trCol = new ByteBuf(2048);
   const lnPos = new FloatBuf(totalParts * 60), lnCol = new ByteBuf(totalParts * 80);
 
+  const heroQuality = Boolean(opts.heroQuality);
+
   const pushTri = (a, b, c, n, col, aByte) => {
     const isTrans = aByte < 245;
     const P = isTrans ? trPos : opPos, N = isTrans ? trNorm : opNorm, C = isTrans ? trCol : opCol;
     P.push9(a[0],a[1],a[2], b[0],b[1],b[2], c[0],c[1],c[2]);
     N.push9(n[0],n[1],n[2], n[0],n[1],n[2], n[0],n[1],n[2]);
+    C.push12(col[0], col[1], col[2], aByte);
+  };
+  const pushTriSmooth = (a, b, c, na, nb, nc, col, aByte) => {
+    const isTrans = aByte < 245;
+    const P = isTrans ? trPos : opPos, N = isTrans ? trNorm : opNorm, C = isTrans ? trCol : opCol;
+    P.push9(a[0],a[1],a[2], b[0],b[1],b[2], c[0],c[1],c[2]);
+    N.push9(na[0],na[1],na[2], nb[0],nb[1],nb[2], nc[0],nc[1],nc[2]);
     C.push12(col[0], col[1], col[2], aByte);
   };
   const pushEdge = (a, b, col, aByte) => {
@@ -761,6 +771,61 @@ function buildMeshBuffers(prevParts, newParts, opts) {
 
   const addBox = (cx, cy, cz, w, h, d, m, ox, oy, oz, hinge, col, eCol, aByte) => {
     const hw=w/2, hh=h/2, hd=d/2;
+    if (heroQuality && hw > 1.2 && hh > 1.2 && hd > 1.2) {
+      // Micro-beveled LEGO ABS brick: inset main faces + 12 chamfered 45° edges + 8 corner facets
+      // catches realistic glossy studio softbox highlights along every brick seam!
+      const b = Math.min(0.48, hw * 0.14, hh * 0.14, hd * 0.14);
+      const iw = hw - b, ih = hh - b, id = hd - b;
+      const pt = (x, y, z) => xformPt([cx + x, cy + y, cz + z], m, ox, oy, oz, hinge);
+      const qFace = (p0, p1, p2, p3, nLocal) => {
+        const wn = xformNorm(nLocal, m, hinge);
+        pushTri(p0, p1, p2, wn, col, aByte);
+        pushTri(p0, p2, p3, wn, col, aByte);
+      };
+      // 6 inset face quads (4 corners per face)
+      const fZ1 = [pt(-iw,-ih, hd), pt( iw,-ih, hd), pt( iw, ih, hd), pt(-iw, ih, hd)];
+      const fZ0 = [pt( iw,-ih,-hd), pt(-iw,-ih,-hd), pt(-iw, ih,-hd), pt( iw, ih,-hd)];
+      const fY1 = [pt(-iw, hh, id), pt( iw, hh, id), pt( iw, hh,-id), pt(-iw, hh,-id)];
+      const fY0 = [pt(-iw,-hh,-id), pt( iw,-hh,-id), pt( iw,-hh, id), pt(-iw,-hh, id)];
+      const fX1 = [pt( hw,-ih, id), pt( hw,-ih,-id), pt( hw, ih,-id), pt( hw, ih, id)];
+      const fX0 = [pt(-hw,-ih,-id), pt(-hw,-ih, id), pt(-hw, ih, id), pt(-hw, ih,-id)];
+
+      qFace(fZ1[0], fZ1[1], fZ1[2], fZ1[3], [0, 0, 1]);
+      qFace(fZ0[0], fZ0[1], fZ0[2], fZ0[3], [0, 0,-1]);
+      qFace(fY1[0], fY1[1], fY1[2], fY1[3], [0, 1, 0]);
+      qFace(fY0[0], fY0[1], fY0[2], fY0[3], [0,-1, 0]);
+      qFace(fX1[0], fX1[1], fX1[2], fX1[3], [1, 0, 0]);
+      qFace(fX0[0], fX0[1], fX0[2], fX0[3], [-1, 0, 0]);
+
+      const s2 = 0.70710678;
+      const s3 = 0.57735027;
+      // 4 top edge bevels
+      qFace(fZ1[3], fZ1[2], fY1[1], fY1[0], [0, s2, s2]);
+      qFace(fZ0[3], fZ0[2], fY1[3], fY1[2], [0, s2,-s2]);
+      qFace(fX1[3], fX1[2], fY1[2], fY1[1], [s2, s2, 0]);
+      qFace(fX0[3], fX0[2], fY1[0], fY1[3], [-s2, s2, 0]);
+      // 4 bottom edge bevels
+      qFace(fY0[3], fY0[2], fZ1[1], fZ1[0], [0,-s2, s2]);
+      qFace(fY0[1], fY0[0], fZ0[1], fZ0[0], [0,-s2,-s2]);
+      qFace(fY0[2], fY0[1], fX1[1], fX1[0], [s2,-s2, 0]);
+      qFace(fY0[0], fY0[3], fX0[1], fX0[0], [-s2,-s2, 0]);
+      // 4 vertical edge bevels
+      qFace(fZ1[1], fX1[0], fX1[3], fZ1[2], [s2, 0, s2]);
+      qFace(fX1[1], fZ0[0], fZ0[3], fX1[2], [s2, 0,-s2]);
+      qFace(fZ0[1], fX0[0], fX0[3], fZ0[2], [-s2, 0,-s2]);
+      qFace(fX0[1], fZ1[0], fZ1[3], fX0[2], [-s2, 0, s2]);
+      // 8 corner bevel triangles
+      pushTri(fZ1[2], fX1[3], fY1[1], xformNorm([ s3, s3, s3], m, hinge), col, aByte);
+      pushTri(fX1[2], fZ0[3], fY1[2], xformNorm([ s3, s3,-s3], m, hinge), col, aByte);
+      pushTri(fZ0[2], fX0[3], fY1[3], xformNorm([-s3, s3,-s3], m, hinge), col, aByte);
+      pushTri(fX0[2], fZ1[3], fY1[0], xformNorm([-s3, s3, s3], m, hinge), col, aByte);
+      pushTri(fZ1[1], fY0[2], fX1[0], xformNorm([ s3,-s3, s3], m, hinge), col, aByte);
+      pushTri(fX1[1], fY0[1], fZ0[0], xformNorm([ s3,-s3,-s3], m, hinge), col, aByte);
+      pushTri(fZ0[1], fY0[0], fX0[0], xformNorm([-s3,-s3,-s3], m, hinge), col, aByte);
+      pushTri(fX0[1], fY0[3], fZ1[0], xformNorm([-s3,-s3, s3], m, hinge), col, aByte);
+      return;
+    }
+
     const v = [
       xformPt([cx-hw,cy-hh,cz+hd],m,ox,oy,oz,hinge), xformPt([cx+hw,cy-hh,cz+hd],m,ox,oy,oz,hinge),
       xformPt([cx+hw,cy+hh,cz+hd],m,ox,oy,oz,hinge), xformPt([cx-hw,cy+hh,cz+hd],m,ox,oy,oz,hinge),
@@ -782,25 +847,49 @@ function buildMeshBuffers(prevParts, newParts, opts) {
     }
   };
 
-  const addCyl = (cx, cy, cz, rTop, rBot, h, axis, segs, m, ox, oy, oz, hinge, col, eCol, aByte) => {
+  const addCyl = (cx, cy, cz, rTop, rBot, h, axis, segs, m, ox, oy, oz, hinge, col, eCol, aByte, bevelTop = false) => {
+    const effSegs = heroQuality ? Math.max(segs, 16) : segs;
     const hh = h / 2;
     const mk = (u, v, t) => axis === 'y' ? [cx+u,cy+t,cz+v] : axis === 'x' ? [cx+t,cy+u,cz+v] : [cx+u,cy+v,cz+t];
+    const mkN = (u, v, t) => xformNorm(axis === 'y' ? [u, t, v] : axis === 'x' ? [t, u, v] : [u, v, t], m, hinge);
     const nTop = xformNorm(axis==='y'?[0,1,0]:axis==='x'?[1,0,0]:[0,0,1], m, hinge);
     const nBot = [-nTop[0], -nTop[1], -nTop[2]];
     const topC = xformPt(mk(0,0,hh), m, ox, oy, oz, hinge);
     const botC = xformPt(mk(0,0,-hh), m, ox, oy, oz, hinge);
-    for (let i = 0; i < segs; i++) {
-      const a0 = (i/segs)*Math.PI*2, a1 = ((i+1)/segs)*Math.PI*2;
-      const t0 = xformPt(mk(Math.cos(a0)*rTop, Math.sin(a0)*rTop, hh), m, ox, oy, oz, hinge);
-      const t1 = xformPt(mk(Math.cos(a1)*rTop, Math.sin(a1)*rTop, hh), m, ox, oy, oz, hinge);
-      const b0 = xformPt(mk(Math.cos(a0)*rBot, Math.sin(a0)*rBot, -hh), m, ox, oy, oz, hinge);
-      const b1 = xformPt(mk(Math.cos(a1)*rBot, Math.sin(a1)*rBot, -hh), m, ox, oy, oz, hinge);
-      const am = (a0+a1)/2;
-      const sn = xformNorm(axis==='y'?[Math.cos(am),0,Math.sin(am)]:axis==='x'?[0,Math.cos(am),Math.sin(am)]:[Math.cos(am),Math.sin(am),0], m, hinge);
-      pushTri(b0, b1, t1, sn, col, aByte); pushTri(b0, t1, t0, sn, col, aByte);
-      if (rTop > 0.05) pushTri(topC, t0, t1, nTop, col, aByte);
+    const useBevel = heroQuality && bevelTop && rTop > 1.0 && h > 1.2;
+    const bev = useBevel ? Math.min(0.42, rTop * 0.12, h * 0.16) : 0;
+    const sideTopY = hh - bev;
+    const capR = rTop - bev;
+    for (let i = 0; i < effSegs; i++) {
+      const a0 = (i/effSegs)*Math.PI*2, a1 = ((i+1)/effSegs)*Math.PI*2;
+      const c0 = Math.cos(a0), s0 = Math.sin(a0), c1 = Math.cos(a1), s1 = Math.sin(a1);
+      const t0 = xformPt(mk(c0*rTop, s0*rTop, sideTopY), m, ox, oy, oz, hinge);
+      const t1 = xformPt(mk(c1*rTop, s1*rTop, sideTopY), m, ox, oy, oz, hinge);
+      const b0 = xformPt(mk(c0*rBot, s0*rBot, -hh), m, ox, oy, oz, hinge);
+      const b1 = xformPt(mk(c1*rBot, s1*rBot, -hh), m, ox, oy, oz, hinge);
+      if (heroQuality) {
+        const sn0 = mkN(c0, s0, 0);
+        const sn1 = mkN(c1, s1, 0);
+        pushTriSmooth(b0, b1, t1, sn0, sn1, sn1, col, aByte);
+        pushTriSmooth(b0, t1, t0, sn0, sn1, sn0, col, aByte);
+      } else {
+        const am = (a0+a1)/2;
+        const sn = mkN(Math.cos(am), Math.sin(am), 0);
+        pushTri(b0, b1, t1, sn, col, aByte); pushTri(b0, t1, t0, sn, col, aByte);
+      }
+      if (useBevel) {
+        const ct0 = xformPt(mk(c0*capR, s0*capR, hh), m, ox, oy, oz, hinge);
+        const ct1 = xformPt(mk(c1*capR, s1*capR, hh), m, ox, oy, oz, hinge);
+        const bn0 = mkN(c0 * 0.7071, s0 * 0.7071, 0.7071);
+        const bn1 = mkN(c1 * 0.7071, s1 * 0.7071, 0.7071);
+        pushTriSmooth(t0, t1, ct1, bn0, bn1, bn1, col, aByte);
+        pushTriSmooth(t0, ct1, ct0, bn0, bn1, bn0, col, aByte);
+        pushTri(topC, ct0, ct1, nTop, col, aByte);
+      } else {
+        if (rTop > 0.05) pushTri(topC, t0, t1, nTop, col, aByte);
+      }
       if (rBot > 0.05) pushTri(botC, b1, b0, nBot, col, aByte);
-      if (includeEdges && rTop > 0.05) pushEdge(t0, t1, eCol, aByte);
+      if (!heroQuality && includeEdges && rTop > 0.05) pushEdge(t0, t1, eCol, aByte);
     }
   };
 
@@ -845,7 +934,7 @@ function buildMeshBuffers(prevParts, newParts, opts) {
     const startX = -((sx - 1) * 20) / 2, startZ = -((sz - 1) * 20) / 2;
     for (let ix = 0; ix < topX; ix++)
       for (let iz = 0; iz < sz; iz++)
-        addCyl(startX + ix*20, 1.8, startZ + iz*20, 5.8, 5.8, 4.4, 'y', 8, m, ox, oy, oz, hinge, col, eCol, aByte);
+        addCyl(startX + ix*20, 1.8, startZ + iz*20, 5.8, 5.8, 4.4, 'y', heroQuality ? 16 : 8, m, ox, oy, oz, hinge, col, eCol, aByte, true);
   };
 
   // Tapered arbitrary-axis limb segment (for sculpted minifigure arms & wrists)
@@ -1363,9 +1452,21 @@ class WebGLBrickEngine {
 
 const snapshotCanvas = document.createElement('canvas');
 const snapshotEngine = new WebGLBrickEngine(snapshotCanvas);
+let studioPhotoEngine = null;
 let activeLiveEngine = null;
 const pliThumbCache = new Map();
 const coverHeroCache = new Map();
+
+function getStudioPhotoEngine() {
+  if (!studioPhotoEngine) {
+    try {
+      studioPhotoEngine = new StudioPhotoRenderer();
+    } catch (_) {
+      studioPhotoEngine = null;
+    }
+  }
+  return studioPhotoEngine;
+}
 
 function isDarkHexColor(hex) {
   const clean = String(hex || '#ffffff').replace('#', '');
@@ -1402,19 +1503,51 @@ function renderCoverHeroSnapshot(parts, az, el, zoom, targetW, targetH, theme) {
   const cacheKey = `${parts.length}|${Math.round(az * 10)}|${Math.round(el * 10)}|${safeZoom}|${rw}x${rh}|${darkTheme ? 'd' : 'l'}`;
   if (coverHeroCache.has(cacheKey)) return coverHeroCache.get(cacheKey);
 
-  const mesh = buildMeshBuffers([], parts, {
-    highlightNew: false,
-    fadePrev: false,
-    showArrows: false,
-    accent: theme?.accent || '#1a73e8',
-  });
+  // Reuse hero beveled mesh across angle/zoom/theme edits for instant responsiveness
+  const meshCacheKey = `__hero_mesh_${parts.length}`;
+  let mesh = coverHeroCache.get(meshCacheKey);
+  if (!mesh) {
+    mesh = buildMeshBuffers([], parts, {
+      highlightNew: false,
+      fadePrev: false,
+      showArrows: false,
+      heroQuality: true,
+      accent: theme?.accent || '#1a73e8',
+    });
+    coverHeroCache.set(meshCacheKey, mesh);
+  }
+
+  // Primary path: Photorealistic multi-pass WebGL Studio Renderer (triple softbox shadow maps,
+  // linear-space GGX ABS plastic PBR, Fresnel softbox reflections, 3D shadow-catcher floor, SSAO)
+  const photo = getStudioPhotoEngine();
+  if (photo && photo.isAvailable()) {
+    const rendered = photo.render(mesh, {
+      azDeg: az,
+      elDeg: el,
+      width: rw,
+      height: rh,
+      zoom: safeZoom,
+      darkBackground: darkTheme,
+    });
+    if (rendered) {
+      const out = { url: rendered.url, mesh, mvp: null, w: rendered.width, h: rendered.height };
+      if (coverHeroCache.size > 18) {
+        const keepMesh = coverHeroCache.get(meshCacheKey);
+        coverHeroCache.clear();
+        if (keepMesh) coverHeroCache.set(meshCacheKey, keepMesh);
+      }
+      coverHeroCache.set(cacheKey, out);
+      return out;
+    }
+  }
+
+  // Fallback path if FBO shadow maps are unavailable on the current device
   const mvp = snapshotEngine.draw(mesh, rw, rh, az, el, safeZoom, 0, {
     tightFit: true,
     heroShading: true,
-    lineAlpha: 0.48,
+    lineAlpha: 0.32,
   });
 
-  // Composite soft studio floor shadow beneath the crisp high-res WebGL model render
   const comp = document.createElement('canvas');
   comp.width = rw;
   comp.height = rh;
@@ -1480,7 +1613,7 @@ function renderCoverHeroSnapshot(parts, az, el, zoom, targetW, targetH, theme) {
   }
 
   const out = { url: comp.toDataURL('image/png'), mesh, mvp, w: rw, h: rh };
-  if (coverHeroCache.size > 16) coverHeroCache.clear();
+  if (coverHeroCache.size > 18) coverHeroCache.clear();
   coverHeroCache.set(cacheKey, out);
   return out;
 }
@@ -4463,7 +4596,7 @@ function renderAll() {
       </div>`;
   } else if (page.kind === 'complete') {
     const cm = state.completeMeta;
-    const snap = renderSnapshot([], allParts, cm.az, cm.el, 760, 500, 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent });
+    const snap = renderCoverHeroSnapshot(allParts, cm.az, cm.el, 1.0, Math.round(dims.width * 1.6), Math.round(dims.height * 1.15), theme);
     const pgNumText = formatPageNumber(page.num, state.pages.length);
     const showText = cm.showText !== false;
     const showFw = cm.showFireworks !== false;
@@ -6987,9 +7120,9 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       }
       ctx.textAlign = 'left';
     }
-    const snap = renderSnapshot([], allParts, cm.az, cm.el, 920, 620, 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent });
-    const img = await loadImgPromise(snap.url);
     const availH = pxH - topOff - pad - footerH;
+    const snap = renderCoverHeroSnapshot(allParts, cm.az, cm.el, 1.0, Math.min(1800, Math.round((pxW - pad * 2) * 1.35)), Math.min(1600, Math.round(availH * 1.35)), theme);
+    const img = await loadImgPromise(snap.url);
     drawContain(ctx, img, pad, topOff, pxW - pad * 2, availH);
     drawFooter(state.model.title);
   } else if (page.kind === 'back') {

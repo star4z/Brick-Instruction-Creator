@@ -56,22 +56,32 @@ Both the live HTML preview (`src/studioRuntime.ts`) and the high-DPI PDF canvas 
 
 ---
 
-## 3. High-Quality Hero Rendering Pipeline
+## 3. Photorealistic Studio Hero Rendering Pipeline (`src/cover/studioPhotoRenderer.ts`)
 
-To achieve a publication-grade cover render inside the pure-JS WebGL engine (`WebGLBrickEngine` in `src/studioRuntime.ts`):
+To achieve a publication-grade LEGO studio photography look on the Cover Page (and Build Complete showcase page) with zero external dependencies and full WebGL 1.0 compatibility:
 
-1. **Camera-Space Tight Bounding-Box Projection (`tightFit: true`)**:
-   - Instead of orthographic bounding-sphere framing (which leaves large dead margins on elongated ships, trains, or towers), every mesh vertex is projected onto the camera's `(right, up, forward)` basis vectors to compute the exact screen-space bounding box.
-   - The orthographic frustum is re-centered on the projected midpoint and fitted to the hero canvas aspect ratio with ~4% breathing room, scaled by the user's optional `coverMeta.zoom` multiplier (`0.75`–`1.35`).
-2. **Hero Studio Lighting (`heroShading: true`)**:
-   - Uses camera-relative 3-point studio lighting (overhead key, warm opposite fill, subtle rim highlight for dark bricks) plus a Blinn-Phong specular highlight (`pow(dot(N, H), 42)`) simulating injection-molded ABS plastic sheen.
-   - Brick edge lines render with softened opacity on the cover so brick seams read as refined micro-bevels rather than heavy technical CAD strokes.
-3. **Soft Studio Ground Shadow (`heroShadow: true`)**:
-   - Projects the model's grounded base footprint (`y = minY`) and full horizontal XZ silhouette onto the floor plane through the exact camera MVP matrix.
-   - Composites dual-layer soft radial ellipses (ambient cast shadow + tighter contact shadow directly under grounded supports) beneath the high-resolution WebGL model render.
-4. **High Resolution & Caching**:
-   - Live cover preview renders up to `1600px` wide (aspect-matched to the hero zone) and caches by `(model, az, el, zoom, themeId, size)` so typing titles or toggling branding is instantaneous.
-   - PDF export renders up to `2000px` wide for crisp print output.
+1. **Micro-Beveled Hero Brick & Smooth Stud Geometry (`heroQuality: true`)**:
+   - Procedural bricks generate subtle `0.48 LDU` 45° chamfered edge bevels and corner facets so every brick seam catches crisp studio softbox catchlights.
+   - Studs and cylinders render at 16+ segments with smooth per-vertex radial normals and a chamfered top bevel ring so specular highlights wrap smoothly around every stud.
+2. **Telephoto Studio Perspective Camera (`computeStudioTelephotoCamera`)**:
+   - Uses a long product-photography telephoto lens (`~18.5°` vertical FOV, equivalent to ~115mm macro lens) fitted tightly to the model's exact projected silhouette so models of any proportion fill the cover edge-to-edge while retaining authentic physical depth.
+3. **Triple 24-Bit RGBA-Packed Studio Softbox Shadow Maps**:
+   - Renders three offscreen depth shadow maps with zero float-texture extensions needed:
+     - **Key Softbox** (`1024×1024`, high front-right relative to camera)
+     - **Fill Softbox** (`768×768`, front-left studio bounce)
+     - **Overhead Light-Tent Dome** (`768×768`, top vertical occlusion under overhangs and decks)
+   - Sampled with per-pixel rotated Vogel-disk PCF kernels (`12–16` taps) and normal-slope-scaled bias for buttery-soft, artifact-free self-shadows across studs, overhangs, and stands.
+4. **Physically-Based LEGO ABS Plastic Shading (Linear HDR → ACES Filmic → sRGB)**:
+   - Converts brick albedo from sRGB to linear light space (`pow(c, 2.2)`).
+   - Evaluates Cook-Torrance **GGX** microfacet specular + energy-conserving diffuse across 3 camera-relative studio lights (warm-daylight key, cool-neutral fill, crisp back-rim strip) with ABS dielectric reflectivity (`F0 = 0.046`, IOR ≈ 1.54).
+   - Samples a procedural tabletop **studio softbox cyclorama environment** via Schlick Fresnel reflection so flat walls, dark display stands, and clear polycarbonate bricks reflect realistic overhead softboxes and studio floor bounce.
+   - Applies **ACES Filmic tone mapping** and sRGB gamma encoding for rich, photographic highlights and deep non-crushed darks.
+5. **3D Shadow-Catcher Studio Floor Plane**:
+   - Rendered in 3D at `y = minY - 0.12` receiving all three softbox shadow maps with proximity-weighted contact darkening (dark crisp contact shadow right under grounded feet/stands + wide feathered penumbra under overhanging hulls/wings) and transparent alpha feathering so it blends onto any theme or custom background.
+6. **Screen-Space Ambient Occlusion (SSAO) Crevice Pass**:
+   - Renders a linear view-space depth pass and evaluates a 16-sample depth-thresholded rotated screen-space occlusion kernel to softly darken stud bases, brick-to-brick joints, and recessed corners without creating silhouette halos.
+7. **High Resolution, Mesh Caching & Graceful Fallback**:
+   - Live cover preview renders up to `1600px` wide; PDF export renders up to `2000px` wide. Both reuse the cached hero beveled mesh and rendered snapshots across UI edits, and gracefully fall back to `WebGLBrickEngine` if FBOs are unavailable.
 
 ---
 

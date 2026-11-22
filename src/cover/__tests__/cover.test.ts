@@ -8,6 +8,11 @@ import {
   normalizeCoverMeta,
 } from '../coverLayout';
 import { buildQrSvg, generateQrMatrix } from '../qrCode';
+import {
+  computeLightOrthoMVP,
+  computeStudioLightDirs,
+  computeStudioTelephotoCamera,
+} from '../studioPhotoRenderer';
 import { buildPdfBinary, canvasRectToPdfLink } from '../../export/pdfBinary';
 
 // Minimal ISO/IEC 18004 verifier: extracts format info, unmasks data modules, verifies GF(256)
@@ -381,3 +386,44 @@ describe('PDF 1.4 Binary Builder with Clickable Link Annotations', () => {
     }
   });
 });
+
+describe('Photorealistic Studio Camera & Softbox Light Rig', () => {
+  it('fits every vertex of an elongated model tightly inside the telephoto perspective frustum', () => {
+    const corners = new Float32Array([
+      -200, 0, -40, 200, 0, -40, 200, 90, -40,
+      -200, 0, 40, 200, 90, 40, -200, 90, 40,
+    ]);
+    const cam = computeStudioTelephotoCamera(corners, [0, 45, 0], 34, 18, 1200, 720, 1.0, 18.5);
+    expect(cam.near).toBeGreaterThan(0);
+    expect(cam.far).toBeGreaterThan(cam.near);
+
+    // Project every corner through cam.mvp and ensure all sit cleanly inside [-1, 1] NDC
+    let maxAbsX = 0;
+    let maxAbsY = 0;
+    for (let i = 0; i < corners.length; i += 3) {
+      const x = corners[i], y = corners[i + 1], z = corners[i + 2];
+      const m = cam.mvp;
+      const cx = m[0] * x + m[4] * y + m[8] * z + m[12];
+      const cy = m[1] * x + m[5] * y + m[9] * z + m[13];
+      const cw = m[3] * x + m[7] * y + m[11] * z + m[15];
+      maxAbsX = Math.max(maxAbsX, Math.abs(cx / cw));
+      maxAbsY = Math.max(maxAbsY, Math.abs(cy / cw));
+    }
+    expect(maxAbsX).toBeGreaterThan(0.8);
+    expect(maxAbsX).toBeLessThanOrEqual(0.98);
+    expect(maxAbsY).toBeLessThanOrEqual(0.98);
+  });
+
+  it('produces normalized upward-angled studio softbox lights and finite shadow-map matrices', () => {
+    const lights = computeStudioLightDirs(34);
+    for (const dir of [lights.key, lights.fill, lights.rim, lights.overhead]) {
+      const len = Math.hypot(dir[0], dir[1], dir[2]);
+      expect(len).toBeCloseTo(1.0, 5);
+      expect(dir[1]).toBeGreaterThan(0.5); // All studio softboxes sit above the horizon
+    }
+    const keyMvp = computeLightOrthoMVP([0, 40, 0], 180, lights.key);
+    expect(keyMvp.length).toBe(16);
+    expect(Array.from(keyMvp).every((v) => Number.isFinite(v))).toBe(true);
+  });
+});
+
