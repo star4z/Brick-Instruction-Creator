@@ -3428,7 +3428,7 @@ const state = {
   bomShortcutVisible: false,
   pages: [],
   pageIdx: 0,
-  mode: 'pan',             // pan | select | rotate | arrange
+  mode: 'pan',             // pan | edit | select | rotate | arrange
   selectedStepId: null,
   selectedPartIds: new Set(),
   selectedArrangeEl: null, // { stepId, kind:'pli'|'callout'|'insert', insertId? }
@@ -3962,6 +3962,15 @@ function getModelFileTypeInfo() {
   return { badge: 'SAMPLE', label: 'Built-In Sample Model', cls: 'bg-black/10 dark:bg-white/10 text-[var(--muted-foreground)]' };
 }
 
+function isSimpleEditPage(page) {
+  return Boolean(page && (page.kind === 'cover' || page.kind === 'complete' || page.kind === 'back' || page.kind === 'divider' || page.kind === 'bom'));
+}
+
+function isPanGestureEnabled() {
+  const page = state.pages[state.pageIdx];
+  return state.mode === 'pan' || (page?.kind !== 'steps' && !isSimpleEditPage(page));
+}
+
 function renderAll() {
   if (activeLiveEngine) { activeLiveEngine.dispose(); activeLiveEngine = null; }
   currentSlotRenderInfo.clear();
@@ -4025,10 +4034,26 @@ function renderAll() {
   document.getElementById('prevPage').disabled = state.pageIdx <= 0;
   document.getElementById('nextPage').disabled = state.pageIdx >= state.pages.length - 1;
 
-  // Update Mode Pill styling
+  const isSteps = page.kind === 'steps';
+  const isSimpleEdit = isSimpleEditPage(page);
+  if (isSteps && state.mode === 'edit') {
+    state.mode = 'pan';
+  }
+
+  // Update Mode Pill visibility & styling for the current page type
+  const modePill = document.getElementById('modePill');
+  if (modePill) modePill.classList.toggle('hidden', !isSteps && !isSimpleEdit);
   document.querySelectorAll('.mode-btn').forEach(b => {
-    const active = b.getAttribute('data-mode') === state.mode;
-    b.className = `mode-btn px-2.5 sm:px-3 py-1.5 rounded-full flex items-center gap-1 whitespace-nowrap transition ${
+    const m = b.getAttribute('data-mode');
+    const visible = m === 'pan'
+      ? (isSteps || isSimpleEdit)
+      : m === 'edit'
+        ? isSimpleEdit
+        : isSteps;
+    const active = isSimpleEdit
+      ? (m === 'pan' ? state.mode === 'pan' : m === 'edit' && state.mode !== 'pan')
+      : m === state.mode;
+    b.className = `mode-btn ${visible ? 'flex' : 'hidden'} px-2.5 sm:px-3 py-1.5 rounded-full items-center gap-1 whitespace-nowrap transition ${
       active ? 'bg-[#1a73e8] text-white shadow-xs' : 'opacity-75 hover:opacity-100'
     }`;
   });
@@ -4115,7 +4140,7 @@ function renderAll() {
     frame.innerHTML = `
       <div class="w-full h-full flex flex-col items-center justify-center text-center gap-2 ${guideCls}" style="padding:${padPx + 12}px">
         <div class="text-2xl sm:text-3xl font-extrabold">${escHtml(d.title)}</div>
-        <div class="text-xs max-w-md" style="color:${theme.muted}">${escHtml(d.note || 'Switch to Arrange mode to edit this divider page or add notes/images.')}</div>
+        <div class="text-xs max-w-md" style="color:${theme.muted}">${escHtml(d.note || 'Switch to Edit mode to edit this divider page.')}</div>
       </div>`;
   } else if (page.kind === 'section_divider') {
     const snap = renderSnapshot([], page.previewParts || [], 38, 28, 620, 400, 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent });
@@ -5224,7 +5249,7 @@ function renderOverviewModal() {
       startDist = Math.max(10, Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY));
       startMidX = (t[0].clientX + t[1].clientX) / 2;
       startMidY = (t[0].clientY + t[1].clientY) / 2;
-    } else if (t.length === 1 && state.mode === 'pan') {
+    } else if (t.length === 1 && isPanGestureEnabled()) {
       e.preventDefault();
       const now = Date.now();
       if (now - lastTapTime < 280) { resetZoom(); modeTouch = null; touchMoved = true; return; }
@@ -5251,7 +5276,7 @@ function renderOverviewModal() {
       state.panX = (midX - cx) - ((startMidX - cx) - startPanX) * ratio;
       state.panY = (midY - cy) - ((startMidY - cy) - startPanY) * ratio;
       applyStageTransform();
-    } else if (modeTouch === 'pan' && t.length === 1 && state.mode === 'pan') {
+    } else if (modeTouch === 'pan' && t.length === 1 && isPanGestureEnabled()) {
       e.preventDefault();
       if (Math.hypot(t[0].clientX - startX, t[0].clientY - startY) > 10) touchMoved = true;
       state.panX = startPanX + (t[0].clientX - startX);
@@ -5262,7 +5287,7 @@ function renderOverviewModal() {
 
   const endTouch = (e) => {
     const t = e.touches;
-    if (t.length === 1 && state.mode === 'pan') {
+    if (t.length === 1 && isPanGestureEnabled()) {
       modeTouch = 'pan';
       startPanX = state.panX; startPanY = state.panY;
       startX = t[0].clientX; startY = t[0].clientY;
@@ -5277,10 +5302,10 @@ function renderOverviewModal() {
   stage.addEventListener('touchend', endTouch, { passive: true });
   stage.addEventListener('touchcancel', endTouch, { passive: true });
 
-  // Desktop mouse drag panning (Pan mode only)
+  // Desktop mouse drag panning (Pan mode or read-only pages)
   let mouseDragging = false;
   stage.addEventListener('mousedown', (e) => {
-    if (!state.model || state.mode !== 'pan' || e.button !== 0) return;
+    if (!state.model || !isPanGestureEnabled() || e.button !== 0) return;
     mouseDragging = true;
     startPanX = state.panX; startPanY = state.panY;
     startX = e.clientX; startY = e.clientY;
@@ -6968,6 +6993,7 @@ document.getElementById('btnRedo').onclick = () => {
 document.querySelectorAll('.mode-btn').forEach(b => {
   b.onclick = () => {
     state.mode = b.getAttribute('data-mode');
+    if (state.mode === 'pan') state.bomShortcutVisible = false;
     if (state.mode !== 'select') state.selectedPartIds.clear();
     if (state.mode !== 'arrange') state.selectedArrangeEl = null;
     renderAll();
