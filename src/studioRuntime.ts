@@ -37,6 +37,19 @@ import {
   slugifyThemeFilename,
   toHexColor,
 } from './themes/customThemes';
+import {
+  PROGRAM_NAME,
+  PROGRAM_URL,
+  clampCoverElevation,
+  clampCoverZoom,
+  computeCameraBasis,
+  computeCoverLayout,
+  computeTightCameraBounds,
+  createDefaultCoverMeta,
+  normalizeCoverMeta,
+} from './cover/coverLayout';
+import { buildQrSvg, drawQrCanvas } from './cover/qrCode';
+import { buildPdfBinary, canvasRectToPdfLink } from './export/pdfBinary';
 
 let initialized = false;
 
@@ -1190,19 +1203,53 @@ class WebGLBrickEngine {
     this.gl = gl;
     if (!gl) return;
     const vsTri = `attribute vec3 aPos; attribute vec3 aNorm; attribute vec4 aCol; uniform mat4 uMVP; varying vec3 vNorm; varying vec4 vCol; void main(){ gl_Position = uMVP * vec4(aPos,1.0); vNorm = aNorm; vCol = aCol; }`;
-    const fsTri = `precision mediump float; varying vec3 vNorm; varying vec4 vCol; void main(){ vec3 n = normalize(vNorm); if (!gl_FrontFacing) n = -n; float key = max(dot(n, normalize(vec3(0.55,0.85,0.55))), 0.0); float fill = max(dot(n, normalize(vec3(-0.7,0.35,-0.5))), 0.0); float hemi = 0.50 + 0.15 * n.y; float shade = min(1.08, hemi + key * 0.44 + fill * 0.18); gl_FragColor = vec4(vCol.rgb * shade, vCol.a); }`;
+    const fsTri = `precision mediump float;
+      uniform float uHeroMode;
+      uniform vec3 uViewDir;
+      varying vec3 vNorm;
+      varying vec4 vCol;
+      void main(){
+        vec3 n = normalize(vNorm);
+        if (!gl_FrontFacing) n = -n;
+        if (uHeroMode > 0.5) {
+          vec3 v = normalize(uViewDir);
+          vec3 keyDir = normalize(vec3(0.42, 0.86, 0.52));
+          vec3 fillDir = normalize(vec3(-0.68, 0.38, 0.34));
+          vec3 rimDir = normalize(vec3(-0.22, 0.58, -0.78));
+          float key = max(dot(n, keyDir), 0.0);
+          float fill = max(dot(n, fillDir), 0.0);
+          float rim = max(dot(n, rimDir), 0.0);
+          float hemi = 0.50 + 0.14 * n.y + 0.05 * max(-n.y, 0.0);
+          float diff = min(1.06, hemi + key * 0.44 + fill * 0.18 + rim * 0.12);
+          vec3 hKey = normalize(keyDir + v);
+          float specKey = pow(max(dot(n, hKey), 0.0), 42.0) * 0.17;
+          vec3 hRim = normalize(rimDir + v);
+          float specRim = pow(max(dot(n, hRim), 0.0), 26.0) * 0.07;
+          vec3 col = min(vec3(1.0), vCol.rgb * diff + vec3(specKey + specRim));
+          gl_FragColor = vec4(col, vCol.a);
+        } else {
+          float key = max(dot(n, normalize(vec3(0.55,0.85,0.55))), 0.0);
+          float fill = max(dot(n, normalize(vec3(-0.7,0.35,-0.5))), 0.0);
+          float hemi = 0.50 + 0.15 * n.y;
+          float shade = min(1.08, hemi + key * 0.44 + fill * 0.18);
+          gl_FragColor = vec4(vCol.rgb * shade, vCol.a);
+        }
+      }`;
     const vsLine = `attribute vec3 aPos; attribute vec4 aCol; uniform mat4 uMVP; varying vec4 vCol; void main(){ gl_Position = uMVP * vec4(aPos,1.0); gl_Position.z -= 0.00022; vCol = aCol; }`;
-    const fsLine = `precision mediump float; varying vec4 vCol; void main(){ gl_FragColor = vCol; }`;
+    const fsLine = `precision mediump float; uniform float uLineAlpha; varying vec4 vCol; void main(){ gl_FragColor = vec4(vCol.rgb, vCol.a * uLineAlpha); }`;
     const cmp = (t, s) => { const sh = gl.createShader(t); gl.shaderSource(sh, s); gl.compileShader(sh); return sh; };
     const lnk = (v, f) => { const p = gl.createProgram(); gl.attachShader(p, cmp(gl.VERTEX_SHADER, v)); gl.attachShader(p, cmp(gl.FRAGMENT_SHADER, f)); gl.linkProgram(p); return p; };
     this.triProg = lnk(vsTri, fsTri);
     this.lineProg = lnk(vsLine, fsLine);
     this.loc = {
       tMVP: gl.getUniformLocation(this.triProg, 'uMVP'),
+      tHeroMode: gl.getUniformLocation(this.triProg, 'uHeroMode'),
+      tViewDir: gl.getUniformLocation(this.triProg, 'uViewDir'),
       tPos: gl.getAttribLocation(this.triProg, 'aPos'),
       tNorm: gl.getAttribLocation(this.triProg, 'aNorm'),
       tCol: gl.getAttribLocation(this.triProg, 'aCol'),
       lMVP: gl.getUniformLocation(this.lineProg, 'uMVP'),
+      lAlpha: gl.getUniformLocation(this.lineProg, 'uLineAlpha'),
       lPos: gl.getAttribLocation(this.lineProg, 'aPos'),
       lCol: gl.getAttribLocation(this.lineProg, 'aCol'),
     };
@@ -1219,19 +1266,38 @@ class WebGLBrickEngine {
     gl.bindBuffer(gl.ARRAY_BUFFER, this.bLineCol); gl.bufferData(gl.ARRAY_BUFFER, mesh.lineCol, gl.STATIC_DRAW);
     this.uploadedMesh = mesh;
   }
-  computeMVP(mesh, w, h, azDeg, elDeg, zoom = 1, fixedHalfH = 0) {
+  computeMVP(mesh, w, h, azDeg, elDeg, zoom = 1, fixedHalfH = 0, tightFit = false) {
     const az = azDeg * Math.PI / 180, el = elDeg * Math.PI / 180;
     // Tight near/far ortho depth range around full model radius for 4x sharper Z-buffer occlusion!
     const clipRadius = Math.max(mesh.fullRadius || mesh.radius, mesh.radius);
     const dist = clipRadius * 2.5;
     const eye = [mesh.center[0]+dist*Math.sin(az)*Math.cos(el), mesh.center[1]+dist*Math.sin(el), mesh.center[2]+dist*Math.cos(az)*Math.cos(el)];
-    const halfH = fixedHalfH > 0 ? fixedHalfH : ((mesh.radius * 1.12) / Math.max(0.4, zoom));
-    const halfW = halfH * (w / Math.max(1, h));
     const near = Math.max(1, dist - clipRadius * 2.2);
     const far = dist + clipRadius * 2.2;
-    return mulMat4(orthoMat4(-halfW, halfW, -halfH, halfH, near, far), lookAtMat4(eye, mesh.center, [0, 1, 0]));
+    const view = lookAtMat4(eye, mesh.center, [0, 1, 0]);
+    if (tightFit && fixedHalfH <= 0 && mesh.triPos && mesh.triPos.length >= 9) {
+      const tb = computeTightCameraBounds(mesh.triPos, mesh.center, azDeg, elDeg, w, h, zoom, 1.07);
+      if (tb) {
+        // Reserve a small bottom strip (~3.5%) so the soft studio floor shadow never clips
+        const shadowShiftY = tb.halfH * 0.035;
+        return mulMat4(
+          orthoMat4(
+            tb.centerX - tb.halfW,
+            tb.centerX + tb.halfW,
+            tb.centerY - tb.halfH - shadowShiftY,
+            tb.centerY + tb.halfH - shadowShiftY,
+            near,
+            far,
+          ),
+          view,
+        );
+      }
+    }
+    const halfH = fixedHalfH > 0 ? fixedHalfH : ((mesh.radius * 1.12) / Math.max(0.4, zoom));
+    const halfW = halfH * (w / Math.max(1, h));
+    return mulMat4(orthoMat4(-halfW, halfW, -halfH, halfH, near, far), view);
   }
-  draw(mesh, w, h, azDeg, elDeg, zoom = 1, fixedHalfH = 0) {
+  draw(mesh, w, h, azDeg, elDeg, zoom = 1, fixedHalfH = 0, drawOpts = null) {
     const gl = this.gl;
     if (!gl || mesh.triPos.length === 0) return null;
     if (this.canvas.width !== w || this.canvas.height !== h) { this.canvas.width = w; this.canvas.height = h; }
@@ -1243,9 +1309,16 @@ class WebGLBrickEngine {
     gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     gl.enable(gl.POLYGON_OFFSET_FILL); gl.polygonOffset(1.0, 1.0);
 
-    const mvp = this.computeMVP(mesh, w, h, azDeg, elDeg, zoom, fixedHalfH);
+    const tightFit = Boolean(drawOpts?.tightFit);
+    const heroShading = Boolean(drawOpts?.heroShading);
+    const lineAlpha = typeof drawOpts?.lineAlpha === 'number' ? drawOpts.lineAlpha : (heroShading ? 0.52 : 1.0);
+    const mvp = this.computeMVP(mesh, w, h, azDeg, elDeg, zoom, fixedHalfH, tightFit);
+    const { forward } = computeCameraBasis(azDeg, elDeg);
+
     gl.useProgram(this.triProg);
     gl.uniformMatrix4fv(this.loc.tMVP, false, mvp);
+    gl.uniform1f(this.loc.tHeroMode, heroShading ? 1.0 : 0.0);
+    gl.uniform3f(this.loc.tViewDir, forward[0], forward[1], forward[2]);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.bTriPos); gl.enableVertexAttribArray(this.loc.tPos); gl.vertexAttribPointer(this.loc.tPos, 3, gl.FLOAT, false, 0, 0);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.bTriNorm); gl.enableVertexAttribArray(this.loc.tNorm); gl.vertexAttribPointer(this.loc.tNorm, 3, gl.FLOAT, false, 0, 0);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.bTriCol); gl.enableVertexAttribArray(this.loc.tCol); gl.vertexAttribPointer(this.loc.tCol, 4, gl.UNSIGNED_BYTE, true, 0, 0);
@@ -1257,9 +1330,10 @@ class WebGLBrickEngine {
       gl.drawArrays(gl.TRIANGLES, mesh.opaqueCount, mesh.transCount);
       gl.depthMask(true);
     }
-    if (mesh.linePos.length > 0) {
+    if (mesh.linePos.length > 0 && lineAlpha > 0.01) {
       gl.useProgram(this.lineProg);
       gl.uniformMatrix4fv(this.loc.lMVP, false, mvp);
+      gl.uniform1f(this.loc.lAlpha, lineAlpha);
       gl.bindBuffer(gl.ARRAY_BUFFER, this.bLinePos); gl.enableVertexAttribArray(this.loc.lPos); gl.vertexAttribPointer(this.loc.lPos, 3, gl.FLOAT, false, 0, 0);
       gl.bindBuffer(gl.ARRAY_BUFFER, this.bLineCol); gl.enableVertexAttribArray(this.loc.lCol); gl.vertexAttribPointer(this.loc.lCol, 4, gl.UNSIGNED_BYTE, true, 0, 0);
       gl.drawArrays(gl.LINES, 0, mesh.linePos.length / 3);
@@ -1277,6 +1351,16 @@ const snapshotCanvas = document.createElement('canvas');
 const snapshotEngine = new WebGLBrickEngine(snapshotCanvas);
 let activeLiveEngine = null;
 const pliThumbCache = new Map();
+const coverHeroCache = new Map();
+
+function isDarkHexColor(hex) {
+  const clean = String(hex || '#ffffff').replace('#', '');
+  const full = clean.length === 3 ? clean.split('').map(c => c + c).join('') : clean.padEnd(6, '0');
+  const r = parseInt(full.slice(0, 2), 16) || 255;
+  const g = parseInt(full.slice(2, 4), 16) || 255;
+  const b = parseInt(full.slice(4, 6), 16) || 255;
+  return (0.299 * r + 0.587 * g + 0.114 * b) < 110;
+}
 
 function getPliThumb(part) {
   const key = `${part.p}:${part.c}`;
@@ -1292,8 +1376,99 @@ function getPliThumb(part) {
 
 function renderSnapshot(prev, next, az, el, w, h, zoom, opts) {
   const mesh = buildMeshBuffers(prev, next, opts);
-  const mvp = snapshotEngine.draw(mesh, w, h, az, el, zoom, opts?.fixedHalfH || 0);
+  const mvp = snapshotEngine.draw(mesh, w, h, az, el, zoom, opts?.fixedHalfH || 0, opts);
   return { url: snapshotCanvas.toDataURL('image/png'), mesh, mvp, w, h };
+}
+
+function renderCoverHeroSnapshot(parts, az, el, zoom, targetW, targetH, theme) {
+  const safeZoom = clampCoverZoom(zoom ?? 1.0);
+  const rw = Math.max(480, Math.min(2000, Math.round(targetW)));
+  const rh = Math.max(320, Math.min(2000, Math.round(targetH)));
+  const darkTheme = isDarkHexColor(toHexColor(theme?.bgColor || '#ffffff', '#ffffff'));
+  const cacheKey = `${parts.length}|${Math.round(az * 10)}|${Math.round(el * 10)}|${safeZoom}|${rw}x${rh}|${darkTheme ? 'd' : 'l'}`;
+  if (coverHeroCache.has(cacheKey)) return coverHeroCache.get(cacheKey);
+
+  const mesh = buildMeshBuffers([], parts, {
+    highlightNew: false,
+    fadePrev: false,
+    showArrows: false,
+    accent: theme?.accent || '#1a73e8',
+  });
+  const mvp = snapshotEngine.draw(mesh, rw, rh, az, el, safeZoom, 0, {
+    tightFit: true,
+    heroShading: true,
+    lineAlpha: 0.48,
+  });
+
+  // Composite soft studio floor shadow beneath the crisp high-res WebGL model render
+  const comp = document.createElement('canvas');
+  comp.width = rw;
+  comp.height = rh;
+  const cctx = comp.getContext('2d');
+  if (cctx && mvp && mesh.triPos.length >= 9) {
+    const minY = mesh.bounds.minY;
+    const baseTol = minY + Math.max(10, (mesh.bounds.maxY - minY) * 0.09);
+    let allMinX = Infinity, allMaxX = -Infinity, allMinY = Infinity, allMaxY = -Infinity;
+    let baseMinX = Infinity, baseMaxX = -Infinity, baseMinY = Infinity, baseMaxY = -Infinity;
+    const stride = Math.max(3, Math.floor(mesh.triPos.length / 9000) * 3);
+    for (let i = 0; i < mesh.triPos.length; i += stride) {
+      const vx = mesh.triPos[i], vy = mesh.triPos[i + 1], vz = mesh.triPos[i + 2];
+      const ndc = projectWorldToNdc([vx, minY, vz], mvp);
+      const sx = (ndc[0] * 0.5 + 0.5) * rw;
+      const sy = (0.5 - ndc[1] * 0.5) * rh;
+      if (sx < allMinX) allMinX = sx;
+      if (sx > allMaxX) allMaxX = sx;
+      if (sy < allMinY) allMinY = sy;
+      if (sy > allMaxY) allMaxY = sy;
+      if (vy <= baseTol) {
+        if (sx < baseMinX) baseMinX = sx;
+        if (sx > baseMaxX) baseMaxX = sx;
+        if (sy < baseMinY) baseMinY = sy;
+        if (sy > baseMaxY) baseMaxY = sy;
+      }
+    }
+
+    const drawSoftEllipse = (cx, cy, rx, ry, innerAlpha, midAlpha) => {
+      if (!Number.isFinite(cx) || rx <= 2 || ry <= 2) return;
+      cctx.save();
+      cctx.translate(cx, cy);
+      cctx.scale(rx, ry);
+      const g = cctx.createRadialGradient(0, 0, 0.05, 0, 0, 1);
+      const rgb = darkTheme ? '0,0,0' : '15,23,42';
+      g.addColorStop(0, `rgba(${rgb},${innerAlpha})`);
+      g.addColorStop(0.55, `rgba(${rgb},${midAlpha})`);
+      g.addColorStop(1, `rgba(${rgb},0)`);
+      cctx.fillStyle = g;
+      cctx.beginPath();
+      cctx.arc(0, 0, 1, 0, Math.PI * 2);
+      cctx.fill();
+      cctx.restore();
+    };
+
+    if (Number.isFinite(allMinX)) {
+      const ambCx = (allMinX + allMaxX) * 0.5;
+      const ambCy = (allMinY + allMaxY) * 0.5 + rh * 0.012;
+      const ambRx = Math.max(rw * 0.08, (allMaxX - allMinX) * 0.56);
+      const ambRy = Math.max(rh * 0.025, Math.min(rh * 0.14, (allMaxY - allMinY) * 0.54 + rh * 0.024));
+      drawSoftEllipse(ambCx, ambCy, ambRx, ambRy, darkTheme ? 0.36 : 0.13, darkTheme ? 0.16 : 0.06);
+    }
+    if (Number.isFinite(baseMinX)) {
+      const conCx = (baseMinX + baseMaxX) * 0.5;
+      const conCy = (baseMinY + baseMaxY) * 0.5 + rh * 0.006;
+      const conRx = Math.max(rw * 0.05, (baseMaxX - baseMinX) * 0.52);
+      const conRy = Math.max(rh * 0.014, Math.min(rh * 0.08, (baseMaxY - baseMinY) * 0.48 + rh * 0.012));
+      drawSoftEllipse(conCx, conCy, conRx, conRy, darkTheme ? 0.48 : 0.22, darkTheme ? 0.22 : 0.09);
+    }
+
+    cctx.imageSmoothingEnabled = true;
+    cctx.imageSmoothingQuality = 'high';
+    cctx.drawImage(snapshotCanvas, 0, 0, rw, rh);
+  }
+
+  const out = { url: comp.toDataURL('image/png'), mesh, mvp, w: rw, h: rh };
+  if (coverHeroCache.size > 16) coverHeroCache.clear();
+  coverHeroCache.set(cacheKey, out);
+  return out;
 }
 
 function renderMinifigOneToOne(parts, pagePxH, pageHIn, maxPxW, maxPxH, accent = '#1a73e8') {
@@ -3347,7 +3522,7 @@ const state = {
   overrides: {},           // keyed by stepId: { pin, side, corner, az, el, modelScale, pliScale, pliPos:{x,y}, calloutPos:{x,y}, calloutDir, calloutAsPages, partOffsets:{ [partId]: {x,y,z,tilt,arrow} } }
   pageInserts: {},         // keyed by pageId: [ { id, kind:'text'|'image', text, src, x, y, scale } ]
   dividerAfter: {},        // keyed by pageId: { title, note }
-  coverMeta: { title:'', subtitle:'', az:38, el:26, bgSrc:null },
+  coverMeta: createDefaultCoverMeta(),
   completeMeta: { title:'Build Complete!', subtitle:'Ready for display!', az:315, el:28, bgSrc:null, showText:true, showFireworks:true },
   backMeta:  { title:'', subtitle:'Made with Brick Instruction Creator', az:38, el:24, bgSrc:null },
   bomConfig: {
@@ -3398,7 +3573,7 @@ function applyHistorySnap(json) {
   state.overrides = s.overrides;
   state.pageInserts = s.pageInserts;
   state.dividerAfter = s.dividerAfter;
-  state.coverMeta = s.coverMeta;
+  state.coverMeta = normalizeCoverMeta(s.coverMeta);
   if (s.completeMeta) state.completeMeta = s.completeMeta;
   state.backMeta = s.backMeta;
   state.selectedPartIds.clear();
@@ -4010,30 +4185,87 @@ function renderAll() {
 
   // Render Page Contents
   if (page.kind === 'cover') {
-    const cm = state.coverMeta;
-    const title = cm.title || state.model.title;
-    const sub = cm.subtitle || state.model.subtitle;
-    const snap = renderSnapshot([], allParts, cm.az, cm.el, 680, 440, 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent });
+    const cm = normalizeCoverMeta(state.coverMeta);
+    const title = (cm.title || state.model.title || 'Untitled Model').trim();
+    const sub = (cm.subtitle || '').trim();
+    const layout = computeCoverLayout({
+      pageW: dims.width,
+      pageH: dims.height,
+      hasCreatorLogo: Boolean(cm.creatorLogoSrc),
+      hasSubtitle: sub.length > 0,
+      hasThemeImage: Boolean(cm.themeImageSrc),
+      showQrCode: cm.showQrCode !== false,
+      showProgramBadge: cm.showProgramBadge !== false,
+      densityPadFactor: dens.pad / 20,
+    });
+    const heroScale = Math.min(2.2, 1600 / Math.max(layout.heroRect.w, layout.heroRect.h, 1));
+    const snap = renderCoverHeroSnapshot(
+      allParts,
+      cm.az,
+      cm.el,
+      cm.zoom,
+      Math.round(layout.heroRect.w * heroScale),
+      Math.round(layout.heroRect.h * heroScale),
+      theme,
+    );
+    const darkBg = isDarkHexColor(toHexColor(theme.bgColor || '#ffffff', '#ffffff'));
+    const badgeSurface = darkBg ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.92)';
+    const badgeBorder = darkBg ? 'rgba(255,255,255,0.20)' : 'rgba(15,23,42,0.14)';
+    const badgeTextColor = darkBg ? '#f8fafc' : '#1e293b';
+    const qrSvg = layout.qrCardRect
+      ? buildQrSvg(PROGRAM_URL, {
+          fg: '#111827',
+          bg: '#ffffff',
+          quietZone: 1,
+          ariaLabel: `QR code for ${PROGRAM_NAME}`,
+        })
+      : '';
+    const titleShadow = cm.bgSrc ? 'text-shadow:0 1px 8px rgba(0,0,0,0.28);' : '';
+    const brandPadX = Math.max(6, Math.round(layout.brandCardRect.h * 0.18));
+    const brandInnerGap = Math.max(5, Math.round(layout.brandCardRect.h * 0.14));
+
     frame.innerHTML = `
-      <div class="relative w-full h-full flex flex-col justify-between overflow-hidden ${guideCls}" style="padding:${padPx + 4}px;${cm.bgSrc ? `background-image:url(${cm.bgSrc});background-size:cover;background-position:center;` : ''}">
-        <div class="shrink-0">
-          <span class="inline-block text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full text-white mb-1.5" style="background:${theme.accent}">Building Instructions</span>
-          <h1 class="text-xl sm:text-3xl font-extrabold tracking-tight leading-tight truncate">${title}</h1>
-          <p class="text-[11px] sm:text-xs mt-0.5 truncate" style="color:${theme.muted}">${sub}</p>
+      <div class="relative w-full h-full overflow-hidden ${guideCls}" style="${cm.bgSrc ? `background-image:url(${cm.bgSrc});background-size:cover;background-position:center;` : ''}">
+        <!-- High-Quality Page-Filling Hero Render -->
+        <div class="absolute z-0 flex items-center justify-center pointer-events-none" style="left:${layout.heroRect.x}px;top:${layout.heroRect.y}px;width:${layout.heroRect.w}px;height:${layout.heroRect.h}px;">
+          <img src="${snap.url}" alt="${escHtml(title)}" class="w-full h-full object-contain pointer-events-none select-none" />
         </div>
-        <div class="flex-1 min-h-0 flex items-center justify-center my-1.5 overflow-hidden">
-          <img src="${snap.url}" alt="${title}" class="max-w-full max-h-full w-full h-full object-contain pointer-events-none" />
+
+        <!-- Top-Left: Optional Creator Logo + Model Name + Optional Subtitle -->
+        <div class="absolute z-10 flex flex-col items-start pointer-events-none" style="left:${layout.pad}px;top:${layout.pad}px;max-width:${layout.topLeftMaxW}px;">
+          ${cm.creatorLogoSrc ? `
+            <img src="${cm.creatorLogoSrc}" alt="Creator logo" class="block object-contain object-left pointer-events-none select-none" style="max-width:${layout.creatorLogoMaxW}px;max-height:${layout.creatorLogoMaxH}px;margin-bottom:${layout.creatorLogoGap}px;" />
+          ` : ''}
+          <h1 class="font-extrabold tracking-tight" style="font-size:${layout.titleFontPx}px;line-height:${layout.titleLineHeightPx}px;letter-spacing:-0.02em;color:${theme.text};display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;${titleShadow}">${escHtml(title)}</h1>
+          ${sub ? `
+            <p class="font-medium" style="font-size:${layout.subtitleFontPx}px;line-height:1.25;margin-top:${layout.subtitleGap}px;color:${theme.muted};display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;${titleShadow}">${escHtml(sub)}</p>
+          ` : ''}
         </div>
-        <div class="shrink-0 flex items-center justify-between flex-wrap gap-1.5 pt-2 border-t text-[11px] font-semibold" style="border-color:${theme.pliBorder}">
-          <div class="flex gap-1.5">
-            <span class="px-2.5 py-0.5 rounded-full" style="background:${theme.pliBg};border:1px solid ${theme.pliBorder}">${allParts.length} Pieces</span>
-            <span class="px-2.5 py-0.5 rounded-full" style="background:${theme.pliBg};border:1px solid ${theme.pliBorder}">${allSteps.length} Steps</span>
+
+        <!-- Top-Right: Optional Theming Image -->
+        ${cm.themeImageSrc ? `
+          <div class="absolute z-10 flex items-start justify-end pointer-events-none" style="right:${layout.pad}px;top:${layout.pad}px;max-width:${layout.topRightMaxW}px;max-height:${layout.topRightMaxH}px;">
+            <img src="${cm.themeImageSrc}" alt="Theme image" class="block object-contain object-right-top pointer-events-none select-none" style="max-width:${layout.topRightMaxW}px;max-height:${layout.topRightMaxH}px;" />
           </div>
-          <span class="inline-flex items-center gap-1.5" style="color:${theme.muted}">
-            <svg class="w-4 h-4 shrink-0" viewBox="0 0 64 64" fill="none" aria-hidden="true"><g transform="rotate(14 32 32)"><path d="M24.2 8.2 C9.0 15.8 7.2 31.8 14.8 40.4 L10.2 40.8 L19.6 50.4 L19.8 37.6 L17.4 39.4 C11.6 31.4 13.8 17.6 24.2 8.2 Z" fill="#38bdf8"/><path d="M32.0 4.6 C34.5 11.8 35.5 34.4 35.8 45.8 L40.5 43.9 L32.0 59.8 L23.5 43.9 L28.2 45.8 C28.5 34.4 29.5 11.8 32.0 4.6 Z" fill="#1a73e8"/><path d="M39.8 7.8 C50.4 17.6 52.0 34.2 45.2 43.4 L42.8 41.6 L42.2 54.6 L52.4 44.8 L47.8 44.3 C57.2 34.8 55.2 15.6 39.8 7.8 Z" fill="#1d48b8"/></g></svg>
-            <span>Brick Instruction Creator</span>
-          </span>
-        </div>
+        ` : ''}
+
+        <!-- Bottom-Right: Clickable Program Icon + Name + Optional QR Code -->
+        ${layout.brandGroupRect.w > 0 ? `
+          <a href="${PROGRAM_URL}" target="_blank" rel="noopener noreferrer" data-cover-link="true" title="Open ${PROGRAM_NAME}" class="absolute z-10 flex items-stretch hover:opacity-90 active:scale-[0.98] transition cursor-pointer" style="right:${layout.pad}px;bottom:${layout.pad}px;height:${layout.brandGroupRect.h}px;gap:${layout.brandGap}px;text-decoration:none;">
+            <div class="flex items-center shrink-0 shadow-xs overflow-hidden" style="min-width:${layout.brandCardRect.w}px;height:${layout.brandCardRect.h}px;border-radius:${layout.cardRadius}px;padding:0 ${brandPadX}px;gap:${brandInnerGap}px;background:${badgeSurface};border:1px solid ${badgeBorder};backdrop-filter:blur(6px);">
+              <svg class="shrink-0" style="width:${layout.brandIconSize}px;height:${layout.brandIconSize}px;" viewBox="0 0 64 64" fill="none" aria-hidden="true"><g transform="rotate(14 32 32)"><path d="M24.2 8.2 C9.0 15.8 7.2 31.8 14.8 40.4 L10.2 40.8 L19.6 50.4 L19.8 37.6 L17.4 39.4 C11.6 31.4 13.8 17.6 24.2 8.2 Z" fill="#38bdf8"/><path d="M32.0 4.6 C34.5 11.8 35.5 34.4 35.8 45.8 L40.5 43.9 L32.0 59.8 L23.5 43.9 L28.2 45.8 C28.5 34.4 29.5 11.8 32.0 4.6 Z" fill="#1a73e8"/><path d="M39.8 7.8 C50.4 17.6 52.0 34.2 45.2 43.4 L42.8 41.6 L42.2 54.6 L52.4 44.8 L47.8 44.3 C57.2 34.8 55.2 15.6 39.8 7.8 Z" fill="#1d48b8"/></g></svg>
+              <div class="min-w-0 leading-tight" style="color:${badgeTextColor};">
+                <div class="font-extrabold tracking-tight whitespace-nowrap" style="font-size:${layout.brandTitleFontPx}px;line-height:1.14;">Brick Instruction</div>
+                <div class="font-semibold opacity-75 whitespace-nowrap" style="font-size:${layout.brandTitleFontPx}px;line-height:1.14;">Creator</div>
+              </div>
+            </div>
+            ${layout.qrCardRect ? `
+              <div class="shrink-0 shadow-xs overflow-hidden flex items-center justify-center" style="width:${layout.qrCardRect.w}px;height:${layout.qrCardRect.h}px;border-radius:${layout.cardRadius}px;padding:${layout.qrInnerInset}px;background:#ffffff;border:1px solid rgba(15,23,42,0.14);">
+                <div class="w-full h-full">${qrSvg}</div>
+              </div>
+            ` : ''}
+          </a>
+        ` : ''}
       </div>`;
   } else if (page.kind === 'complete') {
     const cm = state.completeMeta;
@@ -4063,10 +4295,12 @@ function renderAll() {
       : bm.subtitle;
     frame.innerHTML = `
       <div class="relative w-full h-full text-center flex flex-col items-center justify-center gap-3 overflow-hidden ${guideCls}" style="padding:${padPx + 10}px;${bm.bgSrc ? `background-image:url(${bm.bgSrc});background-size:cover;background-position:center;` : ''}">
-        <div class="w-16 h-16 sm:w-20 sm:h-20 rounded-3xl flex items-center justify-center shadow-sm" style="background:${theme.pliBg};border:1px solid ${theme.pliBorder}">
-          <svg class="w-11 h-11 sm:w-14 sm:h-14" viewBox="0 0 64 64" fill="none" aria-hidden="true"><g transform="rotate(14 32 32)"><path d="M24.2 8.2 C9.0 15.8 7.2 31.8 14.8 40.4 L10.2 40.8 L19.6 50.4 L19.8 37.6 L17.4 39.4 C11.6 31.4 13.8 17.6 24.2 8.2 Z" fill="#38bdf8"/><path d="M32.0 4.6 C34.5 11.8 35.5 34.4 35.8 45.8 L40.5 43.9 L32.0 59.8 L23.5 43.9 L28.2 45.8 C28.5 34.4 29.5 11.8 32.0 4.6 Z" fill="#1a73e8"/><path d="M39.8 7.8 C50.4 17.6 52.0 34.2 45.2 43.4 L42.8 41.6 L42.2 54.6 L52.4 44.8 L47.8 44.3 C57.2 34.8 55.2 15.6 39.8 7.8 Z" fill="#1d48b8"/></g></svg>
-        </div>
-        <span class="text-xs sm:text-sm font-semibold" style="color:${theme.muted}">${escHtml(credit)}</span>
+        <a href="${PROGRAM_URL}" target="_blank" rel="noopener noreferrer" data-cover-link="true" title="Open ${PROGRAM_NAME}" class="inline-flex flex-col items-center gap-3 hover:opacity-90 transition cursor-pointer" style="text-decoration:none;">
+          <div class="w-16 h-16 sm:w-20 sm:h-20 rounded-3xl flex items-center justify-center shadow-sm" style="background:${theme.pliBg};border:1px solid ${theme.pliBorder}">
+            <svg class="w-11 h-11 sm:w-14 sm:h-14" viewBox="0 0 64 64" fill="none" aria-hidden="true"><g transform="rotate(14 32 32)"><path d="M24.2 8.2 C9.0 15.8 7.2 31.8 14.8 40.4 L10.2 40.8 L19.6 50.4 L19.8 37.6 L17.4 39.4 C11.6 31.4 13.8 17.6 24.2 8.2 Z" fill="#38bdf8"/><path d="M32.0 4.6 C34.5 11.8 35.5 34.4 35.8 45.8 L40.5 43.9 L32.0 59.8 L23.5 43.9 L28.2 45.8 C28.5 34.4 29.5 11.8 32.0 4.6 Z" fill="#1a73e8"/><path d="M39.8 7.8 C50.4 17.6 52.0 34.2 45.2 43.4 L42.8 41.6 L42.2 54.6 L52.4 44.8 L47.8 44.3 C57.2 34.8 55.2 15.6 39.8 7.8 Z" fill="#1d48b8"/></g></svg>
+          </div>
+          <span class="text-xs sm:text-sm font-semibold" style="color:${theme.muted}">${escHtml(credit)}</span>
+        </a>
       </div>`;
   } else if (page.kind === 'divider') {
     const d = state.dividerAfter[page.sourcePgId] || { title:'Section Divider', note:'' };
@@ -4585,12 +4819,81 @@ function renderContextOverlay(page) {
     const isCover = page.kind === 'cover';
     const isComplete = page.kind === 'complete';
     const isBack = page.kind === 'back';
+    if (isCover) state.coverMeta = normalizeCoverMeta(state.coverMeta);
     const meta = isCover ? state.coverMeta : isComplete ? state.completeMeta : state.backMeta;
     const label = isCover ? 'Cover Page' : isComplete ? 'Build Complete Page' : 'Back Cover';
     const defaultTitle = isCover ? state.model.title : 'Build Complete!';
     const backCredit = (!meta.subtitle || meta.subtitle === 'Created with Brick Instruction Creator')
       ? 'Made with Brick Instruction Creator'
       : meta.subtitle;
+
+    if (isCover) {
+      const hasCreatorLogo = Boolean(meta.creatorLogoSrc);
+      const hasThemeImg = Boolean(meta.themeImageSrc);
+      const hasBg = Boolean(meta.bgSrc);
+      const qrOn = meta.showQrCode !== false;
+      box.innerHTML = `
+        <div class="pointer-events-auto glass-pill rounded-2xl p-3 w-full space-y-2 text-xs">
+          <div class="flex items-center justify-between gap-1.5 flex-wrap font-bold">
+            <span>Edit Cover Page</span>
+            <div class="flex items-center gap-1 flex-wrap">
+              <button id="covRotL" title="Rotate model left" class="px-2 py-1 rounded-full bg-black/5 dark:bg-white/10">↺</button>
+              <button id="covRotR" title="Rotate model right" class="px-2 py-1 rounded-full bg-black/5 dark:bg-white/10">↻</button>
+              <button id="covTiltU" title="Tilt camera up" class="px-2 py-1 rounded-full bg-black/5 dark:bg-white/10">↑</button>
+              <button id="covTiltD" title="Tilt camera down" class="px-2 py-1 rounded-full bg-black/5 dark:bg-white/10">↓</button>
+              <button id="covZoomOut" title="Zoom model out" class="px-2 py-1 rounded-full bg-black/5 dark:bg-white/10">−</button>
+              <button id="covZoomIn" title="Zoom model in" class="px-2 py-1 rounded-full bg-black/5 dark:bg-white/10">+</button>
+              <button id="covResetCam" title="Reset hero camera" class="px-2 py-1 rounded-full bg-black/5 dark:bg-white/10 font-medium">Reset</button>
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-1.5">
+            <input id="covTitleIn" value="${escHtml(meta.title || defaultTitle)}" placeholder="Model name" class="px-2.5 py-1.5 rounded-xl bg-black/5 dark:bg-white/10 outline-none" />
+            <input id="covSubIn" value="${escHtml(meta.subtitle || '')}" placeholder="Subtitle (optional)" class="px-2.5 py-1.5 rounded-xl bg-black/5 dark:bg-white/10 outline-none" />
+          </div>
+          <div class="flex items-center gap-1.5 flex-wrap">
+            <div class="inline-flex items-center rounded-full overflow-hidden ${hasCreatorLogo ? 'bg-[#1a73e8] text-white' : 'bg-black/5 dark:bg-white/10'}">
+              <button id="covCreatorLogoBtn" class="px-2.5 py-1 font-semibold">Creator Logo</button>
+              ${hasCreatorLogo ? `<button id="covCreatorLogoClr" title="Remove creator logo" class="pr-2 pl-1 py-1 opacity-85 hover:opacity-100">×</button>` : ''}
+            </div>
+            <div class="inline-flex items-center rounded-full overflow-hidden ${hasThemeImg ? 'bg-[#1a73e8] text-white' : 'bg-black/5 dark:bg-white/10'}">
+              <button id="covThemeImgBtn" class="px-2.5 py-1 font-semibold">Theme Image</button>
+              ${hasThemeImg ? `<button id="covThemeImgClr" title="Remove theme image" class="pr-2 pl-1 py-1 opacity-85 hover:opacity-100">×</button>` : ''}
+            </div>
+            <div class="inline-flex items-center rounded-full overflow-hidden ${hasBg ? 'bg-[#1a73e8] text-white' : 'bg-black/5 dark:bg-white/10'}">
+              <button id="covBgBtn" class="px-2.5 py-1 font-semibold">Bg Image</button>
+              ${hasBg ? `<button id="covBgClr" title="Remove background image" class="pr-2 pl-1 py-1 opacity-85 hover:opacity-100">×</button>` : ''}
+            </div>
+            <button id="covQrToggle" class="px-2.5 py-1 rounded-full font-semibold ${qrOn ? 'bg-[#1a73e8] text-white' : 'bg-black/5 dark:bg-white/10'}">QR Code</button>
+          </div>
+        </div>`;
+
+      box.querySelector('#covTitleIn').onchange = (e) => { pushUndo(); meta.title = e.target.value; renderAll(); };
+      box.querySelector('#covSubIn').onchange = (e) => { pushUndo(); meta.subtitle = e.target.value; renderAll(); };
+      box.querySelector('#covRotL').onclick = () => { pushUndo(); meta.az = (meta.az - 22.5 + 360) % 360; renderAll(); };
+      box.querySelector('#covRotR').onclick = () => { pushUndo(); meta.az = (meta.az + 22.5) % 360; renderAll(); };
+      box.querySelector('#covTiltU').onclick = () => { pushUndo(); meta.el = clampCoverElevation(meta.el + 8); renderAll(); };
+      box.querySelector('#covTiltD').onclick = () => { pushUndo(); meta.el = clampCoverElevation(meta.el - 8); renderAll(); };
+      box.querySelector('#covZoomIn').onclick = () => { pushUndo(); meta.zoom = clampCoverZoom((meta.zoom ?? 1.0) + 0.08); renderAll(); };
+      box.querySelector('#covZoomOut').onclick = () => { pushUndo(); meta.zoom = clampCoverZoom((meta.zoom ?? 1.0) - 0.08); renderAll(); };
+      box.querySelector('#covResetCam').onclick = () => {
+        pushUndo();
+        const def = createDefaultCoverMeta();
+        meta.az = def.az; meta.el = def.el; meta.zoom = def.zoom;
+        renderAll();
+      };
+      box.querySelector('#covCreatorLogoBtn').onclick = () => openCoverImagePicker('creatorLogo');
+      const clrCreator = box.querySelector('#covCreatorLogoClr');
+      if (clrCreator) clrCreator.onclick = () => { pushUndo(); meta.creatorLogoSrc = null; renderAll(); };
+      box.querySelector('#covThemeImgBtn').onclick = () => openCoverImagePicker('themeImage');
+      const clrTheme = box.querySelector('#covThemeImgClr');
+      if (clrTheme) clrTheme.onclick = () => { pushUndo(); meta.themeImageSrc = null; renderAll(); };
+      box.querySelector('#covBgBtn').onclick = () => openCoverImagePicker('bg');
+      const clrBg = box.querySelector('#covBgClr');
+      if (clrBg) clrBg.onclick = () => { pushUndo(); meta.bgSrc = null; renderAll(); };
+      box.querySelector('#covQrToggle').onclick = () => { pushUndo(); meta.showQrCode = !(meta.showQrCode !== false); renderAll(); };
+      return;
+    }
+
     box.innerHTML = `
       <div class="pointer-events-auto glass-pill rounded-2xl p-3 w-full space-y-2 text-xs">
         <div class="flex items-center justify-between gap-1.5 flex-wrap font-bold">
@@ -4627,7 +4930,7 @@ function renderContextOverlay(page) {
     if (tText) tText.onclick = () => { pushUndo(); meta.showText = !(meta.showText !== false); renderAll(); };
     const tFw = box.querySelector('#compToggleFw');
     if (tFw) tFw.onclick = () => { pushUndo(); meta.showFireworks = !(meta.showFireworks !== false); renderAll(); };
-    box.querySelector('#covBgBtn').onclick = () => document.getElementById('coverImageInput').click();
+    box.querySelector('#covBgBtn').onclick = () => openCoverImagePicker('bg');
     return;
   }
 
@@ -5313,6 +5616,7 @@ function renderOverviewModal() {
   // Native synchronous Touch Events (iOS Safari samples both fingers on the exact same timestamp -> ZERO jitter!)
   stage.addEventListener('touchstart', (e) => {
     if (!state.model) return;
+    if (e.target?.closest?.('a[href]')) return;
     const t = e.touches;
     if (t.length === 2) {
       e.preventDefault();
@@ -5378,6 +5682,7 @@ function renderOverviewModal() {
   let mouseDragging = false;
   stage.addEventListener('mousedown', (e) => {
     if (!state.model || !isPanGestureEnabled() || e.button !== 0) return;
+    if (e.target?.closest?.('a[href]')) return;
     mouseDragging = true;
     startPanX = state.panX; startPanY = state.panY;
     startX = e.clientX; startY = e.clientY;
@@ -5555,7 +5860,7 @@ async function importBricksLibraryFiles(fileList) {
         }
       }
     }
-    embeddedDatCompiled.clear(); pliThumbCache.clear(); submodelThumbCache.clear();
+    embeddedDatCompiled.clear(); pliThumbCache.clear(); submodelThumbCache.clear(); coverHeroCache.clear();
     updateLibraryStatusUI();
     if (state.model) {
       if (state.model._parsed) state.model = buildManualFromParsed(state.model._parsed, state.model._mode || 'auto', state.model._subdivisionPlan || null);
@@ -5766,7 +6071,7 @@ async function fetchMissingPartsOnline() {
       progBar.style.width = pct + '%';
     }
 
-    embeddedDatCompiled.clear(); pliThumbCache.clear(); submodelThumbCache.clear();
+    embeddedDatCompiled.clear(); pliThumbCache.clear(); submodelThumbCache.clear(); coverHeroCache.clear();
     updateLibraryStatusUI();
     if (state.model) {
       if (fetched > 0 && state.model._parsed) state.model = buildManualFromParsed(state.model._parsed, state.model._mode || 'auto', state.model._subdivisionPlan || null);
@@ -6136,7 +6441,7 @@ async function restoreLastSessionOnStart() {
     state.overrides = prefs.overrides || {};
     state.pageInserts = prefs.pageInserts || {};
     state.dividerAfter = prefs.dividerAfter || {};
-    if (prefs.coverMeta) state.coverMeta = { ...state.coverMeta, ...prefs.coverMeta };
+    if (prefs.coverMeta) state.coverMeta = normalizeCoverMeta({ ...state.coverMeta, ...prefs.coverMeta });
     if (prefs.completeMeta) state.completeMeta = { ...state.completeMeta, ...prefs.completeMeta };
     if (prefs.backMeta) state.backMeta = { ...state.backMeta, ...prefs.backMeta };
     state.pageIdx = Math.max(0, prefs.pageIdx || 0);
@@ -6164,65 +6469,11 @@ async function restoreLastSessionOnStart() {
 }
 
 // =========================================================================
-// 12. PURE-JS MULTI-PAGE PDF 1.4 GENERATOR (Zero External Dependencies!)
+// 12. PURE-JS MULTI-PAGE PDF 1.4 GENERATOR (Imported from src/export/pdfBinary.ts)
 // =========================================================================
 function getPdfPaperPts() {
   const [wIn, hIn] = getActivePagePhysicalInches();
   return [Math.round(wIn * 72), Math.round(hIn * 72)];
-}
-
-function buildPdfBinary(jpegPages, pageWpt, pageHpt) {
-  const enc = (s) => new TextEncoder().encode(s);
-  const chunks = [];
-  let offset = 0;
-  const push = (u8) => { chunks.push(u8); offset += u8.length; };
-  const pushStr = (s) => push(enc(s));
-
-  pushStr('%PDF-1.4\n%\xFF\xFF\xFF\xFF\n');
-  const offsets = [0]; // 1-indexed object offsets
-
-  // Obj 1: Catalog, Obj 2: Pages
-  const pageObjNums = [];
-  const startObj = 3;
-  // Each page uses 3 objects: Page, Image XObject, Content Stream
-  for (let i = 0; i < jpegPages.length; i++) pageObjNums.push(startObj + i * 3);
-
-  offsets.push(offset);
-  pushStr(`1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n`);
-
-  offsets.push(offset);
-  pushStr(`2 0 obj\n<< /Type /Pages /Kids [${pageObjNums.map(n => n + ' 0 R').join(' ')}] /Count ${pageObjNums.length} >>\nendobj\n`);
-
-  for (let i = 0; i < jpegPages.length; i++) {
-    const pgObj = startObj + i * 3;
-    const imgObj = pgObj + 1;
-    const cntObj = pgObj + 2;
-    const { bytes, pxW, pxH } = jpegPages[i];
-
-    offsets.push(offset);
-    pushStr(`${pgObj} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWpt} ${pageHpt}] /Resources << /XObject << /Im0 ${imgObj} 0 R >> >> /Contents ${cntObj} 0 R >>\nendobj\n`);
-
-    offsets.push(offset);
-    pushStr(`${imgObj} 0 obj\n<< /Type /XObject /Subtype /Image /Width ${pxW} /Height ${pxH} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${bytes.length} >>\nstream\n`);
-    push(bytes);
-    pushStr(`\nendstream\nendobj\n`);
-
-    const contentStr = `q ${pageWpt} 0 0 ${pageHpt} 0 0 cm /Im0 Do Q\n`;
-    offsets.push(offset);
-    pushStr(`${cntObj} 0 obj\n<< /Length ${contentStr.length} >>\nstream\n${contentStr}endstream\nendobj\n`);
-  }
-
-  const xrefPos = offset;
-  pushStr(`xref\n0 ${offsets.length}\n0000000000 65535 f \n`);
-  for (let i = 1; i < offsets.length; i++) {
-    pushStr(String(offsets[i]).padStart(10, '0') + ' 00000 n \n');
-  }
-  pushStr(`trailer\n<< /Size ${offsets.length} /Root 1 0 R >>\nstartxref\n${xrefPos}\n%%EOF`);
-
-  const out = new Uint8Array(offset);
-  let p = 0;
-  for (const c of chunks) { out.set(c, p); p += c.length; }
-  return out;
 }
 
 function loadImgPromise(src) {
@@ -6230,10 +6481,72 @@ function loadImgPromise(src) {
 }
 
 function drawContain(ctx, img, x, y, w, h) {
-  if (!img || !img.width || !img.height || w <= 2 || h <= 2) return;
+  if (!img || !img.width || !img.height || w <= 2 || h <= 2) return null;
   const sc = Math.min(w / img.width, h / img.height);
   const dw = img.width * sc, dh = img.height * sc;
+  const dx = x + (w - dw) / 2, dy = y + (h - dh) / 2;
+  ctx.drawImage(img, dx, dy, dw, dh);
+  return { x: dx, y: dy, w: dw, h: dh };
+}
+
+function drawAlignedContain(ctx, img, x, y, maxW, maxH, alignX = 'left', alignY = 'top') {
+  if (!img || !img.width || !img.height || maxW <= 2 || maxH <= 2) return null;
+  const sc = Math.min(maxW / img.width, maxH / img.height);
+  const dw = img.width * sc, dh = img.height * sc;
+  const dx = alignX === 'right' ? (x + maxW - dw) : alignX === 'center' ? (x + (maxW - dw) / 2) : x;
+  const dy = alignY === 'bottom' ? (y + maxH - dh) : alignY === 'center' ? (y + (maxH - dh) / 2) : y;
+  ctx.drawImage(img, dx, dy, dw, dh);
+  return { x: dx, y: dy, w: dw, h: dh };
+}
+
+function drawCoverImage(ctx, img, x, y, w, h) {
+  if (!img || !img.width || !img.height || w <= 2 || h <= 2) return;
+  const sc = Math.max(w / img.width, h / img.height);
+  const dw = img.width * sc, dh = img.height * sc;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x, y, w, h);
+  ctx.clip();
   ctx.drawImage(img, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh);
+  ctx.restore();
+}
+
+function drawRoundedRectPath(ctx, x, y, w, h, r) {
+  const rr = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + rr, y);
+  ctx.arcTo(x + w, y, x + w, y + h, rr);
+  ctx.arcTo(x + w, y + h, x, y + h, rr);
+  ctx.arcTo(x, y + h, x, y, rr);
+  ctx.arcTo(x, y, x + w, y, rr);
+  ctx.closePath();
+}
+
+function drawWrappedText(ctx, text, x, y, maxW, lineH, maxLines = 2) {
+  const words = String(text || '').trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return 0;
+  const lines = [];
+  let current = words[0];
+  for (let i = 1; i < words.length; i++) {
+    const candidate = `${current} ${words[i]}`;
+    if (ctx.measureText(candidate).width <= maxW) {
+      current = candidate;
+    } else {
+      lines.push(current);
+      current = words[i];
+      if (lines.length >= maxLines - 1) {
+        const rest = [current, ...words.slice(i + 1)].join(' ');
+        current = rest;
+        break;
+      }
+    }
+  }
+  lines.push(current);
+  const finalLines = lines.slice(0, maxLines);
+  finalLines.forEach((ln, idx) => {
+    ctx.fillText(ln, x, y + idx * lineH, maxW);
+  });
+  return finalLines.length * lineH;
 }
 
 function drawBrandLogoCanvas(ctx, x, y, size) {
@@ -6253,13 +6566,14 @@ function drawBrandLogoCanvas(ctx, x, y, size) {
   ctx.restore();
 }
 
-async function renderPageToJpegBytes(page, pxW, pxH) {
+async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 612) {
   const canvas = document.createElement('canvas');
   canvas.width = pxW; canvas.height = pxH;
   const ctx = canvas.getContext('2d');
   const theme = getActiveTheme();
   const allParts = getAllParts(state.model);
   const allSteps = getAllSteps(state.model);
+  const links = [];
 
   // Fill background (supports solid, angled gradient, and blueprint grid for built-in & custom themes)
   fillThemeBackgroundCanvas(ctx, theme, pxW, pxH);
@@ -6272,26 +6586,161 @@ async function renderPageToJpegBytes(page, pxW, pxH) {
   ctx.textBaseline = 'top';
 
   if (page.kind === 'cover') {
-    const cm = state.coverMeta;
-    const title = cm.title || state.model.title;
-    const sub = cm.subtitle || state.model.subtitle;
+    const cm = normalizeCoverMeta(state.coverMeta);
+    const title = (cm.title || state.model.title || 'Untitled Model').trim();
+    const sub = (cm.subtitle || '').trim();
+    const layout = computeCoverLayout({
+      pageW: pxW,
+      pageH: pxH,
+      hasCreatorLogo: Boolean(cm.creatorLogoSrc),
+      hasSubtitle: sub.length > 0,
+      hasThemeImage: Boolean(cm.themeImageSrc),
+      showQrCode: cm.showQrCode !== false,
+      showProgramBadge: cm.showProgramBadge !== false,
+      densityPadFactor: dens.pad / 20,
+    });
+
+    if (cm.bgSrc) {
+      const bgImg = await loadImgPromise(cm.bgSrc);
+      if (bgImg) drawCoverImage(ctx, bgImg, 0, 0, pxW, pxH);
+    }
+
+    // 1. High-Quality Page-Filling Hero Model Render
+    const heroScale = Math.min(1.45, 2000 / Math.max(layout.heroRect.w, layout.heroRect.h, 1));
+    const snap = renderCoverHeroSnapshot(
+      allParts,
+      cm.az,
+      cm.el,
+      cm.zoom,
+      Math.round(layout.heroRect.w * heroScale),
+      Math.round(layout.heroRect.h * heroScale),
+      theme,
+    );
+    const heroImg = await loadImgPromise(snap.url);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    drawContain(ctx, heroImg, layout.heroRect.x, layout.heroRect.y, layout.heroRect.w, layout.heroRect.h);
+
+    // 2. Top-Left: Optional Creator Logo + Model Name + Optional Subtitle
+    let topLeftY = layout.pad;
+    if (cm.creatorLogoSrc) {
+      const creatorImg = await loadImgPromise(cm.creatorLogoSrc);
+      const drawn = drawAlignedContain(
+        ctx,
+        creatorImg,
+        layout.pad,
+        topLeftY,
+        layout.creatorLogoMaxW,
+        layout.creatorLogoMaxH,
+        'left',
+        'top',
+      );
+      if (drawn) topLeftY += drawn.h + layout.creatorLogoGap;
+    }
+
+    ctx.save();
+    if (cm.bgSrc) {
+      ctx.shadowColor = 'rgba(0,0,0,0.28)';
+      ctx.shadowBlur = Math.max(4, Math.round(pxH * 0.008));
+      ctx.shadowOffsetY = 1;
+    }
     ctx.fillStyle = theme.text;
-    ctx.font = `bold ${Math.round(pxH * 0.055)}px -apple-system, sans-serif`;
-    ctx.fillText(title, pad, pad);
-    ctx.fillStyle = theme.muted;
-    ctx.font = `500 ${Math.round(pxH * 0.024)}px -apple-system, sans-serif`;
-    ctx.fillText(sub, pad, pad + pxH * 0.068);
-    const snap = renderSnapshot([], allParts, cm.az, cm.el, 900, 600, 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent });
-    const img = await loadImgPromise(snap.url);
-    drawContain(ctx, img, pad, pad + pxH * 0.12, pxW - pad * 2, pxH * 0.72);
-    const logoSz = Math.round(pxH * 0.032);
-    const footerY = pxH - pad - logoSz;
-    drawBrandLogoCanvas(ctx, pad, footerY - Math.round(logoSz * 0.1), logoSz);
-    ctx.fillStyle = theme.muted;
-    ctx.font = `600 ${Math.round(pxH * 0.02)}px -apple-system, sans-serif`;
-    ctx.fillText(`${allParts.length} Pieces · ${allSteps.length} Steps · Brick Instruction Creator`, pad + logoSz + Math.round(logoSz * 0.35), footerY + Math.round(logoSz * 0.12));
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.font = `800 ${layout.titleFontPx}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+    const titleH = drawWrappedText(ctx, title, layout.pad, topLeftY, layout.topLeftMaxW, layout.titleLineHeightPx, 2);
+
+    if (sub) {
+      ctx.fillStyle = theme.muted;
+      ctx.font = `500 ${layout.subtitleFontPx}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+      drawWrappedText(
+        ctx,
+        sub,
+        layout.pad,
+        topLeftY + titleH + layout.subtitleGap,
+        layout.topLeftMaxW,
+        Math.round(layout.subtitleFontPx * 1.25),
+        2,
+      );
+    }
+    ctx.restore();
+
+    // 3. Top-Right: Optional Theming Image
+    if (cm.themeImageSrc) {
+      const themeImg = await loadImgPromise(cm.themeImageSrc);
+      drawAlignedContain(
+        ctx,
+        themeImg,
+        pxW - layout.pad - layout.topRightMaxW,
+        layout.pad,
+        layout.topRightMaxW,
+        layout.topRightMaxH,
+        'right',
+        'top',
+      );
+    }
+
+    // 4. Bottom-Right: Clickable Program Badge (Icon + Name) + Optional QR Code
+    if (layout.brandGroupRect.w > 0) {
+      const darkBg = isDarkHexColor(toHexColor(theme.bgColor || '#ffffff', '#ffffff'));
+      const bc = layout.brandCardRect;
+      const lineW = Math.max(1, Math.round(pxH * 0.0014));
+
+      // Program badge card
+      drawRoundedRectPath(ctx, bc.x, bc.y, bc.w, bc.h, layout.cardRadius);
+      ctx.fillStyle = darkBg ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.94)';
+      ctx.fill();
+      ctx.strokeStyle = darkBg ? 'rgba(255,255,255,0.22)' : 'rgba(15,23,42,0.14)';
+      ctx.lineWidth = lineW;
+      ctx.stroke();
+
+      const brandPadX = Math.max(6, Math.round(bc.h * 0.18));
+      const brandInnerGap = Math.max(5, Math.round(bc.h * 0.14));
+      const iconX = bc.x + brandPadX;
+      const iconY = bc.y + Math.round((bc.h - layout.brandIconSize) / 2);
+      drawBrandLogoCanvas(ctx, iconX, iconY, layout.brandIconSize);
+
+      const textX = iconX + layout.brandIconSize + brandInnerGap;
+      const textMaxW = Math.max(20, bc.x + bc.w - textX - brandPadX);
+      const lineH = Math.round(layout.brandTitleFontPx * 1.15);
+      const textStartY = bc.y + Math.round((bc.h - lineH * 2) / 2);
+      ctx.fillStyle = darkBg ? '#f8fafc' : '#1e293b';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.font = `800 ${layout.brandTitleFontPx}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+      ctx.fillText('Brick Instruction', textX, textStartY, textMaxW);
+      ctx.globalAlpha = 0.78;
+      ctx.font = `600 ${layout.brandTitleFontPx}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+      ctx.fillText('Creator', textX, textStartY + lineH, textMaxW);
+      ctx.globalAlpha = 1;
+
+      // QR Code square card
+      if (layout.qrCardRect) {
+        const qr = layout.qrCardRect;
+        drawRoundedRectPath(ctx, qr.x, qr.y, qr.w, qr.h, layout.cardRadius);
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(15,23,42,0.16)';
+        ctx.lineWidth = lineW;
+        ctx.stroke();
+
+        const inset = layout.qrInnerInset;
+        drawQrCanvas(ctx, PROGRAM_URL, qr.x + inset, qr.y + inset, qr.w - inset * 2, {
+          fg: '#111827',
+          bg: '#ffffff',
+          quietZone: 1,
+        });
+      }
+
+      // Register clickable PDF hyperlink over the program badge + QR code
+      links.push(canvasRectToPdfLink(layout.brandGroupRect, pxW, pxH, pageWpt, pageHpt, PROGRAM_URL));
+    }
   } else if (page.kind === 'complete') {
     const cm = state.completeMeta;
+    if (cm.bgSrc) {
+      const bgImg = await loadImgPromise(cm.bgSrc);
+      if (bgImg) drawCoverImage(ctx, bgImg, 0, 0, pxW, pxH);
+    }
     if (cm.showFireworks !== false) drawFireworksCanvas(ctx, pxW, pxH);
     const showText = cm.showText !== false;
     if (showText) {
@@ -6324,6 +6773,10 @@ async function renderPageToJpegBytes(page, pxW, pxH) {
     }
   } else if (page.kind === 'back') {
     const bm = state.backMeta;
+    if (bm.bgSrc) {
+      const bgImg = await loadImgPromise(bm.bgSrc);
+      if (bgImg) drawCoverImage(ctx, bgImg, 0, 0, pxW, pxH);
+    }
     const credit = (!bm.subtitle || bm.subtitle === 'Created with Brick Instruction Creator')
       ? 'Made with Brick Instruction Creator'
       : bm.subtitle;
@@ -6332,10 +6785,29 @@ async function renderPageToJpegBytes(page, pxW, pxH) {
     const logoY = Math.round(pxH * 0.5 - logoSz * 0.65);
     drawBrandLogoCanvas(ctx, (pxW - logoSz) / 2, logoY, logoSz);
 
+    const creditFontPx = Math.round(pxH * 0.022);
+    const creditY = logoY + logoSz + Math.round(pxH * 0.03);
     ctx.fillStyle = theme.muted;
-    ctx.font = `600 ${Math.round(pxH * 0.022)}px -apple-system, sans-serif`;
-    ctx.fillText(credit, pxW / 2, logoY + logoSz + Math.round(pxH * 0.03));
+    ctx.font = `600 ${creditFontPx}px -apple-system, sans-serif`;
+    ctx.fillText(credit, pxW / 2, creditY);
+    const creditW = Math.max(logoSz, Math.round(ctx.measureText(credit).width));
     ctx.textAlign = 'left';
+
+    links.push(
+      canvasRectToPdfLink(
+        {
+          x: Math.round((pxW - creditW) / 2),
+          y: logoY,
+          w: creditW,
+          h: creditY + creditFontPx * 1.4 - logoY,
+        },
+        pxW,
+        pxH,
+        pageWpt,
+        pageHpt,
+        PROGRAM_URL,
+      ),
+    );
   } else if (page.kind === 'section_divider') {
     const snap = renderSnapshot([], page.previewParts || [], 38, 28, 760, 480, 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent });
     const img = await loadImgPromise(snap.url);
@@ -6744,18 +7216,20 @@ async function renderPageToJpegBytes(page, pxW, pxH) {
     }
   }
 
-  const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
+  const jpegQuality = page.kind === 'cover' ? 0.94 : 0.88;
+  const dataUrl = canvas.toDataURL('image/jpeg', jpegQuality);
   const b64 = dataUrl.split(',')[1];
   const binStr = atob(b64);
   const bytes = new Uint8Array(binStr.length);
   for (let i = 0; i < binStr.length; i++) bytes[i] = binStr.charCodeAt(i);
-  return { bytes, pxW, pxH, dataUrl };
+  return { bytes, pxW, pxH, dataUrl, links };
 }
 
 let lastGeneratedPdfBlob = null, lastGeneratedPdfUrl = null, lastGeneratedPdfName = 'manual.pdf';
 async function runPdfExport(pagesToExport) {
   const [pageWpt, pageHpt] = getPdfPaperPts();
-  const pxW = Math.round(pageWpt * 1.45), pxH = Math.round(pageHpt * 1.45);
+  const basePxW = Math.round(pageWpt * 1.45), basePxH = Math.round(pageHpt * 1.45);
+  const coverPxW = Math.min(2400, Math.round(pageWpt * 2.1)), coverPxH = Math.min(2400, Math.round(pageHpt * 2.1));
   document.getElementById('expProgressWrap').classList.remove('hidden');
   document.getElementById('expReadyWrap').classList.add('hidden');
   const jpegPages = [];
@@ -6765,7 +7239,10 @@ async function runPdfExport(pagesToExport) {
     document.getElementById('expProgressPct').textContent = pct + '%';
     document.getElementById('expProgressBar').style.width = pct + '%';
     await new Promise(r => setTimeout(r, 8));
-    jpegPages.push(await renderPageToJpegBytes(pagesToExport[i], pxW, pxH));
+    const pg = pagesToExport[i];
+    const w = pg.kind === 'cover' ? coverPxW : basePxW;
+    const h = pg.kind === 'cover' ? coverPxH : basePxH;
+    jpegPages.push(await renderPageToJpegBytes(pg, w, h, pageWpt, pageHpt));
   }
   const pdfBytes = buildPdfBinary(jpegPages, pageWpt, pageHpt);
   if (lastGeneratedPdfUrl) URL.revokeObjectURL(lastGeneratedPdfUrl);
@@ -7323,10 +7800,11 @@ document.getElementById('projectLoadInput').onchange = async (e) => {
   try {
     const data = JSON.parse(await f.text());
     submodelThumbCache.clear();
+    coverHeroCache.clear();
     state.model = { title: data.title || 'Loaded Manual', subtitle: '', chapters: data.chapters || [] };
     state.overrides = data.overrides || {}; state.pageInserts = data.pageInserts || {};
     state.dividerAfter = data.dividerAfter || {};
-    if (data.coverMeta) state.coverMeta = { ...state.coverMeta, ...data.coverMeta };
+    state.coverMeta = normalizeCoverMeta(data.coverMeta);
     if (data.completeMeta) state.completeMeta = { ...state.completeMeta, ...data.completeMeta };
     if (data.backMeta) state.backMeta = { ...state.backMeta, ...data.backMeta };
     if (data.bomConfig) state.bomConfig = { ...state.bomConfig, ...data.bomConfig };
@@ -7357,7 +7835,14 @@ document.getElementById('projectLoadInput').onchange = async (e) => {
   } catch (err) { showToast('Could not read project file.'); }
 };
 
-// Image Insert & Cover Image Uploads
+// Image Insert & Cover Image Uploads (Creator Logo, Theme Image, Background)
+let pendingCoverImageSlot = 'bg';
+function openCoverImagePicker(slot = 'bg') {
+  pendingCoverImageSlot = slot;
+  const inp = document.getElementById('coverImageInput');
+  if (inp) inp.click();
+}
+
 document.getElementById('insertImageInput').onchange = (e) => {
   const f = e.target.files?.[0]; e.target.value = ''; if (!f) return;
   const r = new FileReader();
@@ -7373,13 +7858,22 @@ document.getElementById('insertImageInput').onchange = (e) => {
 };
 document.getElementById('coverImageInput').onchange = (e) => {
   const f = e.target.files?.[0]; e.target.value = ''; if (!f) return;
+  const slot = pendingCoverImageSlot || 'bg';
+  pendingCoverImageSlot = 'bg';
   const r = new FileReader();
   r.onload = () => {
     const pg = state.pages[state.pageIdx];
     pushUndo();
-    if (pg.kind === 'cover') state.coverMeta.bgSrc = r.result;
-    else if (pg.kind === 'complete') state.completeMeta.bgSrc = r.result;
-    else if (pg.kind === 'back') state.backMeta.bgSrc = r.result;
+    if (pg.kind === 'cover') {
+      state.coverMeta = normalizeCoverMeta(state.coverMeta);
+      if (slot === 'creatorLogo') state.coverMeta.creatorLogoSrc = r.result;
+      else if (slot === 'themeImage') state.coverMeta.themeImageSrc = r.result;
+      else state.coverMeta.bgSrc = r.result;
+    } else if (pg.kind === 'complete') {
+      state.completeMeta.bgSrc = r.result;
+    } else if (pg.kind === 'back') {
+      state.backMeta.bgSrc = r.result;
+    }
     renderAll();
   };
   r.readAsDataURL(f);
@@ -7406,7 +7900,7 @@ document.getElementById('libImportInput').onchange = async (e) => {
   e.target.value = '';
 };
 document.getElementById('menuClearLibBtn').onclick = async () => {
-  userLibRaw.clear(); userLibTitles.clear(); embeddedDatCompiled.clear(); pliThumbCache.clear(); submodelThumbCache.clear();
+  userLibRaw.clear(); userLibTitles.clear(); embeddedDatCompiled.clear(); pliThumbCache.clear(); submodelThumbCache.clear(); coverHeroCache.clear();
   await dbClearStore(LIB_STORE);
   updateLibraryStatusUI();
   if (state.model) { computeModelDiagnostics(); renderAll(); }
@@ -7822,10 +8316,11 @@ document.getElementById('impToggleIdentical').onchange = (e) => {
 function finishImport(parsed, mode, subdivisionPlan = null, isPostImport = false) {
   if (isPostImport) pushUndo();
   submodelThumbCache.clear();
+  coverHeroCache.clear();
   state.model = buildManualFromParsed(parsed, mode, subdivisionPlan);
   if (!isPostImport) {
     state.overrides = {}; state.pageInserts = {}; state.dividerAfter = {};
-    state.coverMeta = { title:'', subtitle:'', az:38, el:26, bgSrc:null };
+    state.coverMeta = createDefaultCoverMeta();
     state.undoStack = []; state.redoStack = [];
   }
   state.pageIdx = 0; state.mode = 'pan'; state.selectedPartIds.clear();

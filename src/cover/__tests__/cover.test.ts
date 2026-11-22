@@ -1,0 +1,383 @@
+import { describe, expect, it } from 'vitest';
+import {
+  PROGRAM_NAME,
+  PROGRAM_URL,
+  computeCoverLayout,
+  computeTightCameraBounds,
+  createDefaultCoverMeta,
+  normalizeCoverMeta,
+} from '../coverLayout';
+import { buildQrSvg, generateQrMatrix } from '../qrCode';
+import { buildPdfBinary, canvasRectToPdfLink } from '../../export/pdfBinary';
+
+// Minimal ISO/IEC 18004 verifier: extracts format info, unmasks data modules, verifies GF(256)
+// Reed-Solomon syndromes for Version 4-M, and decodes the Byte-mode UTF-8 payload!
+function decodeVersion4MBytePayload(modules: boolean[][]): {
+  ecBits: number;
+  mask: number;
+  text: string;
+  syndromeZeros: boolean;
+} {
+  const size = modules.length;
+  expect(size).toBe(33); // Version 4
+
+  // Read Copy 1 format bits
+  const coords1: Array<[number, number]> = [
+    [8, 0], [8, 1], [8, 2], [8, 3], [8, 4], [8, 5], [8, 7], [8, 8],
+    [7, 8], [5, 8], [4, 8], [3, 8], [2, 8], [1, 8], [0, 8],
+  ];
+  let fmt1 = 0;
+  for (const [r, c] of coords1) fmt1 = (fmt1 << 1) | (modules[r][c] ? 1 : 0);
+
+  // Read Copy 2 format bits and ensure exact agreement
+  let fmt2 = 0;
+  for (let i = 0; i < 7; i++) fmt2 = (fmt2 << 1) | (modules[size - 1 - i][8] ? 1 : 0);
+  for (let i = 0; i < 8; i++) fmt2 = (fmt2 << 1) | (modules[8][size - 8 + i] ? 1 : 0);
+  expect(fmt1).toBe(fmt2);
+
+  const unmaskedFmt = fmt1 ^ 0x5412;
+  const data5 = unmaskedFmt >>> 10;
+  const ecBits = (data5 >>> 3) & 0b11;
+  const mask = data5 & 0b111;
+
+  // Rebuild reserved mask for Version 4
+  const reserved = Array.from({ length: size }, () => new Array<boolean>(size).fill(false));
+  const markFinder = (t: number, l: number) => {
+    for (let dr = -1; dr <= 7; dr++) {
+      for (let dc = -1; dc <= 7; dc++) {
+        const r = t + dr;
+        const c = l + dc;
+        if (r >= 0 && r < size && c >= 0 && c < size) reserved[r][c] = true;
+      }
+    }
+  };
+  markFinder(0, 0);
+  markFinder(0, size - 7);
+  markFinder(size - 7, 0);
+  for (let i = 8; i < size - 8; i++) {
+    reserved[6][i] = true;
+    reserved[i][6] = true;
+  }
+  // V4 alignment at (26, 26)
+  for (let dr = -2; dr <= 2; dr++) {
+    for (let dc = -2; dc <= 2; dc++) {
+      reserved[26 + dr][26 + dc] = true;
+    }
+  }
+  for (let i = 0; i < 9; i++) {
+    reserved[8][i] = true;
+    reserved[i][8] = true;
+  }
+  for (let i = 0; i < 8; i++) {
+    reserved[8][size - 1 - i] = true;
+    reserved[size - 1 - i][8] = true;
+  }
+  reserved[size - 8][8] = true;
+
+  const maskBit = (r: number, c: number) => {
+    switch (mask) {
+      case 0: return (r + c) % 2 === 0;
+      case 1: return r % 2 === 0;
+      case 2: return c % 3 === 0;
+      case 3: return (r + c) % 3 === 0;
+      case 4: return (Math.floor(r / 2) + Math.floor(c / 3)) % 2 === 0;
+      case 5: return ((r * c) % 2) + ((r * c) % 3) === 0;
+      case 6: return (((r * c) % 2) + ((r * c) % 3)) % 2 === 0;
+      case 7: return (((r + c) % 2) + ((r * c) % 3)) % 2 === 0;
+      default: return false;
+    }
+  };
+
+  // Extract bits in zigzag order
+  const bits: number[] = [];
+  let upward = true;
+  for (let rightCol = size - 1; rightCol >= 1; rightCol -= 2) {
+    if (rightCol === 6) rightCol = 5;
+    for (let step = 0; step < size; step++) {
+      const r = upward ? size - 1 - step : step;
+      for (let dx = 0; dx < 2; dx++) {
+        const c = rightCol - dx;
+        if (reserved[r][c]) continue;
+        const raw = modules[r][c];
+        const unmasked = maskBit(r, c) ? !raw : raw;
+        bits.push(unmasked ? 1 : 0);
+      }
+    }
+    upward = !upward;
+  }
+
+  // Convert first 800 bits -> 100 interleaved codewords (V4-M: 2 blocks of 32 data + 18 EC)
+  const codewords = new Uint8Array(100);
+  for (let i = 0; i < 100; i++) {
+    let b = 0;
+    for (let k = 0; k < 8; k++) b = (b << 1) | bits[i * 8 + k];
+    codewords[i] = b;
+  }
+
+  // De-interleave into 2 blocks of 32 data + 18 EC
+  const blocks = [new Uint8Array(50), new Uint8Array(50)];
+  for (let i = 0; i < 32; i++) {
+    blocks[0][i] = codewords[i * 2];
+    blocks[1][i] = codewords[i * 2 + 1];
+  }
+  for (let i = 0; i < 18; i++) {
+    blocks[0][32 + i] = codewords[64 + i * 2];
+    blocks[1][32 + i] = codewords[64 + i * 2 + 1];
+  }
+
+  // Verify Reed-Solomon syndromes at alpha^0 .. alpha^17 in GF(256) (poly 0x11d)
+  const exp = new Uint8Array(512);
+  const log = new Uint8Array(256);
+  let x = 1;
+  for (let i = 0; i < 255; i++) {
+    exp[i] = x;
+    log[x] = i;
+    x <<= 1;
+    if (x & 0x100) x ^= 0x11d;
+  }
+  for (let i = 255; i < 512; i++) exp[i] = exp[i - 255];
+  const mul = (a: number, b: number) => (a === 0 || b === 0 ? 0 : exp[log[a] + log[b]]);
+
+  let syndromeZeros = true;
+  for (const blk of blocks) {
+    for (let root = 0; root < 18; root++) {
+      let acc = 0;
+      const alpha = exp[root];
+      for (let i = 0; i < blk.length; i++) {
+        acc = mul(acc, alpha) ^ blk[i];
+      }
+      if (acc !== 0) syndromeZeros = false;
+    }
+  }
+
+  // Reconstruct 64 data bytes -> decode Byte mode payload
+  const dataBytes = new Uint8Array(64);
+  dataBytes.set(blocks[0].subarray(0, 32), 0);
+  dataBytes.set(blocks[1].subarray(0, 32), 32);
+
+  const dataBits: number[] = [];
+  for (const b of dataBytes) {
+    for (let k = 7; k >= 0; k--) dataBits.push((b >>> k) & 1);
+  }
+  const readBits = (pos: number, len: number) => {
+    let v = 0;
+    for (let i = 0; i < len; i++) v = (v << 1) | dataBits[pos + i];
+    return v;
+  };
+  const mode = readBits(0, 4);
+  expect(mode).toBe(0b0100);
+  const byteLen = readBits(4, 8);
+  const payload = new Uint8Array(byteLen);
+  for (let i = 0; i < byteLen; i++) {
+    payload[i] = readBits(12 + i * 8, 8);
+  }
+  return {
+    ecBits,
+    mask,
+    text: new TextDecoder().decode(payload),
+    syndromeZeros,
+  };
+}
+
+describe('QR Code Generator (ISO/IEC 18004)', () => {
+  it('encodes the Brick Instruction Creator URL into a valid, syndrome-clean Version 4-M QR matrix', () => {
+    const qr = generateQrMatrix(PROGRAM_URL, 'M');
+    expect(qr.version).toBe(4);
+    expect(qr.size).toBe(33);
+    expect(qr.ecLevel).toBe('M');
+
+    // Verify all 3 finder pattern cores & timing pattern & fixed dark module
+    expect(qr.modules[3][3]).toBe(true);
+    expect(qr.modules[3][qr.size - 4]).toBe(true);
+    expect(qr.modules[qr.size - 4][3]).toBe(true);
+    expect(qr.modules[qr.size - 8][8]).toBe(true);
+    expect(qr.modules[6][8]).toBe(true);
+    expect(qr.modules[6][9]).toBe(false);
+    // Version 4 alignment pattern center at (26, 26)
+    expect(qr.modules[26][26]).toBe(true);
+    expect(qr.modules[25][26]).toBe(false);
+    expect(qr.modules[24][26]).toBe(true);
+
+    // Full mathematical round-trip decode + Reed-Solomon syndrome verification
+    const decoded = decodeVersion4MBytePayload(qr.modules);
+    expect(decoded.ecBits).toBe(0b00); // EC level M
+    expect(decoded.mask).toBe(qr.maskPattern);
+    expect(decoded.syndromeZeros).toBe(true);
+    expect(decoded.text).toBe(PROGRAM_URL);
+  });
+
+  it('builds a crisp single-path SVG for the QR code', () => {
+    const svg = buildQrSvg(PROGRAM_URL, { quietZone: 1, ariaLabel: `QR code for ${PROGRAM_NAME}` });
+    expect(svg).toContain('viewBox="0 0 35 35"');
+    expect(svg).toContain('shape-rendering="crispEdges"');
+    expect(svg).toContain('<path d="M');
+  });
+});
+
+describe('Cover Metadata & LEGO-Style Layout Geometry', () => {
+  it('creates clean editorial defaults with optional empty subtitle and QR enabled', () => {
+    const def = createDefaultCoverMeta();
+    expect(def.title).toBe('');
+    expect(def.subtitle).toBe('');
+    expect(def.creatorLogoSrc).toBeNull();
+    expect(def.themeImageSrc).toBeNull();
+    expect(def.bgSrc).toBeNull();
+    expect(def.showQrCode).toBe(true);
+    expect(def.showProgramBadge).toBe(true);
+    expect(def.el).toBe(18);
+  });
+
+  it('normalizes legacy saved coverMeta objects gracefully', () => {
+    const legacy = normalizeCoverMeta({ title: 'Cargo Ship', subtitle: '', az: 45, el: 99, bgSrc: null });
+    expect(legacy.title).toBe('Cargo Ship');
+    expect(legacy.el).toBe(60); // Clamped into hero elevation range
+    expect(legacy.zoom).toBe(1.0);
+    expect(legacy.showQrCode).toBe(true);
+    expect(legacy.creatorLogoSrc).toBeNull();
+    expect(legacy.themeImageSrc).toBeNull();
+  });
+
+  it('computes a page-filling hero region and non-overlapping corner zones on landscape & portrait pages', () => {
+    for (const [pageW, pageH] of [[1100, 850], [850, 1100], [900, 900]]) {
+      const layout = computeCoverLayout({
+        pageW,
+        pageH,
+        hasCreatorLogo: true,
+        hasSubtitle: true,
+        hasThemeImage: true,
+        showQrCode: true,
+        showProgramBadge: true,
+      });
+
+      // Hero render fills nearly the entire page width and generous height with clean corner clearance
+      expect(layout.heroRect.w / pageW).toBeGreaterThan(0.92);
+      expect(layout.heroRect.h / pageH).toBeGreaterThan(0.65);
+
+      // Top-left and top-right zones never overlap horizontally
+      expect(layout.pad + layout.topLeftMaxW).toBeLessThan(pageW - layout.pad - layout.topRightMaxW);
+
+      // Bottom-right clickable group contains both badge card and QR square inside page bounds
+      expect(layout.qrCardRect).not.toBeNull();
+      expect(layout.brandGroupRect.x).toBeGreaterThan(0);
+      expect(layout.brandGroupRect.y).toBeGreaterThan(0);
+      expect(layout.brandGroupRect.x + layout.brandGroupRect.w).toBeLessThanOrEqual(pageW - layout.pad + 1);
+      expect(layout.brandGroupRect.y + layout.brandGroupRect.h).toBeLessThanOrEqual(pageH - layout.pad + 1);
+      expect(layout.qrCardRect!.w).toBe(layout.qrCardRect!.h);
+    }
+  });
+
+  it('omits QR rect when showQrCode is false while keeping the program badge clickable', () => {
+    const layout = computeCoverLayout({
+      pageW: 1100,
+      pageH: 850,
+      hasCreatorLogo: false,
+      hasSubtitle: false,
+      hasThemeImage: false,
+      showQrCode: false,
+      showProgramBadge: true,
+    });
+    expect(layout.qrCardRect).toBeNull();
+    expect(layout.brandGroupRect.w).toBe(layout.brandCardRect.w);
+    expect(layout.brandGroupRect.w).toBeGreaterThan(60);
+  });
+
+  it('computes tight camera-space orthographic bounds for elongated models', () => {
+    // 4:1 wide container-ship-like box: X in [-200..200], Y in [0..80], Z in [-40..40]
+    const corners = [
+      -200, 0, -40, 200, 0, -40, 200, 80, -40,
+      -200, 0, 40, 200, 80, 40, -200, 80, 40,
+    ];
+    const tb = computeTightCameraBounds(
+      new Float32Array(corners),
+      [0, 40, 0],
+      0,
+      0,
+      1000,
+      600,
+      1.0,
+      1.06,
+    );
+    expect(tb).not.toBeNull();
+    // SpanX = 400 -> halfW should be tight around 200 * 1.06 = 212 (much tighter than bounding sphere ~220 * aspect!)
+    expect(tb!.halfW).toBeCloseTo(212, 1);
+    expect(tb!.centerX).toBeCloseTo(0, 2);
+    expect(tb!.centerY).toBeCloseTo(0, 2);
+  });
+});
+
+describe('PDF 1.4 Binary Builder with Clickable Link Annotations', () => {
+  it('converts top-left canvas pixel coordinates into PDF bottom-left point coordinates', () => {
+    const link = canvasRectToPdfLink(
+      { x: 800, y: 700, w: 250, h: 100 },
+      1100,
+      850,
+      792,
+      612,
+      PROGRAM_URL,
+    );
+    // Top of box is y=700/850 down from top -> ury = 612 * (1 - 700/850) = 108
+    // Bottom of box is y=800/850 down from top -> lly = 612 * (1 - 800/850) = 36
+    expect(link.llx).toBeCloseTo((800 / 1100) * 792, 1);
+    expect(link.urx).toBeCloseTo((1050 / 1100) * 792, 1);
+    expect(link.ury).toBeCloseTo(108, 1);
+    expect(link.lly).toBeCloseTo(36, 1);
+    expect(link.url).toBe(PROGRAM_URL);
+  });
+
+  it('builds a valid multi-page PDF 1.4 with clickable URI annotations and exact byte-accurate xref offsets', () => {
+    const fakeJpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
+    const coverLink = canvasRectToPdfLink(
+      { x: 800, y: 720, w: 240, h: 80 },
+      1100,
+      850,
+      792,
+      612,
+      PROGRAM_URL,
+    );
+    const backLink = canvasRectToPdfLink(
+      { x: 420, y: 360, w: 260, h: 160 },
+      1100,
+      850,
+      792,
+      612,
+      PROGRAM_URL,
+    );
+
+    const pdf = buildPdfBinary(
+      [
+        { bytes: fakeJpeg, pxW: 1100, pxH: 850, links: [coverLink] },
+        { bytes: fakeJpeg, pxW: 1100, pxH: 850 },
+        { bytes: fakeJpeg, pxW: 1100, pxH: 850, links: [backLink] },
+      ],
+      792,
+      612,
+    );
+
+    const text = new TextDecoder('latin1').decode(pdf);
+    expect(text.startsWith('%PDF-1.4\n')).toBe(true);
+    expect(text.endsWith('%%EOF')).toBe(true);
+    expect(text).toContain('/Count 3');
+    expect(text).toContain(`/Annots [6 0 R]`);
+    expect(text).toContain(`/Subtype /Link`);
+    expect(text).toContain(`/Border [0 0 0]`);
+    expect(text).toContain(`/URI (${PROGRAM_URL})`);
+
+    // Verify every single xref offset points to the exact byte start of `<id> 0 obj`!
+    const xrefIdx = text.lastIndexOf('\nxref\n') + 1;
+    expect(xrefIdx).toBeGreaterThan(0);
+    const startxrefMatch = text.match(/startxref\n(\d+)\n%%EOF$/);
+    expect(startxrefMatch).not.toBeNull();
+    expect(Number(startxrefMatch![1])).toBe(xrefIdx);
+
+    const xrefLines = text.slice(xrefIdx).split('\n');
+    const headerParts = xrefLines[1].trim().split(' ');
+    const objCount = Number(headerParts[1]); // 1 free + 2 (Catalog, Pages) + 3*3 + 2 annots = 14
+    expect(objCount).toBe(14);
+    for (let objId = 1; objId < objCount; objId++) {
+      const entry = xrefLines[2 + objId];
+      const byteOffset = Number(entry.slice(0, 10));
+      const slice = text.slice(byteOffset, byteOffset + 20);
+      expect(slice.startsWith(`${objId} 0 obj\n`)).toBe(true);
+    }
+  });
+});
