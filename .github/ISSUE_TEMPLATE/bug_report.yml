@@ -1,0 +1,62 @@
+name: Bug Report
+description: Report a bug or unexpected behavior in Brick Instruction Creator
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! Please share as much detail as you can so we can reproduce and fix it.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear and concise description of the bug.
+      placeholder: Describe what went wrong...
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: How can we reproduce this issue?
+      placeholder: |
+        1. Import a .io / .ldr model (or open the app)
+        2. Click on ...
+        3. See error / unexpected result
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen instead?
+      placeholder: Describe what you expected...
+
+  - type: dropdown
+    id: file_type
+    attributes:
+      label: Model / File Type
+      description: What type of file were you working with (if applicable)?
+      options:
+        - BrickLink Studio (.io)
+        - LDraw (.ldr / .mpd)
+        - Saved Project (.bic.json)
+        - No model loaded / UI issue
+        - Other
+
+  - type: input
+    id: environment
+    attributes:
+      label: Browser & Device
+      description: Which browser and device/OS are you using?
+      placeholder: e.g. Chrome 130 on macOS, Safari on iPhone, Firefox on Windows
+
+  - type: textarea
+    id: attachments
+    attributes:
+      label: Screenshots, Console Errors, or Sample File
+      description: Drag and drop screenshots, paste browser console errors, or mention model size/details if relevant.
