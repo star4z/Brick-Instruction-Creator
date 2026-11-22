@@ -3,6 +3,13 @@
 // Brick Instruction Creator — Interactive WebGL Manual Studio Runtime
 // Compiled & bundled locally by Vite for GitHub Pages and Neocities deployment.
 
+import {
+  analyzeModelSubdivisions,
+  mergeProposedSections,
+  recomputeProposalWithCount,
+  splitProposedSection,
+} from './engine/subdivisionAnalyzer';
+
 let initialized = false;
 
 export function initBrickInstructionCreator(): void {
@@ -774,20 +781,28 @@ function buildMeshBuffers(prevParts, newParts, opts) {
         addCyl(startX + ix*20, 1.8, startZ + iz*20, 5.8, 5.8, 4.4, 'y', 8, m, ox, oy, oz, hinge, col, eCol, aByte);
   };
 
-  const emitSingleLeaf = (leafPart, isNew, isSelected, offX, offY, offZ, hingeRad) => {
+  const emitSingleLeaf = (leafPart, isNew, isSelected, offX, offY, offZ, hingeRad, parentId = null) => {
     const def = resolvePart(leafPart.p);
     const cInfo = COLORS[leafPart.c] || COLORS[71];
-    const isFaded = !isNew && opts.fadePrev;
-    const isRealTrans = (cInfo.alpha || 1) < 0.96;
+    const lookupId = parentId || leafPart.id;
+    const overrideHex = opts.partColorOverrides?.[lookupId] || opts.partColorOverrides?.[leafPart.id] || null;
+    const isDimmed = Boolean(opts.dimPartIds && (opts.dimPartIds.has(lookupId) || opts.dimPartIds.has(leafPart.id)));
+    const isFaded = (!isNew && opts.fadePrev) || isDimmed;
+    const isRealTrans = !overrideHex && (cInfo.alpha || 1) < 0.96;
     // Fade solid earlier bricks via clean color muting (NOT alpha transparency with depthMask=false!)
     // so bricks underneath ALWAYS stay properly depth-occluded by plates above them!
-    const fadeMix = isFaded
-      ? Math.max(0, Math.min(0.76, (1.0 - opts.fadeOpacity) * 0.95 + (opts.fadeOpacity < 0.99 ? 0.16 : 0)))
-      : 0;
-    const baseCol = isSelected ? [26, 115, 232] : hexToRgb255(cInfo.hex, fadeMix);
+    const fadeMix = isDimmed
+      ? 0.72
+      : isFaded
+        ? Math.max(0, Math.min(0.76, (1.0 - opts.fadeOpacity) * 0.95 + (opts.fadeOpacity < 0.99 ? 0.16 : 0)))
+        : 0;
+    const baseHex = overrideHex || cInfo.hex;
+    const baseCol = isSelected ? [26, 115, 232] : hexToRgb255(baseHex, fadeMix);
     const edgeCol = isSelected
       ? [255, 255, 255]
-      : (isNew && opts.highlightNew ? hexToRgb255(opts.highlightColor, 0) : hexToRgb255(cInfo.edge, fadeMix * 0.85));
+      : overrideHex
+        ? hexToRgb255('#1e293b', isDimmed ? 0.72 : 0.25)
+        : (isNew && opts.highlightNew ? hexToRgb255(opts.highlightColor, 0) : hexToRgb255(cInfo.edge, fadeMix * 0.85));
     const aByte = isRealTrans
       ? Math.round(255 * (cInfo.alpha || 0.7) * (isFaded ? Math.max(0.55, opts.fadeOpacity) : 1))
       : 255;
@@ -866,9 +881,9 @@ function buildMeshBuffers(prevParts, newParts, opts) {
     const isSel = isNew && Boolean(opts.selectedPartIds?.has(part.id));
 
     if (part.children && part.children.length > 0) {
-      for (const ch of part.children) emitSingleLeaf(ch, isNew, isSel, offX, offY, offZ, hingeRad);
+      for (const ch of part.children) emitSingleLeaf(ch, isNew, isSel, offX, offY, offZ, hingeRad, part.id);
     } else {
-      emitSingleLeaf(part, isNew, isSel, offX, offY, offZ, hingeRad);
+      emitSingleLeaf(part, isNew, isSel, offX, offY, offZ, hingeRad, part.id);
     }
 
     // Placement Arrows ONLY when a piece is ACTUALLY offset/exploded! (Zero random arrows!)
@@ -1749,7 +1764,7 @@ function collectBasePrereqs(blockedIndices, belowMap, remaining, boxes, baseMinY
   return Array.from(unlocked);
 }
 
-// Build bottom-up zero-floating steps for 1 canonical copy of a duplicate submodel
+// Build bottom-up zero-floating steps for 1 canonical copy of a duplicate submodel or modular section
 function buildLocalSubmodelSteps(canonicalParts, perStep, groupId, repeatCount) {
   const n = canonicalParts.length;
   const boxes = canonicalParts.map(p => computeWorldBox(p));
@@ -1757,29 +1772,9 @@ function buildLocalSubmodelSteps(canonicalParts, perStep, groupId, repeatCount) 
   const sideCaps = canonicalParts.map((p, i) => canConnectSideways(p, roles[i]));
   const claddingFlags = canonicalParts.map((p, i) => isSidewaysCladdingPart(p, boxes[i]));
   const layerY = canonicalParts.map((p, i) => computeBuildLayerY(p, boxes[i]));
-  const adj = Array.from({ length: n }, () => []);
-  for (let i = 0; i < n; i++) {
-    for (let j = i + 1; j < n; j++) {
-      if (boxesPhysicallyTouch(boxes[i], boxes[j], roles[i], roles[j], sideCaps[i], sideCaps[j])) {
-        adj[i].push(j); adj[j].push(i);
-      }
-    }
-  }
-  for (let i = 0; i < n; i++) {
-    if (adj[i].length > 0) continue;
-    let bestJ = -1, bestD = 12;
-    for (let j = 0; j < n; j++) {
-      if (i === j || roles[j] === 'wheel') continue;
-      const gx = Math.max(0, boxes[i].min[0]-boxes[j].max[0], boxes[j].min[0]-boxes[i].max[0]);
-      const gy = Math.max(0, boxes[i].min[1]-boxes[j].max[1], boxes[j].min[1]-boxes[i].max[1]);
-      const gz = Math.max(0, boxes[i].min[2]-boxes[j].max[2], boxes[j].min[2]-boxes[i].max[2]);
-      const d = Math.hypot(gx, gy, gz);
-      if (d < bestD) { bestD = d; bestJ = j; }
-    }
-    if (bestJ >= 0) { adj[i].push(bestJ); adj[bestJ].push(i); }
-  }
+  const adj = buildSpatialAdjacency(canonicalParts, boxes, roles, sideCaps);
   const { belowMap, baseMinY } = buildVerticalPrereqMap(boxes, adj, roles, claddingFlags);
-  const subPerStep = Math.max(2, Math.min(perStep, n <= 4 ? 2 : 4));
+  const subPerStep = n > 20 ? perStep : Math.max(2, Math.min(perStep, n <= 4 ? 2 : 4));
   const placed = new Set();
   const remaining = new Set(Array.from({ length: n }, (_, i) => i));
   const steps = [];
@@ -1813,6 +1808,7 @@ function buildLocalSubmodelSteps(canonicalParts, perStep, groupId, repeatCount) 
     }
     const anchor = frontier[0];
     const anchorY = layerY[anchor];
+    const anchorC = boxes[anchor].center;
     const stepIdx = [anchor];
     remaining.delete(anchor); placed.add(anchor);
 
@@ -1834,14 +1830,21 @@ function buildLocalSubmodelSteps(canonicalParts, perStep, groupId, repeatCount) 
           const sameBaseLayer = boxes[i].min[1] <= baseMinY + 24 && Math.abs(boxes[i].min[1] - boxes[anchor].min[1]) <= 4;
           if (!touchesCur && !sameBaseLayer) return false;
         }
-        return true;
+        const d = Math.hypot(boxes[i].center[0]-anchorC[0], boxes[i].center[1]-anchorC[1], boxes[i].center[2]-anchorC[2]);
+        return d <= 140;
       });
       if (cands.length === 0) break;
-      cands.sort((a, b) =>
-        (canonicalParts[b].p === canonicalParts[anchor].p && canonicalParts[b].c === canonicalParts[anchor].c ? 1 : 0)
-        - (canonicalParts[a].p === canonicalParts[anchor].p && canonicalParts[a].c === canonicalParts[anchor].c ? 1 : 0)
-        || Math.abs(layerY[a] - anchorY) - Math.abs(layerY[b] - anchorY)
-      );
+      cands.sort((a, b) => {
+        const sc = (i) => {
+          let s = 0;
+          if (canonicalParts[i].p === canonicalParts[anchor].p && canonicalParts[i].c === canonicalParts[anchor].c) s += 80;
+          else if (canonicalParts[i].p === canonicalParts[anchor].p) s += 30;
+          s -= Math.hypot(boxes[i].center[0]-anchorC[0], boxes[i].center[2]-anchorC[2]) * 0.45;
+          s -= Math.abs(layerY[i] - anchorY) * 2.0;
+          return s;
+        };
+        return sc(b) - sc(a);
+      });
       const next = cands[0];
       stepIdx.push(next); remaining.delete(next); placed.add(next);
     }
@@ -1856,16 +1859,135 @@ function buildLocalSubmodelSteps(canonicalParts, perStep, groupId, repeatCount) 
       isSubmodelStep: true,
     });
   }
-  // Indicate ×N on ONLY the last step of the submodel!
-  if (steps.length > 0) {
+  // Indicate ×N on ONLY the last step of repeated submodels (repeatCount > 1)
+  if (steps.length > 0 && repeatCount > 1) {
     steps[steps.length - 1].isSubmodelFinal = true;
     steps[steps.length - 1].submodelRepeat = repeatCount;
   }
   return steps;
 }
 
-// ZERO-FLOATING CHASSIS-FIRST STEP GENERATOR (with automatic duplicate submodel chapters!)
-function buildManualFromParsed(parsed, mode) {
+// Fast 3D spatial hash broad-phase adjacency builder (wheel-aware & rejects smooth side-wall grazing!)
+function buildSpatialAdjacency(parts, boxes, roles, sideCaps = null) {
+  const n = parts.length;
+  const caps = sideCaps || parts.map((p, i) => canConnectSideways(p, roles[i]));
+  const adj = Array.from({ length: n }, () => []);
+  const cellSize = 80;
+  const pad = 12;
+  const cells = new Map();
+  const oversized = [];
+
+  for (let i = 0; i < n; i++) {
+    const b = boxes[i];
+    const minCx = Math.floor((b.min[0] - pad) / cellSize);
+    const maxCx = Math.floor((b.max[0] + pad) / cellSize);
+    const minCy = Math.floor((b.min[1] - pad) / cellSize);
+    const maxCy = Math.floor((b.max[1] + pad) / cellSize);
+    const minCz = Math.floor((b.min[2] - pad) / cellSize);
+    const maxCz = Math.floor((b.max[2] + pad) / cellSize);
+    const cellCount = (maxCx - minCx + 1) * (maxCy - minCy + 1) * (maxCz - minCz + 1);
+    if (cellCount > 256) {
+      oversized.push(i);
+      continue;
+    }
+    for (let cx = minCx; cx <= maxCx; cx++) {
+      for (let cy = minCy; cy <= maxCy; cy++) {
+        for (let cz = minCz; cz <= maxCz; cz++) {
+          const key = `${cx},${cy},${cz}`;
+          let bucket = cells.get(key);
+          if (!bucket) { bucket = []; cells.set(key, bucket); }
+          bucket.push(i);
+        }
+      }
+    }
+  }
+
+  const tested = new Set();
+  const testPair = (i, j) => {
+    const lo = i < j ? i : j;
+    const hi = i < j ? j : i;
+    const pk = lo * n + hi;
+    if (tested.has(pk)) return;
+    tested.add(pk);
+    if (boxesPhysicallyTouch(boxes[lo], boxes[hi], roles[lo], roles[hi], caps[lo], caps[hi])) {
+      adj[lo].push(hi);
+      adj[hi].push(lo);
+    }
+  };
+
+  for (const bucket of cells.values()) {
+    for (let a = 0; a < bucket.length; a++) {
+      for (let b = a + 1; b < bucket.length; b++) {
+        testPair(bucket[a], bucket[b]);
+      }
+    }
+  }
+  for (const oi of oversized) {
+    for (let j = 0; j < n; j++) {
+      if (oi !== j) testPair(oi, j);
+    }
+  }
+
+  // Fallback for any isolated wheel/detail whose axle wasn't tagged wheel_holder: connect to nearest structural/axle neighbor
+  for (let i = 0; i < n; i++) {
+    parts[i]._detachedGap = 0;
+    if (adj[i].length > 0) continue;
+    let bestJ = -1, bestD = 12;
+    for (let j = 0; j < n; j++) {
+      if (i === j || roles[j] === 'wheel') continue;
+      const gx = Math.max(0, boxes[i].min[0]-boxes[j].max[0], boxes[j].min[0]-boxes[i].max[0]);
+      const gy = Math.max(0, boxes[i].min[1]-boxes[j].max[1], boxes[j].min[1]-boxes[i].max[1]);
+      const gz = Math.max(0, boxes[i].min[2]-boxes[j].max[2], boxes[j].min[2]-boxes[i].max[2]);
+      const d = Math.hypot(gx, gy, gz);
+      if (d < bestD) { bestD = d; bestJ = j; }
+    }
+    if (bestJ >= 0) {
+      adj[i].push(bestJ); adj[bestJ].push(i);
+      if (bestD > 4.5) parts[i]._detachedGap = Math.round(bestD * 10) / 10;
+    } else {
+      parts[i]._detachedGap = Infinity;
+    }
+  }
+  return adj;
+}
+
+function classifyMinifigPieceFast(part) {
+  const k = normId(part.p);
+  const name = (resolvePart(part.p).name || '').toLowerCase();
+  const childKeys = (part.children || []).map(c => normId(c.p)).join(' ');
+  const combo = `${k} ${childKeys}`;
+  if (/(?:^|\s)(?:asm_)?(?:bl_)?(?:3815|3816|3817|970|41879|16709)/i.test(combo) || /\bhips\b|minifig.*leg/i.test(name)) return 'legs';
+  if (/(?:^|\s)(?:asm_)?(?:bl_)?(?:973|3818|3819|3820)/i.test(combo) || /minifig.*torso|torso assembly/i.test(name)) return 'torso';
+  if (/(?:^|\s)(?:bl_)?(?:3626|28621)/i.test(combo) || /minifig.*head\b/i.test(name)) return 'head';
+  if (/(?:^|\s)(?:bl_)?(?:76925|26066|11303|66913|21778|98385|11256|61976|25376|93091|24093|3842)/i.test(combo) ||
+      /hair|helmet|hat|cap|hood|headgear|visor|crown|scarf|cape|armor|backpack|bag|ponytail|wig|beard|glasses|utensil|minifig.*accessory/i.test(name)) return 'headgear';
+  return null;
+}
+
+function prepareSubdivisionData(parsed) {
+  const parts = parsed.parts;
+  const boxes = parts.map(p => computeWorldBox(p));
+  const roles = parts.map(p => classifyPartRole(p));
+  const adjacency = buildSpatialAdjacency(parts, boxes, roles);
+  const inputs = parts.map((p, index) => {
+    const def = resolvePart(p.p);
+    const mf = classifyMinifigPieceFast(p);
+    return {
+      index,
+      id: p.id,
+      partId: normId(p.p),
+      colorId: p.c,
+      box: boxes[index],
+      isTile: def.studs === false && def.h <= 10,
+      isMinifig: mf === 'legs' || mf === 'torso' || mf === 'head',
+      submodelKey: p.sub || undefined,
+    };
+  });
+  return { boxes, roles, adjacency, inputs };
+}
+
+// ZERO-FLOATING CHASSIS-FIRST STEP GENERATOR (with automatic duplicate submodel & subdivision chapters!)
+function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
   const perStep = state.pacing === 'few' ? 3 : state.pacing === 'many' ? 12 : 6;
   const parts = parsed.parts;
   const boxes = parts.map(p => computeWorldBox(p));
@@ -1896,39 +2018,12 @@ function buildManualFromParsed(parsed, mode) {
       }));
       chapters.push({ id: `kch_${chIdx}`, name: subName, kind: 'main', sectionId: `ksec_${chIdx}`, steps });
     }
-    return { title: parsed.title, subtitle: `${parts.length} pieces · ${globalStep} steps`, chapters, _parsed: parsed, _mode: mode };
+    return { title: parsed.title, subtitle: `${parts.length} pieces · ${globalStep} steps`, chapters, _parsed: parsed, _mode: mode, _subdivisionPlan: null };
   }
 
-  // 1. Build strict physical adjacency graph (wheel-aware & rejects smooth side-wall grazing!)
+  // 1. Build strict physical adjacency graph via 3D spatial hash broad-phase (wheel-aware & rejects smooth side-wall grazing!)
   const sideCaps = parts.map((p, i) => canConnectSideways(p, roles[i]));
-  const adj = Array.from({ length: parts.length }, () => []);
-  for (let i = 0; i < parts.length; i++) {
-    for (let j = i + 1; j < parts.length; j++) {
-      if (boxesPhysicallyTouch(boxes[i], boxes[j], roles[i], roles[j], sideCaps[i], sideCaps[j])) {
-        adj[i].push(j); adj[j].push(i);
-      }
-    }
-  }
-  // Fallback for any isolated wheel/detail whose axle wasn't tagged wheel_holder: connect to nearest structural/axle neighbor
-  for (let i = 0; i < parts.length; i++) {
-    parts[i]._detachedGap = 0;
-    if (adj[i].length > 0) continue;
-    let bestJ = -1, bestD = 12;
-    for (let j = 0; j < parts.length; j++) {
-      if (i === j || roles[j] === 'wheel') continue;
-      const gx = Math.max(0, boxes[i].min[0]-boxes[j].max[0], boxes[j].min[0]-boxes[i].max[0]);
-      const gy = Math.max(0, boxes[i].min[1]-boxes[j].max[1], boxes[j].min[1]-boxes[i].max[1]);
-      const gz = Math.max(0, boxes[i].min[2]-boxes[j].max[2], boxes[j].min[2]-boxes[i].max[2]);
-      const d = Math.hypot(gx, gy, gz);
-      if (d < bestD) { bestD = d; bestJ = j; }
-    }
-    if (bestJ >= 0) {
-      adj[i].push(bestJ); adj[bestJ].push(i);
-      if (bestD > 4.5) parts[i]._detachedGap = Math.round(bestD * 10) / 10;
-    } else {
-      parts[i]._detachedGap = Infinity;
-    }
-  }
+  const adj = buildSpatialAdjacency(parts, boxes, roles, sideCaps);
 
   // 1a. Whole-Minifigure Assembly Grouping (NEVER build just a head — always build the entire figure together!)
   const classifyMinifigPiece = (part) => {
@@ -2102,6 +2197,267 @@ function buildManualFromParsed(parsed, mode) {
     });
   }
 
+  // Compute horizontal span for adaptive spatial spread guard (stops far-end pieces from grouping on long builds)
+  let mMinX = Infinity, mMaxX = -Infinity, mMinZ = Infinity, mMaxZ = -Infinity;
+  for (let i = 0; i < parts.length; i++) {
+    if (mfClaimed[i]) continue;
+    if (boxes[i].min[0] < mMinX) mMinX = boxes[i].min[0];
+    if (boxes[i].max[0] > mMaxX) mMaxX = boxes[i].max[0];
+    if (boxes[i].min[2] < mMinZ) mMinZ = boxes[i].min[2];
+    if (boxes[i].max[2] > mMaxZ) mMaxZ = boxes[i].max[2];
+  }
+  const modelHorizSpan = isFinite(mMinX) ? Math.max(mMaxX - mMinX, mMaxZ - mMinZ) : 0;
+  const adaptiveMaxSpread = modelHorizSpan >= 400 ? 120 : 160;
+
+  // Helper: zero-floating chassis-first step generation for any subset of world part indices
+  const buildStepsForIndexList = (idxList, idPrefix, prePlacedSet = new Set(), maxSpread = adaptiveMaxSpread) => {
+    const placed = new Set(prePlacedSet);
+    const remaining = new Set(idxList);
+    const outSteps = [];
+
+    while (remaining.size > 0) {
+      let frontier;
+      if (placed.size === 0) {
+        const nonWheels = Array.from(remaining).filter(i => roles[i] !== 'wheel' && !claddingFlags[i]);
+        const pool = nonWheels.length > 0 ? nonWheels : Array.from(remaining);
+        pool.sort((a, b) => layerY[a] - layerY[b]);
+        const minY = layerY[pool[0]];
+        const lowBand = pool.filter(i => layerY[i] <= minY + 32);
+        lowBand.sort((a, b) => {
+          const sa = (roles[a] === 'structural' || roles[a] === 'wheel_holder' ? 50 : 0) + adj[a].length * 6 - (layerY[a] - minY) * 0.8;
+          const sb = (roles[b] === 'structural' || roles[b] === 'wheel_holder' ? 50 : 0) + adj[b].length * 6 - (layerY[b] - minY) * 0.8;
+          return sb - sa;
+        });
+        frontier = lowBand;
+      } else {
+        const rawFrontier = Array.from(remaining).filter(i => adj[i].some(nb => placed.has(nb)));
+        const readyFrontier = rawFrontier.filter(i => !isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, placed));
+        frontier = readyFrontier.length > 0 ? readyFrontier : rawFrontier;
+        if (frontier.length === 0) {
+          frontier = Array.from(remaining).sort((a, b) => layerY[a] - layerY[b]);
+        }
+        frontier.sort((a, b) => {
+          const wa = roles[a] === 'wheel' ? 1 : 0, wb = roles[b] === 'wheel' ? 1 : 0;
+          if (wa !== wb) return wa - wb;
+          return Math.round(layerY[a] / 8) - Math.round(layerY[b] / 8) || (claddingFlags[a] ? 1 : 0) - (claddingFlags[b] ? 1 : 0) || parts[a].p.localeCompare(parts[b].p);
+        });
+      }
+
+      const anchor = frontier[0];
+      const anchorY = layerY[anchor];
+      const anchorC = boxes[anchor].center;
+      const stepIndices = [anchor];
+      remaining.delete(anchor);
+      placed.add(anchor);
+
+      while (stepIndices.length < perStep && remaining.size > 0) {
+        const cands = Array.from(remaining).filter(i => {
+          if (isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, placed)) return false;
+          if (Math.abs(layerY[i] - anchorY) > 18) return false;
+          if (!adj[i].some(nb => placed.has(nb))) return false;
+          const d = Math.hypot(boxes[i].center[0]-anchorC[0], boxes[i].center[1]-anchorC[1], boxes[i].center[2]-anchorC[2]);
+          return d <= maxSpread;
+        });
+        if (cands.length === 0) break;
+        cands.sort((a, b) => {
+          const score = (i) => {
+            let s = 0;
+            if (parts[i].p === parts[anchor].p && parts[i].c === parts[anchor].c) s += 85;
+            else if (parts[i].p === parts[anchor].p) s += 35;
+            if (roles[i] === roles[anchor]) s += 20;
+            s -= Math.hypot(boxes[i].center[0]-anchorC[0], boxes[i].center[2]-anchorC[2]) * 0.45;
+            s -= Math.abs(layerY[i] - anchorY) * 2.0;
+            return s;
+          };
+          return score(b) - score(a);
+        });
+        const next = cands[0];
+        stepIndices.push(next);
+        remaining.delete(next);
+        placed.add(next);
+      }
+
+      globalStep++;
+      outSteps.push({
+        id: `${idPrefix}_s${globalStep}`,
+        num: globalStep,
+        side: 'top',
+        corner: 'front_right',
+        cue: 'none',
+        parts: stepIndices.map(i => parts[i]),
+      });
+    }
+    return { steps: outSteps, placed };
+  };
+
+  // 3b. SUBDIVISION PLAN EXECUTION (Modular Halves / Floors / Modules + Connect, OR Numbered Build Bags!)
+  if (subdivisionPlan && subdivisionPlan.strategy !== 'none' && Array.isArray(subdivisionPlan.sections) && subdivisionPlan.sections.length >= 1) {
+    // Track every non-minifig part index so zero bricks are ever duplicated or dropped
+    const assigned = new Set();
+    const filterUnassigned = (list) => {
+      const clean = [];
+      for (const idx of list || []) {
+        if (idx >= 0 && idx < parts.length && !mfClaimed[idx] && !assigned.has(idx)) {
+          assigned.add(idx);
+          clean.push(idx);
+        }
+      }
+      return clean;
+    };
+
+    const resolvedSections = subdivisionPlan.sections.map((sec) => {
+      if (sec.repeatPartIndexGroups && sec.repeatPartIndexGroups.length > 1) {
+        const groups = sec.repeatPartIndexGroups.map(g => filterUnassigned(g)).filter(g => g.length > 0);
+        return { ...sec, cleanIndices: groups[0] || [], cleanRepeatGroups: groups };
+      }
+      const clean = filterUnassigned(sec.partIndices);
+      return { ...sec, cleanIndices: clean, cleanRepeatGroups: clean.length > 0 ? [clean] : [] };
+    }).filter(s => s.cleanIndices.length > 0);
+
+    // Fold any stray unassigned non-minifig parts into a join/final bucket
+    const leftover = [];
+    for (let i = 0; i < parts.length; i++) {
+      if (!mfClaimed[i] && !assigned.has(i)) leftover.push(i);
+    }
+
+    if (subdivisionPlan.outputMode === 'numbered_bags') {
+      const runningPlaced = new Set();
+      const bagSections = [...resolvedSections];
+      if (leftover.length > 0) {
+        if (bagSections.length > 0) {
+          bagSections[bagSections.length - 1].cleanRepeatGroups[0].push(...leftover);
+          bagSections[bagSections.length - 1].cleanIndices.push(...leftover);
+        } else {
+          bagSections.push({ id: 'bag_rest', name: 'Final Bag', role: 'bag', cleanIndices: leftover, cleanRepeatGroups: [leftover] });
+        }
+      }
+
+      bagSections.forEach((sec, bIdx) => {
+        const bagIndices = sec.cleanRepeatGroups.flat();
+        const { steps: bagSteps, placed: afterPlaced } = buildStepsForIndexList(
+          bagIndices,
+          `bag${bIdx + 1}`,
+          runningPlaced,
+          adaptiveMaxSpread,
+        );
+        for (const pi of afterPlaced) runningPlaced.add(pi);
+        if (bagSteps.length > 0) {
+          chapters.push({
+            id: `bagch_${++chSeq}_${sec.id}`,
+            name: sec.name || `Bag ${bIdx + 1}`,
+            kind: 'bag',
+            sectionId: 'sec_bags',
+            bagNumber: bIdx + 1,
+            pieceCount: bagIndices.length,
+            bagPreviewParts: bagIndices.map(i => parts[i]),
+            steps: bagSteps,
+          });
+        }
+      });
+
+      return {
+        title: parsed.title,
+        subtitle: `${parts.length} pieces · ${globalStep} steps · ${bagSections.length} build bags`,
+        chapters,
+        _parsed: parsed,
+        _mode: mode,
+        _subdivisionPlan: subdivisionPlan,
+      };
+    } else {
+      // MODULAR CHAPTERS + CONNECT / FINAL ASSEMBLY
+      const moduleSecs = resolvedSections.filter(s => s.role !== 'join');
+      const joinIndices = [
+        ...resolvedSections.filter(s => s.role === 'join').flatMap(s => s.cleanRepeatGroups.flat()),
+        ...leftover,
+      ];
+
+      const attachQueue = [];
+      moduleSecs.forEach((sec, mIdx) => {
+        const repeatCount = sec.cleanRepeatGroups.length;
+        const subId = `mod_${mIdx + 1}_${sec.id}`;
+        const canonicalParts = normalizeCanonicalSubParts(sec.cleanIndices.map(i => parts[i]), subId);
+        const subSteps = buildLocalSubmodelSteps(canonicalParts, perStep, subId, repeatCount);
+        // Mark as a standalone section module (uses clean "SECTION · N pcs" banner when repeatCount === 1)
+        chapters.push({
+          id: `subch_${++chSeq}_${subId}`,
+          name: sec.name || `Section ${mIdx + 1}`,
+          kind: 'submodel',
+          isSectionModule: true,
+          sectionId: `subsec_${subId}`,
+          repeatCount,
+          pieceCount: sec.cleanIndices.length,
+          canonicalParts,
+          steps: subSteps,
+        });
+
+        sec.cleanRepeatGroups.forEach((grpIndices, copyIdx) => {
+          attachQueue.push({
+            id: `${subId}_c${copyIdx}`,
+            name: repeatCount > 1 ? `${sec.name} #${copyIdx + 1}` : sec.name,
+            baseName: sec.name,
+            indices: grpIndices,
+            canonicalParts,
+          });
+        });
+      });
+
+      // Emit Connect & Finish chapter joining all completed sections + any center connector bricks!
+      const joinSteps = [];
+      const joinedPlaced = new Set();
+      attachQueue.forEach((item, aIdx) => {
+        for (const pi of item.indices) joinedPlaced.add(pi);
+        globalStep++;
+        joinSteps.push({
+          id: `join_s${globalStep}`,
+          num: globalStep,
+          side: 'top',
+          corner: 'front_right',
+          cue: 'none',
+          parts: item.indices.map(i => parts[i]),
+          attachedSubmodel: {
+            id: item.id,
+            name: item.name,
+            repeatCount: 1,
+            totalRepeatCount: 1,
+            isSectionAttach: true,
+            attachVerb: aIdx === 0 ? 'Place' : 'Connect',
+            canonicalParts: item.canonicalParts,
+          },
+        });
+      });
+
+      if (joinIndices.length > 0) {
+        const { steps: connectorSteps } = buildStepsForIndexList(
+          joinIndices,
+          'join_conn',
+          joinedPlaced,
+          adaptiveMaxSpread,
+        );
+        joinSteps.push(...connectorSteps);
+      }
+
+      if (joinSteps.length > 0) {
+        chapters.push({
+          id: `ach_${++chSeq}_connect`,
+          name: attachQueue.length === 2 ? 'Connect Halves & Finish' : 'Connect Sections & Finish',
+          kind: 'main',
+          sectionId: 'sec_connect',
+          steps: joinSteps,
+        });
+      }
+
+      const modCount = moduleSecs.length;
+      return {
+        title: parsed.title,
+        subtitle: `${parts.length} pieces · ${modCount} section${modCount === 1 ? '' : 's'} + final join`,
+        chapters,
+        _parsed: parsed,
+        _mode: mode,
+        _subdivisionPlan: subdivisionPlan,
+      };
+    }
+  }
+
   groupedComps.forEach((group, secIdx) => {
     const sectionId = `sec_${secIdx + 1}`;
     const isFigSec = false;
@@ -2269,7 +2625,7 @@ function buildManualFromParsed(parsed, mode) {
             if (!touchesCur && !sameBaseLayer) return false;
           }
           const d = Math.hypot(boxes[i].center[0]-anchorC[0], boxes[i].center[1]-anchorC[1], boxes[i].center[2]-anchorC[2]);
-          return d <= 160;
+          return d <= adaptiveMaxSpread;
         });
         if (cands.length === 0) break;
         cands.sort((a, b) => {
@@ -2302,7 +2658,7 @@ function buildManualFromParsed(parsed, mode) {
   });
 
   const dupSummary = dupGroups.length > 0 ? ` · ${dupGroups.length} repeated submodel${dupGroups.length === 1 ? '' : 's'}` : '';
-  return { title: parsed.title, subtitle: `${parts.length} pieces · ${globalStep} steps${dupSummary}`, chapters, _parsed: parsed, _mode: mode };
+  return { title: parsed.title, subtitle: `${parts.length} pieces · ${globalStep} steps${dupSummary}`, chapters, _parsed: parsed, _mode: mode, _subdivisionPlan: null };
 }
 
 // Built-in Sample Model (includes fused minifigure + a genuine ×2 duplicate submodel showcase!)
@@ -2451,11 +2807,12 @@ function renumberContinuousSteps(model) {
   let mainNum = 0;
   for (const ch of model.chapters) {
     if (ch.kind === 'submodel') {
+      const rep = ch.repeatCount ?? (ch.isSectionModule ? 1 : 2);
       ch.steps.forEach((s, idx) => {
         s.num = idx + 1;
         s.isSubmodelStep = true;
-        s.isSubmodelFinal = idx === ch.steps.length - 1;
-        s.submodelRepeat = ch.repeatCount || 2;
+        s.isSubmodelFinal = idx === ch.steps.length - 1 && rep > 1;
+        s.submodelRepeat = rep;
       });
     } else {
       for (const s of ch.steps) s.num = ++mainNum;
@@ -2682,6 +3039,25 @@ function rebuildPages() {
     let i = 0;
     let isFirstChPage = true;
     const isSubCh = ch.kind === 'submodel';
+    const subRepeat = ch.repeatCount ?? (ch.isSectionModule ? 1 : 2);
+
+    // Emit an official-style Bag / Stage opener divider page before each numbered bag chapter
+    if (ch.kind === 'bag' && ch.steps.length > 0) {
+      pages.push({
+        id: `secdiv_${ch.id}`,
+        kind: 'section_divider',
+        num: ++pNum,
+        label: ch.name,
+        chapterName: ch.name,
+        bagNumber: ch.bagNumber || 1,
+        pieceCount: ch.pieceCount || ch.steps.reduce((acc, s) => acc + s.parts.length, 0),
+        stepCount: ch.steps.length,
+        firstStepNum: ch.steps[0].num,
+        lastStepNum: ch.steps[ch.steps.length - 1].num,
+        previewParts: ch.bagPreviewParts || ch.steps.flatMap(s => s.parts),
+      });
+    }
+
     while (i < ch.steps.length) {
       const first = ch.steps[i];
       const firstOv = state.overrides[first.id] || {};
@@ -2706,19 +3082,23 @@ function rebuildPages() {
         if ((s.subassembly || s.attachedSubmodel) && state.layout === 'auto') break;
       }
       const stepRange = slots.length === 1 ? `Step ${slots[0].step.num}` : `Steps ${slots[0].step.num}–${slots[slots.length-1].step.num}`;
-      const label = isSubCh ? `${ch.name} ×${ch.repeatCount} · ${stepRange}` : stepRange;
+      const label = isSubCh
+        ? (subRepeat > 1 ? `${ch.name} ×${subRepeat} · ${stepRange}` : `${ch.name} · ${stepRange}`)
+        : (ch.kind === 'bag' ? `${ch.name} · ${stepRange}` : stepRange);
       const pgId = 'pg_' + slots[0].step.id;
       pages.push({
         id: pgId,
         kind: 'steps',
         num: ++pNum,
         label,
-        chapterName: isSubCh ? `${ch.name} (×${ch.repeatCount})` : ch.name,
+        chapterName: isSubCh && subRepeat > 1 ? `${ch.name} (×${subRepeat})` : ch.name,
         isSubmodelPage: isSubCh,
         submodelIntro: (isSubCh && isFirstChPage) ? {
           id: ch.id,
           name: ch.name,
-          repeatCount: ch.repeatCount || 2,
+          repeatCount: subRepeat,
+          isSectionModule: Boolean(ch.isSectionModule),
+          pieceCount: ch.pieceCount || (ch.canonicalParts ? ch.canonicalParts.length : 0),
           canonicalParts: ch.canonicalParts || [],
         } : null,
         pinned: Boolean(state.overrides[slots[0].step.id]?.pin),
@@ -3035,6 +3415,29 @@ function renderAll() {
         <div class="text-2xl sm:text-3xl font-extrabold">${escHtml(d.title)}</div>
         <div class="text-xs max-w-md" style="color:${theme.muted}">${escHtml(d.note || 'Switch to Arrange mode to edit this divider page or add notes/images.')}</div>
       </div>`;
+  } else if (page.kind === 'section_divider') {
+    const snap = renderSnapshot([], page.previewParts || [], 38, 28, 620, 400, 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent });
+    const pgNumText = formatPageNumber(page.num, state.pages.length);
+    frame.innerHTML = `
+      <div class="relative w-full h-full flex flex-col justify-between overflow-hidden ${guideCls}" style="padding:${padPx + 6}px">
+        <div class="shrink-0 flex items-center justify-between gap-3">
+          <div class="min-w-0">
+            <span class="inline-block text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full text-white mb-1" style="background:${theme.accent}">Build Stage ${page.bagNumber || 1}</span>
+            <h2 class="text-xl sm:text-3xl font-extrabold tracking-tight leading-tight truncate">${escHtml(page.chapterName || page.label)}</h2>
+          </div>
+          <div class="shrink-0 flex flex-col items-end gap-1 text-[11px] font-bold">
+            <span class="px-2.5 py-0.5 rounded-full" style="background:${theme.pliBg};border:1px solid ${theme.pliBorder}">${page.pieceCount || 0} pcs</span>
+            <span class="text-[10px]" style="color:${theme.muted}">Steps ${page.firstStepNum}–${page.lastStepNum}</span>
+          </div>
+        </div>
+        <div class="flex-1 min-h-0 flex items-center justify-center my-2 overflow-hidden">
+          <img src="${snap.url}" alt="${escHtml(page.chapterName || 'Stage')}" class="max-w-full max-h-full w-full h-full object-contain pointer-events-none" />
+        </div>
+        <div class="shrink-0 flex items-center justify-between text-[10px] font-medium" style="color:${theme.muted}">
+          <span class="truncate">${state.showPageTitle ? escHtml(state.model.title) : ''}</span>
+          <span style="color:${theme.text}" class="font-bold shrink-0">${escHtml(pgNumText)}</span>
+        </div>
+      </div>`;
   } else if (page.kind === 'submodel_page') {
     const sub = page.step.subassembly;
     const snap = renderSnapshot([], sub.buildParts, 38, 30, 620, 400, 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent });
@@ -3154,11 +3557,11 @@ function renderAll() {
             <div class="flex items-center gap-2.5 min-w-0">
               <img src="${subIntroImg}" alt="${escHtml(page.submodelIntro.name)}" class="w-14 h-11 sm:w-20 sm:h-14 object-contain shrink-0 pointer-events-none" />
               <div class="min-w-0">
-                <div class="text-[9px] font-bold uppercase tracking-wider opacity-65">Submodel</div>
+                <div class="text-[9px] font-bold uppercase tracking-wider opacity-65">${page.submodelIntro.isSectionModule ? 'Build Section' : 'Submodel'}</div>
                 <div class="text-xs sm:text-sm font-extrabold truncate">${escHtml(page.submodelIntro.name)}</div>
               </div>
             </div>
-            <span class="shrink-0 px-3 py-1 rounded-full text-sm sm:text-base font-black text-white shadow-xs" style="background:${theme.accent}">×${page.submodelIntro.repeatCount}</span>
+            <span class="shrink-0 px-3 py-1 rounded-full text-xs sm:text-sm font-black text-white shadow-xs" style="background:${theme.accent}">${page.submodelIntro.repeatCount > 1 ? `×${page.submodelIntro.repeatCount}` : `${page.submodelIntro.pieceCount || page.submodelIntro.canonicalParts.length} pcs`}</span>
           </div>` : ''}
         <div class="grid ${gridCls} flex-1 min-h-0" style="gap:${gapPx}px">
           ${slotData.map(({ step, ov, snap, subImg, attSubImg, pli }) => {
@@ -3186,8 +3589,8 @@ function renderAll() {
                       <div data-drag="pli" data-step="${step.id}" class="draggable-el flex items-center gap-2 px-2 py-1 rounded-xl shadow-xs ${isArrangeMode ? 'cursor-move' : ''}" style="background:${theme.calloutBg};border:${pliSel ? `2px solid ${theme.accent}` : `1.5px solid ${theme.calloutBorder}`};transform:translate(${pliPos.x}px,${pliPos.y}px) scale(${pliScale});transform-origin:top left;">
                         <img src="${attSubImg}" alt="${escHtml(step.attachedSubmodel.name)}" class="${isTightSlot ? 'w-8 h-6' : 'w-11 h-8'} object-contain pointer-events-none" />
                         <div class="leading-tight">
-                          <div class="text-xs font-black" style="color:${theme.accent}">×${step.attachedSubmodel.repeatCount}</div>
-                          <div class="text-[9px] font-semibold opacity-75 max-w-[96px] truncate">${escHtml(step.attachedSubmodel.name)}</div>
+                          <div class="text-xs font-black" style="color:${theme.accent}">${step.attachedSubmodel.isSectionAttach ? (step.attachedSubmodel.attachVerb || 'Connect') : `×${step.attachedSubmodel.repeatCount}`}</div>
+                          <div class="text-[9px] font-semibold opacity-75 max-w-[110px] truncate">${escHtml(step.attachedSubmodel.name)}</div>
                         </div>
                       </div>`
                     : (!step.subassembly || ov.calloutAsPages ? `
@@ -3779,6 +4182,8 @@ function syncMenuControls() {
   const hasModel = Boolean(state.model);
   document.getElementById('menuSaveProj').disabled = !hasModel;
   document.getElementById('menuRegenBtn').disabled = !hasModel || !state.model._parsed;
+  const subBtn = document.getElementById('menuSubdivideBtn');
+  if (subBtn) subBtn.disabled = !hasModel || !state.model._parsed;
 
   document.querySelectorAll('.fmt-btn').forEach(b => {
     const fmtId = b.getAttribute('data-format');
@@ -4214,7 +4619,7 @@ async function importBricksLibraryFiles(fileList) {
     embeddedDatCompiled.clear(); pliThumbCache.clear(); submodelThumbCache.clear();
     updateLibraryStatusUI();
     if (state.model) {
-      if (state.model._parsed) state.model = buildManualFromParsed(state.model._parsed, state.model._mode || 'auto');
+      if (state.model._parsed) state.model = buildManualFromParsed(state.model._parsed, state.model._mode || 'auto', state.model._subdivisionPlan || null);
       computeModelDiagnostics();
       renderAll();
     }
@@ -4409,7 +4814,7 @@ async function fetchMissingPartsOnline() {
     embeddedDatCompiled.clear(); pliThumbCache.clear(); submodelThumbCache.clear();
     updateLibraryStatusUI();
     if (state.model) {
-      if (fetched > 0 && state.model._parsed) state.model = buildManualFromParsed(state.model._parsed, state.model._mode || 'auto');
+      if (fetched > 0 && state.model._parsed) state.model = buildManualFromParsed(state.model._parsed, state.model._mode || 'auto', state.model._subdivisionPlan || null);
       computeModelDiagnostics();
       renderAll();
     }
@@ -4754,10 +5159,10 @@ async function restoreLastSessionOnStart() {
     } else if (rec.kind === 'io' && rec.data) {
       const { m1Text, m2Text } = await extractIoArchive(rec.data);
       const parsed = parseImportedModel(m1Text, m2Text, rec.fileName);
-      state.model = buildManualFromParsed(parsed, rec.importMode || 'auto');
+      state.model = buildManualFromParsed(parsed, rec.importMode || 'auto', rec.subdivisionPlan || null);
     } else if (rec.kind === 'ldr' && typeof rec.data === 'string') {
       const parsed = parseImportedModel(rec.data, '', rec.fileName);
-      state.model = buildManualFromParsed(parsed, rec.importMode || 'auto');
+      state.model = buildManualFromParsed(parsed, rec.importMode || 'auto', rec.subdivisionPlan || null);
     } else {
       renderAll(); return;
     }
@@ -4975,6 +5380,32 @@ async function renderPageToJpegBytes(page, pxW, pxH) {
     ctx.font = `600 ${Math.round(pxH * 0.022)}px -apple-system, sans-serif`;
     ctx.fillText(credit, pxW / 2, logoY + logoSz + Math.round(pxH * 0.03));
     ctx.textAlign = 'left';
+  } else if (page.kind === 'section_divider') {
+    const snap = renderSnapshot([], page.previewParts || [], 38, 28, 760, 480, 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent });
+    const img = await loadImgPromise(snap.url);
+    ctx.fillStyle = theme.accent;
+    ctx.font = `800 ${Math.round(pxH * 0.024)}px -apple-system, sans-serif`;
+    ctx.fillText(`BUILD STAGE ${page.bagNumber || 1}`, pad, pad);
+    ctx.fillStyle = theme.text;
+    ctx.font = `800 ${Math.round(pxH * 0.048)}px -apple-system, sans-serif`;
+    ctx.fillText(page.chapterName || page.label || 'Build Stage', pad, pad + Math.round(pxH * 0.036));
+    ctx.fillStyle = theme.muted;
+    ctx.textAlign = 'right';
+    ctx.font = `700 ${Math.round(pxH * 0.022)}px -apple-system, sans-serif`;
+    ctx.fillText(`${page.pieceCount || 0} pcs · Steps ${page.firstStepNum}–${page.lastStepNum}`, pxW - pad, pad + Math.round(pxH * 0.048));
+    ctx.textAlign = 'left';
+    drawContain(ctx, img, pad, pad + Math.round(pxH * 0.12), pxW - pad * 2, pxH - pad * 2 - Math.round(pxH * 0.14) - footerH);
+    if (state.showPageTitle) {
+      ctx.fillStyle = theme.muted;
+      ctx.font = `600 ${Math.round(pxH * 0.02)}px -apple-system, sans-serif`;
+      ctx.fillText(state.model.title, pad, pxH - pad - footerH * 0.4);
+    }
+    if (pgNumText) {
+      ctx.fillStyle = theme.text; ctx.textAlign = 'right';
+      ctx.font = `700 ${Math.round(pxH * 0.02)}px -apple-system, sans-serif`;
+      ctx.fillText(pgNumText, pxW - pad, pxH - pad - footerH * 0.4);
+      ctx.textAlign = 'left';
+    }
   } else if (page.kind === 'bom') {
     const cfg = state.bomConfig;
     const cols = page.bomCols || (pxW > pxH ? 6 : 4);
@@ -5055,7 +5486,7 @@ async function renderPageToJpegBytes(page, pxW, pxH) {
     const rows = Math.ceil(slots.length / cols);
     const gap = Math.round(pad * 0.55);
 
-    // Optional Finished Submodel + ×N Intro Banner at top of submodel's first page
+    // Optional Finished Submodel / Section Intro Banner at top of chapter's first page
     let topY = pad;
     if (page.submodelIntro) {
       const sub = page.submodelIntro;
@@ -5076,13 +5507,13 @@ async function renderPageToJpegBytes(page, pxW, pxH) {
       const textX = pad + 14 + Math.round(bannerH * 1.45) + 14;
       ctx.fillStyle = theme.muted;
       ctx.font = `700 ${Math.round(bannerH * 0.16)}px -apple-system, sans-serif`;
-      ctx.fillText('SUBMODEL', textX, pad + Math.round(bannerH * 0.2));
+      ctx.fillText(sub.isSectionModule ? 'BUILD SECTION' : 'SUBMODEL', textX, pad + Math.round(bannerH * 0.2));
       ctx.fillStyle = theme.text;
       ctx.font = `800 ${Math.round(bannerH * 0.28)}px -apple-system, sans-serif`;
       ctx.fillText(sub.name || 'Submodel', textX, pad + Math.round(bannerH * 0.44));
 
-      const multLabel = `×${sub.repeatCount}`;
-      const pillFont = Math.round(bannerH * 0.34);
+      const multLabel = sub.repeatCount > 1 ? `×${sub.repeatCount}` : `${sub.pieceCount || sub.canonicalParts?.length || 0} pcs`;
+      const pillFont = Math.round(bannerH * (sub.repeatCount > 1 ? 0.34 : 0.24));
       ctx.font = `900 ${pillFont}px -apple-system, sans-serif`;
       const pillW = Math.max(Math.round(bannerH * 0.95), Math.round(ctx.measureText(multLabel).width + 32));
       const pillH = Math.round(bannerH * 0.54);
@@ -5118,7 +5549,7 @@ async function renderPageToJpegBytes(page, pxW, pxH) {
       ctx.font = `800 ${Math.round(Math.min(slotH * 0.11, 44))}px -apple-system, sans-serif`;
       ctx.fillText(String(step.num), sx + 12, sy + 10);
 
-      // PLI Box (shows finished submodel thumbnail + ×N on attachment steps, or raw parts otherwise)
+      // PLI Box (shows finished submodel thumbnail + ×N or Connect verb on attachment steps, or raw parts otherwise)
       const pliX = sx + Math.round(Math.min(slotH * 0.14, 62)), pliY = sy + 10;
       const pliH = Math.min(58, slotH * 0.22);
       if (step.attachedSubmodel) {
@@ -5137,8 +5568,8 @@ async function renderPageToJpegBytes(page, pxW, pxH) {
         }
         const tx = pliX + 6 + pliH * 1.25 + 8;
         ctx.fillStyle = theme.accent;
-        ctx.font = `900 ${Math.round(pliH * 0.36)}px -apple-system, sans-serif`;
-        ctx.fillText(`×${att.repeatCount}`, tx, pliY + Math.round(pliH * 0.14));
+        ctx.font = `900 ${Math.round(pliH * (att.isSectionAttach ? 0.3 : 0.36))}px -apple-system, sans-serif`;
+        ctx.fillText(att.isSectionAttach ? (att.attachVerb || 'Connect') : `×${att.repeatCount}`, tx, pliY + Math.round(pliH * 0.14));
         ctx.fillStyle = theme.text;
         ctx.font = `600 ${Math.round(pliH * 0.24)}px -apple-system, sans-serif`;
         ctx.fillText(att.name || 'Submodel', tx, pliY + Math.round(pliH * 0.56), Math.max(40, attBoxW - (tx - pliX) - 8));
@@ -5376,7 +5807,7 @@ document.getElementById('toggleDetectDuplicates').onchange = (e) => {
   if (state.model?._parsed) {
     pushUndo();
     submodelThumbCache.clear();
-    state.model = buildManualFromParsed(state.model._parsed, state.model._mode || 'auto');
+    state.model = buildManualFromParsed(state.model._parsed, state.model._mode || 'auto', state.model._subdivisionPlan || null);
     state.pageIdx = 0; state.selectedPartIds.clear();
     computeModelDiagnostics();
     renderAll();
@@ -5453,11 +5884,19 @@ document.getElementById('menuRegenBtn').onclick = () => {
   if (!state.model?._parsed) return;
   pushUndo();
   submodelThumbCache.clear();
-  state.model = buildManualFromParsed(state.model._parsed, 'auto');
+  state.model = buildManualFromParsed(state.model._parsed, 'auto', state.model._subdivisionPlan || null);
   state.pageIdx = 0; state.selectedPartIds.clear();
   computeModelDiagnostics();
   closeMenu(); renderAll(); showToast('Regenerated clean steps.');
 };
+const menuSubdivideBtn = document.getElementById('menuSubdivideBtn');
+if (menuSubdivideBtn) {
+  menuSubdivideBtn.onclick = () => {
+    if (!state.model?._parsed) { showToast('Import a model first.'); return; }
+    closeMenu();
+    openImportAssistant(state.model._parsed, true);
+  };
+}
 
 // Save / Open .bic.json Project (supports iOS Share Sheet + Download!)
 document.getElementById('menuSaveProj').onclick = async () => {
@@ -5579,31 +6018,454 @@ document.getElementById('loadSampleBtn').onclick = loadSample;
 document.getElementById('menuSampleBtn').onclick = loadSample;
 
 let pendingRawFile = null; // { kind:'io'|'ldr', fileName, data }
-function finishImport(parsed, mode) {
-  submodelThumbCache.clear();
-  state.model = buildManualFromParsed(parsed, mode);
-  state.overrides = {}; state.pageInserts = {}; state.dividerAfter = {};
-  state.coverMeta = { title:'', subtitle:'', az:38, el:26, bgSrc:null };
-  state.pageIdx = 0; state.mode = 'pan'; state.selectedPartIds.clear();
-  state.undoStack = []; state.redoStack = [];
-  errFilter = 'all';
+let impPreviewEngine = null;
+let impPreviewMesh = null;
+let impState = {
+  parsed: null,
+  prep: null,
+  assessment: null,
+  proposals: [],
+  selectedId: 'none', // 'none' or proposal.id
+  activeProposal: null,
+  explodePct: 45,
+  colorMode: 'sections', // 'sections' | 'bricks'
+  highlightedSecId: null,
+  allowRepeatCollapse: true,
+  az: 38,
+  el: 28,
+  isPostImport: false,
+};
+
+function closeImportAssistant() {
+  state.pendingImport = null;
+  pendingRawFile = null;
+  impState.parsed = null;
+  impState.activeProposal = null;
+  impPreviewMesh = null;
   document.getElementById('importModal').classList.add('hidden');
-  if (pendingRawFile) {
-    lastSourceRecord = { ...pendingRawFile, importMode: mode };
+}
+
+function getPreviewPartMaps() {
+  const parts = impState.parsed?.parts || [];
+  const prop = impState.activeProposal;
+  const partOffsets = {};
+  const partColorOverrides = impState.colorMode === 'sections' && prop ? {} : null;
+  const dimPartIds = impState.highlightedSecId && prop ? new Set() : null;
+
+  if (prop && prop.sections?.length) {
+    const spanRef = Math.max(160, impState.assessment?.longestSpanLdu || 320);
+    const explodeDist = Math.min(240, Math.max(48, spanRef * 0.24)) * (impState.explodePct / 100);
+
+    prop.sections.forEach((sec) => {
+      const isHighlighted = !impState.highlightedSecId || impState.highlightedSecId === sec.id;
+      const groups = sec.repeatPartIndexGroups && sec.repeatPartIndexGroups.length > 1
+        ? sec.repeatPartIndexGroups
+        : [sec.partIndices];
+
+      groups.forEach((grp, gIdx) => {
+        const sign = groups.length === 2 && gIdx === 1 ? -1 : 1;
+        const ox = (sec.explodeOffset?.[0] || 0) * explodeDist * sign;
+        const oy = (sec.explodeOffset?.[1] || 0) * explodeDist * (gIdx === 1 && groups.length === 2 ? 1 : 1);
+        const oz = (sec.explodeOffset?.[2] || 0) * explodeDist * sign;
+        const colHex = groups.length === 2 && gIdx === 1 ? '#38bdf8' : sec.previewColor;
+
+        for (const pi of grp) {
+          const p = parts[pi];
+          if (!p) continue;
+          if (explodeDist > 1) partOffsets[p.id] = { x: ox, y: oy, z: oz, arrow: false };
+          if (partColorOverrides) partColorOverrides[p.id] = colHex;
+          if (dimPartIds && !isHighlighted) dimPartIds.add(p.id);
+        }
+      });
+    });
+  }
+  return { parts, partOffsets, partColorOverrides, dimPartIds };
+}
+
+function rebuildAndDrawImportPreview() {
+  const canvas = document.getElementById('impPreviewCanvas');
+  if (!canvas || !impState.parsed) return;
+  if (!impPreviewEngine) impPreviewEngine = new WebGLBrickEngine(canvas);
+
+  const { parts, partOffsets, partColorOverrides, dimPartIds } = getPreviewPartMaps();
+  impPreviewMesh = buildMeshBuffers([], parts, {
+    highlightNew: false,
+    fadePrev: false,
+    fadeOpacity: 1.0,
+    showArrows: false,
+    accent: '#1a73e8',
+    partOffsets,
+    partColorOverrides,
+    dimPartIds,
+  });
+  drawImportPreviewFrame();
+}
+
+function drawImportPreviewFrame() {
+  const canvas = document.getElementById('impPreviewCanvas');
+  if (!canvas || !impPreviewEngine || !impPreviewMesh) return;
+  const rect = canvas.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const w = Math.max(240, Math.round((rect.width || 360) * dpr));
+  const h = Math.max(180, Math.round((rect.height || 240) * dpr));
+  impPreviewEngine.draw(impPreviewMesh, w, h, impState.az, impState.el, 1.0);
+}
+
+// Orbit pointer gesture for the 3D Import Preview canvas (touch + mouse)
+(function bindImportPreviewOrbit() {
+  const canvas = document.getElementById('impPreviewCanvas');
+  if (!canvas) return;
+  let dragging = false, lastX = 0, lastY = 0;
+  canvas.addEventListener('pointerdown', (e) => {
+    dragging = true; lastX = e.clientX; lastY = e.clientY;
+    try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const dx = e.clientX - lastX;
+    const dy = e.clientY - lastY;
+    lastX = e.clientX; lastY = e.clientY;
+    impState.az = (impState.az - dx * 0.55 + 360) % 360;
+    impState.el = Math.max(-75, Math.min(80, impState.el + dy * 0.45));
+    drawImportPreviewFrame();
+  });
+  const endDrag = () => { dragging = false; };
+  canvas.addEventListener('pointerup', endDrag);
+  canvas.addEventListener('pointercancel', endDrag);
+})();
+
+function renderImportAssistantUI() {
+  const listEl = document.getElementById('impProposalList');
+  const custWrap = document.getElementById('impCustomizeWrap');
+  const secListEl = document.getElementById('impSectionList');
+  const zoomPill = document.getElementById('impZoomGainPill');
+  const autoBtn = document.getElementById('impBtnAuto');
+  const granRow = document.getElementById('impGranularityRow');
+  const countVal = document.getElementById('impCountVal');
+  const identWrap = document.getElementById('impIdenticalWrap');
+  const identToggle = document.getElementById('impToggleIdentical');
+  const outModBtn = document.getElementById('impOutModular');
+  const outBagBtn = document.getElementById('impOutBags');
+  const colSecBtn = document.getElementById('impColorModeSections');
+  const colBrkBtn = document.getElementById('impColorModeBricks');
+
+  // Color mode pill styling
+  colSecBtn.className = `px-2.5 py-1 rounded-full transition ${impState.colorMode === 'sections' ? 'bg-[#1a73e8] text-white' : 'text-[var(--muted-foreground)]'}`;
+  colBrkBtn.className = `px-2.5 py-1 rounded-full transition ${impState.colorMode === 'bricks' ? 'bg-[#1a73e8] text-white' : 'text-[var(--muted-foreground)]'}`;
+
+  // Proposal cards (ranked suggestions + Single Continuous Build escape hatch)
+  const cardsHtml = impState.proposals.map((prop, idx) => {
+    const isSel = impState.selectedId === prop.id;
+    const isRec = idx === 0 && impState.assessment?.shouldPrompt;
+    return `
+      <button type="button" data-prop-id="${prop.id}" class="imp-prop-card w-full text-left p-3 rounded-2xl border-2 transition ${isSel ? 'border-[#1a73e8] bg-[#1a73e8]/10' : 'border-[var(--border)] bg-[var(--background)] hover:border-[#1a73e8]/45'}">
+        <div class="flex items-center justify-between gap-2">
+          <div class="flex items-center gap-1.5 min-w-0 flex-wrap">
+            <span class="text-xs font-bold ${isSel ? 'text-[#1a73e8]' : ''}">${escHtml(prop.title)}</span>
+            ${isRec ? '<span class="text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-[#1a73e8] text-white">Recommended</span>' : ''}
+          </div>
+          ${prop.zoomGainEstimate && prop.zoomGainEstimate >= 1.3 ? `<span class="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 shrink-0">~${prop.zoomGainEstimate}× zoom</span>` : ''}
+        </div>
+        <div class="text-[11px] text-[var(--muted-foreground)] mt-0.5 leading-snug">${escHtml(prop.rationale)}</div>
+      </button>`;
+  }).join('') + `
+    <button type="button" data-prop-id="none" class="imp-prop-card w-full text-left p-3 rounded-2xl border-2 transition ${impState.selectedId === 'none' ? 'border-[#1a73e8] bg-[#1a73e8]/10' : 'border-[var(--border)] bg-[var(--background)] hover:border-[#1a73e8]/45'}">
+      <div class="flex items-center justify-between gap-2">
+        <span class="text-xs font-bold ${impState.selectedId === 'none' ? 'text-[#1a73e8]' : ''}">Keep as Single Continuous Build</span>
+        ${!impState.assessment?.shouldPrompt ? '<span class="text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-[#1a73e8] text-white">Recommended</span>' : ''}
+      </div>
+      <div class="text-[11px] text-[var(--muted-foreground)] mt-0.5 leading-snug">Auto-generate clean zero-floating steps in one continuous chapter without splitting.</div>
+    </button>`;
+
+  listEl.innerHTML = cardsHtml;
+  listEl.querySelectorAll('.imp-prop-card').forEach((btn) => {
+    btn.onclick = () => {
+      const pid = btn.getAttribute('data-prop-id');
+      impState.selectedId = pid;
+      impState.highlightedSecId = null;
+      if (pid === 'none') {
+        impState.activeProposal = null;
+      } else {
+        const found = impState.proposals.find(p => p.id === pid);
+        impState.activeProposal = found ? JSON.parse(JSON.stringify(found)) : null;
+        impState.allowRepeatCollapse = Boolean(found?.hasIdenticalHalves);
+      }
+      renderImportAssistantUI();
+      rebuildAndDrawImportPreview();
+    };
+  });
+
+  const active = impState.activeProposal;
+  if (!active) {
+    custWrap.classList.add('hidden');
+    zoomPill.classList.add('hidden');
+    autoBtn.textContent = impState.isPostImport ? 'Rebuild as Single Build' : 'Generate Manual';
+    return;
+  }
+
+  custWrap.classList.remove('hidden');
+  if (active.zoomGainEstimate && active.zoomGainEstimate >= 1.25 && active.outputMode === 'modular_chapters') {
+    zoomPill.textContent = `~${active.zoomGainEstimate}× larger bricks per step`;
+    zoomPill.classList.remove('hidden');
+  } else {
+    zoomPill.classList.add('hidden');
+  }
+
+  // Output mode buttons
+  const isMod = active.outputMode === 'modular_chapters';
+  outModBtn.className = `px-2.5 py-1 rounded-full transition ${isMod ? 'bg-[#1a73e8] text-white' : 'text-[var(--muted-foreground)]'}`;
+  outBagBtn.className = `px-2.5 py-1 rounded-full transition ${!isMod ? 'bg-[#1a73e8] text-white' : 'text-[var(--muted-foreground)]'}`;
+
+  // Section count stepper
+  const primarySecs = active.sections.filter(s => s.role !== 'join');
+  const effectiveSegCount = active.hasIdenticalHalves ? 2 : primarySecs.length;
+  countVal.textContent = String(effectiveSegCount);
+  granRow.classList.toggle('hidden', active.strategy === 'spatial_sectors');
+
+  // Show 2x Identical Halves toggle whenever longitudinal 2-half plan detected identical halves (or user toggled it off)
+  const canToggleIdentical = active.strategy === 'longitudinal_halves' && effectiveSegCount === 2 && (active.hasIdenticalHalves || impState.proposals.some(p => p.id === impState.selectedId && p.hasIdenticalHalves));
+  identWrap.classList.toggle('hidden', !canToggleIdentical || !isMod);
+  identToggle.checked = Boolean(active.hasIdenticalHalves);
+
+  // Editable sections list (tap to highlight in 3D, rename inline, 1-click Merge / Split)
+  secListEl.innerHTML = active.sections.map((sec, idx) => {
+    const isHi = impState.highlightedSecId === sec.id;
+    const isRep = sec.repeatPartIndexGroups && sec.repeatPartIndexGroups.length > 1;
+    const pcs = sec.partIndices.length;
+    const canMerge = active.sections.length > 2 && idx < active.sections.length - 1;
+    const canSplit = !isRep && pcs >= 10 && active.sections.length < 8;
+    return `
+      <div data-sec-row="${sec.id}" class="flex items-center gap-2 px-2.5 py-2 rounded-2xl border transition cursor-pointer ${isHi ? 'border-[#1a73e8] bg-[#1a73e8]/10' : 'border-[var(--border)] bg-[var(--background)]'}">
+        <span class="w-3 h-3 rounded-full shrink-0 border border-black/15" style="background:${sec.previewColor}"></span>
+        <input data-sec-rename="${idx}" type="text" value="${escHtml(sec.name)}" class="flex-1 min-w-0 bg-transparent text-[11px] font-bold outline-none focus:underline" />
+        <span class="text-[10px] font-semibold text-[var(--muted-foreground)] shrink-0">${isRep ? `${sec.repeatPartIndexGroups.length}×${pcs}` : `${pcs} pcs`}</span>
+        ${canSplit ? `<button type="button" data-sec-split="${idx}" class="px-2 py-0.5 rounded-full border border-[var(--border)] bg-[var(--card)] text-[10px] font-semibold hover:border-[#1a73e8] shrink-0">Split</button>` : ''}
+        ${canMerge ? `<button type="button" data-sec-merge="${idx}" class="px-2 py-0.5 rounded-full border border-[var(--border)] bg-[var(--card)] text-[10px] font-semibold hover:border-[#1a73e8] shrink-0">Merge ↓</button>` : ''}
+      </div>`;
+  }).join('');
+
+  secListEl.querySelectorAll('[data-sec-row]').forEach((row) => {
+    row.onclick = (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON') return;
+      const sid = row.getAttribute('data-sec-row');
+      impState.highlightedSecId = impState.highlightedSecId === sid ? null : sid;
+      renderImportAssistantUI();
+      rebuildAndDrawImportPreview();
+    };
+  });
+  secListEl.querySelectorAll('[data-sec-rename]').forEach((inp) => {
+    inp.oninput = () => {
+      const idx = parseInt(inp.getAttribute('data-sec-rename'), 10);
+      if (impState.activeProposal?.sections[idx]) {
+        impState.activeProposal.sections[idx].name = inp.value;
+      }
+    };
+  });
+  secListEl.querySelectorAll('[data-sec-merge]').forEach((btn) => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      const idx = parseInt(btn.getAttribute('data-sec-merge'), 10);
+      if (!impState.activeProposal || !impState.prep) return;
+      impState.activeProposal = mergeProposedSections(
+        impState.activeProposal, idx, idx + 1, impState.prep.inputs, impState.prep.adjacency,
+      );
+      impState.highlightedSecId = null;
+      renderImportAssistantUI();
+      rebuildAndDrawImportPreview();
+    };
+  });
+  secListEl.querySelectorAll('[data-sec-split]').forEach((btn) => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      const idx = parseInt(btn.getAttribute('data-sec-split'), 10);
+      if (!impState.activeProposal || !impState.prep) return;
+      impState.activeProposal = splitProposedSection(
+        impState.activeProposal, idx, impState.prep.inputs, impState.prep.adjacency,
+      );
+      impState.highlightedSecId = null;
+      renderImportAssistantUI();
+      rebuildAndDrawImportPreview();
+    };
+  });
+
+  const secCountLabel = isMod
+    ? `${primarySecs.length} Section${primarySecs.length === 1 ? '' : 's'} + Join`
+    : `${active.sections.length} Bags`;
+  autoBtn.textContent = `${impState.isPostImport ? 'Apply' : 'Generate Manual'} (${secCountLabel})`;
+}
+
+function openImportAssistant(parsed, isPostImport = false) {
+  const prep = prepareSubdivisionData(parsed);
+  const { assessment, proposals } = analyzeModelSubdivisions(prep.inputs, prep.adjacency);
+
+  state.pendingImport = parsed;
+  impState.parsed = parsed;
+  impState.prep = prep;
+  impState.assessment = assessment;
+  impState.proposals = proposals;
+  impState.isPostImport = isPostImport;
+  impState.explodePct = assessment.shouldPrompt || isPostImport ? 45 : 0;
+  impState.colorMode = 'sections';
+  impState.highlightedSecId = null;
+  impState.az = 38;
+  impState.el = 28;
+
+  // Pre-select the #1 ranked subdivision when triggered by size/span/post-import; otherwise single build
+  if ((assessment.shouldPrompt || isPostImport) && proposals.length > 0) {
+    impState.selectedId = proposals[0].id;
+    impState.activeProposal = JSON.parse(JSON.stringify(proposals[0]));
+    impState.allowRepeatCollapse = Boolean(proposals[0].hasIdenticalHalves);
+  } else {
+    impState.selectedId = 'none';
+    impState.activeProposal = null;
+    impState.allowRepeatCollapse = true;
+  }
+
+  document.getElementById('impTitle').textContent = isPostImport
+    ? `Subdivide ${parsed.title}`
+    : assessment.shouldPrompt
+      ? `Split "${parsed.title}" for Easier Building?`
+      : `Import ${parsed.title}`;
+
+  const badge = document.getElementById('impSizeBadge');
+  if (assessment.shouldPrompt) {
+    badge.textContent = assessment.aspectRatio >= 3.0
+      ? `${Math.round(assessment.longestSpanLdu / 20)} Studs Long`
+      : `${parsed.parts.length} Pieces`;
+    badge.classList.remove('hidden');
+  } else {
+    badge.classList.add('hidden');
+  }
+
+  const reasonStr = assessment.reasons.length > 0
+    ? `Detected ${assessment.reasons.join(' · ')}. Building sections first keeps bricks larger and easier to see.`
+    : `Found ${parsed.parts.length} pieces${parsed.submodelCount ? ` across ${parsed.submodelCount} submodels` : ''}.`;
+  document.getElementById('impSummary').textContent = reasonStr;
+
+  document.getElementById('impKeepWrap').classList.toggle('hidden', isPostImport || !parsed.hasSteps);
+  const slider = document.getElementById('impExplodeSlider');
+  slider.value = String(impState.explodePct);
+  document.getElementById('impExplodeVal').textContent = `${impState.explodePct}%`;
+
+  document.getElementById('importModal').classList.remove('hidden');
+  renderImportAssistantUI();
+  requestAnimationFrame(() => rebuildAndDrawImportPreview());
+}
+
+// Wire Import Assistant controls
+document.getElementById('impExplodeSlider').oninput = (e) => {
+  impState.explodePct = parseInt(e.target.value, 10) || 0;
+  document.getElementById('impExplodeVal').textContent = `${impState.explodePct}%`;
+  rebuildAndDrawImportPreview();
+};
+document.getElementById('impColorModeSections').onclick = () => {
+  impState.colorMode = 'sections';
+  renderImportAssistantUI();
+  rebuildAndDrawImportPreview();
+};
+document.getElementById('impColorModeBricks').onclick = () => {
+  impState.colorMode = 'bricks';
+  renderImportAssistantUI();
+  rebuildAndDrawImportPreview();
+};
+document.getElementById('impOutModular').onclick = () => {
+  if (!impState.activeProposal) return;
+  impState.activeProposal.outputMode = 'modular_chapters';
+  impState.activeProposal.sections.forEach(s => { if (s.role === 'bag') s.role = 'module'; });
+  renderImportAssistantUI();
+};
+document.getElementById('impOutBags').onclick = () => {
+  if (!impState.activeProposal) return;
+  impState.activeProposal.outputMode = 'numbered_bags';
+  renderImportAssistantUI();
+};
+const adjustSectionCount = (delta) => {
+  const act = impState.activeProposal;
+  if (!act || !impState.prep) return;
+  const currPrimary = act.hasIdenticalHalves ? 2 : act.sections.filter(s => s.role !== 'join').length;
+  const nextCount = Math.max(2, Math.min(8, currPrimary + delta));
+  if (nextCount === currPrimary) return;
+  const prevOut = act.outputMode;
+  const recomputed = recomputeProposalWithCount(
+    act.strategy,
+    impState.prep.inputs,
+    impState.prep.adjacency,
+    nextCount,
+    impState.allowRepeatCollapse && nextCount === 2,
+  );
+  if (recomputed) {
+    recomputed.outputMode = prevOut;
+    impState.activeProposal = recomputed;
+    impState.highlightedSecId = null;
+    renderImportAssistantUI();
+    rebuildAndDrawImportPreview();
+  }
+};
+document.getElementById('impCountMinus').onclick = () => adjustSectionCount(-1);
+document.getElementById('impCountPlus').onclick = () => adjustSectionCount(1);
+document.getElementById('impToggleIdentical').onchange = (e) => {
+  impState.allowRepeatCollapse = e.target.checked;
+  const act = impState.activeProposal;
+  if (!act || !impState.prep) return;
+  const recomputed = recomputeProposalWithCount(
+    act.strategy,
+    impState.prep.inputs,
+    impState.prep.adjacency,
+    2,
+    impState.allowRepeatCollapse,
+  );
+  if (recomputed) {
+    recomputed.outputMode = act.outputMode;
+    impState.activeProposal = recomputed;
+    impState.highlightedSecId = null;
+    renderImportAssistantUI();
+    rebuildAndDrawImportPreview();
+  }
+};
+
+function finishImport(parsed, mode, subdivisionPlan = null, isPostImport = false) {
+  if (isPostImport) pushUndo();
+  submodelThumbCache.clear();
+  state.model = buildManualFromParsed(parsed, mode, subdivisionPlan);
+  if (!isPostImport) {
+    state.overrides = {}; state.pageInserts = {}; state.dividerAfter = {};
+    state.coverMeta = { title:'', subtitle:'', az:38, el:26, bgSrc:null };
+    state.undoStack = []; state.redoStack = [];
+  }
+  state.pageIdx = 0; state.mode = 'pan'; state.selectedPartIds.clear();
+  errFilter = 'all';
+  closeImportAssistant();
+  if (!isPostImport && pendingRawFile) {
+    lastSourceRecord = { ...pendingRawFile, importMode: mode, subdivisionPlan: subdivisionPlan || null };
     dbPut('lastModel', lastSourceRecord);
     pendingRawFile = null;
+  } else if (isPostImport && lastSourceRecord && (lastSourceRecord.kind === 'io' || lastSourceRecord.kind === 'ldr')) {
+    lastSourceRecord = { ...lastSourceRecord, importMode: mode, subdivisionPlan: subdivisionPlan || null };
+    dbPut('lastModel', lastSourceRecord);
   }
   computeModelDiagnostics();
   resetZoom(); renderAll();
   const steps = getAllSteps(state.model);
-  const dupSubs = state.model.chapters.filter(c => c.kind === 'submodel').length;
-  showToast(`Imported ${parsed.title} (${parsed.parts.length} pieces, ${steps.length} steps${dupSubs ? `, ${dupSubs} repeated submodel${dupSubs === 1 ? '' : 's'}` : ''}).`);
-  if (state.diagnostics.length > 0) showImportErrorBanner();
+  const subSummary = subdivisionPlan && subdivisionPlan.strategy !== 'none'
+    ? ` · ${subdivisionPlan.title}`
+    : '';
+  showToast(`${isPostImport ? 'Updated' : 'Imported'} ${parsed.title} (${parsed.parts.length} pieces, ${steps.length} steps${subSummary}).`);
+  if (!isPostImport && state.diagnostics.length > 0) showImportErrorBanner();
 }
 
-document.getElementById('impBtnAuto').onclick = () => { if (state.pendingImport) finishImport(state.pendingImport, 'auto'); };
-document.getElementById('impBtnKeep').onclick = () => { if (state.pendingImport) finishImport(state.pendingImport, 'keep'); };
-document.getElementById('impBtnCancel').onclick = () => { state.pendingImport = null; pendingRawFile = null; document.getElementById('importModal').classList.add('hidden'); };
+document.getElementById('impBtnAuto').onclick = () => {
+  if (!impState.parsed) return;
+  finishImport(impState.parsed, 'auto', impState.activeProposal, impState.isPostImport);
+};
+document.getElementById('impBtnKeep').onclick = () => {
+  if (!impState.parsed) return;
+  finishImport(impState.parsed, 'keep', null, impState.isPostImport);
+};
+document.getElementById('impBtnCancel').onclick = closeImportAssistant;
+document.getElementById('impBtnCloseX').onclick = closeImportAssistant;
+document.getElementById('importModal').onclick = (e) => {
+  if (e.target.id === 'importModal') closeImportAssistant();
+};
 
 document.getElementById('fileInput').onchange = async (e) => {
   const file = e.target.files?.[0]; e.target.value = ''; if (!file) return;
@@ -5625,20 +6487,27 @@ document.getElementById('fileInput').onchange = async (e) => {
       pendingRawFile = { kind: 'ldr', fileName: file.name, data: txt };
       parsed = parseImportedModel(txt, '', file.name);
     }
-    if (parsed.hasSteps || parsed.submodelCount > 0) {
-      state.pendingImport = parsed;
-      document.getElementById('impTitle').textContent = `Import ${parsed.title}`;
-      document.getElementById('impSummary').textContent = `Found ${parsed.parts.length} pieces${parsed.submodelCount ? ` across ${parsed.submodelCount} submodels` : ''}.`;
-      document.getElementById('importModal').classList.remove('hidden');
+    const prep = prepareSubdivisionData(parsed);
+    const { assessment } = analyzeModelSubdivisions(prep.inputs, prep.adjacency);
+    if (parsed.hasSteps || parsed.submodelCount > 0 || assessment.shouldPrompt) {
+      openImportAssistant(parsed, false);
     } else {
-      finishImport(parsed, 'auto');
+      finishImport(parsed, 'auto', null, false);
+      if (assessment.tier === 'borderline') {
+        showToast(`Imported ${parsed.title}. Tip: Open Menu → Subdivide Model to split into sections.`);
+      }
     }
   } catch (err) {
     showToast(err?.message || 'Could not import this file.');
   }
 };
 
-window.addEventListener('resize', () => { if (state.model) renderAll(); });
+window.addEventListener('resize', () => {
+  if (state.model) renderAll();
+  if (impState.parsed && !document.getElementById('importModal').classList.contains('hidden')) {
+    drawImportPreviewFrame();
+  }
+});
 
 // Automatically reload last opened model & session on start!
 restoreLastSessionOnStart();

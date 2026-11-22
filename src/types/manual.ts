@@ -138,6 +138,7 @@ export interface StepNode {
   cameraView: CanonicalViewId;
   rotationCue: RotationCueType;
   insertionDirection: Vec3; // Dominant placement axis for arrows
+  attachedChapterIds?: string[]; // Completed modular chapters attached in this step
   note?: string;
 }
 
@@ -159,10 +160,73 @@ export interface SubassemblyNode {
 export interface BuildChapter {
   id: string;
   name: string;
-  kind: 'accessory' | 'minifigure' | 'main';
+  kind: 'accessory' | 'minifigure' | 'bag' | 'module' | 'final_assembly' | 'main';
   partIds: string[];
   stepIds: string[];
   subassemblyIds: string[];
+  continuesFromChapterId?: string;
+  repeatCount?: number;
+  instancePartIdGroups?: string[][];
+  bookletIndex?: number;
+}
+
+export type SubdivisionStrategyId =
+  | 'none'
+  | 'longitudinal_halves'
+  | 'structural_modules'
+  | 'horizontal_floors'
+  | 'numbered_bags'
+  | 'spatial_sectors'
+  | 'refine_existing';
+
+export type SubdivisionOutputMode =
+  | 'modular_chapters'
+  | 'numbered_bags'
+  | 'multi_booklet';
+
+export interface ProposedSection {
+  id: string;
+  name: string;
+  partIndices: number[];
+  partIds: string[];
+  repeatPartIndexGroups?: number[][];
+  repeatPartIdGroups?: string[][];
+  role: 'module' | 'join' | 'bag';
+  cutEdgeCount: number;
+  attachToSectionId?: string;
+  attachNormal?: Vec3;
+  explodeOffset: Vec3;
+  previewColor: string;
+  bookletIndex?: number;
+}
+
+export interface SubdivisionAssessment {
+  partCount: number;
+  spanX: number;
+  spanY: number;
+  spanZ: number;
+  longestSpanLdu: number;
+  medianSpanLdu: number;
+  aspectRatio: number;
+  medianPartDiag: number;
+  readabilityRatio: number;
+  shouldPrompt: boolean;
+  tier: 'compact' | 'borderline' | 'suggest' | 'massive';
+  reasons: string[];
+}
+
+export interface SubdivisionProposal {
+  id: string;
+  strategy: SubdivisionStrategyId;
+  outputMode: SubdivisionOutputMode;
+  title: string;
+  rationale: string;
+  zoomGainEstimate?: number;
+  confidence: number; // 0..100
+  sections: ProposedSection[];
+  estimatedStepCount: number;
+  estimatedPageCount: number;
+  hasIdenticalHalves?: boolean;
 }
 
 export interface InstructionPlan {
@@ -172,6 +236,7 @@ export interface InstructionPlan {
   steps: Record<string, StepNode>;
   subassemblies: Record<string, SubassemblyNode>;
   floatingWarnings: FloatingPartWarning[];
+  subdivisionStrategy?: SubdivisionStrategyId;
 }
 
 export type PageLayoutTemplate = 'auto' | '1-up' | '2-up' | '3-up' | '4-up';
@@ -263,7 +328,7 @@ export interface BomEntry {
   quantity: number;
 }
 
-export type PageKind = 'cover' | 'steps' | 'bom' | 'back';
+export type PageKind = 'cover' | 'section-divider' | 'steps' | 'bom' | 'back';
 
 export interface PageSlot {
   stepId: string;

@@ -25,7 +25,7 @@ interface WorldSnap {
   radius: number;
 }
 
-interface WorldAabb {
+export interface WorldAabb {
   min: Vec3;
   max: Vec3;
   center: Vec3;
@@ -66,6 +66,14 @@ export function computePartWorldAabb(part: PartInstance): WorldAabb {
       (outMin[2] + outMax[2]) / 2,
     ],
   };
+}
+
+export function computeAllPartWorldAabbs(parts: PartInstance[]): Map<string, WorldAabb> {
+  const map = new Map<string, WorldAabb>();
+  for (const part of parts) {
+    map.set(part.id, computePartWorldAabb(part));
+  }
+  return map;
 }
 
 function getWorldSnaps(part: PartInstance): WorldSnap[] {
@@ -189,49 +197,113 @@ export function buildConnectivityGraph(
   }
 
   const edges: ConnectionEdge[] = [];
+  const maxBroadGap = 18 + snapToleranceLdu;
+  const halfPad = maxBroadGap * 0.5 + 0.5;
+  const cellSize = 80;
+  const cells = new Map<string, number[]>();
+  const oversized: number[] = [];
 
   for (let i = 0; i < parts.length; i++) {
-    const pa = parts[i];
+    const box = aabbs.get(parts[i].id)!;
+    const minCx = Math.floor((box.min[0] - halfPad) / cellSize);
+    const maxCx = Math.floor((box.max[0] + halfPad) / cellSize);
+    const minCy = Math.floor((box.min[1] - halfPad) / cellSize);
+    const maxCy = Math.floor((box.max[1] + halfPad) / cellSize);
+    const minCz = Math.floor((box.min[2] - halfPad) / cellSize);
+    const maxCz = Math.floor((box.max[2] + halfPad) / cellSize);
+    const cellCount = (maxCx - minCx + 1) * (maxCy - minCy + 1) * (maxCz - minCz + 1);
+    if (cellCount > 256) {
+      oversized.push(i);
+      continue;
+    }
+    for (let cx = minCx; cx <= maxCx; cx++) {
+      for (let cy = minCy; cy <= maxCy; cy++) {
+        for (let cz = minCz; cz <= maxCz; cz++) {
+          const key = `${cx},${cy},${cz}`;
+          let bucket = cells.get(key);
+          if (!bucket) {
+            bucket = [];
+            cells.set(key, bucket);
+          }
+          bucket.push(i);
+        }
+      }
+    }
+  }
+
+  const testedPairs = new Set<number>();
+  const nParts = parts.length;
+
+  const evaluatePair = (i: number, j: number) => {
+    const lo = i < j ? i : j;
+    const hi = i < j ? j : i;
+    const pairKey = lo * nParts + hi;
+    if (testedPairs.has(pairKey)) return;
+    testedPairs.add(pairKey);
+
+    const pa = parts[lo];
+    const pb = parts[hi];
     const boxA = aabbs.get(pa.id)!;
+    const boxB = aabbs.get(pb.id)!;
+
+    // Fast broad-phase rejection
+    const boxDist = aabbGap(boxA, boxB);
+    if (boxDist > maxBroadGap) return;
+
     const snapsA = snaps.get(pa.id)!;
+    const snapsB = snaps.get(pb.id)!;
+    let bestMatch: {
+      type: ConnectionType;
+      strength: number;
+      direction: Vec3;
+      gap: number;
+    } | null = null;
+    let matchCount = 0;
 
-    for (let j = i + 1; j < parts.length; j++) {
-      const pb = parts[j];
-      const boxB = aabbs.get(pb.id)!;
-
-      // Fast broad-phase rejection
-      const boxDist = aabbGap(boxA, boxB);
-      if (boxDist > 18 + snapToleranceLdu) continue;
-
-      const snapsB = snaps.get(pb.id)!;
-      let bestMatch: {
-        type: ConnectionType;
-        strength: number;
-        direction: Vec3;
-        gap: number;
-      } | null = null;
-      let matchCount = 0;
-
-      for (const sa of snapsA) {
-        for (const sb of snapsB) {
-          const m = matchSnapPair(sa, sb, snapToleranceLdu);
-          if (m) {
-            matchCount += 1;
-            if (!bestMatch || m.strength > bestMatch.strength || (m.strength === bestMatch.strength && m.gap < bestMatch.gap)) {
-              bestMatch = m;
-            }
+    for (const sa of snapsA) {
+      for (const sb of snapsB) {
+        const m = matchSnapPair(sa, sb, snapToleranceLdu);
+        if (m) {
+          matchCount += 1;
+          if (!bestMatch || m.strength > bestMatch.strength || (m.strength === bestMatch.strength && m.gap < bestMatch.gap)) {
+            bestMatch = m;
           }
         }
       }
+    }
 
-      if (bestMatch) {
+    if (bestMatch) {
+      const edge: ConnectionEdge = {
+        a: pa.id,
+        b: pb.id,
+        type: bestMatch.type,
+        strength: bestMatch.strength + Math.min(3, (matchCount - 1) * 0.5),
+        direction: bestMatch.direction,
+        gap: bestMatch.gap,
+      };
+      edges.push(edge);
+      adjacency[pa.id].push(edge);
+      adjacency[pb.id].push({
+        ...edge,
+        a: pb.id,
+        b: pa.id,
+        direction: [-edge.direction[0], -edge.direction[1], -edge.direction[2]],
+      });
+    } else if (boxDist <= snapToleranceLdu) {
+      // Check genuine surface contact (not just diagonal corner grazing)
+      const overlapX = Math.min(boxA.max[0], boxB.max[0]) - Math.max(boxA.min[0], boxB.min[0]);
+      const overlapY = Math.min(boxA.max[1], boxB.max[1]) - Math.max(boxA.min[1], boxB.min[1]);
+      const overlapZ = Math.min(boxA.max[2], boxB.max[2]) - Math.max(boxA.min[2], boxB.min[2]);
+      const positiveAxes = [overlapX, overlapY, overlapZ].filter((o) => o > 2).length;
+      if (positiveAxes >= 2) {
+        const dir = vec3Normalize(vec3Sub(boxB.center, boxA.center));
         const edge: ConnectionEdge = {
           a: pa.id,
           b: pb.id,
-          type: bestMatch.type,
-          strength: bestMatch.strength + Math.min(3, (matchCount - 1) * 0.5),
-          direction: bestMatch.direction,
-          gap: bestMatch.gap,
+          type: 'proximity',
+          strength: 1.0,
+          direction: dir,
+          gap: boxDist,
         };
         edges.push(edge);
         adjacency[pa.id].push(edge);
@@ -239,34 +311,22 @@ export function buildConnectivityGraph(
           ...edge,
           a: pb.id,
           b: pa.id,
-          direction: [-edge.direction[0], -edge.direction[1], -edge.direction[2]],
+          direction: [-dir[0], -dir[1], -dir[2]],
         });
-      } else if (boxDist <= snapToleranceLdu) {
-        // Check genuine surface contact (not just diagonal corner grazing)
-        const overlapX = Math.min(boxA.max[0], boxB.max[0]) - Math.max(boxA.min[0], boxB.min[0]);
-        const overlapY = Math.min(boxA.max[1], boxB.max[1]) - Math.max(boxA.min[1], boxB.min[1]);
-        const overlapZ = Math.min(boxA.max[2], boxB.max[2]) - Math.max(boxA.min[2], boxB.min[2]);
-        const positiveAxes = [overlapX, overlapY, overlapZ].filter((o) => o > 2).length;
-        if (positiveAxes >= 2) {
-          const dir = vec3Normalize(vec3Sub(boxB.center, boxA.center));
-          const edge: ConnectionEdge = {
-            a: pa.id,
-            b: pb.id,
-            type: 'proximity',
-            strength: 1.0,
-            direction: dir,
-            gap: boxDist,
-          };
-          edges.push(edge);
-          adjacency[pa.id].push(edge);
-          adjacency[pb.id].push({
-            ...edge,
-            a: pb.id,
-            b: pa.id,
-            direction: [-dir[0], -dir[1], -dir[2]],
-          });
-        }
       }
+    }
+  };
+
+  for (const bucket of cells.values()) {
+    for (let bi = 0; bi < bucket.length; bi++) {
+      for (let bj = bi + 1; bj < bucket.length; bj++) {
+        evaluatePair(bucket[bi], bucket[bj]);
+      }
+    }
+  }
+  for (const oi of oversized) {
+    for (let j = 0; j < nParts; j++) {
+      if (oi !== j) evaluatePair(oi, j);
     }
   }
 

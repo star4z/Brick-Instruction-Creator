@@ -6,7 +6,7 @@ import type {
   StepOverride,
   Vec3,
 } from '../types/manual';
-import { computePartWorldAabb } from './connectivity';
+import { computePartWorldAabb, type WorldAabb } from './connectivity';
 import { vec3Dot, vec3Normalize } from './math';
 
 export interface CanonicalViewSpec {
@@ -91,15 +91,17 @@ export function scoreStepVisibility(
   previousParts: PartInstance[],
   insertionDir: Vec3,
   view: CanonicalViewSpec,
+  aabbsById?: Map<string, WorldAabb>,
 ): number {
   if (newParts.length === 0) return view.isBottom ? 0.4 : 0.9;
 
-  const prevBoxes = previousParts.map((p) => computePartWorldAabb(p));
+  const getBox = (p: PartInstance): WorldAabb => aabbsById?.get(p.id) ?? computePartWorldAabb(p);
+  const prevBoxes = previousParts.map(getBox);
   const dir = view.viewDir;
   let totalScore = 0;
 
   for (const part of newParts) {
-    const box = computePartWorldAabb(part);
+    const box = getBox(part);
     const samplePoints: Vec3[] = [
       box.center,
       [box.center[0], box.max[1] - 1, box.center[2]],
@@ -199,6 +201,11 @@ export function optimizeCameraSequence(
   const dp: number[][] = Array.from({ length: T }, () => new Array(V).fill(Infinity));
   const backptr: number[][] = Array.from({ length: T }, () => new Array(V).fill(0));
 
+  const aabbsById = new Map<string, WorldAabb>();
+  for (const p of Object.values(partsById)) {
+    aabbsById.set(p.id, computePartWorldAabb(p));
+  }
+
   for (let t = 0; t < T; t++) {
     const step = steps[t];
     const pinnedView = overrides[step.id]?.cameraViewOverride;
@@ -212,6 +219,7 @@ export function optimizeCameraSequence(
         stepPrevParts[t],
         step.insertionDirection,
         view,
+        aabbsById,
       );
       // Slight anchor preference for standard Front-Right on step 0 when tied
       const initialBias = t === 0 && view.id === 'top_front_right' ? -0.05 : 0;

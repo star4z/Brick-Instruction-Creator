@@ -244,11 +244,21 @@ function generateTopologicalSteps(
   // Project each part's center and lowest corner along upAxis
   const heightOf = new Map<string, number>();
   const centerOf = new Map<string, Vec3>();
+  const aabbsById = new Map<string, ReturnType<typeof computePartWorldAabb>>();
   let minHeight = Infinity;
+  let spanMinX = Infinity;
+  let spanMaxX = -Infinity;
+  let spanMinZ = Infinity;
+  let spanMaxZ = -Infinity;
 
   for (const id of partIds) {
     const aabb = computePartWorldAabb(partsById[id]);
+    aabbsById.set(id, aabb);
     centerOf.set(id, aabb.center);
+    if (aabb.min[0] < spanMinX) spanMinX = aabb.min[0];
+    if (aabb.max[0] > spanMaxX) spanMaxX = aabb.max[0];
+    if (aabb.min[2] < spanMinZ) spanMinZ = aabb.min[2];
+    if (aabb.max[2] > spanMaxZ) spanMaxZ = aabb.max[2];
     // Support height along upAxis
     const proj = vec3Dot(aabb.center, upAxis);
     const lowProj =
@@ -258,6 +268,10 @@ function generateTopologicalSteps(
     heightOf.set(id, lowProj);
     if (lowProj < minHeight) minHeight = lowProj;
   }
+
+  const chapterHorizontalSpan = Math.max(spanMaxX - spanMinX, spanMaxZ - spanMinZ);
+  // Prevent opposite-end pieces on wide/elongated models from being lumped into one zoomed-out step
+  const maxStepSpreadLdu = chapterHorizontalSpan >= 360 ? 220 : Infinity;
 
   const placed = new Set<string>();
   const remaining = new Set<string>(partIds);
@@ -321,13 +335,21 @@ function generateTopologicalSteps(
 
     // Greedily add compatible frontier parts up to pacing limit while checking visibility
     while (stepParts.length < limits.maxParts && remaining.size > 0) {
+      const ca = centerOf.get(anchorId)!;
       const candidates = Array.from(remaining).filter((id) => {
         // Must connect to something placed BEFORE this step OR to a part already in this step (when on base)
         const connectsToPrior = (graph.adjacency[id] ?? []).some((e) => placed.has(e.b));
         if (!connectsToPrior) return false;
         // Keep within same build layer band
         const dh = Math.abs(heightOf.get(id)! - anchorHeight);
-        return dh <= (pacing === 'adult' ? 28 : 16);
+        if (dh > (pacing === 'adult' ? 28 : 16)) return false;
+        // Spatial Spread Guard: avoid grouping pieces at opposite far ends of a long model
+        if (Number.isFinite(maxStepSpreadLdu)) {
+          const cp = centerOf.get(id)!;
+          const spread = Math.hypot(cp[0] - ca[0], cp[1] - ca[1], cp[2] - ca[2]);
+          if (spread > maxStepSpreadLdu) return false;
+        }
+        return true;
       });
 
       if (candidates.length === 0) break;
@@ -341,7 +363,6 @@ function generateTopologicalSteps(
           if (stepTypes.has(`${p.partId}:${p.colorId}`)) s += 50;
           if (p.partId === anchorPart.partId) s += 30;
           // Bilateral symmetry bonus (mirrored X or Z around 0)
-          const ca = centerOf.get(anchorId)!;
           const cp = centerOf.get(id)!;
           if (Math.abs(ca[0] + cp[0]) < 4 && Math.abs(ca[2] - cp[2]) < 4) s += 45;
           if (Math.abs(ca[2] + cp[2]) < 4 && Math.abs(ca[0] - cp[0]) < 4) s += 35;
@@ -363,7 +384,7 @@ function generateTopologicalSteps(
           .filter((id) => !stepParts.includes(id))
           .map((id) => partsById[id]);
         const bestVis = Math.max(
-          ...CANONICAL_VIEWS.map((v) => scoreStepVisibility(trialParts, prevParts, upAxis, v)),
+          ...CANONICAL_VIEWS.map((v) => scoreStepVisibility(trialParts, prevParts, upAxis, v, aabbsById)),
         );
         if (bestVis < 0.54 && stepParts.length >= limits.minParts) {
           continue;
