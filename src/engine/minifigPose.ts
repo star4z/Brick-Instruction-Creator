@@ -356,13 +356,13 @@ export function classifyMinifigGroupKind(
   const allIds = [k, ...childIds];
   if (
     allIds.some((id) => CORE_LEGS_ID_RE.test(id)) ||
-    /\bhips\b|minifig.*leg|\bleg,?\s*(?:left|right)\b/i.test(name)
+    /\bhips\b|minifig.*\blegs?\b|\bleg,?\s*(?:left|right)\b/i.test(name)
   ) {
     return 'legs';
   }
   if (
     allIds.some((id) => CORE_TORSO_ID_RE.test(id) || /_(?:torso|arm_?[lr])$/i.test(id)) ||
-    /minifig.*torso|torso assembly|\btorso\b|minifig.*arm|\barm,?\s*(?:left|right)\b|minifig.*hand\b|^\s*hand\s*$/i.test(name)
+    /minifig.*torso|torso assembly|\btorso\b|minifig.*\barms?\b|\barm,?\s*(?:left|right)\b|minifig.*\bhand\b|^\s*hand\s*$/i.test(name)
   ) {
     return 'torso';
   }

@@ -32,6 +32,12 @@ import {
   computeStudioRotationCue,
 } from './engine/minifigCamera';
 import {
+  buildMinifigExplodedPlan,
+  buildMinifigSequentialPlan,
+  normalizeMinifigStepStyle,
+  paginateMinifigSequentialStages,
+} from './engine/minifigSteps';
+import {
   BUILT_IN_THEMES,
   BUILT_IN_THEME_IDS,
   applyThemeBackgroundToElement,
@@ -1548,17 +1554,18 @@ class WebGLBrickEngine {
     gl.bindBuffer(gl.ARRAY_BUFFER, this.bLineCol); gl.bufferData(gl.ARRAY_BUFFER, mesh.lineCol, gl.STATIC_DRAW);
     this.uploadedMesh = mesh;
   }
-  computeMVP(mesh, w, h, azDeg, elDeg, zoom = 1, fixedHalfH = 0, tightFit = false) {
+  computeMVP(mesh, w, h, azDeg, elDeg, zoom = 1, fixedHalfH = 0, tightFit = false, fixedCenter = null) {
     const az = azDeg * Math.PI / 180, el = elDeg * Math.PI / 180;
+    const center = fixedCenter || mesh.center;
     // Tight near/far ortho depth range around full model radius for 4x sharper Z-buffer occlusion!
-    const clipRadius = Math.max(mesh.fullRadius || mesh.radius, mesh.radius);
+    const clipRadius = Math.max(mesh.fullRadius || mesh.radius, mesh.radius, fixedHalfH > 0 ? fixedHalfH * 1.35 : 0);
     const dist = clipRadius * 2.5;
-    const eye = [mesh.center[0]+dist*Math.sin(az)*Math.cos(el), mesh.center[1]+dist*Math.sin(el), mesh.center[2]+dist*Math.cos(az)*Math.cos(el)];
-    const near = Math.max(1, dist - clipRadius * 2.2);
-    const far = dist + clipRadius * 2.2;
-    const view = lookAtMat4(eye, mesh.center, [0, 1, 0]);
+    const eye = [center[0]+dist*Math.sin(az)*Math.cos(el), center[1]+dist*Math.sin(el), center[2]+dist*Math.cos(az)*Math.cos(el)];
+    const near = Math.max(1, dist - clipRadius * 2.4);
+    const far = dist + clipRadius * 2.4;
+    const view = lookAtMat4(eye, center, [0, 1, 0]);
     if (tightFit && fixedHalfH <= 0 && mesh.triPos && mesh.triPos.length >= 9) {
-      const tb = computeTightCameraBounds(mesh.triPos, mesh.center, azDeg, elDeg, w, h, zoom, 1.07);
+      const tb = computeTightCameraBounds(mesh.triPos, center, azDeg, elDeg, w, h, zoom, 1.07);
       if (tb) {
         // Reserve a small bottom strip (~3.5%) so the soft studio floor shadow never clips
         const shadowShiftY = tb.halfH * 0.035;
@@ -1575,7 +1582,9 @@ class WebGLBrickEngine {
         );
       }
     }
-    const halfH = fixedHalfH > 0 ? fixedHalfH : ((mesh.radius * 1.12) / Math.max(0.4, zoom));
+    const halfH = fixedHalfH > 0
+      ? (fixedCenter ? fixedHalfH / Math.max(0.4, zoom) : fixedHalfH)
+      : ((mesh.radius * 1.12) / Math.max(0.4, zoom));
     const halfW = halfH * (w / Math.max(1, h));
     return mulMat4(orthoMat4(-halfW, halfW, -halfH, halfH, near, far), view);
   }
@@ -1594,7 +1603,8 @@ class WebGLBrickEngine {
     const tightFit = Boolean(drawOpts?.tightFit);
     const heroShading = Boolean(drawOpts?.heroShading);
     const lineAlpha = typeof drawOpts?.lineAlpha === 'number' ? drawOpts.lineAlpha : (heroShading ? 0.52 : 1.0);
-    const mvp = this.computeMVP(mesh, w, h, azDeg, elDeg, zoom, fixedHalfH, tightFit);
+    const fixedCenter = drawOpts?.fixedCenter || null;
+    const mvp = this.computeMVP(mesh, w, h, azDeg, elDeg, zoom, fixedHalfH, tightFit, fixedCenter);
     const { forward } = computeCameraBasis(azDeg, elDeg);
 
     gl.useProgram(this.triProg);
@@ -1809,6 +1819,580 @@ function renderMinifigOneToOne(parts, pagePxH, pageHIn, maxPxW, maxPxH, accent =
   return { url: snapshotCanvas.toDataURL('image/png'), ...layout };
 }
 
+const minifigDiagramCache = new Map();
+const minifigSeqPlanCache = new Map();
+
+function clearMinifigDiagramCaches() {
+  minifigDiagramCache.clear();
+  minifigSeqPlanCache.clear();
+}
+
+function getMinifigSequentialPlanForStep(step) {
+  const key = `${step.id}|${(step.parts || []).map(p => `${p.id}:${p.p}:${p.c}`).join(',')}`;
+  if (minifigSeqPlanCache.has(key)) return minifigSeqPlanCache.get(key);
+  const plan = buildMinifigSequentialPlan(step.parts || [], (pid) => resolvePart(pid).name, computeWorldBox);
+  if (minifigSeqPlanCache.size > 48) minifigSeqPlanCache.clear();
+  minifigSeqPlanCache.set(key, plan);
+  return plan;
+}
+
+function projectWorldToCanvasPt(pt, mvp, offX, offY, w, h) {
+  const ndc = projectWorldToNdc(pt, mvp);
+  return [offX + (ndc[0] * 0.5 + 0.5) * w, offY + (0.5 - ndc[1] * 0.5) * h];
+}
+
+function drawMinifigRoundedRect(ctx, x, y, w, h, r) {
+  const rad = Math.max(0, Math.min(r, w / 2, h / 2));
+  ctx.beginPath();
+  ctx.moveTo(x + rad, y);
+  ctx.arcTo(x + w, y, x + w, y + h, rad);
+  ctx.arcTo(x + w, y + h, x, y + h, rad);
+  ctx.arcTo(x, y + h, x, y, rad);
+  ctx.arcTo(x, y, x + w, y, rad);
+  ctx.closePath();
+}
+
+function drawVectorArrow2D(ctx, x0, y0, x1, y1, opts = {}) {
+  const dx = x1 - x0;
+  const dy = y1 - y0;
+  const len = Math.hypot(dx, dy);
+  if (len < 6) return;
+  const ux = dx / len;
+  const uy = dy / len;
+  const px = -uy;
+  const py = ux;
+
+  const color = opts.color || '#1f2937';
+  const lineW = Math.max(1.6, opts.lineWidth || 2.4);
+  const headLen = Math.min(len * 0.44, Math.max(7, opts.headLen || lineW * 4.2));
+  const headHalfW = Math.max(3.6, opts.headHalfW || headLen * 0.46);
+  const shaftEndX = x1 - ux * (headLen * 0.85);
+  const shaftEndY = y1 - uy * (headLen * 0.85);
+  const baseLeftX = x1 - ux * headLen + px * headHalfW;
+  const baseLeftY = y1 - uy * headLen + py * headHalfW;
+  const baseRightX = x1 - ux * headLen - px * headHalfW;
+  const baseRightY = y1 - uy * headLen - py * headHalfW;
+
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  if (opts.haloColor) {
+    ctx.strokeStyle = opts.haloColor;
+    ctx.lineWidth = lineW + (opts.haloWidth || 3.2);
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(shaftEndX, shaftEndY);
+    ctx.stroke();
+
+    ctx.fillStyle = opts.haloColor;
+    ctx.strokeStyle = opts.haloColor;
+    ctx.lineWidth = opts.haloWidth || 2.6;
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(baseLeftX, baseLeftY);
+    ctx.lineTo(baseRightX, baseRightY);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  ctx.strokeStyle = color;
+  ctx.lineWidth = lineW;
+  ctx.beginPath();
+  ctx.moveTo(x0, y0);
+  ctx.lineTo(shaftEndX, shaftEndY);
+  ctx.stroke();
+
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(baseLeftX, baseLeftY);
+  ctx.lineTo(baseRightX, baseRightY);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawFivePointStar2D(ctx, cx, cy, outerR, innerR, strokeColor, fillColor, lineWidth) {
+  ctx.save();
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const r = i % 2 === 0 ? outerR : innerR;
+    const ang = -Math.PI / 2 + (i * Math.PI) / 5;
+    const x = cx + Math.cos(ang) * r;
+    const y = cy + Math.sin(ang) * r;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  if (fillColor) {
+    ctx.fillStyle = fillColor;
+    ctx.fill();
+  }
+  ctx.strokeStyle = strokeColor;
+  ctx.lineWidth = lineWidth;
+  ctx.lineJoin = 'round';
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawMinifigCelebrationStarburst(ctx, cx, cy, radius, theme) {
+  const bgHex = toHexColor(theme?.bgColor || '#ffffff', '#ffffff').toLowerCase();
+  const darkBg = isDarkHexColor(bgHex);
+  const pureWhiteBg = bgHex === '#ffffff' || bgHex === '#fefefe' || bgHex === '#fcfcfc' || bgHex === '#f9fafb';
+  const cw = ctx.canvas.width || 320;
+  const ch = ctx.canvas.height || 460;
+  const maxFitR = Math.max(40, Math.min(radius, cw - cx - 6, cx - 6, cy - 6, ch - cy - 6));
+
+  ctx.save();
+  // Alternating luminous starburst rays radiating behind completed minifigure (official LEGO IMG_0315 Step 6!)
+  const rayCount = 18;
+  for (let i = 0; i < rayCount; i++) {
+    const aMid = (i / rayCount) * Math.PI * 2;
+    const halfSpread = ((Math.PI * 2) / rayCount) * (i % 2 === 0 ? 0.34 : 0.2);
+    const rOuter = maxFitR * (i % 2 === 0 ? 1.0 : 0.8);
+    const rInner = maxFitR * 0.14;
+    const grad = ctx.createRadialGradient(cx, cy, rInner, cx, cy, rOuter);
+    if (darkBg) {
+      grad.addColorStop(0, 'rgba(255,255,255,0.22)');
+      grad.addColorStop(0.6, 'rgba(255,255,255,0.09)');
+      grad.addColorStop(1, 'rgba(255,255,255,0)');
+    } else if (pureWhiteBg) {
+      grad.addColorStop(0, 'rgba(186,214,245,0.52)');
+      grad.addColorStop(0.62, 'rgba(203,221,244,0.26)');
+      grad.addColorStop(1, 'rgba(203,221,244,0)');
+    } else {
+      grad.addColorStop(0, 'rgba(255,255,255,0.72)');
+      grad.addColorStop(0.62, 'rgba(255,255,255,0.34)');
+      grad.addColorStop(1, 'rgba(255,255,255,0)');
+    }
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(aMid - halfSpread * 0.4) * rInner, cy + Math.sin(aMid - halfSpread * 0.4) * rInner);
+    ctx.lineTo(cx + Math.cos(aMid - halfSpread) * rOuter, cy + Math.sin(aMid - halfSpread) * rOuter);
+    ctx.lineTo(cx + Math.cos(aMid + halfSpread) * rOuter, cy + Math.sin(aMid + halfSpread) * rOuter);
+    ctx.lineTo(cx + Math.cos(aMid + halfSpread * 0.4) * rInner, cy + Math.sin(aMid + halfSpread * 0.4) * rInner);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // Three hollow 5-point outline stars floating around the completed minifigure (strictly inside stage bounds!)
+  const starStroke = darkBg ? 'rgba(241,245,249,0.68)' : 'rgba(71,85,105,0.55)';
+  const starFill = darkBg ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.72)';
+  const lw = Math.max(1.3, maxFitR * 0.015);
+  const starSpecs = [
+    { dx: -0.14, dy: -0.80, r: 0.145 },
+    { dx: 0.62, dy: -0.34, r: 0.165 },
+    { dx: -0.62, dy: 0.54, r: 0.16 },
+  ];
+  for (const st of starSpecs) {
+    const sr = Math.max(8, maxFitR * st.r);
+    const sx = Math.max(sr + 6, Math.min(cw - sr - 6, cx + maxFitR * st.dx));
+    const sy = Math.max(sr + 6, Math.min(ch - sr - 6, cy + radius * st.dy));
+    drawFivePointStar2D(ctx, sx, sy, sr, sr * 0.43, starStroke, starFill, lw);
+  }
+  ctx.restore();
+}
+
+function drawProjectedMinifigArrows(ctx, arrows, mvp, offX, offY, w, h, colorMap, lineW, haloColor) {
+  if (!mvp || !arrows || arrows.length === 0) return;
+  for (const arr of arrows) {
+    const p0 = projectWorldToCanvasPt(arr.from, mvp, offX, offY, w, h);
+    const p1 = projectWorldToCanvasPt(arr.to, mvp, offX, offY, w, h);
+    const col = colorMap[arr.color] || colorMap.blue || '#0088ce';
+    drawVectorArrow2D(ctx, p0[0], p0[1], p1[0], p1[1], {
+      color: col,
+      lineWidth: lineW,
+      headLen: Math.max(7, lineW * 4.0),
+      headHalfW: Math.max(3.4, lineW * 1.8),
+      haloColor,
+      haloWidth: haloColor ? Math.max(2, lineW * 1.1) : 0,
+    });
+  }
+}
+
+/**
+ * Option 1 (Official LEGO IMG_0316): Exploded Stack Callout
+ * Left white vertical box with exploded body layers + red downward arrows,
+ * black horizontal arrow -> completed standing minifigure + optional handheld accessory callout(s).
+ */
+function renderMinifigExplodedDiagram(step, cam, w, h, theme, zoom = 1.0) {
+  const rw = Math.max(320, Math.round(w));
+  const rh = Math.max(240, Math.round(h));
+  const bgHex = toHexColor(theme?.bgColor || '#ffffff', '#ffffff');
+  const darkBg = isDarkHexColor(bgHex);
+  const cacheKey = `exp|${step.id}|${(step.parts || []).length}|${Math.round(cam.az)}|${Math.round(cam.el)}|${Math.round(zoom * 100)}|${rw}x${rh}|${darkBg ? 'd' : 'l'}`;
+  if (minifigDiagramCache.has(cacheKey)) return minifigDiagramCache.get(cacheKey);
+
+  const plan = buildMinifigExplodedPlan(step.parts || [], (pid) => resolvePart(pid).name, computeWorldBox);
+  const comp = document.createElement('canvas');
+  comp.width = rw;
+  comp.height = rh;
+  const ctx = comp.getContext('2d');
+  if (!ctx) return { url: '', w: rw, h: rh, plan };
+
+  const hasAcc = plan.accessoryCallouts.length > 0;
+  const padX = Math.round(rw * 0.05);
+  const padY = Math.round(rh * 0.06);
+
+  // 1. Left white vertical exploded callout box (slender vertical proportions matching IMG_0316)
+  const boxH = Math.round(rh - padY * 2);
+  const boxW = Math.round(Math.min(rw * 0.34, Math.max(rw * 0.22, boxH * 0.42)));
+  const boxX = Math.round(padX + Math.max(0, (rw * 0.4 - boxW) * 0.42));
+  const boxY = padY;
+
+  ctx.save();
+  ctx.shadowColor = darkBg ? 'rgba(0,0,0,0.45)' : 'rgba(15,23,42,0.12)';
+  ctx.shadowBlur = Math.max(4, rh * 0.014);
+  ctx.shadowOffsetY = Math.max(1, rh * 0.004);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(boxX, boxY, boxW, boxH);
+  ctx.restore();
+
+  ctx.strokeStyle = '#1f2937';
+  ctx.lineWidth = Math.max(1.6, Math.min(2.6, rh * 0.0042));
+  ctx.strokeRect(boxX + 0.5, boxY + 0.5, boxW - 1, boxH - 1);
+
+  // Render exploded body stack inside the white callout box
+  const innerPadX = Math.round(boxW * 0.08);
+  const innerPadY = Math.round(boxH * 0.045);
+  const stackW = Math.max(48, boxW - innerPadX * 2);
+  const stackH = Math.max(80, boxH - innerPadY * 2);
+  const stackMesh = buildMeshBuffers([], plan.stackParts, {
+    highlightNew: false,
+    fadePrev: false,
+    showArrows: false,
+    accent: theme?.accent || '#1a73e8',
+    partOffsets: plan.stackOffsets,
+  });
+  const stackMvp = snapshotEngine.draw(stackMesh, stackW, stackH, cam.az, cam.el, Math.max(0.82, Math.min(1.18, zoom)), 0, {
+    tightFit: true,
+  });
+  ctx.drawImage(snapshotCanvas, boxX + innerPadX, boxY + innerPadY, stackW, stackH);
+
+  // Crisp crimson-red vertical downward arrows between exploded body layers
+  const redLineW = Math.max(1.8, Math.min(3.2, rh * 0.0048));
+  drawProjectedMinifigArrows(
+    ctx,
+    plan.stackArrows,
+    stackMvp,
+    boxX + innerPadX,
+    boxY + innerPadY,
+    stackW,
+    stackH,
+    { red: '#d92626', blue: '#0088ce', dark: '#1f2937' },
+    redLineW,
+    'rgba(255,255,255,0.82)',
+  );
+
+  // 2. Right region: Completed standing minifigure (with headroom above if accessories exist)
+  const connGap = Math.round(Math.max(42, rw * 0.11));
+  const figAreaX = boxX + boxW + connGap;
+  const figAreaW = Math.max(96, rw - figAreaX - padX);
+  const figTopOffset = hasAcc ? Math.round(rh * 0.28) : Math.round(rh * 0.16);
+  const figAreaH = Math.max(110, rh - figTopOffset - padY);
+  const figAreaY = figTopOffset;
+
+  const figMesh = buildMeshBuffers([], plan.assembledParts, {
+    highlightNew: false,
+    fadePrev: false,
+    showArrows: false,
+    accent: theme?.accent || '#1a73e8',
+  });
+  const figMvp = snapshotEngine.draw(figMesh, figAreaW, figAreaH, cam.az, cam.el, Math.max(0.75, Math.min(1.25, zoom)), 0, {
+    tightFit: true,
+  });
+  ctx.drawImage(snapshotCanvas, figAreaX, figAreaY, figAreaW, figAreaH);
+
+  // 3. Horizontal black connector arrow from lower-right edge of white callout box to the standing figure's legs
+  const bodyBox = plan.decomposed.bodyBox;
+  const legsTargetY = bodyBox.min[1] + (bodyBox.max[1] - bodyBox.min[1]) * 0.18;
+  const figLeftLegPt = figMvp
+    ? projectWorldToCanvasPt([bodyBox.min[0] - 3, legsTargetY, bodyBox.center[2]], figMvp, figAreaX, figAreaY, figAreaW, figAreaH)
+    : [figAreaX + figAreaW * 0.3, boxY + boxH * 0.84];
+  const arrowY = Math.max(boxY + boxH * 0.62, Math.min(boxY + boxH * 0.91, figLeftLegPt[1]));
+  const arrowEndX = Math.max(boxX + boxW + 26, Math.min(figAreaX + figAreaW * 0.42, figLeftLegPt[0] - 8));
+  drawVectorArrow2D(ctx, boxX + boxW + 1, arrowY, arrowEndX, arrowY, {
+    color: darkBg ? '#f8fafc' : '#1f2937',
+    lineWidth: Math.max(2.0, rh * 0.0046),
+    headLen: Math.max(9, rh * 0.022),
+    headHalfW: Math.max(4.5, rh * 0.0105),
+    haloColor: darkBg ? 'rgba(15,23,42,0.75)' : 'rgba(255,255,255,0.65)',
+    haloWidth: 2.4,
+  });
+
+  // 4. Optional handheld accessory callout box(es) above the minifigure's hand(s) (matching IMG_0316 envelope box!)
+  if (hasAcc && figMvp) {
+    const shownAcc = plan.accessoryCallouts.slice(0, 2);
+    const placedBoxes = [];
+    for (let ai = 0; ai < shownAcc.length; ai++) {
+      const acc = shownAcc[ai];
+      const accCenterPt = projectWorldToCanvasPt(acc.box.center, figMvp, figAreaX, figAreaY, figAreaW, figAreaH);
+      const accTopPt = projectWorldToCanvasPt(
+        [acc.box.center[0], acc.box.max[1], acc.box.center[2]],
+        figMvp,
+        figAreaX,
+        figAreaY,
+        figAreaW,
+        figAreaH,
+      );
+
+      const accBoxW = Math.round(Math.max(58, Math.min(rw * 0.16, rh * (acc.isMultiPart ? 0.18 : 0.21))));
+      const accBoxH = Math.round(Math.max(46, Math.min(rh * (acc.isMultiPart ? 0.27 : 0.18), accTopPt[1] - padY - 26)));
+
+      // Position cleanly above the accessory's X coordinate, avoiding the vertical stack box and other accessory boxes
+      let ax = Math.round(accCenterPt[0] - accBoxW / 2);
+      const minAx = boxX + boxW + 16;
+      const maxAx = rw - padX - accBoxW;
+      ax = Math.max(minAx, Math.min(maxAx, ax));
+      for (const prevB of placedBoxes) {
+        if (Math.abs(ax - prevB.x) < accBoxW + 10) {
+          ax = Math.min(maxAx, prevB.x + prevB.w + 10);
+        }
+      }
+      const ay = Math.round(Math.max(padY, Math.min(accTopPt[1] - accBoxH - 26, figAreaY - accBoxH * 0.35)));
+      placedBoxes.push({ x: ax, y: ay, w: accBoxW, h: accBoxH });
+
+      ctx.save();
+      ctx.shadowColor = darkBg ? 'rgba(0,0,0,0.42)' : 'rgba(15,23,42,0.12)';
+      ctx.shadowBlur = Math.max(3, rh * 0.01);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(ax, ay, accBoxW, accBoxH);
+      ctx.restore();
+      ctx.strokeStyle = '#1f2937';
+      ctx.lineWidth = Math.max(1.5, rh * 0.0036);
+      ctx.strokeRect(ax + 0.5, ay + 0.5, accBoxW - 1, accBoxH - 1);
+
+      const aPad = Math.max(5, Math.round(Math.min(accBoxW, accBoxH) * 0.12));
+      const aInnerW = Math.max(28, accBoxW - aPad * 2);
+      const aInnerH = Math.max(28, accBoxH - aPad * 2);
+      const accMesh = buildMeshBuffers([], acc.parts, {
+        highlightNew: false,
+        fadePrev: false,
+        showArrows: false,
+        accent: theme?.accent || '#1a73e8',
+        partOffsets: acc.isMultiPart ? acc.subassemblyOffsets : {},
+      });
+      const accMvp = snapshotEngine.draw(accMesh, aInnerW, aInnerH, cam.az, cam.el, 1.0, 0, { tightFit: true });
+      ctx.drawImage(snapshotCanvas, ax + aPad, ay + aPad, aInnerW, aInnerH);
+
+      if (acc.isMultiPart && acc.subassemblyArrows.length > 0) {
+        drawProjectedMinifigArrows(
+          ctx,
+          acc.subassemblyArrows.map(a => ({ ...a, color: 'red' })),
+          accMvp,
+          ax + aPad,
+          ay + aPad,
+          aInnerW,
+          aInnerH,
+          { red: '#d92626', blue: '#0088ce', dark: '#1f2937' },
+          Math.max(1.5, rh * 0.0036),
+          'rgba(255,255,255,0.85)',
+        );
+      }
+
+      // Crisp white-haloed downward pointer arrow straight to the accessory in the minifigure's hand
+      const ptrStartX = Math.max(ax + 8, Math.min(ax + accBoxW - 8, accCenterPt[0]));
+      const ptrStartY = ay + accBoxH + 1;
+      const ptrEndX = accCenterPt[0];
+      const ptrEndY = Math.max(ptrStartY + 14, accTopPt[1] - 3);
+      drawVectorArrow2D(ctx, ptrStartX, ptrStartY, ptrEndX, ptrEndY, {
+        color: darkBg ? '#f8fafc' : '#1f2937',
+        lineWidth: Math.max(1.8, rh * 0.0038),
+        headLen: Math.max(8, rh * 0.019),
+        headHalfW: Math.max(4, rh * 0.009),
+        haloColor: darkBg ? 'rgba(15,23,42,0.82)' : 'rgba(255,255,255,0.92)',
+        haloWidth: 2.8,
+      });
+    }
+  }
+
+  const out = { url: comp.toDataURL('image/png'), w: rw, h: rh, plan };
+  if (minifigDiagramCache.size > 64) minifigDiagramCache.clear();
+  minifigDiagramCache.set(cacheKey, out);
+  return out;
+}
+
+/**
+ * Option 2 (Official LEGO IMG_0315): Sequential Step-by-Step Minifigure Assembly
+ * Renders one numbered sub-step (1, 2, 3...) at a shared foot baseline & physical scale,
+ * with cyan-blue assembly arrows, warm peach multi-part accessory subassembly pill,
+ * and final radial starburst + outline stars celebration!
+ */
+function renderMinifigSequentialStage(step, stage, plan, cam, w, h, theme, zoom = 1.0) {
+  const rw = Math.max(200, Math.round(w));
+  const rh = Math.max(240, Math.round(h));
+  const bgHex = toHexColor(theme?.bgColor || '#ffffff', '#ffffff');
+  const darkBg = isDarkHexColor(bgHex);
+  const textColor = theme?.text || (darkBg ? '#f8fafc' : '#1f2937');
+  const cacheKey = `seq|${step.id}|s${stage.stepNumber}|${(step.parts || []).length}|${Math.round(cam.az)}|${Math.round(cam.el)}|${Math.round(zoom * 100)}|${rw}x${rh}|${bgHex}|${textColor}`;
+  if (minifigDiagramCache.has(cacheKey)) return minifigDiagramCache.get(cacheKey);
+
+  const comp = document.createElement('canvas');
+  comp.width = rw;
+  comp.height = rh;
+  const ctx = comp.getContext('2d');
+  if (!ctx) return { url: '', w: rw, h: rh };
+
+  const numColW = Math.round(rw * 0.14);
+  const rightPad = Math.round(rw * 0.04);
+  const topPad = Math.round(rh * 0.04);
+  const botPad = Math.round(rh * 0.05);
+  const figX = numColW;
+  const figY = topPad;
+  const figW = Math.max(96, rw - numColW - rightPad);
+  const figH = Math.max(120, rh - topPad - botPad);
+
+  const stageMesh = buildMeshBuffers(stage.baseParts, stage.addedParts, {
+    highlightNew: false,
+    fadePrev: false,
+    showArrows: false,
+    accent: theme?.accent || '#1a73e8',
+    partOffsets: stage.partOffsets || {},
+  });
+  const stageMvp = snapshotEngine.draw(
+    stageMesh,
+    figW,
+    figH,
+    cam.az,
+    cam.el,
+    Math.max(0.65, Math.min(1.6, zoom)),
+    plan.sharedHalfH,
+    { fixedCenter: plan.sharedCenter },
+  );
+
+  // 1. Celebratory starburst behind completed minifigure on the final sub-step (IMG_0315 Step 6!)
+  if (stage.isCelebration && stageMvp) {
+    const bodyBox = plan.decomposed.bodyBox;
+    const centerPt = projectWorldToCanvasPt(bodyBox.center, stageMvp, figX, figY, figW, figH);
+    const topPt = projectWorldToCanvasPt([bodyBox.center[0], bodyBox.max[1], bodyBox.center[2]], stageMvp, figX, figY, figW, figH);
+    const botPt = projectWorldToCanvasPt([bodyBox.center[0], bodyBox.min[1], bodyBox.center[2]], stageMvp, figX, figY, figW, figH);
+    const figVisualH = Math.max(80, Math.abs(botPt[1] - topPt[1]));
+    drawMinifigCelebrationStarburst(ctx, centerPt[0], centerPt[1], figVisualH * 0.78, theme);
+  }
+
+  // 2. Composite crisp WebGL minifigure stage
+  ctx.drawImage(snapshotCanvas, figX, figY, figW, figH);
+
+  // 3. Crisp official LEGO cyan-blue assembly arrows
+  const blueColor = darkBg ? '#38bdf8' : '#0088ce';
+  const blueLineW = Math.max(2.0, Math.min(3.4, rh * 0.0056));
+  drawProjectedMinifigArrows(
+    ctx,
+    stage.arrows,
+    stageMvp,
+    figX,
+    figY,
+    figW,
+    figH,
+    { blue: blueColor, red: '#d92626', dark: darkBg ? '#f8fafc' : '#1f2937' },
+    blueLineW,
+    darkBg ? 'rgba(15,23,42,0.55)' : 'rgba(255,255,255,0.68)',
+  );
+
+  // 4. Multi-part accessory subassembly warm peach rounded pill box (IMG_0315 Step 5 lightsaber!)
+  if (stage.accessoryPill && stageMvp) {
+    const acc = stage.accessoryPill;
+    const accTopPt = projectWorldToCanvasPt(
+      [acc.box.center[0], acc.box.max[1], acc.box.center[2]],
+      stageMvp,
+      figX,
+      figY,
+      figW,
+      figH,
+    );
+    const accSpanX = acc.box.max[0] - acc.box.min[0];
+    const accSpanY = acc.box.max[1] - acc.box.min[1];
+    const isTallAcc = accSpanY >= accSpanX * 0.8;
+
+    const pillW = Math.round(
+      isTallAcc
+        ? Math.max(46, Math.min(rw * 0.25, rh * 0.145))
+        : Math.max(72, Math.min(rw * 0.42, rh * 0.26)),
+    );
+    const maxAvailH = Math.max(72, accTopPt[1] - topPad - 28);
+    const pillH = Math.round(
+      isTallAcc
+        ? Math.max(76, Math.min(maxAvailH, rh * 0.36))
+        : Math.max(52, Math.min(maxAvailH, rh * 0.22)),
+    );
+    const pillX = Math.round(Math.max(numColW + 4, Math.min(rw - rightPad - pillW, accTopPt[0] - pillW / 2)));
+    const pillY = Math.round(Math.max(topPad + 2, accTopPt[1] - pillH - 28));
+
+    ctx.save();
+    drawMinifigRoundedRect(ctx, pillX, pillY, pillW, pillH, Math.min(14, pillW * 0.28));
+    ctx.fillStyle = '#fde4a6';
+    ctx.fill();
+    ctx.strokeStyle = '#1f2937';
+    ctx.lineWidth = Math.max(1.6, rh * 0.004);
+    ctx.stroke();
+    ctx.restore();
+
+    const pPadX = Math.max(5, Math.round(pillW * 0.14));
+    const pPadY = Math.max(6, Math.round(pillH * 0.08));
+    const pInnerW = Math.max(24, pillW - pPadX * 2);
+    const pInnerH = Math.max(36, pillH - pPadY * 2);
+    const pillMesh = buildMeshBuffers([], acc.parts, {
+      highlightNew: false,
+      fadePrev: false,
+      showArrows: false,
+      accent: theme?.accent || '#1a73e8',
+      partOffsets: acc.subassemblyOffsets || {},
+    });
+    const pillMvp = snapshotEngine.draw(pillMesh, pInnerW, pInnerH, cam.az, cam.el, 1.0, 0, { tightFit: true });
+    ctx.drawImage(snapshotCanvas, pillX + pPadX, pillY + pPadY, pInnerW, pInnerH);
+
+    // Blue downward arrow inside the warm peach pill (blade -> hilt)
+    drawProjectedMinifigArrows(
+      ctx,
+      acc.subassemblyArrows,
+      pillMvp,
+      pillX + pPadX,
+      pillY + pPadY,
+      pInnerW,
+      pInnerH,
+      { blue: '#0088ce', red: '#d92626', dark: '#1f2937' },
+      Math.max(1.8, rh * 0.0044),
+      'rgba(253,228,166,0.8)',
+    );
+
+    // Crisp black downward arrow from peach pill straight down to the accessory in the minifigure's hand
+    const ptrX = Math.max(pillX + 10, Math.min(pillX + pillW - 10, accTopPt[0]));
+    const ptrY0 = pillY + pillH + 1;
+    const ptrY1 = Math.max(ptrY0 + 14, accTopPt[1] - 4);
+    drawVectorArrow2D(ctx, ptrX, ptrY0, accTopPt[0], ptrY1, {
+      color: darkBg ? '#f8fafc' : '#1f2937',
+      lineWidth: Math.max(1.9, rh * 0.0044),
+      headLen: Math.max(9, rh * 0.022),
+      headHalfW: Math.max(4.4, rh * 0.01),
+      haloColor: darkBg ? 'rgba(15,23,42,0.7)' : 'rgba(255,255,255,0.6)',
+      haloWidth: 2.0,
+    });
+  }
+
+  // 5. Crisp official LEGO sequential step number (1, 2, 3...) positioned to the left of the minifigure
+  const bodyBox = plan.decomposed.bodyBox;
+  const torsoLevelPt = stageMvp
+    ? projectWorldToCanvasPt([bodyBox.min[0], bodyBox.min[1] + (bodyBox.max[1] - bodyBox.min[1]) * 0.56, bodyBox.center[2]], stageMvp, figX, figY, figW, figH)
+    : [figX, figY + figH * 0.65];
+  const fontSize = Math.round(Math.max(18, Math.min(34, rh * 0.072, rw * 0.11)));
+  ctx.save();
+  ctx.fillStyle = textColor;
+  ctx.font = `700 ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'left';
+  const numX = Math.max(4, Math.round(rw * 0.035));
+  const numY = Math.max(fontSize, Math.min(rh - fontSize, Math.round(torsoLevelPt[1])));
+  ctx.fillText(String(stage.stepNumber), numX, numY);
+  ctx.restore();
+
+  const out = { url: comp.toDataURL('image/png'), w: rw, h: rh };
+  if (minifigDiagramCache.size > 96) minifigDiagramCache.clear();
+  minifigDiagramCache.set(cacheKey, out);
+  return out;
+}
+
 // =========================================================================
 // 3. STUDIO .io PARSER WITH PRE-ASSEMBLED MINIFIGURE FUSION + ZERO-FLOATING STEP GENERATOR
 // =========================================================================
@@ -1893,7 +2477,7 @@ async function extractIoArchive(arrayBuffer) {
   const m1Text = m1Entry ? await readZipEntryText(bytes, view, m1Entry) : '';
   const m2Text = m2Entry ? await readZipEntryText(bytes, view, m2Entry) : '';
 
-  embeddedDatRaw.clear(); embeddedDatTitles.clear(); embeddedDatCompiled.clear(); compositePartDefs.clear(); pliThumbCache.clear(); submodelThumbCache.clear();
+  embeddedDatRaw.clear(); embeddedDatTitles.clear(); embeddedDatCompiled.clear(); compositePartDefs.clear(); pliThumbCache.clear(); submodelThumbCache.clear(); clearMinifigDiagramCaches();
   if (m2Text) {
     const m2Map = splitMpd(m2Text, 'model2.ldr');
     for (const sf of m2Map.values()) {
@@ -4083,12 +4667,13 @@ const state = {
   fadeOpacity: 0.82,
   showRotCues: true,
   showSizeGuides: true,
+  minifigStyle: 'exploded', // 'exploded' (IMG_0316) | 'sequential' (IMG_0315) | 'classic'
   showMinifig1to1: false,
   showStepBorders: true,
   showPageTitle: true,
   pageNumberFormat: 'page_n', // 'number' | 'page_n' | 'n_of_total' | 'none'
   showExtras: true,
-  overrides: {},           // keyed by stepId: { pin, side, corner, az, el, modelScale, pliScale, pliPos:{x,y}, calloutPos:{x,y}, calloutDir, calloutAsPages, partOffsets:{ [partId]: {x,y,z,tilt,arrow} } }
+  overrides: {},           // keyed by stepId: { pin, side, corner, az, el, modelScale, pliScale, pliPos:{x,y}, calloutPos:{x,y}, calloutDir, calloutAsPages, minifigStyle, partOffsets:{ [partId]: {x,y,z,tilt,arrow} } }
   pageInserts: {},         // keyed by pageId: [ { id, kind:'text'|'image', text, src, x, y, scale } ]
   dividerAfter: {},        // keyed by pageId: { title, note }
   coverMeta: createDefaultCoverMeta(),
@@ -4165,6 +4750,10 @@ function getAllParts(model) {
     .filter(({ step }) => !step.isMinifigPoseStep && !(step.isMinifigBuildStep && step.placedInMain))
     .flatMap(x => x.step.parts);
 }
+function getEffectiveMinifigStyle(step) {
+  const ovStyle = step ? state.overrides[step.id]?.minifigStyle : null;
+  return normalizeMinifigStepStyle(ovStyle || state.minifigStyle);
+}
 function renumberContinuousSteps(model) {
   let mainNum = 0;
   for (const ch of model.chapters) {
@@ -4176,6 +4765,8 @@ function renumberContinuousSteps(model) {
         s.isSubmodelFinal = idx === ch.steps.length - 1 && rep > 1;
         s.submodelRepeat = rep;
       });
+    } else if (ch.kind === 'minifigure' && normalizeMinifigStepStyle(state.minifigStyle) !== 'classic') {
+      ch.steps.forEach((s, idx) => { s.num = idx + 1; });
     } else {
       for (const s of ch.steps) s.num = ++mainNum;
     }
@@ -4405,6 +4996,9 @@ function rebuildPages() {
   renumberContinuousSteps(state.model);
   const pages = [];
   let pNum = 0;
+  const isLandPage = state.paperFormat === 'screen'
+    ? computePageFrameDimensions().isLandscape
+    : getActivePagePhysicalInches()[0] >= getActivePagePhysicalInches()[1];
   if (state.showExtras) pages.push({ id:'cover', kind:'cover', num:++pNum, label:'Cover' });
 
   for (const ch of state.model.chapters) {
@@ -4433,6 +5027,37 @@ function rebuildPages() {
     while (i < ch.steps.length) {
       const first = ch.steps[i];
       const firstOv = state.overrides[first.id] || {};
+      const isFirstMfBuild = Boolean((first.isStandaloneFigure || ch.kind === 'minifigure') && !first.isMinifigPoseStep);
+      const firstMfStyle = isFirstMfBuild ? getEffectiveMinifigStyle(first) : 'classic';
+
+      // Sequential Step-by-Step Minifigure Assembly (IMG_0315): 1 horizontal row per page (e.g. 1-3 then 4-6)
+      if (isFirstMfBuild && firstMfStyle === 'sequential') {
+        const seqPlan = getMinifigSequentialPlanForStep(first);
+        const slices = paginateMinifigSequentialStages(seqPlan.stages.length, isLandPage);
+        const mfTitle = first.minifigName || (ch.steps.length > 1 ? `Minifigure ${i + 1}` : 'Minifigure');
+        for (const sl of slices) {
+          const pgId = sl.pageIdx === 0 ? `pg_${first.id}` : `pg_${first.id}_seq${sl.pageIdx + 1}`;
+          const stepLabel = sl.end - sl.start === 1 ? `Step ${sl.start + 1}` : `Steps ${sl.start + 1}–${sl.end}`;
+          pages.push({
+            id: pgId,
+            kind: 'steps',
+            num: ++pNum,
+            label: `${mfTitle} · ${stepLabel}`,
+            chapterName: mfTitle,
+            isSubmodelPage: false,
+            submodelIntro: null,
+            pinned: sl.pageIdx === 0 ? Boolean(firstOv.pin) : false,
+            slots: [{ ch, step: first, minifigSeqSlice: sl }],
+          });
+          if (state.dividerAfter[pgId]) {
+            pages.push({ id: 'div_' + pgId, kind: 'divider', num: ++pNum, label: 'Divider Page', sourcePgId: pgId });
+          }
+        }
+        i++;
+        isFirstChPage = false;
+        continue;
+      }
+
       // Submodel converted to Full Pages gets its own dedicated page before attachment!
       if (first.subassembly && firstOv.calloutAsPages) {
         pages.push({
@@ -4444,21 +5069,33 @@ function rebuildPages() {
       const nextStep = ch.steps[i + 1];
       const isPosePlacePair = Boolean(first.isMinifigPoseStep && nextStep?.attachedMinifig);
       const cap = state.layout === 'auto'
-        ? (isPosePlacePair ? 2 : (first.subassembly || first.attachedSubmodel || first.attachedMinifig || first.parts.length >= 6 ? 1 : 2))
+        ? (isPosePlacePair
+          ? 2
+          : (isFirstMfBuild && firstMfStyle === 'exploded'
+            ? (isLandPage && first.parts.length <= 7 ? 2 : 1)
+            : (first.subassembly || first.attachedSubmodel || first.attachedMinifig || first.parts.length >= 6 ? 1 : 2)))
         : (state.layout === '1-up' ? 1 : state.layout === '2-up' ? 2 : 4);
       const slots = [];
       for (let k = 0; k < cap && i < ch.steps.length; k++) {
         const s = ch.steps[i];
+        const isSMfBuild = Boolean((s.isStandaloneFigure || ch.kind === 'minifigure') && !s.isMinifigPoseStep);
+        if (k > 0 && isSMfBuild && getEffectiveMinifigStyle(s) === 'sequential') break;
         if (k > 0 && state.overrides[s.id]?.pin) break;
         if (k > 0 && (s.subassembly || s.attachedSubmodel || (s.attachedMinifig && !isPosePlacePair) || s.isMinifigPoseStep) && state.layout === 'auto') break;
         slots.push({ ch, step: s });
         i++;
         if ((s.subassembly || s.attachedSubmodel || s.attachedMinifig) && state.layout === 'auto') break;
       }
+      const allExplodedMf = slots.every(sl =>
+        Boolean((sl.step.isStandaloneFigure || sl.ch.kind === 'minifigure') && !sl.step.isMinifigPoseStep) &&
+        getEffectiveMinifigStyle(sl.step) === 'exploded',
+      );
       const stepRange = slots.length === 1 ? `Step ${slots[0].step.num}` : `Steps ${slots[0].step.num}–${slots[slots.length-1].step.num}`;
-      const label = isSubCh
-        ? (subRepeat > 1 ? `${ch.name} ×${subRepeat} · ${stepRange}` : `${ch.name} · ${stepRange}`)
-        : (ch.kind === 'bag' ? `${ch.name} · ${stepRange}` : stepRange);
+      const label = allExplodedMf
+        ? (slots.length === 1 ? (slots[0].step.minifigName || 'Minifigure') : `Minifigures ${slots[0].step.num}–${slots[slots.length - 1].step.num}`)
+        : isSubCh
+          ? (subRepeat > 1 ? `${ch.name} ×${subRepeat} · ${stepRange}` : `${ch.name} · ${stepRange}`)
+          : (ch.kind === 'bag' ? `${ch.name} · ${stepRange}` : stepRange);
       const pgId = 'pg_' + slots[0].step.id;
       pages.push({
         id: pgId,
@@ -4491,9 +5128,7 @@ function rebuildPages() {
     // 2. Multi-page spillover Parts List (zero cut-off!)
     const allParts = getAllParts(state.model);
     const bomEntries = getSortedBomEntries(allParts);
-    const isLand = state.paperFormat === 'screen'
-      ? computePageFrameDimensions().isLandscape
-      : (([wIn, hIn]) => wIn >= hIn * 1.02)(getActivePagePhysicalInches());
+    const isLand = isLandPage;
     const gridDims = getBomGridDimensions(isLand);
     const bomPageCount = Math.max(1, Math.ceil(bomEntries.length / gridDims.perPage));
     for (let bi = 0; bi < bomPageCount; bi++) {
@@ -5008,11 +5643,15 @@ function renderAll() {
     const estSlotW = Math.max(140, (dims.width - padPx * 2 - gapPx * (slotCols - 1)) / slotCols);
     const estSlotH = Math.max(140, (dims.height - padPx * 2 - footerH - gapPx * (slotRows - 1)) / slotRows);
 
-    const slotData = slots.map(({ ch, step }) => {
+    const slotData = slots.map(({ ch, step, minifigSeqSlice }) => {
       const prev = getPreviousPartsForStep(state.model, ch, step);
       const cam = getStepCamera(step);
       const ov = state.overrides[step.id] || {};
       const modelScale = ov.modelScale || 1.0;
+      const isMfBuild = Boolean((step.isStandaloneFigure || ch.kind === 'minifigure') && !step.isMinifigPoseStep);
+      const mfStyle = isMfBuild ? getEffectiveMinifigStyle(step) : 'classic';
+      const isMfExploded = isMfBuild && mfStyle === 'exploded';
+      const isMfSeq = isMfBuild && mfStyle === 'sequential';
       const effectivePartOffsets = step.defaultPartOffsets
         ? { ...step.defaultPartOffsets, ...(ov.partOffsets || {}) }
         : (ov.partOffsets || {});
@@ -5033,6 +5672,24 @@ function renderAll() {
       const snap = renderSnapshot(prev, step.parts, cam.az, cam.el, rw, rh, modelScale, opts);
       currentSlotRenderInfo.set(step.id, { ch, step, prev, cam, ov, snap, modelScale });
 
+      let mfExploded = null;
+      let mfSeqStages = null;
+      if (isMfExploded) {
+        const expW = slots.length === 1 ? 920 : 640;
+        const expH = slots.length === 1 ? 640 : 480;
+        mfExploded = renderMinifigExplodedDiagram(step, cam, expW, expH, theme, modelScale);
+      } else if (isMfSeq) {
+        const seqPlan = getMinifigSequentialPlanForStep(step);
+        const sl = minifigSeqSlice || { start: 0, end: seqPlan.stages.length, cols: Math.min(3, seqPlan.stages.length), pageIdx: 0, pageCount: 1 };
+        const visibleStages = seqPlan.stages.slice(sl.start, sl.end);
+        const stW = visibleStages.length >= 4 ? 320 : visibleStages.length === 3 ? 380 : 440;
+        const stH = visibleStages.length >= 4 ? 460 : 540;
+        mfSeqStages = visibleStages.map(st => ({
+          stage: st,
+          img: renderMinifigSequentialStage(step, st, seqPlan, cam, stW, stH, theme, modelScale),
+        }));
+      }
+
       const subImg = (step.subassembly && !ov.calloutAsPages)
         ? renderSnapshot([], step.subassembly.buildParts, 38, 30, 260, 180, 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent }).url
         : null;
@@ -5050,14 +5707,14 @@ function renderAll() {
             120,
           )
         : null;
-      const isMfBuild = Boolean((step.isStandaloneFigure || ch.kind === 'minifigure') && !step.isMinifigPoseStep);
-      const mf1to1 = (state.showMinifig1to1 && isMfBuild)
-        ? renderMinifigOneToOne(step.parts, dims.height, effectivePageHIn, Math.round(estSlotW * 0.36), Math.round(estSlotH * 0.66), theme.accent)
+      const allowMf1to1OnPage = !isMfSeq || !minifigSeqSlice || minifigSeqSlice.pageIdx === minifigSeqSlice.pageCount - 1;
+      const mf1to1 = (state.showMinifig1to1 && isMfBuild && allowMf1to1OnPage)
+        ? renderMinifigOneToOne(step.parts, dims.height, effectivePageHIn, Math.round(estSlotW * (isMfSeq ? 0.24 : 0.32)), Math.round(estSlotH * 0.64), theme.accent)
         : null;
 
-      // Group PLI items + detect 1:1 Actual-Size Guides (skip individual bricks when attaching a pre-built submodel or minifigure!)
+      // Group PLI items + detect 1:1 Actual-Size Guides (skip individual bricks on official exploded/sequential minifig styles or submodel attachments!)
       const pliMap = new Map();
-      if (!step.attachedSubmodel && !step.attachedMinifig && !step.minifigPrep) {
+      if (!step.attachedSubmodel && !step.attachedMinifig && !step.minifigPrep && !isMfExploded && !isMfSeq) {
         for (const p of step.parts) {
           const k = `${p.p}:${p.c}`;
           if (!pliMap.has(k)) pliMap.set(k, { part: p, ids: [], qty: 0, guide: getActualSizeGuide(p.p) });
@@ -5065,7 +5722,7 @@ function renderAll() {
           item.qty++; item.ids.push(p.id);
         }
       }
-      return { ch, step, prev, cam, ov, snap, subImg, attSubImg, mfPrepImg, attMfImg, mf1to1, pli: Array.from(pliMap.values()) };
+      return { ch, step, minifigSeqSlice, prev, cam, ov, snap, isMfBuild, isMfExploded, isMfSeq, mfExploded, mfSeqStages, subImg, attSubImg, mfPrepImg, attMfImg, mf1to1, pli: Array.from(pliMap.values()) };
     });
 
     const isRotateMode = state.mode === 'rotate';
@@ -5091,18 +5748,20 @@ function renderAll() {
             <span class="shrink-0 rounded-full font-black text-white shadow-xs" style="background:${theme.accent};font-size:${st.introPillFont}px;padding:${Math.round(typo.pt(3))}px ${Math.round(typo.pt(10))}px">${page.submodelIntro.repeatCount > 1 ? `×${page.submodelIntro.repeatCount}` : `${page.submodelIntro.pieceCount || page.submodelIntro.canonicalParts.length} pcs`}</span>
           </div>` : ''}
         <div class="grid ${gridCls} flex-1 min-h-0" style="gap:${gapPx}px">
-          ${slotData.map(({ step, ov, snap, subImg, attSubImg, mfPrepImg, attMfImg, mf1to1, pli }) => {
+          ${slotData.map(({ ch, step, ov, snap, isMfExploded, isMfSeq, mfExploded, mfSeqStages, subImg, attSubImg, mfPrepImg, attMfImg, mf1to1, pli }) => {
             const isSelStep = state.selectedStepId === step.id;
             const showLive3D = isRotateMode && isSelStep;
+            const isOfficialMfStyle = isMfExploded || isMfSeq;
             const pliScale = ov.pliScale || (isTightSlot ? 0.92 : 1.0);
             const pliPos = ov.pliPos || { x: 0, y: 0 };
             const calloutPos = ov.calloutPos || { x: 0, y: 0 };
             const calloutSel = isArrangeMode && state.selectedArrangeEl?.stepId === step.id && state.selectedArrangeEl?.kind === 'callout';
             const pliSel = isArrangeMode && state.selectedArrangeEl?.stepId === step.id && state.selectedArrangeEl?.kind === 'pli';
-            const slotBorderStyle = state.showStepBorders
+            const showSlotFrame = state.showStepBorders && !(isOfficialMfStyle && slots.length === 1);
+            const slotBorderStyle = showSlotFrame
               ? (isSelStep && state.mode !== 'pan' ? `2px solid ${theme.accent}` : `1px solid ${theme.pliBorder}`)
               : (isSelStep && state.mode !== 'pan' && slots.length > 1 ? `1.5px dashed ${theme.accent}` : '1px solid transparent');
-            const slotBgStyle = state.showStepBorders ? 'rgba(255,255,255,0.05)' : 'transparent';
+            const slotBgStyle = showSlotFrame ? 'rgba(255,255,255,0.05)' : 'transparent';
 
             const calloutPliScale = ov.pliScale || 1.0;
             const calloutPliStyle = `gap:${Math.round(typo.pt(isTightSlot ? 4.5 : 6))}px;padding:${Math.round(typo.pt(3.5))}px ${Math.round(typo.pt(isTightSlot ? 5.5 : 7))}px;border-radius:${Math.round(typo.pt(8))}px;background:${theme.calloutBg};border:${pliSel ? `2px solid ${theme.accent}` : `1.5px solid ${theme.calloutBorder}`};transform:translate(${pliPos.x}px,${pliPos.y}px) scale(${calloutPliScale});transform-origin:top left;`;
@@ -5115,7 +5774,9 @@ function renderAll() {
                 </div>
               </div>`;
 
-            const pliBoxHtml = step.attachedSubmodel
+            const pliBoxHtml = isOfficialMfStyle
+              ? ''
+              : step.attachedSubmodel
               ? renderCalloutPli(
                   attSubImg,
                   isTightSlot ? st.pliSubThumbWTight : st.pliSubThumbW,
@@ -5169,13 +5830,25 @@ function renderAll() {
             const stackHeaderBadges = Boolean(headerBadgesHtml) && (isTightSlot || estSlotW < typo.pt(250));
 
             return `
-              <div data-step="${step.id}" class="step-slot relative flex flex-col min-h-0 overflow-hidden transition" style="border-radius:${typo.borderRadius}px;padding:${st.slotPad}px;border:${slotBorderStyle};background:${slotBgStyle}">
+              <div data-step="${step.id}" class="step-slot relative flex flex-col min-h-0 overflow-hidden transition" style="border-radius:${typo.borderRadius}px;padding:${isOfficialMfStyle ? Math.round(st.slotPad * 0.5) : st.slotPad}px;border:${slotBorderStyle};background:${slotBgStyle}">
                 <!-- Step Number & Draggable Parts List Box -->
                 ${(() => {
                   const pinIconPx = Math.round(st.cueFont * 1.05);
                   const pinBadgeHtml = ov.pin
                     ? `<span class="no-print inline-flex items-center font-bold rounded-full bg-[#1a73e8]/15 text-[#1a73e8] shrink-0 whitespace-nowrap" style="gap:${Math.round(typo.pt(2))}px;font-size:${st.cueFont}px;padding:${Math.round(typo.pt(1.5))}px ${Math.round(typo.pt(5))}px" title="Page break: Step ${step.num} always starts a new page so earlier edits won't shift later pages"><svg style="width:${pinIconPx}px;height:${pinIconPx}px" class="shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4"/><path d="M10 12h4"/><path d="M17 12h4"/><path d="M6 4v3a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V4"/><path d="M6 20v-3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v3"/></svg><span>Page Break</span></span>`
                     : '';
+                  if (isOfficialMfStyle) {
+                    const showMfLabel = ch.steps.length > 1 || slots.length > 1;
+                    if (!showMfLabel && !pinBadgeHtml && !headerBadgesHtml) return '';
+                    return `
+                <div class="relative z-10 shrink-0 flex items-center justify-between gap-1.5 px-1 min-w-0">
+                  <div class="flex items-center gap-1.5 min-w-0">
+                    ${showMfLabel ? `<span class="font-bold tracking-tight opacity-75 truncate" style="font-size:${st.pliSubNameFont}px">${escHtml(step.minifigName || `Minifigure ${step.num}`)}</span>` : ''}
+                    ${pinBadgeHtml}
+                  </div>
+                  ${headerBadgesHtml ? `<div class="flex items-center gap-1 shrink-0">${headerBadgesHtml}</div>` : ''}
+                </div>`;
+                  }
                   return stackHeaderBadges ? `
                 <div class="relative z-10 shrink-0 flex flex-col min-w-0" style="gap:${Math.round(typo.pt(4))}px">
                   <div class="flex items-center justify-between min-w-0" style="gap:${Math.round(typo.pt(4))}px">
@@ -5197,9 +5870,9 @@ function renderAll() {
                 </div>`;
                 })()}
 
-                <!-- Step Visual Area (Callout + 3D Render + Optional 1:1 Minifig Card — STRICT min-h-0 so NEVER clipped!) -->
-                <div class="flex-1 min-h-0 flex ${ov.calloutDir === 'vertical' ? 'flex-col' : 'flex-row'} items-center justify-center overflow-hidden" style="gap:${Math.round(typo.pt(6))}px;margin-top:${Math.round(typo.pt(4))}px">
-                  ${step.subassembly && !ov.calloutAsPages ? `
+                <!-- Step Visual Area (Callout + 3D Render / Official Minifig Style + Optional 1:1 Minifig Card — STRICT min-h-0 so NEVER clipped!) -->
+                <div class="flex-1 min-h-0 flex ${ov.calloutDir === 'vertical' ? 'flex-col' : 'flex-row'} items-center justify-center overflow-hidden" style="gap:${Math.round(typo.pt(6))}px;margin-top:${isOfficialMfStyle ? 0 : Math.round(typo.pt(4))}px">
+                  ${step.subassembly && !ov.calloutAsPages && !isOfficialMfStyle ? `
                     <div data-drag="callout" data-step="${step.id}" class="draggable-el shrink-0 ${ov.calloutDir === 'vertical' ? 'max-w-full' : 'max-w-[48%]'} max-h-full flex flex-col overflow-hidden ${isArrangeMode ? 'cursor-move' : ''}" style="width:${isTightSlot ? st.calloutWTight : st.calloutW}px;padding:${Math.round(typo.pt(5))}px;border-radius:${Math.round(typo.pt(8))}px;background:${theme.calloutBg};border:${calloutSel ? `2px solid ${theme.accent}` : `1.5px solid ${theme.calloutBorder}`};transform:translate(${calloutPos.x}px,${calloutPos.y}px)">
                       <div class="flex items-center justify-between font-bold shrink-0 min-w-0" style="gap:${Math.round(typo.pt(4))}px;font-size:${st.calloutFont}px">
                         <span class="min-w-0 truncate">${escHtml(step.subassembly.name)}</span>
@@ -5211,7 +5884,16 @@ function renderAll() {
                   <div class="flex-1 min-w-0 min-h-0 w-full h-full flex items-center justify-center relative overflow-hidden">
                     ${showLive3D
                       ? `<canvas id="liveRotateCanvas" class="w-full h-full object-contain cursor-grab active:cursor-grabbing"></canvas>`
-                      : `<img data-pick-step="${step.id}" src="${snap.url}" class="step-render-img absolute inset-0 w-full h-full object-contain ${state.mode === 'select' ? 'cursor-crosshair' : 'pointer-events-none'}" />`
+                      : isMfExploded && mfExploded
+                        ? `<img data-pick-step="${step.id}" src="${mfExploded.url}" alt="${escHtml(step.minifigName || 'Minifigure assembly')}" class="absolute inset-0 w-full h-full object-contain pointer-events-none" />`
+                        : isMfSeq && mfSeqStages
+                          ? `<div class="w-full h-full grid items-center justify-items-center gap-1 sm:gap-2 px-1" style="grid-template-columns:repeat(${mfSeqStages.length},minmax(0,1fr))">
+                              ${mfSeqStages.map(({ stage, img }) => `
+                                <div class="w-full h-full min-w-0 min-h-0 flex items-center justify-center overflow-hidden">
+                                  <img src="${img.url}" alt="${escHtml(`Step ${stage.stepNumber}: ${stage.label}`)}" class="max-w-full max-h-full w-full h-full object-contain pointer-events-none" />
+                                </div>`).join('')}
+                            </div>`
+                          : `<img data-pick-step="${step.id}" src="${snap.url}" class="step-render-img absolute inset-0 w-full h-full object-contain ${state.mode === 'select' ? 'cursor-crosshair' : 'pointer-events-none'}" />`
                     }
                     ${step.isSubmodelFinal ? `<span class="absolute rounded-full font-black text-white shadow-md pointer-events-none" style="bottom:${Math.round(typo.pt(5))}px;right:${Math.round(typo.pt(5))}px;padding:${Math.round(typo.pt(3))}px ${Math.round(typo.pt(9))}px;font-size:${st.subFinalFont}px;background:${theme.accent}">×${step.submodelRepeat || 2}</span>` : ''}
                   </div>
@@ -5735,6 +6417,7 @@ function renderContextOverlay(page) {
     const scalePct = Math.round((ov.modelScale || 1.0) * 100);
     const fMode = ov.focusMode || 'auto';
     const isMfBuild = Boolean((step.isStandaloneFigure || ch.kind === 'minifigure') && !step.isMinifigPoseStep);
+    const curMfStyle = isMfBuild ? getEffectiveMinifigStyle(step) : 'classic';
     const isMfStep = isMfBuild || Boolean(step.isMinifigPoseStep);
     const mfDefaultCam = step.isMinifigPoseStep
       ? { side: 'top', corner: step.corner || MINIFIG_POSE_CAMERA.corner, az: step.az ?? MINIFIG_POSE_CAMERA.az, el: step.el ?? MINIFIG_POSE_CAMERA.el }
@@ -5743,11 +6426,17 @@ function renderContextOverlay(page) {
     box.innerHTML = `
       <div class="pointer-events-auto glass-pill rounded-3xl p-3 w-full space-y-2 text-xs">
         <div class="flex items-center justify-between gap-2 flex-wrap">
-          <span class="font-bold">Step ${step.num} · Drag 3D to orbit</span>
+          <span class="font-bold">${isMfBuild ? escHtml(step.minifigName || 'Minifigure') : `Step ${step.num}`} · Drag 3D to orbit</span>
           <div class="flex items-center gap-1 flex-wrap">
             <button id="camTop" class="px-2 py-1 rounded-full font-semibold ${cam.side === 'top' ? 'bg-[#1a73e8] text-white' : 'bg-black/5 dark:bg-white/10'}">Top</button>
             <button id="camBot" class="px-2 py-1 rounded-full font-semibold ${cam.side === 'bottom' ? 'bg-[#1a73e8] text-white' : 'bg-black/5 dark:bg-white/10'}">Bottom</button>
-            ${isMfBuild ? `<button id="btnToggleMf1to1Quick" class="px-2.5 py-1 rounded-full font-semibold ${state.showMinifig1to1 ? 'bg-[#1a73e8] text-white' : 'bg-black/5 dark:bg-white/10'}">1:1 View</button>` : ''}
+            ${isMfBuild ? `
+              <div class="inline-flex rounded-full bg-black/5 dark:bg-white/10 p-0.5 text-[10px] font-semibold">
+                <button data-mf-quick="exploded" class="mf-quick-style px-2 py-0.5 rounded-full ${curMfStyle === 'exploded' ? 'bg-[#1a73e8] text-white' : ''}">Exploded</button>
+                <button data-mf-quick="sequential" class="mf-quick-style px-2 py-0.5 rounded-full ${curMfStyle === 'sequential' ? 'bg-[#1a73e8] text-white' : ''}">Step-by-Step</button>
+                <button data-mf-quick="classic" class="mf-quick-style px-2 py-0.5 rounded-full ${curMfStyle === 'classic' ? 'bg-[#1a73e8] text-white' : ''}">Classic</button>
+              </div>
+              <button id="btnToggleMf1to1Quick" class="px-2.5 py-1 rounded-full font-semibold ${state.showMinifig1to1 ? 'bg-[#1a73e8] text-white' : 'bg-black/5 dark:bg-white/10'}">1:1 View</button>` : ''}
             <div class="inline-flex rounded-full bg-black/5 dark:bg-white/10 p-0.5 text-[10px] font-semibold">
               <button data-focus="auto" class="focus-btn px-2 py-0.5 rounded-full ${fMode === 'auto' ? 'bg-[#1a73e8] text-white' : ''}">Auto</button>
               <button data-focus="focus" class="focus-btn px-2 py-0.5 rounded-full ${fMode === 'focus' ? 'bg-[#1a73e8] text-white' : ''}">Close-Up</button>
@@ -5794,6 +6483,9 @@ function renderContextOverlay(page) {
     if (mf1to1Btn) {
       mf1to1Btn.onclick = () => { state.showMinifig1to1 = !state.showMinifig1to1; renderAll(); };
     }
+    box.querySelectorAll('.mf-quick-style').forEach(b => {
+      b.onclick = () => applyMinifigStyleChange(b.getAttribute('data-mf-quick'), step.id);
+    });
     box.querySelectorAll('.focus-btn').forEach(b => {
       b.onclick = () => {
         pushUndo();
@@ -5824,6 +6516,8 @@ function renderContextOverlay(page) {
   if (state.mode === 'arrange') {
     const pliPct = Math.round((ov.pliScale || 1.0) * 100);
     const hasSub = Boolean(step.subassembly);
+    const isMfBuild = Boolean((step.isStandaloneFigure || ch.kind === 'minifigure') && !step.isMinifigPoseStep);
+    const curMfStyle = isMfBuild ? getEffectiveMinifigStyle(step) : 'classic';
     const isPinned = Boolean(ov.pin);
     const slotIdx = (page.slots || []).findIndex(s => s.step.id === step.id);
     const pinBtnTitle = isPinned
@@ -5835,7 +6529,13 @@ function renderContextOverlay(page) {
       <div class="pointer-events-auto glass-pill rounded-3xl p-3 w-full space-y-2 text-xs">
         <div class="flex items-center justify-between gap-2 flex-wrap">
           <span class="font-bold">Drag boxes on the page to arrange</span>
-          <div class="flex items-center gap-1">
+          <div class="flex items-center gap-1 flex-wrap">
+            ${isMfBuild ? `
+              <div class="inline-flex rounded-full bg-black/5 dark:bg-white/10 p-0.5 text-[10px] font-semibold mr-1">
+                <button data-mf-quick="exploded" class="mf-quick-style px-2 py-0.5 rounded-full ${curMfStyle === 'exploded' ? 'bg-[#1a73e8] text-white' : ''}">Exploded</button>
+                <button data-mf-quick="sequential" class="mf-quick-style px-2 py-0.5 rounded-full ${curMfStyle === 'sequential' ? 'bg-[#1a73e8] text-white' : ''}">Step-by-Step</button>
+                <button data-mf-quick="classic" class="mf-quick-style px-2 py-0.5 rounded-full ${curMfStyle === 'classic' ? 'bg-[#1a73e8] text-white' : ''}">Classic</button>
+              </div>` : ''}
             <span class="text-[11px] opacity-65">Parts Box:</span>
             <button id="pliDown" class="w-6 h-6 rounded-full bg-black/5 dark:bg-white/10 font-bold">−</button>
             <span class="text-[11px] font-bold tabular-nums">${pliPct}%</span>
@@ -5856,6 +6556,9 @@ function renderContextOverlay(page) {
         </div>
       </div>`;
 
+    box.querySelectorAll('.mf-quick-style').forEach(b => {
+      b.onclick = () => applyMinifigStyleChange(b.getAttribute('data-mf-quick'), step.id);
+    });
     box.querySelector('#pliDown').onclick = () => { pushUndo(); state.overrides[step.id] = { ...ov, pliScale: Math.max(0.6, (ov.pliScale || 1) - 0.1) }; renderAll(); };
     box.querySelector('#pliUp').onclick = () => { pushUndo(); state.overrides[step.id] = { ...ov, pliScale: Math.min(1.6, (ov.pliScale || 1) + 0.1) }; renderAll(); };
     box.querySelector('#btnResetArrange').onclick = () => { pushUndo(); state.overrides[step.id] = { ...ov, pliPos:{x:0,y:0}, pliScale:1, calloutPos:{x:0,y:0} }; renderAll(); };
@@ -5902,6 +6605,18 @@ function renderContextOverlay(page) {
       renderAll();
     };
   }
+}
+
+function applyMinifigStyleChange(rawStyle, anchorStepId = null) {
+  const nextStyle = normalizeMinifigStepStyle(rawStyle);
+  const currentStepId = anchorStepId || state.pages[state.pageIdx]?.slots?.[0]?.step?.id || null;
+  state.minifigStyle = nextStyle;
+  rebuildPages();
+  if (currentStepId) {
+    const idx = state.pages.findIndex(pg => pg.slots?.some(sl => sl.step.id === currentStepId));
+    if (idx >= 0) state.pageIdx = idx;
+  }
+  renderAll();
 }
 
 // =========================================================================
@@ -5983,6 +6698,11 @@ function syncMenuControls() {
   setChk('toggleExtras', state.showExtras);
   setChk('toggleDetectDuplicates', state.detectDuplicates);
   setChk('toggleMinifig1to1', state.showMinifig1to1);
+  const curMfStyleGlobal = normalizeMinifigStepStyle(state.minifigStyle);
+  document.querySelectorAll('.mf-style-btn').forEach(b => {
+    const act = b.getAttribute('data-mf-style') === curMfStyleGlobal;
+    b.className = `mf-style-btn py-1.5 px-1 rounded-full border font-semibold text-[11px] transition ${act ? 'border-[#1a73e8] bg-[#1a73e8] text-white' : 'border-[var(--border)] bg-[var(--background)]'}`;
+  });
 
   const bc = state.bomConfig;
   document.querySelectorAll('.bom-dens-btn').forEach(b => {
@@ -6485,7 +7205,7 @@ async function importBricksLibraryFiles(fileList) {
         }
       }
     }
-    embeddedDatCompiled.clear(); pliThumbCache.clear(); submodelThumbCache.clear(); coverHeroCache.clear();
+    embeddedDatCompiled.clear(); pliThumbCache.clear(); submodelThumbCache.clear(); clearMinifigDiagramCaches(); coverHeroCache.clear();
     updateLibraryStatusUI();
     if (state.model) {
       if (state.model._parsed) state.model = buildManualFromParsed(state.model._parsed, state.model._mode || 'auto', state.model._subdivisionPlan || null);
@@ -6696,7 +7416,7 @@ async function fetchMissingPartsOnline() {
       progBar.style.width = pct + '%';
     }
 
-    embeddedDatCompiled.clear(); pliThumbCache.clear(); submodelThumbCache.clear(); coverHeroCache.clear();
+    embeddedDatCompiled.clear(); pliThumbCache.clear(); submodelThumbCache.clear(); clearMinifigDiagramCaches(); coverHeroCache.clear();
     updateLibraryStatusUI();
     if (state.model) {
       if (fetched > 0 && state.model._parsed) state.model = buildManualFromParsed(state.model._parsed, state.model._mode || 'auto', state.model._subdivisionPlan || null);
@@ -6995,7 +7715,7 @@ function scheduleSaveSessionPrefs() {
       density: state.density, showPrintGuides: state.showPrintGuides, layout: state.layout,
       pacing: state.pacing, detectDuplicates: state.detectDuplicates, highlightNew: state.highlightNew, highlightColor: state.highlightColor,
       fadePrev: state.fadePrev, fadeOpacity: state.fadeOpacity, showRotCues: state.showRotCues,
-      showSizeGuides: state.showSizeGuides, showMinifig1to1: state.showMinifig1to1, showStepBorders: state.showStepBorders,
+      showSizeGuides: state.showSizeGuides, minifigStyle: state.minifigStyle, showMinifig1to1: state.showMinifig1to1, showStepBorders: state.showStepBorders,
       showPageTitle: state.showPageTitle, pageNumberFormat: state.pageNumberFormat,
       showExtras: state.showExtras, bomConfig: state.bomConfig,
       overrides: state.overrides, pageInserts: state.pageInserts, dividerAfter: state.dividerAfter,
@@ -7046,6 +7766,7 @@ async function restoreLastSessionOnStart() {
     if (typeof prefs.fadeOpacity === 'number') state.fadeOpacity = prefs.fadeOpacity;
     if (typeof prefs.showRotCues === 'boolean') state.showRotCues = prefs.showRotCues;
     if (typeof prefs.showSizeGuides === 'boolean') state.showSizeGuides = prefs.showSizeGuides;
+    if (prefs.minifigStyle) state.minifigStyle = normalizeMinifigStepStyle(prefs.minifigStyle);
     if (typeof prefs.showMinifig1to1 === 'boolean') state.showMinifig1to1 = prefs.showMinifig1to1;
     if (typeof prefs.showStepBorders === 'boolean') state.showStepBorders = prefs.showStepBorders;
     if (typeof prefs.showPageTitle === 'boolean') state.showPageTitle = prefs.showPageTitle;
@@ -7630,129 +8351,155 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
     const pliQtyPx = isTightSlot ? st.pliQtyFontTight : st.pliQtyFont;
 
     for (let idx = 0; idx < slots.length; idx++) {
-      const { ch, step } = slots[idx];
+      const { ch, step, minifigSeqSlice } = slots[idx];
       const sx = pad + (idx % cols) * (slotW + gap);
       const sy = topY + Math.floor(idx / cols) * (slotH + gap);
-      if (state.showStepBorders) {
+      const isMfBuild = Boolean((step.isStandaloneFigure || ch.kind === 'minifigure') && !step.isMinifigPoseStep);
+      const mfStyle = isMfBuild ? getEffectiveMinifigStyle(step) : 'classic';
+      const isMfExploded = isMfBuild && mfStyle === 'exploded';
+      const isMfSeq = isMfBuild && mfStyle === 'sequential';
+      const isOfficialMfStyle = isMfExploded || isMfSeq;
+
+      if (state.showStepBorders && !(isOfficialMfStyle && slots.length === 1)) {
         ctx.strokeStyle = theme.pliBorder; ctx.lineWidth = 1.5;
         ctx.strokeRect(sx, sy, slotW, slotH);
       }
 
       const cam = getStepCamera(step);
       const ov = state.overrides[step.id] || {};
+      const modelScale = ov.modelScale || 1.0;
 
-      // Step number
-      ctx.fillStyle = theme.text;
-      ctx.font = `800 ${stepNumPx}px -apple-system, sans-serif`;
-      ctx.fillText(String(step.num), sx + st.slotPad, sy + st.slotPad);
-      const numWidth = Math.max(Math.round(stepNumPx * 1.15), Math.round(ctx.measureText(String(step.num)).width));
-
-      // PLI Box (shows finished submodel/minifigure thumbnail + ×N or Connect verb on prep & attachment steps, or raw parts otherwise)
-      const pliX = sx + st.slotPad + numWidth + Math.round(typo.pt(8));
-      const pliY = sy + st.slotPad;
       const pliH = Math.min(Math.round(pliThumbPx + typo.pt(10)), slotH * 0.22);
       const pliRadius = Math.round(typo.pt(7));
-      if (step.attachedSubmodel) {
-        const att = step.attachedSubmodel;
-        const attBoxW = Math.min(slotW - (pliX - sx) - st.slotPad, Math.max(Math.round(typo.pt(115)), pliH * 3.4));
-        drawRRect(pliX, pliY, attBoxW, pliH, pliRadius);
-        ctx.fillStyle = theme.calloutBg;
-        ctx.fill();
-        ctx.strokeStyle = theme.calloutBorder;
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-        ctx.save();
-        drawRRect(pliX, pliY, attBoxW, pliH, pliRadius);
-        ctx.clip();
-        const attUrl = getSubmodelThumb(att, 160, 120);
-        if (attUrl) {
-          const attImg = await loadImgPromise(attUrl);
-          drawContain(ctx, attImg, pliX + 6, pliY + 4, pliH * 1.25, pliH - 8);
+      const mfPrep = step.isMinifigPoseStep ? step.minifigPrep : null;
+      const poseLegendH = (mfPrep && mfPrep.indicators && mfPrep.indicators.length > 0) ? Math.round(typo.pt(22)) : 0;
+      let renderTopY = sy + st.slotPad + pliH + Math.round(typo.pt(8));
+      let renderAvailH = Math.max(40, slotH - st.slotPad * 2 - pliH - Math.round(typo.pt(10)) - poseLegendH);
+
+      if (isOfficialMfStyle) {
+        const showMfLabel = ch.steps.length > 1 || slots.length > 1;
+        if (showMfLabel) {
+          ctx.fillStyle = theme.muted;
+          ctx.font = `700 ${st.pliSubNameFont}px -apple-system, sans-serif`;
+          ctx.fillText(step.minifigName || `Minifigure ${step.num}`, sx + st.slotPad, sy + st.slotPad);
+          renderTopY = sy + st.slotPad + Math.round(st.pliSubNameFont * 1.6);
+          renderAvailH = Math.max(40, slotH - st.slotPad * 2 - Math.round(st.pliSubNameFont * 1.8));
+        } else {
+          renderTopY = sy + st.slotPad;
+          renderAvailH = Math.max(40, slotH - st.slotPad * 2);
         }
-        const tx = pliX + 6 + pliH * 1.25 + 8;
-        const textMaxW = Math.max(0, pliX + attBoxW - tx - 8);
-        ctx.fillStyle = theme.accent;
-        ctx.font = `900 ${st.pliSubCountFont}px -apple-system, sans-serif`;
-        drawTruncatedText(att.isSectionAttach ? (att.attachVerb || 'Connect') : `×${att.repeatCount}`, tx, pliY + Math.round(pliH * 0.16), textMaxW);
-        ctx.fillStyle = theme.text;
-        ctx.font = `600 ${st.pliSubNameFont}px -apple-system, sans-serif`;
-        drawTruncatedText(att.name || 'Submodel', tx, pliY + Math.round(pliH * 0.56), textMaxW);
-        ctx.restore();
-      } else if (step.minifigPrep) {
-        const prep = step.minifigPrep;
-        const prepBoxW = Math.min(slotW - (pliX - sx) - st.slotPad, Math.max(Math.round(typo.pt(130)), pliH * 3.8));
-        drawRRect(pliX, pliY, prepBoxW, pliH, pliRadius);
-        ctx.fillStyle = theme.calloutBg;
-        ctx.fill();
-        ctx.strokeStyle = theme.calloutBorder;
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-        ctx.save();
-        drawRRect(pliX, pliY, prepBoxW, pliH, pliRadius);
-        ctx.clip();
-        const prepUrl = getMinifigThumb(prep.canonicalParts, `prep_${prep.id}`, MINIFIG_BUILD_CAMERA.az, MINIFIG_BUILD_CAMERA.el, 120, 120);
-        if (prepUrl) {
-          const prepImg = await loadImgPromise(prepUrl);
-          drawContain(ctx, prepImg, pliX + 6, pliY + 4, pliH * 1.0, pliH - 8);
-        }
-        const tx = pliX + 6 + pliH * 1.0 + 8;
-        const textMaxW = Math.max(0, pliX + prepBoxW - tx - 8);
-        ctx.fillStyle = theme.accent;
-        ctx.font = `800 ${st.pliSubCountFont}px -apple-system, sans-serif`;
-        drawTruncatedText(prep.label || 'Position', tx, pliY + Math.round(pliH * 0.16), textMaxW);
-        ctx.fillStyle = theme.text;
-        ctx.font = `600 ${st.pliSubNameFont}px -apple-system, sans-serif`;
-        drawTruncatedText(prep.name || 'Minifigure', tx, pliY + Math.round(pliH * 0.56), textMaxW);
-        ctx.restore();
-      } else if (step.attachedMinifig) {
-        const att = step.attachedMinifig;
-        const attBoxW = Math.min(slotW - (pliX - sx) - st.slotPad, Math.max(Math.round(typo.pt(115)), pliH * 3.3));
-        drawRRect(pliX, pliY, attBoxW, pliH, pliRadius);
-        ctx.fillStyle = theme.calloutBg;
-        ctx.fill();
-        ctx.strokeStyle = theme.calloutBorder;
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-        ctx.save();
-        drawRRect(pliX, pliY, attBoxW, pliH, pliRadius);
-        ctx.clip();
-        const attUrl = getMinifigThumb(
-          att.previewParts || att.canonicalParts,
-          `att_${att.id}`,
-          Math.round(cam.az),
-          Math.round(Math.min(30, Math.max(16, cam.el))),
-          120,
-          120,
-        );
-        if (attUrl) {
-          const attImg = await loadImgPromise(attUrl);
-          drawContain(ctx, attImg, pliX + 6, pliY + 4, pliH * 1.0, pliH - 8);
-        }
-        const tx = pliX + 6 + pliH * 1.0 + 8;
-        const textMaxW = Math.max(0, pliX + attBoxW - tx - 8);
-        ctx.fillStyle = theme.accent;
-        ctx.font = `900 ${st.pliSubCountFont}px -apple-system, sans-serif`;
-        drawTruncatedText(`×${att.repeatCount || 1}`, tx, pliY + Math.round(pliH * 0.16), textMaxW);
-        ctx.fillStyle = theme.text;
-        ctx.font = `600 ${st.pliSubNameFont}px -apple-system, sans-serif`;
-        drawTruncatedText(att.name || 'Minifigure', tx, pliY + Math.round(pliH * 0.56), textMaxW);
-        ctx.restore();
       } else {
-        const pliMap = new Map();
-        for (const p of step.parts) { const k = `${p.p}:${p.c}`; if (!pliMap.has(k)) pliMap.set(k, { part: p, qty: 0 }); pliMap.get(k).qty++; }
-        const pli = Array.from(pliMap.values()).slice(0, 6);
-        if (pli.length > 0) {
-          const itemW = Math.min(Math.round(pliThumbPx * 1.95), (slotW - (pliX - sx) - st.slotPad - 10) / Math.max(1, pli.length));
-          drawRRect(pliX, pliY, pli.length * itemW + 10, pliH, pliRadius);
-          ctx.fillStyle = theme.pliBg;
+        // Step number
+        ctx.fillStyle = theme.text;
+        ctx.font = `800 ${stepNumPx}px -apple-system, sans-serif`;
+        ctx.fillText(String(step.num), sx + st.slotPad, sy + st.slotPad);
+        const numWidth = Math.max(Math.round(stepNumPx * 1.15), Math.round(ctx.measureText(String(step.num)).width));
+
+        // PLI Box (shows finished submodel/minifigure thumbnail + ×N or Connect verb on prep & attachment steps, or raw parts otherwise)
+        const pliX = sx + st.slotPad + numWidth + Math.round(typo.pt(8));
+        const pliY = sy + st.slotPad;
+        if (step.attachedSubmodel) {
+          const att = step.attachedSubmodel;
+          const attBoxW = Math.min(slotW - (pliX - sx) - st.slotPad, Math.max(Math.round(typo.pt(115)), pliH * 3.4));
+          drawRRect(pliX, pliY, attBoxW, pliH, pliRadius);
+          ctx.fillStyle = theme.calloutBg;
           ctx.fill();
-          ctx.strokeStyle = theme.pliBorder; ctx.lineWidth = 1.25;
+          ctx.strokeStyle = theme.calloutBorder;
+          ctx.lineWidth = 1.5;
           ctx.stroke();
-          for (let pi = 0; pi < pli.length; pi++) {
-            const im = await loadImgPromise(getPliThumb(pli[pi].part));
-            drawContain(ctx, im, pliX + 5 + pi * itemW, pliY + 4, itemW * 0.54, pliH - 8);
-            ctx.fillStyle = theme.text; ctx.font = `700 ${pliQtyPx}px -apple-system, sans-serif`;
-            ctx.fillText(`${pli[pi].qty}×`, pliX + 5 + pi * itemW + itemW * 0.58, pliY + Math.round((pliH - pliQtyPx) * 0.45));
+          ctx.save();
+          drawRRect(pliX, pliY, attBoxW, pliH, pliRadius);
+          ctx.clip();
+          const attUrl = getSubmodelThumb(att, 160, 120);
+          if (attUrl) {
+            const attImg = await loadImgPromise(attUrl);
+            drawContain(ctx, attImg, pliX + 6, pliY + 4, pliH * 1.25, pliH - 8);
+          }
+          const tx = pliX + 6 + pliH * 1.25 + 8;
+          const textMaxW = Math.max(0, pliX + attBoxW - tx - 8);
+          ctx.fillStyle = theme.accent;
+          ctx.font = `900 ${st.pliSubCountFont}px -apple-system, sans-serif`;
+          drawTruncatedText(att.isSectionAttach ? (att.attachVerb || 'Connect') : `×${att.repeatCount}`, tx, pliY + Math.round(pliH * 0.16), textMaxW);
+          ctx.fillStyle = theme.text;
+          ctx.font = `600 ${st.pliSubNameFont}px -apple-system, sans-serif`;
+          drawTruncatedText(att.name || 'Submodel', tx, pliY + Math.round(pliH * 0.56), textMaxW);
+          ctx.restore();
+        } else if (step.minifigPrep) {
+          const prep = step.minifigPrep;
+          const prepBoxW = Math.min(slotW - (pliX - sx) - st.slotPad, Math.max(Math.round(typo.pt(130)), pliH * 3.8));
+          drawRRect(pliX, pliY, prepBoxW, pliH, pliRadius);
+          ctx.fillStyle = theme.calloutBg;
+          ctx.fill();
+          ctx.strokeStyle = theme.calloutBorder;
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+          ctx.save();
+          drawRRect(pliX, pliY, prepBoxW, pliH, pliRadius);
+          ctx.clip();
+          const prepUrl = getMinifigThumb(prep.canonicalParts, `prep_${prep.id}`, MINIFIG_BUILD_CAMERA.az, MINIFIG_BUILD_CAMERA.el, 120, 120);
+          if (prepUrl) {
+            const prepImg = await loadImgPromise(prepUrl);
+            drawContain(ctx, prepImg, pliX + 6, pliY + 4, pliH * 1.0, pliH - 8);
+          }
+          const tx = pliX + 6 + pliH * 1.0 + 8;
+          const textMaxW = Math.max(0, pliX + prepBoxW - tx - 8);
+          ctx.fillStyle = theme.accent;
+          ctx.font = `800 ${st.pliSubCountFont}px -apple-system, sans-serif`;
+          drawTruncatedText(prep.label || 'Position', tx, pliY + Math.round(pliH * 0.16), textMaxW);
+          ctx.fillStyle = theme.text;
+          ctx.font = `600 ${st.pliSubNameFont}px -apple-system, sans-serif`;
+          drawTruncatedText(prep.name || 'Minifigure', tx, pliY + Math.round(pliH * 0.56), textMaxW);
+          ctx.restore();
+        } else if (step.attachedMinifig) {
+          const att = step.attachedMinifig;
+          const attBoxW = Math.min(slotW - (pliX - sx) - st.slotPad, Math.max(Math.round(typo.pt(115)), pliH * 3.3));
+          drawRRect(pliX, pliY, attBoxW, pliH, pliRadius);
+          ctx.fillStyle = theme.calloutBg;
+          ctx.fill();
+          ctx.strokeStyle = theme.calloutBorder;
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+          ctx.save();
+          drawRRect(pliX, pliY, attBoxW, pliH, pliRadius);
+          ctx.clip();
+          const attUrl = getMinifigThumb(
+            att.previewParts || att.canonicalParts,
+            `att_${att.id}`,
+            Math.round(cam.az),
+            Math.round(Math.min(30, Math.max(16, cam.el))),
+            120,
+            120,
+          );
+          if (attUrl) {
+            const attImg = await loadImgPromise(attUrl);
+            drawContain(ctx, attImg, pliX + 6, pliY + 4, pliH * 1.0, pliH - 8);
+          }
+          const tx = pliX + 6 + pliH * 1.0 + 8;
+          const textMaxW = Math.max(0, pliX + attBoxW - tx - 8);
+          ctx.fillStyle = theme.accent;
+          ctx.font = `900 ${st.pliSubCountFont}px -apple-system, sans-serif`;
+          drawTruncatedText(`×${att.repeatCount || 1}`, tx, pliY + Math.round(pliH * 0.16), textMaxW);
+          ctx.fillStyle = theme.text;
+          ctx.font = `600 ${st.pliSubNameFont}px -apple-system, sans-serif`;
+          drawTruncatedText(att.name || 'Minifigure', tx, pliY + Math.round(pliH * 0.56), textMaxW);
+          ctx.restore();
+        } else {
+          const pliMap = new Map();
+          for (const p of step.parts) { const k = `${p.p}:${p.c}`; if (!pliMap.has(k)) pliMap.set(k, { part: p, qty: 0 }); pliMap.get(k).qty++; }
+          const pli = Array.from(pliMap.values()).slice(0, 6);
+          if (pli.length > 0) {
+            const itemW = Math.min(Math.round(pliThumbPx * 1.95), (slotW - (pliX - sx) - st.slotPad - 10) / Math.max(1, pli.length));
+            drawRRect(pliX, pliY, pli.length * itemW + 10, pliH, pliRadius);
+            ctx.fillStyle = theme.pliBg;
+            ctx.fill();
+            ctx.strokeStyle = theme.pliBorder; ctx.lineWidth = 1.25;
+            ctx.stroke();
+            for (let pi = 0; pi < pli.length; pi++) {
+              const im = await loadImgPromise(getPliThumb(pli[pi].part));
+              drawContain(ctx, im, pliX + 5 + pi * itemW, pliY + 4, itemW * 0.54, pliH - 8);
+              ctx.fillStyle = theme.text; ctx.font = `700 ${pliQtyPx}px -apple-system, sans-serif`;
+              ctx.fillText(`${pli[pi].qty}×`, pliX + 5 + pi * itemW + itemW * 0.58, pliY + Math.round((pliH - pliQtyPx) * 0.45));
+            }
           }
         }
       }
@@ -7796,29 +8543,15 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
         ctx.fillText(step.stepHint, hintX + 9, hintY + 5, hintW - 16);
       }
 
-      // 3D Step Render (+ optional true physical 1:1 Minifigure View card on printed paper!)
+      // 3D Step Render / Official Minifig Style (+ optional true physical 1:1 Minifigure View card on printed paper!)
       const prev = getPreviousPartsForStep(state.model, ch, step);
-      const effectivePartOffsets = step.defaultPartOffsets
-        ? { ...step.defaultPartOffsets, ...(ov.partOffsets || {}) }
-        : (ov.partOffsets || {});
-      const mfPrep = step.isMinifigPoseStep ? step.minifigPrep : null;
-      const snap = renderSnapshot(prev, step.parts, cam.az, cam.el, 760, 520, ov.modelScale || 1.0, {
-        highlightNew: state.highlightNew, highlightColor: state.highlightColor,
-        fadePrev: state.fadePrev, fadeOpacity: state.fadeOpacity,
-        showArrows: true, accent: theme.accent, ov, partOffsets: effectivePartOffsets,
-        ...(mfPrep ? {
-          minifigIndicators: mfPrep.indicators || [],
-          ghostParts: mfPrep.ghostParts || [],
-          highlightOnlyPartIds: new Set(mfPrep.rotatedPartIds || []),
-        } : {}),
-      });
-      const stepImg = await loadImgPromise(snap.url);
-      const isMfBuild = Boolean((step.isStandaloneFigure || ch.kind === 'minifigure') && !step.isMinifigPoseStep);
-      const poseLegendH = (mfPrep && mfPrep.indicators && mfPrep.indicators.length > 0) ? Math.round(typo.pt(22)) : 0;
-      const renderTopY = sy + st.slotPad + pliH + Math.round(typo.pt(8));
-      const renderAvailH = Math.max(40, slotH - st.slotPad * 2 - pliH - Math.round(typo.pt(10)) - poseLegendH);
-      if (state.showMinifig1to1 && isMfBuild) {
-        const mf1 = renderMinifigOneToOne(step.parts, pxH, hIn, Math.round(slotW * 0.34), Math.round(renderAvailH * 0.72), theme.accent);
+      const allowMf1to1OnPage = !isMfSeq || !minifigSeqSlice || minifigSeqSlice.pageIdx === minifigSeqSlice.pageCount - 1;
+      const show1to1Here = Boolean(state.showMinifig1to1 && isMfBuild && allowMf1to1OnPage);
+
+      let mainAvailW = slotW - st.slotPad * 2;
+      let mf1CardInfo = null;
+      if (show1to1Here) {
+        const mf1 = renderMinifigOneToOne(step.parts, pxH, hIn, Math.round(slotW * (isMfSeq ? 0.24 : 0.34)), Math.round(renderAvailH * 0.72), theme.accent);
         const cardPad = Math.round(typo.pt(8));
         const headerH = Math.round(st.mf1to1Font * 1.9);
         const mfHeaderLabel = `1:1${mf1.isExact ? '' : ' Fit'} · ${Math.round(mf1.heightMm)} mm`;
@@ -7828,9 +8561,48 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
         const cardH = Math.min(renderAvailH - 4, mf1.displayPxH + headerH + cardPad * 2);
         const cardX = sx + slotW - cardW - st.slotPad;
         const cardY = renderTopY + Math.round((renderAvailH - cardH) / 2);
-        drawContain(ctx, stepImg, sx + st.slotPad, renderTopY, Math.max(40, cardX - (sx + st.slotPad + 8)), renderAvailH);
-
         const cardRadius = Math.round(typo.pt(8));
+        mainAvailW = Math.max(40, cardX - (sx + st.slotPad + 8));
+        mf1CardInfo = { mf1, cardPad, headerH, mfHeaderLabel, cardW, cardH, cardX, cardY, cardRadius };
+      }
+
+      if (isMfExploded) {
+        const expDiag = renderMinifigExplodedDiagram(step, cam, Math.max(760, Math.round(mainAvailW * 1.2)), Math.max(520, Math.round(renderAvailH * 1.2)), theme, modelScale);
+        const expImg = await loadImgPromise(expDiag.url);
+        drawContain(ctx, expImg, sx + st.slotPad, renderTopY, mainAvailW, renderAvailH);
+      } else if (isMfSeq) {
+        const seqPlan = getMinifigSequentialPlanForStep(step);
+        const sl = minifigSeqSlice || { start: 0, end: seqPlan.stages.length, cols: Math.min(3, seqPlan.stages.length), pageIdx: 0, pageCount: 1 };
+        const visibleStages = seqPlan.stages.slice(sl.start, sl.end);
+        const stGap = Math.round(Math.max(8, mainAvailW * 0.015));
+        const stCellW = (mainAvailW - stGap * Math.max(0, visibleStages.length - 1)) / Math.max(1, visibleStages.length);
+        const stPixW = Math.max(320, Math.round(stCellW * 1.25));
+        const stPixH = Math.max(440, Math.round(renderAvailH * 1.25));
+        for (let si = 0; si < visibleStages.length; si++) {
+          const stDiag = renderMinifigSequentialStage(step, visibleStages[si], seqPlan, cam, stPixW, stPixH, theme, modelScale);
+          const stImg = await loadImgPromise(stDiag.url);
+          drawContain(ctx, stImg, sx + st.slotPad + si * (stCellW + stGap), renderTopY, stCellW, renderAvailH);
+        }
+      } else {
+        const effectivePartOffsets = step.defaultPartOffsets
+          ? { ...step.defaultPartOffsets, ...(ov.partOffsets || {}) }
+          : (ov.partOffsets || {});
+        const snap = renderSnapshot(prev, step.parts, cam.az, cam.el, 760, 520, modelScale, {
+          highlightNew: state.highlightNew, highlightColor: state.highlightColor,
+          fadePrev: state.fadePrev, fadeOpacity: state.fadeOpacity,
+          showArrows: true, accent: theme.accent, ov, partOffsets: effectivePartOffsets,
+          ...(mfPrep ? {
+            minifigIndicators: mfPrep.indicators || [],
+            ghostParts: mfPrep.ghostParts || [],
+            highlightOnlyPartIds: new Set(mfPrep.rotatedPartIds || []),
+          } : {}),
+        });
+        const stepImg = await loadImgPromise(snap.url);
+        drawContain(ctx, stepImg, sx + st.slotPad, renderTopY, mainAvailW, renderAvailH);
+      }
+
+      if (mf1CardInfo) {
+        const { mf1, cardPad, headerH, mfHeaderLabel, cardW, cardH, cardX, cardY, cardRadius } = mf1CardInfo;
         drawRRect(cardX, cardY, cardW, cardH, cardRadius);
         ctx.fillStyle = theme.calloutBg;
         ctx.fill();
@@ -7861,8 +8633,6 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
         ctx.moveTo(rx - 3, ry1); ctx.lineTo(rx + 3, ry1);
         ctx.stroke();
         ctx.restore();
-      } else {
-        drawContain(ctx, stepImg, sx + st.slotPad, renderTopY, slotW - st.slotPad * 2, renderAvailH);
       }
 
       // Color-coded rotation indicator pills at bottom of minifigure Prepare steps
@@ -8386,6 +9156,9 @@ document.getElementById('toggleRotCues').onchange = (e) => { state.showRotCues =
 document.getElementById('toggleSizeGuides').onchange = (e) => { state.showSizeGuides = e.target.checked; renderAll(); };
 const mf1to1ToggleEl = document.getElementById('toggleMinifig1to1');
 if (mf1to1ToggleEl) mf1to1ToggleEl.onchange = (e) => { state.showMinifig1to1 = e.target.checked; renderAll(); };
+document.querySelectorAll('.mf-style-btn').forEach(b => {
+  b.onclick = () => applyMinifigStyleChange(b.getAttribute('data-mf-style'));
+});
 const setStepBorders = (e) => { state.showStepBorders = e.target.checked; renderAll(); };
 document.getElementById('toggleStepBorders').onchange = setStepBorders;
 document.getElementById('toggleStepBordersSetup').onchange = setStepBorders;
@@ -8495,7 +9268,7 @@ document.getElementById('menuSaveProj').onclick = async () => {
   if (!state.model) return;
   const activeTheme = getActiveTheme();
   const embeddedCustomTheme = activeTheme && !activeTheme.builtIn && !BUILT_IN_THEME_IDS.has(activeTheme.id) ? activeTheme : undefined;
-  const payload = JSON.stringify({ version: 3, title: state.model.title, chapters: state.model.chapters, overrides: state.overrides, pageInserts: state.pageInserts, dividerAfter: state.dividerAfter, coverMeta: state.coverMeta, completeMeta: state.completeMeta, backMeta: state.backMeta, bomConfig: state.bomConfig, showStepBorders: state.showStepBorders, showPageTitle: state.showPageTitle, pageNumberFormat: state.pageNumberFormat, detectDuplicates: state.detectDuplicates, themeId: state.themeId, ...(embeddedCustomTheme ? { customTheme: embeddedCustomTheme } : {}), paperFormat: state.paperFormat, orientation: state.orientation, density: state.density, layout: state.layout }, null, 2);
+  const payload = JSON.stringify({ version: 3, title: state.model.title, chapters: state.model.chapters, overrides: state.overrides, pageInserts: state.pageInserts, dividerAfter: state.dividerAfter, coverMeta: state.coverMeta, completeMeta: state.completeMeta, backMeta: state.backMeta, bomConfig: state.bomConfig, showStepBorders: state.showStepBorders, showPageTitle: state.showPageTitle, pageNumberFormat: state.pageNumberFormat, detectDuplicates: state.detectDuplicates, minifigStyle: state.minifigStyle, showMinifig1to1: state.showMinifig1to1, themeId: state.themeId, ...(embeddedCustomTheme ? { customTheme: embeddedCustomTheme } : {}), paperFormat: state.paperFormat, orientation: state.orientation, density: state.density, layout: state.layout }, null, 2);
   const fileName = `${state.model.title.replace(/[^a-z0-9_-]+/gi, '_')}.bic.json`;
   closeMenu();
   await shareOrDownloadJsonFile(payload, fileName, 'Shared project file.', `Saved ${fileName}`);
@@ -8507,6 +9280,7 @@ document.getElementById('projectLoadInput').onchange = async (e) => {
     const data = JSON.parse(await f.text());
     submodelThumbCache.clear();
     coverHeroCache.clear();
+    clearMinifigDiagramCaches();
     state.model = { title: data.title || 'Loaded Manual', subtitle: '', chapters: data.chapters || [] };
     state.overrides = data.overrides || {}; state.pageInserts = data.pageInserts || {};
     state.dividerAfter = data.dividerAfter || {};
@@ -8518,6 +9292,8 @@ document.getElementById('projectLoadInput').onchange = async (e) => {
     if (typeof data.showPageTitle === 'boolean') state.showPageTitle = data.showPageTitle;
     if (data.pageNumberFormat) state.pageNumberFormat = data.pageNumberFormat;
     if (typeof data.detectDuplicates === 'boolean') state.detectDuplicates = data.detectDuplicates;
+    if (data.minifigStyle) state.minifigStyle = normalizeMinifigStepStyle(data.minifigStyle);
+    if (typeof data.showMinifig1to1 === 'boolean') state.showMinifig1to1 = data.showMinifig1to1;
     if (data.customTheme) {
       const normalized = normalizeCustomTheme(data.customTheme);
       if (normalized) {
@@ -8606,7 +9382,7 @@ document.getElementById('libImportInput').onchange = async (e) => {
   e.target.value = '';
 };
 document.getElementById('menuClearLibBtn').onclick = async () => {
-  userLibRaw.clear(); userLibTitles.clear(); embeddedDatCompiled.clear(); pliThumbCache.clear(); submodelThumbCache.clear(); coverHeroCache.clear();
+  userLibRaw.clear(); userLibTitles.clear(); embeddedDatCompiled.clear(); pliThumbCache.clear(); submodelThumbCache.clear(); clearMinifigDiagramCaches(); coverHeroCache.clear();
   await dbClearStore(LIB_STORE);
   updateLibraryStatusUI();
   if (state.model) { computeModelDiagnostics(); renderAll(); }
@@ -9130,7 +9906,7 @@ document.getElementById('fileInput').onchange = async (e) => {
       const { m1Text, m2Text } = await extractIoArchive(ab);
       parsed = parseImportedModel(m1Text, m2Text, file.name);
     } else {
-      embeddedDatRaw.clear(); embeddedDatTitles.clear(); embeddedDatCompiled.clear(); compositePartDefs.clear(); pliThumbCache.clear(); submodelThumbCache.clear();
+      embeddedDatRaw.clear(); embeddedDatTitles.clear(); embeddedDatCompiled.clear(); compositePartDefs.clear(); pliThumbCache.clear(); submodelThumbCache.clear(); clearMinifigDiagramCaches();
       const txt = await file.text();
       pendingRawFile = { kind: 'ldr', fileName: file.name, data: txt };
       parsed = parseImportedModel(txt, '', file.name);
