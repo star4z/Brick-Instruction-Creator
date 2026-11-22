@@ -1694,6 +1694,19 @@ function fuseAssemblies(rawParts) {
 }
 
 function parseImportedModel(m1Text, m2Text, fileName) {
+  if (m1Text) {
+    const m1Map = splitMpd(m1Text, fileName);
+    for (const sf of m1Map.values()) {
+      const isEmbeddedPart = sf.name.toLowerCase().endsWith('.dat') || sf.lines.some(l => /^[234]\s+/.test(l));
+      if (isEmbeddedPart) {
+        const nk = normId(sf.name);
+        if (!embeddedDatRaw.has(nk)) {
+          embeddedDatRaw.set(nk, sf.lines);
+          embeddedDatTitles.set(nk, getSubfileTitle(sf));
+        }
+      }
+    }
+  }
   const f1 = m1Text ? flattenMpd(m1Text, fileName, false) : { parts:[], hasSteps:false, submodelCount:0 };
   const f2 = m2Text ? flattenMpd(m2Text, fileName, true) : { parts:[], hasSteps:false, submodelCount:0 };
   let rawParts;
@@ -6160,7 +6173,7 @@ async function fetchMissingPartsOnline() {
     const base = k.split('/').pop();
     if (!k || queued.has(k)) return;
     // Skip standard studs/arcs/rects we already synthesize procedurally at high speed!
-    if (/^(stud|stud2|stud2a|stud3|stud4|stud4a|stud10|stud15|studp01|axlehol|npeghol|beamhol|rect|\d+-\d+(cyli|cylo|cylc|disc|edge|ring\d+|chrd|ndis))$/.test(base)) return;
+    if (/^(stud|stud2|stud2a|stud3|stud4|stud4a|stud10|stud15|studp01|axlehol|npeghol|beamhol|rect|rect2p|\d+-\d+(cyli|cylo|cylc|disc|edge|ring\d+|rin\d+|chrd|ndis))$/.test(base)) return;
     // If already loaded as a real .dat (not a virtual synthesis), walk its nested type-1 subparts so partial shortcuts still fetch missing children!
     const existing = lookupEmbeddedDat(k, false);
     if (existing) {
@@ -6168,7 +6181,7 @@ async function fetchMissingPartsOnline() {
         visitedLoaded.add(existing.key);
         for (const line of existing.lines) {
           const tr = line.trim();
-          if (tr.startsWith('1 ')) {
+          if (/^1\s/.test(tr)) {
             const toks = tr.split(/\s+/);
             if (toks.length >= 15) enqueue(toks.slice(14).join(' '));
           }
@@ -6230,7 +6243,7 @@ async function fetchMissingPartsOnline() {
           // Enqueue any referenced subparts / primitives inside this .dat!
           for (const line of r.text.split(/\r?\n/)) {
             const tr = line.trim();
-            if (tr.startsWith('1 ')) {
+            if (/^1\s/.test(tr)) {
               const toks = tr.split(/\s+/);
               if (toks.length >= 15) enqueue(toks.slice(14).join(' '));
             }

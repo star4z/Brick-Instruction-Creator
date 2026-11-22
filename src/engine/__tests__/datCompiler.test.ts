@@ -143,18 +143,112 @@ describe('compileDatEntry — minifigure torso & sibling-fair budgeting', () => 
     expect(Array.from(mesh!.triCols!).filter((c) => c === 14).length).toBe(500);
   });
 
-  it('synthesizes ndis primitives and parses tab-separated LDraw lines', () => {
-    const part: DatEntrySource = {
+  it('synthesizes ndis primitives (including 4-4ndis and fractional 1-8ndis) at exact 16-segment LDraw alignment', () => {
+    const part44: DatEntrySource = {
       key: 'ndis_test',
       lines: [
         '1\t16\t0\t0\t0\t5\t0\t0\t0\t1\t0\t0\t0\t5\t4-4ndis.dat',
       ],
     };
-    const mesh = compileDatEntry(part, () => null);
+    const mesh44 = compileDatEntry(part44, () => null);
+    expect(mesh44).not.toBeNull();
+    // Exact 16-segment LDraw circle: 4 quadrants * 4 segments = 16 triangles
+    expect(mesh44!.tris.length).toBe(16 * 9);
+    expect(mesh44!.min[0]).toBeCloseTo(-5, 3);
+    expect(mesh44!.max[0]).toBeCloseTo(5, 3);
+
+    const part18: DatEntrySource = {
+      key: 'ndis_1_8_test',
+      lines: ['1 16 0 0 0 1 0 0 0 1 0 0 0 1 1-8ndis.dat'],
+    };
+    const mesh18 = compileDatEntry(part18, () => null);
+    expect(mesh18).not.toBeNull();
+    // 1/8th circle = 2 segments at 22.5° steps
+    expect(mesh18!.tris.length).toBe(2 * 9);
+  });
+
+  it('preserves all 4 front forehead & chin torus bevels on high-poly printed minifigure heads even when torus .dat files are absent', () => {
+    const lines: string[] = ['0 Minifig Head with Detailed Sunglasses Print'];
+    for (let i = 0; i < 2400; i++) {
+      const x0 = -4 + (i % 40) * 0.2;
+      const y0 = 6 + Math.floor(i / 40) * 0.15;
+      lines.push(`3 1 ${x0} ${y0} -13 ${x0 + 0.18} ${y0} -13 ${x0 + 0.09} ${y0 + 0.12} -13`);
+    }
+    lines.push(
+      '1 16 0 4 0 0 0 -8 0 -6.4 0 -8 0 0 t04o6250.dat',
+      '1 16 0 4 0 8 0 0 0 -6.4 0 0 0 -8 t04o6250.dat',
+      '1 16 0 17 0 0 0 8 0 6.4 0 -8 0 0 t04o6250.dat',
+      '1 16 0 17 0 -8 0 0 0 6.4 0 0 0 -8 t04o6250.dat',
+    );
+
+    const mesh = compileDatEntry({ key: '3626cp_test', lines }, () => null);
     expect(mesh).not.toBeNull();
-    // 4 quadrants * 3 segments = 12 triangles
-    expect(mesh!.tris.length).toBe(12 * 9);
-    expect(mesh!.min[0]).toBeCloseTo(-5, 3);
-    expect(mesh!.max[0]).toBeCloseTo(5, 3);
+    // 2,400 face tris + 4 * 32 torus tris = 2,528 tris
+    expect(mesh!.tris.length).toBe(2528 * 9);
+    expect(mesh!.min[0]).toBeCloseTo(-13, 1);
+    expect(mesh!.max[0]).toBeCloseTo(13, 1);
+    expect(mesh!.min[1]).toBeCloseTo(-21, 1);
+    expect(mesh!.max[1]).toBeCloseTo(0, 1);
+    expect(mesh!.max[2]).toBeCloseTo(13, 1);
+  });
+
+  it('synthesizes missing t08o6250, t16o6250, cone, rinN, and box5 fallback primitives', () => {
+    const t08 = compileDatEntry({ key: 't08', lines: ['1 16 0 0 0 1 0 0 0 1 0 0 0 1 t08o6250.dat'] }, () => null);
+    const t16 = compileDatEntry({ key: 't16', lines: ['1 16 0 0 0 1 0 0 0 1 0 0 0 1 t16o6250.dat'] }, () => null);
+    const rin3 = compileDatEntry({ key: 'rin3', lines: ['1 16 0 0 0 1 0 0 0 1 0 0 0 1 1-16rin3.dat'] }, () => null);
+    const cone = compileDatEntry({ key: 'con0', lines: ['1 16 0 0 0 1 0 0 0 1 0 0 0 1 1-4con0.dat'] }, () => null);
+    const box5 = compileDatEntry({ key: 'box5', lines: ['1 16 0 0 0 1 0 0 0 1 0 0 0 1 box5.dat'] }, () => null);
+
+    expect(t08!.tris.length / 9).toBe(16);
+    expect(t16!.tris.length / 9).toBe(8);
+    expect(rin3!.tris.length / 9).toBe(2);
+    expect(cone!.tris.length / 9).toBe(4);
+    expect(box5!.tris.length / 9).toBe(10);
+  });
+
+  it('prefers !TEXMAP FALLBACK geometry when present and unwraps 0 !: lines when FALLBACK is absent', () => {
+    const withFallback = compileDatEntry(
+      {
+        key: 'tex_fb',
+        lines: [
+          '0 !TEXMAP START PLANAR 0 0 0 1 0 0 0 1 0 face.png',
+          '0 !: 3 16 0 0 0 10 0 0 0 10 0',
+          '0 !TEXMAP FALLBACK',
+          '3 1 0 0 0 5 0 0 0 5 0',
+          '3 4 5 0 0 10 0 0 5 5 0',
+          '0 !TEXMAP END',
+        ],
+      },
+      () => null,
+    );
+    expect(withFallback!.tris.length / 9).toBe(2);
+    expect(Array.from(withFallback!.triCols!)).toEqual([1, 4]);
+
+    const withoutFallback = compileDatEntry(
+      {
+        key: 'tex_only',
+        lines: [
+          '0 !TEXMAP START PLANAR 0 0 0 1 0 0 0 1 0 face.png',
+          '0 !: 4 16 0 0 0 10 0 0 10 10 0 0 10 0',
+          '0 !TEXMAP END',
+        ],
+      },
+      () => null,
+    );
+    expect(withoutFallback!.tris.length / 9).toBe(2);
+  });
+
+  it('triangulates concave quads safely without folding over', () => {
+    // Concave at vertex b (1, 1): diagonal (a, c) lies outside, diagonal (b, d) lies inside
+    const mesh = compileDatEntry(
+      { key: 'concave_quad', lines: ['4 1 0 0 0 1 1 0 4 0 0 1 4 0'] },
+      () => null,
+    );
+    expect(mesh).not.toBeNull();
+    expect(mesh!.tris.length / 9).toBe(2);
+    // Both triangle normals must agree in orientation
+    const n1z = mesh!.norms[2];
+    const n2z = mesh!.norms[9 + 2];
+    expect(n1z * n2z).toBeGreaterThan(0.99);
   });
 });
