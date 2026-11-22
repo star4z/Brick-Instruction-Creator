@@ -841,8 +841,12 @@ function buildMeshBuffers(prevParts, newParts, opts) {
       addBox(sh[0]+18.5,sh[1]-17,sh[2], 7,24,8, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
       addCyl(sh[0],sh[1]+5.0,sh[2], 5.8,5.8,10,'y',10, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
     } else if (def.shape === 'mf_head') {
-      addCyl(0,-11,0, 9.5,9.5,22,'y',12, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
-      addCyl(0,1.9,0, 5.8,5.8,4.6,'y',10, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
+      // Authentic LEGO minifigure head proportions (matches LDraw 3626c / 28621: crown y=0, neck bottom y=-24)
+      addCyl(0, 2.0, 0, 5.8, 5.8, 4.4, 'y', 10, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
+      addCyl(0, -1.8, 0, 8.6, 12.6, 3.6, 'y', 14, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
+      addCyl(0, -10.5, 0, 12.6, 12.6, 13.8, 'y', 14, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
+      addCyl(0, -19.2, 0, 12.6, 8.6, 3.6, 'y', 14, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
+      addCyl(0, -22.5, 0, 8.0, 8.0, 3.2, 'y', 12, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
     } else if (def.shape === 'mf_helmet') {
       addCyl(0,-12,0, 11.5,12.2,20,'y',12, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
       addBox(0,-11,10, 16,8,5, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
@@ -1311,7 +1315,16 @@ function computeLeafWorldBox(part) {
   else {
     const def = resolvePart(part.p);
     const hx = (def.sx*20)/2, hz = (def.sz*20)/2;
-    lMin = [-hx, -def.h, -hz]; lMax = [hx, def.studs ? 4 : 0, hz];
+    if (def.shape === 'mf_torso' || def.shape === 'mf_torso_body') {
+      const sh = (def.shape === 'mf_torso' && isBrickLinkTorsoAssemblyId(normId(part.p))) ? [-20, 32, -10] : [0, 0, 0];
+      lMin = [sh[0] - hx, sh[1] - def.h, sh[2] - hz];
+      lMax = [sh[0] + hx, sh[1] + 10, sh[2] + hz];
+    } else if (def.shape === 'mf_head') {
+      lMin = [-12.6, -24, -12.6];
+      lMax = [12.6, 4.2, 12.6];
+    } else {
+      lMin = [-hx, -def.h, -hz]; lMax = [hx, def.studs ? 4 : 0, hz];
+    }
   }
   let mn=[Infinity,Infinity,Infinity], mx=[-Infinity,-Infinity,-Infinity];
   for (const x of [lMin[0],lMax[0]]) for (const y of [lMin[1],lMax[1]]) for (const z of [lMin[2],lMax[2]]) {
@@ -1750,8 +1763,113 @@ function buildManualFromParsed(parsed, mode) {
     }
   }
 
+  // 1a. Whole-Minifigure Assembly Grouping (NEVER build just a head — always build the entire figure together!)
+  const classifyMinifigPiece = (part) => {
+    const k = normId(part.p);
+    const name = (resolvePart(part.p).name || '').toLowerCase();
+    const childKeys = (part.children || []).map(c => normId(c.p)).join(' ');
+    const combo = `${k} ${childKeys}`;
+    if (/(?:^|\s)(?:asm_)?(?:bl_)?(?:3815|3816|3817|970|41879|16709)/i.test(combo) || /\bhips\b|minifig.*leg/i.test(name)) return 'legs';
+    if (/(?:^|\s)(?:asm_)?(?:bl_)?(?:973|3818|3819|3820)/i.test(combo) || /minifig.*torso|torso assembly/i.test(name)) return 'torso';
+    if (/(?:^|\s)(?:bl_)?(?:3626|28621)/i.test(combo) || /minifig.*head\b/i.test(name)) return 'head';
+    if (/(?:^|\s)(?:bl_)?(?:76925|26066|11303|66913|21778|98385|11256|61976|25376|93091|24093|3842)/i.test(combo) ||
+        /hair|helmet|hat|cap|hood|headgear|visor|crown|scarf|cape|armor|backpack|bag|ponytail|wig|beard|glasses|utensil|minifig.*accessory/i.test(name)) return 'headgear';
+    return null;
+  };
+  const mfKinds = parts.map(p => classifyMinifigPiece(p));
+  const mfClaimed = new Uint8Array(parts.length);
+  const minifigGroups = [];
+
+  // Stage A: Explicit minifigure submodels (any submodel of 2..12 parts containing >= 2 core body types among legs/torso/head)
+  const mfSubInsts = new Map();
+  for (let i = 0; i < parts.length; i++) {
+    for (const entry of (parts[i].subChain || [])) {
+      if (!mfSubInsts.has(entry.instId)) mfSubInsts.set(entry.instId, { name: entry.name, indices: [] });
+      mfSubInsts.get(entry.instId).indices.push(i);
+    }
+  }
+  const mfSubCands = Array.from(mfSubInsts.values())
+    .filter(r => r.indices.length >= 2 && r.indices.length <= 12)
+    .sort((a, b) => a.indices.length - b.indices.length);
+  for (const rec of mfSubCands) {
+    if (rec.indices.some(i => mfClaimed[i])) continue;
+    const core = new Set(rec.indices.map(i => mfKinds[i]).filter(t => t === 'legs' || t === 'torso' || t === 'head'));
+    if (core.size >= 2) {
+      rec.indices.forEach(i => { mfClaimed[i] = 1; parts[i]._detachedGap = 0; });
+      minifigGroups.push({ name: rec.name || `Minifigure ${minifigGroups.length + 1}`, indices: rec.indices });
+    }
+  }
+
+  // Stage B: Geometric whole-body minifigure detection (works even on flat .ldr files with ZERO submodels!)
+  for (let t = 0; t < parts.length; t++) {
+    if (mfClaimed[t] || mfKinds[t] !== 'torso') continue;
+    const tc = boxes[t].center;
+    const grp = [t];
+    // Nearest unclaimed legs below/at torso
+    let bestLegs = -1, bestLegsD = 58;
+    for (let j = 0; j < parts.length; j++) {
+      if (mfClaimed[j] || mfKinds[j] !== 'legs') continue;
+      const c = boxes[j].center;
+      const hDist = Math.hypot(c[0] - tc[0], c[2] - tc[2]);
+      const vDist = Math.abs(c[1] - tc[1]);
+      if (hDist <= 34 && vDist <= 56 && hDist + vDist * 0.6 < bestLegsD) { bestLegsD = hDist + vDist * 0.6; bestLegs = j; }
+    }
+    if (bestLegs >= 0) grp.push(bestLegs);
+    // Nearest unclaimed head above torso
+    let bestHead = -1, bestHeadD = 62;
+    for (let j = 0; j < parts.length; j++) {
+      if (mfClaimed[j] || mfKinds[j] !== 'head') continue;
+      const c = boxes[j].center;
+      const hDist = Math.hypot(c[0] - tc[0], c[2] - tc[2]);
+      const dy = c[1] - tc[1];
+      if (hDist <= 30 && dy >= -10 && dy <= 72 && hDist + Math.abs(dy - 36) * 0.5 < bestHeadD) {
+        bestHeadD = hDist + Math.abs(dy - 36) * 0.5; bestHead = j;
+      }
+    }
+    if (bestHead >= 0) grp.push(bestHead);
+    // Attach nearby headgear / collar / accessories belonging to this figure
+    const anchors = grp.map(idx => boxes[idx].center);
+    for (let j = 0; j < parts.length; j++) {
+      if (mfClaimed[j] || grp.includes(j) || mfKinds[j] !== 'headgear') continue;
+      const c = boxes[j].center;
+      const near = anchors.some(ac => Math.hypot(c[0] - ac[0], c[1] - ac[1], c[2] - ac[2]) <= 46);
+      if (near) grp.push(j);
+    }
+    if (grp.length >= 2) {
+      grp.forEach(i => { mfClaimed[i] = 1; parts[i]._detachedGap = 0; });
+      minifigGroups.push({ name: `Minifigure ${minifigGroups.length + 1}`, indices: grp });
+    }
+  }
+
+  // Safety net: merge any remaining unclaimed head (+ touching headgear) into the closest minifigure missing a head
+  for (let h = 0; h < parts.length; h++) {
+    if (mfClaimed[h] || mfKinds[h] !== 'head') continue;
+    const hc = boxes[h].center;
+    let bestG = null, bestD = 75;
+    for (const g of minifigGroups) {
+      if (g.indices.some(idx => mfKinds[idx] === 'head')) continue;
+      for (const idx of g.indices) {
+        const c = boxes[idx].center;
+        const d = Math.hypot(c[0] - hc[0], c[1] - hc[1], c[2] - hc[2]);
+        if (d < bestD) { bestD = d; bestG = g; }
+      }
+    }
+    if (bestG) {
+      bestG.indices.push(h); mfClaimed[h] = 1; parts[h]._detachedGap = 0;
+      for (let j = 0; j < parts.length; j++) {
+        if (mfClaimed[j] || mfKinds[j] !== 'headgear') continue;
+        const c = boxes[j].center;
+        if (Math.hypot(c[0] - hc[0], c[1] - hc[1], c[2] - hc[2]) <= 36) {
+          bestG.indices.push(j); mfClaimed[j] = 1; parts[j]._detachedGap = 0;
+        }
+      }
+    }
+  }
+
   // 1b. Automatic Duplicate Submodel Detection (explicit submodels + geometric-only duplicates!)
-  const dupGroups = detectDuplicateSubassemblies(parts, boxes, adj, roles);
+  const dupGroups = detectDuplicateSubassemblies(parts, boxes, adj, roles).filter(g =>
+    !g.instances.some(inst => inst.some(pi => mfClaimed[pi]))
+  );
   const partToDup = new Map();
   for (const g of dupGroups) {
     g.instances.forEach((inst, instIdx) => {
@@ -1759,8 +1877,9 @@ function buildManualFromParsed(parsed, mode) {
     });
   }
 
-  // 2. Connected components -> separate standalone figures/accessories from main model
+  // 2. Connected components for non-minifigure model parts
   const visited = new Uint8Array(parts.length);
+  for (let i = 0; i < parts.length; i++) if (mfClaimed[i]) visited[i] = 1;
   const rawComps = [];
   for (let i = 0; i < parts.length; i++) {
     if (visited[i]) continue;
@@ -1771,21 +1890,54 @@ function buildManualFromParsed(parsed, mode) {
     }
     rawComps.push(comp);
   }
-  rawComps.sort((a, b) => a.length - b.length);
-  const smallComps = rawComps.filter(c => c.length <= 20 && rawComps.length > 1);
+  rawComps.sort((a, b) => b.length - a.length);
   const largeComps = rawComps.filter(c => c.length > 20 || rawComps.length === 1);
-  const groupedComps = [];
-  if (smallComps.length > 0) groupedComps.push({ name: 'Figure & Accessories', indices: smallComps.flat() });
-  largeComps.forEach((c, idx) => groupedComps.push({ name: largeComps.length === 1 ? parsed.title : `${parsed.title} · Section ${idx + 1}`, indices: c }));
+  const straySmall = rawComps.filter(c => c.length <= 20 && rawComps.length > 1);
+  // Fold tiny stray non-figure clips/bars into the primary model component so they build with the model, not as fake figures!
+  if (largeComps.length > 0 && straySmall.length > 0) {
+    for (const sc of straySmall) largeComps[0].push(...sc);
+  } else if (largeComps.length === 0 && straySmall.length > 0) {
+    largeComps.push(straySmall.flat());
+  }
+  const groupedComps = largeComps.map((c, idx) => ({
+    name: largeComps.length === 1 ? parsed.title : `${parsed.title} · Section ${idx + 1}`,
+    indices: c,
+  }));
 
-  // 3. Chassis-First Bottom-Up Zero-Floating Frontier (interleaving duplicate submodel chapters cleanly!)
+  // 3. Emit complete Minifigures chapter FIRST (1 whole minifigure per step), then Chassis-First Main Build!
   const chapters = [];
   const emittedSubChapters = new Set();
   let globalStep = 0, chSeq = 0;
 
+  if (minifigGroups.length > 0) {
+    const mfSteps = minifigGroups.map((mg) => {
+      globalStep++;
+      const order = { legs: 0, torso: 1, head: 2, headgear: 3 };
+      const sortedIdx = [...mg.indices].sort((a, b) =>
+        (order[mfKinds[a]] ?? 4) - (order[mfKinds[b]] ?? 4) || boxes[a].min[1] - boxes[b].min[1]
+      );
+      return {
+        id: `mf_s${globalStep}`,
+        num: globalStep,
+        side: 'top',
+        corner: 'front_right',
+        cue: 'none',
+        isStandaloneFigure: true,
+        parts: sortedIdx.map(i => parts[i]),
+      };
+    });
+    chapters.push({
+      id: `ach_${++chSeq}`,
+      name: minifigGroups.length === 1 ? 'Minifigure' : 'Minifigures',
+      kind: 'minifigure',
+      sectionId: 'sec_minifigs',
+      steps: mfSteps,
+    });
+  }
+
   groupedComps.forEach((group, secIdx) => {
     const sectionId = `sec_${secIdx + 1}`;
-    const isFigSec = secIdx === 0 && smallComps.length > 0;
+    const isFigSec = false;
     const indices = group.indices;
     const placed = new Set();
     const remaining = new Set(indices);
@@ -2092,6 +2244,7 @@ function renumberContinuousSteps(model) {
 }
 function getPreviousPartsForStep(model, ch, step) {
   const prev = [];
+  if (step.isStandaloneFigure) return prev;
   if (ch.kind === 'submodel') {
     for (const s of ch.steps) { if (s.id === step.id) break; prev.push(...s.parts); }
     return prev;
