@@ -2715,7 +2715,11 @@ function renderAll() {
   document.getElementById('btnRedo').disabled = state.redoStack.length === 0;
 
   const page = state.pages[state.pageIdx];
-  document.getElementById('pageLabelText').textContent = `${page.label} · ${page.num}/${state.pages.length}`;
+  const fullLabel = `${page.label} · ${page.num}/${state.pages.length}`;
+  document.getElementById('pageLabelText').textContent = page.label;
+  const pageCountEl = document.getElementById('pageCountText');
+  if (pageCountEl) pageCountEl.textContent = `· ${page.num}/${state.pages.length}`;
+  document.getElementById('btnPageOverview').title = fullLabel;
   document.getElementById('prevPage').disabled = state.pageIdx <= 0;
   document.getElementById('nextPage').disabled = state.pageIdx >= state.pages.length - 1;
 

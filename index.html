@@ -137,23 +137,24 @@
       </div>
 
       <!-- Page & Zoom Pill -->
-      <div class="glass-pill px-1.5 py-1 rounded-full flex items-center gap-1 text-xs font-semibold whitespace-nowrap">
+      <div class="glass-pill max-w-full min-w-0 px-1.5 py-1 rounded-full flex items-center gap-1 text-xs font-semibold">
         <button id="prevPage" title="Previous Page" class="h-8 w-8 rounded-full flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/10 disabled:opacity-30 transition shrink-0">
           <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m15 18-6-6 6-6"/></svg>
         </button>
-        <button id="btnPageOverview" class="h-8 px-2.5 rounded-full hover:bg-black/5 dark:hover:bg-white/10 flex items-center gap-1 whitespace-nowrap transition">
-          <span id="pageLabelText">Page 1 / 1</span>
+        <button id="btnPageOverview" class="h-8 px-2 rounded-full hover:bg-black/5 dark:hover:bg-white/10 flex items-center gap-1 min-w-0 flex-1 overflow-hidden transition">
+          <span id="pageLabelText" class="truncate min-w-0">Page 1</span>
+          <span id="pageCountText" class="shrink-0 opacity-65 tabular-nums text-[11px] whitespace-nowrap"></span>
           <svg class="w-3.5 h-3.5 opacity-60 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m6 9 6 6 6-6"/></svg>
         </button>
-        <button id="nextPage" title="Next Page" class="h-8 w-8 rounded-full bg-[#1a73e8] text-white flex items-center justify-center hover:opacity-95 disabled:opacity-30 transition">
+        <button id="nextPage" title="Next Page" class="h-8 w-8 rounded-full bg-[#1a73e8] text-white flex items-center justify-center hover:opacity-95 disabled:opacity-30 transition shrink-0">
           <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m9 18 6-6-6-6"/></svg>
         </button>
 
-        <div class="w-px h-5 bg-black/15 dark:bg-white/15 mx-1"></div>
+        <div class="w-px h-5 bg-black/15 dark:bg-white/15 mx-0.5 shrink-0"></div>
 
-        <button id="btnZoomOut" title="Zoom Out" class="h-8 w-7 rounded-full flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/10 text-sm font-bold">−</button>
-        <button id="btnZoomFit" title="Reset Zoom" class="h-8 px-2 rounded-full text-[11px] font-semibold hover:bg-black/5 dark:hover:bg-white/10 tabular-nums">100%</button>
-        <button id="btnZoomIn" title="Zoom In" class="h-8 w-7 rounded-full flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/10 text-sm font-bold">+</button>
+        <button id="btnZoomOut" title="Zoom Out" class="h-8 w-7 rounded-full flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/10 text-sm font-bold shrink-0">−</button>
+        <button id="btnZoomFit" title="Reset Zoom" class="h-8 px-1.5 sm:px-2 rounded-full text-[11px] font-semibold hover:bg-black/5 dark:hover:bg-white/10 tabular-nums shrink-0">100%</button>
+        <button id="btnZoomIn" title="Zoom In" class="h-8 w-7 rounded-full flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/10 text-sm font-bold shrink-0">+</button>
       </div>
     </div>
 
