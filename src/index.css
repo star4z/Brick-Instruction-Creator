@@ -139,14 +139,21 @@ body {
     overflow: visible !important;
     height: auto !important;
   }
+  #stageViewport {
+    padding: 0 !important;
+    overflow: visible !important;
+    background: transparent !important;
+  }
   #stageContainer {
     transform: none !important;
     position: static !important;
+    width: auto !important;
+    height: auto !important;
   }
   #pageFrame {
     box-shadow: none !important;
     border: none !important;
-    width: 100% !important;
+    border-radius: 0 !important;
     max-width: none !important;
   }
 }

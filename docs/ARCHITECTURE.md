@@ -123,6 +123,11 @@ flowchart LR
   3. Remove deleted parts cleanly (collapsing empty steps only if desired).
   4. Insert newly added parts into the earliest physically connected step (or create a localized new step right where they connect) without touching downstream steps.
 
+### 4.4 Canonical Physical Page Layout & Unified Print Typography (`src/engine/pageTypography.ts`)
+- **Resolution-Independent Print Stage**: Every physical paper format (`US Letter`, `A4`, `Booklet Square`, `Custom`) renders internally in `#pageFrame` at canonical physical coordinates (`96 CSS px = 1 inch`, e.g., `1056 × 816 px` for US Letter Landscape, capped at `1600 px` max edge for poster-sized custom sheets) and scales to fit any mobile, tablet, or desktop viewport via a single combined GPU transform (`fitScale × state.zoom`).
+- **Unified Print Point Scale**: Both the live DOM renderer (`renderAll`) and the PDF/Canvas exporter (`renderPageToJpegBytes`) derive all margins, headers, footers, step numbers, PLI badges, and Parts List (BOM) captions from the same physical point scale (`computePageTypography`, anchored to the 8.5 in Letter short side—e.g. `8.5 pt` footers, `14 pt` Parts List titles, `9.5 pt` BOM quantities, `7 pt` BOM part names, `21 pt` step numbers, `23 pt` cover titles).
+- **Protected BOM Thumbnail Framing**: Because BOM cells are laid out in canonical print coordinates with full-bleed `object-contain` thumbnail containers (`160 × 160` renders) above compact print-sized labels, every piece thumbnail retains ~70%+ of its cell height regardless of viewport width or orientation—eliminating text crowding and tiny thumbnails on narrow mobile screens.
+
 ---
 
 ## 5. 3-Tier Customization System

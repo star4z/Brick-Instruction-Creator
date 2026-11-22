@@ -54,6 +54,11 @@ import {
 } from './cover/coverLayout';
 import { buildQrSvg, drawQrCanvas } from './cover/qrCode';
 import { buildPdfBinary, canvasRectToPdfLink } from './export/pdfBinary';
+import {
+  computeCanonicalPageMetrics,
+  computePageTypography,
+  estimateBomCellGeometry,
+} from './engine/pageTypography';
 
 let initialized = false;
 
@@ -1371,7 +1376,7 @@ function getPliThumb(part) {
   if (pliThumbCache.has(key)) return pliThumbCache.get(key);
   const samplePart = normalizeCompositeThumbPart(part, (pid) => resolvePart(pid).name, computeWorldBox);
   const mesh = buildMeshBuffers([], [samplePart], { highlightNew:false, fadePrev:false, showArrows:false, accent:'#1a73e8' });
-  snapshotEngine.draw(mesh, 112, 112, 32, 22, 1.05);
+  snapshotEngine.draw(mesh, 160, 160, 32, 22, 1.08);
   const url = snapshotCanvas.toDataURL('image/png');
   if (pliThumbCache.size > 220) pliThumbCache.clear();
   pliThumbCache.set(key, url);
@@ -4004,7 +4009,24 @@ function getActiveStepObj() {
 // =========================================================================
 // 5. ZOOM & PAN ENGINE (Hardware-Accelerated CSS Transform — Zero Crash!)
 // =========================================================================
-let stageRafId = 0, lastZoomText = '';
+let stageRafId = 0, lastZoomText = '', currentPageFitScale = 1;
+function getEffectiveStageScale() {
+  return Math.max(0.1, currentPageFitScale * state.zoom);
+}
+function getStageOrigin() {
+  const stage = document.getElementById('stageViewport');
+  if (!stage) return { cx: window.innerWidth / 2, cy: window.innerHeight / 2 };
+  const rect = stage.getBoundingClientRect();
+  const cs = getComputedStyle(stage);
+  const pl = parseFloat(cs.paddingLeft) || 0;
+  const pr = parseFloat(cs.paddingRight) || 0;
+  const pt = parseFloat(cs.paddingTop) || 0;
+  const pb = parseFloat(cs.paddingBottom) || 0;
+  return {
+    cx: rect.left + pl + (rect.width - pl - pr) / 2,
+    cy: rect.top + pt + (rect.height - pt - pb) / 2,
+  };
+}
 function flushStageTransform() {
   stageRafId = 0;
   const container = document.getElementById('stageContainer');
@@ -4014,7 +4036,8 @@ function flushStageTransform() {
   const limY = Math.max(window.innerHeight * 0.75, window.innerHeight * state.zoom * 0.65);
   state.panX = Math.max(-limX, Math.min(limX, state.panX));
   state.panY = Math.max(-limY, Math.min(limY, state.panY));
-  container.style.transform = `translate3d(${state.panX.toFixed(2)}px, ${state.panY.toFixed(2)}px, 0) scale(${state.zoom.toFixed(4)})`;
+  const effScale = getEffectiveStageScale();
+  container.style.transform = `translate3d(${state.panX.toFixed(2)}px, ${state.panY.toFixed(2)}px, 0) scale(${effScale.toFixed(4)})`;
   const txt = Math.round(state.zoom * 100) + '%';
   if (txt !== lastZoomText) {
     lastZoomText = txt;
@@ -4029,9 +4052,9 @@ function applyStageTransform() {
 
 function setZoom(nextZoom, focalX = null, focalY = null) {
   const prevZoom = state.zoom;
-  const clamped = Math.max(0.45, Math.min(3.5, nextZoom));
+  const clamped = Math.max(0.45, Math.min(4.5, nextZoom));
   if (focalX !== null && focalY !== null) {
-    const cx = window.innerWidth / 2, cy = window.innerHeight / 2;
+    const { cx, cy } = getStageOrigin();
     const vx = focalX - cx, vy = focalY - cy;
     const ratio = clamped / prevZoom;
     state.panX = vx - (vx - state.panX) * ratio;
@@ -4063,18 +4086,14 @@ function formatPhysicalDims(wIn, hIn) {
 }
 
 function computePageFrameDimensions() {
-  const vw = window.innerWidth, vh = window.innerHeight;
-  const availW = Math.max(296, vw - 24);
-  const availH = Math.max(360, vh - 170);
-  if (state.paperFormat === 'screen') {
-    const w = Math.min(920, availW);
-    return { width: w, height: Math.min(640, availH), isLandscape: w >= Math.min(640, availH) };
-  }
   const [wIn, hIn] = getActivePagePhysicalInches();
-  const ratio = wIn / hIn;
-  let w = availW, h = w / ratio;
-  if (h > availH) { h = availH; w = h * ratio; }
-  return { width: Math.round(Math.max(280, w)), height: Math.round(Math.max(200, h)), isLandscape: ratio >= 1.05 };
+  return computeCanonicalPageMetrics({
+    paperFormat: state.paperFormat,
+    widthIn: wIn,
+    heightIn: hIn,
+    viewportW: window.innerWidth,
+    viewportH: window.innerHeight,
+  });
 }
 
 // =========================================================================
@@ -4195,25 +4214,39 @@ function renderAll() {
     }`;
   });
 
-  // Apply Print / Screen Proportions & Density to Live Page Frame!
+  // Apply Canonical Physical Print / Screen Proportions & Unified Typography to Live Page Frame!
   const frame = document.getElementById('pageFrame');
   const dims = computePageFrameDimensions();
-  const dens = DENSITY_PAD[state.density] || DENSITY_PAD.balanced;
-  const padScale = Math.min(1, dims.width / 520);
-  const padPx = Math.max(8, Math.round(dens.pad * padScale));
-  const gapPx = Math.max(6, Math.round(dens.gap * padScale));
+  currentPageFitScale = dims.fitScale;
+  const typo = computePageTypography({
+    widthIn: dims.widthIn,
+    heightIn: dims.heightIn,
+    pxPerInch: dims.pxPerInch,
+    density: state.density,
+    bomDensity: state.bomConfig?.density,
+  });
+  const padPx = typo.pad;
+  const gapPx = typo.gap;
+  const footerH = typo.footerH;
+  const invFit = 1 / Math.max(0.25, dims.fitScale);
   frame.style.width = dims.width + 'px';
   frame.style.height = dims.height + 'px';
   frame.style.minHeight = '';
+  frame.style.borderRadius = Math.round(14 * invFit) + 'px';
+  frame.style.borderWidth = Math.max(1, Number(invFit.toFixed(2))) + 'px';
   frame.classList.remove('blueprint-grid');
   applyThemeBackgroundToElement(frame, theme);
   frame.style.color = theme.text;
   frame.innerHTML = '';
+  // Apply stage scale immediately so there is never an unscaled flash before rAF
+  flushStageTransform();
 
   const guideCls = (state.showPrintGuides && state.paperFormat !== 'screen') ? 'print-margin-guide' : '';
+  const footerPadBottom = Math.max(4, Math.round(padPx * 0.42));
 
   // Render Page Contents
   if (page.kind === 'cover') {
+    const dens = DENSITY_PAD[state.density] || DENSITY_PAD.balanced;
     const cm = normalizeCoverMeta(state.coverMeta);
     const title = (cm.title || state.model.title || 'Untitled Model').trim();
     const sub = (cm.subtitle || '').trim();
@@ -4298,21 +4331,21 @@ function renderAll() {
       </div>`;
   } else if (page.kind === 'complete') {
     const cm = state.completeMeta;
-    const snap = renderSnapshot([], allParts, cm.az, cm.el, 700, 460, 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent });
+    const snap = renderSnapshot([], allParts, cm.az, cm.el, 760, 500, 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent });
     const pgNumText = formatPageNumber(page.num, state.pages.length);
     const showText = cm.showText !== false;
     const showFw = cm.showFireworks !== false;
     frame.innerHTML = `
-      <div class="relative w-full h-full text-center flex flex-col items-center justify-between overflow-hidden ${guideCls}" style="padding:${padPx + 4}px;${cm.bgSrc ? `background-image:url(${cm.bgSrc});background-size:cover;background-position:center;` : ''}">
+      <div class="relative w-full h-full text-center flex flex-col items-center justify-between overflow-hidden ${guideCls}" style="padding:${padPx}px;padding-bottom:${padPx + footerH}px;${cm.bgSrc ? `background-image:url(${cm.bgSrc});background-size:cover;background-position:center;` : ''}">
         ${showFw ? buildFireworksSvg() : ''}
         <div class="relative z-10 shrink-0 ${showText ? '' : 'hidden'}">
-          <h2 class="text-xl sm:text-3xl font-extrabold leading-tight">${escHtml(cm.title || 'Build Complete!')}</h2>
-          ${cm.subtitle ? `<p class="text-[11px] sm:text-xs mt-0.5" style="color:${theme.muted}">${escHtml(cm.subtitle)}</p>` : ''}
+          <h2 class="font-extrabold leading-tight" style="font-size:${typo.complete.titleFont}px">${escHtml(cm.title || 'Build Complete!')}</h2>
+          ${cm.subtitle ? `<p style="color:${theme.muted};font-size:${typo.complete.subtitleFont}px;margin-top:${Math.round(typo.pt(2.5))}px">${escHtml(cm.subtitle)}</p>` : ''}
         </div>
-        <div class="relative z-10 flex-1 min-h-0 w-full flex items-center justify-center my-1.5 overflow-hidden">
-          <img src="${snap.url}" alt="Completed build" class="max-w-full max-h-full w-full h-full object-contain pointer-events-none" />
+        <div class="relative z-10 flex-1 min-h-0 w-full overflow-hidden" style="margin:${Math.round(typo.pt(8))}px 0">
+          <img src="${snap.url}" alt="Completed build" class="absolute inset-0 w-full h-full object-contain pointer-events-none" />
         </div>
-        <div class="relative z-10 w-full shrink-0 flex items-center justify-between text-[10px] font-medium" style="color:${theme.muted}">
+        <div class="absolute z-10 flex justify-between font-medium pointer-events-none" style="bottom:${footerPadBottom}px;left:${padPx}px;right:${padPx}px;font-size:${typo.footerFont}px;color:${theme.muted}">
           <span class="truncate">${state.showPageTitle ? escHtml(state.model.title) : ''}</span>
           <span style="color:${theme.text}" class="font-bold shrink-0">${escHtml(pgNumText)}</span>
         </div>
@@ -4323,58 +4356,60 @@ function renderAll() {
       ? 'Made with Brick Instruction Creator'
       : bm.subtitle;
     frame.innerHTML = `
-      <div class="relative w-full h-full text-center flex flex-col items-center justify-center gap-3 overflow-hidden ${guideCls}" style="padding:${padPx + 10}px;${bm.bgSrc ? `background-image:url(${bm.bgSrc});background-size:cover;background-position:center;` : ''}">
-        <a href="${PROGRAM_URL}" target="_blank" rel="noopener noreferrer" data-cover-link="true" title="Open ${PROGRAM_NAME}" class="inline-flex flex-col items-center gap-3 hover:opacity-90 transition cursor-pointer" style="text-decoration:none;">
-          <div class="w-16 h-16 sm:w-20 sm:h-20 rounded-3xl flex items-center justify-center shadow-sm" style="background:${theme.pliBg};border:1px solid ${theme.pliBorder}">
-            <svg class="w-11 h-11 sm:w-14 sm:h-14" viewBox="0 0 64 64" fill="none" aria-hidden="true"><g transform="rotate(14 32 32)"><path d="M24.2 8.2 C9.0 15.8 7.2 31.8 14.8 40.4 L10.2 40.8 L19.6 50.4 L19.8 37.6 L17.4 39.4 C11.6 31.4 13.8 17.6 24.2 8.2 Z" fill="#38bdf8"/><path d="M32.0 4.6 C34.5 11.8 35.5 34.4 35.8 45.8 L40.5 43.9 L32.0 59.8 L23.5 43.9 L28.2 45.8 C28.5 34.4 29.5 11.8 32.0 4.6 Z" fill="#1a73e8"/><path d="M39.8 7.8 C50.4 17.6 52.0 34.2 45.2 43.4 L42.8 41.6 L42.2 54.6 L52.4 44.8 L47.8 44.3 C57.2 34.8 55.2 15.6 39.8 7.8 Z" fill="#1d48b8"/></g></svg>
+      <div class="relative w-full h-full text-center flex flex-col items-center justify-center overflow-hidden ${guideCls}" style="padding:${padPx + Math.round(typo.pt(8))}px;${bm.bgSrc ? `background-image:url(${bm.bgSrc});background-size:cover;background-position:center;` : ''}">
+        <a href="${PROGRAM_URL}" target="_blank" rel="noopener noreferrer" data-cover-link="true" title="Open ${PROGRAM_NAME}" class="inline-flex flex-col items-center hover:opacity-90 transition cursor-pointer" style="gap:${Math.round(typo.pt(12))}px;text-decoration:none;">
+          <div class="flex items-center justify-center shadow-sm" style="width:${typo.back.logoBox}px;height:${typo.back.logoBox}px;border-radius:${Math.round(typo.back.logoBox * 0.28)}px;background:${theme.pliBg};border:1px solid ${theme.pliBorder}">
+            <svg style="width:${typo.back.logoIcon}px;height:${typo.back.logoIcon}px" viewBox="0 0 64 64" fill="none" aria-hidden="true"><g transform="rotate(14 32 32)"><path d="M24.2 8.2 C9.0 15.8 7.2 31.8 14.8 40.4 L10.2 40.8 L19.6 50.4 L19.8 37.6 L17.4 39.4 C11.6 31.4 13.8 17.6 24.2 8.2 Z" fill="#38bdf8"/><path d="M32.0 4.6 C34.5 11.8 35.5 34.4 35.8 45.8 L40.5 43.9 L32.0 59.8 L23.5 43.9 L28.2 45.8 C28.5 34.4 29.5 11.8 32.0 4.6 Z" fill="#1a73e8"/><path d="M39.8 7.8 C50.4 17.6 52.0 34.2 45.2 43.4 L42.8 41.6 L42.2 54.6 L52.4 44.8 L47.8 44.3 C57.2 34.8 55.2 15.6 39.8 7.8 Z" fill="#1d48b8"/></g></svg>
           </div>
-          <span class="text-xs sm:text-sm font-semibold" style="color:${theme.muted}">${escHtml(credit)}</span>
+          <span class="font-semibold" style="color:${theme.muted};font-size:${typo.back.creditFont}px">${escHtml(credit)}</span>
         </a>
       </div>`;
   } else if (page.kind === 'divider') {
     const d = state.dividerAfter[page.sourcePgId] || { title:'Section Divider', note:'' };
     frame.innerHTML = `
-      <div class="w-full h-full flex flex-col items-center justify-center text-center gap-2 ${guideCls}" style="padding:${padPx + 12}px">
-        <div class="text-2xl sm:text-3xl font-extrabold">${escHtml(d.title)}</div>
-        <div class="text-xs max-w-md" style="color:${theme.muted}">${escHtml(d.note || 'Switch to Edit mode to edit this divider page.')}</div>
+      <div class="w-full h-full flex flex-col items-center justify-center text-center ${guideCls}" style="padding:${padPx + Math.round(typo.pt(10))}px;gap:${Math.round(typo.pt(8))}px">
+        <div class="font-extrabold" style="font-size:${typo.divider.customTitleFont}px">${escHtml(d.title)}</div>
+        <div style="color:${theme.muted};font-size:${typo.divider.customNoteFont}px;max-width:${Math.round(typo.pt(320))}px">${escHtml(d.note || 'Switch to Edit mode to edit this divider page.')}</div>
       </div>`;
   } else if (page.kind === 'section_divider') {
-    const snap = renderSnapshot([], page.previewParts || [], 38, 28, 620, 400, 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent });
+    const snap = renderSnapshot([], page.previewParts || [], 38, 28, 720, 460, 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent });
     const pgNumText = formatPageNumber(page.num, state.pages.length);
+    const pillPadX = Math.round(typo.pt(8));
+    const pillPadY = Math.round(typo.pt(2.5));
     frame.innerHTML = `
-      <div class="relative w-full h-full flex flex-col justify-between overflow-hidden ${guideCls}" style="padding:${padPx + 6}px">
-        <div class="shrink-0 flex items-center justify-between gap-3">
+      <div class="relative w-full h-full flex flex-col justify-between overflow-hidden ${guideCls}" style="padding:${padPx}px;padding-bottom:${padPx + footerH}px">
+        <div class="shrink-0 flex items-center justify-between" style="gap:${Math.round(typo.pt(12))}px">
           <div class="min-w-0">
-            <span class="inline-block text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full text-white mb-1" style="background:${theme.accent}">Build Stage ${page.bagNumber || 1}</span>
-            <h2 class="text-xl sm:text-3xl font-extrabold tracking-tight leading-tight truncate">${escHtml(page.chapterName || page.label)}</h2>
+            <span class="inline-block font-extrabold uppercase tracking-wider rounded-full text-white" style="background:${theme.accent};font-size:${typo.divider.badgeFont}px;padding:${pillPadY}px ${pillPadX}px;margin-bottom:${Math.round(typo.pt(4))}px">Build Stage ${page.bagNumber || 1}</span>
+            <h2 class="font-extrabold tracking-tight leading-tight truncate" style="font-size:${typo.divider.titleFont}px">${escHtml(page.chapterName || page.label)}</h2>
           </div>
-          <div class="shrink-0 flex flex-col items-end gap-1 text-[11px] font-bold">
-            <span class="px-2.5 py-0.5 rounded-full" style="background:${theme.pliBg};border:1px solid ${theme.pliBorder}">${page.pieceCount || 0} pcs</span>
-            <span class="text-[10px]" style="color:${theme.muted}">Steps ${page.firstStepNum}–${page.lastStepNum}</span>
+          <div class="shrink-0 flex flex-col items-end font-bold" style="gap:${Math.round(typo.pt(3))}px;font-size:${typo.divider.metaFont}px">
+            <span class="rounded-full" style="background:${theme.pliBg};border:1px solid ${theme.pliBorder};padding:${pillPadY}px ${pillPadX}px">${page.pieceCount || 0} pcs</span>
+            <span style="color:${theme.muted};font-size:${typo.divider.subMetaFont}px">Steps ${page.firstStepNum}–${page.lastStepNum}</span>
           </div>
         </div>
-        <div class="flex-1 min-h-0 flex items-center justify-center my-2 overflow-hidden">
-          <img src="${snap.url}" alt="${escHtml(page.chapterName || 'Stage')}" class="max-w-full max-h-full w-full h-full object-contain pointer-events-none" />
+        <div class="relative flex-1 min-h-0 overflow-hidden" style="margin:${Math.round(typo.pt(8))}px 0">
+          <img src="${snap.url}" alt="${escHtml(page.chapterName || 'Stage')}" class="absolute inset-0 w-full h-full object-contain pointer-events-none" />
         </div>
-        <div class="shrink-0 flex items-center justify-between text-[10px] font-medium" style="color:${theme.muted}">
+        <div class="absolute flex justify-between font-medium pointer-events-none" style="bottom:${footerPadBottom}px;left:${padPx}px;right:${padPx}px;font-size:${typo.footerFont}px;color:${theme.muted}">
           <span class="truncate">${state.showPageTitle ? escHtml(state.model.title) : ''}</span>
           <span style="color:${theme.text}" class="font-bold shrink-0">${escHtml(pgNumText)}</span>
         </div>
       </div>`;
   } else if (page.kind === 'submodel_page') {
     const sub = page.step.subassembly;
-    const snap = renderSnapshot([], sub.buildParts, 38, 30, 620, 400, 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent });
+    const snap = renderSnapshot([], sub.buildParts, 38, 30, 720, 460, 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent });
     const pgNumText = formatPageNumber(page.num, state.pages.length);
     frame.innerHTML = `
-      <div class="w-full h-full flex flex-col justify-between overflow-hidden ${guideCls}" style="padding:${padPx}px">
+      <div class="relative w-full h-full flex flex-col justify-between overflow-hidden ${guideCls}" style="padding:${padPx}px;padding-bottom:${padPx + footerH}px">
         <div class="shrink-0 flex items-center justify-between">
-          <h2 class="text-lg font-extrabold">${escHtml(sub.name)}</h2>
-          <span class="px-2.5 py-0.5 rounded-full text-xs font-bold text-white" style="background:${theme.accent}">Build ${sub.repeatCount}×</span>
+          <h2 class="font-extrabold" style="font-size:${typo.submodelPage.titleFont}px">${escHtml(sub.name)}</h2>
+          <span class="rounded-full font-bold text-white" style="background:${theme.accent};font-size:${typo.submodelPage.badgeFont}px;padding:${Math.round(typo.pt(2.5))}px ${Math.round(typo.pt(8))}px">Build ${sub.repeatCount}×</span>
         </div>
-        <div class="flex-1 min-h-0 flex items-center justify-center my-1.5 overflow-hidden">
-          <img src="${snap.url}" class="max-w-full max-h-full w-full h-full object-contain pointer-events-none" />
+        <div class="relative flex-1 min-h-0 overflow-hidden" style="margin:${Math.round(typo.pt(8))}px 0">
+          <img src="${snap.url}" class="absolute inset-0 w-full h-full object-contain pointer-events-none" />
         </div>
-        <div class="shrink-0 flex justify-between text-[11px]" style="color:${theme.muted}">
+        <div class="absolute flex justify-between font-medium pointer-events-none" style="bottom:${footerPadBottom}px;left:${padPx}px;right:${padPx}px;font-size:${typo.footerFont}px;color:${theme.muted}">
           <span class="truncate">${state.showPageTitle ? escHtml(page.chapterName) : ''}</span>
           <span style="color:${theme.text}" class="font-bold shrink-0">${escHtml(pgNumText)}</span>
         </div>
@@ -4386,32 +4421,31 @@ function renderAll() {
     const entries = page.bomEntries || [];
     const cells = computeBomGridLayout(entries, cols, rows, cfg.flow, cfg.align);
     const pgNumText = formatPageNumber(page.num, state.pages.length);
-    const imgSizeCls = cfg.density === 'compact' ? 'w-7 h-7 sm:w-9 sm:h-9' : cfg.density === 'spacious' ? 'w-12 h-12 sm:w-16 sm:h-16' : 'w-9 h-9 sm:w-11 sm:h-11';
-    const qtySizeCls = cfg.density === 'compact' ? 'text-[9px]' : cfg.density === 'spacious' ? 'text-xs' : 'text-[10px]';
+    const bt = typo.bom;
 
     frame.innerHTML = `
-      <div id="bomPageTapArea" class="relative w-full h-full flex flex-col overflow-hidden cursor-pointer ${guideCls}" style="padding:${padPx}px;padding-bottom:${padPx + 18}px">
-        <div class="shrink-0 flex items-baseline justify-between gap-2 pb-1.5 mb-1.5 border-b" style="border-color:${theme.pliBorder}">
-          <div class="flex items-baseline gap-2 min-w-0">
-            <h2 class="text-sm sm:text-base font-bold truncate">Parts List</h2>
-            ${page.bomPageCount > 1 ? `<span class="text-[10px] font-semibold opacity-70 shrink-0">${page.bomPageIdx + 1} / ${page.bomPageCount}</span>` : ''}
+      <div id="bomPageTapArea" class="relative w-full h-full flex flex-col overflow-hidden cursor-pointer ${guideCls}" style="padding:${padPx}px;padding-bottom:${padPx + footerH}px">
+        <div class="shrink-0 flex items-baseline justify-between border-b" style="border-color:${theme.pliBorder};padding-bottom:${bt.headerPb}px;margin-bottom:${bt.headerMb}px;gap:${Math.round(typo.pt(8))}px">
+          <div class="flex items-baseline min-w-0" style="gap:${Math.round(typo.pt(8))}px">
+            <h2 class="font-bold truncate leading-tight" style="font-size:${bt.titleFont}px">Parts List</h2>
+            ${page.bomPageCount > 1 ? `<span class="font-semibold opacity-70 shrink-0" style="font-size:${bt.pageCountFont}px">${page.bomPageIdx + 1} / ${page.bomPageCount}</span>` : ''}
           </div>
-          <span class="text-[10px] sm:text-[11px] shrink-0" style="color:${theme.muted}">${page.bomTotalPieces} pcs · ${page.bomTotalUnique} unique</span>
+          <span class="shrink-0 font-medium" style="color:${theme.muted};font-size:${bt.summaryFont}px">${page.bomTotalPieces} pcs · ${page.bomTotalUnique} unique</span>
         </div>
         <div class="relative flex-1 min-h-0 w-full">
           ${cells.map(({ item, xFrac, yFrac, wFrac, hFrac }) => {
             const { part, qty, meta } = item;
             const thumb = getPliThumb(part);
-            return `<div class="absolute p-0.5 flex flex-col items-center justify-center text-center overflow-hidden" style="left:${(xFrac*100).toFixed(4)}%;top:${(yFrac*100).toFixed(4)}%;width:${(wFrac*100).toFixed(4)}%;height:${(hFrac*100).toFixed(4)}%;background:transparent">
-              <div class="flex-1 min-h-0 w-full flex items-center justify-center">
-                <img src="${thumb}" alt="${escHtml(meta.name)}" class="max-w-full max-h-full ${imgSizeCls} object-contain pointer-events-none" />
+            return `<div class="absolute flex flex-col items-center justify-end text-center overflow-hidden" style="left:${(xFrac*100).toFixed(4)}%;top:${(yFrac*100).toFixed(4)}%;width:${(wFrac*100).toFixed(4)}%;height:${(hFrac*100).toFixed(4)}%;padding:${bt.cellPadY}px ${bt.cellPadX}px;background:transparent">
+              <div class="relative flex-1 min-h-0 w-full">
+                <img src="${thumb}" alt="${escHtml(meta.name)}" class="absolute inset-0 w-full h-full object-contain pointer-events-none" style="padding:${bt.imgPad}px" />
               </div>
-              <div class="shrink-0 leading-tight font-extrabold ${qtySizeCls}">${qty}×</div>
-              ${cfg.showNames ? `<div class="shrink-0 text-[8px] sm:text-[9px] font-medium truncate w-full px-0.5 opacity-80" title="${escHtml(meta.name)}">${escHtml(meta.name)}</div>` : ''}
+              <div class="shrink-0 font-extrabold" style="font-size:${bt.qtyFont}px;line-height:1.15;margin-top:${bt.textGap}px">${qty}×</div>
+              ${cfg.showNames ? `<div class="shrink-0 font-medium truncate w-full opacity-80" style="font-size:${bt.nameFont}px;line-height:1.2;margin-top:${Math.max(1, Math.round(bt.textGap * 0.6))}px;padding:0 ${Math.round(typo.pt(1.5))}px" title="${escHtml(meta.name)}">${escHtml(meta.name)}</div>` : ''}
             </div>`;
           }).join('')}
         </div>
-        <div class="absolute bottom-1.5 left-3.5 right-3.5 flex justify-between text-[10px] font-medium pointer-events-none" style="color:${theme.muted}">
+        <div class="absolute flex justify-between font-medium pointer-events-none" style="bottom:${footerPadBottom}px;left:${padPx}px;right:${padPx}px;font-size:${typo.footerFont}px;color:${theme.muted}">
           <span class="truncate">${state.showPageTitle ? escHtml(state.model.title) : ''}</span>
           <span style="color:${theme.text}" class="font-bold shrink-0">${escHtml(pgNumText)}</span>
         </div>
@@ -4433,13 +4467,11 @@ function renderAll() {
       : 'grid-cols-2 grid-rows-2';
 
     const subIntroImg = page.submodelIntro ? getSubmodelThumb(page.submodelIntro, 240, 150) : null;
-    const effectivePageHIn = state.paperFormat === 'screen'
-      ? (dims.isLandscape ? 8.5 : 11)
-      : getActivePagePhysicalInches()[1];
+    const effectivePageHIn = dims.heightIn;
     const slotCols = slots.length === 1 ? 1 : slots.length === 2 ? (dims.isLandscape ? 2 : 1) : 2;
     const slotRows = Math.ceil(slots.length / slotCols);
-    const estSlotW = Math.max(120, (dims.width - padPx * 2 - gapPx * (slotCols - 1)) / slotCols);
-    const estSlotH = Math.max(120, (dims.height - padPx * 2 - 22 - gapPx * (slotRows - 1)) / slotRows);
+    const estSlotW = Math.max(140, (dims.width - padPx * 2 - gapPx * (slotCols - 1)) / slotCols);
+    const estSlotH = Math.max(140, (dims.height - padPx * 2 - footerH - gapPx * (slotRows - 1)) / slotRows);
 
     const slotData = slots.map(({ ch, step }) => {
       const prev = getPreviousPartsForStep(state.model, ch, step);
@@ -4456,7 +4488,7 @@ function renderAll() {
         partOffsets: effectivePartOffsets,
         selectedPartIds: state.mode === 'select' && state.selectedStepId === step.id ? state.selectedPartIds : null,
       };
-      const rw = slots.length === 1 ? 680 : 440, rh = slots.length === 1 ? 440 : 320;
+      const rw = slots.length === 1 ? 760 : 500, rh = slots.length === 1 ? 500 : 360;
       const snap = renderSnapshot(prev, step.parts, cam.az, cam.el, rw, rh, modelScale, opts);
       currentSlotRenderInfo.set(step.id, { ch, step, prev, cam, ov, snap, modelScale });
 
@@ -4494,27 +4526,31 @@ function renderAll() {
 
     const isRotateMode = state.mode === 'rotate';
     const isArrangeMode = state.mode === 'arrange';
-    const isTightSlot = dims.height < 360 || slots.length >= 4 || (slots.length === 2 && !dims.isLandscape && dims.height < 460);
+    const isTightSlot = slots.length >= 4 || estSlotH < typo.pt(260);
+    const st = typo.steps;
+    const stepNumPx = slots.length === 1 ? st.stepNum1Up : (isTightSlot ? st.stepNumTight : st.stepNum2Up);
+    const pliThumbPx = isTightSlot ? st.pliThumbTight : st.pliThumb;
+    const pliQtyPx = isTightSlot ? st.pliQtyFontTight : st.pliQtyFont;
     const pgNumText = formatPageNumber(page.num, state.pages.length);
 
     frame.innerHTML = `
-      <div class="relative w-full h-full flex flex-col overflow-hidden ${guideCls}" style="padding:${padPx}px;padding-bottom:${padPx + 18}px">
+      <div class="relative w-full h-full flex flex-col overflow-hidden ${guideCls}" style="padding:${padPx}px;padding-bottom:${padPx + footerH}px">
         ${page.submodelIntro ? `
-          <div class="shrink-0 mb-2 px-3 py-1.5 rounded-2xl flex items-center justify-between gap-3 shadow-xs overflow-hidden" style="background:${theme.calloutBg};border:1.5px solid ${theme.calloutBorder}">
-            <div class="flex items-center gap-2.5 min-w-0 flex-1">
-              <img src="${subIntroImg}" alt="${escHtml(page.submodelIntro.name)}" class="w-14 h-11 sm:w-20 sm:h-14 object-contain shrink-0 pointer-events-none" />
+          <div class="shrink-0 flex items-center justify-between shadow-xs overflow-hidden" style="margin-bottom:${Math.round(typo.pt(7))}px;padding:${Math.round(typo.pt(5))}px ${Math.round(typo.pt(10))}px;border-radius:${Math.round(typo.pt(10))}px;gap:${Math.round(typo.pt(10))}px;background:${theme.calloutBg};border:1.5px solid ${theme.calloutBorder}">
+            <div class="flex items-center min-w-0 flex-1" style="gap:${Math.round(typo.pt(8))}px">
+              <img src="${subIntroImg}" alt="${escHtml(page.submodelIntro.name)}" style="width:${st.introThumbW}px;height:${st.introThumbH}px" class="object-contain shrink-0 pointer-events-none" />
               <div class="min-w-0 flex-1 overflow-hidden">
-                <div class="text-[9px] font-bold uppercase tracking-wider opacity-65 truncate">${page.submodelIntro.isSectionModule ? 'Build Section' : 'Submodel'}</div>
-                <div class="text-xs sm:text-sm font-extrabold truncate">${escHtml(page.submodelIntro.name)}</div>
+                <div class="font-bold uppercase tracking-wider opacity-65 truncate" style="font-size:${st.introLabelFont}px">${page.submodelIntro.isSectionModule ? 'Build Section' : 'Submodel'}</div>
+                <div class="font-extrabold truncate" style="font-size:${st.introTitleFont}px">${escHtml(page.submodelIntro.name)}</div>
               </div>
             </div>
-            <span class="shrink-0 px-3 py-1 rounded-full text-xs sm:text-sm font-black text-white shadow-xs" style="background:${theme.accent}">${page.submodelIntro.repeatCount > 1 ? `×${page.submodelIntro.repeatCount}` : `${page.submodelIntro.pieceCount || page.submodelIntro.canonicalParts.length} pcs`}</span>
+            <span class="shrink-0 rounded-full font-black text-white shadow-xs" style="background:${theme.accent};font-size:${st.introPillFont}px;padding:${Math.round(typo.pt(3))}px ${Math.round(typo.pt(10))}px">${page.submodelIntro.repeatCount > 1 ? `×${page.submodelIntro.repeatCount}` : `${page.submodelIntro.pieceCount || page.submodelIntro.canonicalParts.length} pcs`}</span>
           </div>` : ''}
         <div class="grid ${gridCls} flex-1 min-h-0" style="gap:${gapPx}px">
           ${slotData.map(({ step, ov, snap, subImg, attSubImg, mfPrepImg, attMfImg, mf1to1, pli }) => {
             const isSelStep = state.selectedStepId === step.id;
             const showLive3D = isRotateMode && isSelStep;
-            const pliScale = ov.pliScale || (isTightSlot ? 0.86 : 1.0);
+            const pliScale = ov.pliScale || (isTightSlot ? 0.92 : 1.0);
             const pliPos = ov.pliPos || { x: 0, y: 0 };
             const calloutPos = ov.calloutPos || { x: 0, y: 0 };
             const calloutSel = isArrangeMode && state.selectedArrangeEl?.stepId === step.id && state.selectedArrangeEl?.kind === 'callout';
@@ -4524,55 +4560,57 @@ function renderAll() {
               : (isSelStep && state.mode !== 'pan' && slots.length > 1 ? `1.5px dashed ${theme.accent}` : '1px solid transparent');
             const slotBgStyle = state.showStepBorders ? 'rgba(255,255,255,0.05)' : 'transparent';
 
-            const pliPadCls = isTightSlot ? 'gap-1.5 px-1.5 py-1' : 'gap-2 px-2 py-1';
             const calloutPliScale = ov.pliScale || 1.0;
-            const calloutPliStyle = `background:${theme.calloutBg};border:${pliSel ? `2px solid ${theme.accent}` : `1.5px solid ${theme.calloutBorder}`};transform:translate(${pliPos.x}px,${pliPos.y}px) scale(${calloutPliScale});transform-origin:top left;`;
-            const renderCalloutPli = (imgSrc, imgCls, topText, topCls, nameText) => `
-              <div data-drag="pli" data-step="${step.id}" title="${escHtml(`${topText} — ${nameText}`)}" class="draggable-el flex items-center ${pliPadCls} rounded-xl shadow-xs w-fit max-w-full min-w-0 overflow-hidden ${isArrangeMode ? 'cursor-move' : ''}" style="${calloutPliStyle}">
-                <img src="${imgSrc}" alt="${escHtml(nameText)}" class="${imgCls} shrink-0 object-contain pointer-events-none" />
+            const calloutPliStyle = `gap:${Math.round(typo.pt(isTightSlot ? 4.5 : 6))}px;padding:${Math.round(typo.pt(3.5))}px ${Math.round(typo.pt(isTightSlot ? 5.5 : 7))}px;border-radius:${Math.round(typo.pt(8))}px;background:${theme.calloutBg};border:${pliSel ? `2px solid ${theme.accent}` : `1.5px solid ${theme.calloutBorder}`};transform:translate(${pliPos.x}px,${pliPos.y}px) scale(${calloutPliScale});transform-origin:top left;`;
+            const renderCalloutPli = (imgSrc, imgW, imgH, topText, topWeightCls, nameText) => `
+              <div data-drag="pli" data-step="${step.id}" title="${escHtml(`${topText} — ${nameText}`)}" class="draggable-el flex items-center shadow-xs w-fit max-w-full min-w-0 overflow-hidden ${isArrangeMode ? 'cursor-move' : ''}" style="${calloutPliStyle}">
+                <img src="${imgSrc}" alt="${escHtml(nameText)}" style="width:${imgW}px;height:${imgH}px" class="shrink-0 object-contain pointer-events-none" />
                 <div class="min-w-0 flex-1 overflow-hidden leading-tight">
-                  <div class="${topCls} truncate" style="color:${theme.accent}">${escHtml(topText)}</div>
-                  <div class="text-[9px] font-semibold opacity-75 truncate">${escHtml(nameText)}</div>
+                  <div class="${topWeightCls} truncate" style="color:${theme.accent};font-size:${st.pliSubCountFont}px">${escHtml(topText)}</div>
+                  <div class="font-semibold opacity-75 truncate" style="font-size:${st.pliSubNameFont}px">${escHtml(nameText)}</div>
                 </div>
               </div>`;
 
             const pliBoxHtml = step.attachedSubmodel
               ? renderCalloutPli(
                   attSubImg,
-                  isTightSlot ? 'w-7 h-5' : 'w-11 h-8',
+                  isTightSlot ? st.pliSubThumbWTight : st.pliSubThumbW,
+                  isTightSlot ? st.pliSubThumbHTight : st.pliSubThumbH,
                   step.attachedSubmodel.isSectionAttach ? (step.attachedSubmodel.attachVerb || 'Connect') : `×${step.attachedSubmodel.repeatCount}`,
-                  'text-xs font-black',
+                  'font-black',
                   step.attachedSubmodel.name || 'Submodel',
                 )
               : step.minifigPrep
               ? renderCalloutPli(
                   mfPrepImg,
-                  isTightSlot ? 'w-6 h-6' : 'w-9 h-9',
+                  isTightSlot ? st.pliMfThumbTight : st.pliMfThumb,
+                  isTightSlot ? st.pliMfThumbTight : st.pliMfThumb,
                   step.minifigPrep.label || 'Position',
-                  'text-[10px] font-extrabold',
+                  'font-extrabold',
                   step.minifigPrep.name || 'Minifigure',
                 )
               : step.attachedMinifig
               ? renderCalloutPli(
                   attMfImg,
-                  isTightSlot ? 'w-6 h-6' : 'w-9 h-9',
+                  isTightSlot ? st.pliMfThumbTight : st.pliMfThumb,
+                  isTightSlot ? st.pliMfThumbTight : st.pliMfThumb,
                   `×${step.attachedMinifig.repeatCount || 1}`,
-                  'text-xs font-black',
+                  'font-black',
                   step.attachedMinifig.name || 'Minifigure',
                 )
               : (!step.subassembly || ov.calloutAsPages ? `
-                <div data-drag="pli" data-step="${step.id}" class="draggable-el flex items-center gap-1.5 px-1.5 py-0.5 rounded-xl flex-wrap shadow-xs w-fit max-w-full min-w-0 ${isArrangeMode ? 'cursor-move' : ''}" style="background:${theme.pliBg};border:${pliSel ? `2px solid ${theme.accent}` : `1px solid ${theme.pliBorder}`};transform:translate(${pliPos.x}px,${pliPos.y}px) scale(${pliScale});transform-origin:top left;">
+                <div data-drag="pli" data-step="${step.id}" class="draggable-el flex items-center flex-wrap shadow-xs w-fit max-w-full min-w-0 ${isArrangeMode ? 'cursor-move' : ''}" style="gap:${Math.round(typo.pt(5))}px;padding:${Math.round(typo.pt(2.5))}px ${Math.round(typo.pt(6))}px;border-radius:${Math.round(typo.pt(8))}px;background:${theme.pliBg};border:${pliSel ? `2px solid ${theme.accent}` : `1px solid ${theme.pliBorder}`};transform:translate(${pliPos.x}px,${pliPos.y}px) scale(${pliScale});transform-origin:top left;">
                   ${pli.slice(0, 7).map(item => {
                     const anySel = state.mode === 'select' && item.ids.some(id => state.selectedPartIds.has(id));
                     const thumb = getPliThumb(item.part);
-                    return `<button type="button" data-pli-ids="${item.ids.join(',')}" data-step="${step.id}" class="pli-chip flex flex-col items-center px-0.5 py-0.5 rounded-lg transition ${anySel ? 'ring-2 ring-[#1a73e8] bg-[#1a73e8]/15' : ''}" title="${escHtml(resolvePart(item.part.p).name)}">
-                      <div class="flex items-center gap-0.5 text-[11px] font-bold">
-                        <img src="${thumb}" class="${isTightSlot ? 'w-5 h-5' : 'w-7 h-7'} shrink-0 object-contain pointer-events-none" />
+                    return `<button type="button" data-pli-ids="${item.ids.join(',')}" data-step="${step.id}" class="pli-chip flex flex-col items-center rounded-lg transition ${anySel ? 'ring-2 ring-[#1a73e8] bg-[#1a73e8]/15' : ''}" style="padding:${Math.round(typo.pt(1.5))}px ${Math.round(typo.pt(2))}px" title="${escHtml(resolvePart(item.part.p).name)}">
+                      <div class="flex items-center font-bold" style="gap:${Math.round(typo.pt(2.5))}px;font-size:${pliQtyPx}px">
+                        <img src="${thumb}" style="width:${pliThumbPx}px;height:${pliThumbPx}px" class="shrink-0 object-contain pointer-events-none" />
                         <span>${item.qty}×</span>
                       </div>
                       ${state.showSizeGuides && item.guide ? `
-                        <div class="flex items-center gap-1 text-[8px] font-extrabold px-1 rounded-full bg-black/10 dark:bg-white/15">
-                          <span class="inline-block h-1 rounded-full bg-current" style="width:${Math.min(28, item.guide.lengthL * 3.5)}px"></span>
+                        <div class="flex items-center font-extrabold rounded-full bg-black/10 dark:bg-white/15" style="gap:${Math.round(typo.pt(3))}px;font-size:${st.pliGuideFont}px;padding:0 ${Math.round(typo.pt(3.5))}px">
+                          <span class="inline-block rounded-full bg-current" style="height:${Math.max(2, Math.round(typo.pt(2.5)))}px;width:${Math.min(34, Math.round(item.guide.lengthL * typo.pt(3)))}px"></span>
                           <span>1:1 ${item.guide.lengthL}L</span>
                         </div>` : ''}
                     </button>`;
@@ -4580,47 +4618,48 @@ function renderAll() {
                 </div>` : '');
 
             const headerBadgesHtml = [
-              step.stepHint ? `<span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-white text-[#202124] shadow-xs whitespace-nowrap max-w-full truncate" style="border:1.5px solid ${theme.accent}">${escHtml(step.stepHint)}</span>` : '',
-              step.minifigPrep ? `<span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-white text-[#202124] shadow-xs whitespace-nowrap max-w-full truncate" style="border:1.5px solid ${theme.accent}">↻ Prepare</span>` : '',
-              state.showRotCues && step.cue && step.cue !== 'none' ? `<span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-white text-[#202124] shadow-xs whitespace-nowrap max-w-full truncate" style="border:1.5px solid ${theme.accent}">↻ ${step.cue === 'flip_vertical' ? 'Flip Over' : step.cue === 'yaw_180' ? 'Turn 180°' : 'Rotate 90°'}</span>` : '',
+              step.stepHint ? `<span class="font-bold rounded-full bg-white text-[#202124] shadow-xs whitespace-nowrap max-w-full truncate" style="border:1.5px solid ${theme.accent};font-size:${st.cueFont}px;padding:${Math.round(typo.pt(2))}px ${Math.round(typo.pt(6))}px">${escHtml(step.stepHint)}</span>` : '',
+              step.minifigPrep ? `<span class="font-bold rounded-full bg-white text-[#202124] shadow-xs whitespace-nowrap max-w-full truncate" style="border:1.5px solid ${theme.accent};font-size:${st.cueFont}px;padding:${Math.round(typo.pt(2))}px ${Math.round(typo.pt(6))}px">↻ Prepare</span>` : '',
+              state.showRotCues && step.cue && step.cue !== 'none' ? `<span class="font-bold rounded-full bg-white text-[#202124] shadow-xs whitespace-nowrap max-w-full truncate" style="border:1.5px solid ${theme.accent};font-size:${st.cueFont}px;padding:${Math.round(typo.pt(2))}px ${Math.round(typo.pt(6))}px">↻ ${step.cue === 'flip_vertical' ? 'Flip Over' : step.cue === 'yaw_180' ? 'Turn 180°' : 'Rotate 90°'}</span>` : '',
             ].filter(Boolean).join('');
-            const stackHeaderBadges = Boolean(headerBadgesHtml) && (isTightSlot || estSlotW < 280);
+            const stackHeaderBadges = Boolean(headerBadgesHtml) && (isTightSlot || estSlotW < typo.pt(250));
 
             return `
-              <div data-step="${step.id}" class="step-slot relative rounded-xl p-2 flex flex-col min-h-0 overflow-hidden transition" style="border:${slotBorderStyle};background:${slotBgStyle}">
+              <div data-step="${step.id}" class="step-slot relative flex flex-col min-h-0 overflow-hidden transition" style="border-radius:${typo.borderRadius}px;padding:${st.slotPad}px;border:${slotBorderStyle};background:${slotBgStyle}">
                 <!-- Step Number & Draggable Parts List Box -->
                 ${(() => {
+                  const pinIconPx = Math.round(st.cueFont * 1.05);
                   const pinBadgeHtml = ov.pin
-                    ? `<span class="no-print inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-[#1a73e8]/15 text-[#1a73e8] shrink-0 whitespace-nowrap" title="Page break: Step ${step.num} always starts a new page so earlier edits won't shift later pages"><svg class="w-2.5 h-2.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4"/><path d="M10 12h4"/><path d="M17 12h4"/><path d="M6 4v3a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V4"/><path d="M6 20v-3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v3"/></svg><span>Page Break</span></span>`
+                    ? `<span class="no-print inline-flex items-center font-bold rounded-full bg-[#1a73e8]/15 text-[#1a73e8] shrink-0 whitespace-nowrap" style="gap:${Math.round(typo.pt(2))}px;font-size:${st.cueFont}px;padding:${Math.round(typo.pt(1.5))}px ${Math.round(typo.pt(5))}px" title="Page break: Step ${step.num} always starts a new page so earlier edits won't shift later pages"><svg style="width:${pinIconPx}px;height:${pinIconPx}px" class="shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4"/><path d="M10 12h4"/><path d="M17 12h4"/><path d="M6 4v3a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V4"/><path d="M6 20v-3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v3"/></svg><span>Page Break</span></span>`
                     : '';
                   return stackHeaderBadges ? `
-                <div class="relative z-10 shrink-0 flex flex-col gap-1 min-w-0">
-                  <div class="flex items-center justify-between gap-1 min-w-0">
-                    <div class="flex items-center gap-1 min-w-0 shrink-0">
-                      <span class="${isTightSlot ? 'text-lg' : 'text-2xl'} font-extrabold leading-none shrink-0">${step.num}</span>
+                <div class="relative z-10 shrink-0 flex flex-col min-w-0" style="gap:${Math.round(typo.pt(4))}px">
+                  <div class="flex items-center justify-between min-w-0" style="gap:${Math.round(typo.pt(4))}px">
+                    <div class="flex items-center min-w-0 shrink-0" style="gap:${Math.round(typo.pt(4))}px">
+                      <span class="font-extrabold leading-none shrink-0" style="font-size:${stepNumPx}px">${step.num}</span>
                       ${pinBadgeHtml}
                     </div>
-                    <div class="flex items-center gap-1 min-w-0 max-w-[75%] justify-end">${headerBadgesHtml}</div>
+                    <div class="flex items-center min-w-0 max-w-[75%] justify-end" style="gap:${Math.round(typo.pt(4))}px">${headerBadgesHtml}</div>
                   </div>
                   ${pliBoxHtml ? `<div class="min-w-0 max-w-full">${pliBoxHtml}</div>` : ''}
                 </div>` : `
-                <div class="relative z-10 shrink-0 flex items-start justify-between gap-1.5 min-w-0">
-                  <div class="flex items-start gap-1.5 flex-wrap min-w-0 flex-1">
-                    <span class="${isTightSlot ? 'text-lg' : 'text-2xl'} font-extrabold leading-none shrink-0">${step.num}</span>
+                <div class="relative z-10 shrink-0 flex items-start justify-between min-w-0" style="gap:${Math.round(typo.pt(5))}px">
+                  <div class="flex items-start flex-wrap min-w-0 flex-1" style="gap:${Math.round(typo.pt(6))}px">
+                    <span class="font-extrabold leading-none shrink-0" style="font-size:${stepNumPx}px">${step.num}</span>
                     ${pinBadgeHtml}
                     ${pliBoxHtml}
                   </div>
-                  ${headerBadgesHtml ? `<div class="flex items-center gap-1 shrink-0 flex-wrap justify-end max-w-[45%]">${headerBadgesHtml}</div>` : ''}
+                  ${headerBadgesHtml ? `<div class="flex items-center shrink-0 flex-wrap justify-end max-w-[45%]" style="gap:${Math.round(typo.pt(4))}px">${headerBadgesHtml}</div>` : ''}
                 </div>`;
                 })()}
 
                 <!-- Step Visual Area (Callout + 3D Render + Optional 1:1 Minifig Card — STRICT min-h-0 so NEVER clipped!) -->
-                <div class="flex-1 min-h-0 flex ${ov.calloutDir === 'vertical' ? 'flex-col' : 'flex-row'} items-center justify-center gap-1.5 mt-1 overflow-hidden">
+                <div class="flex-1 min-h-0 flex ${ov.calloutDir === 'vertical' ? 'flex-col' : 'flex-row'} items-center justify-center overflow-hidden" style="gap:${Math.round(typo.pt(6))}px;margin-top:${Math.round(typo.pt(4))}px">
                   ${step.subassembly && !ov.calloutAsPages ? `
-                    <div data-drag="callout" data-step="${step.id}" class="draggable-el rounded-xl p-1.5 shrink-0 w-28 sm:w-40 ${ov.calloutDir === 'vertical' ? 'max-w-full' : 'max-w-[48%]'} max-h-full flex flex-col overflow-hidden ${isArrangeMode ? 'cursor-move' : ''}" style="background:${theme.calloutBg};border:${calloutSel ? `2px solid ${theme.accent}` : `1.5px solid ${theme.calloutBorder}`};transform:translate(${calloutPos.x}px,${calloutPos.y}px)">
-                      <div class="flex items-center justify-between gap-1 text-[10px] font-bold shrink-0 min-w-0">
+                    <div data-drag="callout" data-step="${step.id}" class="draggable-el shrink-0 ${ov.calloutDir === 'vertical' ? 'max-w-full' : 'max-w-[48%]'} max-h-full flex flex-col overflow-hidden ${isArrangeMode ? 'cursor-move' : ''}" style="width:${isTightSlot ? st.calloutWTight : st.calloutW}px;padding:${Math.round(typo.pt(5))}px;border-radius:${Math.round(typo.pt(8))}px;background:${theme.calloutBg};border:${calloutSel ? `2px solid ${theme.accent}` : `1.5px solid ${theme.calloutBorder}`};transform:translate(${calloutPos.x}px,${calloutPos.y}px)">
+                      <div class="flex items-center justify-between font-bold shrink-0 min-w-0" style="gap:${Math.round(typo.pt(4))}px;font-size:${st.calloutFont}px">
                         <span class="min-w-0 truncate">${escHtml(step.subassembly.name)}</span>
-                        <span class="px-1.5 py-0.5 rounded-full text-white shrink-0" style="background:${theme.accent}">${step.subassembly.repeatCount}×</span>
+                        <span class="rounded-full text-white shrink-0" style="background:${theme.accent};padding:${Math.round(typo.pt(1))}px ${Math.round(typo.pt(4.5))}px">${step.subassembly.repeatCount}×</span>
                       </div>
                       <img src="${subImg}" class="w-full flex-1 min-h-0 object-contain pointer-events-none" />
                     </div>` : ''}
@@ -4628,18 +4667,18 @@ function renderAll() {
                   <div class="flex-1 min-w-0 min-h-0 w-full h-full flex items-center justify-center relative overflow-hidden">
                     ${showLive3D
                       ? `<canvas id="liveRotateCanvas" class="w-full h-full object-contain cursor-grab active:cursor-grabbing"></canvas>`
-                      : `<img data-pick-step="${step.id}" src="${snap.url}" class="step-render-img max-w-full max-h-full w-full h-full object-contain ${state.mode === 'select' ? 'cursor-crosshair' : 'pointer-events-none'}" />`
+                      : `<img data-pick-step="${step.id}" src="${snap.url}" class="step-render-img absolute inset-0 w-full h-full object-contain ${state.mode === 'select' ? 'cursor-crosshair' : 'pointer-events-none'}" />`
                     }
-                    ${step.isSubmodelFinal ? `<span class="absolute bottom-1.5 right-1.5 px-3 py-1 rounded-full text-sm sm:text-base font-black text-white shadow-md pointer-events-none" style="background:${theme.accent}">×${step.submodelRepeat || 2}</span>` : ''}
+                    ${step.isSubmodelFinal ? `<span class="absolute rounded-full font-black text-white shadow-md pointer-events-none" style="bottom:${Math.round(typo.pt(5))}px;right:${Math.round(typo.pt(5))}px;padding:${Math.round(typo.pt(3))}px ${Math.round(typo.pt(9))}px;font-size:${st.subFinalFont}px;background:${theme.accent}">×${step.submodelRepeat || 2}</span>` : ''}
                   </div>
 
                   ${mf1to1 ? `
-                    <div class="shrink-0 max-w-[45%] rounded-xl px-2 py-1.5 flex flex-col items-center justify-center gap-1 max-h-full overflow-hidden shadow-xs" style="background:${theme.calloutBg};border:1.5px solid ${theme.calloutBorder}" title="Actual-size 1:1 minifigure reference (${Math.round(mf1to1.heightMm)} mm tall)">
-                      <div class="flex items-center gap-1 text-[9px] font-extrabold leading-none max-w-full overflow-hidden whitespace-nowrap">
-                        <span class="px-1.5 py-0.5 rounded-full text-white shrink-0" style="background:${theme.accent}">1:1${mf1to1.isExact ? '' : ' · Fit'}</span>
+                    <div class="shrink-0 max-w-[45%] flex flex-col items-center justify-center max-h-full overflow-hidden shadow-xs" style="border-radius:${Math.round(typo.pt(8))}px;padding:${Math.round(typo.pt(5))}px ${Math.round(typo.pt(7))}px;gap:${Math.round(typo.pt(4))}px;background:${theme.calloutBg};border:1.5px solid ${theme.calloutBorder}" title="Actual-size 1:1 minifigure reference (${Math.round(mf1to1.heightMm)} mm tall)">
+                      <div class="flex items-center font-extrabold leading-none max-w-full overflow-hidden whitespace-nowrap" style="gap:${Math.round(typo.pt(4))}px;font-size:${st.mf1to1Font}px">
+                        <span class="rounded-full text-white shrink-0" style="background:${theme.accent};padding:${Math.round(typo.pt(1.5))}px ${Math.round(typo.pt(5))}px">1:1${mf1to1.isExact ? '' : ' · Fit'}</span>
                         <span class="opacity-75 tabular-nums truncate">${Math.round(mf1to1.heightMm)} mm</span>
                       </div>
-                      <div class="flex items-center gap-1">
+                      <div class="flex items-center" style="gap:${Math.round(typo.pt(4))}px">
                         <img src="${mf1to1.url}" alt="1:1 actual size minifigure" style="width:${mf1to1.displayPxW}px;height:${mf1to1.displayPxH}px" class="block shrink-0 pointer-events-none" />
                         <div class="flex flex-col items-center justify-between opacity-55" style="height:${Math.max(24, Math.round(mf1to1.displayPxH * 0.92))}px">
                           <span class="w-1.5 h-[1.5px] bg-current"></span>
@@ -4656,15 +4695,15 @@ function renderAll() {
         <!-- Custom Page Inserts (Text Notes & Images — Draggable in Arrange Mode!) -->
         ${(state.pageInserts[page.id] || []).map(ins => {
           const isInsSel = isArrangeMode && state.selectedArrangeEl?.kind === 'insert' && state.selectedArrangeEl?.insertId === ins.id;
-          return `<div data-drag="insert" data-insert-id="${ins.id}" class="draggable-el absolute z-20 rounded-xl p-2 ${isArrangeMode ? 'cursor-move' : ''}" style="left:${ins.x}px;top:${ins.y}px;transform:scale(${ins.scale || 1});transform-origin:top left;border:${isInsSel ? `2px solid ${theme.accent}` : '1px solid transparent'};background:${ins.kind === 'text' ? theme.pliBg : 'transparent'}">
+          return `<div data-drag="insert" data-insert-id="${ins.id}" class="draggable-el absolute z-20 ${isArrangeMode ? 'cursor-move' : ''}" style="left:${ins.x}px;top:${ins.y}px;padding:${Math.round(typo.pt(6))}px;border-radius:${Math.round(typo.pt(8))}px;transform:scale(${ins.scale || 1});transform-origin:top left;border:${isInsSel ? `2px solid ${theme.accent}` : '1px solid transparent'};background:${ins.kind === 'text' ? theme.pliBg : 'transparent'}">
             ${ins.kind === 'text'
-              ? `<div class="text-xs font-bold max-w-[200px] leading-snug break-words overflow-hidden">${escHtml(ins.text)}</div>`
-              : `<img src="${ins.src}" class="w-24 h-24 object-contain rounded-lg pointer-events-none" />`}
+              ? `<div class="font-bold leading-snug break-words overflow-hidden" style="font-size:${st.insertTextFont}px;max-width:${st.insertTextMaxW}px">${escHtml(ins.text)}</div>`
+              : `<img src="${ins.src}" style="width:${st.insertImgSize}px;height:${st.insertImgSize}px" class="object-contain rounded-lg pointer-events-none" />`}
           </div>`;
         }).join('')}
 
         <!-- Page Footer -->
-        <div class="absolute bottom-1.5 left-3.5 right-3.5 flex justify-between text-[10px] font-medium pointer-events-none" style="color:${theme.muted}">
+        <div class="absolute flex justify-between font-medium pointer-events-none" style="bottom:${footerPadBottom}px;left:${padPx}px;right:${padPx}px;font-size:${typo.footerFont}px;color:${theme.muted}">
           <span class="truncate">${state.showPageTitle ? escHtml(page.chapterName) : ''}</span>
           <span style="color:${theme.text}" class="font-bold shrink-0">${escHtml(pgNumText)}</span>
         </div>
@@ -4800,7 +4839,8 @@ function bindStepPageInteractions(page) {
       el.onpointermove = (e) => {
         if (!dragging) return;
         e.stopPropagation();
-        const dx = (e.clientX - sx) / state.zoom, dy = (e.clientY - sy) / state.zoom;
+        const effScale = getEffectiveStageScale();
+        const dx = (e.clientX - sx) / effScale, dy = (e.clientY - sy) / effScale;
         const nx = Math.round(origX + dx), ny = Math.round(origY + dy);
         if (kind === 'pli') {
           const ov = state.overrides[sid] || {};
@@ -5674,8 +5714,8 @@ function renderOverviewModal() {
       const dist = Math.max(10, Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY));
       const midX = (t[0].clientX + t[1].clientX) / 2;
       const midY = (t[0].clientY + t[1].clientY) / 2;
-      const nextZoom = Math.max(0.45, Math.min(3.5, startZoom * (dist / startDist)));
-      const cx = window.innerWidth / 2, cy = window.innerHeight / 2;
+      const nextZoom = Math.max(0.45, Math.min(4.5, startZoom * (dist / startDist)));
+      const { cx, cy } = getStageOrigin();
       const ratio = nextZoom / startZoom;
       state.zoom = nextZoom;
       state.panX = (midX - cx) - ((startMidX - cx) - startPanX) * ratio;
@@ -6609,14 +6649,37 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
   // Fill background (supports solid, angled gradient, and blueprint grid for built-in & custom themes)
   fillThemeBackgroundCanvas(ctx, theme, pxW, pxH);
 
-  const dens = DENSITY_PAD[state.density] || DENSITY_PAD.balanced;
-  const pad = Math.round((dens.pad / 20) * (pxW * 0.04));
-  const footerH = Math.round(pxH * 0.042);
+  const [wIn, hIn] = getActivePagePhysicalInches();
+  const pxPerInch = pxW / Math.max(1, wIn);
+  const typo = computePageTypography({
+    widthIn: wIn,
+    heightIn: hIn,
+    pxPerInch,
+    density: state.density,
+    bomDensity: state.bomConfig?.density,
+  });
+  const pad = typo.pad;
+  const footerH = typo.footerH;
+  const footerTextY = pxH - Math.max(6, Math.round(pad * 0.42)) - Math.round(typo.footerFont * 1.15);
   const pgNumText = formatPageNumber(page.num, state.pages.length);
+  const drawFooter = (leftLabel) => {
+    if (state.showPageTitle && leftLabel) {
+      ctx.fillStyle = theme.muted;
+      ctx.font = `600 ${typo.footerFont}px -apple-system, sans-serif`;
+      ctx.fillText(leftLabel, pad, footerTextY);
+    }
+    if (pgNumText) {
+      ctx.fillStyle = theme.text; ctx.textAlign = 'right';
+      ctx.font = `700 ${typo.footerFont}px -apple-system, sans-serif`;
+      ctx.fillText(pgNumText, pxW - pad, footerTextY);
+      ctx.textAlign = 'left';
+    }
+  };
   ctx.fillStyle = theme.text;
   ctx.textBaseline = 'top';
 
   if (page.kind === 'cover') {
+    const dens = DENSITY_PAD[state.density] || DENSITY_PAD.balanced;
     const cm = normalizeCoverMeta(state.coverMeta);
     const title = (cm.title || state.model.title || 'Untitled Model').trim();
     const sub = (cm.subtitle || '').trim();
@@ -6774,34 +6837,26 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
     }
     if (cm.showFireworks !== false) drawFireworksCanvas(ctx, pxW, pxH);
     const showText = cm.showText !== false;
+    let topOff = pad + Math.round(typo.pt(8));
     if (showText) {
       ctx.fillStyle = theme.text;
       ctx.textAlign = 'center';
-      ctx.font = `800 ${Math.round(pxH * 0.055)}px -apple-system, sans-serif`;
+      ctx.font = `800 ${typo.complete.titleFont}px -apple-system, sans-serif`;
       ctx.fillText(cm.title || 'Build Complete!', pxW / 2, pad);
+      topOff = pad + Math.round(typo.complete.titleFont * 1.3);
       if (cm.subtitle) {
         ctx.fillStyle = theme.muted;
-        ctx.font = `500 ${Math.round(pxH * 0.022)}px -apple-system, sans-serif`;
-        ctx.fillText(cm.subtitle, pxW / 2, pad + pxH * 0.068);
+        ctx.font = `500 ${typo.complete.subtitleFont}px -apple-system, sans-serif`;
+        ctx.fillText(cm.subtitle, pxW / 2, topOff);
+        topOff += Math.round(typo.complete.subtitleFont * 1.5);
       }
       ctx.textAlign = 'left';
     }
     const snap = renderSnapshot([], allParts, cm.az, cm.el, 920, 620, 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent });
     const img = await loadImgPromise(snap.url);
-    const topOff = showText ? pad + pxH * 0.12 : pad + pxH * 0.04;
     const availH = pxH - topOff - pad - footerH;
     drawContain(ctx, img, pad, topOff, pxW - pad * 2, availH);
-    if (state.showPageTitle) {
-      ctx.fillStyle = theme.muted;
-      ctx.font = `600 ${Math.round(pxH * 0.02)}px -apple-system, sans-serif`;
-      ctx.fillText(state.model.title, pad, pxH - pad - footerH * 0.4);
-    }
-    if (pgNumText) {
-      ctx.fillStyle = theme.text; ctx.textAlign = 'right';
-      ctx.font = `700 ${Math.round(pxH * 0.02)}px -apple-system, sans-serif`;
-      ctx.fillText(pgNumText, pxW - pad, pxH - pad - footerH * 0.4);
-      ctx.textAlign = 'left';
-    }
+    drawFooter(state.model.title);
   } else if (page.kind === 'back') {
     const bm = state.backMeta;
     if (bm.bgSrc) {
@@ -6812,12 +6867,12 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       ? 'Made with Brick Instruction Creator'
       : bm.subtitle;
     ctx.textAlign = 'center';
-    const logoSz = Math.round(Math.min(pxW, pxH) * 0.14);
+    const logoSz = typo.back.logoIcon;
     const logoY = Math.round(pxH * 0.5 - logoSz * 0.65);
     drawBrandLogoCanvas(ctx, (pxW - logoSz) / 2, logoY, logoSz);
 
-    const creditFontPx = Math.round(pxH * 0.022);
-    const creditY = logoY + logoSz + Math.round(pxH * 0.03);
+    const creditFontPx = typo.back.creditFont;
+    const creditY = logoY + logoSz + Math.round(typo.pt(12));
     ctx.fillStyle = theme.muted;
     ctx.font = `600 ${creditFontPx}px -apple-system, sans-serif`;
     ctx.fillText(credit, pxW / 2, creditY);
@@ -6843,56 +6898,57 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
     const snap = renderSnapshot([], page.previewParts || [], 38, 28, 760, 480, 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent });
     const img = await loadImgPromise(snap.url);
     ctx.fillStyle = theme.accent;
-    ctx.font = `800 ${Math.round(pxH * 0.024)}px -apple-system, sans-serif`;
+    ctx.font = `800 ${typo.divider.badgeFont}px -apple-system, sans-serif`;
     ctx.fillText(`BUILD STAGE ${page.bagNumber || 1}`, pad, pad);
+    const titleY = pad + Math.round(typo.divider.badgeFont * 1.5);
     ctx.fillStyle = theme.text;
-    ctx.font = `800 ${Math.round(pxH * 0.048)}px -apple-system, sans-serif`;
-    ctx.fillText(page.chapterName || page.label || 'Build Stage', pad, pad + Math.round(pxH * 0.036));
+    ctx.font = `800 ${typo.divider.titleFont}px -apple-system, sans-serif`;
+    ctx.fillText(page.chapterName || page.label || 'Build Stage', pad, titleY);
     ctx.fillStyle = theme.muted;
     ctx.textAlign = 'right';
-    ctx.font = `700 ${Math.round(pxH * 0.022)}px -apple-system, sans-serif`;
-    ctx.fillText(`${page.pieceCount || 0} pcs · Steps ${page.firstStepNum}–${page.lastStepNum}`, pxW - pad, pad + Math.round(pxH * 0.048));
+    ctx.font = `700 ${typo.divider.metaFont}px -apple-system, sans-serif`;
+    ctx.fillText(`${page.pieceCount || 0} pcs · Steps ${page.firstStepNum}–${page.lastStepNum}`, pxW - pad, titleY + Math.round((typo.divider.titleFont - typo.divider.metaFont) * 0.5));
     ctx.textAlign = 'left';
-    drawContain(ctx, img, pad, pad + Math.round(pxH * 0.12), pxW - pad * 2, pxH - pad * 2 - Math.round(pxH * 0.14) - footerH);
-    if (state.showPageTitle) {
-      ctx.fillStyle = theme.muted;
-      ctx.font = `600 ${Math.round(pxH * 0.02)}px -apple-system, sans-serif`;
-      ctx.fillText(state.model.title, pad, pxH - pad - footerH * 0.4);
-    }
-    if (pgNumText) {
-      ctx.fillStyle = theme.text; ctx.textAlign = 'right';
-      ctx.font = `700 ${Math.round(pxH * 0.02)}px -apple-system, sans-serif`;
-      ctx.fillText(pgNumText, pxW - pad, pxH - pad - footerH * 0.4);
-      ctx.textAlign = 'left';
-    }
+    const imgTop = titleY + Math.round(typo.divider.titleFont * 1.4);
+    drawContain(ctx, img, pad, imgTop, pxW - pad * 2, pxH - imgTop - pad - footerH);
+    drawFooter(state.model.title);
   } else if (page.kind === 'bom') {
     const cfg = state.bomConfig;
     const cols = page.bomCols || (pxW > pxH ? 6 : 4);
     const rows = page.bomRows || (pxW > pxH ? 5 : 6);
     const entries = page.bomEntries || [];
+    const bt = typo.bom;
     const headerTitle = page.bomPageCount > 1
-      ? `Parts List (${page.bomPageIdx + 1} / ${page.bomPageCount})`
+      ? `Parts List  ${page.bomPageIdx + 1} / ${page.bomPageCount}`
       : 'Parts List';
 
     ctx.fillStyle = theme.text;
-    ctx.font = `bold ${Math.round(pxH * 0.036)}px -apple-system, sans-serif`;
+    ctx.font = `700 ${bt.titleFont}px -apple-system, sans-serif`;
     ctx.fillText(headerTitle, pad, pad);
     ctx.fillStyle = theme.muted;
     ctx.textAlign = 'right';
-    ctx.font = `600 ${Math.round(pxH * 0.02)}px -apple-system, sans-serif`;
-    ctx.fillText(`${page.bomTotalPieces || allParts.length} pcs · ${page.bomTotalUnique || entries.length} unique`, pxW - pad, pad + Math.round(pxH * 0.012));
+    ctx.font = `500 ${bt.summaryFont}px -apple-system, sans-serif`;
+    ctx.fillText(`${page.bomTotalPieces || allParts.length} pcs · ${page.bomTotalUnique || entries.length} unique`, pxW - pad, pad + Math.round((bt.titleFont - bt.summaryFont) * 0.72));
     ctx.textAlign = 'left';
 
-    const headerH = Math.round(pxH * 0.065);
-    ctx.strokeStyle = theme.pliBorder; ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.moveTo(pad, pad + headerH - 6); ctx.lineTo(pxW - pad, pad + headerH - 6); ctx.stroke();
+    const headerH = bt.headerH;
+    ctx.strokeStyle = theme.pliBorder; ctx.lineWidth = 1.25;
+    ctx.beginPath(); ctx.moveTo(pad, pad + headerH - bt.headerMb); ctx.lineTo(pxW - pad, pad + headerH - bt.headerMb); ctx.stroke();
 
     const gridX = pad, gridY = pad + headerH;
     const gridW = pxW - pad * 2, gridH = pxH - gridY - pad - footerH;
     const cells = computeBomGridLayout(entries, cols, rows, cfg.flow, cfg.align);
-    const qtyFontPx = Math.max(12, Math.round(Math.min(gridW / cols, gridH / rows) * 0.15));
-    const nameFontPx = Math.max(9, Math.round(qtyFontPx * 0.72));
-    const textAreaH = qtyFontPx + (cfg.showNames ? nameFontPx + 8 : 6);
+    const cellGeom = estimateBomCellGeometry({
+      pageWidth: pxW,
+      pageHeight: pxH,
+      cols,
+      rows,
+      showNames: Boolean(cfg.showNames),
+      typo,
+    });
+    const qtyFontPx = bt.qtyFont;
+    const nameFontPx = bt.nameFont;
+    const textAreaH = cellGeom.textAreaH;
 
     for (const c of cells) {
       const { part, qty, meta } = c.item;
@@ -6902,31 +6958,24 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       const ch = c.hFrac * gridH;
       // Clear/transparent background — no opaque card boxes around BOM parts!
       const img = await loadImgPromise(getPliThumb(part));
-      drawContain(ctx, img, cx + 6, cy + 4, cw - 12, Math.max(12, ch - textAreaH - 8));
+      const padX = bt.cellPadX + bt.imgPad;
+      const padY = bt.cellPadY + bt.imgPad;
+      drawContain(ctx, img, cx + padX, cy + padY, cw - padX * 2, Math.max(14, ch - textAreaH - padY * 2));
       ctx.textAlign = 'center';
       ctx.fillStyle = theme.text;
       ctx.font = `800 ${qtyFontPx}px -apple-system, sans-serif`;
-      ctx.fillText(`${qty}×`, cx + cw / 2, cy + ch - textAreaH);
+      const qtyY = cy + ch - bt.cellPadY - textAreaH + bt.textGap;
+      ctx.fillText(`${qty}×`, cx + cw / 2, qtyY);
       if (cfg.showNames) {
         ctx.fillStyle = theme.muted;
         ctx.font = `500 ${nameFontPx}px -apple-system, sans-serif`;
-        const maxChars = Math.max(8, Math.floor((cw - 8) / (nameFontPx * 0.58)));
+        const maxChars = Math.max(8, Math.floor((cw - bt.cellPadX * 2) / (nameFontPx * 0.56)));
         const nm = meta.name.length > maxChars ? meta.name.slice(0, maxChars - 1) + '…' : meta.name;
-        ctx.fillText(nm, cx + cw / 2, cy + ch - nameFontPx - 2);
+        ctx.fillText(nm, cx + cw / 2, qtyY + Math.round(qtyFontPx * 1.18) + Math.max(1, Math.round(bt.textGap * 0.6)));
       }
     }
     ctx.textAlign = 'left';
-    if (state.showPageTitle) {
-      ctx.fillStyle = theme.muted;
-      ctx.font = `600 ${Math.round(pxH * 0.02)}px -apple-system, sans-serif`;
-      ctx.fillText(state.model.title, pad, pxH - pad - footerH * 0.4);
-    }
-    if (pgNumText) {
-      ctx.fillStyle = theme.text; ctx.textAlign = 'right';
-      ctx.font = `700 ${Math.round(pxH * 0.02)}px -apple-system, sans-serif`;
-      ctx.fillText(pgNumText, pxW - pad, pxH - pad - footerH * 0.4);
-      ctx.textAlign = 'left';
-    }
+    drawFooter(state.model.title);
   } else if (page.kind === 'steps') {
     const drawRRect = (x, y, w, h, r) => {
       const rr = Math.min(r, w / 2, h / 2);
@@ -6962,51 +7011,51 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
     const isLand = pxW >= pxH;
     const cols = slots.length === 1 ? 1 : slots.length === 2 ? (isLand ? 2 : 1) : 2;
     const rows = Math.ceil(slots.length / cols);
-    const gap = Math.round(pad * 0.55);
+    const gap = typo.gap;
+    const st = typo.steps;
 
     // Optional Finished Submodel / Section Intro Banner at top of chapter's first page
     let topY = pad;
     if (page.submodelIntro) {
       const sub = page.submodelIntro;
-      const bannerH = Math.round(Math.min(pxH * 0.13, 130));
+      const bannerH = Math.round(st.introThumbH + typo.pt(12));
       const bannerW = pxW - pad * 2;
-      drawRRect(pad, pad, bannerW, bannerH, 16);
+      drawRRect(pad, pad, bannerW, bannerH, Math.round(typo.pt(10)));
       ctx.fillStyle = theme.calloutBg;
       ctx.fill();
       ctx.strokeStyle = theme.calloutBorder;
-      ctx.lineWidth = 2;
+      ctx.lineWidth = 1.5;
       ctx.stroke();
 
       const multLabel = sub.repeatCount > 1 ? `×${sub.repeatCount}` : `${sub.pieceCount || sub.canonicalParts?.length || 0} pcs`;
-      const pillFont = Math.round(bannerH * (sub.repeatCount > 1 ? 0.34 : 0.24));
-      ctx.font = `900 ${pillFont}px -apple-system, sans-serif`;
-      const pillW = Math.max(Math.round(bannerH * 0.95), Math.round(ctx.measureText(multLabel).width + 32));
-      const pillH = Math.round(bannerH * 0.54);
-      const pillX = pad + bannerW - pillW - 18;
+      ctx.font = `900 ${st.introPillFont}px -apple-system, sans-serif`;
+      const pillW = Math.max(Math.round(typo.pt(42)), Math.round(ctx.measureText(multLabel).width + typo.pt(20)));
+      const pillH = Math.round(st.introPillFont * 1.9);
+      const pillX = pad + bannerW - pillW - Math.round(typo.pt(10));
       const pillY = pad + Math.round((bannerH - pillH) / 2);
 
       ctx.save();
-      drawRRect(pad, pad, bannerW, bannerH, 16);
+      drawRRect(pad, pad, bannerW, bannerH, Math.round(typo.pt(10)));
       ctx.clip();
       const thumbUrl = getSubmodelThumb(sub, 260, 160);
       if (thumbUrl) {
         const introImg = await loadImgPromise(thumbUrl);
-        drawContain(ctx, introImg, pad + 14, pad + 8, Math.round(bannerH * 1.45), bannerH - 16);
+        drawContain(ctx, introImg, pad + Math.round(typo.pt(10)), pad + Math.round(typo.pt(6)), st.introThumbW, bannerH - Math.round(typo.pt(12)));
       }
-      const textX = pad + 14 + Math.round(bannerH * 1.45) + 14;
-      const introTextMaxW = Math.max(0, pillX - textX - 12);
+      const textX = pad + Math.round(typo.pt(10)) + st.introThumbW + Math.round(typo.pt(10));
+      const introTextMaxW = Math.max(0, pillX - textX - Math.round(typo.pt(8)));
       ctx.fillStyle = theme.muted;
-      ctx.font = `700 ${Math.round(bannerH * 0.16)}px -apple-system, sans-serif`;
-      drawTruncatedText(sub.isSectionModule ? 'BUILD SECTION' : 'SUBMODEL', textX, pad + Math.round(bannerH * 0.2), introTextMaxW);
+      ctx.font = `700 ${st.introLabelFont}px -apple-system, sans-serif`;
+      drawTruncatedText(sub.isSectionModule ? 'BUILD SECTION' : 'SUBMODEL', textX, pad + Math.round(bannerH * 0.22), introTextMaxW);
       ctx.fillStyle = theme.text;
-      ctx.font = `800 ${Math.round(bannerH * 0.28)}px -apple-system, sans-serif`;
-      drawTruncatedText(sub.name || 'Submodel', textX, pad + Math.round(bannerH * 0.44), introTextMaxW);
+      ctx.font = `800 ${st.introTitleFont}px -apple-system, sans-serif`;
+      drawTruncatedText(sub.name || 'Submodel', textX, pad + Math.round(bannerH * 0.48), introTextMaxW);
 
       drawRRect(pillX, pillY, pillW, pillH, pillH / 2);
       ctx.fillStyle = theme.accent;
       ctx.fill();
       ctx.fillStyle = '#ffffff';
-      ctx.font = `900 ${pillFont}px -apple-system, sans-serif`;
+      ctx.font = `900 ${st.introPillFont}px -apple-system, sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(multLabel, pillX + pillW / 2, pillY + pillH / 2 + 1);
@@ -7019,35 +7068,42 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
 
     const slotW = (pxW - pad * 2 - gap * (cols - 1)) / cols;
     const slotH = (pxH - topY - pad - footerH - gap * (rows - 1)) / rows;
+    const isTightSlot = slots.length >= 4 || slotH < typo.pt(260);
+    const stepNumPx = slots.length === 1 ? st.stepNum1Up : (isTightSlot ? st.stepNumTight : st.stepNum2Up);
+    const pliThumbPx = isTightSlot ? st.pliThumbTight : st.pliThumb;
+    const pliQtyPx = isTightSlot ? st.pliQtyFontTight : st.pliQtyFont;
 
     for (let idx = 0; idx < slots.length; idx++) {
       const { ch, step } = slots[idx];
       const sx = pad + (idx % cols) * (slotW + gap);
       const sy = topY + Math.floor(idx / cols) * (slotH + gap);
       if (state.showStepBorders) {
-        ctx.strokeStyle = theme.pliBorder; ctx.lineWidth = 2;
+        ctx.strokeStyle = theme.pliBorder; ctx.lineWidth = 1.5;
         ctx.strokeRect(sx, sy, slotW, slotH);
       }
 
       // Step number
       ctx.fillStyle = theme.text;
-      ctx.font = `800 ${Math.round(Math.min(slotH * 0.11, 44))}px -apple-system, sans-serif`;
-      ctx.fillText(String(step.num), sx + 12, sy + 10);
+      ctx.font = `800 ${stepNumPx}px -apple-system, sans-serif`;
+      ctx.fillText(String(step.num), sx + st.slotPad, sy + st.slotPad);
+      const numWidth = Math.max(Math.round(stepNumPx * 1.15), Math.round(ctx.measureText(String(step.num)).width));
 
       // PLI Box (shows finished submodel/minifigure thumbnail + ×N or Connect verb on prep & attachment steps, or raw parts otherwise)
-      const pliX = sx + Math.round(Math.min(slotH * 0.14, 62)), pliY = sy + 10;
-      const pliH = Math.min(58, slotH * 0.22);
+      const pliX = sx + st.slotPad + numWidth + Math.round(typo.pt(8));
+      const pliY = sy + st.slotPad;
+      const pliH = Math.min(Math.round(pliThumbPx + typo.pt(10)), slotH * 0.22);
+      const pliRadius = Math.round(typo.pt(7));
       if (step.attachedSubmodel) {
         const att = step.attachedSubmodel;
-        const attBoxW = Math.min(slotW - (pliX - sx) - 14, Math.max(150, pliH * 3.4));
-        drawRRect(pliX, pliY, attBoxW, pliH, 10);
+        const attBoxW = Math.min(slotW - (pliX - sx) - st.slotPad, Math.max(Math.round(typo.pt(115)), pliH * 3.4));
+        drawRRect(pliX, pliY, attBoxW, pliH, pliRadius);
         ctx.fillStyle = theme.calloutBg;
         ctx.fill();
         ctx.strokeStyle = theme.calloutBorder;
-        ctx.lineWidth = 1.8;
+        ctx.lineWidth = 1.5;
         ctx.stroke();
         ctx.save();
-        drawRRect(pliX, pliY, attBoxW, pliH, 10);
+        drawRRect(pliX, pliY, attBoxW, pliH, pliRadius);
         ctx.clip();
         const attUrl = getSubmodelThumb(att, 160, 120);
         if (attUrl) {
@@ -7057,23 +7113,23 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
         const tx = pliX + 6 + pliH * 1.25 + 8;
         const textMaxW = Math.max(0, pliX + attBoxW - tx - 8);
         ctx.fillStyle = theme.accent;
-        ctx.font = `900 ${Math.round(pliH * (att.isSectionAttach ? 0.3 : 0.36))}px -apple-system, sans-serif`;
-        drawTruncatedText(att.isSectionAttach ? (att.attachVerb || 'Connect') : `×${att.repeatCount}`, tx, pliY + Math.round(pliH * 0.14), textMaxW);
+        ctx.font = `900 ${st.pliSubCountFont}px -apple-system, sans-serif`;
+        drawTruncatedText(att.isSectionAttach ? (att.attachVerb || 'Connect') : `×${att.repeatCount}`, tx, pliY + Math.round(pliH * 0.16), textMaxW);
         ctx.fillStyle = theme.text;
-        ctx.font = `600 ${Math.round(pliH * 0.24)}px -apple-system, sans-serif`;
+        ctx.font = `600 ${st.pliSubNameFont}px -apple-system, sans-serif`;
         drawTruncatedText(att.name || 'Submodel', tx, pliY + Math.round(pliH * 0.56), textMaxW);
         ctx.restore();
       } else if (step.minifigPrep) {
         const prep = step.minifigPrep;
-        const prepBoxW = Math.min(slotW - (pliX - sx) - 14, Math.max(175, pliH * 3.8));
-        drawRRect(pliX, pliY, prepBoxW, pliH, 10);
+        const prepBoxW = Math.min(slotW - (pliX - sx) - st.slotPad, Math.max(Math.round(typo.pt(130)), pliH * 3.8));
+        drawRRect(pliX, pliY, prepBoxW, pliH, pliRadius);
         ctx.fillStyle = theme.calloutBg;
         ctx.fill();
         ctx.strokeStyle = theme.calloutBorder;
-        ctx.lineWidth = 1.8;
+        ctx.lineWidth = 1.5;
         ctx.stroke();
         ctx.save();
-        drawRRect(pliX, pliY, prepBoxW, pliH, 10);
+        drawRRect(pliX, pliY, prepBoxW, pliH, pliRadius);
         ctx.clip();
         const prepUrl = getMinifigThumb(prep.canonicalParts, `prep_${prep.id}`, MINIFIG_BUILD_CAMERA.az, MINIFIG_BUILD_CAMERA.el, 120, 120);
         if (prepUrl) {
@@ -7083,23 +7139,23 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
         const tx = pliX + 6 + pliH * 1.0 + 8;
         const textMaxW = Math.max(0, pliX + prepBoxW - tx - 8);
         ctx.fillStyle = theme.accent;
-        ctx.font = `800 ${Math.round(pliH * 0.28)}px -apple-system, sans-serif`;
+        ctx.font = `800 ${st.pliSubCountFont}px -apple-system, sans-serif`;
         drawTruncatedText(prep.label || 'Position', tx, pliY + Math.round(pliH * 0.16), textMaxW);
         ctx.fillStyle = theme.text;
-        ctx.font = `600 ${Math.round(pliH * 0.23)}px -apple-system, sans-serif`;
+        ctx.font = `600 ${st.pliSubNameFont}px -apple-system, sans-serif`;
         drawTruncatedText(prep.name || 'Minifigure', tx, pliY + Math.round(pliH * 0.56), textMaxW);
         ctx.restore();
       } else if (step.attachedMinifig) {
         const att = step.attachedMinifig;
-        const attBoxW = Math.min(slotW - (pliX - sx) - 14, Math.max(150, pliH * 3.3));
-        drawRRect(pliX, pliY, attBoxW, pliH, 10);
+        const attBoxW = Math.min(slotW - (pliX - sx) - st.slotPad, Math.max(Math.round(typo.pt(115)), pliH * 3.3));
+        drawRRect(pliX, pliY, attBoxW, pliH, pliRadius);
         ctx.fillStyle = theme.calloutBg;
         ctx.fill();
         ctx.strokeStyle = theme.calloutBorder;
-        ctx.lineWidth = 1.8;
+        ctx.lineWidth = 1.5;
         ctx.stroke();
         ctx.save();
-        drawRRect(pliX, pliY, attBoxW, pliH, 10);
+        drawRRect(pliX, pliY, attBoxW, pliH, pliRadius);
         ctx.clip();
         const attUrl = getMinifigThumb(att.previewParts || att.canonicalParts, `att_${att.id}`, 38, 26, 120, 120);
         if (attUrl) {
@@ -7109,10 +7165,10 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
         const tx = pliX + 6 + pliH * 1.0 + 8;
         const textMaxW = Math.max(0, pliX + attBoxW - tx - 8);
         ctx.fillStyle = theme.accent;
-        ctx.font = `900 ${Math.round(pliH * 0.36)}px -apple-system, sans-serif`;
-        drawTruncatedText(`×${att.repeatCount || 1}`, tx, pliY + Math.round(pliH * 0.14), textMaxW);
+        ctx.font = `900 ${st.pliSubCountFont}px -apple-system, sans-serif`;
+        drawTruncatedText(`×${att.repeatCount || 1}`, tx, pliY + Math.round(pliH * 0.16), textMaxW);
         ctx.fillStyle = theme.text;
-        ctx.font = `600 ${Math.round(pliH * 0.24)}px -apple-system, sans-serif`;
+        ctx.font = `600 ${st.pliSubNameFont}px -apple-system, sans-serif`;
         drawTruncatedText(att.name || 'Minifigure', tx, pliY + Math.round(pliH * 0.56), textMaxW);
         ctx.restore();
       } else {
@@ -7120,16 +7176,17 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
         for (const p of step.parts) { const k = `${p.p}:${p.c}`; if (!pliMap.has(k)) pliMap.set(k, { part: p, qty: 0 }); pliMap.get(k).qty++; }
         const pli = Array.from(pliMap.values()).slice(0, 6);
         if (pli.length > 0) {
-          const itemW = Math.min(72, (slotW - 80) / Math.max(1, pli.length));
+          const itemW = Math.min(Math.round(pliThumbPx * 1.95), (slotW - (pliX - sx) - st.slotPad - 10) / Math.max(1, pli.length));
+          drawRRect(pliX, pliY, pli.length * itemW + 10, pliH, pliRadius);
           ctx.fillStyle = theme.pliBg;
-          ctx.fillRect(pliX, pliY, pli.length * itemW + 10, pliH);
-          ctx.strokeStyle = theme.pliBorder; ctx.lineWidth = 1.5;
-          ctx.strokeRect(pliX, pliY, pli.length * itemW + 10, pliH);
+          ctx.fill();
+          ctx.strokeStyle = theme.pliBorder; ctx.lineWidth = 1.25;
+          ctx.stroke();
           for (let pi = 0; pi < pli.length; pi++) {
             const im = await loadImgPromise(getPliThumb(pli[pi].part));
-            drawContain(ctx, im, pliX + 6 + pi * itemW, pliY + 4, itemW * 0.56, pliH - 8);
-            ctx.fillStyle = theme.text; ctx.font = `bold ${Math.round(pliH * 0.34)}px -apple-system, sans-serif`;
-            ctx.fillText(`${pli[pi].qty}×`, pliX + 6 + pi * itemW + itemW * 0.58, pliY + pliH * 0.3);
+            drawContain(ctx, im, pliX + 5 + pi * itemW, pliY + 4, itemW * 0.54, pliH - 8);
+            ctx.fillStyle = theme.text; ctx.font = `700 ${pliQtyPx}px -apple-system, sans-serif`;
+            ctx.fillText(`${pli[pi].qty}×`, pliX + 5 + pi * itemW + itemW * 0.58, pliY + Math.round((pliH - pliQtyPx) * 0.45));
           }
         }
       }
@@ -7163,35 +7220,35 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       });
       const stepImg = await loadImgPromise(snap.url);
       const isMfBuild = Boolean((step.isStandaloneFigure || ch.kind === 'minifigure') && !step.isMinifigPoseStep);
-      const renderTopY = sy + pliH + 18;
-      const renderAvailH = slotH - pliH - 28;
+      const renderTopY = sy + st.slotPad + pliH + Math.round(typo.pt(8));
+      const renderAvailH = slotH - st.slotPad * 2 - pliH - Math.round(typo.pt(10));
       if (state.showMinifig1to1 && isMfBuild) {
-        const [, pdfHIn] = getActivePagePhysicalInches();
-        const mf1 = renderMinifigOneToOne(step.parts, pxH, pdfHIn, Math.round(slotW * 0.34), Math.round(renderAvailH * 0.72), theme.accent);
-        const cardPad = 12;
-        const headerH = 22;
+        const mf1 = renderMinifigOneToOne(step.parts, pxH, hIn, Math.round(slotW * 0.34), Math.round(renderAvailH * 0.72), theme.accent);
+        const cardPad = Math.round(typo.pt(8));
+        const headerH = Math.round(st.mf1to1Font * 1.9);
         const mfHeaderLabel = `1:1${mf1.isExact ? '' : ' Fit'} · ${Math.round(mf1.heightMm)} mm`;
-        ctx.font = `800 12px -apple-system, sans-serif`;
+        ctx.font = `800 ${st.mf1to1Font}px -apple-system, sans-serif`;
         const mfHeaderW = Math.ceil(ctx.measureText(mfHeaderLabel).width);
-        const cardW = Math.min(Math.round(slotW * 0.44), Math.max(82, mfHeaderW + cardPad * 2, mf1.displayPxW + cardPad * 2 + 12));
+        const cardW = Math.min(Math.round(slotW * 0.44), Math.max(Math.round(typo.pt(68)), mfHeaderW + cardPad * 2, mf1.displayPxW + cardPad * 2 + 12));
         const cardH = Math.min(renderAvailH - 4, mf1.displayPxH + headerH + cardPad * 2);
-        const cardX = sx + slotW - cardW - 12;
+        const cardX = sx + slotW - cardW - st.slotPad;
         const cardY = renderTopY + Math.round((renderAvailH - cardH) / 2);
-        drawContain(ctx, stepImg, sx + 10, renderTopY, Math.max(40, cardX - (sx + 18)), renderAvailH);
+        drawContain(ctx, stepImg, sx + st.slotPad, renderTopY, Math.max(40, cardX - (sx + st.slotPad + 8)), renderAvailH);
 
-        drawRRect(cardX, cardY, cardW, cardH, 12);
+        const cardRadius = Math.round(typo.pt(8));
+        drawRRect(cardX, cardY, cardW, cardH, cardRadius);
         ctx.fillStyle = theme.calloutBg;
         ctx.fill();
         ctx.strokeStyle = theme.calloutBorder;
-        ctx.lineWidth = 1.8;
+        ctx.lineWidth = 1.5;
         ctx.stroke();
 
         ctx.save();
-        drawRRect(cardX, cardY, cardW, cardH, 12);
+        drawRRect(cardX, cardY, cardW, cardH, cardRadius);
         ctx.clip();
         ctx.fillStyle = theme.accent;
-        ctx.font = `800 12px -apple-system, sans-serif`;
-        drawTruncatedText(mfHeaderLabel, cardX + cardPad, cardY + 8, Math.max(0, cardW - cardPad * 2));
+        ctx.font = `800 ${st.mf1to1Font}px -apple-system, sans-serif`;
+        drawTruncatedText(mfHeaderLabel, cardX + cardPad, cardY + Math.round(cardPad * 0.7), Math.max(0, cardW - cardPad * 2));
         const mf1Img = await loadImgPromise(mf1.url);
         const imgX = cardX + Math.round((cardW - 10 - mf1.displayPxW) / 2);
         const imgY = cardY + headerH + Math.round((cardH - headerH - cardPad - mf1.displayPxH) / 2);
@@ -7210,18 +7267,18 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
         ctx.stroke();
         ctx.restore();
       } else {
-        drawContain(ctx, stepImg, sx + 10, renderTopY, slotW - 20, renderAvailH);
+        drawContain(ctx, stepImg, sx + st.slotPad, renderTopY, slotW - st.slotPad * 2, renderAvailH);
       }
 
       // Final step of a duplicate submodel: show prominent ×N badge ONLY on this last step
       if (step.isSubmodelFinal) {
         const badgeLabel = `×${step.submodelRepeat || 2}`;
-        const badgeFont = Math.round(Math.min(slotH * 0.085, 34));
+        const badgeFont = st.subFinalFont;
         ctx.font = `900 ${badgeFont}px -apple-system, sans-serif`;
-        const bW = Math.max(Math.round(badgeFont * 2.1), Math.round(ctx.measureText(badgeLabel).width + 26));
-        const bH = Math.round(badgeFont * 1.55);
-        const bX = sx + slotW - bW - 14;
-        const bY = sy + slotH - bH - 12;
+        const bW = Math.max(Math.round(badgeFont * 2.1), Math.round(ctx.measureText(badgeLabel).width + typo.pt(16)));
+        const bH = Math.round(badgeFont * 1.6);
+        const bX = sx + slotW - bW - st.slotPad;
+        const bY = sy + slotH - bH - st.slotPad;
         drawRRect(bX, bY, bW, bH, bH / 2);
         ctx.fillStyle = theme.accent;
         ctx.fill();
@@ -7234,17 +7291,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       }
     }
 
-    if (state.showPageTitle) {
-      ctx.fillStyle = theme.muted;
-      ctx.font = `600 ${Math.round(pxH * 0.02)}px -apple-system, sans-serif`;
-      ctx.fillText(page.chapterName || '', pad, pxH - pad - footerH * 0.4);
-    }
-    if (pgNumText) {
-      ctx.fillStyle = theme.text; ctx.textAlign = 'right';
-      ctx.font = `700 ${Math.round(pxH * 0.02)}px -apple-system, sans-serif`;
-      ctx.fillText(pgNumText, pxW - pad, pxH - pad - footerH * 0.4);
-      ctx.textAlign = 'left';
-    }
+    drawFooter(page.chapterName || '');
   }
 
   const jpegQuality = page.kind === 'cover' ? 0.94 : 0.88;
