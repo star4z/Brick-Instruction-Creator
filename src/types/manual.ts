@@ -188,8 +188,11 @@ export interface ArticulatedJoinPlan {
   slideAxis: [number, number];
   floatingCollarIndices: number[];
   pivotRodIndices: number[];
+  /** Intact subassembly attached to the protruding end of the rod (e.g. Middle Bogie, Pivot Hub) */
   bogiePartIndices: number[];
   bogieName?: string;
+  /** Which end of the rod the end-assembly attaches to ('bottom' or 'top') */
+  endAttachSide?: 'bottom' | 'top';
   finishPartIndices: number[];
 }
 
@@ -207,6 +210,8 @@ export interface ProposedSection {
   explodeOffset: Vec3;
   previewColor: string;
   bookletIndex?: number;
+  /** True when this section is a removable cap/roof separated by a tile-majority seam */
+  isDetachableCap?: boolean;
   articulatedJoin?: ArticulatedJoinPlan;
 }
 

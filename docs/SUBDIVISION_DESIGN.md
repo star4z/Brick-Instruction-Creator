@@ -70,33 +70,51 @@ flowchart TD
 
 ## 4. Subdivision Analysis Algorithms (`src/engine/subdivisionAnalyzer.ts`)
 
-The pure-TypeScript analyzer evaluates five complementary LEGO-native strategies, scores each (`0–100`), and ranks the top proposals—enforcing a **strict zero-floating invariant** across every section of every proposal:
+The pure-TypeScript analyzer evaluates five complementary LEGO-native strategies, scores each (`0–100`), and ranks the top proposals—enforcing a **strict zero-floating invariant** across every section of every proposal while slicing along **model-agnostic LEGO connection strengths**:
 
 > **Zero-Floating Section Invariant** (verified by [`verifyProposalZeroFloating`](../src/engine/subdivisionAnalyzer.ts)):
 > Every proposed section (and every copy inside `repeatPartIndexGroups`, plus any optional articulated `Center Joint & Bogie` or symmetric `Center Connector`) MUST be a **single connected component** in the physical adjacency graph (`isConnectedSubgraph === true`). No section may contain floating parts, detached roof chunks, or scattered debris.
 
-### Core Primitive: Anchored Connected Graph Partitioner (`enforceConnectedPartition`)
+### 4.1 General LEGO Connection-Strength Graph (Model-Agnostic)
+
+Rather than relying on model-specific heuristics (such as train-only rules), subdivision slicing is driven from first principles by [`classifyConnectionEdge`](../src/engine/subdivisionAnalyzer.ts) and [`buildTypedConnectionGraph`](../src/engine/subdivisionAnalyzer.ts), which classify every physical contact into **Strong**, **Weak**, or **None**:
+
+| Connection Type | Kind | Strength | Physical Meaning & Slicing Behavior |
+| :--- | :--- | :--- | :--- |
+| **Stud-to-Anti-Stud / SNOT** | `stud` | **Strong** | Rigid clutch power; keeps brick assemblies together unless explicitly cut. |
+| **Technic Axle through Cross (`+`) Hole** | `axle_cross` | **Strong** | Torsionally locked (cross-axle collars `4032`/`3941`, bushes `3713`, gears, axle-mounted wheels `50254`, or embedded `axlehol` parts). |
+| **Wheel ↔ Wheel Holder / Rigid Pin** | `wheel_mount`, `rigid_pin` | **Strong** | Direct wheel-holder mounts and rigid Technic pin joins stay intact. |
+| **Technic Axle through Round Hole** | `axle_round` | **Weak** | Free-spinning pivot (pinhole plates `3176`, Technic bricks `3700`, beams); natural slicing seam. |
+| **Clips, Bars, Hinges, Turntables, Swivels** | `clip_hinge` | **Weak** | Articulated/hinged joints and opposing pinhole coupler tongues; natural slicing seam. |
+| **Piece Resting on Smooth Tile** | `tile_rest` | **Weak** | No vertical clutch power; upper assembly lifts off cleanly. |
+| **Tile-Majority Mixed Seam** | `tile_seam` | **Weak** | When a horizontal seam mixes smooth tiles (or jumper plates) and minimal anchor studs, **prefer the majority**: if smooth tile contact area strictly exceeds stud contact area (`tileArea > studArea`), downgrade the minimal anchor stud edges to weak `tile_seam` edges and tag the upper assembly as a detachable cap (`isDetachableCap: true`, e.g., removable vehicle/train roofs, hatches, or modular building floors). Conversely, if studs are the majority (`studArea >= tileArea`), keep the upper assembly rigidly attached. |
+| **Concave Hollow / Smooth Side Grazing** | `none` | **None** | Rejects false AABB overlaps inside concave scoops (`30562`) and side-by-side non-SNOT grazing. |
+
+**Cohesive Strong-Group Leaf Absorption**: [`buildCohesiveStrongGroups`](../src/engine/subdivisionAnalyzer.ts) extracts connected components of strong edges and iteratively folds small degree-1 leaf components into their unique weak-graph neighbor (e.g., wheel+axle pairs into a bogie frame, clip-on doors into a cabin, or a bogie/end-assembly onto its central pivot axle) while **preserving** significant tile-majority detachable caps (`≥ 6` parts) and major body halves.
+
+### 4.2 Core Primitive: Anchored Connected Graph Partitioner (`enforceConnectedPartition`)
 1. **Per-Component Partitioning**: Extracts global connected components first so genuinely separate builds (e.g., a train and a separate trackside platform `> 16 LDU` away) stay in their own standalone connected sections instead of floating inside another section. Small CAD-clearance sub-assemblies (`≤ 16` parts within `12 LDU` in [`buildSpatialAdjacency`](../src/studioRuntime.ts)) are bridged beforehand so bogies, pantographs, headlights, and mirrors remain attached to the model.
 2. **Locked Connected Cores**: For each spatial bucket, locks its largest connected component as an anchored core.
 3. **Priority Frontier Expansion**: Claims all remaining/detached bricks strictly across physical `adjacency` edges into an already-connected core (weighted by spatial fidelity, shared-edge strength, and balance), inductively guaranteeing 100% single-component connectivity at every step.
 4. **Articulation-Guarded Boundary Smoothing**: Moves boundary bricks to an adjacent section with stronger physical attachment **only** when an early-exit BFS cut-vertex check (`wouldStayConnectedWithout`) confirms removing the brick does not split its current section.
 
 ### Strategy A: Longitudinal Halves & Segments (`longitudinal_halves`)
-*Best for elongated models (trains, light rail vehicles, ships, bridges, fuselages).*
+*Best for elongated models (trains, light rail vehicles, articulated vehicles, ships, bridges, fuselages).*
 1. **2D PCA Principal Horizontal Axis**: Computes the dominant lengthwise axis on horizontal XZ part centroids (snapping nearly orthogonal axes within ~5° to exact X or Z), so diagonal models split just as cleanly as axis-aligned ones.
-2. **Rigid Stud-Clutch Graph & Intact Bogie Detection**: Builds a strict stud-clutch graph ([`buildStudClutchAdjacency`](../src/engine/subdivisionAnalyzer.ts)) that distinguishes genuine stud/SNOT/pin connections from sliding smooth-tile seams, swiveling bogie pins (`4025`/`2878`/turntables), opposing pinhole coupler tongues (`3176`/`2444`/`32001`), vertical Technic axles, and concave-scoop hollow AABB overlaps. Detects explicit and geometric train bogies (standard RC wheel holders + wheels as well as brick-built horizontal-axle bogies) behind a car-body firewall so a cut plane **never** slices a middle bogie in half.
-3. **Minimum-Bridge Transverse Cut Sweep**: Sweeps candidate transverse cut planes around ideal split fractions (within `±14%` of length) to minimize rigid stud cut edges and piece imbalance, snapping directly onto a detected vertical Technic pivot rod when an articulated joint is present.
-4. **Zero-Floating Connected Partition & Articulated Joint Isolation**:
-   - Any brick crossing the cut plane that connects by studs to **only one half** (such as curved articulation scoops and protruding coupler tongues) is reassigned back to that corresponding half rather than dumped into the middle section.
-   - For **articulated 2-half trains**, when the **intact middle bogie**, **vertical Technic rod**, and coaxial **floating circular cross-axle pieces** (`4032`, `3941`, `3713`, `4265c`, gears, bushes, or embedded `axlehol` parts) form a single connected joint assembly, they stay centered (`explodeOffset: [0, 0, 0]`) in `Center Joint & Bogie`, while any non-articulated roof/wall/floor bricks stay connected on Front/Rear Half (never dumped into a floating debris cloud). [`buildManualFromParsed`](../src/studioRuntime.ts) builds the intact **Middle Bogie** as its own zoomed-in chapter and sequences **Connect Halves & Finish** in true physical assembly order:
+2. **Minimum-Strong-Cut Transverse Sweep**: Sweeps candidate transverse cut planes around ideal split fractions (within `±14%` of length) minimizing strong-edge cuts (without penalizing compact articulated seam hubs) and snapping onto a vertical Technic pivot rod when one sits in the seam window.
+3. **Whole Strong-Group Partitioning, Zero-Floating Enforcement & Detachable Roofs/Caps**:
+   - **Removable Roofs / Caps** (`isDetachableCap: true`): Tile-majority upper assemblies (e.g., **Front Roof** and **Rear Roof** resting on mostly smooth tiles with minimal anchor studs) are automatically paired with their parent half, lifted upward in the 3D exploded preview, built in their own zoomed-in chapter, and lowered onto the model **after** minifigures are placed inside.
+   - **Stud-Owned Seam Parts**: Entire strong body groups—including curved scoops and round-hole coupler tongues protruding slightly past the cut plane—stay intact on their corresponding half.
+   - **Articulated Joint Isolation**: Only compact intact seam hubs bridging the halves (e.g., vertical Technic pivot rod + coaxial cross-axle circular pieces + any intact end assembly such as a middle bogie or pivot hub) go into the Center Join section when they form a single connected assembly. For articulated axle joints, [`buildManualFromParsed`](../src/studioRuntime.ts) builds any multi-part end assembly as its own zoomed-in chapter and sequences **Connect Halves & Finish** in physical assembly order with 3D directional arrows and step badges:
      1. **Place** First Half
-     2. **Drop into scoop** — floating circular cross-axle pieces into the open scoop cavity
+     2. **Drop into cavity** — floating circular cross-axle pieces positioned inside the seam cavity
      3. **Slide halves together** — Second Half slides in around the center pieces
-     4. **Push rod through** — vertical Technic rod with 1:1 actual-size guide
-     5. **Attach bogie to rod** — pre-built Middle Bogie pushes up onto the protruding end of the rod
-   - For **general 2-half, 3-segment, or N-segment splits** (without an articulated 2-half joint or a single-connected symmetric center coupler), runs `enforceConnectedPartition` directly on the primary connected component with **no floating Join debris cloud** so every segment (`Front Section`, `Middle Section`, `Rear Section`) is a solid, single-connected-component build that snaps directly onto its neighbor.
-5. **Identical Half Detection (`2×` Collapse)**: Compares part+color multisets and centroid-relative quantized distance profiles (invariant under 180° rotation and reflection) to detect `2×` identical halves. Only emits a separate `Center Connector` when both halves match **and** the center connector itself is a single connected component touching both halves.
-6. **Zoom Gain Estimate**: Computes `fullDiagonal / maxSectionDiagonal` to show the expected zoom improvement (e.g., `~2.3× larger bricks per step`).
+     4. **Push rod through** — vertical Technic axle with 1:1 actual-size guide
+     5. **Attach end assembly to rod** — pre-built end assembly (e.g., Middle Bogie) pushes onto the protruding bottom or top end of the axle (`endAttachSide`)
+     6. **Place minifigures**, then **Snap on removable roofs/caps** from above
+   - **General Solid / Multi-Segment Splits**: For solid monolithic models without weak joints (or `3–6` segment splits), runs `enforceConnectedPartition` directly on the primary connected component with **no floating Join debris cloud** so every segment (`Front Section`, `Middle Section`, `Rear Section`) is a solid, single-connected-component build that snaps directly onto its neighbor.
+4. **Identical Half Detection (`2×` Collapse)**: Compares part+color multisets and centroid-relative quantized distance profiles (invariant under 180° rotation and reflection) to detect `2×` identical halves. Only emits a separate `Center Connector` when both halves match **and** the center connector itself is a single connected component touching both halves.
+5. **Zoom Gain Estimate**: Computes `fullDiagonal / maxSectionDiagonal` to show the expected zoom improvement (e.g., `~2.3× larger bricks per step`).
 
 ### Strategy B: Modular Floors & Vertical Layers (`horizontal_floors`)
 *Best for modular buildings, towers, and multi-story structures (`spanY >= 72 LDU`).*
@@ -105,7 +123,8 @@ The pure-TypeScript analyzer evaluates five complementary LEGO-native strategies
 
 ### Strategy C: Structural Modules (`structural_modules`)
 *Best for vehicles, spaceships, mechs, and multi-pod assemblies.*
-- Uses farthest-point spatial seeding inside the primary connected component, balanced multi-source BFS growth along physical connections, and articulation-guarded boundary modularity smoothing (`wouldStayConnectedWithout`) to isolate cohesive, 100% connected modules ordered in a grounded contact sequence.
+- **Natural Weak-Joint Fast Path**: When the general Typed Connection-Strength Graph (clips, hinges, round-hole axles, and tile-majority seams) naturally separates a model into `2–8` cohesive, single-connected-component strong modules, uses those exact LEGO seams directly without cutting through any strong stud cluster.
+- **Graph-Clustering Fallback**: For tightly stud-welded models, uses farthest-point spatial seeding inside the primary connected component, balanced multi-source BFS growth along physical connections, and articulation-guarded boundary modularity smoothing (`wouldStayConnectedWithout`) to isolate cohesive, 100% connected modules ordered in a grounded contact sequence.
 
 ### Strategy D: Numbered Build Bags (`numbered_bags`)
 *Universal fallback—valid on any model.*

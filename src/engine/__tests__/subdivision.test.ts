@@ -7,6 +7,8 @@ import {
   assessModelSubdivisionNeed,
   buildSpatialSectorsProposal,
   buildSubdivisionInputsFromCanonical,
+  classifyConnectionEdge,
+  classifySubdivisionPartFlags,
   computeHorizontalPrincipalAxis,
   isConnectedSubgraph,
   mergeProposedSections,
@@ -739,5 +741,301 @@ describe('Large & Elongated Model Subdivision Analyzer', () => {
       }
       expect(covered.size).toBe(parts.length);
     }
+  });
+
+  it('classifies LEGO connection strengths from first principles (cross-axle & studs strong; round-hole axle, clips, hinges & tile tops weak)', () => {
+    const mk = (
+      index: number,
+      partId: string,
+      partName: string,
+      min: [number, number, number],
+      max: [number, number, number],
+    ): SubdivisionPartInput => {
+      const box = {
+        min,
+        max,
+        center: [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2] as [number, number, number],
+      };
+      return {
+        index,
+        id: `p_${index}`,
+        partId,
+        partName,
+        colorId: 72,
+        box,
+        ...classifySubdivisionPartFlags(partId, partName, box),
+      };
+    };
+
+    const axle = mk(0, '3706', 'Technic Axle 6L', [-4, 0, -4], [4, 120, 4]);
+    const crossCollar = mk(1, '4032', 'Plate 2 x 2 Round with Axlehole', [-20, 40, -20], [20, 48, 20]);
+    const roundHolePlate = mk(2, '3176', 'Plate 3 x 2 with Hole', [-45, 32, -20], [15, 40, 20]);
+    const brickBelow = mk(3, '3001', 'Brick 2x4', [-40, 0, -20], [40, 24, 20]);
+    const plateAbove = mk(4, '3020', 'Plate 2x4', [-40, 24, -20], [40, 32, 20]);
+    const smoothTile = mk(5, '3069b', 'Tile 1x2', [-40, 24, -10], [0, 32, 10]);
+    const plateOnTile = mk(6, '3020', 'Plate 2x4', [-40, 32, -20], [40, 40, 20]);
+    const clipBrick = mk(7, '60475b', 'Brick 1x1 w/ Vertical Clip', [-10, 0, -10], [10, 24, 10]);
+    const barRod = mk(8, '30374', 'Bar 4L', [8, 0, -4], [16, 80, 4]);
+
+    // Axle through cross (+) hole -> STRONG
+    expect(classifyConnectionEdge(axle, crossCollar)).toMatchObject({ kind: 'axle_cross', strength: 'strong' });
+    // Axle through round hole -> WEAK
+    expect(classifyConnectionEdge(axle, roundHolePlate)).toMatchObject({ kind: 'axle_round', strength: 'weak' });
+    // Stud connection -> STRONG
+    expect(classifyConnectionEdge(brickBelow, plateAbove)).toMatchObject({ kind: 'stud', strength: 'strong' });
+    // Piece on top of smooth tile -> WEAK
+    expect(classifyConnectionEdge(smoothTile, plateOnTile)).toMatchObject({ kind: 'tile_rest', strength: 'weak' });
+    // Clip <-> bar -> WEAK
+    expect(classifyConnectionEdge(clipBrick, barRod)).toMatchObject({ kind: 'clip_hinge', strength: 'weak' });
+  });
+
+  it('treats tile-majority seams with minimal anchor studs as detachable roofs on both ends while keeping stud-only roofs attached', () => {
+    // Two articulated halves (non-train generic vehicle / building wings) connected by a central vertical Technic axle
+    // through round holes + cross-axle collar.
+    // BOTH halves have removable roofs resting on 8 smooth 1x4 tiles + only 2 minimal 1x1 anchor studs (tileArea >> studArea)!
+    const parts: SubdivisionPartInput[] = [];
+    const adj: number[][] = [];
+    const addPart = (
+      id: string,
+      partId: string,
+      partName: string,
+      min: [number, number, number],
+      max: [number, number, number],
+    ): number => {
+      const index = parts.length;
+      parts.push({
+        index,
+        id,
+        partId,
+        partName,
+        colorId: 72,
+        box: {
+          min,
+          max,
+          center: [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2],
+        },
+      });
+      adj.push([]);
+      return index;
+    };
+    const link = (a: number, b: number) => {
+      if (a === b) return;
+      if (!adj[a].includes(b)) adj[a].push(b);
+      if (!adj[b].includes(a)) adj[b].push(a);
+    };
+
+    const buildEndWithRemovableRoof = (prefix: string, sign: -1 | 1) => {
+      const bodyIds: number[] = [];
+      const roofIds: number[] = [];
+      const xs = [60, 140, 220, 300].map((v) => v * sign).sort((a, b) => a - b);
+
+      const wallBases: number[] = [];
+      const wallTops: number[] = [];
+      let prevFloor = -1;
+      for (const x of xs) {
+        const fl = addPart(`${prefix}_fl_${x}`, '3020', 'Plate 2x4', [x - 40, 0, -40], [x + 40, 8, 40]);
+        const w1 = addPart(`${prefix}_w1_${x}`, '3001', 'Brick 2x4', [x - 40, 8, -40], [x + 40, 32, 40]);
+        const w2 = addPart(`${prefix}_w2_${x}`, '3001', 'Brick 2x4', [x - 40, 32, -40], [x + 40, 56, 40]);
+        link(fl, w1); link(w1, w2);
+        if (prevFloor >= 0) {
+          const tie = addPart(`${prefix}_tie_${x}`, '3020', 'Plate 2x4', [x - 80, 8, -20], [x, 16, 20]);
+          link(prevFloor, tie); link(fl, tie);
+          bodyIds.push(tie);
+        }
+        prevFloor = fl;
+        wallBases.push(w1);
+        wallTops.push(w2);
+        bodyIds.push(fl, w1, w2);
+      }
+
+      // Tile-majority seam at y = 56..64: mostly smooth tiles (2431 Tile 1x4) + only 1 minimal 1x1 anchor plate (3024)!
+      const seamTiles: number[] = [];
+      for (let i = 0; i < xs.length; i++) {
+        const x = xs[i];
+        const tileA = addPart(`${prefix}_stA_${x}`, '2431', 'Tile 1x4', [x - 40, 56, -40], [x + 40, 64, -20]);
+        const tileB = addPart(`${prefix}_stB_${x}`, '2431', 'Tile 1x4', [x - 40, 56, 20], [x + 40, 64, 40]);
+        link(wallTops[i], tileA);
+        link(wallTops[i], tileB);
+        seamTiles.push(tileA, tileB);
+        bodyIds.push(tileA, tileB);
+      }
+      // Minimal 1x1 anchor stud plate at one corner to hold the roof lightly
+      const anchorX = xs[1];
+      const anchorStud = addPart(`${prefix}_anchor`, '3024', 'Plate 1x1', [anchorX - 10, 56, -10], [anchorX + 10, 64, 10]);
+      link(wallTops[1], anchorStud);
+      bodyIds.push(anchorStud);
+
+      // Removable Roof sitting on y = 64..80 (connected via 1 minimal anchor stud + resting on 8 smooth 1x4 tiles!)
+      let prevRoof = -1;
+      for (let i = 0; i < xs.length; i++) {
+        const x = xs[i];
+        const rp = addPart(`${prefix}_rp_${x}`, '3020', 'Plate 2x4', [x - 40, 64, -40], [x + 40, 72, 40]);
+        const rt = addPart(`${prefix}_rt_${x}`, '87079', 'Tile 2x4', [x - 40, 72, -40], [x + 40, 80, 40]);
+        link(rp, rt);
+        // Rests on the two smooth 1x4 tiles underneath
+        link(seamTiles[i * 2], rp);
+        link(seamTiles[i * 2 + 1], rp);
+        if (i === 1) link(anchorStud, rp); // Minimal stud connection!
+        if (prevRoof >= 0) {
+          const rTie = addPart(`${prefix}_rtie_${x}`, '3020', 'Plate 2x4', [x - 80, 72, -20], [x, 80, 20]);
+          link(prevRoof, rTie); link(rp, rTie);
+          roofIds.push(rTie);
+        }
+        prevRoof = rp;
+        roofIds.push(rp, rt);
+      }
+
+      // Coupler tongue with round pinhole extending to x = 0:
+      // front sits at y=[24,32] under front_w2 (y=[32,56]); rear sits at y=[32,40] on top of rear_w1 (y=[8,32])!
+      const anchorBrick = sign < 0 ? wallTops[wallTops.length - 1] : wallBases[0];
+      const tongue = addPart(
+        `${prefix}_tongue`,
+        '3176',
+        'Plate 3 x 2 with Hole',
+        sign < 0 ? [-45, 24, -20] : [-15, 32, -20],
+        sign < 0 ? [15, 32, 20] : [45, 40, 20],
+      );
+      link(anchorBrick, tongue);
+      bodyIds.push(tongue);
+
+      return { bodyIds, roofIds, tongue };
+    };
+
+    const front = buildEndWithRemovableRoof('front', -1);
+    const rear = buildEndWithRemovableRoof('rear', 1);
+
+    // Center non-train articulated joint: vertical Technic axle through round holes + 1 cross-axle collar (4032)
+    const rod = addPart('pivot_axle', '3706', 'Technic Axle 6L', [-4, 10, -4], [4, 70, 4]);
+    const collar = addPart('pivot_collar', '4032', 'Plate 2 x 2 Round with Axlehole', [-20, 40, -20], [20, 48, 20]);
+    link(rod, front.tongue);
+    link(rod, rear.tongue);
+    link(rod, collar);
+    link(collar, rear.tongue);
+
+    const { proposals } = analyzeModelSubdivisions(parts, adj);
+    const longProp = proposals.find((p) => p.strategy === 'longitudinal_halves')!;
+    expect(longProp).toBeDefined();
+
+    // Both removable roofs should be cleanly detected as separate detachable cap sections!
+    const capSecs = longProp.sections.filter((s) => s.isDetachableCap);
+    expect(capSecs).toHaveLength(2);
+    expect(capSecs.map((c) => c.name).sort()).toEqual(['Front Roof', 'Rear Roof']);
+
+    const frontRoofSec = capSecs.find((c) => c.name === 'Front Roof')!;
+    const rearRoofSec = capSecs.find((c) => c.name === 'Rear Roof')!;
+    expect(new Set(frontRoofSec.partIndices)).toEqual(new Set(front.roofIds));
+    expect(new Set(rearRoofSec.partIndices)).toEqual(new Set(rear.roofIds));
+    // Roofs lift cleanly upward in 3D exploded preview
+    expect(frontRoofSec.explodeOffset[1]).toBeGreaterThan(0.5);
+    expect(rearRoofSec.explodeOffset[1]).toBeGreaterThan(0.5);
+
+    // Center joint contains ONLY the Technic axle and cross-axle collar (zero train-specific parts!)
+    const joinSec = longProp.sections.find((s) => s.role === 'join')!;
+    expect(joinSec).toBeDefined();
+    expect(new Set(joinSec.partIndices)).toEqual(new Set([rod, collar]));
+    expect(joinSec.articulatedJoin!.pivotRodIndices).toEqual([rod]);
+    expect(joinSec.articulatedJoin!.floatingCollarIndices).toEqual([collar]);
+
+    // Exact partition check
+    const covered = new Set<number>();
+    for (const sec of longProp.sections) {
+      for (const idx of sec.partIndices) {
+        expect(covered.has(idx)).toBe(false);
+        covered.add(idx);
+      }
+    }
+    expect(covered.size).toBe(parts.length);
+
+    // Negative check: when the seam is majority STUDS (plates instead of tiles), roofs stay attached!
+    const studParts = parts.map((p) =>
+      p.partId === '2431'
+        ? { ...p, partId: '3710', partName: 'Plate 1x4' }
+        : { ...p },
+    );
+    const studResult = analyzeModelSubdivisions(studParts, adj);
+    const studLongProp = studResult.proposals.find((p) => p.strategy === 'longitudinal_halves')!;
+    expect(studLongProp).toBeDefined();
+    expect(studLongProp.sections.filter((s) => s.isDetachableCap)).toHaveLength(0);
+  });
+
+  it('uses general clip/hinge weak edges to separate non-train hinged assemblies cleanly in structural modules', () => {
+    // Non-train spaceship / mech with a central fuselage and 2 side wings attached purely by clip/bar joints
+    const parts: SubdivisionPartInput[] = [];
+    const adj: number[][] = [];
+    const addPart = (
+      id: string,
+      partId: string,
+      partName: string,
+      min: [number, number, number],
+      max: [number, number, number],
+    ): number => {
+      const index = parts.length;
+      parts.push({
+        index,
+        id,
+        partId,
+        partName,
+        colorId: 72,
+        box: {
+          min,
+          max,
+          center: [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2],
+        },
+      });
+      adj.push([]);
+      return index;
+    };
+    const link = (a: number, b: number) => {
+      if (a === b) return;
+      if (!adj[a].includes(b)) adj[a].push(b);
+      if (!adj[b].includes(a)) adj[b].push(a);
+    };
+
+    const buildCluster = (prefix: string, cx: number, cz: number, countX: number) => {
+      const ids: number[] = [];
+      let prev = -1;
+      for (let i = 0; i < countX; i++) {
+        const x = cx + (i - (countX - 1) / 2) * 80;
+        const p1 = addPart(`${prefix}_p_${i}`, '3020', 'Plate 2x4', [x - 40, 0, cz - 40], [x + 40, 8, cz + 40]);
+        const b1 = addPart(`${prefix}_b_${i}`, '3001', 'Brick 2x4', [x - 40, 8, cz - 40], [x + 40, 32, cz + 40]);
+        const p2 = addPart(`${prefix}_t_${i}`, '3020', 'Plate 2x4', [x - 40, 32, cz - 40], [x + 40, 40, cz + 40]);
+        link(p1, b1); link(b1, p2);
+        if (prev >= 0) {
+          const tie = addPart(`${prefix}_tie_${i}`, '3020', 'Plate 2x4', [x - 80, 32, cz - 20], [x, 40, cz + 20]);
+          link(prev, tie); link(b1, tie);
+          ids.push(tie);
+        }
+        prev = b1;
+        ids.push(p1, b1, p2);
+      }
+      return ids;
+    };
+
+    const core = buildCluster('core', 0, 0, 4);
+    const leftWing = buildCluster('lwing', 0, -110, 4);
+    const rightWing = buildCluster('rwing', 0, 110, 4);
+
+    // Attach left & right wings to core via weak clip <-> bar hinge joints
+    const coreBarL = addPart('core_bar_l', '48729', 'Bar Holder with Clip', [-20, 8, -50], [20, 32, -38]);
+    const wingClipL = addPart('wing_clip_l', '60475b', 'Brick 1x1 w/ Vertical Clip', [-20, 8, -72], [20, 32, -48]);
+    link(core[0], coreBarL);
+    link(leftWing[0], wingClipL);
+    link(coreBarL, wingClipL);
+
+    const coreBarR = addPart('core_bar_r', '48729', 'Bar Holder with Clip', [-20, 8, 38], [20, 32, 50]);
+    const wingClipR = addPart('wing_clip_r', '60475b', 'Brick 1x1 w/ Vertical Clip', [-20, 8, 48], [20, 32, 72]);
+    link(core[0], coreBarR);
+    link(rightWing[0], wingClipR);
+    link(coreBarR, wingClipR);
+
+    const { proposals } = analyzeModelSubdivisions(parts, adj);
+    const modProp = proposals.find((p) => p.strategy === 'structural_modules')!;
+    expect(modProp).toBeDefined();
+    // All 3 hinged assemblies (core + 2 wings) should stay cleanly separated along the weak clip joints!
+    const totalSections = modProp.sections.reduce(
+      (acc, s) => acc + (s.repeatPartIndexGroups ? s.repeatPartIndexGroups.length : 1),
+      0,
+    );
+    expect(totalSections).toBe(3);
   });
 });
