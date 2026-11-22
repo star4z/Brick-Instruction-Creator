@@ -4216,11 +4216,11 @@ function renderAll() {
     frame.innerHTML = `
       <div class="relative w-full h-full flex flex-col overflow-hidden ${guideCls}" style="padding:${padPx}px;padding-bottom:${padPx + 18}px">
         ${page.submodelIntro ? `
-          <div class="shrink-0 mb-2 px-3 py-1.5 rounded-2xl flex items-center justify-between gap-3 shadow-xs" style="background:${theme.calloutBg};border:1.5px solid ${theme.calloutBorder}">
-            <div class="flex items-center gap-2.5 min-w-0">
+          <div class="shrink-0 mb-2 px-3 py-1.5 rounded-2xl flex items-center justify-between gap-3 shadow-xs overflow-hidden" style="background:${theme.calloutBg};border:1.5px solid ${theme.calloutBorder}">
+            <div class="flex items-center gap-2.5 min-w-0 flex-1">
               <img src="${subIntroImg}" alt="${escHtml(page.submodelIntro.name)}" class="w-14 h-11 sm:w-20 sm:h-14 object-contain shrink-0 pointer-events-none" />
-              <div class="min-w-0">
-                <div class="text-[9px] font-bold uppercase tracking-wider opacity-65">${page.submodelIntro.isSectionModule ? 'Build Section' : 'Submodel'}</div>
+              <div class="min-w-0 flex-1 overflow-hidden">
+                <div class="text-[9px] font-bold uppercase tracking-wider opacity-65 truncate">${page.submodelIntro.isSectionModule ? 'Build Section' : 'Submodel'}</div>
                 <div class="text-xs sm:text-sm font-extrabold truncate">${escHtml(page.submodelIntro.name)}</div>
               </div>
             </div>
@@ -4240,70 +4240,101 @@ function renderAll() {
               : (isSelStep && state.mode !== 'pan' && slots.length > 1 ? `1.5px dashed ${theme.accent}` : '1px solid transparent');
             const slotBgStyle = state.showStepBorders ? 'rgba(255,255,255,0.05)' : 'transparent';
 
+            const pliPadCls = isTightSlot ? 'gap-1.5 px-1.5 py-1' : 'gap-2 px-2 py-1';
+            const calloutPliScale = ov.pliScale || 1.0;
+            const calloutPliStyle = `background:${theme.calloutBg};border:${pliSel ? `2px solid ${theme.accent}` : `1.5px solid ${theme.calloutBorder}`};transform:translate(${pliPos.x}px,${pliPos.y}px) scale(${calloutPliScale});transform-origin:top left;`;
+            const renderCalloutPli = (imgSrc, imgCls, topText, topCls, nameText) => `
+              <div data-drag="pli" data-step="${step.id}" title="${escHtml(`${topText} — ${nameText}`)}" class="draggable-el flex items-center ${pliPadCls} rounded-xl shadow-xs w-fit max-w-full min-w-0 overflow-hidden ${isArrangeMode ? 'cursor-move' : ''}" style="${calloutPliStyle}">
+                <img src="${imgSrc}" alt="${escHtml(nameText)}" class="${imgCls} shrink-0 object-contain pointer-events-none" />
+                <div class="min-w-0 flex-1 overflow-hidden leading-tight">
+                  <div class="${topCls} truncate" style="color:${theme.accent}">${escHtml(topText)}</div>
+                  <div class="text-[9px] font-semibold opacity-75 truncate">${escHtml(nameText)}</div>
+                </div>
+              </div>`;
+
+            const pliBoxHtml = step.attachedSubmodel
+              ? renderCalloutPli(
+                  attSubImg,
+                  isTightSlot ? 'w-7 h-5' : 'w-11 h-8',
+                  step.attachedSubmodel.isSectionAttach ? (step.attachedSubmodel.attachVerb || 'Connect') : `×${step.attachedSubmodel.repeatCount}`,
+                  'text-xs font-black',
+                  step.attachedSubmodel.name || 'Submodel',
+                )
+              : step.minifigPrep
+              ? renderCalloutPli(
+                  mfPrepImg,
+                  isTightSlot ? 'w-6 h-6' : 'w-9 h-9',
+                  step.minifigPrep.label || 'Position',
+                  'text-[10px] font-extrabold',
+                  step.minifigPrep.name || 'Minifigure',
+                )
+              : step.attachedMinifig
+              ? renderCalloutPli(
+                  attMfImg,
+                  isTightSlot ? 'w-6 h-6' : 'w-9 h-9',
+                  `×${step.attachedMinifig.repeatCount || 1}`,
+                  'text-xs font-black',
+                  step.attachedMinifig.name || 'Minifigure',
+                )
+              : (!step.subassembly || ov.calloutAsPages ? `
+                <div data-drag="pli" data-step="${step.id}" class="draggable-el flex items-center gap-1.5 px-1.5 py-0.5 rounded-xl flex-wrap shadow-xs w-fit max-w-full min-w-0 ${isArrangeMode ? 'cursor-move' : ''}" style="background:${theme.pliBg};border:${pliSel ? `2px solid ${theme.accent}` : `1px solid ${theme.pliBorder}`};transform:translate(${pliPos.x}px,${pliPos.y}px) scale(${pliScale});transform-origin:top left;">
+                  ${pli.slice(0, 7).map(item => {
+                    const anySel = state.mode === 'select' && item.ids.some(id => state.selectedPartIds.has(id));
+                    const thumb = getPliThumb(item.part);
+                    return `<button type="button" data-pli-ids="${item.ids.join(',')}" data-step="${step.id}" class="pli-chip flex flex-col items-center px-0.5 py-0.5 rounded-lg transition ${anySel ? 'ring-2 ring-[#1a73e8] bg-[#1a73e8]/15' : ''}" title="${escHtml(resolvePart(item.part.p).name)}">
+                      <div class="flex items-center gap-0.5 text-[11px] font-bold">
+                        <img src="${thumb}" class="${isTightSlot ? 'w-5 h-5' : 'w-7 h-7'} shrink-0 object-contain pointer-events-none" />
+                        <span>${item.qty}×</span>
+                      </div>
+                      ${state.showSizeGuides && item.guide ? `
+                        <div class="flex items-center gap-1 text-[8px] font-extrabold px-1 rounded-full bg-black/10 dark:bg-white/15">
+                          <span class="inline-block h-1 rounded-full bg-current" style="width:${Math.min(28, item.guide.lengthL * 3.5)}px"></span>
+                          <span>1:1 ${item.guide.lengthL}L</span>
+                        </div>` : ''}
+                    </button>`;
+                  }).join('')}
+                </div>` : '');
+
+            const headerBadgesHtml = [
+              step.minifigPrep ? `<span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-white text-[#202124] shadow-xs whitespace-nowrap max-w-full truncate" style="border:1.5px solid ${theme.accent}">↻ Prepare</span>` : '',
+              state.showRotCues && step.cue && step.cue !== 'none' ? `<span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-white text-[#202124] shadow-xs whitespace-nowrap max-w-full truncate" style="border:1.5px solid ${theme.accent}">↻ ${step.cue === 'flip_vertical' ? 'Flip Over' : step.cue === 'yaw_180' ? 'Turn 180°' : 'Rotate 90°'}</span>` : '',
+            ].filter(Boolean).join('');
+            const stackHeaderBadges = Boolean(headerBadgesHtml) && (isTightSlot || estSlotW < 280);
+
             return `
               <div data-step="${step.id}" class="step-slot relative rounded-xl p-2 flex flex-col min-h-0 overflow-hidden transition" style="border:${slotBorderStyle};background:${slotBgStyle}">
                 <!-- Step Number & Draggable Parts List Box -->
-                <div class="relative z-10 shrink-0 flex items-start justify-between gap-1.5">
-                  <div class="flex items-start gap-1.5 flex-wrap">
-                    <span class="${isTightSlot ? 'text-lg' : 'text-2xl'} font-extrabold leading-none">${step.num}</span>
-                    ${ov.pin ? `<span class="no-print inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-[#1a73e8]/15 text-[#1a73e8]" title="Pinned page break: Step ${step.num} always starts a new page so earlier edits won't shift later pages"><svg class="w-2.5 h-2.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg><span>Page Break</span></span>` : ''}
-
-                    ${step.attachedSubmodel ? `
-                      <div data-drag="pli" data-step="${step.id}" class="draggable-el flex items-center gap-2 px-2 py-1 rounded-xl shadow-xs ${isArrangeMode ? 'cursor-move' : ''}" style="background:${theme.calloutBg};border:${pliSel ? `2px solid ${theme.accent}` : `1.5px solid ${theme.calloutBorder}`};transform:translate(${pliPos.x}px,${pliPos.y}px) scale(${pliScale});transform-origin:top left;">
-                        <img src="${attSubImg}" alt="${escHtml(step.attachedSubmodel.name)}" class="${isTightSlot ? 'w-8 h-6' : 'w-11 h-8'} object-contain pointer-events-none" />
-                        <div class="leading-tight">
-                          <div class="text-xs font-black" style="color:${theme.accent}">${step.attachedSubmodel.isSectionAttach ? (step.attachedSubmodel.attachVerb || 'Connect') : `×${step.attachedSubmodel.repeatCount}`}</div>
-                          <div class="text-[9px] font-semibold opacity-75 max-w-[110px] truncate">${escHtml(step.attachedSubmodel.name)}</div>
-                        </div>
-                      </div>`
-                    : step.minifigPrep ? `
-                      <div data-drag="pli" data-step="${step.id}" class="draggable-el flex items-center gap-2 px-2 py-1 rounded-xl shadow-xs ${isArrangeMode ? 'cursor-move' : ''}" style="background:${theme.calloutBg};border:${pliSel ? `2px solid ${theme.accent}` : `1.5px solid ${theme.calloutBorder}`};transform:translate(${pliPos.x}px,${pliPos.y}px) scale(${pliScale});transform-origin:top left;">
-                        <img src="${mfPrepImg}" alt="${escHtml(step.minifigPrep.name)}" class="${isTightSlot ? 'w-7 h-7' : 'w-9 h-9'} object-contain pointer-events-none" />
-                        <div class="leading-tight">
-                          <div class="text-[10px] font-extrabold" style="color:${theme.accent}">${escHtml(step.minifigPrep.label)}</div>
-                          <div class="text-[9px] font-semibold opacity-75 max-w-[110px] truncate">${escHtml(step.minifigPrep.name)}</div>
-                        </div>
-                      </div>`
-                    : step.attachedMinifig ? `
-                      <div data-drag="pli" data-step="${step.id}" class="draggable-el flex items-center gap-2 px-2 py-1 rounded-xl shadow-xs ${isArrangeMode ? 'cursor-move' : ''}" style="background:${theme.calloutBg};border:${pliSel ? `2px solid ${theme.accent}` : `1.5px solid ${theme.calloutBorder}`};transform:translate(${pliPos.x}px,${pliPos.y}px) scale(${pliScale});transform-origin:top left;">
-                        <img src="${attMfImg}" alt="${escHtml(step.attachedMinifig.name)}" class="${isTightSlot ? 'w-7 h-7' : 'w-9 h-9'} object-contain pointer-events-none" />
-                        <div class="leading-tight">
-                          <div class="text-xs font-black" style="color:${theme.accent}">×${step.attachedMinifig.repeatCount || 1}</div>
-                          <div class="text-[9px] font-semibold opacity-75 max-w-[100px] truncate">${escHtml(step.attachedMinifig.name)}</div>
-                        </div>
-                      </div>`
-                    : (!step.subassembly || ov.calloutAsPages ? `
-                      <div data-drag="pli" data-step="${step.id}" class="draggable-el flex items-center gap-1.5 px-1.5 py-0.5 rounded-xl flex-wrap shadow-xs ${isArrangeMode ? 'cursor-move' : ''}" style="background:${theme.pliBg};border:${pliSel ? `2px solid ${theme.accent}` : `1px solid ${theme.pliBorder}`};transform:translate(${pliPos.x}px,${pliPos.y}px) scale(${pliScale});transform-origin:top left;">
-                        ${pli.slice(0, 7).map(item => {
-                          const anySel = state.mode === 'select' && item.ids.some(id => state.selectedPartIds.has(id));
-                          const thumb = getPliThumb(item.part);
-                          return `<button type="button" data-pli-ids="${item.ids.join(',')}" data-step="${step.id}" class="pli-chip flex flex-col items-center px-0.5 py-0.5 rounded-lg transition ${anySel ? 'ring-2 ring-[#1a73e8] bg-[#1a73e8]/15' : ''}" title="${resolvePart(item.part.p).name}">
-                            <div class="flex items-center gap-0.5 text-[11px] font-bold">
-                              <img src="${thumb}" class="${isTightSlot ? 'w-5 h-5' : 'w-7 h-7'} object-contain pointer-events-none" />
-                              <span>${item.qty}×</span>
-                            </div>
-                            ${state.showSizeGuides && item.guide ? `
-                              <div class="flex items-center gap-1 text-[8px] font-extrabold px-1 rounded-full bg-black/10 dark:bg-white/15">
-                                <span class="inline-block h-1 rounded-full bg-current" style="width:${Math.min(28, item.guide.lengthL * 3.5)}px"></span>
-                                <span>1:1 ${item.guide.lengthL}L</span>
-                              </div>` : ''}
-                          </button>`;
-                        }).join('')}
-                      </div>` : '')}
+                ${(() => {
+                  const pinBadgeHtml = ov.pin
+                    ? `<span class="no-print inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-[#1a73e8]/15 text-[#1a73e8] shrink-0 whitespace-nowrap" title="Pinned page break: Step ${step.num} always starts a new page so earlier edits won't shift later pages"><svg class="w-2.5 h-2.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg><span>Page Break</span></span>`
+                    : '';
+                  return stackHeaderBadges ? `
+                <div class="relative z-10 shrink-0 flex flex-col gap-1 min-w-0">
+                  <div class="flex items-center justify-between gap-1 min-w-0">
+                    <div class="flex items-center gap-1 min-w-0 shrink-0">
+                      <span class="${isTightSlot ? 'text-lg' : 'text-2xl'} font-extrabold leading-none shrink-0">${step.num}</span>
+                      ${pinBadgeHtml}
+                    </div>
+                    <div class="flex items-center gap-1 min-w-0 max-w-[75%] justify-end">${headerBadgesHtml}</div>
                   </div>
-
-                  <div class="flex items-center gap-1 shrink-0">
-                    ${step.minifigPrep ? `<span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-white text-[#202124] shadow-xs" style="border:1.5px solid ${theme.accent}">↻ Prepare</span>` : ''}
-                    ${state.showRotCues && step.cue && step.cue !== 'none' ? `<span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-white text-[#202124] shadow-xs" style="border:1.5px solid ${theme.accent}">↻ ${step.cue === 'flip_vertical' ? 'Flip Over' : step.cue === 'yaw_180' ? 'Turn 180°' : 'Rotate 90°'}</span>` : ''}
+                  ${pliBoxHtml ? `<div class="min-w-0 max-w-full">${pliBoxHtml}</div>` : ''}
+                </div>` : `
+                <div class="relative z-10 shrink-0 flex items-start justify-between gap-1.5 min-w-0">
+                  <div class="flex items-start gap-1.5 flex-wrap min-w-0 flex-1">
+                    <span class="${isTightSlot ? 'text-lg' : 'text-2xl'} font-extrabold leading-none shrink-0">${step.num}</span>
+                    ${pinBadgeHtml}
+                    ${pliBoxHtml}
                   </div>
-                </div>
+                  ${headerBadgesHtml ? `<div class="flex items-center gap-1 shrink-0 flex-wrap justify-end max-w-[45%]">${headerBadgesHtml}</div>` : ''}
+                </div>`;
+                })()}
 
                 <!-- Step Visual Area (Callout + 3D Render + Optional 1:1 Minifig Card — STRICT min-h-0 so NEVER clipped!) -->
                 <div class="flex-1 min-h-0 flex ${ov.calloutDir === 'vertical' ? 'flex-col' : 'flex-row'} items-center justify-center gap-1.5 mt-1 overflow-hidden">
                   ${step.subassembly && !ov.calloutAsPages ? `
-                    <div data-drag="callout" data-step="${step.id}" class="draggable-el rounded-xl p-1.5 shrink-0 w-28 sm:w-40 max-h-full flex flex-col overflow-hidden ${isArrangeMode ? 'cursor-move' : ''}" style="background:${theme.calloutBg};border:${calloutSel ? `2px solid ${theme.accent}` : `1.5px solid ${theme.calloutBorder}`};transform:translate(${calloutPos.x}px,${calloutPos.y}px)">
-                      <div class="flex items-center justify-between gap-1 text-[10px] font-bold shrink-0">
-                        <span class="truncate">${step.subassembly.name}</span>
+                    <div data-drag="callout" data-step="${step.id}" class="draggable-el rounded-xl p-1.5 shrink-0 w-28 sm:w-40 ${ov.calloutDir === 'vertical' ? 'max-w-full' : 'max-w-[48%]'} max-h-full flex flex-col overflow-hidden ${isArrangeMode ? 'cursor-move' : ''}" style="background:${theme.calloutBg};border:${calloutSel ? `2px solid ${theme.accent}` : `1.5px solid ${theme.calloutBorder}`};transform:translate(${calloutPos.x}px,${calloutPos.y}px)">
+                      <div class="flex items-center justify-between gap-1 text-[10px] font-bold shrink-0 min-w-0">
+                        <span class="min-w-0 truncate">${escHtml(step.subassembly.name)}</span>
                         <span class="px-1.5 py-0.5 rounded-full text-white shrink-0" style="background:${theme.accent}">${step.subassembly.repeatCount}×</span>
                       </div>
                       <img src="${subImg}" class="w-full flex-1 min-h-0 object-contain pointer-events-none" />
@@ -4318,10 +4349,10 @@ function renderAll() {
                   </div>
 
                   ${mf1to1 ? `
-                    <div class="shrink-0 rounded-xl px-2 py-1.5 flex flex-col items-center justify-center gap-1 max-h-full overflow-hidden shadow-xs" style="background:${theme.calloutBg};border:1.5px solid ${theme.calloutBorder}" title="Actual-size 1:1 minifigure reference (${Math.round(mf1to1.heightMm)} mm tall)">
-                      <div class="flex items-center gap-1 text-[9px] font-extrabold leading-none">
-                        <span class="px-1.5 py-0.5 rounded-full text-white" style="background:${theme.accent}">1:1${mf1to1.isExact ? '' : ' · Fit'}</span>
-                        <span class="opacity-75 tabular-nums">${Math.round(mf1to1.heightMm)} mm</span>
+                    <div class="shrink-0 max-w-[45%] rounded-xl px-2 py-1.5 flex flex-col items-center justify-center gap-1 max-h-full overflow-hidden shadow-xs" style="background:${theme.calloutBg};border:1.5px solid ${theme.calloutBorder}" title="Actual-size 1:1 minifigure reference (${Math.round(mf1to1.heightMm)} mm tall)">
+                      <div class="flex items-center gap-1 text-[9px] font-extrabold leading-none max-w-full overflow-hidden whitespace-nowrap">
+                        <span class="px-1.5 py-0.5 rounded-full text-white shrink-0" style="background:${theme.accent}">1:1${mf1to1.isExact ? '' : ' · Fit'}</span>
+                        <span class="opacity-75 tabular-nums truncate">${Math.round(mf1to1.heightMm)} mm</span>
                       </div>
                       <div class="flex items-center gap-1">
                         <img src="${mf1to1.url}" alt="1:1 actual size minifigure" style="width:${mf1to1.displayPxW}px;height:${mf1to1.displayPxH}px" class="block shrink-0 pointer-events-none" />
@@ -4342,7 +4373,7 @@ function renderAll() {
           const isInsSel = isArrangeMode && state.selectedArrangeEl?.kind === 'insert' && state.selectedArrangeEl?.insertId === ins.id;
           return `<div data-drag="insert" data-insert-id="${ins.id}" class="draggable-el absolute z-20 rounded-xl p-2 ${isArrangeMode ? 'cursor-move' : ''}" style="left:${ins.x}px;top:${ins.y}px;transform:scale(${ins.scale || 1});transform-origin:top left;border:${isInsSel ? `2px solid ${theme.accent}` : '1px solid transparent'};background:${ins.kind === 'text' ? theme.pliBg : 'transparent'}">
             ${ins.kind === 'text'
-              ? `<div class="text-xs font-bold max-w-[200px] leading-snug">${ins.text}</div>`
+              ? `<div class="text-xs font-bold max-w-[200px] leading-snug break-words overflow-hidden">${escHtml(ins.text)}</div>`
               : `<img src="${ins.src}" class="w-24 h-24 object-contain rounded-lg pointer-events-none" />`}
           </div>`;
         }).join('')}
@@ -6382,6 +6413,25 @@ async function renderPageToJpegBytes(page, pxW, pxH) {
       ctx.arcTo(x, y, x + w, y, rr);
       ctx.closePath();
     };
+    const drawTruncatedText = (rawText, x, y, maxW) => {
+      const text = String(rawText || '');
+      if (!text || maxW <= 2) return;
+      if (ctx.measureText(text).width <= maxW) {
+        ctx.fillText(text, x, y);
+        return;
+      }
+      const ell = '…';
+      const ellW = ctx.measureText(ell).width;
+      if (ellW >= maxW) return;
+      let lo = 0;
+      let hi = text.length;
+      while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1;
+        if (ctx.measureText(text.slice(0, mid)).width + ellW <= maxW) lo = mid;
+        else hi = mid - 1;
+      }
+      ctx.fillText(lo > 0 ? text.slice(0, lo).trimEnd() + ell : ell, x, y);
+    };
 
     const slots = page.slots;
     const isLand = pxW >= pxH;
@@ -6402,19 +6452,6 @@ async function renderPageToJpegBytes(page, pxW, pxH) {
       ctx.lineWidth = 2;
       ctx.stroke();
 
-      const thumbUrl = getSubmodelThumb(sub, 260, 160);
-      if (thumbUrl) {
-        const introImg = await loadImgPromise(thumbUrl);
-        drawContain(ctx, introImg, pad + 14, pad + 8, Math.round(bannerH * 1.45), bannerH - 16);
-      }
-      const textX = pad + 14 + Math.round(bannerH * 1.45) + 14;
-      ctx.fillStyle = theme.muted;
-      ctx.font = `700 ${Math.round(bannerH * 0.16)}px -apple-system, sans-serif`;
-      ctx.fillText(sub.isSectionModule ? 'BUILD SECTION' : 'SUBMODEL', textX, pad + Math.round(bannerH * 0.2));
-      ctx.fillStyle = theme.text;
-      ctx.font = `800 ${Math.round(bannerH * 0.28)}px -apple-system, sans-serif`;
-      ctx.fillText(sub.name || 'Submodel', textX, pad + Math.round(bannerH * 0.44));
-
       const multLabel = sub.repeatCount > 1 ? `×${sub.repeatCount}` : `${sub.pieceCount || sub.canonicalParts?.length || 0} pcs`;
       const pillFont = Math.round(bannerH * (sub.repeatCount > 1 ? 0.34 : 0.24));
       ctx.font = `900 ${pillFont}px -apple-system, sans-serif`;
@@ -6422,15 +6459,35 @@ async function renderPageToJpegBytes(page, pxW, pxH) {
       const pillH = Math.round(bannerH * 0.54);
       const pillX = pad + bannerW - pillW - 18;
       const pillY = pad + Math.round((bannerH - pillH) / 2);
+
+      ctx.save();
+      drawRRect(pad, pad, bannerW, bannerH, 16);
+      ctx.clip();
+      const thumbUrl = getSubmodelThumb(sub, 260, 160);
+      if (thumbUrl) {
+        const introImg = await loadImgPromise(thumbUrl);
+        drawContain(ctx, introImg, pad + 14, pad + 8, Math.round(bannerH * 1.45), bannerH - 16);
+      }
+      const textX = pad + 14 + Math.round(bannerH * 1.45) + 14;
+      const introTextMaxW = Math.max(0, pillX - textX - 12);
+      ctx.fillStyle = theme.muted;
+      ctx.font = `700 ${Math.round(bannerH * 0.16)}px -apple-system, sans-serif`;
+      drawTruncatedText(sub.isSectionModule ? 'BUILD SECTION' : 'SUBMODEL', textX, pad + Math.round(bannerH * 0.2), introTextMaxW);
+      ctx.fillStyle = theme.text;
+      ctx.font = `800 ${Math.round(bannerH * 0.28)}px -apple-system, sans-serif`;
+      drawTruncatedText(sub.name || 'Submodel', textX, pad + Math.round(bannerH * 0.44), introTextMaxW);
+
       drawRRect(pillX, pillY, pillW, pillH, pillH / 2);
       ctx.fillStyle = theme.accent;
       ctx.fill();
       ctx.fillStyle = '#ffffff';
+      ctx.font = `900 ${pillFont}px -apple-system, sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(multLabel, pillX + pillW / 2, pillY + pillH / 2 + 1);
       ctx.textAlign = 'left';
       ctx.textBaseline = 'top';
+      ctx.restore();
 
       topY = pad + bannerH + Math.round(gap * 0.8);
     }
@@ -6464,18 +6521,23 @@ async function renderPageToJpegBytes(page, pxW, pxH) {
         ctx.strokeStyle = theme.calloutBorder;
         ctx.lineWidth = 1.8;
         ctx.stroke();
+        ctx.save();
+        drawRRect(pliX, pliY, attBoxW, pliH, 10);
+        ctx.clip();
         const attUrl = getSubmodelThumb(att, 160, 120);
         if (attUrl) {
           const attImg = await loadImgPromise(attUrl);
           drawContain(ctx, attImg, pliX + 6, pliY + 4, pliH * 1.25, pliH - 8);
         }
         const tx = pliX + 6 + pliH * 1.25 + 8;
+        const textMaxW = Math.max(0, pliX + attBoxW - tx - 8);
         ctx.fillStyle = theme.accent;
         ctx.font = `900 ${Math.round(pliH * (att.isSectionAttach ? 0.3 : 0.36))}px -apple-system, sans-serif`;
-        ctx.fillText(att.isSectionAttach ? (att.attachVerb || 'Connect') : `×${att.repeatCount}`, tx, pliY + Math.round(pliH * 0.14));
+        drawTruncatedText(att.isSectionAttach ? (att.attachVerb || 'Connect') : `×${att.repeatCount}`, tx, pliY + Math.round(pliH * 0.14), textMaxW);
         ctx.fillStyle = theme.text;
         ctx.font = `600 ${Math.round(pliH * 0.24)}px -apple-system, sans-serif`;
-        ctx.fillText(att.name || 'Submodel', tx, pliY + Math.round(pliH * 0.56), Math.max(40, attBoxW - (tx - pliX) - 8));
+        drawTruncatedText(att.name || 'Submodel', tx, pliY + Math.round(pliH * 0.56), textMaxW);
+        ctx.restore();
       } else if (step.minifigPrep) {
         const prep = step.minifigPrep;
         const prepBoxW = Math.min(slotW - (pliX - sx) - 14, Math.max(175, pliH * 3.8));
@@ -6485,18 +6547,23 @@ async function renderPageToJpegBytes(page, pxW, pxH) {
         ctx.strokeStyle = theme.calloutBorder;
         ctx.lineWidth = 1.8;
         ctx.stroke();
+        ctx.save();
+        drawRRect(pliX, pliY, prepBoxW, pliH, 10);
+        ctx.clip();
         const prepUrl = getMinifigThumb(prep.canonicalParts, `prep_${prep.id}`, MINIFIG_BUILD_CAMERA.az, MINIFIG_BUILD_CAMERA.el, 120, 120);
         if (prepUrl) {
           const prepImg = await loadImgPromise(prepUrl);
           drawContain(ctx, prepImg, pliX + 6, pliY + 4, pliH * 1.0, pliH - 8);
         }
         const tx = pliX + 6 + pliH * 1.0 + 8;
+        const textMaxW = Math.max(0, pliX + prepBoxW - tx - 8);
         ctx.fillStyle = theme.accent;
         ctx.font = `800 ${Math.round(pliH * 0.28)}px -apple-system, sans-serif`;
-        ctx.fillText(prep.label || 'Position', tx, pliY + Math.round(pliH * 0.16), Math.max(40, prepBoxW - (tx - pliX) - 8));
+        drawTruncatedText(prep.label || 'Position', tx, pliY + Math.round(pliH * 0.16), textMaxW);
         ctx.fillStyle = theme.text;
         ctx.font = `600 ${Math.round(pliH * 0.23)}px -apple-system, sans-serif`;
-        ctx.fillText(prep.name || 'Minifigure', tx, pliY + Math.round(pliH * 0.56), Math.max(40, prepBoxW - (tx - pliX) - 8));
+        drawTruncatedText(prep.name || 'Minifigure', tx, pliY + Math.round(pliH * 0.56), textMaxW);
+        ctx.restore();
       } else if (step.attachedMinifig) {
         const att = step.attachedMinifig;
         const attBoxW = Math.min(slotW - (pliX - sx) - 14, Math.max(150, pliH * 3.3));
@@ -6506,18 +6573,23 @@ async function renderPageToJpegBytes(page, pxW, pxH) {
         ctx.strokeStyle = theme.calloutBorder;
         ctx.lineWidth = 1.8;
         ctx.stroke();
+        ctx.save();
+        drawRRect(pliX, pliY, attBoxW, pliH, 10);
+        ctx.clip();
         const attUrl = getMinifigThumb(att.previewParts || att.canonicalParts, `att_${att.id}`, 38, 26, 120, 120);
         if (attUrl) {
           const attImg = await loadImgPromise(attUrl);
           drawContain(ctx, attImg, pliX + 6, pliY + 4, pliH * 1.0, pliH - 8);
         }
         const tx = pliX + 6 + pliH * 1.0 + 8;
+        const textMaxW = Math.max(0, pliX + attBoxW - tx - 8);
         ctx.fillStyle = theme.accent;
         ctx.font = `900 ${Math.round(pliH * 0.36)}px -apple-system, sans-serif`;
-        ctx.fillText(`×${att.repeatCount || 1}`, tx, pliY + Math.round(pliH * 0.14));
+        drawTruncatedText(`×${att.repeatCount || 1}`, tx, pliY + Math.round(pliH * 0.14), textMaxW);
         ctx.fillStyle = theme.text;
         ctx.font = `600 ${Math.round(pliH * 0.24)}px -apple-system, sans-serif`;
-        ctx.fillText(att.name || 'Minifigure', tx, pliY + Math.round(pliH * 0.56), Math.max(40, attBoxW - (tx - pliX) - 8));
+        drawTruncatedText(att.name || 'Minifigure', tx, pliY + Math.round(pliH * 0.56), textMaxW);
+        ctx.restore();
       } else {
         const pliMap = new Map();
         for (const p of step.parts) { const k = `${p.p}:${p.c}`; if (!pliMap.has(k)) pliMap.set(k, { part: p, qty: 0 }); pliMap.get(k).qty++; }
@@ -6555,7 +6627,10 @@ async function renderPageToJpegBytes(page, pxW, pxH) {
         const mf1 = renderMinifigOneToOne(step.parts, pxH, pdfHIn, Math.round(slotW * 0.34), Math.round(renderAvailH * 0.72), theme.accent);
         const cardPad = 12;
         const headerH = 22;
-        const cardW = Math.max(82, mf1.displayPxW + cardPad * 2 + 12);
+        const mfHeaderLabel = `1:1${mf1.isExact ? '' : ' Fit'} · ${Math.round(mf1.heightMm)} mm`;
+        ctx.font = `800 12px -apple-system, sans-serif`;
+        const mfHeaderW = Math.ceil(ctx.measureText(mfHeaderLabel).width);
+        const cardW = Math.min(Math.round(slotW * 0.44), Math.max(82, mfHeaderW + cardPad * 2, mf1.displayPxW + cardPad * 2 + 12));
         const cardH = Math.min(renderAvailH - 4, mf1.displayPxH + headerH + cardPad * 2);
         const cardX = sx + slotW - cardW - 12;
         const cardY = renderTopY + Math.round((renderAvailH - cardH) / 2);
@@ -6568,9 +6643,12 @@ async function renderPageToJpegBytes(page, pxW, pxH) {
         ctx.lineWidth = 1.8;
         ctx.stroke();
 
+        ctx.save();
+        drawRRect(cardX, cardY, cardW, cardH, 12);
+        ctx.clip();
         ctx.fillStyle = theme.accent;
         ctx.font = `800 12px -apple-system, sans-serif`;
-        ctx.fillText(`1:1${mf1.isExact ? '' : ' Fit'} · ${Math.round(mf1.heightMm)} mm`, cardX + cardPad, cardY + 8);
+        drawTruncatedText(mfHeaderLabel, cardX + cardPad, cardY + 8, Math.max(0, cardW - cardPad * 2));
         const mf1Img = await loadImgPromise(mf1.url);
         const imgX = cardX + Math.round((cardW - 10 - mf1.displayPxW) / 2);
         const imgY = cardY + headerH + Math.round((cardH - headerH - cardPad - mf1.displayPxH) / 2);
@@ -6587,6 +6665,7 @@ async function renderPageToJpegBytes(page, pxW, pxH) {
         ctx.moveTo(rx, ry0); ctx.lineTo(rx, ry1);
         ctx.moveTo(rx - 3, ry1); ctx.lineTo(rx + 3, ry1);
         ctx.stroke();
+        ctx.restore();
       } else {
         drawContain(ctx, stepImg, sx + 10, renderTopY, slotW - 20, renderAvailH);
       }

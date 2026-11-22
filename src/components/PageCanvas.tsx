@@ -77,14 +77,14 @@ function SubassemblyCalloutCard({
 
   return (
     <div
-      className="rounded-xl p-2.5 shadow-sm flex flex-col gap-2 max-w-[230px] shrink-0"
+      className="rounded-xl p-2.5 shadow-sm flex flex-col gap-2 max-w-[230px] shrink-0 overflow-hidden"
       style={{
         backgroundColor: theme.calloutBackground,
         border: `1.5px solid ${theme.calloutBorderColor}`,
       }}
     >
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-[11px] font-bold uppercase tracking-wide truncate" style={{ color: theme.textColor }}>
+      <div className="flex items-center justify-between gap-2 min-w-0">
+        <span className="text-[11px] font-bold uppercase tracking-wide min-w-0 truncate" style={{ color: theme.textColor }}>
           {sub.name}
         </span>
         {sub.repeatCount > 1 && (
