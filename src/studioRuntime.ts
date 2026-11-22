@@ -3299,91 +3299,6 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
   return { title: parsed.title, subtitle: `${parts.length} pieces · ${globalStep} steps${dupSummary}`, chapters, _parsed: parsed, _mode: mode, _subdivisionPlan: null };
 }
 
-// Built-in Sample Model (includes standing minifigure + placement + a genuine ×2 duplicate submodel showcase!)
-function buildSampleModel() {
-  const mk = (id, p, c, x, y, z, m = R_ID) => ({ id, p, c, x, y, z, m });
-  const rotY = (deg) => {
-    const r = deg * Math.PI / 180, co = Math.cos(r), si = Math.sin(r);
-    return [co, 0, si, 0, 1, 0, -si, 0, co];
-  };
-  const astroWorldM = rotY(-40);
-  const astroWorldParts = [
-    mk('m1', '3815c01', 15, 72, 28, 18, astroWorldM),
-    mk('m2', '973c01', 15, 72, 60, 18, astroWorldM),
-    mk('m3', '3626cp01', 14, 72, 84, 18, astroWorldM),
-    mk('m4', '3842a', 15, 72, 86, 18, astroWorldM),
-  ];
-  const astroNorm = normalizeMinifigureForBuild(
-    astroWorldParts,
-    (pid) => resolvePart(pid).name,
-    computeWorldBox,
-    'sample_astro',
-  );
-  const solarCanon = [mk('sc1','3023',15,0,8,0), mk('sc2','60470b',72,20,8,0), mk('sc3','3068b',1,0,16,0)];
-  return {
-    title: 'Orbital Rover',
-    subtitle: 'Sample · 19 pieces · 6 steps · 1 repeated submodel',
-    chapters: [
-      {
-        id: 'ch_mf', name: 'Astronaut', kind: 'minifigure', sectionId: 'sec_mf',
-        steps: [
-          {
-            id: 's1', num: 1,
-            side: MINIFIG_BUILD_CAMERA.side, corner: MINIFIG_BUILD_CAMERA.corner,
-            az: MINIFIG_BUILD_CAMERA.az, el: MINIFIG_BUILD_CAMERA.el,
-            cue: 'none',
-            isStandaloneFigure: true, isMinifigBuildStep: true, placedInMain: true,
-            minifigId: 'sample_astro', minifigName: 'Astronaut', minifigMetrics: astroNorm.metrics,
-            parts: astroNorm.canonicalParts,
-          },
-        ],
-      },
-      {
-        id: 'ch_main_1', name: 'Rover Chassis', kind: 'main', sectionId: 'sec_main',
-        steps: [
-          { id:'s2', num:2, side:'top', corner:'front_right', cue:'none', parts:[mk('r1','3031',72,0,8,0), mk('r2','3020',71,-30,16,0), mk('r3','3020',71,30,16,0)] },
-          { id:'s3', num:3, side:'top', corner:'front_right', cue:'none', parts:[mk('r4','3001',15,0,40,0), mk('r5','4733',72,-30,40,0), mk('r6','4733',72,30,40,0), mk('r7','4519',0,0,48,0)] },
-        ],
-      },
-      {
-        id: 'ch_sub_solar', name: 'Solar Array', kind: 'submodel', sectionId: 'sub_solar', repeatCount: 2, canonicalParts: solarCanon,
-        steps: [
-          { id:'sub_s1', num:1, side:'top', corner:'front_right', cue:'none', isSubmodelStep:true, parts:[solarCanon[0], solarCanon[1]] },
-          { id:'sub_s2', num:2, side:'top', corner:'front_right', cue:'none', isSubmodelStep:true, isSubmodelFinal:true, submodelRepeat:2, parts:[solarCanon[2]] },
-        ],
-      },
-      {
-        id: 'ch_main_2', name: 'Rover Chassis', kind: 'main', sectionId: 'sec_main',
-        steps: [
-          {
-            id:'s4', num:4, side:'top', corner:'back_left', cue:'yaw_180',
-            attachedSubmodel: { id:'sub_solar', name:'Solar Array', repeatCount:2, totalRepeatCount:2, canonicalParts: solarCanon },
-            parts:[mk('r8','3023',15,-46,24,0), mk('r9','3068b',1,-46,32,0), mk('r10','3023',15,46,24,0), mk('r11','3068b',1,46,32,0), mk('r12','30374',71,0,66,0)],
-          },
-          {
-            id:'s5', num:5, side:'top', corner:'front_right', az:38, el:26, cue:'none',
-            isMinifigPoseStep: true,
-            minifigPrep: {
-              id: 'sample_astro', name: 'Astronaut', label: astroNorm.transformLabel,
-              canonicalParts: astroNorm.canonicalParts, poseSummary: astroNorm.poseSummary,
-            },
-            parts: astroNorm.posedPreviewParts,
-          },
-          {
-            id:'s6', num:6, side:'top', corner:'front_right', cue:'none',
-            attachedMinifig: {
-              id: 'sample_astro', name: 'Astronaut', repeatCount: 1,
-              previewParts: astroNorm.posedPreviewParts, canonicalParts: astroNorm.canonicalParts,
-              needsTransform: astroNorm.needsTransform, transformLabel: astroNorm.transformLabel,
-            },
-            parts: astroWorldParts,
-          },
-        ],
-      },
-    ],
-  };
-}
-
 // =========================================================================
 // 4. APPLICATION STATE, UNDO/REDO STACK & PAGINATION
 // =========================================================================
@@ -3959,7 +3874,7 @@ function getModelFileTypeInfo() {
   if (rec?.kind === 'project' || lower.endsWith('.json')) {
     return { badge: '.JSON', label: 'Saved Project (.bic.json)', cls: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' };
   }
-  return { badge: 'SAMPLE', label: 'Built-In Sample Model', cls: 'bg-black/10 dark:bg-white/10 text-[var(--muted-foreground)]' };
+  return { badge: 'MODEL', label: 'Imported Model', cls: 'bg-black/10 dark:bg-white/10 text-[var(--muted-foreground)]' };
 }
 
 function isSimpleEditPage(page) {
@@ -5979,7 +5894,7 @@ function openBomSetupModal() {
   document.getElementById('bomSetupModal').classList.remove('hidden');
 }
 
-let lastSourceRecord = null; // { kind:'io'|'ldr'|'sample'|'project', fileName, data, importMode }
+let lastSourceRecord = null; // { kind:'io'|'ldr'|'project', fileName, data, importMode }
 let savePrefsTimer = null;
 function scheduleSaveSessionPrefs() {
   if (!state.model) return;
@@ -6049,9 +5964,7 @@ async function restoreLastSessionOnStart() {
     if (typeof prefs.showExtras === 'boolean') state.showExtras = prefs.showExtras;
     if (prefs.bomConfig) state.bomConfig = { ...state.bomConfig, ...prefs.bomConfig };
 
-    if (rec.kind === 'sample') {
-      state.model = buildSampleModel();
-    } else if (rec.kind === 'io' && rec.data) {
+    if (rec.kind === 'io' && rec.data) {
       const { m1Text, m2Text } = await extractIoArchive(rec.data);
       const parsed = parseImportedModel(m1Text, m2Text, rec.fileName);
       state.model = buildManualFromParsed(parsed, rec.importMode || 'auto', rec.subdivisionPlan || null);
@@ -6763,7 +6676,7 @@ function syncThemeEditorUI() {
   const prevMuted = document.getElementById('themePreviewMuted');
   if (prevMuted) {
     prevMuted.style.color = d.muted;
-    prevMuted.textContent = state.model?.title || 'Orbital Rover';
+    prevMuted.textContent = state.model?.title || 'My Model';
   }
   const prevPageNum = document.getElementById('themePreviewPageNum');
   if (prevPageNum) prevPageNum.style.color = d.text;
@@ -7267,22 +7180,6 @@ document.getElementById('menuClearLibBtn').onclick = async () => {
   if (state.model) { computeModelDiagnostics(); renderAll(); }
   showToast('Cleared saved Bricks Library.');
 };
-
-const loadSample = () => {
-  embeddedDatRaw.clear(); embeddedDatTitles.clear(); embeddedDatCompiled.clear(); compositePartDefs.clear(); pliThumbCache.clear(); submodelThumbCache.clear();
-  state.model = buildSampleModel();
-  state.overrides = {}; state.pageInserts = {}; state.dividerAfter = {};
-  state.coverMeta = { title:'', subtitle:'', az:38, el:26, bgSrc:null };
-  state.pageIdx = 1; state.mode = 'pan'; state.selectedPartIds.clear();
-  state.undoStack = []; state.redoStack = [];
-  errFilter = 'all';
-  lastSourceRecord = { kind: 'sample', fileName: 'Orbital Rover' };
-  dbPut('lastModel', lastSourceRecord);
-  computeModelDiagnostics();
-  closeMenu(); resetZoom(); renderAll();
-};
-document.getElementById('loadSampleBtn').onclick = loadSample;
-document.getElementById('menuSampleBtn').onclick = loadSample;
 
 let pendingRawFile = null; // { kind:'io'|'ldr', fileName, data }
 let impPreviewEngine = null;
