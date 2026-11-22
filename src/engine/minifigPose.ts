@@ -202,43 +202,173 @@ function normPartId(raw: string): string {
     .replace(/\.dat$/i, '');
 }
 
+export type MinifigGroupKind = 'legs' | 'torso' | 'head' | 'headgear' | null;
+
+export interface MinifigSubmodelRef {
+  name: string;
+  instId: number | string;
+}
+
+export interface DetectedMinifigGroup {
+  name: string;
+  indices: number[];
+}
+
+const CORE_LEGS_ID_RE = /^(?:asm_)?(?:bl_)?(?:3815|3816|3817|970|41879|16709|37364|36036)(?:[^0-9]|$)/i;
+const CORE_TORSO_ID_RE = /^(?:asm_)?(?:bl_)?(?:973|76382|3818|3819|3820)(?:[^0-9]|$)/i;
+const CORE_HEAD_ID_RE = /^(?:bl_)?(?:3626|28621)(?:[^0-9]|$)/i;
+
+/** Known LEGO furniture, seating, vehicle control, mount, and train part IDs that are never part of a minifigure. */
+const NON_MINIFIG_PART_ID_RE =
+  /^(?:bl_)?(?:4079|4598|30149|29602|65767|61482|60583|90195|3828|3829|73081|2819|30663|4491|2491|4719|30187|50859|15396|25214|38339|38340|29085|28740|bb892)(?:[^0-9]|$)/i;
+
+/** Known LEGO minifigure hair, headgear, and wearable neckwear part IDs. */
+const HEADGEAR_ID_RE =
+  /^(?:bl_)?(?:76925|26066|11303|66913|21778|98385|11256|61976|25376|3842|3901|4530|62810|92081|20595|25972|28551|23186|88283|64798|87991|92746|15500|21268|21269|24791|25409|35699|68212|79768)(?:[^0-9]|$)/i;
+
+const WEARABLE_ACCESSORY_ID_RE =
+  /^(?:bl_)?(?:93091|24093|93555|65632|19918|26093|85974)(?:[^0-9]|$)/i;
+
+/** Furniture, seats, fixtures, and large architectural parts that must NEVER be bundled into a minifigure build step. */
+const NON_MINIFIG_FURNITURE_RE =
+  /\b(seat|seats|seating|chair|chairs|armchair|recliner|stool|bench|sofa|couch|throne|bed|bunk|table|desk|toilet|sink|bathtub|wheelchair|saddle|stretcher|pram|stroller|crib|baseplate|steering|dashboard|console|cockpit|door|window|windscreen|windshield|fence|railing|ladder|stairs?|crate|barrel|cabinet|cupboard|locker|shelf|counter)\b/i;
+
+/** Structural bricks, plates, vehicles, and Technic elements (only checked for non-core, non-wearable parts). */
+const NON_MINIFIG_STRUCTURAL_RE =
+  /\b(bicycle|bike|tricycle|motorcycle|motorbike|scooter|vespa|skateboard|surfboard|snowboard|boat|kayak|canoe|raft|cart|wagon|wheelbarrow|brick|plate|tile|slope|wedge|panel|bracket|hinge|technic|liftarm|beam|axle|pin|gear|turntable|wheel|tire|tyre|rim|bogie|track|rail|motor|coupler|buffer|arch|cylinder|cone|dish|dome|frame|glass|lattice|grille|jumper)\b|\b(?:car|vehicle|engine|truck)\s+hood\b/i;
+
+const MINIFIG_WEARABLE_NAME_RE =
+  /\b(hair|helmet|hat|cap|hood|headgear|visor|crown|scarf|cape|cloak|armor|armour|backpack|ponytail|wig|beard|moustache|mustache|glasses|goggles|headphones?|earmuffs?|neckwear|collar|epaulette|pauldron|quiver|scabbard|jetpack|tiara|turban|beanie|beret|bandana|headband)\b/i;
+
+const MINIFIG_ACCESSORY_NAME_RE =
+  /\b(utensil|mug|cup|goblet|bottle|broom|wand|sword|lightsaber|blaster|camera|briefcase|suitcase|handbag|purse|satchel|bag|book|newspaper|letter|phone|walkie|radio|microphone|guitar|umbrella|torch|lantern|flashlight|wrench|hammer|shovel|pickaxe|binoculars|magnifying|megaphone|trophy|clipboard|laptop)\b|minifig.*accessory/i;
+
+function isCoreBodyId(k: string): boolean {
+  return CORE_LEGS_ID_RE.test(k) || CORE_TORSO_ID_RE.test(k) || CORE_HEAD_ID_RE.test(k) || /_(?:torso|leg_?[lr]|arm_?[lr])$/i.test(k);
+}
+
+/**
+ * Returns true if a part is definitively NOT a minifigure body part, headgear, or wearable/handheld accessory
+ * (for example, LEGO seats/chairs like 4079 "Minifigure Seat 2x2", furniture, vehicles, or structural bricks).
+ */
+export function isNonMinifigPart(partId: string, partName = '', childPartIds: string[] = []): boolean {
+  const k = normPartId(partId).replace(/-bl$/, '');
+  const normChildren = childPartIds.map((c) => normPartId(c).replace(/-bl$/, ''));
+
+  // Fused assemblies containing core minifigure body parts (e.g. torso+arms+hands, hips+legs) are always minifigure parts
+  if (normChildren.some((ck) => isCoreBodyId(ck))) return false;
+  if (isCoreBodyId(k)) return false;
+
+  // Explicit non-minifig furniture/seat/vehicle IDs (e.g. 4079 chair/seat)
+  if (NON_MINIFIG_PART_ID_RE.test(k) || normChildren.some((ck) => NON_MINIFIG_PART_ID_RE.test(ck))) {
+    return true;
+  }
+
+  const name = (partName || '').toLowerCase();
+  if (!name) return false;
+
+  // Core body part names always win over print descriptions (e.g. "Minifig Torso with Train Pattern")
+  if (/\bhips\b|minifig.*(?:leg|torso|arm|hand|head\b)|torso assembly/i.test(name)) {
+    return false;
+  }
+
+  // Chairs, seats, benches, tables, doors, windows, steering consoles are NEVER minifigure parts
+  if (NON_MINIFIG_FURNITURE_RE.test(name)) {
+    return true;
+  }
+
+  // Explicit headgear/wearables (e.g. "Minifig Helmet Motorcycle", "Minifig Headphones") are valid minifigure parts
+  if (HEADGEAR_ID_RE.test(k) || WEARABLE_ACCESSORY_ID_RE.test(k) || MINIFIG_WEARABLE_NAME_RE.test(name)) {
+    return false;
+  }
+
+  // Reject structural bricks, plates, tiles, slopes, wheels, Technic, and vehicles
+  if (NON_MINIFIG_STRUCTURAL_RE.test(name)) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Classifies a runtime part (or fused composite assembly) into its minifigure grouping kind,
+ * returning null for chairs/seats, furniture, vehicles, and structural bricks.
+ */
+export function classifyMinifigGroupKind(
+  part: RuntimePart,
+  resolveName: (partId: string) => string,
+): MinifigGroupKind {
+  const k = normPartId(part.p).replace(/-bl$/, '');
+  const name = (resolveName(part.p) || '').toLowerCase();
+  const childIds = (part.children || []).map((c) => normPartId(c.p).replace(/-bl$/, ''));
+
+  if (isNonMinifigPart(k, name, childIds)) {
+    return null;
+  }
+
+  const allIds = [k, ...childIds];
+  if (allIds.some((id) => CORE_LEGS_ID_RE.test(id)) || /\bhips\b|minifig.*leg/i.test(name)) {
+    return 'legs';
+  }
+  if (
+    allIds.some((id) => CORE_TORSO_ID_RE.test(id) || /_(?:torso|arm_?[lr])$/i.test(id)) ||
+    /minifig.*torso|torso assembly|minifig.*arm|minifig.*hand/i.test(name)
+  ) {
+    return 'torso';
+  }
+  if (allIds.some((id) => CORE_HEAD_ID_RE.test(id)) || /minifig.*head\b/i.test(name)) {
+    return 'head';
+  }
+  if (
+    allIds.some((id) => HEADGEAR_ID_RE.test(id) || WEARABLE_ACCESSORY_ID_RE.test(id)) ||
+    MINIFIG_WEARABLE_NAME_RE.test(name) ||
+    MINIFIG_ACCESSORY_NAME_RE.test(name)
+  ) {
+    return 'headgear';
+  }
+  return null;
+}
+
 export function classifyMinifigLeafRole(partId: string, partName = ''): MinifigLeafRole {
-  const k = normPartId(partId);
+  const k = normPartId(partId).replace(/-bl$/, '');
   const name = (partName || '').toLowerCase();
 
-  if (/^(?:bl_)?3815(?!c\d)/i.test(k) || (/\bhips\b/i.test(name) && !/\blegs?\b/i.test(name))) {
+  if (isNonMinifigPart(k, name)) {
+    return 'accessory';
+  }
+  if (/^(?:bl_)?3815(?!c\d)(?:[^0-9]|$)/i.test(k) || (/\bhips\b/i.test(name) && !/\blegs?\b/i.test(name))) {
     return 'hips';
   }
-  if (/^(?:bl_)?3816/i.test(k) || /minifig.*leg.*right/i.test(name) || /_leg_?r\b/i.test(k)) {
+  if (/^(?:bl_)?3816(?:[^0-9]|$)/i.test(k) || /minifig.*leg.*right/i.test(name) || /_leg_?r\b/i.test(k)) {
     return 'leg_r';
   }
-  if (/^(?:bl_)?3817/i.test(k) || /minifig.*leg.*left/i.test(name) || /_leg_?l\b/i.test(k)) {
+  if (/^(?:bl_)?3817(?:[^0-9]|$)/i.test(k) || /minifig.*leg.*left/i.test(name) || /_leg_?l\b/i.test(k)) {
     return 'leg_l';
   }
   if (
-    /^(?:bl_)?(?:3815c|970|41879|16709|37364|36036)/i.test(k) ||
+    /^(?:bl_)?(?:3815c|970|41879|16709|37364|36036)(?:[^0-9]|$)/i.test(k) ||
     /\bhips\b.*leg|minifig.*legs/i.test(name)
   ) {
     return 'legs_unit';
   }
-  if (/^(?:bl_)?3818/i.test(k) || /minifig.*arm.*right/i.test(name) || /_arm_?r\b/i.test(k)) {
+  if (/^(?:bl_)?3818(?:[^0-9]|$)/i.test(k) || /minifig.*arm.*right/i.test(name) || /_arm_?r\b/i.test(k)) {
     return 'arm_r';
   }
-  if (/^(?:bl_)?3819/i.test(k) || /minifig.*arm.*left/i.test(name) || /_arm_?l\b/i.test(k)) {
+  if (/^(?:bl_)?3819(?:[^0-9]|$)/i.test(k) || /minifig.*arm.*left/i.test(name) || /_arm_?l\b/i.test(k)) {
     return 'arm_l';
   }
-  if (/^(?:bl_)?3820/i.test(k) || /minifig.*hand/i.test(name)) {
+  if (/^(?:bl_)?3820(?:[^0-9]|$)/i.test(k) || /minifig.*hand/i.test(name)) {
     return 'hand';
   }
-  if (/^(?:bl_)?973/i.test(k) || /_torso$/i.test(k) || /minifig.*torso/i.test(name)) {
+  if (/^(?:bl_)?(?:973|76382)(?:[^0-9]|$)/i.test(k) || /_torso$/i.test(k) || /minifig.*torso/i.test(name)) {
     return 'torso';
   }
-  if (/^(?:bl_)?(?:3626|28621)/i.test(k) || /minifig.*head\b/i.test(name)) {
+  if (CORE_HEAD_ID_RE.test(k) || /minifig.*head\b/i.test(name)) {
     return 'head';
   }
   if (
-    /^(?:bl_)?(?:76925|26066|11303|66913|21778|98385|11256|61976|25376|3842)/i.test(k) ||
-    /hair|helmet|hat|cap|hood|headgear|visor|crown|ponytail|wig|beard|glasses/i.test(name)
+    HEADGEAR_ID_RE.test(k) ||
+    /\b(hair|helmet|hat|cap|hood|headgear|visor|crown|ponytail|wig|beard|moustache|mustache|glasses|goggles|tiara|turban|beanie|beret|bandana|headband)\b/i.test(name)
   ) {
     return 'headgear';
   }
@@ -730,4 +860,374 @@ export function computeMinifigOneToOneLayout(
     fitScale,
     isExact: fitScale >= 0.985,
   };
+}
+
+function transformBoxToLocal(box: WorldBox, origin: Vec3, rInv: Mat3): WorldBox {
+  const min: Vec3 = [Infinity, Infinity, Infinity];
+  const max: Vec3 = [-Infinity, -Infinity, -Infinity];
+  for (const x of [box.min[0], box.max[0]]) {
+    for (const y of [box.min[1], box.max[1]]) {
+      for (const z of [box.min[2], box.max[2]]) {
+        const p = mat3Vec(rInv, x - origin[0], y - origin[1], z - origin[2]);
+        if (p[0] < min[0]) min[0] = p[0];
+        if (p[1] < min[1]) min[1] = p[1];
+        if (p[2] < min[2]) min[2] = p[2];
+        if (p[0] > max[0]) max[0] = p[0];
+        if (p[1] > max[1]) max[1] = p[1];
+        if (p[2] > max[2]) max[2] = p[2];
+      }
+    }
+  }
+  return {
+    min,
+    max,
+    center: [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2],
+  };
+}
+
+function getCoreBodyLeaf(part: RuntimePart, resolveName: (partId: string) => string): RuntimePart {
+  if (part.children && part.children.length > 0) {
+    return (
+      part.children.find((c) => classifyMinifigLeafRole(c.p, resolveName(c.p)) === 'torso') ||
+      part.children.find((c) => classifyMinifigLeafRole(c.p, resolveName(c.p)) === 'hips') ||
+      part.children[0]
+    );
+  }
+  return part;
+}
+
+/**
+ * Detects whole minifigure assemblies across an imported model while strictly excluding
+ * chairs/seats (e.g. 4079), furniture, vehicles, and structural bricks — even when a designer
+ * grouped a seated minifigure and its chair together inside the same Studio submodel.
+ */
+export function extractMinifigureGroups(
+  parts: RuntimePart[],
+  boxes: WorldBox[],
+  resolveName: (partId: string) => string,
+): {
+  groups: DetectedMinifigGroup[];
+  kinds: MinifigGroupKind[];
+  claimed: Uint8Array;
+} {
+  const kinds: MinifigGroupKind[] = parts.map((p) => classifyMinifigGroupKind(p, resolveName));
+  const claimed = new Uint8Array(parts.length);
+  const groups: DetectedMinifigGroup[] = [];
+
+  const isCoreTorsoPart = (part: RuntimePart, idx: number): boolean => {
+    if (part.children && part.children.length > 0) return kinds[idx] === 'torso';
+    return classifyMinifigLeafRole(part.p, resolveName(part.p)) === 'torso';
+  };
+
+  const isLooseArmOrHand = (part: RuntimePart): boolean => {
+    if (part.children && part.children.length > 0) return false;
+    const r = classifyMinifigLeafRole(part.p, resolveName(part.p));
+    return r === 'arm_r' || r === 'arm_l' || r === 'hand';
+  };
+
+  const getPartUpVector = (part: RuntimePart): Vec3 => {
+    const leaf = getCoreBodyLeaf(part, resolveName);
+    return mat3Col(mat3Orthonormalize(leaf.m || R_IDENTITY), 1);
+  };
+
+  const isUnknownPartAttachedToFigure = (
+    candIdx: number,
+    coreIndices: number[],
+    origin: Vec3,
+    rInv: Mat3,
+    torsoLocal: WorldBox | null,
+    headLocal: WorldBox | null,
+    hipsLocal: WorldBox | null,
+    handLocals: Vec3[],
+  ): boolean => {
+    const lb = transformBoxToLocal(boxes[candIdx], origin, rInv);
+    const sizeX = lb.max[0] - lb.min[0];
+    const sizeY = lb.max[1] - lb.min[1];
+    const sizeZ = lb.max[2] - lb.min[2];
+
+    // Reject oversized props, bases, seats, or consoles
+    if (sizeX > 48 || sizeZ > 48 || sizeY > 64) return false;
+
+    const waistY = torsoLocal
+      ? torsoLocal.min[1]
+      : hipsLocal
+        ? hipsLocal.max[1]
+        : headLocal
+          ? headLocal.min[1] - 32
+          : -20;
+    const torsoCenterY = torsoLocal
+      ? (torsoLocal.min[1] + torsoLocal.max[1]) / 2
+      : waistY + 16;
+    const bodyCenterX = torsoLocal
+      ? (torsoLocal.min[0] + torsoLocal.max[0]) / 2
+      : headLocal
+        ? headLocal.center[0]
+        : 0;
+    const bodyCenterZ = torsoLocal
+      ? (torsoLocal.min[2] + torsoLocal.max[2]) / 2
+      : headLocal
+        ? headLocal.center[2]
+        : 0;
+
+    const horizDist = Math.hypot(lb.center[0] - bodyCenterX, lb.center[2] - bodyCenterZ);
+
+    // 1. Head / neck / shoulders wearable zone (unrecognized hair, hats, headphones, collars, scarves)
+    if (horizDist <= 26 && lb.center[1] >= torsoCenterY - 2 && lb.min[1] >= waistY - 8) {
+      return true;
+    }
+
+    // 2. Thin cape or backpack directly behind the torso
+    if (
+      horizDist <= 24 &&
+      sizeZ <= 14 &&
+      lb.max[2] <= (torsoLocal ? torsoLocal.min[2] + 8 : -2) &&
+      lb.center[1] >= waistY - 12 &&
+      lb.max[1] >= torsoCenterY - 4
+    ) {
+      return true;
+    }
+
+    // 3. Compact handheld prop touching a hand (must NOT wrap across body centerline below waist like a seat/base)
+    const maxDim = Math.max(sizeX, sizeY, sizeZ);
+    const spansUnderWaist =
+      lb.min[0] < bodyCenterX - 6 && lb.max[0] > bodyCenterX + 6 && lb.min[1] < waistY - 4;
+    if (maxDim <= 36 && !spansUnderWaist) {
+      if (handLocals.length > 0 && handLocals.some((hp) => pointToBoxDistance(hp, lb) <= 16)) {
+        return true;
+      }
+      if (
+        handLocals.length === 0 &&
+        Math.abs(lb.center[0] - bodyCenterX) >= 12 &&
+        Math.abs(lb.center[0] - bodyCenterX) <= 38 &&
+        lb.center[1] >= waistY - 10 &&
+        lb.center[1] <= torsoCenterY + 18 &&
+        Math.abs(lb.center[2] - bodyCenterZ) <= 28
+      ) {
+        return true;
+      }
+    }
+
+    // Never keep unclaimed parts far from core body
+    void coreIndices;
+    return false;
+  };
+
+  // Stage A: Explicit minifigure submodels (2..16 parts containing >= 2 core body types for a SINGLE minifigure).
+  // Non-minifigure parts (such as chairs/seats, plates, or vehicle controls grouped with a seated passenger)
+  // are filtered OUT so they stay in the main model and never clip into the standing minifigure build step.
+  const mfSubInsts = new Map<string | number, { name: string; indices: number[] }>();
+  for (let i = 0; i < parts.length; i++) {
+    const chain = (parts[i].subChain as MinifigSubmodelRef[] | undefined) || [];
+    for (const entry of chain) {
+      if (!mfSubInsts.has(entry.instId)) {
+        mfSubInsts.set(entry.instId, { name: entry.name, indices: [] });
+      }
+      mfSubInsts.get(entry.instId)!.indices.push(i);
+    }
+  }
+  const mfSubCands = Array.from(mfSubInsts.values())
+    .filter((r) => r.indices.length >= 2 && r.indices.length <= 16)
+    .sort((a, b) => a.indices.length - b.indices.length);
+
+  for (const rec of mfSubCands) {
+    if (rec.indices.some((i) => claimed[i])) continue;
+
+    const coreIndices = rec.indices.filter(
+      (i) => kinds[i] === 'legs' || kinds[i] === 'torso' || kinds[i] === 'head',
+    );
+    const coreTypes = new Set(coreIndices.map((i) => kinds[i]));
+    if (coreTypes.size < 2) continue;
+
+    // Multi-minifigure submodels (e.g. an entire train seating row) are skipped here so Stage B splits each figure cleanly
+    const torsoCount = coreIndices.filter((i) => isCoreTorsoPart(parts[i], i)).length;
+    const headCount = coreIndices.filter((i) => kinds[i] === 'head').length;
+    if (torsoCount > 1 || headCount > 1) continue;
+
+    // Build local body frame from torso -> legs -> head so unknown wearables (hair/headphones) are kept
+    // while seats, chairs, floor plates, and other non-minifigure items are excluded.
+    const refIdx =
+      coreIndices.find((i) => isCoreTorsoPart(parts[i], i)) ??
+      coreIndices.find((i) => kinds[i] === 'legs') ??
+      coreIndices.find((i) => kinds[i] === 'head') ??
+      coreIndices[0];
+    const refLeaf = getCoreBodyLeaf(parts[refIdx], resolveName);
+    const rBody = mat3Orthonormalize(refLeaf.m || R_IDENTITY);
+    const rInv = mat3Transpose(rBody);
+    const origin: Vec3 = [refLeaf.x, refLeaf.y, refLeaf.z];
+
+    const torsoIdx = coreIndices.find((i) => isCoreTorsoPart(parts[i], i));
+    const headIdx = coreIndices.find((i) => kinds[i] === 'head');
+    const legsIdx = coreIndices.find((i) => kinds[i] === 'legs');
+    const torsoLocal = torsoIdx !== undefined ? transformBoxToLocal(boxes[torsoIdx], origin, rInv) : null;
+    const headLocal = headIdx !== undefined ? transformBoxToLocal(boxes[headIdx], origin, rInv) : null;
+    const hipsLocal = legsIdx !== undefined ? transformBoxToLocal(boxes[legsIdx], origin, rInv) : null;
+
+    const handLocals: Vec3[] = [];
+    for (const ci of coreIndices) {
+      const p = parts[ci];
+      const leaves = p.children && p.children.length > 0 ? p.children : [p];
+      for (const lf of leaves) {
+        if (classifyMinifigLeafRole(lf.p, resolveName(lf.p)) === 'hand') {
+          handLocals.push(mat3Vec(rInv, lf.x - origin[0], lf.y - origin[1], lf.z - origin[2]));
+        }
+      }
+    }
+
+    const coreCenters = coreIndices.map((i) => boxes[i].center);
+    const filtered: number[] = [];
+
+    for (const i of rec.indices) {
+      const k = kinds[i];
+      if (k === 'legs' || k === 'torso' || k === 'head') {
+        filtered.push(i);
+        continue;
+      }
+
+      const childIds = (parts[i].children || []).map((c) => c.p);
+      if (isNonMinifigPart(parts[i].p, resolveName(parts[i].p), childIds)) {
+        continue;
+      }
+
+      if (k === 'headgear') {
+        const c = boxes[i].center;
+        if (coreCenters.some((ac) => Math.hypot(c[0] - ac[0], c[1] - ac[1], c[2] - ac[2]) <= 56)) {
+          filtered.push(i);
+        }
+        continue;
+      }
+
+      // Unclassified part inside an explicit minifigure submodel (e.g. unrecognized hair mold or neckwear)
+      if (
+        isUnknownPartAttachedToFigure(
+          i,
+          coreIndices,
+          origin,
+          rInv,
+          torsoLocal,
+          headLocal,
+          hipsLocal,
+          handLocals,
+        )
+      ) {
+        filtered.push(i);
+      }
+    }
+
+    if (filtered.length >= 2) {
+      filtered.forEach((i) => {
+        claimed[i] = 1;
+        parts[i]._detachedGap = 0;
+      });
+      groups.push({ name: rec.name || `Minifigure ${groups.length + 1}`, indices: filtered });
+    }
+  }
+
+  // Stage B: Geometric whole-body minifigure detection (works on flat .ldr AND tilted/reclined figures!)
+  for (let t = 0; t < parts.length; t++) {
+    if (claimed[t] || !isCoreTorsoPart(parts[t], t)) continue;
+    const tc = boxes[t].center;
+    const up = getPartUpVector(parts[t]);
+    const localRel = (c: Vec3) => {
+      const dx = c[0] - tc[0];
+      const dy = c[1] - tc[1];
+      const dz = c[2] - tc[2];
+      const along = vec3Dot([dx, dy, dz], up);
+      const horiz = Math.hypot(dx - up[0] * along, dy - up[1] * along, dz - up[2] * along);
+      return { along, horiz };
+    };
+    const grp = [t];
+    // Attach any un-fused loose arms & hands belonging to this torso (flat .ldr files)
+    for (let j = 0; j < parts.length; j++) {
+      if (claimed[j] || j === t || !isLooseArmOrHand(parts[j])) continue;
+      const c = boxes[j].center;
+      if (Math.hypot(c[0] - tc[0], c[1] - tc[1], c[2] - tc[2]) <= 40) grp.push(j);
+    }
+    // Nearest unclaimed legs below/at torso (along -up)
+    let bestLegs = -1;
+    let bestLegsD = 58;
+    for (let j = 0; j < parts.length; j++) {
+      if (claimed[j] || kinds[j] !== 'legs') continue;
+      const { along, horiz } = localRel(boxes[j].center);
+      const vDist = Math.abs(along);
+      if (horiz <= 36 && along <= 12 && vDist <= 58 && horiz + vDist * 0.6 < bestLegsD) {
+        bestLegsD = horiz + vDist * 0.6;
+        bestLegs = j;
+      }
+    }
+    if (bestLegs >= 0) {
+      grp.push(bestLegs);
+      // If un-fused flat .ldr legs (separate 3815 hips + 3816/3817 legs), pull in sibling leg pieces too!
+      if (!parts[bestLegs].children?.length) {
+        const lc = boxes[bestLegs].center;
+        for (let j = 0; j < parts.length; j++) {
+          if (claimed[j] || grp.includes(j) || kinds[j] !== 'legs') continue;
+          if (parts[j].children?.length) continue;
+          const c = boxes[j].center;
+          if (Math.hypot(c[0] - lc[0], c[1] - lc[1], c[2] - lc[2]) <= 34) grp.push(j);
+        }
+      }
+    }
+    // Nearest unclaimed head above torso (along +up)
+    let bestHead = -1;
+    let bestHeadD = 62;
+    for (let j = 0; j < parts.length; j++) {
+      if (claimed[j] || kinds[j] !== 'head') continue;
+      const { along, horiz } = localRel(boxes[j].center);
+      if (horiz <= 30 && along >= -10 && along <= 72 && horiz + Math.abs(along - 36) * 0.5 < bestHeadD) {
+        bestHeadD = horiz + Math.abs(along - 36) * 0.5;
+        bestHead = j;
+      }
+    }
+    if (bestHead >= 0) grp.push(bestHead);
+    // Attach nearby headgear / collar / accessories belonging to this figure (chairs/furniture already have kind === null)
+    const anchors = grp.map((idx) => boxes[idx].center);
+    for (let j = 0; j < parts.length; j++) {
+      if (claimed[j] || grp.includes(j) || kinds[j] !== 'headgear') continue;
+      const c = boxes[j].center;
+      const near = anchors.some((ac) => Math.hypot(c[0] - ac[0], c[1] - ac[1], c[2] - ac[2]) <= 46);
+      if (near) grp.push(j);
+    }
+    if (grp.length >= 2) {
+      grp.forEach((i) => {
+        claimed[i] = 1;
+        parts[i]._detachedGap = 0;
+      });
+      groups.push({ name: `Minifigure ${groups.length + 1}`, indices: grp });
+    }
+  }
+
+  // Safety net: merge any remaining unclaimed head (+ touching headgear) into the closest minifigure missing a head
+  for (let h = 0; h < parts.length; h++) {
+    if (claimed[h] || kinds[h] !== 'head') continue;
+    const hc = boxes[h].center;
+    let bestG: DetectedMinifigGroup | null = null;
+    let bestD = 75;
+    for (const g of groups) {
+      if (g.indices.some((idx) => kinds[idx] === 'head')) continue;
+      for (const idx of g.indices) {
+        const c = boxes[idx].center;
+        const d = Math.hypot(c[0] - hc[0], c[1] - hc[1], c[2] - hc[2]);
+        if (d < bestD) {
+          bestD = d;
+          bestG = g;
+        }
+      }
+    }
+    if (bestG) {
+      bestG.indices.push(h);
+      claimed[h] = 1;
+      parts[h]._detachedGap = 0;
+      for (let j = 0; j < parts.length; j++) {
+        if (claimed[j] || kinds[j] !== 'headgear') continue;
+        const c = boxes[j].center;
+        if (Math.hypot(c[0] - hc[0], c[1] - hc[1], c[2] - hc[2]) <= 36) {
+          bestG.indices.push(j);
+          claimed[j] = 1;
+          parts[j]._detachedGap = 0;
+        }
+      }
+    }
+  }
+
+  return { groups, kinds, claimed };
 }

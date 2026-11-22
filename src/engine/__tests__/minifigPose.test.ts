@@ -3,7 +3,10 @@ import {
   LDU_TO_MM,
   MM_PER_INCH,
   R_IDENTITY,
+  classifyMinifigGroupKind,
   computeMinifigOneToOneLayout,
+  extractMinifigureGroups,
+  isNonMinifigPart,
   mat3AngleDeg,
   mat3Col,
   mat3Multiply,
@@ -315,3 +318,236 @@ describe('Minifigure Standing Normalization & 1:1 Scale', () => {
     expect(tight.displayPxW).toBeLessThanOrEqual(40);
   });
 });
+
+describe('Minifigure Group Extraction & Chair/Furniture Exclusion', () => {
+  const customBox = (
+    part: RuntimePart,
+    overrides: Record<string, [number, number, number]> = {},
+  ): WorldBox => {
+    const half = overrides[part.id];
+    if (!half) return simpleBox(part);
+    const min: [number, number, number] = [part.x - half[0], part.y - half[1], part.z - half[2]];
+    const max: [number, number, number] = [part.x + half[0], part.y + half[1], part.z + half[2]];
+    return {
+      min,
+      max,
+      center: [part.x, part.y, part.z],
+    };
+  };
+
+  it('rejects LEGO chairs/seats (4079, 4598, armchairs) and structural bricks while preserving minifigure parts', () => {
+    // Chairs & seats must NEVER classify as minifigure parts even when named "Minifigure Seat" or "Minifigure, Utensil Seat"
+    expect(isNonMinifigPart('4079', 'Minifigure Seat 2×2')).toBe(true);
+    expect(isNonMinifigPart('4079b', 'Minifig Seat 2 x 2 with Two Studs on Back')).toBe(true);
+    expect(isNonMinifigPart('bl_4079', 'Minifigure, Utensil Seat / Chair 2 x 2')).toBe(true);
+    expect(isNonMinifigPart('4079', '')).toBe(true);
+    expect(isNonMinifigPart('4598', 'Space Seat 3 x 2')).toBe(true);
+    expect(isNonMinifigPart('99999', 'Armchair')).toBe(true);
+    expect(isNonMinifigPart('3829', 'Car Steering Stand and Wheel')).toBe(true);
+    expect(isNonMinifigPart('3022', 'Plate 2 x 2')).toBe(true);
+    expect(isNonMinifigPart('4070', 'Brick 1 x 1 with Headlight')).toBe(true);
+
+    expect(
+      classifyMinifigGroupKind(
+        { id: 'c1', p: '4079', c: 1, x: 0, y: 0, z: 0 },
+        () => 'Minifigure, Utensil Seat / Chair 2 x 2',
+      ),
+    ).toBeNull();
+
+    // Genuine minifigure parts keep their classification even with vehicle/furniture print descriptions
+    expect(isNonMinifigPart('973p12', 'Minifig Torso with Train Seat Pattern')).toBe(false);
+    expect(
+      classifyMinifigGroupKind(
+        { id: 't1', p: '973p12', c: 4, x: 0, y: 0, z: 0 },
+        () => 'Minifig Torso with Train Seat Pattern',
+      ),
+    ).toBe('torso');
+    expect(isNonMinifigPart('2446', 'Minifig Helmet Motorcycle')).toBe(false);
+    expect(
+      classifyMinifigGroupKind(
+        { id: 'hm1', p: '2446', c: 15, x: 0, y: 0, z: 0 },
+        () => 'Minifig Helmet Motorcycle',
+      ),
+    ).toBe('headgear');
+    expect(
+      classifyMinifigGroupKind(
+        { id: 'hp1', p: '93555', c: 15, x: 0, y: 0, z: 0 },
+        () => 'Minifigure, Neckwear Headphones',
+      ),
+    ).toBe('headgear');
+  });
+
+  it('excludes chairs (4079) from explicit seated-passenger submodels while keeping hair and headphones', () => {
+    const legSeatedM = rotX(-90);
+    const subA = [{ name: 'Passenger 1', instId: 101 }];
+    const subB = [{ name: 'Passenger 2', instId: 102 }];
+
+    const parts: RuntimePart[] = [
+      // Passenger 1 (like Step 6): seated legs, torso, head, BLUE chair 4079, unrecognized-ID curly hair
+      {
+        id: 'p1_legs',
+        p: 'asm_970c00_1',
+        c: 1,
+        x: 0,
+        y: 28,
+        z: 0,
+        m: R_IDENTITY,
+        subChain: subA,
+        children: [
+          { id: 'p1_hips', p: '3815', c: 1, x: 0, y: 40, z: 0, m: R_IDENTITY },
+          { id: 'p1_leg_r', p: '3816', c: 1, x: -10, y: 28, z: 0, m: legSeatedM },
+          { id: 'p1_leg_l', p: '3817', c: 1, x: 10, y: 28, z: 0, m: legSeatedM },
+        ],
+      },
+      {
+        id: 'p1_torso',
+        p: 'asm_973c01_72',
+        c: 72,
+        x: 0,
+        y: 72,
+        z: 0,
+        m: R_IDENTITY,
+        subChain: subA,
+        children: [{ id: 'p1_torso_b', p: '973', c: 72, x: 0, y: 72, z: 0, m: R_IDENTITY }],
+      },
+      { id: 'p1_head', p: '3626c', c: 14, x: 0, y: 96, z: 0, m: R_IDENTITY, subChain: subA },
+      { id: 'p1_chair', p: '4079b', c: 1, x: 0, y: 26, z: 0, m: R_IDENTITY, subChain: subA },
+      { id: 'p1_hair_unknown', p: '99881', c: 0, x: 0, y: 106, z: 0, m: R_IDENTITY, subChain: subA },
+
+      // Passenger 2 (like Step 7): seated legs, torso, head, RED chair 4079, headphones, hair
+      {
+        id: 'p2_legs',
+        p: 'asm_970c00_308',
+        c: 308,
+        x: 200,
+        y: 28,
+        z: 0,
+        m: R_IDENTITY,
+        subChain: subB,
+        children: [
+          { id: 'p2_hips', p: '3815', c: 308, x: 200, y: 40, z: 0, m: R_IDENTITY },
+          { id: 'p2_leg_r', p: '3816', c: 308, x: 190, y: 28, z: 0, m: legSeatedM },
+          { id: 'p2_leg_l', p: '3817', c: 308, x: 210, y: 28, z: 0, m: legSeatedM },
+        ],
+      },
+      {
+        id: 'p2_torso',
+        p: 'asm_973c01_320',
+        c: 320,
+        x: 200,
+        y: 72,
+        z: 0,
+        m: R_IDENTITY,
+        subChain: subB,
+        children: [{ id: 'p2_torso_b', p: '973', c: 320, x: 200, y: 72, z: 0, m: R_IDENTITY }],
+      },
+      { id: 'p2_head', p: '3626c', c: 14, x: 200, y: 96, z: 0, m: R_IDENTITY, subChain: subB },
+      { id: 'p2_chair', p: '4079', c: 4, x: 200, y: 26, z: 0, m: R_IDENTITY, subChain: subB },
+      { id: 'p2_headphones', p: '93555', c: 15, x: 200, y: 84, z: 0, m: R_IDENTITY, subChain: subB },
+      { id: 'p2_hair', p: '21778', c: 308, x: 200, y: 106, z: 0, m: R_IDENTITY, subChain: subB },
+    ];
+
+    const extraNames: Record<string, string> = {
+      ...NAMES,
+      asm_970c00_1: 'Minifigure Hips & Legs',
+      asm_973c01_72: 'Minifigure Torso Assembly',
+      asm_970c00_308: 'Minifigure Hips & Legs',
+      asm_973c01_320: 'Minifigure Torso Assembly',
+      '4079': 'Minifigure Seat 2×2',
+      '4079b': 'Minifig Seat 2 x 2 with Two Studs on Back',
+      '93555': 'Minifigure Headphones',
+      '99881': '99881', // Unrecognized hair mold with bare numeric title
+    };
+    const resName = (pid: string) => extraNames[pid] || pid;
+    const boxOverrides: Record<string, [number, number, number]> = {
+      p1_chair: [20, 22, 20],
+      p2_chair: [20, 22, 20],
+      p1_hair_unknown: [13, 14, 13],
+      p2_headphones: [14, 10, 12],
+    };
+    const boxes = parts.map((p) => customBox(p, boxOverrides));
+
+    const { groups, claimed } = extractMinifigureGroups(parts, boxes, resName);
+
+    expect(groups).toHaveLength(2);
+    const ids0 = groups[0].indices.map((i) => parts[i].id);
+    const ids1 = groups[1].indices.map((i) => parts[i].id);
+
+    // Neither minifigure group contains its chair!
+    expect(ids0).toEqual(['p1_legs', 'p1_torso', 'p1_head', 'p1_hair_unknown']);
+    expect(ids1).toEqual(['p2_legs', 'p2_torso', 'p2_head', 'p2_headphones', 'p2_hair']);
+
+    // Both chairs remain unclaimed so they stay in the main model and are built before placing the seated figures
+    expect(claimed[3]).toBe(0); // p1_chair
+    expect(claimed[8]).toBe(0); // p2_chair
+
+    // Standing normalization on Passenger 1 has no chair and cleanly straightens the seated legs
+    const norm1 = normalizeMinifigureForBuild(
+      groups[0].indices.map((i) => parts[i]),
+      resName,
+      (p) => customBox(p, boxOverrides),
+      'mf1',
+    );
+    expect(norm1.canonicalParts.map((p) => p.p)).not.toContain('4079b');
+    expect(norm1.poseSummary.legsBent).toBe(true);
+    expect(norm1.transformLabel).toBe('Sit legs');
+  });
+
+  it('geometrically excludes an unknown custom seat sitting beneath seated hips inside a submodel', () => {
+    const legSeatedM = rotX(-90);
+    const sub = [{ name: 'Driver Seat', instId: 201 }];
+    const parts: RuntimePart[] = [
+      { id: 'legs', p: '970c00', c: 1, x: 0, y: 32, z: 0, m: legSeatedM, subChain: sub },
+      { id: 'torso', p: '973', c: 4, x: 0, y: 72, z: 0, m: R_IDENTITY, subChain: sub },
+      { id: 'head', p: '3626c', c: 14, x: 0, y: 96, z: 0, m: R_IDENTITY, subChain: sub },
+      // Completely unknown ID & generic title sitting under hips/legs like a seat
+      { id: 'mystery_seat', p: 'bl_custom_777', c: 0, x: 0, y: 24, z: 0, m: R_IDENTITY, subChain: sub },
+      // Completely unknown hairpiece sitting on top of the head
+      { id: 'mystery_hair', p: 'bl_custom_888', c: 0, x: 0, y: 106, z: 0, m: R_IDENTITY, subChain: sub },
+    ];
+    const boxOverrides: Record<string, [number, number, number]> = {
+      mystery_seat: [20, 22, 20],
+      mystery_hair: [13, 14, 13],
+    };
+    const boxes = parts.map((p) => customBox(p, boxOverrides));
+
+    const { groups, claimed } = extractMinifigureGroups(parts, boxes, (pid) => NAMES[pid] || pid);
+    expect(groups).toHaveLength(1);
+    const picked = groups[0].indices.map((i) => parts[i].id);
+    expect(picked).toContain('mystery_hair');
+    expect(picked).not.toContain('mystery_seat');
+    expect(claimed[3]).toBe(0);
+  });
+
+  it('never grabs a chair in Stage B (flat .ldr) and splits multi-minifig submodels cleanly', () => {
+    const legSeatedM = rotX(-90);
+    // Two seated passengers + two chairs grouped into ONE 10-part submodel (e.g. a train seating row)
+    const rowSub = [{ name: 'Coach Seating Row', instId: 301 }];
+    const parts: RuntimePart[] = [
+      { id: 'a_legs', p: '970c00', c: 1, x: 0, y: 32, z: 0, m: legSeatedM, subChain: rowSub },
+      { id: 'a_torso', p: '973', c: 4, x: 0, y: 72, z: 0, m: R_IDENTITY, subChain: rowSub },
+      { id: 'a_head', p: '3626c', c: 14, x: 0, y: 96, z: 0, m: R_IDENTITY, subChain: rowSub },
+      { id: 'a_hair', p: '21778', c: 0, x: 0, y: 106, z: 0, m: R_IDENTITY, subChain: rowSub },
+      { id: 'a_chair', p: '4079', c: 1, x: 0, y: 24, z: 0, m: R_IDENTITY, subChain: rowSub },
+
+      { id: 'b_legs', p: '970c00', c: 0, x: 100, y: 32, z: 0, m: legSeatedM, subChain: rowSub },
+      { id: 'b_torso', p: '973', c: 2, x: 100, y: 72, z: 0, m: R_IDENTITY, subChain: rowSub },
+      { id: 'b_head', p: '3626c', c: 14, x: 100, y: 96, z: 0, m: R_IDENTITY, subChain: rowSub },
+      { id: 'b_hair', p: '21778', c: 0, x: 100, y: 106, z: 0, m: R_IDENTITY, subChain: rowSub },
+      { id: 'b_chair', p: '4079', c: 4, x: 100, y: 24, z: 0, m: R_IDENTITY, subChain: rowSub },
+    ];
+    const resName = (pid: string) =>
+      pid === '4079' ? 'Minifigure, Utensil Seat / Chair 2 x 2' : NAMES[pid] || pid;
+    const boxes = parts.map((p) => customBox(p, { a_chair: [20, 22, 20], b_chair: [20, 22, 20] }));
+
+    const { groups, claimed } = extractMinifigureGroups(parts, boxes, resName);
+
+    // Split cleanly into 2 separate minifigures, zero chairs claimed!
+    expect(groups).toHaveLength(2);
+    expect(groups[0].indices.map((i) => parts[i].id)).toEqual(['a_torso', 'a_legs', 'a_head', 'a_hair']);
+    expect(groups[1].indices.map((i) => parts[i].id)).toEqual(['b_torso', 'b_legs', 'b_head', 'b_hair']);
+    expect(claimed[4]).toBe(0); // a_chair
+    expect(claimed[9]).toBe(0); // b_chair
+  });
+});
+

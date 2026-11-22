@@ -11,13 +11,11 @@ import {
 } from './engine/subdivisionAnalyzer';
 import {
   MINIFIG_BUILD_CAMERA,
-  classifyMinifigLeafRole,
+  classifyMinifigGroupKind,
   computeMinifigOneToOneLayout,
-  mat3Col,
-  mat3Orthonormalize,
+  extractMinifigureGroups,
   normalizeCompositeThumbPart,
   normalizeMinifigureForBuild,
-  vec3Dot,
 } from './engine/minifigPose';
 import {
   BUILT_IN_THEMES,
@@ -348,13 +346,14 @@ const KNOWN_EXTRA_PART_NAMES = {
 
 function getHumanPartName(pid) {
   const k = normId(pid);
+  const isMeaningfulTitle = (t, id) => Boolean(t && normId(t) !== normId(id));
   const directTitle = embeddedDatTitles.get(k) || userLibTitles.get(k);
-  if (directTitle) return directTitle;
+  if (isMeaningfulTitle(directTitle, k)) return directTitle;
 
   const isPrinted = /(?:pb|ps|pat|pr)\d+/i.test(k) || /^\d{3,}[a-z]?p[0-9a-z]{2,}/i.test(k);
   const lookupName = (id) => {
     const t = embeddedDatTitles.get(id) || userLibTitles.get(id);
-    if (t) return t;
+    if (isMeaningfulTitle(t, id)) return t;
     if (KNOWN_EXTRA_PART_NAMES[id]) return KNOWN_EXTRA_PART_NAMES[id];
     if (PARTS_CATALOG[id]?.name) return PARTS_CATALOG[id].name;
     return null;
@@ -1735,7 +1734,7 @@ function classifyPartRole(part) {
     return 'wheel';
   }
   if (/38339|2878c/.test(k) || /wheel.*holder|bogie.*holder/.test(name)) return 'wheel_holder';
-  if (/minifig|hair|headgear|utensil|broom|cup|mug|book|laptop|bag|scarf|head/.test(name) || part.children) return 'figure';
+  if (classifyMinifigGroupKind(part, (pid) => resolvePart(pid).name) !== null) return 'figure';
   if (/plate|brick|tile|frame|base|beam|liftarm|chassis|slope|panel|bracket|hinge|turntable/.test(name)) return 'structural';
   return 'detail';
 }
@@ -2317,16 +2316,7 @@ function buildSpatialAdjacency(parts, boxes, roles, sideCaps = null) {
 }
 
 function classifyMinifigPieceFast(part) {
-  const k = normId(part.p);
-  const name = (resolvePart(part.p).name || '').toLowerCase();
-  const childKeys = (part.children || []).map(c => normId(c.p)).join(' ');
-  const combo = `${k} ${childKeys}`;
-  if (/(?:^|\s)(?:asm_)?(?:bl_)?(?:3815|3816|3817|970|41879|16709)/i.test(combo) || /\bhips\b|minifig.*leg/i.test(name)) return 'legs';
-  if (/(?:^|\s)(?:asm_)?(?:bl_)?(?:973|3818|3819|3820)/i.test(combo) || /minifig.*torso|torso assembly/i.test(name)) return 'torso';
-  if (/(?:^|\s)(?:bl_)?(?:3626|28621)/i.test(combo) || /minifig.*head\b/i.test(name)) return 'head';
-  if (/(?:^|\s)(?:bl_)?(?:76925|26066|11303|66913|21778|98385|11256|61976|25376|93091|24093|3842)/i.test(combo) ||
-      /hair|helmet|hat|cap|hood|headgear|visor|crown|scarf|cape|armor|backpack|bag|ponytail|wig|beard|glasses|utensil|minifig.*accessory/i.test(name)) return 'headgear';
-  return null;
+  return classifyMinifigGroupKind(part, (pid) => resolvePart(pid).name);
 }
 
 function prepareSubdivisionData(parsed) {
@@ -2390,147 +2380,12 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
   const sideCaps = parts.map((p, i) => canConnectSideways(p, roles[i]));
   const adj = buildSpatialAdjacency(parts, boxes, roles, sideCaps);
 
-  // 1a. Whole-Minifigure Assembly Grouping (NEVER build just a head — always build the entire figure together!)
-  const classifyMinifigPiece = (part) => {
-    const k = normId(part.p);
-    const name = (resolvePart(part.p).name || '').toLowerCase();
-    const childKeys = (part.children || []).map(c => normId(c.p)).join(' ');
-    const combo = `${k} ${childKeys}`;
-    if (/(?:^|\s)(?:asm_)?(?:bl_)?(?:3815|3816|3817|970|41879|16709|37364|36036)/i.test(combo) || /\bhips\b|minifig.*leg/i.test(name)) return 'legs';
-    if (/(?:^|\s)(?:asm_)?(?:bl_)?(?:973|3818|3819|3820)/i.test(combo) || /minifig.*torso|torso assembly|minifig.*arm|minifig.*hand/i.test(name)) return 'torso';
-    if (/(?:^|\s)(?:bl_)?(?:3626|28621)/i.test(combo) || /minifig.*head\b/i.test(name)) return 'head';
-    if (/(?:^|\s)(?:bl_)?(?:76925|26066|11303|66913|21778|98385|11256|61976|25376|93091|24093|3842)/i.test(combo) ||
-        /hair|helmet|hat|cap|hood|headgear|visor|crown|scarf|cape|armor|backpack|bag|ponytail|wig|beard|glasses|utensil|minifig.*accessory/i.test(name)) return 'headgear';
-    return null;
-  };
-  const isCoreTorsoPart = (part) => {
-    if (part.children && part.children.length > 0) return classifyMinifigPiece(part) === 'torso';
-    return classifyMinifigLeafRole(part.p, resolvePart(part.p).name) === 'torso';
-  };
-  const isLooseArmOrHand = (part) => {
-    if (part.children && part.children.length > 0) return false;
-    const r = classifyMinifigLeafRole(part.p, resolvePart(part.p).name);
-    return r === 'arm_r' || r === 'arm_l' || r === 'hand';
-  };
-  const getPartUpVector = (part) => {
-    const leaf = (part.children && part.children.length > 0)
-      ? (part.children.find(c => classifyMinifigLeafRole(c.p, resolvePart(c.p).name) === 'torso') || part.children[0])
-      : part;
-    return mat3Col(mat3Orthonormalize(leaf.m || R_ID), 1);
-  };
-  const mfKinds = parts.map(p => classifyMinifigPiece(p));
-  const mfClaimed = new Uint8Array(parts.length);
-  const minifigGroups = [];
-
-  // Stage A: Explicit minifigure submodels (any submodel of 2..12 parts containing >= 2 core body types among legs/torso/head)
-  const mfSubInsts = new Map();
-  for (let i = 0; i < parts.length; i++) {
-    for (const entry of (parts[i].subChain || [])) {
-      if (!mfSubInsts.has(entry.instId)) mfSubInsts.set(entry.instId, { name: entry.name, indices: [] });
-      mfSubInsts.get(entry.instId).indices.push(i);
-    }
-  }
-  const mfSubCands = Array.from(mfSubInsts.values())
-    .filter(r => r.indices.length >= 2 && r.indices.length <= 14)
-    .sort((a, b) => a.indices.length - b.indices.length);
-  for (const rec of mfSubCands) {
-    if (rec.indices.some(i => mfClaimed[i])) continue;
-    const core = new Set(rec.indices.map(i => mfKinds[i]).filter(t => t === 'legs' || t === 'torso' || t === 'head'));
-    if (core.size >= 2) {
-      rec.indices.forEach(i => { mfClaimed[i] = 1; parts[i]._detachedGap = 0; });
-      minifigGroups.push({ name: rec.name || `Minifigure ${minifigGroups.length + 1}`, indices: rec.indices });
-    }
-  }
-
-  // Stage B: Geometric whole-body minifigure detection (works on flat .ldr AND tilted/reclined figures!)
-  for (let t = 0; t < parts.length; t++) {
-    if (mfClaimed[t] || !isCoreTorsoPart(parts[t])) continue;
-    const tc = boxes[t].center;
-    const up = getPartUpVector(parts[t]);
-    const localRel = (c) => {
-      const dx = c[0] - tc[0], dy = c[1] - tc[1], dz = c[2] - tc[2];
-      const along = vec3Dot([dx, dy, dz], up);
-      const horiz = Math.hypot(dx - up[0] * along, dy - up[1] * along, dz - up[2] * along);
-      return { along, horiz };
-    };
-    const grp = [t];
-    // Attach any un-fused loose arms & hands belonging to this torso (flat .ldr files)
-    for (let j = 0; j < parts.length; j++) {
-      if (mfClaimed[j] || j === t || !isLooseArmOrHand(parts[j])) continue;
-      const c = boxes[j].center;
-      if (Math.hypot(c[0] - tc[0], c[1] - tc[1], c[2] - tc[2]) <= 40) grp.push(j);
-    }
-    // Nearest unclaimed legs below/at torso (along -up)
-    let bestLegs = -1, bestLegsD = 58;
-    for (let j = 0; j < parts.length; j++) {
-      if (mfClaimed[j] || mfKinds[j] !== 'legs') continue;
-      const { along, horiz } = localRel(boxes[j].center);
-      const vDist = Math.abs(along);
-      if (horiz <= 36 && along <= 12 && vDist <= 58 && horiz + vDist * 0.6 < bestLegsD) {
-        bestLegsD = horiz + vDist * 0.6; bestLegs = j;
-      }
-    }
-    if (bestLegs >= 0) {
-      grp.push(bestLegs);
-      // If un-fused flat .ldr legs (separate 3815 hips + 3816/3817 legs), pull in sibling leg pieces too!
-      if (!parts[bestLegs].children || parts[bestLegs].children.length === 0) {
-        const lc = boxes[bestLegs].center;
-        for (let j = 0; j < parts.length; j++) {
-          if (mfClaimed[j] || grp.includes(j) || mfKinds[j] !== 'legs') continue;
-          if (parts[j].children && parts[j].children.length > 0) continue;
-          const c = boxes[j].center;
-          if (Math.hypot(c[0] - lc[0], c[1] - lc[1], c[2] - lc[2]) <= 34) grp.push(j);
-        }
-      }
-    }
-    // Nearest unclaimed head above torso (along +up)
-    let bestHead = -1, bestHeadD = 62;
-    for (let j = 0; j < parts.length; j++) {
-      if (mfClaimed[j] || mfKinds[j] !== 'head') continue;
-      const { along, horiz } = localRel(boxes[j].center);
-      if (horiz <= 30 && along >= -10 && along <= 72 && horiz + Math.abs(along - 36) * 0.5 < bestHeadD) {
-        bestHeadD = horiz + Math.abs(along - 36) * 0.5; bestHead = j;
-      }
-    }
-    if (bestHead >= 0) grp.push(bestHead);
-    // Attach nearby headgear / collar / accessories belonging to this figure
-    const anchors = grp.map(idx => boxes[idx].center);
-    for (let j = 0; j < parts.length; j++) {
-      if (mfClaimed[j] || grp.includes(j) || mfKinds[j] !== 'headgear') continue;
-      const c = boxes[j].center;
-      const near = anchors.some(ac => Math.hypot(c[0] - ac[0], c[1] - ac[1], c[2] - ac[2]) <= 46);
-      if (near) grp.push(j);
-    }
-    if (grp.length >= 2) {
-      grp.forEach(i => { mfClaimed[i] = 1; parts[i]._detachedGap = 0; });
-      minifigGroups.push({ name: `Minifigure ${minifigGroups.length + 1}`, indices: grp });
-    }
-  }
-
-  // Safety net: merge any remaining unclaimed head (+ touching headgear) into the closest minifigure missing a head
-  for (let h = 0; h < parts.length; h++) {
-    if (mfClaimed[h] || mfKinds[h] !== 'head') continue;
-    const hc = boxes[h].center;
-    let bestG = null, bestD = 75;
-    for (const g of minifigGroups) {
-      if (g.indices.some(idx => mfKinds[idx] === 'head')) continue;
-      for (const idx of g.indices) {
-        const c = boxes[idx].center;
-        const d = Math.hypot(c[0] - hc[0], c[1] - hc[1], c[2] - hc[2]);
-        if (d < bestD) { bestD = d; bestG = g; }
-      }
-    }
-    if (bestG) {
-      bestG.indices.push(h); mfClaimed[h] = 1; parts[h]._detachedGap = 0;
-      for (let j = 0; j < parts.length; j++) {
-        if (mfClaimed[j] || mfKinds[j] !== 'headgear') continue;
-        const c = boxes[j].center;
-        if (Math.hypot(c[0] - hc[0], c[1] - hc[1], c[2] - hc[2]) <= 36) {
-          bestG.indices.push(j); mfClaimed[j] = 1; parts[j]._detachedGap = 0;
-        }
-      }
-    }
-  }
+  // 1a. Whole-Minifigure Assembly Grouping (NEVER build just a head — and NEVER sweep chairs/seats or furniture into figures!)
+  const {
+    groups: minifigGroups,
+    kinds: mfKinds,
+    claimed: mfClaimed,
+  } = extractMinifigureGroups(parts, boxes, (pid) => resolvePart(pid).name);
 
   // 1b. Automatic Duplicate Submodel Detection (explicit submodels + geometric-only duplicates!)
   const dupGroups = detectDuplicateSubassemblies(parts, boxes, adj, roles).filter(g =>
@@ -3475,7 +3330,7 @@ function getBomGridDimensions(isLandscape) {
 
 function classifyBomCategory(part) {
   const name = (resolvePart(part.p).name || '').toLowerCase();
-  if (part.children || /minifig|torso|legs|head|hair|helmet|hat|utensil|hand|cape|arm/.test(name)) return [7, 'Minifigures'];
+  if (classifyMinifigGroupKind(part, (pid) => resolvePart(pid).name) !== null) return [7, 'Minifigures'];
   if (/wheel|tire|tyre|rim|bogie|track/.test(name)) return [6, 'Wheels & Tires'];
   if (/window|door|glass|panel|windscreen|fence|lattice|frame/.test(name)) return [5, 'Windows & Panels'];
   if (/technic|axle|pin|beam|liftarm|gear|bush|connector|cross/.test(name)) return [4, 'Technic'];
