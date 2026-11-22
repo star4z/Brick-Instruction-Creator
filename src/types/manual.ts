@@ -184,6 +184,15 @@ export type SubdivisionOutputMode =
   | 'numbered_bags'
   | 'multi_booklet';
 
+export interface ArticulatedJoinPlan {
+  slideAxis: [number, number];
+  floatingCollarIndices: number[];
+  pivotRodIndices: number[];
+  bogiePartIndices: number[];
+  bogieName?: string;
+  finishPartIndices: number[];
+}
+
 export interface ProposedSection {
   id: string;
   name: string;
@@ -198,6 +207,7 @@ export interface ProposedSection {
   explodeOffset: Vec3;
   previewColor: string;
   bookletIndex?: number;
+  articulatedJoin?: ArticulatedJoinPlan;
 }
 
 export interface SubdivisionAssessment {

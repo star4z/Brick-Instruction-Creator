@@ -73,12 +73,22 @@ flowchart TD
 The pure-TypeScript analyzer evaluates five complementary LEGO-native strategies, scores each (`0–100`), and ranks the top proposals:
 
 ### Strategy A: Longitudinal Halves & Segments (`longitudinal_halves`)
-*Best for elongated models (trains, ships, bridges, fuselages).*
+*Best for elongated models (trains, light rail vehicles, ships, bridges, fuselages).*
 1. **2D PCA Principal Horizontal Axis**: Computes the dominant lengthwise axis on horizontal XZ part centroids (snapping nearly orthogonal axes within ~5° to exact X or Z), so diagonal models split just as cleanly as axis-aligned ones.
-2. **Minimum-Bridge Transverse Cut Sweep**: Sweeps candidate transverse cut planes around ideal split fractions (within `±14%` of length) to minimize spanning bricks, cut edges, and piece imbalance.
-3. **Zero-Floating Spanning-Brick Assignment**: Bricks strictly on each side go to their respective half/segment; bricks straddling a cut plane (e.g., center coupler plates or tie-beams) go into a **Center Connector & Join** section. Any tiny fragments detached by a cut move to the Join section so every half stays 100% internally connected. If `> 35%` of parts span the cut, automatically falls back to `numbered_bags`.
-4. **Identical Half Detection**: Compares part+color multisets and centroid-relative quantized distance profiles (invariant under 180° rotation and reflection) to detect `2×` identical halves.
-5. **Zoom Gain Estimate**: Computes `fullDiagonal / maxSectionDiagonal` to show the expected zoom improvement (e.g., `~1.9× larger bricks per step`).
+2. **Rigid Stud-Clutch Graph & Intact Bogie Detection**: Builds a strict stud-clutch graph ([`buildStudClutchAdjacency`](../src/engine/subdivisionAnalyzer.ts)) that distinguishes genuine stud/SNOT/pin connections from sliding smooth-tile seams, swiveling bogie pins (`4025`/`2878`/turntables), opposing pinhole coupler tongues (`3176`/`2444`/`32001`), vertical Technic axles, and concave-scoop hollow AABB overlaps. Detects explicit and geometric train bogies (standard RC wheel holders + wheels as well as brick-built horizontal-axle bogies) behind a car-body firewall so a cut plane **never** slices a middle bogie in half.
+3. **Minimum-Bridge Transverse Cut Sweep**: Sweeps candidate transverse cut planes around ideal split fractions (within `±14%` of length) to minimize rigid stud cut edges and piece imbalance, snapping directly onto a detected vertical Technic pivot rod when an articulated joint is present.
+4. **Stud-Owned Seam Assignment & Articulated Joint Isolation**:
+   - Any brick crossing the cut plane that connects by studs to **only one half** (such as curved articulation scoops and protruding coupler tongues) is reassigned back to that corresponding half rather than dumped into the middle section.
+   - Only genuine two-sided rigid bridge bricks — or, for articulated models, the **intact middle bogie**, the **vertical Technic rod**, and the **floating circular cross-axle pieces** coaxial with the rod (`4032`, `3941`, `3713`, `4265c`, gears, bushes, or embedded `axlehol` parts) — remain in the Center Join section.
+   - Detached small fragments are only moved to Join if they actually touch the cut/join zone (never pulling distant roof details or minifig accessories into the middle section).
+   - For articulated joints, [`buildManualFromParsed`](../src/studioRuntime.ts) builds the intact **Middle Bogie** as its own zoomed-in chapter and sequences **Connect Halves & Finish** in true physical assembly order with 3D directional arrows and step badges:
+     1. **Place** First Half
+     2. **Drop into scoop** — floating circular cross-axle pieces into the open scoop cavity
+     3. **Slide halves together** — Second Half slides in around the center pieces
+     4. **Push rod through** — vertical Technic rod with 1:1 actual-size guide
+     5. **Attach bogie to rod** — pre-built Middle Bogie pushes up onto the protruding end of the rod
+5. **Identical Half Detection**: Compares part+color multisets and centroid-relative quantized distance profiles (invariant under 180° rotation and reflection) to detect `2×` identical halves.
+6. **Zoom Gain Estimate**: Computes `fullDiagonal / maxSectionDiagonal` to show the expected zoom improvement (e.g., `~1.9× larger bricks per step`).
 
 ### Strategy B: Modular Floors & Vertical Layers (`horizontal_floors`)
 *Best for modular buildings, towers, and multi-story structures (`spanY >= 72 LDU`).*

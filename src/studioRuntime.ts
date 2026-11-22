@@ -5,6 +5,7 @@
 
 import {
   analyzeModelSubdivisions,
+  classifySubdivisionPartFlags,
   mergeProposedSections,
   recomputeProposalWithCount,
   splitProposedSection,
@@ -1548,14 +1549,22 @@ function computeWorldBox(part) {
   return computeLeafWorldBox(part);
 }
 
-// Identify wheels, tires, and loose accessories so Step 1 NEVER starts on a floating wheel!
+// Identify wheels, wheel holders, axles, and loose accessories so Step 1 NEVER starts on a floating wheel!
 function classifyPartRole(part) {
   const k = normId(part.p);
   const name = (resolvePart(part.p).name || '').toLowerCase();
-  if (/38340|55423|57878|2878/.test(k) || (/\b(wheel|tire|tyre|rim)\b/.test(name) && !/holder|bogie|motor|plate|brick|arch/.test(name))) {
+  if (/^(?:bl_)?(?:38339|2878|4025|4092|65632|28740|bb892|88011|88002)(?:c\d+)?[a-z]?$/.test(k) ||
+      /wheel\s*holder|bogie\s*(?:plate|holder)|train\s*motor/i.test(name)) {
+    return 'wheel_holder';
+  }
+  if (/^(?:bl_)?(?:38340|55423|57878|50254|2928|4180|7049|73983|85489|65734|65735|64711)(?:c\d+)?[a-z]?$/.test(k) ||
+      (/\b(wheel|tire|tyre|rim)\b/.test(name) && !/holder|bogie|motor|plate|brick|arch|fender|mudguard|steering|ship|cog|gear|pulley|knob\s+wheel|belt\s+wheel/.test(name))) {
     return 'wheel';
   }
-  if (/38339|2878c/.test(k) || /wheel.*holder|bogie.*holder/.test(name)) return 'wheel_holder';
+  if (/^(?:bl_)?(?:32062|4519|3705|32073|3706|44294|3707|60485|3737|23948|3708|50451|50450|6587|24316|87083|15462|32209|55013)[a-z]?$/.test(k) ||
+      (/\baxle\b/.test(name) && !/hole|brick|plate|wheel|connector|hub|frame|beam|liftarm|bush|gear|cam|holder|steering/.test(name))) {
+    return 'axle';
+  }
   if (classifyMinifigGroupKind(part, (pid) => resolvePart(pid).name) !== null) return 'figure';
   if (/plate|brick|tile|frame|base|beam|liftarm|chassis|slope|panel|bracket|hinge|turntable/.test(name)) return 'structural';
   return 'detail';
@@ -1602,7 +1611,7 @@ function isCladdingWaitingForUpperSupport(idx, claddingFlags, boxes, adj, placed
 // Two plain upright bricks/plates/slopes/tiles grazing side-by-side do NOT physically stick together!
 function canConnectSideways(part, role) {
   if (!part) return true;
-  if (role === 'wheel' || role === 'figure') return true;
+  if (role === 'wheel' || role === 'axle' || role === 'figure') return true;
   const m = part.m || R_ID;
   if (Math.abs(m[4]) < 0.5) return true; // SNOT / sideways-mounted part
   const k = normId(part.p);
@@ -1615,16 +1624,16 @@ function canConnectSideways(part, role) {
 }
 
 // Strict LEGO clutch contact check:
-// - Train wheels attach ONLY to wheel holders.
+// - Train wheels attach ONLY to wheel holders or Technic axles.
 // - Upright bricks/plates/slopes/tiles connect via vertical stud footprint overlap (ovX >= 3 && ovZ >= 3),
 //   NOT by grazing smooth vertical side walls (which caused floating inverted slopes & train-body bleed into bogies!).
 // - Sideways contacts require either 3-axis interlocking (SNOT studs/pins/clips engaged >= 1.5 LDU)
 //   or BOTH parts having sideways/SNOT/clip/hinge/window connection capability.
 function boxesPhysicallyTouch(a, b, roleA, roleB, sideCapA = true, sideCapB = true) {
   const isWheelPair = (roleA === 'wheel' || roleB === 'wheel');
-  const otherIsHolder = (roleA === 'wheel_holder' || roleB === 'wheel_holder');
+  const otherIsHolder = (roleA === 'wheel_holder' || roleB === 'wheel_holder' || roleA === 'axle' || roleB === 'axle');
   if (isWheelPair && otherIsHolder) {
-    // Wheel clips into wheel holder pin slots (can be up to 6 LDU clearance along axle)
+    // Wheel clips into wheel holder pin slots or mounts onto a Technic axle (up to 6 LDU clearance along axle)
     const gx = Math.max(0, a.min[0]-b.max[0], b.min[0]-a.max[0]);
     const gy = Math.max(0, a.min[1]-b.max[1], b.min[1]-a.max[1]);
     const gz = Math.max(0, a.min[2]-b.max[2], b.min[2]-a.max[2]);
@@ -2141,23 +2150,45 @@ function classifyMinifigPieceFast(part) {
   return classifyMinifigGroupKind(part, (pid) => resolvePart(pid).name);
 }
 
+function hasEmbeddedAxleHole(pid) {
+  const k = normId(pid);
+  const lines = embeddedDatRaw.get(k) || userLibRaw.get(k);
+  if (!lines) return false;
+  return lines.some(l => /axlehol/i.test(l));
+}
+
 function prepareSubdivisionData(parsed) {
   const parts = parsed.parts;
   const boxes = parts.map(p => computeWorldBox(p));
   const roles = parts.map(p => classifyPartRole(p));
-  const adjacency = buildSpatialAdjacency(parts, boxes, roles);
+  const sideCaps = parts.map((p, i) => canConnectSideways(p, roles[i]));
+  const adjacency = buildSpatialAdjacency(parts, boxes, roles, sideCaps);
   const inputs = parts.map((p, index) => {
     const def = resolvePart(p.p);
     const mf = classifyMinifigPieceFast(p);
+    const m = p.m || R_ID;
+    const isUpright = Math.abs(m[4]) >= 0.7;
+    const isInverted = m[4] <= -0.7;
+    const lastSub = p.subChain && p.subChain.length > 0 ? p.subChain[p.subChain.length - 1] : null;
+    const flags = classifySubdivisionPartFlags(normId(p.p), def.name, boxes[index], {
+      isTile: def.studs === false && def.h <= 10,
+      hasTopStuds: def.studs !== false,
+      hasEmbeddedAxleHole: hasEmbeddedAxleHole(p.p),
+      isSidewaysCapable: sideCaps[index],
+      isUpright,
+      isInverted,
+    });
     return {
       index,
       id: p.id,
       partId: normId(p.p),
+      partName: def.name,
       colorId: p.c,
       box: boxes[index],
-      isTile: def.studs === false && def.h <= 10,
+      ...flags,
       isMinifig: mf === 'legs' || mf === 'torso' || mf === 'head',
       submodelKey: p.sub || undefined,
+      submodelInstanceId: lastSub ? String(lastSub.instId) : undefined,
     };
   });
   return { boxes, roles, adjacency, inputs };
@@ -2569,10 +2600,13 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
     } else {
       // MODULAR CHAPTERS + CONNECT / FINAL ASSEMBLY
       const moduleSecs = resolvedSections.filter(s => s.role !== 'join');
+      const joinSecs = resolvedSections.filter(s => s.role === 'join');
       const joinIndices = [
-        ...resolvedSections.filter(s => s.role === 'join').flatMap(s => s.cleanRepeatGroups.flat()),
+        ...joinSecs.flatMap(s => s.cleanRepeatGroups.flat()),
         ...leftover,
       ];
+      const artSec = joinSecs.find(s => s.articulatedJoin);
+      const artJoin = artSec?.articulatedJoin || null;
 
       const attachQueue = [];
       moduleSecs.forEach((sec, mIdx) => {
@@ -2604,11 +2638,75 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
         });
       });
 
+      // Partition join indices cleanly when an articulated Technic-rod + bogie joint is present
+      let useArticulatedSequence = false;
+      let cleanCollarIndices = [];
+      let cleanRodIndices = [];
+      let cleanBogieIndices = [];
+      let cleanFinishIndices = [];
+      let bogieSubId = null;
+      let bogieCanonical = null;
+
+      if (artJoin && attachQueue.length >= 2) {
+        const joinPool = new Set(joinIndices);
+        const takeFromPool = (list) => {
+          const out = [];
+          for (const idx of list || []) {
+            if (joinPool.has(idx)) {
+              joinPool.delete(idx);
+              out.push(idx);
+            }
+          }
+          return out;
+        };
+        cleanCollarIndices = takeFromPool(artJoin.floatingCollarIndices);
+        cleanRodIndices = takeFromPool(artJoin.pivotRodIndices);
+        cleanBogieIndices = takeFromPool(artJoin.bogiePartIndices);
+        cleanFinishIndices = [...takeFromPool(artJoin.finishPartIndices), ...Array.from(joinPool)];
+
+        if (cleanBogieIndices.length > 0 || cleanRodIndices.length > 0) {
+          useArticulatedSequence = true;
+          // Build the intact Middle Bogie as its own zoomed-in chapter before connecting!
+          if (cleanBogieIndices.length >= 2) {
+            bogieSubId = 'mod_middle_bogie';
+            bogieCanonical = normalizeCanonicalSubParts(cleanBogieIndices.map(i => parts[i]), bogieSubId);
+            const bogieSteps = buildLocalSubmodelSteps(bogieCanonical, perStep, bogieSubId, 1);
+            chapters.push({
+              id: `subch_${++chSeq}_${bogieSubId}`,
+              name: artJoin.bogieName || 'Middle Bogie',
+              kind: 'submodel',
+              isSectionModule: true,
+              sectionId: `subsec_${bogieSubId}`,
+              repeatCount: 1,
+              pieceCount: cleanBogieIndices.length,
+              canonicalParts: bogieCanonical,
+              steps: bogieSteps,
+            });
+          }
+        }
+      }
+
       // Emit Connect & Finish chapter joining all completed sections + any center connector bricks!
       const joinSteps = [];
       const joinedPlaced = new Set();
-      attachQueue.forEach((item, aIdx) => {
-        for (const pi of item.indices) joinedPlaced.add(pi);
+
+      if (useArticulatedSequence) {
+        const halfA = attachQueue[0];
+        const halfB = attachQueue[1];
+        const [ax, az] = artJoin.slideAxis || [1, 0];
+        const centroidXZ = (idxList) => {
+          let sx = 0, sz = 0;
+          for (const i of idxList) { sx += boxes[i].center[0]; sz += boxes[i].center[2]; }
+          const denom = Math.max(1, idxList.length);
+          return [sx / denom, sz / denom];
+        };
+        const cA = centroidXZ(halfA.indices);
+        const cB = centroidXZ(halfB.indices);
+        const dirSign = ((cB[0] - cA[0]) * ax + (cB[1] - cA[1]) * az) >= 0 ? 1 : -1;
+        const slideDir = [ax * dirSign, 0, az * dirSign];
+
+        // Stage 1: Place First Half
+        for (const pi of halfA.indices) joinedPlaced.add(pi);
         globalStep++;
         joinSteps.push({
           id: `join_s${globalStep}`,
@@ -2616,27 +2714,251 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
           side: 'top',
           corner: 'front_right',
           cue: 'none',
-          parts: item.indices.map(i => parts[i]),
+          parts: halfA.indices.map(i => parts[i]),
           attachedSubmodel: {
-            id: item.id,
-            name: item.name,
+            id: halfA.id,
+            name: halfA.name,
             repeatCount: 1,
             totalRepeatCount: 1,
             isSectionAttach: true,
-            attachVerb: aIdx === 0 ? 'Place' : 'Connect',
-            canonicalParts: item.canonicalParts,
+            attachVerb: 'Place',
+            canonicalParts: halfA.canonicalParts,
           },
         });
-      });
 
-      if (joinIndices.length > 0) {
-        const { steps: connectorSteps } = buildStepsForIndexList(
-          joinIndices,
-          'join_conn',
-          joinedPlaced,
-          adaptiveMaxSpread,
-        );
-        joinSteps.push(...connectorSteps);
+        // Stage 2: Drop floating circular cross-axle pieces into the scoop(s) before closing halves
+        if (cleanCollarIndices.length > 0) {
+          const sortedCollars = [...cleanCollarIndices].sort((a, b) => boxes[a].min[1] - boxes[b].min[1]);
+          const chunkSize = Math.max(4, perStep);
+          for (let ci = 0; ci < sortedCollars.length; ci += chunkSize) {
+            const chunk = sortedCollars.slice(ci, ci + chunkSize);
+            const defaultPartOffsets = {};
+            chunk.forEach((idx, posInChunk) => {
+              joinedPlaced.add(idx);
+              defaultPartOffsets[parts[idx].id] = {
+                x: Math.round(slideDir[0] * 18),
+                y: 28,
+                z: Math.round(slideDir[2] * 18),
+                tilt: 0,
+                arrow: posInChunk === 0 || posInChunk === chunk.length - 1,
+              };
+            });
+            globalStep++;
+            joinSteps.push({
+              id: `join_collar_s${globalStep}`,
+              num: globalStep,
+              side: 'top',
+              corner: 'front_right',
+              cue: 'none',
+              stepHint: 'Drop into scoop',
+              defaultPartOffsets,
+              parts: chunk.map(i => parts[i]),
+            });
+          }
+        }
+
+        // Stage 3: Slide the Second Half together with the First Half around the center pieces
+        const halfBOffsets = {};
+        let minProjB = Infinity, midYB = 0;
+        for (const i of halfB.indices) midYB += boxes[i].center[1];
+        midYB /= Math.max(1, halfB.indices.length);
+        let leadArrowId = parts[halfB.indices[0]]?.id || null;
+        let bestLeadScore = Infinity;
+        for (const i of halfB.indices) {
+          const pr = boxes[i].center[0] * slideDir[0] + boxes[i].center[2] * slideDir[2];
+          if (pr < minProjB) minProjB = pr;
+        }
+        for (const i of halfB.indices) {
+          const pr = boxes[i].center[0] * slideDir[0] + boxes[i].center[2] * slideDir[2];
+          const score = (pr - minProjB) + Math.abs(boxes[i].center[1] - midYB) * 0.4;
+          if (score < bestLeadScore) { bestLeadScore = score; leadArrowId = parts[i].id; }
+        }
+        const slideOffX = Math.round(slideDir[0] * 60);
+        const slideOffZ = Math.round(slideDir[2] * 60);
+        for (const i of halfB.indices) {
+          joinedPlaced.add(i);
+          halfBOffsets[parts[i].id] = {
+            x: slideOffX,
+            y: 0,
+            z: slideOffZ,
+            tilt: 0,
+            arrow: parts[i].id === leadArrowId,
+          };
+        }
+        globalStep++;
+        joinSteps.push({
+          id: `join_slide_s${globalStep}`,
+          num: globalStep,
+          side: 'top',
+          corner: 'front_right',
+          cue: 'none',
+          stepHint: 'Slide halves together',
+          defaultPartOffsets: halfBOffsets,
+          parts: halfB.indices.map(i => parts[i]),
+          attachedSubmodel: {
+            id: halfB.id,
+            name: halfB.name,
+            repeatCount: 1,
+            totalRepeatCount: 1,
+            isSectionAttach: true,
+            attachVerb: 'Slide Together',
+            canonicalParts: halfB.canonicalParts,
+          },
+        });
+
+        // Attach any extra modules beyond the first two halves (if manually added)
+        for (let aIdx = 2; aIdx < attachQueue.length; aIdx++) {
+          const item = attachQueue[aIdx];
+          for (const pi of item.indices) joinedPlaced.add(pi);
+          globalStep++;
+          joinSteps.push({
+            id: `join_s${globalStep}`,
+            num: globalStep,
+            side: 'top',
+            corner: 'front_right',
+            cue: 'none',
+            parts: item.indices.map(i => parts[i]),
+            attachedSubmodel: {
+              id: item.id,
+              name: item.name,
+              repeatCount: 1,
+              totalRepeatCount: 1,
+              isSectionAttach: true,
+              attachVerb: 'Connect',
+              canonicalParts: item.canonicalParts,
+            },
+          });
+        }
+
+        // Stage 4: Push the vertical Technic rod(s) through both halves & floating circular pieces
+        let rodTargetXZ = null;
+        if (cleanRodIndices.length > 0) {
+          const rodOffsets = {};
+          let rSx = 0, rSz = 0;
+          for (const rIdx of cleanRodIndices) {
+            joinedPlaced.add(rIdx);
+            const rb = boxes[rIdx];
+            rSx += rb.center[0];
+            rSz += rb.center[2];
+            // Lift rod cleanly above nearby seam bricks so the rod & downward push arrow are clearly visible
+            let seamMaxY = rb.max[1];
+            for (const pi of joinedPlaced) {
+              if (pi === rIdx) continue;
+              const pb = boxes[pi];
+              if (Math.hypot(pb.center[0] - rb.center[0], pb.center[2] - rb.center[2]) <= 60 && pb.max[1] > seamMaxY) {
+                seamMaxY = pb.max[1];
+              }
+            }
+            const liftY = Math.round(Math.max(48, Math.min(96, (seamMaxY - rb.max[1]) + 34)));
+            rodOffsets[parts[rIdx].id] = { x: 0, y: liftY, z: 0, tilt: 0, arrow: true };
+          }
+          rodTargetXZ = [rSx / cleanRodIndices.length, rSz / cleanRodIndices.length];
+          globalStep++;
+          joinSteps.push({
+            id: `join_rod_s${globalStep}`,
+            num: globalStep,
+            side: 'top',
+            corner: 'front_right',
+            cue: 'none',
+            stepHint: 'Push rod through',
+            defaultPartOffsets: rodOffsets,
+            parts: cleanRodIndices.map(i => parts[i]),
+          });
+        }
+
+        // Stage 5: Attach the intact Middle Bogie onto the protruding bottom end of the Technic rod
+        if (cleanBogieIndices.length > 0) {
+          const bogieOffsets = {};
+          let bCx = 0, bCz = 0;
+          for (const i of cleanBogieIndices) { bCx += boxes[i].center[0]; bCz += boxes[i].center[2]; }
+          bCx /= cleanBogieIndices.length;
+          bCz /= cleanBogieIndices.length;
+          const refX = rodTargetXZ ? rodTargetXZ[0] : bCx;
+          const refZ = rodTargetXZ ? rodTargetXZ[1] : bCz;
+          let bogieArrowId = parts[cleanBogieIndices[0]]?.id || null;
+          let bestBogieScore = Infinity;
+          for (const i of cleanBogieIndices) {
+            const dXZ = Math.hypot(boxes[i].center[0] - refX, boxes[i].center[2] - refZ);
+            const score = dXZ - boxes[i].max[1] * 0.25;
+            if (score < bestBogieScore) { bestBogieScore = score; bogieArrowId = parts[i].id; }
+          }
+          for (const i of cleanBogieIndices) {
+            joinedPlaced.add(i);
+            bogieOffsets[parts[i].id] = {
+              x: 0,
+              y: -44,
+              z: 0,
+              tilt: 0,
+              arrow: parts[i].id === bogieArrowId,
+            };
+          }
+          globalStep++;
+          const bogieStep = {
+            id: `join_bogie_s${globalStep}`,
+            num: globalStep,
+            side: 'top',
+            corner: 'front_right',
+            cue: 'none',
+            stepHint: cleanRodIndices.length > 0 ? 'Attach bogie to rod' : 'Attach middle bogie',
+            defaultPartOffsets: bogieOffsets,
+            parts: cleanBogieIndices.map(i => parts[i]),
+          };
+          if (bogieCanonical && bogieSubId) {
+            bogieStep.attachedSubmodel = {
+              id: `${bogieSubId}_c0`,
+              name: artJoin.bogieName || 'Middle Bogie',
+              repeatCount: 1,
+              totalRepeatCount: 1,
+              isSectionAttach: true,
+              attachVerb: cleanRodIndices.length > 0 ? 'Attach to Rod' : 'Attach',
+              canonicalParts: bogieCanonical,
+            };
+          }
+          joinSteps.push(bogieStep);
+        }
+
+        // Stage 6: Any remaining finish/connector pieces after the articulated joint is locked
+        if (cleanFinishIndices.length > 0) {
+          const { steps: connectorSteps } = buildStepsForIndexList(
+            cleanFinishIndices,
+            'join_conn',
+            joinedPlaced,
+            adaptiveMaxSpread,
+          );
+          joinSteps.push(...connectorSteps);
+        }
+      } else {
+        attachQueue.forEach((item, aIdx) => {
+          for (const pi of item.indices) joinedPlaced.add(pi);
+          globalStep++;
+          joinSteps.push({
+            id: `join_s${globalStep}`,
+            num: globalStep,
+            side: 'top',
+            corner: 'front_right',
+            cue: 'none',
+            parts: item.indices.map(i => parts[i]),
+            attachedSubmodel: {
+              id: item.id,
+              name: item.name,
+              repeatCount: 1,
+              totalRepeatCount: 1,
+              isSectionAttach: true,
+              attachVerb: aIdx === 0 ? 'Place' : 'Connect',
+              canonicalParts: item.canonicalParts,
+            },
+          });
+        });
+
+        if (joinIndices.length > 0) {
+          const { steps: connectorSteps } = buildStepsForIndexList(
+            joinIndices,
+            'join_conn',
+            joinedPlaced,
+            adaptiveMaxSpread,
+          );
+          joinSteps.push(...connectorSteps);
+        }
       }
 
       // Position / pose and place all minifigures onto the joined model in Connect & Finish
@@ -2654,7 +2976,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
         });
       }
 
-      const modCount = moduleSecs.length;
+      const modCount = moduleSecs.length + (bogieCanonical ? 1 : 0);
       return {
         title: parsed.title,
         subtitle: `${parts.length} pieces · ${modCount} section${modCount === 1 ? '' : 's'} + final join`,
@@ -3842,11 +4164,14 @@ function renderAll() {
       const cam = getStepCamera(step);
       const ov = state.overrides[step.id] || {};
       const modelScale = ov.modelScale || 1.0;
+      const effectivePartOffsets = step.defaultPartOffsets
+        ? { ...step.defaultPartOffsets, ...(ov.partOffsets || {}) }
+        : (ov.partOffsets || {});
       const opts = {
         highlightNew: state.highlightNew, highlightColor: state.highlightColor,
         fadePrev: state.fadePrev, fadeOpacity: state.fadeOpacity,
         showArrows: true, accent: theme.accent, ov,
-        partOffsets: ov.partOffsets || {},
+        partOffsets: effectivePartOffsets,
         selectedPartIds: state.mode === 'select' && state.selectedStepId === step.id ? state.selectedPartIds : null,
       };
       const rw = slots.length === 1 ? 680 : 440, rh = slots.length === 1 ? 440 : 320;
@@ -3973,6 +4298,7 @@ function renderAll() {
                 </div>` : '');
 
             const headerBadgesHtml = [
+              step.stepHint ? `<span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-white text-[#202124] shadow-xs whitespace-nowrap max-w-full truncate" style="border:1.5px solid ${theme.accent}">${escHtml(step.stepHint)}</span>` : '',
               step.minifigPrep ? `<span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-white text-[#202124] shadow-xs whitespace-nowrap max-w-full truncate" style="border:1.5px solid ${theme.accent}">↻ Prepare</span>` : '',
               state.showRotCues && step.cue && step.cue !== 'none' ? `<span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-white text-[#202124] shadow-xs whitespace-nowrap max-w-full truncate" style="border:1.5px solid ${theme.accent}">↻ ${step.cue === 'flip_vertical' ? 'Flip Over' : step.cue === 'yaw_180' ? 'Turn 180°' : 'Rotate 90°'}</span>` : '',
             ].filter(Boolean).join('');
@@ -4124,7 +4450,7 @@ function bindStepPageInteractions(page) {
       let bestId = null, bestScore = 0.28;
       const ov = info.ov || {};
       for (const p of info.step.parts) {
-        const pOv = ov.partOffsets?.[p.id] || {};
+        const pOv = ov.partOffsets?.[p.id] || info.step.defaultPartOffsets?.[p.id] || {};
         const box = computeWorldBox(p);
         const dx = (pOv.x || 0) + (ov.offX || 0), dy = (pOv.y || 0) + (ov.offY || 0), dz = (pOv.z || 0) + (ov.offZ || 0);
         const c = projectWorldToNdc([box.center[0]+dx, box.center[1]+dy, box.center[2]+dz], info.snap.mvp);
@@ -4322,7 +4648,7 @@ function renderContextOverlay(page) {
     }
 
     const firstId = Array.from(state.selectedPartIds)[0];
-    const pOv = ov.partOffsets?.[firstId] || { x:0, y:0, z:0, tilt:0, arrow:true };
+    const pOv = ov.partOffsets?.[firstId] || step.defaultPartOffsets?.[firstId] || { x:0, y:0, z:0, tilt:0, arrow:true };
     box.innerHTML = `
       <div class="pointer-events-auto glass-pill rounded-3xl p-3 w-full space-y-2.5 text-xs">
         <div class="flex items-center justify-between gap-2">
@@ -4367,7 +4693,7 @@ function renderContextOverlay(page) {
       const curOv = state.overrides[step.id] || {};
       const po = { ...(curOv.partOffsets || {}) };
       for (const id of state.selectedPartIds) {
-        const cur = po[id] || { x:0, y:0, z:0, tilt:0, arrow:true };
+        const cur = po[id] || step.defaultPartOffsets?.[id] || { x:0, y:0, z:0, tilt:0, arrow:true };
         po[id] = { x: cur.x + dx, y: cur.y + dy, z: cur.z + dz, tilt: cur.tilt + dtilt, arrow: cur.arrow };
       }
       state.overrides[step.id] = { ...curOv, partOffsets: po };
@@ -4385,7 +4711,7 @@ function renderContextOverlay(page) {
       const po = { ...(curOv.partOffsets || {}) };
       const nextVal = pOv.arrow === false;
       for (const id of state.selectedPartIds) {
-        const cur = po[id] || { x:0, y:0, z:0, tilt:0, arrow:true };
+        const cur = po[id] || step.defaultPartOffsets?.[id] || { x:0, y:0, z:0, tilt:0, arrow:true };
         po[id] = { ...cur, arrow: nextVal };
       }
       state.overrides[step.id] = { ...curOv, partOffsets: po };
@@ -4395,7 +4721,10 @@ function renderContextOverlay(page) {
       pushUndo();
       const curOv = state.overrides[step.id] || {};
       const po = { ...(curOv.partOffsets || {}) };
-      for (const id of state.selectedPartIds) delete po[id];
+      for (const id of state.selectedPartIds) {
+        if (step.defaultPartOffsets?.[id]) po[id] = { x:0, y:0, z:0, tilt:0, arrow:false };
+        else delete po[id];
+      }
       state.overrides[step.id] = { ...curOv, partOffsets: po };
       renderAll();
     };
@@ -6283,14 +6612,32 @@ async function renderPageToJpegBytes(page, pxW, pxH) {
         }
       }
 
+      if (step.stepHint) {
+        ctx.font = '700 11px -apple-system, sans-serif';
+        const hintW = Math.min(slotW * 0.42, ctx.measureText(step.stepHint).width + 18);
+        const hintX = sx + slotW - hintW - 10;
+        const hintY = sy + 12;
+        drawRRect(hintX, hintY, hintW, 22, 11);
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+        ctx.strokeStyle = theme.accent;
+        ctx.lineWidth = 1.6;
+        ctx.stroke();
+        ctx.fillStyle = '#202124';
+        ctx.fillText(step.stepHint, hintX + 9, hintY + 5, hintW - 16);
+      }
+
       // 3D Step Render (+ optional true physical 1:1 Minifigure View card on printed paper!)
       const prev = getPreviousPartsForStep(state.model, ch, step);
       const cam = getStepCamera(step);
       const ov = state.overrides[step.id] || {};
+      const effectivePartOffsets = step.defaultPartOffsets
+        ? { ...step.defaultPartOffsets, ...(ov.partOffsets || {}) }
+        : (ov.partOffsets || {});
       const snap = renderSnapshot(prev, step.parts, cam.az, cam.el, 760, 520, ov.modelScale || 1.0, {
         highlightNew: state.highlightNew, highlightColor: state.highlightColor,
         fadePrev: state.fadePrev, fadeOpacity: state.fadeOpacity,
-        showArrows: true, accent: theme.accent, ov, partOffsets: ov.partOffsets || {},
+        showArrows: true, accent: theme.accent, ov, partOffsets: effectivePartOffsets,
       });
       const stepImg = await loadImgPromise(snap.url);
       const isMfBuild = Boolean((step.isStandaloneFigure || ch.kind === 'minifigure') && !step.isMinifigPoseStep);

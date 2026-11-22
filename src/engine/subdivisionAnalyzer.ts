@@ -1,5 +1,6 @@
 import { resolvePartDefinition } from '../data/partCatalog';
 import type {
+  ArticulatedJoinPlan,
   CanonicalModel,
   ConnectivityGraph,
   ProposedSection,
@@ -15,6 +16,7 @@ export interface SubdivisionPartInput {
   index: number;
   id: string;
   partId: string;
+  partName?: string;
   colorId: number;
   box: {
     min: Vec3;
@@ -22,8 +24,21 @@ export interface SubdivisionPartInput {
     center: Vec3;
   };
   isTile?: boolean;
+  hasTopStuds?: boolean;
+  isUpright?: boolean;
+  isInverted?: boolean;
+  isSidewaysCapable?: boolean;
+  isWheel?: boolean;
+  isWheelHolder?: boolean;
+  isBogiePart?: boolean;
+  isTechnicAxle?: boolean;
+  isAxleCollar?: boolean;
+  isPinholeCoupler?: boolean;
+  isTechnicPin?: boolean;
+  hasEmbeddedAxleHole?: boolean;
   isMinifig?: boolean;
   submodelKey?: string;
+  submodelInstanceId?: string;
 }
 
 export interface SubdivisionAnalysisResult {
@@ -44,6 +59,241 @@ export const SECTION_PREVIEW_PALETTE = [
 
 const JOIN_PREVIEW_COLOR = '#e11d48';
 
+const TRAIN_WHEEL_IDS = new Set([
+  '38340', '55423', '57878', '50254', '2928', '4180', '7049',
+  '73983', '85489', '65734', '65735', '64711',
+]);
+
+const WHEEL_HOLDER_IDS = new Set([
+  '38339', '2878', '4025', '4092', '65632', '28740', 'bb892', '88011', '88002',
+]);
+
+const BOGIE_SWIVEL_TOP_IDS = new Set(['4025', '65632', '2878', '4092']);
+
+const BOGIE_DECOR_IDS = new Set(['2871', '2871b', '4025', '4092', '65632', '2878', '38339', '28740', 'bb892', '88011', '88002']);
+
+const TECHNIC_AXLE_IDS = new Set([
+  '32062', '4519', '3705', '32073', '3706', '44294', '3707', '60485',
+  '3737', '23948', '3708', '50451', '50450',
+  '6587', '24316', '87083', '15462', '32209', '55013',
+]);
+
+const AXLE_COLLAR_IDS = new Set([
+  // Round plates, bricks & cones with cross axle hole
+  '4032', '3941', '6143', '92947', '3942', '6116',
+  // Technic bushes & round axle connectors
+  '3713', '4265', '32123', '6590', '6538', '59443', '18654', '62462',
+  // Circular Technic discs, pulleys, knob wheels & gears with cross axle hole
+  '4185', '2958', '2723', '32072', '3736', '6575', '35185', '35186',
+  '3647', '3648', '3649', '3650', '10928', '32269', '32270', '6589',
+  '94925', '4019', '6542', '69778', '69779', '24121', '65487',
+  '42610', '55981', '56902', '56904', '11208', '44292', '6118', '3482',
+]);
+
+const STUDLESS_TECHNIC_IDS = new Set([
+  '32523', '32524', '32525', '32316', '40490', '32278', '32063', '32054',
+  '6632', '32017', '32065', '32009', '32348', '32526', '32271', '32140',
+  '60483', '60484', '11478', '14720', '64179', '64178', '39790', '39794',
+  '3713', '4265', '32123', '6590', '6538', '59443', '18654', '62462',
+  '4185', '2958', '2723', '32072', '3736', '6575',
+  '3647', '3648', '3649', '3650', '10928', '32269', '32270', '6589', '94925', '4019', '6542',
+]);
+
+const PINHOLE_COUPLER_IDS = new Set([
+  '3176', '2444', '2817', '32001', '3709', '15535', '18674', '60474', '11833',
+  '32523', '32524', '32525', '32316', '32063', '6632',
+]);
+
+const TECHNIC_PIN_IDS = new Set([
+  '2780', '3673', '4274', '6558', '32054', '89678', '6628', '43093', '3749', '11214', '32002',
+]);
+
+const SMOOTH_TILE_IDS = new Set([
+  '3070', '3069', '63864', '2431', '6636', '4162', '3068', '26603', '87079', '69729',
+  '2412', '25269', '98138', '14769', '15535', '20482', '22385', '35399', '6881', '6934',
+]);
+
+export function normalizeSubdivisionPartKey(rawPartId: string): { key: string; baseNum: string } {
+  const key = String(rawPartId || '')
+    .trim()
+    .replace(/\\/g, '/')
+    .toLowerCase()
+    .replace(/^ldraw\//, '')
+    .replace(/^parts\//, '')
+    .replace(/^p\//, '')
+    .replace(/\.dat$/i, '')
+    .replace(/^bl_/, '')
+    .replace(/-bl$/, '');
+  const noComp = key.replace(/c\d+[a-z]?$/i, '');
+  const baseNum = noComp.replace(/(?:pb|ps|pat|pr)\d+[a-z0-9_]*$/i, '').replace(/[a-z]+$/i, '');
+  return { key, baseNum: baseNum || key };
+}
+
+export function classifySubdivisionPartFlags(
+  partId: string,
+  partName: string | undefined,
+  box: { min: Vec3; max: Vec3; center: Vec3 },
+  hints?: {
+    isTile?: boolean;
+    hasTopStuds?: boolean;
+    hasEmbeddedAxleHole?: boolean;
+    isSidewaysCapable?: boolean;
+    isUpright?: boolean;
+    isInverted?: boolean;
+  },
+): Pick<
+  SubdivisionPartInput,
+  | 'isTile'
+  | 'hasTopStuds'
+  | 'isUpright'
+  | 'isInverted'
+  | 'isSidewaysCapable'
+  | 'isWheel'
+  | 'isWheelHolder'
+  | 'isBogiePart'
+  | 'isTechnicAxle'
+  | 'isAxleCollar'
+  | 'isPinholeCoupler'
+  | 'isTechnicPin'
+> {
+  const { key, baseNum } = normalizeSubdivisionPartKey(partId);
+  const name = (partName || '').toLowerCase();
+  const spanX = box.max[0] - box.min[0];
+  const spanY = box.max[1] - box.min[1];
+  const spanZ = box.max[2] - box.min[2];
+
+  const isWheelHolder =
+    WHEEL_HOLDER_IDS.has(key) ||
+    WHEEL_HOLDER_IDS.has(baseNum) ||
+    /wheel\s*holder|bogie\s*(?:plate|holder)|train\s*motor/i.test(name);
+
+  const isWheel =
+    !isWheelHolder &&
+    (TRAIN_WHEEL_IDS.has(key) ||
+      TRAIN_WHEEL_IDS.has(baseNum) ||
+      (/\b(wheel|tire|tyre|rim)\b/i.test(name) &&
+        !/holder|bogie|motor|plate|brick|arch|fender|mudguard|steering|ship|cog|gear|pulley|knob\s+wheel|belt\s+wheel|axle\s*hole/i.test(name)));
+
+  const isBogiePart =
+    isWheelHolder ||
+    BOGIE_DECOR_IDS.has(key) ||
+    BOGIE_DECOR_IDS.has(baseNum) ||
+    /bogie|train\s*motor.*side|wheel\s*holder/i.test(name);
+
+  const isTechnicAxle =
+    TECHNIC_AXLE_IDS.has(key) ||
+    TECHNIC_AXLE_IDS.has(baseNum) ||
+    (/\baxle\b/i.test(name) &&
+      !/hole|brick|plate|wheel|connector|hub|frame|beam|liftarm|bush|gear|cam|pin\s+with|with\s+pin|holder|steering|fork|shock|motor|turntable|differential|portal/i.test(name));
+
+  const isTechnicPin =
+    TECHNIC_PIN_IDS.has(key) ||
+    TECHNIC_PIN_IDS.has(baseNum) ||
+    (/\btechnic\s+pin\b/i.test(name) && !/hole|brick|plate|beam|liftarm|connector/i.test(name));
+
+  const isCompactCircularFootprint =
+    Math.abs(spanX - spanZ) <= 8.5 && Math.max(spanX, spanZ) <= 86 && Math.min(spanX, spanZ) >= 12;
+
+  const isAxleCollar =
+    !isWheel &&
+    !isWheelHolder &&
+    !isTechnicAxle &&
+    (AXLE_COLLAR_IDS.has(key) ||
+      AXLE_COLLAR_IDS.has(baseNum) ||
+      (/\baxle\s*hole\b/i.test(name) &&
+        /\b(round|cylind|cone|disc|disk|gear|pulley|bush|ring|hub|knob|wheel)\b/i.test(name)) ||
+      /\btechnic\s+bush\b|\bbush\s+1\/2\b|\btechnic\s+(?:gear|disc|disk|pulley|wedge\s+belt|knob\s+wheel)\b|\baxle\s+connector\b/i.test(name) ||
+      (Boolean(hints?.hasEmbeddedAxleHole) && isCompactCircularFootprint && spanY <= 52));
+
+  const isPinholeCoupler =
+    PINHOLE_COUPLER_IDS.has(key) ||
+    PINHOLE_COUPLER_IDS.has(baseNum) ||
+    (/\b(pin\s*hole|with\s+hole)\b/i.test(name) && /\b(plate|tile|beam|liftarm)\b/i.test(name));
+
+  const isStudlessTechnic =
+    STUDLESS_TECHNIC_IDS.has(key) ||
+    STUDLESS_TECHNIC_IDS.has(baseNum) ||
+    (/\b(liftarm|technic\s+beam|technic\s+bush|technic\s+gear|technic\s+disc|technic\s+pulley|wedge\s+belt|knob\s+wheel)\b/i.test(name) &&
+      !/brick|plate/i.test(name));
+
+  const isSmoothTile =
+    SMOOTH_TILE_IDS.has(key) ||
+    SMOOTH_TILE_IDS.has(baseNum) ||
+    (Boolean(hints?.isTile) && !/clip|hinge|bar|holder|handle|turntable/i.test(name)) ||
+    (/\btile\b/i.test(name) && !/clip|hinge|bar|holder|handle|modified|turntable|stud/i.test(name));
+
+  const isTile = hints?.isTile ?? isSmoothTile;
+
+  let hasTopStuds = hints?.hasTopStuds;
+  if (hasTopStuds === undefined) {
+    if (
+      isSmoothTile ||
+      isTechnicAxle ||
+      isStudlessTechnic ||
+      isWheel ||
+      BOGIE_SWIVEL_TOP_IDS.has(key) ||
+      BOGIE_SWIVEL_TOP_IDS.has(baseNum)
+    ) {
+      hasTopStuds = false;
+    } else {
+      hasTopStuds = true;
+    }
+  } else if (
+    isSmoothTile ||
+    isTechnicAxle ||
+    isStudlessTechnic ||
+    isWheel ||
+    BOGIE_SWIVEL_TOP_IDS.has(key) ||
+    BOGIE_SWIVEL_TOP_IDS.has(baseNum)
+  ) {
+    hasTopStuds = false;
+  }
+
+  const isSidewaysCapable =
+    hints?.isSidewaysCapable ??
+    (isTechnicPin ||
+      isTechnicAxle ||
+      isWheel ||
+      isWheelHolder ||
+      /snot|bracket|clip|hinge|bar|axle|pin|technic|liftarm|beam|turntable|handle|hook|grab|magnet|coupler|buffer|ball|socket|window|glass|door|fence|rail|ladder|hose|antenna|lever/i.test(name));
+
+  return {
+    isTile,
+    hasTopStuds,
+    isUpright: hints?.isUpright ?? true,
+    isInverted: hints?.isInverted ?? false,
+    isSidewaysCapable,
+    isWheel,
+    isWheelHolder,
+    isBogiePart,
+    isTechnicAxle,
+    isAxleCollar,
+    isPinholeCoupler,
+    isTechnicPin,
+  };
+}
+
+function enrichPartInput(p: SubdivisionPartInput): SubdivisionPartInput {
+  if (
+    p.isWheel !== undefined &&
+    p.isWheelHolder !== undefined &&
+    p.isTechnicAxle !== undefined &&
+    p.isAxleCollar !== undefined &&
+    p.hasTopStuds !== undefined
+  ) {
+    return p;
+  }
+  const flags = classifySubdivisionPartFlags(p.partId, p.partName, p.box, {
+    isTile: p.isTile,
+    hasTopStuds: p.hasTopStuds,
+    hasEmbeddedAxleHole: p.hasEmbeddedAxleHole,
+    isSidewaysCapable: p.isSidewaysCapable,
+    isUpright: p.isUpright,
+    isInverted: p.isInverted,
+  });
+  return { ...p, ...flags };
+}
+
 export function buildSubdivisionInputsFromCanonical(
   model: CanonicalModel,
   graph: ConnectivityGraph,
@@ -53,13 +303,31 @@ export function buildSubdivisionInputsFromCanonical(
     idToIndex.set(p.id, index);
     const def = resolvePartDefinition(p.partId);
     const box = computePartWorldAabb(p);
+    const m4 = p.rotation[4];
+    const flags = classifySubdivisionPartFlags(p.partId, p.partName || def.name, box, {
+      isTile: def.shape === 'tile',
+      hasTopStuds: def.hasTopStuds,
+      isUpright: Math.abs(m4) >= 0.7,
+      isInverted: m4 <= -0.7,
+      isSidewaysCapable:
+        Math.abs(m4) < 0.5 ||
+        def.shape === 'snot_brick' ||
+        def.shape === 'snot_bracket' ||
+        def.shape === 'clip_plate' ||
+        def.shape === 'bar_plate' ||
+        def.shape === 'bar' ||
+        def.shape === 'technic_brick' ||
+        def.shape === 'technic_pin' ||
+        def.shape === 'hinge_plate',
+    });
     return {
       index,
       id: p.id,
       partId: p.partId,
+      partName: p.partName || def.name,
       colorId: p.colorId,
       box,
-      isTile: def.shape === 'tile' || !def.hasTopStuds,
+      ...flags,
       isMinifig: def.category === 'Minifigure',
       submodelKey: p.submodelPath[p.submodelPath.length - 1],
     };
@@ -382,18 +650,379 @@ function computeSectionDiag(indices: number[], allParts: SubdivisionPartInput[])
   return computeModelBounds(subset).diag;
 }
 
+function isVerticalPivotRod(p: SubdivisionPartInput): boolean {
+  const spanX = p.box.max[0] - p.box.min[0];
+  const spanY = p.box.max[1] - p.box.min[1];
+  const spanZ = p.box.max[2] - p.box.min[2];
+  const horiz = Math.max(spanX, spanZ);
+  if (spanY < 32 || spanY < horiz * 1.6) return false;
+  if (p.isTechnicAxle) return true;
+  if (horiz <= 16 && spanY >= 48 && /\b(axle|rod|bar)\b/i.test(p.partName || '')) return true;
+  return false;
+}
+
+function isHorizontalWheelAxle(p: SubdivisionPartInput): boolean {
+  if (!p.isTechnicAxle) return false;
+  const spanY = p.box.max[1] - p.box.min[1];
+  const horiz = Math.max(p.box.max[0] - p.box.min[0], p.box.max[2] - p.box.min[2]);
+  return spanY <= 18 && horiz >= 28;
+}
+
+const TURNTABLE_IDS = new Set(['3680', '3679', '61485', '27448', '18938', '18939', '3403', '3404']);
+
+/**
+ * Determines whether an edge between two physically adjacent parts represents a genuine
+ * rigid stud / SNOT / clip / pin clutch connection (as opposed to a sliding smooth-tile
+ * seam, swiveling bogie pin, turntable pivot, opposing pinhole coupler tongues, sliding
+ * Technic axle, wheel-clip, or concave-scoop AABB overlap).
+ */
+export function isRigidStudEdge(a: SubdivisionPartInput, b: SubdivisionPartInput): boolean {
+  if (a.isTechnicAxle || b.isTechnicAxle) return false;
+  if (a.isWheel || b.isWheel) return false;
+
+  const boxA = a.box;
+  const boxB = b.box;
+  const ovX = Math.min(boxA.max[0], boxB.max[0]) - Math.max(boxA.min[0], boxB.min[0]);
+  const ovY = Math.min(boxA.max[1], boxB.max[1]) - Math.max(boxA.min[1], boxB.min[1]);
+  const ovZ = Math.min(boxA.max[2], boxB.max[2]) - Math.max(boxA.min[2], boxB.min[2]);
+
+  // Identify lower vs upper part by center Y
+  const lower = boxA.center[1] <= boxB.center[1] ? a : b;
+  const upper = lower === a ? b : a;
+
+  const keyA = normalizeSubdivisionPartKey(a.partId);
+  const keyB = normalizeSubdivisionPartKey(b.partId);
+  const lowerKey = lower === a ? keyA : keyB;
+
+  // Turntable base <-> turntable top swivels freely (not a rigid weld)
+  if (
+    (TURNTABLE_IDS.has(keyA.key) || TURNTABLE_IDS.has(keyA.baseNum)) &&
+    (TURNTABLE_IDS.has(keyB.key) || TURNTABLE_IDS.has(keyB.baseNum))
+  ) {
+    return false;
+  }
+
+  // Bogie swivel plates (4025 / 65632 / 2878) swivel on a pin; they do NOT stud-weld to upper car floors
+  if (
+    (BOGIE_SWIVEL_TOP_IDS.has(lowerKey.key) || BOGIE_SWIVEL_TOP_IDS.has(lowerKey.baseNum)) &&
+    upper.box.min[1] >= lower.box.max[1] - 6
+  ) {
+    return false;
+  }
+  // Standard RC wheel holder (38339) does not stud-weld directly to wide/long car floors
+  if (
+    lower.isWheelHolder &&
+    !upper.isBogiePart &&
+    !upper.isWheelHolder &&
+    Math.max(upper.box.max[0] - upper.box.min[0], upper.box.max[2] - upper.box.min[2]) >= 120
+  ) {
+    return false;
+  }
+
+  // 1. Strict vertical face-to-face stud stacking check:
+  // Lower's top face must actually meet upper's bottom face (rejects concave-scoop hollow enclosure!)
+  const faceGap = Math.abs(lower.box.max[1] - upper.box.min[1]);
+  if (ovX >= 3.0 && ovZ >= 3.0 && faceGap <= 6.5) {
+    // Technic pin engaged into a beam/brick
+    if (a.isTechnicPin || b.isTechnicPin) return true;
+
+    // Opposing pinhole coupler tongues (e.g., two 3176 / 2444 / 32001 plates overlapping only at their pivot holes)
+    // swivel freely around the vertical axle and do NOT stud-weld to each other!
+    if (a.isPinholeCoupler && b.isPinholeCoupler) {
+      const centerDistXZ = Math.hypot(
+        boxA.center[0] - boxB.center[0],
+        boxA.center[2] - boxB.center[2],
+      );
+      if (centerDistXZ >= 14) return false;
+    }
+
+    // Floating circular cross-axle collars resting against pinhole coupler plates/beams do not stud-weld
+    if (
+      (a.isAxleCollar && b.isPinholeCoupler) ||
+      (b.isAxleCollar && a.isPinholeCoupler)
+    ) {
+      return false;
+    }
+
+    const lowerUpright = lower.isUpright !== false;
+    const upperUpright = upper.isUpright !== false;
+    if (lowerUpright && upperUpright) {
+      if (lower.isInverted && !upper.isInverted) return false;
+      if (!lower.isInverted && upper.isInverted) return false;
+      if (lower.isInverted && upper.isInverted) {
+        return upper.hasTopStuds !== false;
+      }
+      // Standard upright stack: lower part MUST actually have top studs (rejects smooth tiles / liftarms / bushes!)
+      return lower.hasTopStuds !== false;
+    }
+    // At least one part is sideways (SNOT) meeting vertically with genuine contact
+    return Boolean(a.isSidewaysCapable || b.isSidewaysCapable);
+  }
+
+  // 2. Sideways / SNOT / clip / hinge / Technic pin connection:
+  // Circular axle collars (4032, 3941, 3713, 4265c, gears) have NO side studs/clips —
+  // reject concave-scoop or side-wall AABB overlaps involving upright axle collars!
+  if ((a.isAxleCollar && a.isUpright !== false) || (b.isAxleCollar && b.isUpright !== false)) {
+    return false;
+  }
+
+  const goodAxes = (ovX >= 1.5 ? 1 : 0) + (ovY >= 1.5 ? 1 : 0) + (ovZ >= 1.5 ? 1 : 0);
+  if (goodAxes < 2) return false;
+
+  if (a.isTechnicPin || b.isTechnicPin) return true;
+  if ((!a.isUpright || !b.isUpright) && ovX >= 1.5 && ovY >= 1.5 && ovZ >= 1.5) return true;
+  if (a.isSidewaysCapable && b.isSidewaysCapable) return true;
+  return false;
+}
+
+export function buildStudClutchAdjacency(
+  allParts: SubdivisionPartInput[],
+  adjacency: number[][],
+): number[][] {
+  const studAdj: number[][] = Array.from({ length: allParts.length }, () => []);
+  for (let i = 0; i < allParts.length; i++) {
+    const pa = allParts[i];
+    for (const j of adjacency[i] ?? []) {
+      if (j <= i) continue;
+      const pb = allParts[j];
+      if (!pa || !pb) continue;
+      if (isRigidStudEdge(pa, pb)) {
+        studAdj[i].push(j);
+        studAdj[j].push(i);
+      }
+    }
+  }
+  return studAdj;
+}
+
+interface DetectedBogie {
+  indices: number[];
+  minP: number;
+  maxP: number;
+  centerP: number;
+  maxY: number;
+}
+
+/**
+ * Detects intact train bogies / wheel assemblies (explicit bogie submodels, standard RC/9V
+ * wheel holders + wheels + bogie plates + decorative sides, and custom brick-built bogies)
+ * so a longitudinal cut plane NEVER slices a middle bogey in half.
+ */
+function detectIntactBogies(
+  active: SubdivisionPartInput[],
+  allParts: SubdivisionPartInput[],
+  adjacency: number[][],
+  studAdjacency: number[][],
+  projMin: Map<number, number>,
+  projMax: Map<number, number>,
+  projCenter: Map<number, number>,
+): DetectedBogie[] {
+  const activeSet = new Set(active.map((p) => p.index));
+  const bogies: DetectedBogie[] = [];
+  const claimed = new Set<number>();
+
+  // 1. Check explicit submodel instances (from .io / .mpd) that are compact wheel assemblies
+  const bySubInst = new Map<string, number[]>();
+  for (const p of active) {
+    if (!p.submodelInstanceId) continue;
+    let list = bySubInst.get(p.submodelInstanceId);
+    if (!list) {
+      list = [];
+      bySubInst.set(p.submodelInstanceId, list);
+    }
+    list.push(p.index);
+  }
+  for (const list of bySubInst.values()) {
+    if (list.length < 3 || list.length > Math.min(60, Math.floor(active.length * 0.25))) continue;
+    const wheelCount = list.filter((i) => allParts[i].isWheel).length;
+    const holderCount = list.filter((i) => allParts[i].isWheelHolder).length;
+    if (wheelCount < 2 && holderCount < 1) continue;
+    let minP = Infinity;
+    let maxP = -Infinity;
+    let maxY = -Infinity;
+    for (const i of list) {
+      const lo = projMin.get(i)!;
+      const hi = projMax.get(i)!;
+      if (lo < minP) minP = lo;
+      if (hi > maxP) maxP = hi;
+      if (allParts[i].box.max[1] > maxY) maxY = allParts[i].box.max[1];
+    }
+    if (maxP - minP > 240) continue;
+    for (const i of list) claimed.add(i);
+    bogies.push({ indices: list, minP, maxP, centerP: (minP + maxP) * 0.5, maxY });
+  }
+
+  // 2. Geometric & graph-based bogie detection for remaining unclaimed wheels & wheel holders
+  const seeds = active.filter((p) => !claimed.has(p.index) && (p.isWheel || p.isWheelHolder));
+  if (seeds.length === 0) return bogies;
+
+  const globalWheelBandMaxY = Math.max(...seeds.map((s) => s.box.max[1]));
+
+  // Build car-body firewall: parts stud-connected to the upper train body (> wheelBand + 28 LDU)
+  // cannot be swallowed by a bogie expansion!
+  const carBodySet = new Set<number>();
+  const carQueue: number[] = [];
+  for (const p of active) {
+    if (
+      p.box.min[1] > globalWheelBandMaxY + 28 &&
+      !isVerticalPivotRod(p) &&
+      !p.isAxleCollar &&
+      !p.isWheel &&
+      !p.isWheelHolder &&
+      !p.isBogiePart
+    ) {
+      carBodySet.add(p.index);
+      carQueue.push(p.index);
+    }
+  }
+  for (let head = 0; head < carQueue.length; head++) {
+    const u = carQueue[head];
+    for (const v of studAdjacency[u] ?? []) {
+      if (!activeSet.has(v) || carBodySet.has(v)) continue;
+      const vp = allParts[v];
+      if (vp.isWheel || vp.isWheelHolder || vp.isBogiePart || isVerticalPivotRod(vp) || isHorizontalWheelAxle(vp)) {
+        continue;
+      }
+      carBodySet.add(v);
+      carQueue.push(v);
+    }
+  }
+
+  // Cluster seeds belonging to the same bogie (same wheel-holder / axle connectivity OR within 135 LDU along train axis)
+  const seedIdxList = seeds.map((s) => s.index);
+  const seedVisited = new Set<number>();
+  const seedClusters: number[][] = [];
+
+  for (const sIdx of seedIdxList) {
+    if (seedVisited.has(sIdx)) continue;
+    const cluster: number[] = [sIdx];
+    seedVisited.add(sIdx);
+    let head = 0;
+    while (head < cluster.length) {
+      const curr = cluster[head++];
+      const currP = projCenter.get(curr)!;
+      const currY = allParts[curr].box.center[1];
+
+      // Expand to other seeds within bogie wheelbase distance (<= 135 LDU = 6.75 studs) and same height band
+      for (const other of seedIdxList) {
+        if (seedVisited.has(other)) continue;
+        const otherP = projCenter.get(other)!;
+        const otherY = allParts[other].box.center[1];
+        if (Math.abs(otherP - currP) <= 135 && Math.abs(otherY - currY) <= 32) {
+          seedVisited.add(other);
+          cluster.push(other);
+        }
+      }
+
+      // Also link seeds connected by a short path (<= 3 hops) through low non-car-body non-vertical-rod parts
+      const bfs: Array<{ idx: number; depth: number }> = [{ idx: curr, depth: 0 }];
+      const seenLocal = new Set<number>([curr]);
+      for (let bHead = 0; bHead < bfs.length; bHead++) {
+        const { idx, depth } = bfs[bHead];
+        if (depth >= 3) continue;
+        for (const nb of adjacency[idx] ?? []) {
+          if (!activeSet.has(nb) || seenLocal.has(nb) || claimed.has(nb)) continue;
+          const nbp = allParts[nb];
+          if (isVerticalPivotRod(nbp) || carBodySet.has(nb)) continue;
+          if (nbp.box.max[1] > globalWheelBandMaxY + 32) continue;
+          if (projMax.get(nb)! - projMin.get(nb)! > 200) continue;
+          seenLocal.add(nb);
+          if ((nbp.isWheel || nbp.isWheelHolder) && !seedVisited.has(nb)) {
+            seedVisited.add(nb);
+            cluster.push(nb);
+          }
+          bfs.push({ idx: nb, depth: depth + 1 });
+        }
+      }
+    }
+    seedClusters.push(cluster);
+  }
+
+  // Expand each seed cluster into its full intact bogie (wheel holders, horizontal axles, bogie frame, decorative sides)
+  for (const sCluster of seedClusters) {
+    let seedMinP = Infinity;
+    let seedMaxP = -Infinity;
+    let wheelTopY = -Infinity;
+    for (const i of sCluster) {
+      const lo = projMin.get(i)!;
+      const hi = projMax.get(i)!;
+      if (lo < seedMinP) seedMinP = lo;
+      if (hi > seedMaxP) seedMaxP = hi;
+      if (allParts[i].box.max[1] > wheelTopY) wheelTopY = allParts[i].box.max[1];
+    }
+    const seedSpan = seedMaxP - seedMinP;
+
+    const bogieSet = new Set<number>(sCluster);
+    const q: number[] = [...sCluster];
+    for (let head = 0; head < q.length; head++) {
+      const u = q[head];
+      const up = allParts[u];
+      const uNeighbors = new Set<number>([
+        ...(studAdjacency[u] ?? []),
+        // Wheels, wheel holders, horizontal axles, and bogie decor also use physical adjacency
+        ...(up.isWheel || up.isWheelHolder || up.isBogiePart || isHorizontalWheelAxle(up)
+          ? adjacency[u] ?? []
+          : []),
+      ]);
+
+      for (const nb of uNeighbors) {
+        if (!activeSet.has(nb) || bogieSet.has(nb) || claimed.has(nb)) continue;
+        const nbp = allParts[nb];
+        if (isVerticalPivotRod(nbp)) continue;
+        if (carBodySet.has(nb) && !nbp.isBogiePart && !nbp.isWheel && !nbp.isWheelHolder) continue;
+        const nbLo = projMin.get(nb)!;
+        const nbHi = projMax.get(nb)!;
+        if (nbHi - nbLo > Math.max(180, seedSpan + 48)) continue;
+        if (nbLo < seedMinP - 36 || nbHi > seedMaxP + 36) continue;
+        if (nbp.box.max[1] > wheelTopY + 32) continue;
+        // Require either bogie/wheel/horizontal-axle role OR stud/pin attachment to bogie frame
+        const isNativeBogiePiece =
+          nbp.isWheel || nbp.isWheelHolder || nbp.isBogiePart || isHorizontalWheelAxle(nbp);
+        const isStudAttachedToU = (studAdjacency[u] ?? []).includes(nb);
+        if (!isNativeBogiePiece && !isStudAttachedToU && !up.isWheel && !up.isWheelHolder && !isHorizontalWheelAxle(up)) {
+          continue;
+        }
+        // Do not pull floating circular cross-axle collars sitting above the bogie into the bogie
+        if (nbp.isAxleCollar && !isStudAttachedToU && nbp.box.min[1] >= wheelTopY - 2) continue;
+
+        bogieSet.add(nb);
+        q.push(nb);
+      }
+    }
+
+    const indices = Array.from(bogieSet);
+    if (indices.length < 2) continue;
+    let minP = Infinity;
+    let maxP = -Infinity;
+    let maxY = -Infinity;
+    for (const i of indices) {
+      claimed.add(i);
+      const lo = projMin.get(i)!;
+      const hi = projMax.get(i)!;
+      if (lo < minP) minP = lo;
+      if (hi > maxP) maxP = hi;
+      if (allParts[i].box.max[1] > maxY) maxY = allParts[i].box.max[1];
+    }
+    bogies.push({ indices, minP, maxP, centerP: (minP + maxP) * 0.5, maxY });
+  }
+
+  return bogies;
+}
+
 /**
  * Strategy A: Longitudinal Halves & Multi-Segment Split ("Build Halves First, Then Connect").
  * Uses 2D PCA to find the model's lengthwise direction, sweeps transverse planes to minimize
- * spanning coupler bricks, puts spanning bricks into a clean Connect/Join step, and detects
- * identical 2x halves when symmetric.
+ * rigid stud cut edges, preserves intact bogies (never slicing a middle bogie in half),
+ * keeps stud-connected seam bricks on their corresponding halves, and recognizes articulated
+ * Technic axle/rod + floating circular cross-axle collar + middle bogie joints.
  */
 export function buildLongitudinalHalvesProposal(
-  allParts: SubdivisionPartInput[],
+  rawAllParts: SubdivisionPartInput[],
   adjacency: number[][],
   segmentCount = 2,
   allowRepeatCollapse = true,
 ): SubdivisionProposal | null {
+  const allParts = rawAllParts.map(enrichPartInput);
   const active = allParts.filter((p) => !p.isMinifig);
   if (active.length < 16) return null;
 
@@ -433,6 +1062,24 @@ export function buildLongitudinalHalvesProposal(
     if (hi > globalMaxP) globalMaxP = hi;
   }
 
+  // Build strict stud-clutch adjacency graph & detect intact wheel bogies
+  const studAdjacency = buildStudClutchAdjacency(allParts, adjacency);
+  const detectedBogies = detectIntactBogies(
+    active,
+    allParts,
+    adjacency,
+    studAdjacency,
+    projMin,
+    projMax,
+    projCenter,
+  );
+  const partToBogie = new Map<number, DetectedBogie>();
+  for (const bogie of detectedBogies) {
+    for (const idx of bogie.indices) partToBogie.set(idx, bogie);
+  }
+
+  const verticalPivotRods = active.filter((p) => isVerticalPivotRod(p));
+
   const totalProjSpan = Math.max(1, globalMaxP - globalMinP);
   const cutPositions: number[] = [];
 
@@ -448,70 +1095,279 @@ export function buildLongitudinalHalvesProposal(
     for (let t = idealT - searchHalf; t <= idealT + searchHalf + 0.5; t += stepLdu) {
       let spanning = 0;
       let leftCount = 0;
-      let cutEdges = 0;
+      let studCutEdges = 0;
+      let physCutEdges = 0;
 
       for (const p of active) {
         const lo = projMin.get(p.index)!;
         const hi = projMax.get(p.index)!;
         const c = projCenter.get(p.index)!;
-        if (lo < t - 2.5 && hi > t + 2.5) spanning++;
+        if (lo < t - 2.5 && hi > t + 2.5) {
+          // Do not heavily penalize an intact bogie / vertical pivot rod sitting cleanly at an articulation seam
+          if (!partToBogie.has(p.index) && !isVerticalPivotRod(p) && !p.isAxleCollar) {
+            spanning++;
+          }
+        }
         if (c < t) leftCount++;
       }
 
       for (const p of active) {
         const ca = projCenter.get(p.index)!;
         if (ca >= t) continue;
+        for (const nb of studAdjacency[p.index] ?? []) {
+          const cb = projCenter.get(nb);
+          if (cb !== undefined && cb >= t && !partToBogie.has(p.index) && !partToBogie.has(nb)) {
+            studCutEdges++;
+          }
+        }
         for (const nb of adjacency[p.index] ?? []) {
           const cb = projCenter.get(nb);
-          if (cb !== undefined && cb >= t) cutEdges++;
+          if (cb !== undefined && cb >= t) physCutEdges++;
         }
       }
 
       const fracDiff = Math.abs(leftCount / active.length - idealFrac);
-      const score = spanning * 7.5 + cutEdges * 1.4 + fracDiff * active.length * 1.8;
+      const score = spanning * 4.5 + studCutEdges * 3.2 + physCutEdges * 0.6 + fracDiff * active.length * 1.8;
       if (score < bestScore) {
         bestScore = score;
         bestT = t;
       }
     }
-    cutPositions.push(bestT);
+
+    // If a vertical Technic pivot rod sits right near bestT (articulated joint!), snap cut plane directly to its axis
+    let snappedT = bestT;
+    let bestRodDist = 44;
+    for (const rod of verticalPivotRods) {
+      const rp = projCenter.get(rod.index)!;
+      const dist = Math.abs(rp - bestT);
+      if (dist < bestRodDist) {
+        bestRodDist = dist;
+        snappedT = rp;
+      }
+    }
+    cutPositions.push(snappedT);
   }
 
-  // Assign each part to a segment 0..k-1, or to the spanning/join bucket
-  const rawSegments: number[][] = Array.from({ length: k }, () => []);
-  const spanningIndices: number[] = [];
+  // Identify protected middle-joint assemblies at each cut plane:
+  // 1. Intact middle bogie(s) straddling a cut plane (NEVER cut in half!)
+  // 2. Vertical Technic pivot rod(s) at the cut plane
+  // 3. Circular cross-axle pieces (4032, 3941, 3713, 4265c, etc.) coaxial with a pivot rod
+  const cutBogieSet = new Set<number>();
+  const cutBogieList: DetectedBogie[] = [];
+  for (const bogie of detectedBogies) {
+    const straddlesCut = cutPositions.some((t) => bogie.minP < t + 12 && bogie.maxP > t - 12);
+    if (straddlesCut) {
+      cutBogieList.push(bogie);
+      for (const idx of bogie.indices) cutBogieSet.add(idx);
+    }
+  }
+
+  const pivotRodSet = new Set<number>();
+  for (const rod of verticalPivotRods) {
+    const rp = projCenter.get(rod.index)!;
+    const nearCut = cutPositions.some((t) => Math.abs(rp - t) <= 44);
+    const touchesCutBogie = (adjacency[rod.index] ?? []).some((nb) => cutBogieSet.has(nb));
+    if (nearCut || touchesCutBogie) {
+      pivotRodSet.add(rod.index);
+    }
+  }
+
+  // If a pivot rod touches a bogie that wasn't caught by the ±12 LDU band (e.g., slightly offset), include that bogie intact too
+  for (const rodIdx of pivotRodSet) {
+    for (const nb of adjacency[rodIdx] ?? []) {
+      const bogie = partToBogie.get(nb);
+      if (bogie && !cutBogieList.includes(bogie)) {
+        const rodP = projCenter.get(rodIdx)!;
+        if (Math.abs(bogie.centerP - rodP) <= 60) {
+          cutBogieList.push(bogie);
+          for (const idx of bogie.indices) cutBogieSet.add(idx);
+        }
+      }
+    }
+  }
+
+  const floatingCollarSet = new Set<number>();
+  for (const rodIdx of pivotRodSet) {
+    const rod = allParts[rodIdx];
+    const rx = rod.box.center[0];
+    const rz = rod.box.center[2];
+    const rodP = projCenter.get(rodIdx)!;
+    const rMinY = rod.box.min[1];
+    const rMaxY = rod.box.max[1];
+
+    for (const p of active) {
+      if (cutBogieSet.has(p.index) || pivotRodSet.has(p.index)) continue;
+      if (!p.isAxleCollar) continue;
+      const distXZ = Math.hypot(p.box.center[0] - rx, p.box.center[2] - rz);
+      const overlapsY = p.box.max[1] >= rMinY - 4 && p.box.min[1] <= rMaxY + 4;
+      if (distXZ <= 10 && overlapsY) {
+        // Verify this circular collar is NOT firmly bricked into >= 2 non-coaxial bricks on the SAME side
+        let leftSideStuds = 0;
+        let rightSideStuds = 0;
+        for (const nb of studAdjacency[p.index] ?? []) {
+          if (cutBogieSet.has(nb) || pivotRodSet.has(nb)) continue;
+          const nbp = allParts[nb];
+          if (nbp.isAxleCollar || nbp.isPinholeCoupler) continue;
+          const nbDistXZ = Math.hypot(nbp.box.center[0] - rx, nbp.box.center[2] - rz);
+          if (nbDistXZ <= 10) continue;
+          if ((projCenter.get(nb) ?? rodP) < rodP) leftSideStuds++;
+          else rightSideStuds++;
+        }
+        const sandwichedBetweenHalves = leftSideStuds > 0 && rightSideStuds > 0;
+        if (sandwichedBetweenHalves || Math.max(leftSideStuds, rightSideStuds) <= 1) {
+          floatingCollarSet.add(p.index);
+        }
+      }
+    }
+  }
+
+  const protectedJoinSet = new Set<number>([
+    ...cutBogieSet,
+    ...pivotRodSet,
+    ...floatingCollarSet,
+  ]);
+
+  // Initial segment assignment for non-protected parts
+  const segOwner = new Map<number, number>();
+  const rawSpanning: number[] = [];
+
+  // Keep non-cut bogies (e.g., Front Bogie, Rear Bogie) intact inside their side segment
+  for (const bogie of detectedBogies) {
+    if (cutBogieList.includes(bogie)) continue;
+    let segIdx = 0;
+    while (segIdx < cutPositions.length && bogie.centerP >= cutPositions[segIdx]) segIdx++;
+    for (const idx of bogie.indices) {
+      if (!protectedJoinSet.has(idx)) segOwner.set(idx, segIdx);
+    }
+  }
 
   for (const p of active) {
+    if (protectedJoinSet.has(p.index) || segOwner.has(p.index)) continue;
     const lo = projMin.get(p.index)!;
     const hi = projMax.get(p.index)!;
     const c = projCenter.get(p.index)!;
     const crossesCut = cutPositions.some((t) => lo < t - 2.5 && hi > t + 2.5);
     if (crossesCut) {
-      spanningIndices.push(p.index);
+      rawSpanning.push(p.index);
     } else {
       let segIdx = 0;
       while (segIdx < cutPositions.length && c >= cutPositions[segIdx]) segIdx++;
-      rawSegments[segIdx].push(p.index);
+      segOwner.set(p.index, segIdx);
     }
   }
 
-  // If too many bricks physically span the cut (> 35% of parts, e.g. long overlapping Technic frame),
-  // assign spanning bricks by center so halves stay balanced and prefer Numbered Bags mode.
-  const heavySpanning = spanningIndices.length > Math.max(20, Math.floor(active.length * 0.35));
-  const joinIndices: number[] = [];
+  // Reassign stud-connected cut-zone bricks back to their corresponding half!
+  // Any brick crossing the cut plane that is connected by studs ONLY to one half (e.g.,
+  // articulated train scoops & coupler tongues!) belongs in that half, NOT in the middle section.
+  let remainingSpanning = [...rawSpanning];
+  if (remainingSpanning.length > 0) {
+    // Pass 1: Iterative single-side stud absorption
+    let changed = true;
+    while (changed && remainingSpanning.length > 0) {
+      changed = false;
+      const nextRemaining: number[] = [];
+      const remSet = new Set(remainingSpanning);
 
+      for (const idx of remainingSpanning) {
+        const touchedSegs = new Set<number>();
+        let touchesOtherSpanning = false;
+        for (const nb of studAdjacency[idx] ?? []) {
+          if (protectedJoinSet.has(nb)) continue;
+          const ow = segOwner.get(nb);
+          if (ow !== undefined) touchedSegs.add(ow);
+          else if (remSet.has(nb)) touchesOtherSpanning = true;
+        }
+        if (touchedSegs.size === 1 && !touchesOtherSpanning) {
+          segOwner.set(idx, Array.from(touchedSegs)[0]);
+          changed = true;
+        } else {
+          nextRemaining.push(idx);
+        }
+      }
+      remainingSpanning = nextRemaining;
+    }
+
+    // Pass 2: Stud-connected components of remaining spanning bricks.
+    // If an entire stud-connected spanning sub-cluster connects by studs ONLY to 1 half,
+    // assign the whole cluster to that half!
+    if (remainingSpanning.length > 0) {
+      const spanComps = getConnectedComponents(remainingSpanning, studAdjacency);
+      const stillBridging: number[] = [];
+      for (const comp of spanComps) {
+        const touchedSegs = new Set<number>();
+        for (const idx of comp) {
+          for (const nb of studAdjacency[idx] ?? []) {
+            if (protectedJoinSet.has(nb)) continue;
+            const ow = segOwner.get(nb);
+            if (ow !== undefined) touchedSegs.add(ow);
+          }
+        }
+        if (touchedSegs.size === 1) {
+          const targetSeg = Array.from(touchedSegs)[0];
+          for (const idx of comp) segOwner.set(idx, targetSeg);
+        } else if (touchedSegs.size === 0 && pivotRodSet.size > 0) {
+          // Completely unattached by studs to either half: if compact & coaxial with a pivot rod, promote to floating collar!
+          const allCoaxial = comp.every((idx) => {
+            const p = allParts[idx];
+            const sx = p.box.max[0] - p.box.min[0];
+            const sz = p.box.max[2] - p.box.min[2];
+            if (Math.max(sx, sz) > 86 || Math.abs(sx - sz) > 12) return false;
+            return Array.from(pivotRodSet).some((rIdx) => {
+              const rod = allParts[rIdx];
+              const d = Math.hypot(p.box.center[0] - rod.box.center[0], p.box.center[2] - rod.box.center[2]);
+              return d <= 12 && p.box.max[1] >= rod.box.min[1] - 4 && p.box.min[1] <= rod.box.max[1] + 4;
+            });
+          });
+          if (allCoaxial) {
+            for (const idx of comp) {
+              floatingCollarSet.add(idx);
+              protectedJoinSet.add(idx);
+            }
+          } else {
+            stillBridging.push(...comp);
+          }
+        } else {
+          stillBridging.push(...comp);
+        }
+      }
+      remainingSpanning = stillBridging;
+    }
+  }
+
+  // If too many rigid bricks still physically bridge the cut (> 35% of parts, e.g. long overlapping Technic frame),
+  // assign them by center so halves stay balanced and prefer Numbered Bags mode.
+  const totalJoinCandidateCount = remainingSpanning.length + protectedJoinSet.size;
+  const heavySpanning =
+    remainingSpanning.length > Math.max(20, Math.floor(active.length * 0.35)) &&
+    pivotRodSet.size === 0 &&
+    cutBogieSet.size === 0;
+
+  const rawSegments: number[][] = Array.from({ length: k }, () => []);
+  for (const [idx, segIdx] of segOwner.entries()) {
+    rawSegments[segIdx].push(idx);
+  }
+
+  const finishJoinIndices: number[] = [];
   if (heavySpanning) {
-    for (const idx of spanningIndices) {
+    for (const idx of [...remainingSpanning, ...protectedJoinSet]) {
       const c = projCenter.get(idx)!;
       let segIdx = 0;
       while (segIdx < cutPositions.length && c >= cutPositions[segIdx]) segIdx++;
       rawSegments[segIdx].push(idx);
     }
   } else {
-    joinIndices.push(...spanningIndices);
+    finishJoinIndices.push(...remainingSpanning);
   }
 
-  // Enforce internal connectivity inside each segment: any small detached fragment moves to Join
+  const allJoinSet = new Set<number>(
+    heavySpanning
+      ? []
+      : [...cutBogieSet, ...pivotRodSet, ...floatingCollarSet, ...finishJoinIndices],
+  );
+
+  // Enforce internal connectivity inside each segment:
+  // ONLY move a small detached fragment to Join if it is actually adjacent to the cut plane
+  // AND connected to the join zone (never pull stray roof/end details 20 studs away into Center Join!).
   const cleanSegments: number[][] = [];
   for (const seg of rawSegments) {
     if (seg.length === 0) continue;
@@ -521,16 +1377,48 @@ export function buildLongitudinalHalvesProposal(
     } else {
       cleanSegments.push(comps[0]);
       for (let ci = 1; ci < comps.length; ci++) {
-        if (!heavySpanning && comps[ci].length <= Math.max(8, Math.floor(seg.length * 0.25))) {
-          joinIndices.push(...comps[ci]);
+        const comp = comps[ci];
+        const nearCutPlane = comp.some((idx) => {
+          const lo = projMin.get(idx)!;
+          const hi = projMax.get(idx)!;
+          return cutPositions.some((t) => lo <= t + 36 && hi >= t - 36);
+        });
+        const touchesJoin = comp.some((idx) =>
+          (adjacency[idx] ?? []).some((nb) => allJoinSet.has(nb)),
+        );
+        const isSmallFragment = comp.length <= Math.max(8, Math.floor(seg.length * 0.25));
+
+        if (!heavySpanning && isSmallFragment && nearCutPlane && touchesJoin) {
+          // If it's stud-connected ONLY to a cut bogie or is a floating collar on the pivot rod, classify accurately
+          const touchesCutBogie = comp.some((idx) =>
+            (adjacency[idx] ?? []).some((nb) => cutBogieSet.has(nb)),
+          );
+          if (touchesCutBogie && comp.every((idx) => allParts[idx].box.max[1] <= Math.max(...cutBogieList.map((b) => b.maxY), -Infinity) + 20)) {
+            for (const idx of comp) {
+              cutBogieSet.add(idx);
+              allJoinSet.add(idx);
+            }
+          } else {
+            for (const idx of comp) {
+              finishJoinIndices.push(idx);
+              allJoinSet.add(idx);
+            }
+          }
         } else {
-          cleanSegments[cleanSegments.length - 1].push(...comps[ci]);
+          cleanSegments[cleanSegments.length - 1].push(...comp);
         }
       }
     }
   }
 
   if (cleanSegments.length < 2) return null;
+
+  const bogiePartIndices = heavySpanning ? [] : Array.from(cutBogieSet);
+  const pivotRodIndices = heavySpanning ? [] : Array.from(pivotRodSet);
+  const floatingCollarIndices = heavySpanning ? [] : Array.from(floatingCollarSet);
+  const joinIndices = heavySpanning
+    ? []
+    : [...floatingCollarIndices, ...pivotRodIndices, ...bogiePartIndices, ...finishJoinIndices];
 
   // Check if 2 halves are structurally identical (e.g., symmetrical train car ends!)
   const isIdenticalHalves =
@@ -581,16 +1469,44 @@ export function buildLongitudinalHalvesProposal(
     });
   }
 
+  const hasArticulatedJoint =
+    cleanSegments.length === 2 &&
+    outputMode === 'modular_chapters' &&
+    (pivotRodIndices.length > 0 || bogiePartIndices.length > 0);
+
+  const articulatedJoin: ArticulatedJoinPlan | undefined = hasArticulatedJoint
+    ? {
+        slideAxis: [ux, uz],
+        floatingCollarIndices,
+        pivotRodIndices,
+        bogiePartIndices,
+        bogieName: bogiePartIndices.length > 0 ? 'Middle Bogie' : undefined,
+        finishPartIndices: finishJoinIndices,
+      }
+    : undefined;
+
   if (joinIndices.length > 0 && outputMode === 'modular_chapters') {
+    const joinName = hasArticulatedJoint
+      ? bogiePartIndices.length > 0 && pivotRodIndices.length > 0
+        ? 'Center Joint & Bogie'
+        : bogiePartIndices.length > 0
+          ? 'Middle Bogie & Join'
+          : 'Center Articulation Joint'
+      : cleanSegments.length === 2
+        ? 'Center Connector & Join'
+        : 'Connect Sections';
+
     sections.push({
       id: 'sec_join_center',
-      name: cleanSegments.length === 2 ? 'Center Connector & Join' : 'Connect Sections',
+      name: joinName,
       partIndices: joinIndices,
       partIds: joinIndices.map((i) => allParts[i].id),
       role: 'join',
       cutEdgeCount: countCutEdges(joinIndices, adjacency),
-      explodeOffset: [0, 0.85, 0],
+      // Keep articulated bogie/rod joints cleanly centered on track level between the pulled-apart halves
+      explodeOffset: hasArticulatedJoint ? [0, 0, 0] : [0, 0.85, 0],
       previewColor: JOIN_PREVIEW_COLOR,
+      articulatedJoin,
     });
   }
 
@@ -598,12 +1514,13 @@ export function buildLongitudinalHalvesProposal(
   const zoomGainEstimate = Math.max(1.1, Math.round((bounds.diag / maxSegDiag) * 10) / 10);
 
   const aspect = pca.minorSpan > 1 ? pca.majorSpan / pca.minorSpan : 1;
-  const spanRatio = spanningIndices.length / active.length;
+  const spanRatio = totalJoinCandidateCount / active.length;
   let confidence = 72;
   if (aspect >= 2.2) confidence += 14;
   if (aspect >= 3.5) confidence += 6;
   if (spanRatio <= 0.08) confidence += 8;
-  else if (spanRatio > 0.25) confidence -= 12;
+  else if (spanRatio > 0.25 && !hasArticulatedJoint) confidence -= 12;
+  if (hasArticulatedJoint) confidence += 6;
   if (isIdenticalHalves) confidence += 6;
   confidence = Math.max(45, Math.min(98, Math.round(confidence)));
 
@@ -623,11 +1540,22 @@ export function buildLongitudinalHalvesProposal(
     joinIndices.length > 0
       ? ` + ${joinIndices.length} connector piece${joinIndices.length === 1 ? '' : 's'}`
       : '';
+  const articulatedDesc = hasArticulatedJoint
+    ? [
+        bogiePartIndices.length > 0 ? `intact middle bogie (${bogiePartIndices.length} pcs)` : null,
+        pivotRodIndices.length > 0 ? `${pivotRodIndices.length} Technic rod` : null,
+        floatingCollarIndices.length > 0 ? `${floatingCollarIndices.length} axle spacer${floatingCollarIndices.length === 1 ? '' : 's'}` : null,
+      ]
+        .filter(Boolean)
+        .join(' + ')
+    : '';
   const rationale = isIdenticalHalves
     ? `Both halves match (${cleanSegments[0].length} pcs each${joinNote}) — build once ×2 at ~${zoomGainEstimate}× larger zoom, then connect.`
     : heavySpanning
       ? `Splits along the ${Math.round(pca.majorSpan / 20)}-stud length into ${cleanSegments.length} balanced stages (tightly interlocked spine).`
-      : `Builds ${cleanSegments.length} shorter sections first${joinNote} for ~${zoomGainEstimate}× larger bricks on screen before joining.`;
+      : hasArticulatedJoint && articulatedDesc
+        ? `Builds both halves separately (~${zoomGainEstimate}× zoom), then connects via ${articulatedDesc}.`
+        : `Builds ${cleanSegments.length} shorter sections first${joinNote} for ~${zoomGainEstimate}× larger bricks on screen before joining.`;
 
   return {
     id: `prop_long_${cleanSegments.length}${isIdenticalHalves ? '_x2' : ''}`,
@@ -1339,6 +2267,7 @@ export function mergeProposedSections(
     partIds: mergedIndices.map((i) => allParts[i].id),
     repeatPartIndexGroups: undefined,
     repeatPartIdGroups: undefined,
+    articulatedJoin: undefined,
     role: secA.role === 'join' && secB.role === 'join' ? 'join' : secA.role === 'bag' ? 'bag' : 'module',
     cutEdgeCount: countCutEdges(mergedIndices, adjacency),
     explodeOffset: [
