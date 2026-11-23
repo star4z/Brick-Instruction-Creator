@@ -16,6 +16,7 @@ import {
   normalizeTextureName,
   textureStore,
 } from './engine/textureStore';
+import { analyzeMissingParts } from './engine/missingParts';
 import {
   PUBLIC_LDRAW_MIRRORS,
   buildMirrorConfigList,
@@ -8169,7 +8170,7 @@ async function importBricksLibraryFiles(fileList) {
     await textureStore.predecodeAllPending();
     invalidateLibraryRenderCaches();
     updateLibraryStatusUI();
-    if (state.model) {
+    if (state.model && !mpState.parsed) {
       if (state.model._parsed) {
         const nextPlan = (importedParts + importedHelpers) > 0
           ? refreshSubdivisionPlanForParsed(state.model._parsed, state.model._subdivisionPlan || null)
@@ -8215,8 +8216,7 @@ async function persistLibraryBatchToDb(db, datBatch, texBatch) {
 
 /**
  * Automatically downloads missing official LDraw 3D shapes, nested subparts/primitives, and
- * `!TEXMAP` PNG textures for a newly parsed `.ldr`/`.mpd` (or `.io`) model BEFORE subdivision
- * analysis, 3D import preview, and zero-floating step generation run!
+ * `!TEXMAP` PNG textures for a parsed model (used on session restore).
  */
 async function autoFetchMissingPartsForParsed(parsed, displayName = '') {
   const rootPartIds = collectLeafPartIdsFromParsed(parsed);
@@ -8299,7 +8299,7 @@ let fetchPartsInFlight = false;
 let fetchCancelRequested = false;
 let activeFetchAbortCtrl = null;
 
-function collectMissingFetchTargets() {
+function collectMissingFetchTargets(parsedOverride = null) {
   const queue = [];
   const queued = new Set();
   const visitedLoaded = new Set();
@@ -8349,7 +8349,14 @@ function collectMissingFetchTargets() {
     queue.push(k);
   };
 
-  if (state.model) {
+  if (parsedOverride) {
+    for (const p of (parsedOverride.parts || [])) {
+      const leaves = p.children && p.children.length > 0 ? p.children : [p];
+      for (const lf of leaves) {
+        if (lf?.p) enqueue(lf.p);
+      }
+    }
+  } else if (state.model) {
     for (const { step } of getAllSteps(state.model)) {
       for (const p of step.parts) {
         const leaves = p.children && p.children.length > 0 ? p.children : [p];
@@ -8372,24 +8379,30 @@ function hasMissingPartsToFetch() {
 async function fetchPartsOnline(opts = {}) {
   const mode = opts.mode || 'model_missing'; // 'model_missing' | 'pack' | 'custom_ids'
   const silent = Boolean(opts.silent);
+  const parsedOverride = opts.parsed || null;
+  const onProgress = typeof opts.onProgress === 'function' ? opts.onProgress : null;
   const label = opts.label || (mode === 'model_missing' ? 'missing model parts' : 'selected parts');
   const maxFiles = opts.maxFiles || 2500;
 
   if (fetchPartsInFlight) {
     if (!silent) showToast('A library download is already in progress.');
-    return { fetchedParts: 0, fetchedHelpers: 0, fetchedTex: 0, canceled: false };
+    return { fetchedParts: 0, fetchedHelpers: 0, fetched: 0, fetchedTex: 0, processed: 0, total: 0, networkBlocked: false, alreadyLoaded: false, canceled: false, busy: true };
   }
 
   // Never silently download an arbitrary starter set when asked to fetch missing model parts with no model loaded!
-  if (mode === 'model_missing' && !state.model) {
+  if (mode === 'model_missing' && !parsedOverride && !state.model) {
     if (!silent) {
       showToast('No model is loaded. Choose a starter pack, enter part IDs, or import complete.zip.');
     }
-    return { fetchedParts: 0, fetchedHelpers: 0, fetchedTex: 0, canceled: false };
+    return { fetchedParts: 0, fetchedHelpers: 0, fetched: 0, fetchedTex: 0, processed: 0, total: 0, networkBlocked: false, alreadyLoaded: true, canceled: false };
   }
 
   const rootPartIds = [];
-  if (mode === 'model_missing' && state.model) {
+  if (parsedOverride) {
+    for (const pid of collectLeafPartIdsFromParsed(parsedOverride)) {
+      if (pid) rootPartIds.push(pid);
+    }
+  } else if (mode === 'model_missing' && state.model) {
     for (const { step } of getAllSteps(state.model)) {
       for (const p of step.parts) {
         const leaves = p.children && p.children.length > 0 ? p.children : [p];
@@ -8406,7 +8419,7 @@ async function fetchPartsOnline(opts = {}) {
 
   if (rootPartIds.length === 0) {
     if (!silent) showToast('No part IDs to fetch.');
-    return { fetchedParts: 0, fetchedHelpers: 0, fetchedTex: 0, canceled: false };
+    return { fetchedParts: 0, fetchedHelpers: 0, fetched: 0, fetchedTex: 0, processed: 0, total: 0, networkBlocked: false, alreadyLoaded: true, canceled: false };
   }
 
   fetchPartsInFlight = true;
@@ -8429,9 +8442,12 @@ async function fetchPartsOnline(opts = {}) {
       cancelBtn.disabled = false;
       cancelBtn.textContent = 'Cancel';
     }
-    // Manual trigger clears session 404 cache so switching mirrors or reconnecting retries cleanly
+  }
+  if (!silent || parsedOverride) {
+    // Manual or pre-import trigger clears session 404 cache so switching mirrors or reconnecting retries cleanly
     notFoundDatCache.clear();
   }
+  if (onProgress) onProgress({ phase: 'scan', fetched: 0, fetchedTex: 0, processed: 0, total: 0, pct: 0 });
 
   const mirrors = getSelectedMirrorConfigs();
   const db = await openSessionDB().catch(() => null);
@@ -8457,13 +8473,17 @@ async function fetchPartsOnline(opts = {}) {
         textureStore.registerBase64Texture(b64, { name: normName, source: 'library' });
       },
       onBatchComplete: (datBatch, texBatch) => persistLibraryBatchToDb(db, datBatch, texBatch),
-      onProgress: ({ processed, total }) => {
-        if (silent) return;
+      onProgress: ({ fetched, texturesFetched = 0, processed, total }) => {
         const pct = Math.min(99, Math.round((processed / Math.max(1, total)) * 100));
-        const helperTxt = fetchedHelpers > 0 ? ` + ${fetchedHelpers} subparts` : '';
-        if (progLabel) progLabel.textContent = `Fetching ${label}: ${fetchedParts} part${fetchedParts === 1 ? '' : 's'}${helperTxt} (${processed}/${total} files)…`;
-        if (progPct) progPct.textContent = pct + '%';
-        if (progBar) progBar.style.width = pct + '%';
+        if (!silent) {
+          const helperTxt = fetchedHelpers > 0 ? ` + ${fetchedHelpers} subparts` : '';
+          if (progLabel) progLabel.textContent = `Fetching ${label}: ${fetchedParts} part${fetchedParts === 1 ? '' : 's'}${helperTxt} (${processed}/${total} files)…`;
+          if (progPct) progPct.textContent = pct + '%';
+          if (progBar) progBar.style.width = pct + '%';
+        }
+        if (onProgress) {
+          onProgress({ phase: 'parts', fetched, fetchedTex: texturesFetched, processed, total, pct });
+        }
       },
       concurrency: 16,
       maxQueue: maxFiles,
@@ -8477,12 +8497,12 @@ async function fetchPartsOnline(opts = {}) {
           ? 'All parts in this model already have exact 3D shapes loaded!'
           : 'All requested parts are already saved in your Bricks Library!');
       }
-      return { fetchedParts: 0, fetchedHelpers: 0, fetchedTex: 0, canceled: false };
+      return { fetchedParts: 0, fetchedHelpers: 0, fetched: 0, fetchedTex: 0, processed: 0, total: 0, networkBlocked: false, alreadyLoaded: true, canceled: false };
     }
 
     if (res.networkBlocked) {
       if (!silent) showToast('Online fetch is blocked or offline. Use Import .zip / .dat for offline libraries.');
-      return { fetchedParts: 0, fetchedHelpers: 0, fetchedTex: 0, canceled: false };
+      return { fetchedParts: 0, fetchedHelpers: 0, fetched: res.fetched, fetchedTex: res.texturesFetched || 0, processed: res.processed, total: res.total, networkBlocked: true, alreadyLoaded: false, canceled: false };
     }
 
     await textureStore.predecodeAllPending();
@@ -8491,7 +8511,7 @@ async function fetchPartsOnline(opts = {}) {
     if (totalDatFetched > 0 || fetchedTex > 0) {
       invalidateLibraryRenderCaches();
       updateLibraryStatusUI();
-      if (state.model) {
+      if (!parsedOverride && state.model) {
         if (totalDatFetched > 0 && state.model._parsed) {
           const nextPlan = refreshSubdivisionPlanForParsed(state.model._parsed, state.model._subdivisionPlan || null);
           state.model = buildManualFromParsed(state.model._parsed, state.model._mode || 'auto', nextPlan);
@@ -8504,6 +8524,7 @@ async function fetchPartsOnline(opts = {}) {
         renderAll();
       }
     }
+    if (onProgress) onProgress({ phase: 'done', fetched: res.fetched, fetchedTex, processed: res.processed, total: res.total, pct: 100 });
     if (!silent) {
       const totalFetched = totalDatFetched + fetchedTex;
       if (fetchCancelRequested || res.aborted) {
@@ -8518,7 +8539,7 @@ async function fetchPartsOnline(opts = {}) {
         showToast('No matching parts found at that public source.');
       }
     }
-    return { fetchedParts, fetchedHelpers, fetchedTex, canceled: Boolean(fetchCancelRequested || res.aborted) };
+    return { fetchedParts, fetchedHelpers, fetched: res.fetched, fetchedTex, processed: res.processed, total: res.total, networkBlocked: false, alreadyLoaded: false, canceled: Boolean(fetchCancelRequested || res.aborted) };
   } finally {
     fetchPartsInFlight = false;
     fetchCancelRequested = false;
@@ -8532,7 +8553,11 @@ async function fetchMissingPartsOnline(fetchOpts = {}) {
   return fetchPartsOnline({
     mode: 'model_missing',
     silent: Boolean(fetchOpts && fetchOpts.silent),
-    label: state.model?.title ? `${state.model.title} parts` : 'missing model parts',
+    parsed: fetchOpts && fetchOpts.parsed ? fetchOpts.parsed : null,
+    onProgress: fetchOpts && typeof fetchOpts.onProgress === 'function' ? fetchOpts.onProgress : null,
+    label: fetchOpts?.parsed?.title
+      ? `${fetchOpts.parsed.title} parts`
+      : (state.model?.title ? `${state.model.title} parts` : 'missing model parts'),
   });
 }
 
@@ -11281,7 +11306,10 @@ document.getElementById('libCustomIdsInput').onkeydown = (e) => {
 document.getElementById('libImportLocalBtn').onclick = () => document.getElementById('libImportInput').click();
 document.getElementById('libImportInput').onchange = async (e) => {
   const files = e.target.files;
-  if (files && files.length) await importBricksLibraryFiles(files);
+  if (files && files.length) {
+    await importBricksLibraryFiles(files);
+    if (mpState.parsed) refreshMissingPartsPromptAfterLibraryImport();
+  }
   e.target.value = '';
 };
 
@@ -11312,6 +11340,13 @@ document.getElementById('libClearConfirmYes').onclick = async () => {
 };
 
 let pendingRawFile = null; // { kind:'io'|'ldr', fileName, data }
+let mpState = {
+  parsed: null,
+  analysis: null,
+  fetching: false,
+  attemptedFetch: false,
+  token: 0,
+};
 let impPreviewEngine = null;
 let impPreviewMesh = null;
 let impState = {
@@ -11326,13 +11361,15 @@ let impState = {
   az: 38,
   el: 28,
   isPostImport: false,
+  skipAutoFetch: false,
 };
 
-function closeImportAssistant() {
+function closeImportAssistant(keepPendingRaw = false) {
   state.pendingImport = null;
-  pendingRawFile = null;
+  if (!keepPendingRaw) pendingRawFile = null;
   impState.parsed = null;
   impState.activeProposal = null;
+  impState.skipAutoFetch = false;
   impPreviewMesh = null;
   document.getElementById('importModal').classList.add('hidden');
 }
@@ -11612,8 +11649,9 @@ document.getElementById('impColorModeBricks').onclick = () => {
   rebuildAndDrawImportPreview();
 };
 
-function finishImport(parsed, mode, subdivisionPlan = null, isPostImport = false) {
+function finishImport(parsed, mode, subdivisionPlan = null, isPostImport = false, importOpts = {}) {
   if (isPostImport) pushUndo();
+  const skipAutoFetch = Boolean(importOpts && importOpts.skipAutoFetch);
   submodelThumbCache.clear();
   coverHeroCache.clear();
   state.model = buildManualFromParsed(parsed, mode, subdivisionPlan);
@@ -11625,7 +11663,7 @@ function finishImport(parsed, mode, subdivisionPlan = null, isPostImport = false
   }
   state.pageIdx = 0; state.mode = 'pan'; state.selectedPartIds.clear();
   errFilter = 'all';
-  closeImportAssistant();
+  closeImportAssistant(true);
   if (!isPostImport && pendingRawFile) {
     lastSourceRecord = { ...pendingRawFile, importMode: mode, subdivisionPlan: subdivisionPlan || null };
     dbPut('lastModel', lastSourceRecord);
@@ -11642,23 +11680,300 @@ function finishImport(parsed, mode, subdivisionPlan = null, isPostImport = false
     : '';
   showToast(`${isPostImport ? 'Updated' : 'Imported'} ${parsed.title} (${parsed.parts.length} pieces, ${steps.length} steps${subSummary}).`);
   if (!isPostImport && state.diagnostics.length > 0) showImportErrorBanner();
-  if (!isPostImport && lastSourceRecord?.kind === 'ldr') {
+  if (!isPostImport && !skipAutoFetch && lastSourceRecord?.kind === 'ldr') {
     void fetchMissingPartsOnline({ silent: true });
   }
 }
 
 document.getElementById('impBtnAuto').onclick = () => {
   if (!impState.parsed) return;
-  finishImport(impState.parsed, 'auto', impState.activeProposal, impState.isPostImport);
+  finishImport(impState.parsed, 'auto', impState.activeProposal, impState.isPostImport, { skipAutoFetch: impState.skipAutoFetch });
 };
 document.getElementById('impBtnKeep').onclick = () => {
   if (!impState.parsed) return;
-  finishImport(impState.parsed, 'keep', null, impState.isPostImport);
+  finishImport(impState.parsed, 'keep', null, impState.isPostImport, { skipAutoFetch: impState.skipAutoFetch });
 };
-document.getElementById('impBtnCancel').onclick = closeImportAssistant;
-document.getElementById('impBtnCloseX').onclick = closeImportAssistant;
+document.getElementById('impBtnCancel').onclick = () => closeImportAssistant(false);
+document.getElementById('impBtnCloseX').onclick = () => closeImportAssistant(false);
 document.getElementById('importModal').onclick = (e) => {
-  if (e.target.id === 'importModal') closeImportAssistant();
+  if (e.target.id === 'importModal') closeImportAssistant(false);
+};
+
+function analyzePendingImportMissingParts(parsed) {
+  return analyzeMissingParts(parsed?.parts || [], {
+    lookupExactRawDat: (k) => lookupExactRawDat(k),
+    hasKnownShape: (k) => hasKnownShape(k),
+    getPartIdFallbacks: (k) => getPartIdFallbacks(k),
+    hasTexture: (tn) => Boolean(textureStore.lookupByName(tn)),
+  });
+}
+
+function proceedAfterMissingPartsCheck(parsed, opts = {}) {
+  const skipAutoFetch = Boolean(opts && opts.skipAutoFetch);
+  const prep = prepareSubdivisionData(parsed);
+  const { assessment } = analyzeModelSubdivisions(prep.inputs, prep.adjacency);
+  impState.skipAutoFetch = skipAutoFetch;
+  if (parsed.hasSteps || parsed.submodelCount > 0 || assessment.shouldPrompt) {
+    openImportAssistant(parsed, false);
+  } else {
+    finishImport(parsed, 'auto', null, false, { skipAutoFetch });
+    if (assessment.tier === 'borderline') {
+      showToast(`Imported ${parsed.title}. Tip: Open Menu → Subdivide Model to split into sections.`);
+    }
+  }
+}
+
+function closeMissingPartsPrompt(keepPendingRaw = false) {
+  mpState.token++;
+  mpState.parsed = null;
+  mpState.analysis = null;
+  mpState.fetching = false;
+  mpState.attemptedFetch = false;
+  if (!keepPendingRaw) pendingRawFile = null;
+  document.getElementById('missingPartsModal').classList.add('hidden');
+  document.getElementById('mpProgressWrap').classList.add('hidden');
+  document.getElementById('mpStatusBox').classList.add('hidden');
+}
+
+function renderMissingPartsPromptUI(statusMsg = null, statusTone = 'info') {
+  const parsed = mpState.parsed;
+  const analysis = mpState.analysis;
+  if (!parsed || !analysis) return;
+
+  const titleEl = document.getElementById('mpTitle');
+  const badgeEl = document.getElementById('mpCountBadge');
+  const summaryEl = document.getElementById('mpSummary');
+  const listEl = document.getElementById('mpList');
+  const statusEl = document.getElementById('mpStatusBox');
+  const fetchBtn = document.getElementById('mpBtnFetch');
+  const fetchLabel = document.getElementById('mpBtnFetchLabel');
+  const skipBtn = document.getElementById('mpBtnSkip');
+  const importBtn = document.getElementById('mpBtnImportLib');
+  const closeX = document.getElementById('mpBtnCloseX');
+
+  const shapeN = analysis.missingShapes.length;
+  const printN = analysis.missingPrinted.length;
+  const texN = analysis.missingTextures.length;
+
+  titleEl.textContent = shapeN > 0 ? 'Missing Parts Found' : 'Missing Printed Parts Found';
+  badgeEl.textContent = `${analysis.totalMissingUnique} Missing`;
+
+  const clauses = [];
+  if (shapeN > 0) clauses.push(`${shapeN} 3D part shape${shapeN === 1 ? '' : 's'}`);
+  if (printN > 0) clauses.push(`${printN} printed part${printN === 1 ? '' : 's'}`);
+  if (texN > 0) clauses.push(`${texN} decal texture${texN === 1 ? '' : 's'}`);
+  summaryEl.textContent = `"${parsed.title}" references ${clauses.join(' and ')} not yet in your Bricks Library.`;
+
+  const rows = [];
+  for (const item of analysis.missingShapes) {
+    const tag = item.fetchable
+      ? '<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300 shrink-0">Shape</span>'
+      : '<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-rose-500/15 text-rose-700 dark:text-rose-300 shrink-0">Custom ID</span>';
+    rows.push({
+      name: getHumanPartName(item.partId),
+      code: `${item.partId}.dat`,
+      count: item.count,
+      tag,
+    });
+  }
+  for (const item of analysis.missingPrinted) {
+    rows.push({
+      name: getHumanPartName(item.partId),
+      code: `${item.partId}.dat`,
+      count: item.count,
+      tag: '<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-[#1a73e8]/15 text-[#1a73e8] shrink-0">Printed</span>',
+    });
+  }
+  for (const tn of analysis.missingTextures) {
+    rows.push({
+      name: 'Decal Texture',
+      code: tn,
+      count: null,
+      tag: '<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-[#1a73e8]/15 text-[#1a73e8] shrink-0">Decal PNG</span>',
+    });
+  }
+
+  const MAX_VISIBLE = 24;
+  const visibleRows = rows.slice(0, MAX_VISIBLE);
+  const extraCount = rows.length - visibleRows.length;
+  listEl.innerHTML = visibleRows.map((r) => `
+    <div class="flex items-center justify-between gap-2 px-2 py-1.5 rounded-xl bg-[var(--card)] border border-[var(--border)]/70">
+      <div class="min-w-0">
+        <div class="text-[11px] font-semibold truncate">${escHtml(r.name)}${r.count ? ` <span class="text-[var(--muted-foreground)] font-normal">(${r.count}×)</span>` : ''}</div>
+        <div class="text-[10px] font-mono text-[var(--muted-foreground)] truncate">${escHtml(r.code)}</div>
+      </div>
+      ${r.tag}
+    </div>
+  `).join('') + (extraCount > 0
+    ? `<div class="text-center text-[10px] font-semibold text-[var(--muted-foreground)] py-1">+${extraCount} more missing part${extraCount === 1 ? '' : 's'}…</div>`
+    : '');
+
+  let effectiveStatus = statusMsg;
+  let effectiveTone = statusTone;
+  if (!effectiveStatus && analysis.fetchableCount === 0 && analysis.customOnlyCount > 0) {
+    effectiveStatus = 'These look like BrickLink Studio custom part IDs that are not hosted on public LDraw mirrors. Open the original .io file or import local .dat/.zip parts, or continue to step generation.';
+    effectiveTone = 'warn';
+  }
+
+  if (effectiveStatus) {
+    statusEl.className = effectiveTone === 'warn'
+      ? 'p-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-200 text-[11px] leading-snug'
+      : 'p-3 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200 text-[11px] leading-snug';
+    statusEl.textContent = effectiveStatus;
+    statusEl.classList.remove('hidden');
+  } else {
+    statusEl.classList.add('hidden');
+  }
+
+  const isContinueMode = mpState.attemptedFetch || analysis.fetchableCount === 0;
+  fetchBtn.disabled = mpState.fetching;
+  skipBtn.disabled = mpState.fetching;
+  importBtn.disabled = mpState.fetching;
+  closeX.disabled = mpState.fetching;
+  fetchBtn.classList.toggle('opacity-70', mpState.fetching);
+
+  if (mpState.fetching) {
+    fetchLabel.textContent = 'Fetching Parts…';
+    skipBtn.classList.remove('hidden');
+  } else if (isContinueMode) {
+    fetchLabel.textContent = 'Continue to Step Wizard';
+    skipBtn.classList.add('hidden');
+  } else {
+    fetchLabel.textContent = 'Fetch Missing Parts Online';
+    skipBtn.classList.remove('hidden');
+  }
+}
+
+function openMissingPartsPrompt(parsed, analysis) {
+  mpState.token++;
+  mpState.parsed = parsed;
+  mpState.analysis = analysis;
+  mpState.fetching = false;
+  mpState.attemptedFetch = false;
+  document.getElementById('mpProgressWrap').classList.add('hidden');
+  document.getElementById('mpProgressBar').style.width = '0%';
+  document.getElementById('mpProgressPct').textContent = '0%';
+  renderMissingPartsPromptUI();
+  document.getElementById('missingPartsModal').classList.remove('hidden');
+}
+
+function refreshMissingPartsPromptAfterLibraryImport() {
+  if (!mpState.parsed || mpState.fetching) return;
+  const parsed = mpState.parsed;
+  const after = analyzePendingImportMissingParts(parsed);
+  if (!after.shouldPrompt) {
+    closeMissingPartsPrompt(true);
+    showToast('All missing parts loaded — opening step wizard.');
+    proceedAfterMissingPartsCheck(parsed, { skipAutoFetch: true });
+    return;
+  }
+  mpState.analysis = after;
+  if (after.fetchableCount > 0) mpState.attemptedFetch = false;
+  renderMissingPartsPromptUI(`Library updated. ${after.totalMissingUnique} missing item${after.totalMissingUnique === 1 ? '' : 's'} remaining.`, 'info');
+}
+
+document.getElementById('mpBtnFetch').onclick = async () => {
+  if (!mpState.parsed || mpState.fetching) return;
+  const parsed = mpState.parsed;
+  const analysis = mpState.analysis;
+
+  // After a partial/blocked fetch or when only Studio-custom IDs remain, primary CTA advances to the wizard
+  if (mpState.attemptedFetch || !analysis || analysis.fetchableCount === 0) {
+    closeMissingPartsPrompt(true);
+    proceedAfterMissingPartsCheck(parsed, { skipAutoFetch: true });
+    return;
+  }
+
+  const token = mpState.token;
+  mpState.fetching = true;
+  const progWrap = document.getElementById('mpProgressWrap');
+  const progLabel = document.getElementById('mpProgressLabel');
+  const progPct = document.getElementById('mpProgressPct');
+  const progBar = document.getElementById('mpProgressBar');
+  progWrap.classList.remove('hidden');
+  progLabel.textContent = 'Checking public LDraw library…';
+  progPct.textContent = '0%';
+  progBar.style.width = '0%';
+  renderMissingPartsPromptUI();
+
+  const res = await fetchMissingPartsOnline({
+    parsed,
+    silent: true,
+    onProgress: (ev) => {
+      if (mpState.token !== token) return;
+      const pct = Math.max(0, Math.min(100, ev.pct || 0));
+      progPct.textContent = `${pct}%`;
+      progBar.style.width = `${pct}%`;
+      if (ev.phase === 'textures') {
+        progLabel.textContent = `Fetching decal textures (${ev.processed}/${ev.total})…`;
+      } else if (ev.phase === 'parts') {
+        progLabel.textContent = `Fetched ${ev.fetched} part${ev.fetched === 1 ? '' : 's'} (${ev.processed}/${ev.total})…`;
+      } else if (ev.phase === 'done') {
+        progLabel.textContent = 'Preparing 3D previews…';
+      }
+    },
+  });
+
+  if (mpState.token !== token) return;
+  mpState.fetching = false;
+  progWrap.classList.add('hidden');
+
+  const after = analyzePendingImportMissingParts(parsed);
+  if (!res.networkBlocked && (!after.shouldPrompt || after.fetchableCount === 0)) {
+    const fetchedMsg = res.fetched > 0 || res.fetchedTex > 0
+      ? `Fetched ${res.fetched} part shape${res.fetched === 1 ? '' : 's'}${res.fetchedTex > 0 ? ` and ${res.fetchedTex} decal${res.fetchedTex === 1 ? '' : 's'}` : ''}.`
+      : 'Part shapes ready.';
+    if (!after.shouldPrompt) {
+      closeMissingPartsPrompt(true);
+      showToast(fetchedMsg);
+      proceedAfterMissingPartsCheck(parsed, { skipAutoFetch: true });
+      return;
+    }
+    // Only Studio-custom parts remain: inform user briefly and switch primary CTA to Continue
+    mpState.analysis = after;
+    mpState.attemptedFetch = true;
+    renderMissingPartsPromptUI(
+      `${fetchedMsg} ${after.customOnlyCount} BrickLink Studio custom ID${after.customOnlyCount === 1 ? '' : 's'} could not be fetched from public LDraw mirrors — import local .dat/.zip or continue now.`,
+      'info',
+    );
+    return;
+  }
+
+  mpState.analysis = after;
+  mpState.attemptedFetch = true;
+  if (res.networkBlocked) {
+    renderMissingPartsPromptUI(
+      'Online fetch appears offline or blocked in this environment. You can import LDraw complete.zip / .dat files locally or continue to the step wizard.',
+      'warn',
+    );
+  } else if (res.fetched > 0 || res.fetchedTex > 0) {
+    renderMissingPartsPromptUI(
+      `Fetched ${res.fetched} part shape${res.fetched === 1 ? '' : 's'}${res.fetchedTex > 0 ? ` and ${res.fetchedTex} decal${res.fetchedTex === 1 ? '' : 's'}` : ''}. ${after.totalMissingUnique} item${after.totalMissingUnique === 1 ? '' : 's'} could not be found on public LDraw mirrors — continue when ready.`,
+      'info',
+    );
+  } else {
+    renderMissingPartsPromptUI(
+      'No matching parts were found on public LDraw mirrors (they may be custom or unofficial IDs). Import local .dat/.zip files, open the original .io file, or continue to the step wizard.',
+      'warn',
+    );
+  }
+};
+
+document.getElementById('mpBtnSkip').onclick = () => {
+  if (!mpState.parsed || mpState.fetching) return;
+  const parsed = mpState.parsed;
+  closeMissingPartsPrompt(true);
+  proceedAfterMissingPartsCheck(parsed, { skipAutoFetch: true });
+};
+document.getElementById('mpBtnImportLib').onclick = () => {
+  if (mpState.fetching) return;
+  document.getElementById('libImportInput').click();
+};
+document.getElementById('mpBtnCloseX').onclick = () => {
+  if (!mpState.fetching) closeMissingPartsPrompt(false);
+};
+document.getElementById('missingPartsModal').onclick = (e) => {
+  if (e.target.id === 'missingPartsModal' && !mpState.fetching) closeMissingPartsPrompt(false);
 };
 
 document.getElementById('fileInput').onchange = async (e) => {
@@ -11675,7 +11990,6 @@ document.getElementById('fileInput').onchange = async (e) => {
       pendingRawFile = { kind: 'io', fileName: file.name, data: ab };
       const { m1Text, m2Text } = await extractIoArchive(ab);
       parsed = parseImportedModel(m1Text, m2Text, file.name);
-      await autoFetchMissingPartsForParsed(parsed, file.name);
       await textureStore.predecodeAllPending();
     } else {
       embeddedDatRaw.clear(); embeddedDatTitles.clear(); embeddedDatCompiled.clear(); compositePartDefs.clear(); pliThumbCache.clear(); submodelThumbCache.clear(); clearMinifigDiagramCaches();
@@ -11683,18 +11997,13 @@ document.getElementById('fileInput').onchange = async (e) => {
       const txt = await file.text();
       pendingRawFile = { kind: 'ldr', fileName: file.name, data: txt };
       parsed = parseImportedModel(txt, '', file.name);
-      await autoFetchMissingPartsForParsed(parsed, file.name);
       await textureStore.predecodeAllPending();
     }
-    const prep = prepareSubdivisionData(parsed);
-    const { assessment } = analyzeModelSubdivisions(prep.inputs, prep.adjacency);
-    if (parsed.hasSteps || parsed.submodelCount > 0 || assessment.shouldPrompt) {
-      openImportAssistant(parsed, false);
+    const missingAnalysis = analyzePendingImportMissingParts(parsed);
+    if (missingAnalysis.shouldPrompt) {
+      openMissingPartsPrompt(parsed, missingAnalysis);
     } else {
-      finishImport(parsed, 'auto', null, false);
-      if (assessment.tier === 'borderline') {
-        showToast(`Imported ${parsed.title}. Tip: Open Menu → Subdivide Model to split into sections.`);
-      }
+      proceedAfterMissingPartsCheck(parsed, { skipAutoFetch: false });
     }
   } catch (err) {
     showToast(err?.message || 'Could not import this file.');
