@@ -102,6 +102,15 @@ import {
   normalizePageLayoutSpec,
 } from './engine/pageLayout';
 import {
+  FOCUS_MODE_OPTIONS,
+  MINIFIG_STYLE_OPTIONS,
+  clearStepArrangeOverride,
+  clearStepCameraOverride,
+  getFocusModeDescription,
+  getVisibleModeTabs,
+  resolveStepToolbarCapabilities,
+} from './engine/stepToolbar';
+import {
   DEFAULT_EDITOR_URL,
   buildInteractiveHtmlFilename,
   encodeTypedArrayBase64,
@@ -5963,6 +5972,26 @@ function isPanGestureEnabled() {
   return state.mode === 'pan' || (page?.kind !== 'steps' && !isSimpleEditPage(page));
 }
 
+function syncModePillButtons(page) {
+  const visibleModes = getVisibleModeTabs(page?.kind);
+  const modePill = document.getElementById('modePill');
+  if (modePill) modePill.classList.toggle('hidden', visibleModes.length === 0);
+  const isSimpleEdit = isSimpleEditPage(page);
+  const editModalOpen = page?.kind === 'steps' && isStepEditModalOpen();
+  document.querySelectorAll('.mode-btn').forEach(b => {
+    const m = b.getAttribute('data-mode');
+    const visible = visibleModes.includes(m);
+    const active = isSimpleEdit
+      ? (m === 'pan' ? state.mode === 'pan' : m === 'edit' && state.mode !== 'pan')
+      : editModalOpen
+        ? m === 'edit'
+        : m === state.mode;
+    b.className = `mode-btn ${visible ? 'flex' : 'hidden'} min-h-[40px] sm:min-h-[34px] px-2.5 sm:px-3 py-1.5 rounded-md items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer ${
+      active ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--card)]/70'
+    }`;
+  });
+}
+
 function getThemeForPage(page) {
   if (page?.layoutGroup?.themeId) {
     return resolveThemeById(page.layoutGroup.themeId, customThemes);
@@ -6040,24 +6069,12 @@ function renderAll() {
   if (isSteps && state.mode === 'edit') {
     state.mode = 'pan';
   }
+  if (!isSteps && isStepEditModalOpen()) {
+    closeStepEditModal();
+  }
 
   // Update Mode Pill visibility & styling for the current page type
-  const modePill = document.getElementById('modePill');
-  if (modePill) modePill.classList.toggle('hidden', !isSteps && !isSimpleEdit);
-  document.querySelectorAll('.mode-btn').forEach(b => {
-    const m = b.getAttribute('data-mode');
-    const visible = m === 'pan'
-      ? (isSteps || isSimpleEdit)
-      : m === 'edit'
-        ? isSimpleEdit
-        : isSteps;
-    const active = isSimpleEdit
-      ? (m === 'pan' ? state.mode === 'pan' : m === 'edit' && state.mode !== 'pan')
-      : m === state.mode;
-    b.className = `mode-btn ${visible ? 'flex' : 'hidden'} min-h-[40px] sm:min-h-[34px] px-3 py-1.5 rounded-md items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer ${
-      active ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--card)]/70'
-    }`;
-  });
+  syncModePillButtons(page);
 
   // Apply Canonical Physical Print / Screen Proportions & Unified Typography to Live Page Frame!
   const frame = document.getElementById('pageFrame');
@@ -6628,6 +6645,7 @@ function renderAll() {
   }
 
   renderContextOverlay(page);
+  if (isStepEditModalOpen()) renderStepEditModal();
   syncMenuControls();
   applyStageTransform();
 }
@@ -6979,7 +6997,7 @@ function renderContextOverlay(page) {
           <span class="font-bold text-[var(--primary)]">${selCount} piece${selCount > 1 ? 's' : ''} selected · Step ${step.num}</span>
           <div class="flex items-center gap-1.5">
             <button id="btnToggleArrow" type="button" class="px-2.5 py-1.5 rounded-md border text-xs font-semibold ${pOv.arrow !== false ? 'bg-[var(--primary-soft)] border-[var(--primary)] text-[var(--primary)]' : 'border-[var(--border)] bg-[var(--surface-sunken)]'}">Arrow ${pOv.arrow !== false ? 'On' : 'Off'}</button>
-            <button id="btnResetSelPos" type="button" class="px-2.5 py-1.5 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] text-xs font-semibold">Reset</button>
+            <button id="btnResetSelPos" type="button" class="px-2.5 py-1.5 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] text-xs font-semibold">Reset Pos</button>
             <button id="btnClearSel" type="button" aria-label="Clear selection" class="w-8 h-8 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] flex items-center justify-center">${icoDismiss}</button>
           </div>
         </div>
@@ -7004,6 +7022,7 @@ function renderContextOverlay(page) {
 
         <!-- Direct Step Reorganization Bar -->
         <div class="flex items-center gap-1.5 flex-wrap pt-2.5 border-t border-[var(--border)]">
+          <span class="text-xs font-semibold text-[var(--muted-foreground)] mr-0.5">Step</span>
           <button id="actNewBefore" type="button" class="px-3 py-1.5 rounded-md bg-[var(--primary)] text-[var(--primary-foreground)] font-semibold">New Step Before</button>
           <button id="actNewAfter" type="button" class="px-3 py-1.5 rounded-md bg-[var(--primary)] text-[var(--primary-foreground)] font-semibold">New Step After</button>
           <button id="actMoveStep" type="button" class="px-3 py-1.5 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] font-semibold">Move to Step…</button>
@@ -7114,52 +7133,77 @@ function renderContextOverlay(page) {
     return;
   }
 
-  // ---- MODE: ROTATE 3D (Floating Camera Pill + Focus Framing + Apply-to-Following + Model Size −/+) ----
+  const slots = page.slots || [];
+  const stepIdxInCh = ch.steps.indexOf(step);
+  const followingCount = stepIdxInCh >= 0 ? Math.max(0, ch.steps.length - 1 - stepIdxInCh) : 0;
+  const isMfBuild = Boolean((step.isStandaloneFigure || ch.kind === 'minifigure') && !step.isMinifigPoseStep);
+  const curMfStyle = isMfBuild ? getEffectiveMinifigStyle(step) : 'classic';
+  const pageInserts = state.pageInserts[page.id] || [];
+  const caps = resolveStepToolbarCapabilities({
+    isMinifigBuild: isMfBuild,
+    minifigStyle: curMfStyle,
+    hasSubassembly: Boolean(step.subassembly),
+    override: ov,
+    pageInsertCount: pageInserts.length,
+    followingStepCount: followingCount,
+  });
+
+  const renderSlotSwitcher = (btnClass, hintText) => slots.length > 1
+    ? `<div class="flex items-center gap-2 flex-wrap min-w-0">
+        <div class="inline-flex items-center gap-0.5 rounded-md bg-[var(--surface-sunken)] p-0.5 text-xs font-bold">
+          ${slots.map(sl => `<button type="button" data-pick-slot="${sl.step.id}" class="${btnClass} px-2.5 py-0.5 rounded-md transition-colors cursor-pointer ${sl.step.id === step.id ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'hover:bg-[var(--surface-hover)]'}">Step ${sl.step.num}</button>`).join('')}
+        </div>
+        <span class="text-xs text-[var(--muted-foreground)] truncate">${hintText}</span>
+      </div>`
+    : `<span class="font-bold truncate">${isMfBuild ? escHtml(step.minifigName || `Step ${step.num}`) : `Step ${step.num}`} · <span class="font-medium text-[var(--muted-foreground)]">${hintText}</span></span>`;
+
+  // ---- MODE: ROTATE 3D (Strictly 3D Camera Angle & Orientation — Zero Overlap!) ----
   if (state.mode === 'rotate') {
     const cam = getStepCamera(step);
-    const scalePct = Math.round((ov.modelScale || 1.0) * 100);
-    const fMode = ov.focusMode || 'auto';
-    const isMfBuild = Boolean((step.isStandaloneFigure || ch.kind === 'minifigure') && !step.isMinifigPoseStep);
-    const curMfStyle = isMfBuild ? getEffectiveMinifigStyle(step) : 'classic';
     const isMfStep = isMfBuild || Boolean(step.isMinifigPoseStep);
     const mfDefaultCam = step.isMinifigPoseStep
       ? { side: 'top', corner: step.corner || MINIFIG_POSE_CAMERA.corner, az: step.az ?? MINIFIG_POSE_CAMERA.az, el: step.el ?? MINIFIG_POSE_CAMERA.el }
       : MINIFIG_BUILD_CAMERA;
     const isFront34 = isMfStep && Math.abs(cam.az - mfDefaultCam.az) <= 4 && Math.abs(cam.el - mfDefaultCam.el) <= 4;
+
     box.innerHTML = `
-      <div class="pointer-events-auto studio-surface rounded-xl p-3 w-full space-y-2 text-xs">
+      <div class="pointer-events-auto studio-surface rounded-xl p-3.5 w-full space-y-2.5 text-xs">
         <div class="flex items-center justify-between gap-2 flex-wrap">
-          <span class="font-bold">${isMfBuild ? escHtml(step.minifigName || 'Minifigure') : `Step ${step.num}`} · Drag 3D to orbit</span>
-          <div class="flex items-center gap-1 flex-wrap">
-            <button id="camTop" class="px-2 py-1 rounded-md font-semibold ${cam.side === 'top' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'bg-black/5 dark:bg-white/10'}">Top</button>
-            <button id="camBot" class="px-2 py-1 rounded-md font-semibold ${cam.side === 'bottom' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'bg-black/5 dark:bg-white/10'}">Bottom</button>
-            ${isMfBuild ? `
-              <div class="inline-flex rounded-md bg-black/5 dark:bg-white/10 p-0.5 text-xs font-semibold">
-                <button data-mf-quick="exploded" class="mf-quick-style px-2 py-0.5 rounded-md ${curMfStyle === 'exploded' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : ''}">Exploded</button>
-                <button data-mf-quick="sequential" class="mf-quick-style px-2 py-0.5 rounded-md ${curMfStyle === 'sequential' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : ''}">Step-by-Step</button>
-                <button data-mf-quick="classic" class="mf-quick-style px-2 py-0.5 rounded-md ${curMfStyle === 'classic' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : ''}">Classic</button>
-              </div>
-              <button id="btnToggleMf1to1Quick" class="px-2.5 py-1 rounded-md font-semibold ${state.showMinifig1to1 ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'bg-black/5 dark:bg-white/10'}">1:1 View</button>` : ''}
-            <div class="inline-flex rounded-md bg-black/5 dark:bg-white/10 p-0.5 text-xs font-semibold">
-              <button data-focus="auto" class="focus-btn px-2 py-0.5 rounded-md ${fMode === 'auto' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : ''}">Auto</button>
-              <button data-focus="focus" class="focus-btn px-2 py-0.5 rounded-md ${fMode === 'focus' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : ''}">Close-Up</button>
-              <button data-focus="full" class="focus-btn px-2 py-0.5 rounded-md ${fMode === 'full' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : ''}">Full</button>
-            </div>
-            <div class="flex items-center gap-1 bg-black/5 dark:bg-white/10 rounded-md px-1.5 py-0.5">
-              <button id="modScaleDown" class="w-5 h-5 font-bold">−</button>
-              <span class="text-xs font-bold tabular-nums">${scalePct}%</span>
-              <button id="modScaleUp" class="w-5 h-5 font-bold">+</button>
+          ${renderSlotSwitcher('rotate-step-btn', 'Drag 3D to orbit')}
+          <div class="flex items-center gap-1.5 shrink-0">
+            <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">View</span>
+            <div class="inline-flex rounded-md bg-[var(--surface-sunken)] p-0.5 text-xs font-semibold">
+              <button type="button" id="camTop" title="Look down from above" class="px-2.5 py-0.5 rounded-md transition-colors cursor-pointer ${cam.side === 'top' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'hover:bg-[var(--surface-hover)]'}">Top</button>
+              <button type="button" id="camBot" title="Look up from underneath" class="px-2.5 py-0.5 rounded-md transition-colors cursor-pointer ${cam.side === 'bottom' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'hover:bg-[var(--surface-hover)]'}">Bottom</button>
             </div>
           </div>
         </div>
-        <div class="flex items-center justify-between gap-1.5 flex-wrap">
-          <div class="flex gap-1 flex-wrap">
-            ${isMfStep ? `<button id="btnMfFront34" class="px-2.5 py-1 rounded-md text-xs font-semibold ${isFront34 ? 'bg-[var(--primary-soft)] text-[var(--primary)] ring-1 ring-[var(--primary)]' : 'bg-black/5 dark:bg-white/10'}">Front 3/4</button>` : ''}
-            ${CORNERS.map(c => `<button data-corner="${c.id}" class="corner-btn px-2.5 py-1 rounded-md text-xs font-semibold ${!isFront34 && cam.corner === c.id ? 'bg-[var(--primary-soft)] text-[var(--primary)] ring-1 ring-[var(--primary)]' : 'bg-black/5 dark:bg-white/10'}">${c.label}</button>`).join('')}
-          </div>
-          <button id="btnApplyFollowing" class="px-3 py-1 rounded-md bg-[var(--primary)] text-[var(--primary-foreground)] text-xs font-semibold">Apply to Following</button>
+        <div class="flex items-center gap-1.5 flex-wrap">
+          <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)] mr-0.5">Angle</span>
+          ${isMfStep ? `<button type="button" id="btnMfFront34" class="px-2.5 py-1 rounded-md text-xs font-semibold transition-colors cursor-pointer ${isFront34 ? 'bg-[var(--primary-soft)] text-[var(--primary)] ring-1 ring-[var(--primary)]' : 'bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)]'}">Front 3/4</button>` : ''}
+          ${CORNERS.map(c => `<button type="button" data-corner="${c.id}" class="corner-btn px-2.5 py-1 rounded-md text-xs font-semibold transition-colors cursor-pointer ${!isFront34 && cam.corner === c.id ? 'bg-[var(--primary-soft)] text-[var(--primary)] ring-1 ring-[var(--primary)]' : 'bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)]'}">${c.label}</button>`).join('')}
         </div>
+        ${(caps.canApplyAngleToFollowing || caps.hasCustomCameraAngle) ? `
+          <div class="flex items-center justify-between gap-2 flex-wrap pt-2 border-t border-[var(--border)]">
+            ${caps.hasCustomCameraAngle
+              ? `<button type="button" id="btnResetCam" class="px-2.5 py-1 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] text-xs font-semibold cursor-pointer">Reset Angle</button>`
+              : `<span></span>`}
+            ${caps.canApplyAngleToFollowing
+              ? `<button type="button" id="btnApplyFollowing" class="px-3 py-1 rounded-md bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] text-xs font-semibold cursor-pointer">Apply Angle to Following (${followingCount})</button>`
+              : ''}
+          </div>` : ''}
       </div>`;
+
+    box.querySelectorAll('.rotate-step-btn').forEach(b => {
+      b.onclick = () => {
+        const sid = b.getAttribute('data-pick-slot');
+        if (sid && state.selectedStepId !== sid) {
+          state.selectedStepId = sid;
+          state.selectedPartIds.clear();
+          renderAll();
+        }
+      };
+    });
 
     const setCam = (patch) => {
       pushUndo();
@@ -7182,93 +7226,84 @@ function renderContextOverlay(page) {
     if (mf34Btn) {
       mf34Btn.onclick = () => setCam({ side: 'top', corner: mfDefaultCam.corner, az: mfDefaultCam.az, el: mfDefaultCam.el });
     }
-    const mf1to1Btn = box.querySelector('#btnToggleMf1to1Quick');
-    if (mf1to1Btn) {
-      mf1to1Btn.onclick = () => { state.showMinifig1to1 = !state.showMinifig1to1; renderAll(); };
-    }
-    box.querySelectorAll('.mf-quick-style').forEach(b => {
-      b.onclick = () => applyMinifigStyleChange(b.getAttribute('data-mf-quick'), step.id);
-    });
-    box.querySelectorAll('.focus-btn').forEach(b => {
-      b.onclick = () => {
+    box.querySelectorAll('.corner-btn').forEach(b => { b.onclick = () => setCam({ corner: b.getAttribute('data-corner') }); });
+    const resetCamBtn = box.querySelector('#btnResetCam');
+    if (resetCamBtn) {
+      resetCamBtn.onclick = () => {
         pushUndo();
-        state.overrides[step.id] = { ...(state.overrides[step.id] || {}), focusMode: b.getAttribute('data-focus') };
+        state.overrides[step.id] = clearStepCameraOverride(state.overrides[step.id]);
+        showToast(`Reset camera angle for Step ${step.num}.`);
         renderAll();
       };
-    });
-    box.querySelectorAll('.corner-btn').forEach(b => { b.onclick = () => setCam({ corner: b.getAttribute('data-corner') }); });
-    box.querySelector('#modScaleDown').onclick = () => { pushUndo(); state.overrides[step.id] = { ...ov, modelScale: Math.max(0.5, (ov.modelScale || 1) - 0.15) }; renderAll(); };
-    box.querySelector('#modScaleUp').onclick = () => { pushUndo(); state.overrides[step.id] = { ...ov, modelScale: Math.min(2.2, (ov.modelScale || 1) + 0.15) }; renderAll(); };
-    box.querySelector('#btnApplyFollowing').onclick = () => {
-      pushUndo();
-      const curCam = getStepCamera(step);
-      const idx = ch.steps.indexOf(step);
-      let count = 0;
-      for (let i = idx + 1; i < ch.steps.length; i++) {
-        const s = ch.steps[i];
-        state.overrides[s.id] = { ...(state.overrides[s.id] || {}), side: curCam.side, corner: curCam.corner, az: curCam.az, el: curCam.el };
-        count++;
-      }
-      showToast(`Applied camera angle to ${count} following step(s).`);
-      renderAll();
-    };
+    }
+    const applyFollowingBtn = box.querySelector('#btnApplyFollowing');
+    if (applyFollowingBtn) {
+      applyFollowingBtn.onclick = () => {
+        pushUndo();
+        const curCam = getStepCamera(step);
+        const idx = ch.steps.indexOf(step);
+        let count = 0;
+        for (let i = idx + 1; i < ch.steps.length; i++) {
+          const s = ch.steps[i];
+          state.overrides[s.id] = { ...(state.overrides[s.id] || {}), side: curCam.side, corner: curCam.corner, az: curCam.az, el: curCam.el };
+          count++;
+        }
+        showToast(`Applied camera angle to ${count} following step(s).`);
+        renderAll();
+      };
+    }
     return;
   }
 
-  // ---- MODE: ARRANGE LAYOUT (Drag 2D boxes, Resize PLI, Callout toggle, Inserts!) ----
+  // ---- MODE: ARRANGE LAYOUT (Strictly 2D Box Positioning & Box Sizing — Zero Overlap!) ----
   if (state.mode === 'arrange') {
     const pliPct = Math.round((ov.pliScale || 1.0) * 100);
-    const hasSub = Boolean(step.subassembly);
-    const isMfBuild = Boolean((step.isStandaloneFigure || ch.kind === 'minifigure') && !step.isMinifigPoseStep);
-    const curMfStyle = isMfBuild ? getEffectiveMinifigStyle(step) : 'classic';
-    const slots = page.slots || [];
-    const slotIdx = slots.findIndex(s => s.step.id === step.id);
-    const isPinned = Boolean(ov.pin);
-    const stepShortLabel = getStepShortLabel(step, ch);
-    const pinBtnTitle = getStepBreakTooltip({
-      stepLabel: stepShortLabel,
-      pinned: isPinned,
-      slotIndex: Math.max(0, slotIdx),
-    });
-    const arrangeHeaderLeftHtml = slots.length > 1
-      ? `<div class="inline-flex items-center gap-0.5 rounded-md bg-black/5 dark:bg-white/10 p-0.5 text-xs font-bold">
-          ${slots.map(sl => `<button type="button" data-arrange-step="${sl.step.id}" class="arrange-step-btn px-2 py-0.5 rounded-md transition ${sl.step.id === step.id ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'hover:bg-black/5 dark:hover:bg-white/10'}">Step ${sl.step.num}</button>`).join('')}
-        </div>`
-      : `<span class="font-bold">${isMfBuild ? escHtml(step.minifigName || `Step ${step.num}`) : `Step ${step.num}`} · Drag boxes to arrange</span>`;
+    const selectedInsert = state.selectedArrangeEl?.kind === 'insert'
+      ? pageInserts.find(x => x.id === state.selectedArrangeEl.insertId) || null
+      : null;
+    const insertPct = selectedInsert ? Math.round((selectedInsert.scale || 1.0) * 100) : 100;
+
     box.innerHTML = `
-      <div class="pointer-events-auto studio-surface rounded-xl p-3 w-full space-y-2 text-xs">
+      <div class="pointer-events-auto studio-surface rounded-xl p-3.5 w-full space-y-2.5 text-xs">
         <div class="flex items-center justify-between gap-2 flex-wrap">
-          ${arrangeHeaderLeftHtml}
-          <div class="flex items-center gap-1 flex-wrap">
-            ${isMfBuild ? `
-              <div class="inline-flex rounded-md bg-black/5 dark:bg-white/10 p-0.5 text-xs font-semibold mr-1">
-                <button data-mf-quick="exploded" class="mf-quick-style px-2 py-0.5 rounded-md ${curMfStyle === 'exploded' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : ''}">Exploded</button>
-                <button data-mf-quick="sequential" class="mf-quick-style px-2 py-0.5 rounded-md ${curMfStyle === 'sequential' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : ''}">Step-by-Step</button>
-                <button data-mf-quick="classic" class="mf-quick-style px-2 py-0.5 rounded-md ${curMfStyle === 'classic' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : ''}">Classic</button>
-              </div>` : ''}
-            <span class="text-xs opacity-65">Parts Box:</span>
-            <button id="pliDown" class="w-6 h-6 rounded-md bg-black/5 dark:bg-white/10 font-bold">−</button>
-            <span class="text-xs font-bold tabular-nums">${pliPct}%</span>
-            <button id="pliUp" class="w-6 h-6 rounded-md bg-black/5 dark:bg-white/10 font-bold">+</button>
-            <button id="btnResetArrange" class="ml-1 px-2.5 py-1 rounded-md bg-black/5 dark:bg-white/10 text-xs font-semibold">Reset</button>
-          </div>
+          ${renderSlotSwitcher('arrange-step-btn', caps.hasMovableElements ? 'Drag boxes to move' : '2D layout')}
+          ${(caps.hasPartsBox || caps.hasMovableCallout) ? `
+            <button type="button" id="btnResetArrange" class="px-2.5 py-1 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] text-xs font-semibold cursor-pointer">Reset Box Layout</button>` : ''}
         </div>
-        <div class="flex items-center gap-1.5 flex-wrap">
-          <button id="btnInsText" class="px-2.5 py-1.5 rounded-md bg-[var(--primary)] text-[var(--primary-foreground)] font-semibold">+ Text Note</button>
-          <button id="btnInsImg" class="px-2.5 py-1.5 rounded-md bg-black/5 dark:bg-white/10 font-semibold">+ Image / Logo</button>
-          <button id="btnArrangePinBreak" title="${escHtml(pinBtnTitle)}" aria-pressed="${isPinned ? 'true' : 'false'}" class="px-2.5 py-1.5 rounded-md font-semibold inline-flex items-center gap-1 transition ${isPinned ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'bg-black/5 dark:bg-white/10'}">
-            <svg class="w-3 h-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4"/><path d="M10 12h4"/><path d="M17 12h4"/><path d="M6 4v3a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V4"/><path d="M6 20v-3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v3"/></svg>
-            <span>Page Break · Step ${step.num}</span>
-          </button>
-          ${hasSub ? `<button id="btnToggleCallout" class="px-2.5 py-1.5 rounded-md bg-black/5 dark:bg-white/10 font-semibold">${ov.calloutAsPages ? 'Convert to Callout Box' : 'Convert to Full Page'}</button>` : ''}
-          ${hasSub && !ov.calloutAsPages ? `<button id="btnCalloutDir" class="px-2.5 py-1.5 rounded-md bg-black/5 dark:bg-white/10 font-semibold">${ov.calloutDir === 'vertical' ? 'Side-by-Side' : 'Stack Vertically'}</button>` : ''}
-          ${state.selectedArrangeEl?.kind === 'insert' ? `<button id="btnDelInsert" class="px-2.5 py-1.5 rounded-md bg-[var(--danger-soft)] text-[var(--danger)] font-semibold">Delete Selected</button>` : ''}
-        </div>
+
+        ${caps.hasPartsBox ? `
+          <div class="flex items-center justify-between gap-2 flex-wrap">
+            <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Parts Box Size</span>
+            <div class="inline-flex items-center gap-1 bg-[var(--surface-sunken)] rounded-md px-1.5 py-0.5">
+              <button type="button" id="pliDown" aria-label="Decrease Parts Box size" class="w-6 h-6 rounded-md hover:bg-[var(--surface-hover)] font-bold cursor-pointer">−</button>
+              <span class="text-xs font-bold tabular-nums min-w-[38px] text-center">${pliPct}%</span>
+              <button type="button" id="pliUp" aria-label="Increase Parts Box size" class="w-6 h-6 rounded-md hover:bg-[var(--surface-hover)] font-bold cursor-pointer">+</button>
+            </div>
+          </div>` : ''}
+
+        ${selectedInsert ? `
+          <div class="flex items-center justify-between gap-2 flex-wrap pt-2 border-t border-[var(--border)]">
+            <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--primary)]">Selected ${selectedInsert.kind === 'text' ? 'Note' : 'Image'}</span>
+            <div class="flex items-center gap-1.5">
+              <div class="inline-flex items-center gap-1 bg-[var(--surface-sunken)] rounded-md px-1.5 py-0.5">
+                <button type="button" id="insScaleDown" aria-label="Decrease insert size" class="w-6 h-6 rounded-md hover:bg-[var(--surface-hover)] font-bold cursor-pointer">−</button>
+                <span class="text-xs font-bold tabular-nums min-w-[38px] text-center">${insertPct}%</span>
+                <button type="button" id="insScaleUp" aria-label="Increase insert size" class="w-6 h-6 rounded-md hover:bg-[var(--surface-hover)] font-bold cursor-pointer">+</button>
+              </div>
+              <button type="button" id="btnDelInsert" class="px-2.5 py-1 rounded-md bg-[var(--danger-soft)] text-[var(--danger)] text-xs font-semibold cursor-pointer">Delete</button>
+            </div>
+          </div>` : ''}
+
+        ${!caps.hasMovableElements ? `
+          <div class="flex items-center justify-between gap-2 flex-wrap pt-1">
+            <span class="text-xs text-[var(--muted-foreground)]">No movable Parts Box in ${curMfStyle === 'exploded' ? 'Exploded' : 'Step-by-Step'} style yet.</span>
+            <button type="button" id="btnArrangeOpenEdit" class="px-3 py-1.5 rounded-md bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] text-xs font-semibold shrink-0 cursor-pointer">Open Edit →</button>
+          </div>` : ''}
       </div>`;
 
     box.querySelectorAll('.arrange-step-btn').forEach(b => {
       b.onclick = () => {
-        const sid = b.getAttribute('data-arrange-step');
+        const sid = b.getAttribute('data-pick-slot');
         if (sid && state.selectedStepId !== sid) {
           state.selectedStepId = sid;
           state.selectedPartIds.clear();
@@ -7276,29 +7311,32 @@ function renderContextOverlay(page) {
         }
       };
     });
-    box.querySelectorAll('.mf-quick-style').forEach(b => {
-      b.onclick = () => applyMinifigStyleChange(b.getAttribute('data-mf-quick'), step.id);
-    });
-    box.querySelector('#pliDown').onclick = () => { pushUndo(); state.overrides[step.id] = { ...ov, pliScale: Math.max(0.6, (ov.pliScale || 1) - 0.1) }; renderAll(); };
-    box.querySelector('#pliUp').onclick = () => { pushUndo(); state.overrides[step.id] = { ...ov, pliScale: Math.min(1.6, (ov.pliScale || 1) + 0.1) }; renderAll(); };
-    box.querySelector('#btnResetArrange').onclick = () => { pushUndo(); state.overrides[step.id] = { ...ov, pliPos:{x:0,y:0}, pliScale:1, calloutPos:{x:0,y:0} }; renderAll(); };
-    box.querySelector('#btnInsText').onclick = () => {
-      const txt = prompt('Enter note text to place on this page:', 'Check alignment before pressing down.');
-      if (!txt) return;
-      pushUndo();
-      const arr = state.pageInserts[page.id] || [];
-      arr.push({ id: 'ins_' + Date.now().toString(36), kind: 'text', text: txt, x: 30, y: 80, scale: 1 });
-      state.pageInserts[page.id] = arr;
-      renderAll();
-    };
-    box.querySelector('#btnInsImg').onclick = () => document.getElementById('insertImageInput').click();
-    box.querySelector('#btnArrangePinBreak').onclick = () => {
-      toggleStepPageBreak(step, { ch, followToggledStep: true });
-    };
-    if (hasSub) {
-      box.querySelector('#btnToggleCallout').onclick = () => { pushUndo(); state.overrides[step.id] = { ...ov, calloutAsPages: !ov.calloutAsPages }; renderAll(); };
-      const dirBtn = box.querySelector('#btnCalloutDir');
-      if (dirBtn) dirBtn.onclick = () => { pushUndo(); state.overrides[step.id] = { ...ov, calloutDir: ov.calloutDir === 'vertical' ? 'horizontal' : 'vertical' }; renderAll(); };
+    const pliDown = box.querySelector('#pliDown');
+    const pliUp = box.querySelector('#pliUp');
+    if (pliDown) pliDown.onclick = () => { pushUndo(); state.overrides[step.id] = { ...ov, pliScale: Math.max(0.6, (ov.pliScale || 1) - 0.1) }; renderAll(); };
+    if (pliUp) pliUp.onclick = () => { pushUndo(); state.overrides[step.id] = { ...ov, pliScale: Math.min(1.6, (ov.pliScale || 1) + 0.1) }; renderAll(); };
+    const resetArrBtn = box.querySelector('#btnResetArrange');
+    if (resetArrBtn) {
+      resetArrBtn.onclick = () => {
+        pushUndo();
+        state.overrides[step.id] = clearStepArrangeOverride(ov);
+        showToast(`Reset box positions for Step ${step.num}.`);
+        renderAll();
+      };
+    }
+    const insDown = box.querySelector('#insScaleDown');
+    const insUp = box.querySelector('#insScaleUp');
+    if (selectedInsert && insDown && insUp) {
+      insDown.onclick = () => {
+        pushUndo();
+        selectedInsert.scale = Math.max(0.5, Number(((selectedInsert.scale || 1) - 0.15).toFixed(2)));
+        renderAll();
+      };
+      insUp.onclick = () => {
+        pushUndo();
+        selectedInsert.scale = Math.min(2.2, Number(((selectedInsert.scale || 1) + 0.15).toFixed(2)));
+        renderAll();
+      };
     }
     const delBtn = box.querySelector('#btnDelInsert');
     if (delBtn) delBtn.onclick = () => {
@@ -7307,7 +7345,427 @@ function renderContextOverlay(page) {
       state.selectedArrangeEl = null;
       renderAll();
     };
+    const openEditBtn = box.querySelector('#btnArrangeOpenEdit');
+    if (openEditBtn) openEditBtn.onclick = () => openStepEditModal();
   }
+}
+
+// =========================================================================
+// 8B. FULL-PAGE EDIT STEP & PAGE MODAL (Dedicated, Clearly Labeled Controls)
+// =========================================================================
+function isStepEditModalOpen() {
+  const el = document.getElementById('stepEditModal');
+  return Boolean(el && !el.classList.contains('hidden'));
+}
+
+function openStepEditModal() {
+  const page = state.pages[state.pageIdx];
+  if (!page || page.kind !== 'steps') return;
+  closeMenu();
+  document.getElementById('stylePopover')?.classList.add('hidden');
+  document.getElementById('stepEditModal').classList.remove('hidden');
+  renderStepEditModal();
+  syncModePillButtons(page);
+}
+
+function closeStepEditModal() {
+  const el = document.getElementById('stepEditModal');
+  if (el) el.classList.add('hidden');
+  const page = state.pages[state.pageIdx];
+  if (page) syncModePillButtons(page);
+}
+
+function renderStepEditModal() {
+  const modal = document.getElementById('stepEditModal');
+  const body = document.getElementById('stepEditBody');
+  const stepBar = document.getElementById('stepEditStepBar');
+  const subtitle = document.getElementById('stepEditSubtitle');
+  if (!modal || !body) return;
+
+  const page = state.pages[state.pageIdx];
+  if (!page || page.kind !== 'steps') {
+    closeStepEditModal();
+    return;
+  }
+  const active = getActiveStepObj();
+  if (!active) {
+    closeStepEditModal();
+    return;
+  }
+
+  const { ch, step } = active;
+  const ov = state.overrides[step.id] || {};
+  const slots = page.slots || [];
+  const slotIdx = Math.max(0, slots.findIndex(s => s.step.id === step.id));
+  const isMfBuild = Boolean((step.isStandaloneFigure || ch.kind === 'minifigure') && !step.isMinifigPoseStep);
+  const curMfStyle = isMfBuild ? getEffectiveMinifigStyle(step) : 'classic';
+  const fMode = ov.focusMode || 'auto';
+  const modelScalePct = Math.round((ov.modelScale || 1.0) * 100);
+  const pliScalePct = Math.round((ov.pliScale || 1.0) * 100);
+  const cam = getStepCamera(step);
+  const cornerLabel = (CORNERS.find(c => c.id === cam.corner) || CORNERS[0]).label;
+  const pageInserts = state.pageInserts[page.id] || [];
+  const stepIdxInCh = ch.steps.indexOf(step);
+  const followingCount = stepIdxInCh >= 0 ? Math.max(0, ch.steps.length - 1 - stepIdxInCh) : 0;
+  const isPinned = Boolean(ov.pin);
+  const stepShortLabel = getStepShortLabel(step, ch);
+  const pinTooltip = getStepBreakTooltip({ stepLabel: stepShortLabel, pinned: isPinned, slotIndex: slotIdx });
+
+  const caps = resolveStepToolbarCapabilities({
+    isMinifigBuild: isMfBuild,
+    minifigStyle: curMfStyle,
+    hasSubassembly: Boolean(step.subassembly),
+    override: ov,
+    pageInsertCount: pageInserts.length,
+    followingStepCount: followingCount,
+  });
+
+  if (subtitle) {
+    subtitle.textContent = `Page ${page.num} of ${state.pages.length} · ${page.label} · Editing ${stepShortLabel}`;
+  }
+
+  // Multi-step switcher bar at top of modal
+  if (stepBar) {
+    if (slots.length > 1) {
+      stepBar.classList.remove('hidden');
+      stepBar.innerHTML = `
+        <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)] shrink-0">Editing:</span>
+        ${slots.map(sl => {
+          const slIsMf = Boolean((sl.step.isStandaloneFigure || sl.ch.kind === 'minifigure') && !sl.step.isMinifigPoseStep);
+          const lbl = slIsMf && sl.step.minifigName ? `Step ${sl.step.num} · ${sl.step.minifigName}` : `Step ${sl.step.num}`;
+          const activeCls = sl.step.id === step.id
+            ? 'bg-[var(--primary)] text-[var(--primary-foreground)] border-transparent'
+            : 'border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)]';
+          return `<button type="button" data-edit-slot="${sl.step.id}" class="step-edit-slot-btn px-3 py-1 rounded-md border text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${activeCls}">${escHtml(lbl)}</button>`;
+        }).join('')}`;
+      stepBar.querySelectorAll('.step-edit-slot-btn').forEach(b => {
+        b.onclick = () => {
+          const sid = b.getAttribute('data-edit-slot');
+          if (sid && state.selectedStepId !== sid) {
+            state.selectedStepId = sid;
+            state.selectedPartIds.clear();
+            renderAll();
+          }
+        };
+      });
+    } else {
+      stepBar.classList.add('hidden');
+      stepBar.innerHTML = '';
+    }
+  }
+
+  const scopeBadge = (text, accent = false) =>
+    `<span class="px-2 py-0.5 rounded-md text-[11px] font-semibold ${accent ? 'bg-[var(--primary-soft)] text-[var(--primary)]' : 'bg-[var(--surface-sunken)] text-[var(--muted-foreground)]'}">${escHtml(text)}</span>`;
+
+  body.innerHTML = `
+    ${caps.showMinifigSettings ? `
+      <section class="p-4 rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)]/60 space-y-3">
+        <div class="flex items-center justify-between gap-2 flex-wrap">
+          <div>
+            <div class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Minifigure Instruction Style</div>
+            <h3 class="text-sm font-bold mt-0.5">How Minifigures Are Presented</h3>
+          </div>
+          ${scopeBadge('All minifigure steps', true)}
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          ${MINIFIG_STYLE_OPTIONS.map(opt => {
+            const selected = curMfStyle === opt.id;
+            return `<button type="button" data-edit-mf-style="${opt.id}" aria-pressed="${selected ? 'true' : 'false'}" class="step-edit-mf-btn p-3 rounded-lg border text-left transition-colors cursor-pointer flex flex-col gap-1 ${
+              selected
+                ? 'border-[var(--primary)] bg-[var(--primary-soft)] ring-1 ring-[var(--primary)]'
+                : 'border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)]'
+            }">
+              <div class="flex items-center justify-between gap-1.5">
+                <span class="font-bold text-xs ${selected ? 'text-[var(--primary)]' : ''}">${escHtml(opt.label)}</span>
+                ${selected ? `<span class="text-[10px] font-bold uppercase tracking-wider text-[var(--primary)]">Active</span>` : ''}
+              </div>
+              <p class="text-[11px] text-[var(--muted-foreground)] leading-snug">${escHtml(opt.description)}</p>
+            </button>`;
+          }).join('')}
+        </div>
+        <label class="flex items-center justify-between gap-3 pt-3 border-t border-[var(--border)] cursor-pointer">
+          <div class="min-w-0">
+            <div class="font-semibold">1:1 Actual-Size Minifigure Preview</div>
+            <p class="text-[11px] text-[var(--muted-foreground)] leading-snug">Show a life-size height reference card next to each minifigure.</p>
+          </div>
+          <input id="stepEditMf1to1" type="checkbox" ${state.showMinifig1to1 ? 'checked' : ''} class="w-4 h-4 accent-[var(--primary)] shrink-0 cursor-pointer" />
+        </label>
+      </section>` : ''}
+
+    <section class="p-4 rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)]/60 space-y-3.5">
+      <div class="flex items-center justify-between gap-2 flex-wrap">
+        <div>
+          <div class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Step Display &amp; Framing</div>
+          <h3 class="text-sm font-bold mt-0.5">${escHtml(stepShortLabel)}</h3>
+        </div>
+        ${scopeBadge('This step')}
+      </div>
+
+      <!-- Camera Framing -->
+      <div class="space-y-1.5">
+        <div class="font-semibold">Camera Framing</div>
+        <div class="grid grid-cols-3 gap-1.5">
+          ${FOCUS_MODE_OPTIONS.map(opt => `
+            <button type="button" data-edit-focus="${opt.id}" aria-pressed="${fMode === opt.id ? 'true' : 'false'}" class="step-edit-focus-btn py-2 px-2 rounded-md border font-semibold transition-colors cursor-pointer ${
+              fMode === opt.id
+                ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]'
+                : 'border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)]'
+            }">${escHtml(opt.label)}</button>`).join('')}
+        </div>
+        <p class="text-[11px] text-[var(--muted-foreground)] leading-snug">${escHtml(getFocusModeDescription(fMode))}</p>
+      </div>
+
+      <!-- 3D Model Size -->
+      <div class="flex items-center justify-between gap-3 pt-3 border-t border-[var(--border)] flex-wrap">
+        <div class="min-w-0 flex-1">
+          <div class="font-semibold">3D Model Size</div>
+          <p class="text-[11px] text-[var(--muted-foreground)] leading-snug">Scale how large the 3D model renders inside this step.</p>
+        </div>
+        <div class="flex items-center gap-1.5 shrink-0">
+          <div class="inline-flex items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--card)] px-1.5 py-1">
+            <button type="button" id="stepEditModScaleDown" aria-label="Decrease 3D model size" class="w-6 h-6 rounded-md hover:bg-[var(--surface-hover)] font-bold cursor-pointer">−</button>
+            <span class="text-xs font-bold tabular-nums min-w-[40px] text-center">${modelScalePct}%</span>
+            <button type="button" id="stepEditModScaleUp" aria-label="Increase 3D model size" class="w-6 h-6 rounded-md hover:bg-[var(--surface-hover)] font-bold cursor-pointer">+</button>
+          </div>
+          ${modelScalePct !== 100 ? `<button type="button" id="stepEditModScaleReset" class="px-2.5 py-1.5 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] text-xs font-semibold cursor-pointer">Reset</button>` : ''}
+        </div>
+      </div>
+
+      <!-- Parts Box Size (only when visible) -->
+      ${caps.hasPartsBox ? `
+        <div class="flex items-center justify-between gap-3 pt-3 border-t border-[var(--border)] flex-wrap">
+          <div class="min-w-0 flex-1">
+            <div class="font-semibold">Parts Box Size</div>
+            <p class="text-[11px] text-[var(--muted-foreground)] leading-snug">Resize the Parts List box shown at the top of this step.</p>
+          </div>
+          <div class="flex items-center gap-1.5 shrink-0">
+            <div class="inline-flex items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--card)] px-1.5 py-1">
+              <button type="button" id="stepEditPliDown" aria-label="Decrease Parts Box size" class="w-6 h-6 rounded-md hover:bg-[var(--surface-hover)] font-bold cursor-pointer">−</button>
+              <span class="text-xs font-bold tabular-nums min-w-[40px] text-center">${pliScalePct}%</span>
+              <button type="button" id="stepEditPliUp" aria-label="Increase Parts Box size" class="w-6 h-6 rounded-md hover:bg-[var(--surface-hover)] font-bold cursor-pointer">+</button>
+            </div>
+            ${pliScalePct !== 100 ? `<button type="button" id="stepEditPliReset" class="px-2.5 py-1.5 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] text-xs font-semibold cursor-pointer">Reset</button>` : ''}
+          </div>
+        </div>` : ''}
+
+      <!-- Camera Angle Bridge (links directly to Rotate without duplicating controls) -->
+      <div class="flex items-center justify-between gap-3 pt-3 border-t border-[var(--border)] flex-wrap">
+        <div class="min-w-0 flex-1">
+          <div class="font-semibold">3D Camera Angle</div>
+          <p class="text-[11px] text-[var(--muted-foreground)] leading-snug">${cam.side === 'bottom' ? 'Bottom' : 'Top'} view · ${escHtml(cornerLabel)} (${Math.round(cam.az)}° / ${Math.round(cam.el)}°)</p>
+        </div>
+        <button type="button" id="stepEditGoRotate" class="px-3 py-1.5 rounded-md border border-[var(--primary)]/40 bg-[var(--primary-soft)] text-[var(--primary)] font-semibold shrink-0 cursor-pointer">Rotate in 3D →</button>
+      </div>
+    </section>
+
+    ${caps.showSubassemblySettings ? `
+      <section class="p-4 rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)]/60 space-y-3">
+        <div class="flex items-center justify-between gap-2 flex-wrap">
+          <div>
+            <div class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Subassembly Layout</div>
+            <h3 class="text-sm font-bold mt-0.5">${escHtml(step.subassembly.name || 'Subassembly')}</h3>
+          </div>
+          ${scopeBadge('This step')}
+        </div>
+        <div class="space-y-1.5">
+          <div class="font-semibold">Display Style</div>
+          <div class="grid grid-cols-2 gap-2">
+            <button type="button" id="stepEditSubCallout" class="py-2 px-3 rounded-md border font-semibold transition-colors cursor-pointer ${!ov.calloutAsPages ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)]'}">Inline Callout Box</button>
+            <button type="button" id="stepEditSubPages" class="py-2 px-3 rounded-md border font-semibold transition-colors cursor-pointer ${ov.calloutAsPages ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)]'}">Separate Full Pages</button>
+          </div>
+          <p class="text-[11px] text-[var(--muted-foreground)] leading-snug">Show this subassembly inside a yellow callout box on this step, or break it out into its own full pages.</p>
+        </div>
+        ${!ov.calloutAsPages ? `
+          <div class="space-y-1.5 pt-3 border-t border-[var(--border)]">
+            <div class="font-semibold">Callout Box Position</div>
+            <div class="grid grid-cols-2 gap-2">
+              <button type="button" id="stepEditSubHoriz" class="py-2 px-3 rounded-md border font-semibold transition-colors cursor-pointer ${ov.calloutDir !== 'vertical' ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)]'}">Side-by-Side</button>
+              <button type="button" id="stepEditSubVert" class="py-2 px-3 rounded-md border font-semibold transition-colors cursor-pointer ${ov.calloutDir === 'vertical' ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)]'}">Stacked Vertically</button>
+            </div>
+          </div>` : ''}
+      </section>` : ''}
+
+    <section class="p-4 rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)]/60 space-y-3">
+      <div class="flex items-center justify-between gap-2 flex-wrap">
+        <div>
+          <div class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Pagination &amp; Page Break</div>
+          <h3 class="text-sm font-bold mt-0.5">Page Flow for Step ${step.num}</h3>
+        </div>
+        ${scopeBadge('This step')}
+      </div>
+      <div class="flex items-center justify-between gap-3 flex-wrap">
+        <div class="min-w-0 flex-1">
+          <div class="font-semibold">Start Step ${step.num} on a New Page</div>
+          <p class="text-[11px] text-[var(--muted-foreground)] leading-snug">Pins a page break before Step ${step.num} so adding, splitting, or merging earlier steps won&rsquo;t shift later pages.</p>
+        </div>
+        <button type="button" id="stepEditPinBreak" title="${escHtml(pinTooltip)}" aria-pressed="${isPinned ? 'true' : 'false'}" class="px-3.5 py-2 rounded-md font-semibold inline-flex items-center gap-1.5 shrink-0 transition-colors cursor-pointer ${isPinned ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)]'}">
+          <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4"/><path d="M10 12h4"/><path d="M17 12h4"/><path d="M6 4v3a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V4"/><path d="M6 20v-3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v3"/></svg>
+          <span>${isPinned ? 'Page Break On' : 'Add Page Break'}</span>
+        </button>
+      </div>
+      <div class="pt-3 border-t border-[var(--border)] flex items-center justify-between gap-2 flex-wrap">
+        <span class="text-[11px] text-[var(--muted-foreground)]">Want to change steps per page, grid layout, or paper size?</span>
+        <button type="button" id="stepEditOpenPageSetup" class="px-3 py-1.5 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold shrink-0 cursor-pointer">Open Page Setup…</button>
+      </div>
+    </section>
+
+    <section class="p-4 rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)]/60 space-y-3">
+      <div class="flex items-center justify-between gap-2 flex-wrap">
+        <div>
+          <div class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Page Notes &amp; Images</div>
+          <h3 class="text-sm font-bold mt-0.5">Custom Callouts on Page ${page.num}</h3>
+        </div>
+        ${scopeBadge('This page')}
+      </div>
+      <p class="text-[11px] text-[var(--muted-foreground)] leading-snug">Add builder tips, warnings, or custom logos onto this page. Switch to <b>Arrange</b> mode afterward to drag or resize them.</p>
+
+      <div class="flex items-center gap-2">
+        <input id="stepEditNoteInput" type="text" maxlength="160" placeholder="Type a builder note (e.g. Press firmly until it clicks)…" class="flex-1 min-w-0 px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--card)] outline-none focus:border-[var(--primary)]" />
+        <button type="button" id="stepEditAddNoteBtn" class="px-3.5 py-2 rounded-md bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] font-semibold shrink-0 cursor-pointer">+ Add Note</button>
+      </div>
+
+      <div class="flex items-center gap-2 flex-wrap">
+        <button type="button" id="stepEditAddImgBtn" class="px-3.5 py-2 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold inline-flex items-center gap-1.5 cursor-pointer">
+          <svg class="w-3.5 h-3.5 text-[var(--primary)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+          <span>+ Add Image / Logo</span>
+        </button>
+        ${pageInserts.length > 0 ? `<button type="button" id="stepEditGoArrange" class="px-3 py-2 rounded-md border border-[var(--primary)]/40 bg-[var(--primary-soft)] text-[var(--primary)] font-semibold cursor-pointer">Move in Arrange →</button>` : ''}
+      </div>
+
+      ${pageInserts.length > 0 ? `
+        <div class="space-y-1.5 pt-2.5 border-t border-[var(--border)]">
+          <div class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">On This Page (${pageInserts.length})</div>
+          ${pageInserts.map(ins => `
+            <div class="flex items-center justify-between gap-2 p-2 rounded-lg border border-[var(--border)] bg-[var(--card)]">
+              <div class="flex items-center gap-2 min-w-0 flex-1">
+                ${ins.kind === 'image'
+                  ? `<img src="${ins.src}" alt="Page image" class="w-8 h-8 rounded-md object-contain border border-[var(--border)] shrink-0 bg-[var(--surface-sunken)]" />`
+                  : `<span class="px-2 py-0.5 rounded-md bg-[var(--primary-soft)] text-[var(--primary)] text-[10px] font-bold shrink-0">Note</span>`}
+                <span class="truncate font-medium">${ins.kind === 'text' ? escHtml(ins.text) : `Custom Image (${Math.round((ins.scale || 1) * 100)}%)`}</span>
+              </div>
+              <button type="button" data-del-insert="${ins.id}" class="step-edit-del-ins px-2.5 py-1 rounded-md bg-[var(--danger-soft)] text-[var(--danger)] font-semibold shrink-0 cursor-pointer">Delete</button>
+            </div>`).join('')}
+        </div>` : ''}
+    </section>
+  `;
+
+  // Bind Minifigure controls
+  body.querySelectorAll('.step-edit-mf-btn').forEach(b => {
+    b.onclick = () => applyMinifigStyleChange(b.getAttribute('data-edit-mf-style'), step.id);
+  });
+  const mf1to1Check = body.querySelector('#stepEditMf1to1');
+  if (mf1to1Check) {
+    mf1to1Check.onchange = (e) => {
+      state.showMinifig1to1 = Boolean(e.target.checked);
+      renderAll();
+    };
+  }
+
+  // Bind Framing & Scaling controls
+  body.querySelectorAll('.step-edit-focus-btn').forEach(b => {
+    b.onclick = () => {
+      pushUndo();
+      state.overrides[step.id] = { ...(state.overrides[step.id] || {}), focusMode: b.getAttribute('data-edit-focus') };
+      renderAll();
+    };
+  });
+  body.querySelector('#stepEditModScaleDown').onclick = () => {
+    pushUndo();
+    state.overrides[step.id] = { ...ov, modelScale: Math.max(0.5, Number(((ov.modelScale || 1) - 0.15).toFixed(2))) };
+    renderAll();
+  };
+  body.querySelector('#stepEditModScaleUp').onclick = () => {
+    pushUndo();
+    state.overrides[step.id] = { ...ov, modelScale: Math.min(2.2, Number(((ov.modelScale || 1) + 0.15).toFixed(2))) };
+    renderAll();
+  };
+  const modResetBtn = body.querySelector('#stepEditModScaleReset');
+  if (modResetBtn) {
+    modResetBtn.onclick = () => {
+      pushUndo();
+      state.overrides[step.id] = { ...ov, modelScale: 1 };
+      renderAll();
+    };
+  }
+
+  const pliDownBtn = body.querySelector('#stepEditPliDown');
+  const pliUpBtn = body.querySelector('#stepEditPliUp');
+  const pliResetBtn = body.querySelector('#stepEditPliReset');
+  if (pliDownBtn) pliDownBtn.onclick = () => { pushUndo(); state.overrides[step.id] = { ...ov, pliScale: Math.max(0.6, Number(((ov.pliScale || 1) - 0.1).toFixed(2))) }; renderAll(); };
+  if (pliUpBtn) pliUpBtn.onclick = () => { pushUndo(); state.overrides[step.id] = { ...ov, pliScale: Math.min(1.6, Number(((ov.pliScale || 1) + 0.1).toFixed(2))) }; renderAll(); };
+  if (pliResetBtn) pliResetBtn.onclick = () => { pushUndo(); state.overrides[step.id] = { ...ov, pliScale: 1 }; renderAll(); };
+
+  body.querySelector('#stepEditGoRotate').onclick = () => {
+    closeStepEditModal();
+    state.mode = 'rotate';
+    state.selectedPartIds.clear();
+    state.selectedArrangeEl = null;
+    renderAll();
+  };
+
+  // Bind Subassembly controls
+  const subCalloutBtn = body.querySelector('#stepEditSubCallout');
+  const subPagesBtn = body.querySelector('#stepEditSubPages');
+  if (subCalloutBtn) subCalloutBtn.onclick = () => { pushUndo(); state.overrides[step.id] = { ...ov, calloutAsPages: false }; renderAll(); };
+  if (subPagesBtn) subPagesBtn.onclick = () => { pushUndo(); state.overrides[step.id] = { ...ov, calloutAsPages: true }; renderAll(); };
+  const subHorizBtn = body.querySelector('#stepEditSubHoriz');
+  const subVertBtn = body.querySelector('#stepEditSubVert');
+  if (subHorizBtn) subHorizBtn.onclick = () => { pushUndo(); state.overrides[step.id] = { ...ov, calloutDir: 'horizontal' }; renderAll(); };
+  if (subVertBtn) subVertBtn.onclick = () => { pushUndo(); state.overrides[step.id] = { ...ov, calloutDir: 'vertical' }; renderAll(); };
+
+  // Bind Pagination controls
+  body.querySelector('#stepEditPinBreak').onclick = () => {
+    toggleStepPageBreak(step, { ch, followToggledStep: true });
+  };
+  body.querySelector('#stepEditOpenPageSetup').onclick = () => {
+    closeStepEditModal();
+    openPageSetupModal();
+  };
+
+  // Bind Page Notes & Images controls
+  const noteInput = body.querySelector('#stepEditNoteInput');
+  const addNote = () => {
+    const txt = (noteInput?.value || '').trim();
+    if (!txt) {
+      showToast('Enter note text first.');
+      noteInput?.focus();
+      return;
+    }
+    pushUndo();
+    const arr = state.pageInserts[page.id] || [];
+    arr.push({ id: 'ins_' + Date.now().toString(36), kind: 'text', text: txt, x: 30, y: 80, scale: 1 });
+    state.pageInserts[page.id] = arr;
+    showToast(`Added note to Page ${page.num}.`);
+    renderAll();
+  };
+  body.querySelector('#stepEditAddNoteBtn').onclick = addNote;
+  if (noteInput) {
+    noteInput.onkeydown = (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        addNote();
+      }
+    };
+  }
+  body.querySelector('#stepEditAddImgBtn').onclick = () => document.getElementById('insertImageInput').click();
+  const goArrangeBtn = body.querySelector('#stepEditGoArrange');
+  if (goArrangeBtn) {
+    goArrangeBtn.onclick = () => {
+      closeStepEditModal();
+      state.mode = 'arrange';
+      state.selectedPartIds.clear();
+      renderAll();
+    };
+  }
+  body.querySelectorAll('.step-edit-del-ins').forEach(b => {
+    b.onclick = () => {
+      const id = b.getAttribute('data-del-insert');
+      pushUndo();
+      state.pageInserts[page.id] = (state.pageInserts[page.id] || []).filter(x => x.id !== id);
+      if (state.selectedArrangeEl?.insertId === id) state.selectedArrangeEl = null;
+      renderAll();
+    };
+  });
 }
 
 function getStepShortLabel(step, ch = null) {
@@ -11179,6 +11637,8 @@ document.addEventListener('keydown', (e) => {
   const ovModal = document.getElementById('overviewModal');
   if (isBricksLibraryModalOpen()) {
     closeBricksLibraryModal();
+  } else if (isStepEditModalOpen()) {
+    closeStepEditModal();
   } else if (ovModal && !ovModal.classList.contains('hidden')) {
     ovModal.classList.add('hidden');
   } else if (themeEditorModalEl && !themeEditorModalEl.classList.contains('hidden')) {
@@ -11215,7 +11675,18 @@ document.getElementById('btnRedo').onclick = () => {
 
 document.querySelectorAll('.mode-btn').forEach(b => {
   b.onclick = () => {
-    state.mode = b.getAttribute('data-mode');
+    const nextMode = b.getAttribute('data-mode');
+    const curPage = state.pages[state.pageIdx];
+    if (nextMode === 'edit' && curPage?.kind === 'steps') {
+      if (isStepEditModalOpen()) {
+        closeStepEditModal();
+      } else {
+        openStepEditModal();
+      }
+      return;
+    }
+    if (isStepEditModalOpen()) closeStepEditModal();
+    state.mode = nextMode;
     if (state.mode === 'pan') state.bomShortcutVisible = false;
     if (state.mode !== 'select') state.selectedPartIds.clear();
     if (state.mode !== 'arrange') state.selectedArrangeEl = null;
@@ -11865,6 +12336,7 @@ function openExportModal() {
   if (!state.model || state.pages.length === 0) { showToast('Import a model first.'); return; }
   closeMenu();
   closeBricksLibraryModal();
+  closeStepEditModal();
   document.getElementById('pageSetupModal').classList.add('hidden');
   document.getElementById('bomSetupModal').classList.add('hidden');
   const fmt = PAPER_FORMATS[state.paperFormat] || PAPER_FORMATS.letter;
@@ -11888,6 +12360,10 @@ document.getElementById('btnClosePageSetup').onclick = closePageSetupModal;
 document.getElementById('pageSetupDoneBtn').onclick = closePageSetupModal;
 document.getElementById('pageSetupPrintBtn').onclick = openExportModal;
 document.getElementById('pageSetupModal').onclick = (e) => { if (e.target.id === 'pageSetupModal') closePageSetupModal(); };
+
+document.getElementById('btnCloseStepEdit').onclick = closeStepEditModal;
+document.getElementById('stepEditDoneBtn').onclick = closeStepEditModal;
+document.getElementById('stepEditModal').onclick = (e) => { if (e.target.id === 'stepEditModal') closeStepEditModal(); };
 
 document.getElementById('menuBomSetupBtn').onclick = openBomSetupModal;
 const closeBomSetupModal = () => document.getElementById('bomSetupModal').classList.add('hidden');
@@ -12023,6 +12499,7 @@ document.getElementById('insertImageInput').onchange = (e) => {
     const arr = state.pageInserts[pg.id] || [];
     arr.push({ id: 'ins_' + Date.now().toString(36), kind: 'image', src: r.result, x: 40, y: 90, scale: 1 });
     state.pageInserts[pg.id] = arr;
+    showToast(`Added image to Page ${pg.num}.`);
     renderAll();
   };
   r.readAsDataURL(f);

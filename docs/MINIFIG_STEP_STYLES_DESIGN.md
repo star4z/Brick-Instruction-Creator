@@ -40,6 +40,6 @@ Official LEGO instruction manuals use two distinct visual conventions for minifi
 ## User Controls & Persistence
 
 - **Style Popover (`#stylePopover`)**: Segmented **Minifigure Steps** selector (`Exploded` | `Step-by-Step` | `Classic`) directly above **1:1 Minifigure View**.
-- **Quick Floating Toolbars**: On minifigure build pages, `Rotate 3D` and `Arrange` overlays expose 1-tap `Exploded` / `Step-by-Step` / `Classic` switching while keeping the current minifigure page anchored in view.
+- **Full-Page Step Editor (`#stepEditModal`, opened via the bottom `Edit` tab)**: Displays clearly labeled descriptive cards for `Exploded`, `Step-by-Step`, and `Classic` (tagged `All minifigure steps`) alongside the **1:1 Actual-Size Minifigure Preview** toggle, keeping `Rotate` and `Arrange` focused strictly on 3D camera orientation and 2D box positioning.
 - **Step Numbering**: In `exploded` and `sequential` styles, minifigure chapters use local numbering so the main model build begins cleanly at **Step 1**.
 - **Persistence**: `minifigStyle` is saved automatically in IndexedDB session preferences and embedded in `.bic.json` project exports/imports (defaulting to `'exploded'`).

@@ -17,6 +17,7 @@ All architecture specifications and feature design proposals for **Brick Instruc
 - [`PAGE_LAYOUT_GROUPS_DESIGN.md`](./PAGE_LAYOUT_GROUPS_DESIGN.md) — Customizable steps per page (1–24), explicit column/row grids, row-first vs column-first fill order, mixed step proportions (`Large Left`, `Large Top`, `Large Right`, per-slot S/M/L weights), and reusable editable Step Range Groups.
 - [`DYNAMIC_STEP_SIZING_DESIGN.md`](./DYNAMIC_STEP_SIZING_DESIGN.md) — Cognitive-budget dynamic bricks-per-step sizing (structured rows/grids/pairs vs. scattered texture, even-chunk splitting, gentle Step 1 opening, opposite-wall guards) and sticky camera-corner selection with camera-aware frontier ordering.
 - [`CONCAVE_CONTACT_AND_SUPPORT_DESIGN.md`](./CONCAVE_CONTACT_AND_SUPPORT_DESIGN.md) — Local concave sub-box collider from compiled `.dat` geometry, two-phase physical clutch verification, top-hung-safe vertical prerequisites, and zero-floating step invariants.
+- [`STEP_EDITOR_UX_DESIGN.md`](./STEP_EDITOR_UX_DESIGN.md) — Separation of concerns across `Pan`, `Select`, `Rotate`, `Arrange`, and the dedicated full-page `Edit Step & Page` modal (`#stepEditModal`) with clearly labeled, scope-badged controls and zero overlap.
 
 ## Conventions
 

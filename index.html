@@ -174,25 +174,25 @@
     <footer id="bottomDock" class="no-print hidden shrink-0 bg-[var(--chrome)] border-t border-[var(--border)] px-3 sm:px-4 py-2 z-40 flex flex-col md:flex-row items-center justify-between gap-2">
       <!-- Mode Segmented Control -->
       <div id="modePill" class="p-1 rounded-lg bg-[var(--surface-sunken)] border border-[var(--border)] inline-flex items-center gap-0.5 text-xs font-semibold whitespace-nowrap max-w-full overflow-x-auto no-scrollbar">
-        <button data-mode="pan" type="button" class="mode-btn min-h-[40px] sm:min-h-[34px] px-3 py-1.5 rounded-md flex items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer">
+        <button data-mode="pan" type="button" class="mode-btn min-h-[40px] sm:min-h-[34px] px-2.5 sm:px-3 py-1.5 rounded-md flex items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer">
           <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/><path d="M11 8v6"/><path d="M8 11h6"/></svg>
           <span>Pan</span>
         </button>
-        <button data-mode="edit" type="button" class="mode-btn hidden min-h-[40px] sm:min-h-[34px] px-3 py-1.5 rounded-md items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer">
-          <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4Z"/></svg>
-          <span>Edit</span>
-        </button>
-        <button data-mode="select" type="button" class="mode-btn min-h-[40px] sm:min-h-[34px] px-3 py-1.5 rounded-md flex items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer">
+        <button data-mode="select" type="button" class="mode-btn min-h-[40px] sm:min-h-[34px] px-2.5 sm:px-3 py-1.5 rounded-md flex items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer">
           <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m4 4 7.07 17 2.51-7.39L21 11.07z"/></svg>
           <span>Select</span>
         </button>
-        <button data-mode="rotate" type="button" class="mode-btn min-h-[40px] sm:min-h-[34px] px-3 py-1.5 rounded-md flex items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer">
+        <button data-mode="rotate" type="button" class="mode-btn min-h-[40px] sm:min-h-[34px] px-2.5 sm:px-3 py-1.5 rounded-md flex items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer">
           <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3.6 9h16.8"/><path d="M3.6 15h16.8"/><path d="M11.5 3a17 17 0 0 0 0 18"/><path d="M12.5 3a17 17 0 0 1 0 18"/></svg>
           <span>Rotate</span>
         </button>
-        <button data-mode="arrange" type="button" class="mode-btn min-h-[40px] sm:min-h-[34px] px-3 py-1.5 rounded-md flex items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer">
+        <button data-mode="arrange" type="button" class="mode-btn min-h-[40px] sm:min-h-[34px] px-2.5 sm:px-3 py-1.5 rounded-md flex items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer">
           <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>
           <span>Arrange</span>
+        </button>
+        <button data-mode="edit" type="button" class="mode-btn min-h-[40px] sm:min-h-[34px] px-2.5 sm:px-3 py-1.5 rounded-md flex items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer">
+          <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4Z"/></svg>
+          <span>Edit</span>
         </button>
       </div>
 
@@ -1235,6 +1235,35 @@
         <div class="px-5 py-3.5 border-t border-[var(--border)] bg-[var(--chrome)] flex items-center gap-2.5 shrink-0">
           <button id="bomSetupJumpBtn" type="button" class="flex-1 py-2.5 px-4 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold transition-colors cursor-pointer">View Parts List</button>
           <button id="bomSetupDoneBtn" type="button" class="px-5 py-2.5 rounded-md bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] font-semibold transition-colors cursor-pointer">Done</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- EDIT STEP & PAGE FULL-PAGE MODAL (Opened from Edit tab)          -->
+    <!-- ================================================================ -->
+    <div id="stepEditModal" role="dialog" aria-modal="true" aria-labelledby="stepEditTitle" class="no-print hidden fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+      <div class="w-full max-w-2xl h-[92vh] sm:h-[86vh] rounded-t-xl sm:rounded-xl studio-sheet flex flex-col overflow-hidden text-xs">
+        <div class="px-5 py-4 border-b border-[var(--border)] bg-[var(--chrome)] flex items-center justify-between gap-3 shrink-0">
+          <div class="min-w-0">
+            <h2 id="stepEditTitle" class="text-base font-bold tracking-tight flex items-center gap-2">
+              <svg class="w-4 h-4 text-[var(--primary)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4Z"/></svg>
+              <span>Edit Step &amp; Page</span>
+            </h2>
+            <p id="stepEditSubtitle" class="text-xs text-[var(--muted-foreground)] mt-0.5 truncate">Step style, framing, scaling, page breaks, and notes</p>
+          </div>
+          <button id="btnCloseStepEdit" type="button" aria-label="Close Edit Step & Page" class="w-9 h-9 rounded-md flex items-center justify-center hover:bg-[var(--surface-hover)] transition-colors shrink-0 cursor-pointer">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
+        </div>
+
+        <div id="stepEditStepBar" class="hidden px-5 py-2.5 border-b border-[var(--border)] bg-[var(--surface-sunken)] flex items-center gap-2 overflow-x-auto no-scrollbar shrink-0"></div>
+
+        <div id="stepEditBody" class="flex-1 min-h-0 overflow-y-auto overscroll-contain p-5 space-y-4"></div>
+
+        <div class="px-5 py-3.5 border-t border-[var(--border)] bg-[var(--chrome)] flex items-center justify-between gap-2.5 shrink-0">
+          <span id="stepEditFooterHint" class="text-xs text-[var(--muted-foreground)] truncate">Changes apply immediately to your manual.</span>
+          <button id="stepEditDoneBtn" type="button" class="px-5 py-2.5 rounded-md bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] font-semibold transition-colors shrink-0 cursor-pointer">Done</button>
         </div>
       </div>
     </div>
