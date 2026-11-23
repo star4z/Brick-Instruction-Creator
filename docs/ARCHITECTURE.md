@@ -117,7 +117,7 @@ flowchart LR
 
 ### 4.3 Reactive Flow Layout Engine & Smart Re-Import Diff
 - **Constraint Auto-Packing**: Steps flow into pages based on active theme default layout (`1-up`, `2-up`, `3-up`, `4-up`) plus step complexity heuristics (steps with large subassembly callouts or >6 unique PLI items automatically promote to a larger slot).
-- **Pin Page Breaks**: Users can toggle `Pin Page Break` on any step or section boundary. Edits before a pinned boundary absorb into pages within that section only, leaving all pages after the pin completely untouched.
+- **Per-Step Page Breaks (`src/engine/pageBreaks.ts`)**: Page breaks bind strictly to individual semantic `StepId`s (never page indices) and are exposed **per step**—each step row inside the **Pages & Steps** overview modal has its own `Page Break` toggle (immediately splitting multi-step pages or reflowing them back together), and the **Arrange** toolbar provides a multi-step switcher pill and step-labeled `Page Break · Step N` button. Continuation pages of multi-page sequential minifigure steps never duplicate page-break badges, toggles, or counts. Edits before a pinned step absorb into pages within that section only, leaving all pages after the break completely untouched.
 - **Smart Re-Import Diff**: When re-importing a modified `.io`/`.ldr` file:
   1. Match incoming `PartInstance` records against existing parts by exact `signature`, then nearest-neighbor `(partId, colorId)` within `2 LDU`.
   2. Keep matched parts in their assigned `StepId`s (preserving all camera, highlight, layout, pin, and presentation overrides!).

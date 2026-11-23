@@ -42,6 +42,16 @@ import {
   paginateMinifigSequentialStages,
 } from './engine/minifigSteps';
 import {
+  clearAllStepPageBreaks,
+  countStepPageBreaks,
+  findPageIndexForStep,
+  getStepBreakFeedbackMessage,
+  getStepBreakTooltip,
+  hasStepPageBreak,
+  isStepBreakContinuationSlice,
+  toggleStepPageBreakOverride,
+} from './engine/pageBreaks';
+import {
   BUILT_IN_THEMES,
   BUILT_IN_THEME_IDS,
   applyThemeBackgroundToElement,
@@ -4802,6 +4812,10 @@ function applyHistorySnap(json) {
   state.backMeta = s.backMeta;
   state.selectedPartIds.clear();
   renderAll();
+  const ovModal = document.getElementById('overviewModal');
+  if (ovModal && !ovModal.classList.contains('hidden')) {
+    renderOverviewModal();
+  }
 }
 
 let toastTimer = null;
@@ -5818,7 +5832,7 @@ function renderAll() {
             <span class="shrink-0 rounded-full font-black text-white shadow-xs" style="background:${theme.accent};font-size:${st.introPillFont}px;padding:${Math.round(typo.pt(3))}px ${Math.round(typo.pt(10))}px">${page.submodelIntro.repeatCount > 1 ? `×${page.submodelIntro.repeatCount}` : `${page.submodelIntro.pieceCount || page.submodelIntro.canonicalParts.length} pcs`}</span>
           </div>` : ''}
         <div class="grid ${gridCls} flex-1 min-h-0" style="gap:${gapPx}px">
-          ${slotData.map(({ ch, step, ov, snap, isMfExploded, isMfSeq, mfExploded, mfSeqStages, subImg, attSubImg, mfPrepImg, attMfImg, mf1to1, pli }) => {
+          ${slotData.map(({ ch, step, minifigSeqSlice, ov, snap, isMfExploded, isMfSeq, mfExploded, mfSeqStages, subImg, attSubImg, mfPrepImg, attMfImg, mf1to1, pli }) => {
             const isSelStep = state.selectedStepId === step.id;
             const showLive3D = isRotateMode && isSelStep;
             const isOfficialMfStyle = isMfExploded || isMfSeq;
@@ -5900,11 +5914,11 @@ function renderAll() {
             const stackHeaderBadges = Boolean(headerBadgesHtml) && (isTightSlot || estSlotW < typo.pt(250));
 
             return `
-              <div data-step="${step.id}" class="step-slot relative flex flex-col min-h-0 overflow-hidden transition" style="border-radius:${typo.borderRadius}px;padding:${isOfficialMfStyle ? Math.round(st.slotPad * 0.5) : st.slotPad}px;border:${slotBorderStyle};background:${slotBgStyle}">
+              <div data-step="${step.id}" class="step-slot relative flex flex-col min-h-0 overflow-hidden transition ${isArrangeMode && slots.length > 1 ? 'cursor-pointer' : ''}" style="border-radius:${typo.borderRadius}px;padding:${isOfficialMfStyle ? Math.round(st.slotPad * 0.5) : st.slotPad}px;border:${slotBorderStyle};background:${slotBgStyle}">
                 <!-- Step Number & Draggable Parts List Box -->
                 ${(() => {
                   const pinIconPx = Math.round(st.cueFont * 1.05);
-                  const pinBadgeHtml = ov.pin
+                  const pinBadgeHtml = hasStepPageBreak(state.overrides, step.id, { step, minifigSeqSlice })
                     ? `<span class="no-print inline-flex items-center font-bold rounded-full bg-[#1a73e8]/15 text-[#1a73e8] shrink-0 whitespace-nowrap" style="gap:${Math.round(typo.pt(2))}px;font-size:${st.cueFont}px;padding:${Math.round(typo.pt(1.5))}px ${Math.round(typo.pt(5))}px" title="Page break: Step ${step.num} always starts a new page so earlier edits won't shift later pages"><svg style="width:${pinIconPx}px;height:${pinIconPx}px" class="shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4"/><path d="M10 12h4"/><path d="M17 12h4"/><path d="M6 4v3a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V4"/><path d="M6 20v-3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v3"/></svg><span>Page Break</span></span>`
                     : '';
                   if (isOfficialMfStyle) {
@@ -6451,7 +6465,10 @@ function renderContextOverlay(page) {
       const moved = step.parts.filter(p => state.selectedPartIds.has(p.id));
       step.parts = step.parts.filter(p => !state.selectedPartIds.has(p.id));
       dest.step.parts.push(...moved);
-      if (step.parts.length === 0) ch.steps.splice(ch.steps.indexOf(step), 1);
+      if (step.parts.length === 0) {
+        ch.steps.splice(ch.steps.indexOf(step), 1);
+        delete state.overrides[step.id];
+      }
       state.selectedPartIds.clear();
       showToast(`Moved ${moved.length} piece(s) to Step ${targetNum}.`);
       renderAll();
@@ -6462,6 +6479,7 @@ function renderContextOverlay(page) {
       pushUndo();
       ch.steps[idx - 1].parts.push(...step.parts);
       ch.steps.splice(idx, 1);
+      delete state.overrides[step.id];
       state.selectedStepId = ch.steps[idx - 1].id;
       state.selectedPartIds.clear();
       showToast('Merged into previous step.');
@@ -6588,17 +6606,24 @@ function renderContextOverlay(page) {
     const hasSub = Boolean(step.subassembly);
     const isMfBuild = Boolean((step.isStandaloneFigure || ch.kind === 'minifigure') && !step.isMinifigPoseStep);
     const curMfStyle = isMfBuild ? getEffectiveMinifigStyle(step) : 'classic';
+    const slots = page.slots || [];
+    const slotIdx = slots.findIndex(s => s.step.id === step.id);
     const isPinned = Boolean(ov.pin);
-    const slotIdx = (page.slots || []).findIndex(s => s.step.id === step.id);
-    const pinBtnTitle = isPinned
-      ? `Remove page break before Step ${step.num}`
-      : (slotIdx > 0
-        ? `Add a page break so Step ${step.num} starts on a new page`
-        : `Add a page break before Step ${step.num} so earlier edits won't shift later pages`);
+    const stepShortLabel = getStepShortLabel(step, ch);
+    const pinBtnTitle = getStepBreakTooltip({
+      stepLabel: stepShortLabel,
+      pinned: isPinned,
+      slotIndex: Math.max(0, slotIdx),
+    });
+    const arrangeHeaderLeftHtml = slots.length > 1
+      ? `<div class="inline-flex items-center gap-0.5 rounded-full bg-black/5 dark:bg-white/10 p-0.5 text-[11px] font-bold">
+          ${slots.map(sl => `<button type="button" data-arrange-step="${sl.step.id}" class="arrange-step-btn px-2 py-0.5 rounded-full transition ${sl.step.id === step.id ? 'bg-[#1a73e8] text-white' : 'hover:bg-black/5 dark:hover:bg-white/10'}">Step ${sl.step.num}</button>`).join('')}
+        </div>`
+      : `<span class="font-bold">${isMfBuild ? escHtml(step.minifigName || `Step ${step.num}`) : `Step ${step.num}`} · Drag boxes to arrange</span>`;
     box.innerHTML = `
       <div class="pointer-events-auto glass-pill rounded-3xl p-3 w-full space-y-2 text-xs">
         <div class="flex items-center justify-between gap-2 flex-wrap">
-          <span class="font-bold">Drag boxes on the page to arrange</span>
+          ${arrangeHeaderLeftHtml}
           <div class="flex items-center gap-1 flex-wrap">
             ${isMfBuild ? `
               <div class="inline-flex rounded-full bg-black/5 dark:bg-white/10 p-0.5 text-[10px] font-semibold mr-1">
@@ -6618,7 +6643,7 @@ function renderContextOverlay(page) {
           <button id="btnInsImg" class="px-2.5 py-1.5 rounded-full bg-black/5 dark:bg-white/10 font-semibold">+ Image / Logo</button>
           <button id="btnArrangePinBreak" title="${escHtml(pinBtnTitle)}" aria-pressed="${isPinned ? 'true' : 'false'}" class="px-2.5 py-1.5 rounded-full font-semibold inline-flex items-center gap-1 transition ${isPinned ? 'bg-[#1a73e8] text-white' : 'bg-black/5 dark:bg-white/10'}">
             <svg class="w-3 h-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4"/><path d="M10 12h4"/><path d="M17 12h4"/><path d="M6 4v3a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V4"/><path d="M6 20v-3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v3"/></svg>
-            <span>Page Break</span>
+            <span>Page Break · Step ${step.num}</span>
           </button>
           ${hasSub ? `<button id="btnToggleCallout" class="px-2.5 py-1.5 rounded-full bg-black/5 dark:bg-white/10 font-semibold">${ov.calloutAsPages ? 'Convert to Callout Box' : 'Convert to Full Page'}</button>` : ''}
           ${hasSub && !ov.calloutAsPages ? `<button id="btnCalloutDir" class="px-2.5 py-1.5 rounded-full bg-black/5 dark:bg-white/10 font-semibold">${ov.calloutDir === 'vertical' ? 'Side-by-Side' : 'Stack Vertically'}</button>` : ''}
@@ -6626,6 +6651,16 @@ function renderContextOverlay(page) {
         </div>
       </div>`;
 
+    box.querySelectorAll('.arrange-step-btn').forEach(b => {
+      b.onclick = () => {
+        const sid = b.getAttribute('data-arrange-step');
+        if (sid && state.selectedStepId !== sid) {
+          state.selectedStepId = sid;
+          state.selectedPartIds.clear();
+          renderAll();
+        }
+      };
+    });
     box.querySelectorAll('.mf-quick-style').forEach(b => {
       b.onclick = () => applyMinifigStyleChange(b.getAttribute('data-mf-quick'), step.id);
     });
@@ -6643,24 +6678,7 @@ function renderContextOverlay(page) {
     };
     box.querySelector('#btnInsImg').onclick = () => document.getElementById('insertImageInput').click();
     box.querySelector('#btnArrangePinBreak').onclick = () => {
-      pushUndo();
-      const nextOv = { ...(state.overrides[step.id] || {}) };
-      const nextPinned = !isPinned;
-      if (nextPinned) nextOv.pin = true;
-      else delete nextOv.pin;
-      state.overrides[step.id] = nextOv;
-      rebuildPages();
-      const targetIdx = state.pages.findIndex(pg => pg.slots?.some(sl => sl.step.id === step.id));
-      if (targetIdx >= 0) state.pageIdx = targetIdx;
-      const targetPg = state.pages[state.pageIdx];
-      renderAll();
-      if (nextPinned) {
-        showToast(slotIdx > 0 && targetPg
-          ? `Added page break — Step ${step.num} now starts Page ${targetPg.num}.`
-          : `Added page break before Step ${step.num} — earlier edits won't shift later pages.`);
-      } else {
-        showToast(`Removed page break before Step ${step.num} — pages can reflow freely.`);
-      }
+      toggleStepPageBreak(step, { ch, followToggledStep: true });
     };
     if (hasSub) {
       box.querySelector('#btnToggleCallout').onclick = () => { pushUndo(); state.overrides[step.id] = { ...ov, calloutAsPages: !ov.calloutAsPages }; renderAll(); };
@@ -6675,6 +6693,54 @@ function renderContextOverlay(page) {
       renderAll();
     };
   }
+}
+
+function getStepShortLabel(step, ch = null) {
+  const isMfBuild = Boolean((step.isStandaloneFigure || ch?.kind === 'minifigure') && !step.isMinifigPoseStep);
+  if (isMfBuild && step.minifigName) return `Step ${step.num} (${step.minifigName})`;
+  return `Step ${step.num}`;
+}
+
+function toggleStepPageBreak(step, opts = {}) {
+  if (!step) return;
+  const { ch = null, followToggledStep = false, refreshOverview = false } = opts;
+  const currentPage = state.pages[state.pageIdx];
+  const anchorStepId = state.selectedStepId || currentPage?.slots?.[0]?.step?.id || null;
+  const prevPageIdx = findPageIndexForStep(state.pages, step.id);
+  const prevPage = prevPageIdx >= 0 ? state.pages[prevPageIdx] : null;
+  const prevSlotIdx = prevPage?.slots ? prevPage.slots.findIndex(sl => sl.step.id === step.id) : 0;
+  const toggledWasSelectedOnCurrentPage = Boolean(
+    currentPage?.slots?.some(sl => sl.step.id === step.id) && state.selectedStepId === step.id,
+  );
+
+  pushUndo();
+  const res = toggleStepPageBreakOverride(state.overrides, step.id);
+  state.overrides = res.overrides;
+  rebuildPages();
+
+  const targetIdx = findPageIndexForStep(state.pages, step.id);
+  if (followToggledStep || toggledWasSelectedOnCurrentPage) {
+    if (targetIdx >= 0) state.pageIdx = targetIdx;
+    state.selectedStepId = step.id;
+  } else if (anchorStepId) {
+    const anchorIdx = findPageIndexForStep(state.pages, anchorStepId);
+    if (anchorIdx >= 0) state.pageIdx = anchorIdx;
+  }
+
+  renderAll();
+  const ovModal = document.getElementById('overviewModal');
+  if (refreshOverview || (ovModal && !ovModal.classList.contains('hidden'))) {
+    renderOverviewModal();
+  }
+
+  const targetPg = targetIdx >= 0 ? state.pages[targetIdx] : null;
+  const movedToNewPage = res.pinned && prevSlotIdx > 0;
+  showToast(getStepBreakFeedbackMessage({
+    stepLabel: getStepShortLabel(step, ch),
+    pinned: res.pinned,
+    movedToNewPage,
+    targetPageNum: targetPg?.num ?? null,
+  }));
 }
 
 function applyMinifigStyleChange(rawStyle, anchorStepId = null) {
@@ -6908,11 +6974,7 @@ function renderOverviewModal() {
 
   const pageBreakSvg = '<svg class="w-3 h-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4"/><path d="M10 12h4"/><path d="M17 12h4"/><path d="M6 4v3a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V4"/><path d="M6 20v-3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v3"/></svg>';
 
-  let breakCount = 0;
-  for (const pg of state.pages) {
-    const fs = pg.slots?.[0]?.step;
-    if (fs && state.overrides[fs.id]?.pin) breakCount++;
-  }
+  const breakCount = countStepPageBreaks(state.model?.chapters, state.overrides);
 
   const clearBtn = document.getElementById('btnClearAllPins');
   if (clearBtn) {
@@ -6921,13 +6983,14 @@ function renderOverviewModal() {
       clearBtn.title = `Remove all ${breakCount} page break${breakCount === 1 ? '' : 's'}`;
       clearBtn.classList.remove('hidden');
       clearBtn.onclick = () => {
+        const anchorStepId = state.selectedStepId || state.pages[state.pageIdx]?.slots?.[0]?.step?.id || null;
         pushUndo();
-        for (const sid of Object.keys(state.overrides)) {
-          if (state.overrides[sid]?.pin) {
-            const nextOv = { ...state.overrides[sid] };
-            delete nextOv.pin;
-            state.overrides[sid] = nextOv;
-          }
+        const cleared = clearAllStepPageBreaks(state.overrides);
+        state.overrides = cleared.overrides;
+        rebuildPages();
+        if (anchorStepId) {
+          const anchorIdx = findPageIndexForStep(state.pages, anchorStepId);
+          if (anchorIdx >= 0) state.pageIdx = anchorIdx;
         }
         renderAll();
         renderOverviewModal();
@@ -6939,72 +7002,134 @@ function renderOverviewModal() {
     }
   }
 
+  const jumpToPageAndStep = (idx, stepId = null) => {
+    state.pageIdx = idx;
+    if (stepId) state.selectedStepId = stepId;
+    state.selectedPartIds.clear();
+    document.getElementById('overviewModal').classList.add('hidden');
+    resetZoom();
+    renderAll();
+  };
+
   state.pages.forEach((pg, idx) => {
     const active = idx === state.pageIdx;
-    const firstStep = pg.slots?.[0]?.step;
-    const hasBreak = Boolean(firstStep && state.overrides[firstStep.id]?.pin);
+    const slots = pg.slots || [];
 
-    if (hasBreak && firstStep) {
+    // Non-step pages (Cover, Divider, Submodel Page, Build Complete, Parts List, Back Cover)
+    if (slots.length === 0) {
+      const row = document.createElement('div');
+      if (active) row.dataset.active = 'true';
+      row.className = `flex items-center justify-between gap-2 px-3 py-2.5 rounded-2xl border cursor-pointer transition ${active ? 'border-[#1a73e8] bg-[#1a73e8]/10' : 'border-[var(--border)] bg-[var(--background)] hover:border-[#1a73e8]/45'}`;
+      const showChapterSub = Boolean(pg.chapterName && pg.chapterName !== pg.label);
+      row.innerHTML = `
+        <div class="min-w-0">
+          <div class="font-bold truncate">${escHtml(`Page ${pg.num} · ${pg.label}`)}</div>
+          ${showChapterSub ? `<div class="text-[11px] text-[var(--muted-foreground)] truncate">${escHtml(pg.chapterName)}</div>` : ''}
+        </div>`;
+      row.onclick = () => jumpToPageAndStep(idx, null);
+      list.appendChild(row);
+      return;
+    }
+
+    const firstSlot = slots[0];
+    const firstStep = firstSlot.step;
+    const startsWithBreak = hasStepPageBreak(state.overrides, firstStep.id, firstSlot);
+
+    if (startsWithBreak) {
       const divider = document.createElement('div');
       divider.className = 'flex items-center gap-2 px-2 pt-1 text-[10px] font-bold text-[#1a73e8] select-none';
       divider.innerHTML = `
         <div class="flex-1 border-t border-dashed border-[#1a73e8]/55"></div>
         <span class="inline-flex items-center gap-1 whitespace-nowrap">
           ${pageBreakSvg}
-          <span>Page Break · Step ${firstStep.num} always starts a new page</span>
+          <span>Page Break · ${escHtml(getStepShortLabel(firstStep, firstSlot.ch))} starts a new page</span>
         </span>
         <div class="flex-1 border-t border-dashed border-[#1a73e8]/55"></div>`;
       list.appendChild(divider);
     }
 
-    const row = document.createElement('div');
-    if (active) row.dataset.active = 'true';
-    row.className = `flex items-center justify-between gap-2 px-3 py-2.5 rounded-2xl border cursor-pointer transition ${active ? 'border-[#1a73e8] bg-[#1a73e8]/10' : 'border-[var(--border)] bg-[var(--background)]'}`;
+    const card = document.createElement('div');
+    card.className = `rounded-2xl border overflow-hidden transition ${active ? 'border-[#1a73e8] bg-[#1a73e8]/[0.04]' : 'border-[var(--border)] bg-[var(--background)]'}`;
 
-    const stepRange = pg.slots?.length
-      ? (pg.slots.length === 1 ? `Step ${pg.slots[0].step.num}` : `Steps ${pg.slots[0].step.num}–${pg.slots[pg.slots.length - 1].step.num}`)
-      : null;
-    const primaryLabel = stepRange ? `Page ${pg.num} · ${stepRange}` : `Page ${pg.num} · ${pg.label}`;
-    const showChapterSub = Boolean(pg.chapterName && (stepRange || pg.chapterName !== pg.label));
-    const breakTitle = firstStep
-      ? (hasBreak
-        ? `Remove page break before Step ${firstStep.num}`
-        : `Add a page break before Step ${firstStep.num} so earlier edits won't shift later pages`)
-      : '';
-
-    row.innerHTML = `
-      <div class="min-w-0">
-        <div class="font-bold truncate">${escHtml(primaryLabel)}</div>
-        ${showChapterSub ? `<div class="text-[11px] text-[var(--muted-foreground)] truncate">${escHtml(pg.chapterName)}</div>` : ''}
+    const pageHeader = document.createElement('div');
+    pageHeader.className = `flex items-center justify-between gap-2 px-3 py-1.5 border-b cursor-pointer transition ${active ? 'border-[#1a73e8]/25 bg-[#1a73e8]/10' : 'border-[var(--border)]/70 bg-black/[0.02] dark:bg-white/[0.03] hover:bg-black/[0.04] dark:hover:bg-white/[0.06]'}`;
+    const showChapterName = Boolean(pg.chapterName);
+    pageHeader.innerHTML = `
+      <div class="flex items-center gap-1.5 min-w-0 text-[11px]">
+        <span class="font-bold shrink-0">Page ${pg.num}</span>
+        ${showChapterName ? `<span class="text-[var(--muted-foreground)] truncate">· ${escHtml(pg.chapterName)}</span>` : ''}
       </div>
-      <div class="flex items-center gap-1 shrink-0">
-        ${firstStep ? `<button type="button" title="${escHtml(breakTitle)}" aria-pressed="${hasBreak ? 'true' : 'false'}" class="ov-pin px-2.5 py-1 rounded-full text-[11px] font-semibold border inline-flex items-center gap-1 transition ${hasBreak ? 'bg-[#1a73e8] text-white border-transparent' : 'border-[var(--border)] bg-[var(--card)] hover:border-[#1a73e8]/60'}">${pageBreakSvg}<span>Page Break</span></button>` : ''}
-      </div>`;
-    row.onclick = () => {
-      state.pageIdx = idx;
-      if (firstStep) state.selectedStepId = firstStep.id;
-      state.selectedPartIds.clear();
-      document.getElementById('overviewModal').classList.add('hidden');
-      resetZoom();
-      renderAll();
-    };
-    const pinBtn = row.querySelector('.ov-pin');
-    if (pinBtn) {
-      pinBtn.onclick = (e) => {
-        e.stopPropagation();
-        pushUndo();
-        const nextOv = { ...(state.overrides[firstStep.id] || {}) };
-        if (hasBreak) delete nextOv.pin;
-        else nextOv.pin = true;
-        state.overrides[firstStep.id] = nextOv;
-        renderAll();
-        renderOverviewModal();
-        showToast(hasBreak
-          ? `Removed page break before Step ${firstStep.num} — pages can reflow freely.`
-          : `Added page break before Step ${firstStep.num} — earlier edits won't shift later pages.`);
-      };
-    }
-    list.appendChild(row);
+      <span class="text-[10px] font-semibold text-[var(--muted-foreground)] shrink-0">${slots.length === 1 ? '1 step' : `${slots.length} steps`}</span>`;
+    pageHeader.onclick = () => jumpToPageAndStep(idx, firstStep.id);
+    card.appendChild(pageHeader);
+
+    const stepsWrap = document.createElement('div');
+    stepsWrap.className = 'divide-y divide-[var(--border)]/60';
+
+    slots.forEach((slot, slotIdx) => {
+      const step = slot.step;
+      const isSeqCont = isStepBreakContinuationSlice(slot);
+      const hasBreak = hasStepPageBreak(state.overrides, step.id, slot);
+      const isStepActive = active && (state.selectedStepId === step.id || (!state.selectedStepId && slotIdx === 0));
+      const isMfBuild = Boolean((step.isStandaloneFigure || slot.ch?.kind === 'minifigure') && !step.isMinifigPoseStep);
+
+      const stepTitle = isMfBuild && step.minifigName
+        ? `Step ${step.num} · ${step.minifigName}`
+        : `Step ${step.num}`;
+
+      const metaParts = [];
+      if (slot.minifigSeqSlice) {
+        const sl = slot.minifigSeqSlice;
+        metaParts.push(sl.end - sl.start === 1 ? `Sub-step ${sl.start + 1}` : `Sub-steps ${sl.start + 1}–${sl.end}`);
+      } else {
+        const partCount = (step.parts || []).length;
+        if (partCount > 0) metaParts.push(`${partCount} pc${partCount === 1 ? '' : 's'}`);
+      }
+      if (step.subassembly) metaParts.push(step.subassembly.name || 'Callout');
+      else if (step.attachedSubmodel) metaParts.push(`Attach ${step.attachedSubmodel.name || 'Submodel'}`);
+      else if (step.attachedMinifig) metaParts.push(`Place ${step.attachedMinifig.name || 'Minifigure'}`);
+      else if (step.isMinifigPoseStep) metaParts.push('Pose');
+      const stepMeta = metaParts.join(' · ');
+
+      const stepRow = document.createElement('div');
+      if (isStepActive) stepRow.dataset.active = 'true';
+      stepRow.className = `flex items-center justify-between gap-2 px-3 py-2 cursor-pointer transition ${isStepActive ? 'bg-[#1a73e8]/10' : 'hover:bg-black/[0.03] dark:hover:bg-white/[0.04]'}`;
+
+      const breakTitle = getStepBreakTooltip({
+        stepLabel: getStepShortLabel(step, slot.ch),
+        pinned: hasBreak,
+        slotIndex: slotIdx,
+      });
+
+      stepRow.innerHTML = `
+        <div class="flex items-center gap-2 min-w-0">
+          ${isStepActive ? '<span class="w-1.5 h-1.5 rounded-full bg-[#1a73e8] shrink-0" aria-hidden="true"></span>' : ''}
+          <div class="min-w-0">
+            <div class="font-semibold truncate ${isStepActive ? 'text-[#1a73e8]' : ''}">${escHtml(stepTitle)}</div>
+            ${stepMeta ? `<div class="text-[11px] text-[var(--muted-foreground)] truncate">${escHtml(stepMeta)}</div>` : ''}
+          </div>
+        </div>
+        <div class="flex items-center gap-1 shrink-0">
+          ${isSeqCont
+            ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-medium text-[var(--muted-foreground)] bg-black/5 dark:bg-white/10">Continued</span>'
+            : `<button type="button" title="${escHtml(breakTitle)}" aria-label="${escHtml(`Page break before Step ${step.num}`)}" aria-pressed="${hasBreak ? 'true' : 'false'}" class="ov-step-pin px-2.5 py-1 rounded-full text-[11px] font-semibold border inline-flex items-center gap-1 transition ${hasBreak ? 'bg-[#1a73e8] text-white border-transparent' : 'border-[var(--border)] bg-[var(--card)] hover:border-[#1a73e8]/60'}">${pageBreakSvg}<span>Page Break</span></button>`}
+        </div>`;
+
+      stepRow.onclick = () => jumpToPageAndStep(idx, step.id);
+
+      const pinBtn = stepRow.querySelector('.ov-step-pin');
+      if (pinBtn) {
+        pinBtn.onclick = (e) => {
+          e.stopPropagation();
+          toggleStepPageBreak(step, { ch: slot.ch, refreshOverview: true });
+        };
+      }
+
+      stepsWrap.appendChild(stepRow);
+    });
+
+    card.appendChild(stepsWrap);
+    list.appendChild(card);
   });
 
   list.scrollTop = prevScrollTop;

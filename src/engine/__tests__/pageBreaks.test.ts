@@ -1,0 +1,225 @@
+import { describe, expect, it } from 'vitest';
+import { DEMO_MODELS } from '../../data/demoModels';
+import { THEME_PRESETS } from '../../data/themePresets';
+import { parseLDrawSource } from '../ldrawParser';
+import { buildConnectivityGraph } from '../connectivity';
+import { generateInstructionPlan } from '../stepGenerator';
+import { buildPagePlans } from '../layoutEngine';
+import {
+  clearAllStepPageBreaks,
+  countStepPageBreaks,
+  findPageIndexForStep,
+  getStepBreakFeedbackMessage,
+  getStepBreakTooltip,
+  hasStepPageBreak,
+  isStepBreakContinuationSlice,
+  toggleStepPageBreakOverride,
+  type RuntimeChapterLike,
+  type RuntimeOverrideLike,
+  type RuntimePageLike,
+} from '../pageBreaks';
+import type { BackConfig, BomConfig, CoverConfig, StepOverride } from '../../types/manual';
+
+const DEFAULT_THEME = THEME_PRESETS['classic-lego-blue'].settings;
+const DEFAULT_COVER: CoverConfig = {
+  enabled: true,
+  title: 'Test Manual',
+  subtitle: 'Subtitle',
+  author: 'Tester',
+  setNumber: 'T-001',
+  showPieceCount: true,
+  showStepCount: true,
+  heroView: 'top_front_right',
+};
+const DEFAULT_BACK: BackConfig = {
+  enabled: true,
+  headline: 'Done!',
+  footerNote: 'Footer',
+  showCompletionRender: true,
+  showStatsSummary: true,
+};
+const DEFAULT_BOM: BomConfig = {
+  enabled: true,
+  title: 'Parts Inventory',
+  sortMode: 'color-part',
+  columns: 5,
+};
+
+describe('Per-Step Page Breaks', () => {
+  it('toggles page breaks immutably on individual steps without affecting sibling overrides', () => {
+    const initial: Record<string, RuntimeOverrideLike> = {
+      s1: { az: 45, el: 30 },
+      s2: { pliScale: 1.2 },
+    };
+
+    const enabled = toggleStepPageBreakOverride(initial, 's2');
+    expect(enabled.pinned).toBe(true);
+    expect(enabled.overrides.s2).toEqual({ pliScale: 1.2, pin: true });
+    expect(enabled.overrides.s1).toEqual({ az: 45, el: 30 });
+    expect(initial.s2).toEqual({ pliScale: 1.2 });
+
+    const disabled = toggleStepPageBreakOverride(enabled.overrides, 's2');
+    expect(disabled.pinned).toBe(false);
+    expect(disabled.overrides.s2).toEqual({ pliScale: 1.2 });
+    expect('pin' in disabled.overrides.s2).toBe(false);
+  });
+
+  it('counts live per-step page breaks accurately and ignores stale deleted-step keys', () => {
+    const chapters: RuntimeChapterLike[] = [
+      {
+        id: 'ch_mf',
+        kind: 'minifigure',
+        steps: [{ id: 'mf_1', num: 1, minifigName: 'Explorer' }],
+      },
+      {
+        id: 'ch_main',
+        kind: 'main',
+        steps: [
+          { id: 's1', num: 2 },
+          { id: 's2', num: 3 },
+          { id: 's3', num: 4 },
+        ],
+      },
+    ];
+    const overrides: Record<string, RuntimeOverrideLike> = {
+      mf_1: { pin: true },
+      s2: { pin: true },
+      deleted_step: { pin: true },
+      s3: { az: 135 },
+    };
+
+    expect(countStepPageBreaks(chapters, overrides)).toBe(2);
+  });
+
+  it('never duplicates page-break state on sequential minifigure continuation pages', () => {
+    const step = { id: 'mf_1', num: 1, minifigName: 'Explorer' };
+    const overrides: Record<string, RuntimeOverrideLike> = { mf_1: { pin: true } };
+
+    const firstSliceSlot = {
+      step,
+      minifigSeqSlice: { pageIdx: 0, pageCount: 2, start: 0, end: 3 },
+    };
+    const contSliceSlot = {
+      step,
+      minifigSeqSlice: { pageIdx: 1, pageCount: 2, start: 3, end: 6 },
+    };
+
+    expect(isStepBreakContinuationSlice(firstSliceSlot)).toBe(false);
+    expect(isStepBreakContinuationSlice(contSliceSlot)).toBe(true);
+    expect(hasStepPageBreak(overrides, step.id, firstSliceSlot)).toBe(true);
+    expect(hasStepPageBreak(overrides, step.id, contSliceSlot)).toBe(false);
+  });
+
+  it('clears all per-step page breaks while keeping camera and layout overrides intact', () => {
+    const overrides: Record<string, RuntimeOverrideLike> = {
+      s1: { pin: true, az: 35 },
+      s2: { pin: true },
+      s3: { pliScale: 1.1 },
+    };
+
+    const cleared = clearAllStepPageBreaks(overrides);
+    expect(cleared.clearedCount).toBe(2);
+    expect(cleared.overrides.s1).toEqual({ az: 35 });
+    expect(cleared.overrides.s2).toEqual({});
+    expect(cleared.overrides.s3).toEqual({ pliScale: 1.1 });
+    expect(overrides.s1.pin).toBe(true);
+  });
+
+  it('finds the first page index containing any target step and builds clear per-step tooltips & feedback', () => {
+    const pages: RuntimePageLike[] = [
+      { id: 'cover', kind: 'cover', num: 1 },
+      { id: 'pg_s1', kind: 'steps', num: 2, slots: [{ step: { id: 's1', num: 1 } }, { step: { id: 's2', num: 2 } }] },
+      { id: 'pg_s3', kind: 'steps', num: 3, slots: [{ step: { id: 's3', num: 3 } }] },
+    ];
+
+    expect(findPageIndexForStep(pages, 's1')).toBe(1);
+    expect(findPageIndexForStep(pages, 's2')).toBe(1);
+    expect(findPageIndexForStep(pages, 's3')).toBe(2);
+    expect(findPageIndexForStep(pages, 'missing')).toBe(-1);
+
+    expect(getStepBreakTooltip({ stepLabel: 'Step 2', pinned: false, slotIndex: 1 })).toContain(
+      'starts on a new page',
+    );
+    expect(getStepBreakTooltip({ stepLabel: 'Step 1', pinned: false, slotIndex: 0 })).toContain(
+      'before Step 1',
+    );
+    expect(getStepBreakTooltip({ stepLabel: 'Step 2', pinned: true, slotIndex: 0 })).toContain(
+      'Remove page break before Step 2',
+    );
+
+    expect(
+      getStepBreakFeedbackMessage({
+        stepLabel: 'Step 2',
+        pinned: true,
+        movedToNewPage: true,
+        targetPageNum: 3,
+      }),
+    ).toBe('Added page break — Step 2 now starts Page 3.');
+    expect(
+      getStepBreakFeedbackMessage({
+        stepLabel: 'Step 2',
+        pinned: false,
+        movedToNewPage: false,
+      }),
+    ).toBe('Removed page break before Step 2 — pages can reflow freely.');
+  });
+
+  it('splits a non-first step off a multi-step page into a new page and reflows it back when cleared', () => {
+    const cottage = DEMO_MODELS.find((d) => d.id === 'alpine-cottage')!;
+    const model = parseLDrawSource(cottage.ldrawSource, 'cottage.ldr', 'demo');
+    const graph = buildConnectivityGraph(model.parts);
+    const plan = generateInstructionPlan(model, graph, 'standard', 'regenerate_all', {});
+
+    const twoUpTheme = { ...DEFAULT_THEME, defaultLayout: '2-up' as const };
+    const pagesBefore = buildPagePlans(
+      model,
+      plan,
+      {},
+      twoUpTheme,
+      DEFAULT_COVER,
+      DEFAULT_BACK,
+      DEFAULT_BOM,
+    );
+
+    const multiStepPage = pagesBefore.find((p) => p.kind === 'steps' && (p.slots?.length || 0) >= 2);
+    expect(multiStepPage).toBeDefined();
+
+    const firstStepId = multiStepPage!.slots![0].stepId;
+    const secondStepId = multiStepPage!.slots![1].stepId;
+
+    const overrides: Record<string, StepOverride> = {
+      [secondStepId]: { pinPageBreakBefore: true },
+    };
+
+    const pagesWithBreak = buildPagePlans(
+      model,
+      plan,
+      overrides,
+      twoUpTheme,
+      DEFAULT_COVER,
+      DEFAULT_BACK,
+      DEFAULT_BOM,
+    );
+
+    const pageOfFirst = pagesWithBreak.find((p) => p.slots?.some((s) => s.stepId === firstStepId));
+    const pageOfSecond = pagesWithBreak.find((p) => p.slots?.some((s) => s.stepId === secondStepId));
+    expect(pageOfFirst).toBeDefined();
+    expect(pageOfSecond).toBeDefined();
+    expect(pageOfSecond!.pageNumber).toBe(pageOfFirst!.pageNumber + 1);
+    expect(pageOfSecond!.slots![0].stepId).toBe(secondStepId);
+    expect(pageOfSecond!.pinnedStart).toBe(true);
+
+    // Removing the per-step break reflows secondStepId back onto firstStepId's page
+    const pagesRestored = buildPagePlans(
+      model,
+      plan,
+      {},
+      twoUpTheme,
+      DEFAULT_COVER,
+      DEFAULT_BACK,
+      DEFAULT_BOM,
+    );
+    const restoredPage = pagesRestored.find((p) => p.slots?.some((s) => s.stepId === firstStepId));
+    expect(restoredPage!.slots!.map((s) => s.stepId)).toContain(secondStepId);
+  });
+});
