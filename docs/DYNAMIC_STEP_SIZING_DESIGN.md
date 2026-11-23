@@ -54,6 +54,16 @@ The camera follows two principles: **prefer not to change the camera**, and **ke
    - **Underside flip**: When ≥60% of a step's bricks sit strictly underneath already-built overhead structure (`isUndersidePlacement`), flips to `side: 'bottom'` (`flip_vertical`) and flips back to `side: 'top'` once building resumes upright.
    - **Minifigure integration**: `optimizeMinifigPlacementCameras` continues to run after step generation and synchronizes all rotation cues across both sticky normal steps and occlusion-checked minifigure placement steps.
 
+### 5. Strict Step Connectivity & Grounded Vertical Prerequisites
+
+To prevent disconnected pieces from being grouped into the same step (or placed detached before their connecting structure exists):
+
+- **No disconnected `sameBaseLayer` or `collectBasePrereqs` bypasses**: Both `isCandidateConnectedForStep` and `createGroundedPrereqChecker` in [`src/engine/dynamicStepSizer.ts`](../src/engine/dynamicStepSizer.ts) enforce that:
+  - On **Step 1** (`placedBeforeStep.size === 0`), every added brick must physically connect to `placedInStep` so the opening step always forms a single connected assembly.
+  - On **Steps 2+**, when `anchor` connects to the already-built model (`placedBeforeStep`), every added brick in that step must also physically connect to `placedBeforeStep` (never scooping detached plates sitting on the same base elevation).
+  - In the rare **disconnected-island fallback**, candidates may only extend `anchor`'s own connected island (`placedInStep`), never merging two unrelated islands into one step.
+- **Grounded vertical prerequisites (`createGroundedPrereqChecker`)**: A bridging plate or floor is only blocked by an unplaced lower brick `u ∈ belowMap[i]` when `u` is physically reachable from `placed` (directly touching `placed` or resting atop a chain of lower unplaced bricks that reaches `placed`). Grounded walls on an already-built baseplate still build strictly bottom-up with zero trapped bricks, while unattached underside plates (e.g., `4×6`/`2×6` plates hanging beneath an unplaced train floor) wait until the connecting floor is placed and then snap directly onto it.
+
 ---
 
 ## Planned Future Extensions

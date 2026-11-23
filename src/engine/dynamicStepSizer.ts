@@ -364,6 +364,96 @@ export function compareFrontierCandidates(
 }
 
 /**
+ * Builds a memoized check for whether an unplaced prerequisite part `u` is
+ * physically grounded in `placed` (either directly touching a placed part, or
+ * resting atop a chain of unplaced `belowMap` prerequisites that reaches `placed`).
+ *
+ * Why: Blocking an upper bridge/floor on an unplaced lower part `u` is only
+ * valid when `u` can itself be placed while connected to `placed`. If `u` is
+ * NOT connected to `placed` (e.g., underside plates beneath an unplaced train
+ * floor, or a second separate baseplate), blocking the bridge would force `u`
+ * to be placed detached/floating before the bridge. Letting the bridge attach
+ * to `placed` first immediately connects `u` to the model for the next step.
+ */
+export function createGroundedPrereqChecker(
+  adjacency: readonly (readonly number[])[],
+  belowMap: readonly (readonly number[])[],
+  placed: ReadonlySet<number>,
+  remaining: ReadonlySet<number>,
+): (partIdx: number) => boolean {
+  const memo = new Map<number, boolean>();
+  const visiting = new Set<number>();
+
+  const isGrounded = (u: number): boolean => {
+    if (!remaining.has(u)) return false;
+    const cached = memo.get(u);
+    if (cached !== undefined) return cached;
+    if (visiting.has(u)) return false; // Defensive cycle guard
+    visiting.add(u);
+
+    let grounded = false;
+    for (const nb of adjacency[u] ?? []) {
+      if (placed.has(nb)) {
+        grounded = true;
+        break;
+      }
+    }
+    if (!grounded) {
+      for (const lower of belowMap[u] ?? []) {
+        if (remaining.has(lower) && isGrounded(lower)) {
+          grounded = true;
+          break;
+        }
+      }
+    }
+
+    visiting.delete(u);
+    memo.set(u, grounded);
+    return grounded;
+  };
+
+  return isGrounded;
+}
+
+/**
+ * Enforces strict step connectivity so disconnected pieces are never grouped
+ * into the same step:
+ *
+ * - On Step 1 (`placedBeforeStep.size === 0`): every added piece must
+ *   physically touch at least one piece already chosen for this step
+ *   (`placedInStep`), so Step 1 forms a single connected assembly.
+ * - On Steps 2+ when `anchor` connects to `placedBeforeStep` (normal build):
+ *   every added piece must also physically connect to `placedBeforeStep`, so
+ *   every piece in the step snaps directly onto the already-built model.
+ * - On Steps 2+ when `anchor` does NOT connect to `placedBeforeStep` (only
+ *   reached in fallback for genuinely disconnected model islands): every added
+ *   piece must physically touch `placedInStep` (staying strictly inside
+ *   `anchor`'s own connected island) and must NOT touch `placedBeforeStep`.
+ */
+export function isCandidateConnectedForStep(
+  candIdx: number,
+  anchorConnectedToPrev: boolean,
+  adjacency: readonly (readonly number[])[],
+  placedBeforeStep: ReadonlySet<number>,
+  placedInStep: ReadonlySet<number>,
+): boolean {
+  const nbs = adjacency[candIdx] ?? [];
+  if (placedBeforeStep.size === 0) {
+    return nbs.some((nb) => placedInStep.has(nb));
+  }
+  if (anchorConnectedToPrev) {
+    return nbs.some((nb) => placedBeforeStep.has(nb));
+  }
+  // Disconnected-island fallback: only grow anchor's own connected island
+  let touchesStep = false;
+  for (const nb of nbs) {
+    if (placedBeforeStep.has(nb)) return false;
+    if (placedInStep.has(nb)) touchesStep = true;
+  }
+  return touchesStep;
+}
+
+/**
  * Estimates the contiguous/structured run size of `anchor.sku` currently ready
  * in the same layer & camera-facing zone so large uniform runs can be split evenly.
  */

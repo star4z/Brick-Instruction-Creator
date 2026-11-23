@@ -12,6 +12,9 @@ import {
   compareFrontierCandidates,
   computeBoundsFromBoxes,
   computeEvenRunTarget,
+  createGroundedPrereqChecker,
+  expandBoundsWithBox,
+  isCandidateConnectedForStep,
   selectDynamicStepIndices,
   type DynamicPartDescriptor,
 } from '../dynamicStepSizer';
@@ -347,5 +350,181 @@ describe('dynamicStepSizer', () => {
     );
     expect(backTopRes.side).toBe('top');
     expect(backTopRes.cue).toBe('flip_vertical');
+  });
+
+  it('never groups detached underside plates with a train bogie axle and waits until the bridging floor connects them', () => {
+    // Reproduces a train motor/bogie with a vertical axle and 4x6 + 2x6 plates sitting
+    // on either side underneath an unplaced long train floor:
+    //   0: Train Motor (already built in Step 1)
+    //   1: Vertical Technic Axle (touches Train Motor 0 and Train Floor 2)
+    //   2: Train Floor (touches Motor 0, Axle 1, and underside plates 3..6)
+    //   3: Front 4x6 Plate (touches ONLY Train Floor 2)
+    //   4: Front 2x6 Plate (touches ONLY Train Floor 2)
+    //   5: Rear 4x6 Plate (touches ONLY Train Floor 2)
+    //   6: Rear 2x6 Plate (touches ONLY Train Floor 2)
+    const parts: DynamicPartDescriptor[] = [
+      makePart(0, '88011', 72, makeBox(0, 12, 0, 120, 24, 200), 'wheel_holder'),
+      makePart(1, '3707', 72, makeBox(0, 52, 0, 8, 96, 8), 'axle'),
+      makePart(2, '6584', 72, makeBox(0, 28, 0, 120, 8, 480), 'structural'),
+      makePart(3, '3032', 72, makeBox(0, 12, 160, 120, 8, 80), 'structural'),
+      makePart(4, '3795', 72, makeBox(0, 12, 220, 120, 8, 40), 'structural'),
+      makePart(5, '3032', 72, makeBox(0, 12, -160, 120, 8, 80), 'structural'),
+      makePart(6, '3795', 72, makeBox(0, 12, -220, 120, 8, 40), 'structural'),
+    ];
+    const adj: number[][] = [
+      [1, 2],       // 0: motor
+      [0, 2],       // 1: vertical axle
+      [0, 1, 3, 4, 5, 6], // 2: train floor
+      [2],          // 3: front 4x6
+      [2],          // 4: front 2x6
+      [2],          // 5: rear 4x6
+      [2],          // 6: rear 2x6
+    ];
+    const belowMap: number[][] = [
+      [],
+      [],
+      [0, 3, 4, 5, 6],
+      [],
+      [],
+      [],
+      [],
+    ];
+
+    const modelBounds = computeBoundsFromBoxes(parts.map((p) => p.box));
+    const placed = new Set<number>([0]);
+    const remaining = new Set<number>([1, 2, 3, 4, 5, 6]);
+    let builtBounds = expandBoundsWithBox(null, parts[0].box);
+    const activeCam = DEFAULT_STUDIO_CAMERA;
+    const steps: number[][] = [];
+
+    while (remaining.size > 0) {
+      const placedBeforeStep = new Set(placed);
+      const isGrounded = createGroundedPrereqChecker(adj, belowMap, placedBeforeStep, remaining);
+      const rawFrontier = Array.from(remaining).filter((i) =>
+        adj[i].some((nb) => placedBeforeStep.has(nb)),
+      );
+      const unblocked = rawFrontier.filter(
+        (i) => !belowMap[i].some((u) => remaining.has(u) && isGrounded(u)),
+      );
+      const frontier = unblocked.length > 0 ? unblocked : rawFrontier;
+      frontier.sort((a, b) =>
+        compareFrontierCandidates(parts[a], parts[b], activeCam.corner, builtBounds),
+      );
+
+      const anchor = frontier[0];
+      const anchorY = parts[anchor].layerY;
+      const anchorConnectedToPrev = adj[anchor].some((nb) => placedBeforeStep.has(nb));
+      const stepIndices = selectDynamicStepIndices({
+        anchor,
+        parts,
+        getEligibleCandidates: (placedInStep) =>
+          Array.from(remaining).filter((i) => {
+            if (placedInStep.has(i)) return false;
+            if (Math.abs(parts[i].layerY - anchorY) > 12) return false;
+            if (belowMap[i].some((u) => !placedBeforeStep.has(u) && isGrounded(u))) return false;
+            return isCandidateConnectedForStep(
+              i,
+              anchorConnectedToPrev,
+              adj,
+              placedBeforeStep,
+              placedInStep,
+            );
+          }),
+        modelBounds,
+        builtBounds,
+        activeCam,
+        isFirstStep: false,
+        totalPartsInScope: parts.length,
+      });
+
+      // Invariant: every single piece placed in Steps 2+ must directly touch placedBeforeStep!
+      for (const idx of stepIndices) {
+        expect(adj[idx].some((nb) => placedBeforeStep.has(nb))).toBe(true);
+      }
+
+      steps.push(stepIndices);
+      for (const idx of stepIndices) {
+        remaining.delete(idx);
+        placed.add(idx);
+        builtBounds = expandBoundsWithBox(builtBounds, parts[idx].box);
+      }
+    }
+
+    const stepOf = (idx: number) => steps.findIndex((s) => s.includes(idx));
+    // Vertical axle (1) must NOT share a step with any detached underside plate (3..6)
+    for (const plateIdx of [3, 4, 5, 6]) {
+      expect(stepOf(plateIdx)).not.toBe(stepOf(1));
+      // Every underside plate must be placed strictly AFTER the train floor (2) connects it
+      expect(stepOf(plateIdx)).toBeGreaterThan(stepOf(2));
+    }
+  });
+
+  it('keeps grounded vertical prerequisites strict on an existing baseplate while unblocking detached baseplates until bridged', () => {
+    // 0: Baseplate L (placed)
+    // 1: Wall L1 (placed, on Baseplate L)
+    // 2: Wall R1 (unplaced, on Baseplate L -> grounded!)
+    // 3: Wall R2 (unplaced, on Wall R1 -> transitively grounded!)
+    // 4: Roof Lintel (unplaced, bridges Wall L1 and Wall R2)
+    // 5: Detached Baseplate R (unplaced, does NOT touch Baseplate L)
+    // 6: Bridge Plate (unplaced, touches Baseplate L and sits above Detached Baseplate R)
+    const adj: number[][] = [
+      [1, 2, 6], // 0: Baseplate L
+      [0, 4],    // 1: Wall L1
+      [0, 3],    // 2: Wall R1
+      [2, 4],    // 3: Wall R2
+      [1, 3],    // 4: Roof Lintel
+      [6],       // 5: Detached Baseplate R
+      [0, 5],    // 6: Bridge Plate
+    ];
+    const belowMap: number[][] = [
+      [],     // 0
+      [0],    // 1
+      [0],    // 2
+      [2],    // 3
+      [1, 3], // 4: needs 3 (which needs 2 on placed 0)
+      [],     // 5: detached
+      [0, 5], // 6: sits above placed 0 and detached 5
+    ];
+
+    const placed = new Set<number>([0, 1]);
+    const remaining = new Set<number>([2, 3, 4, 5, 6]);
+    const isGrounded = createGroundedPrereqChecker(adj, belowMap, placed, remaining);
+
+    // Wall R1 (2) and Wall R2 (3) ARE grounded in placed Baseplate L -> Roof Lintel (4) stays blocked!
+    expect(isGrounded(2)).toBe(true);
+    expect(isGrounded(3)).toBe(true);
+    expect(belowMap[4].some((u) => remaining.has(u) && isGrounded(u))).toBe(true);
+
+    // Detached Baseplate R (5) is NOT grounded in placed -> Bridge Plate (6) is NOT deadlocked!
+    expect(isGrounded(5)).toBe(false);
+    expect(belowMap[6].some((u) => remaining.has(u) && isGrounded(u))).toBe(false);
+  });
+
+  it('enforces strict step connectivity on Step 1 and during disconnected-island fallback', () => {
+    // Island A: 0 -- 1
+    // Island B: 2 -- 3 (disconnected from Island A)
+    // Island C: 4 (singleton disconnected from both)
+    const adj: number[][] = [
+      [1],
+      [0],
+      [3],
+      [2],
+      [],
+    ];
+
+    // Step 1 (nothing placed yet): anchor = 0
+    const emptyPrev = new Set<number>();
+    const step1 = new Set<number>([0]);
+    expect(isCandidateConnectedForStep(1, false, adj, emptyPrev, step1)).toBe(true);
+    expect(isCandidateConnectedForStep(2, false, adj, emptyPrev, step1)).toBe(false);
+    expect(isCandidateConnectedForStep(4, false, adj, emptyPrev, step1)).toBe(false);
+
+    // Disconnected-island fallback after Island A is placed: anchor = 2 (in Island B)
+    const prevWithA = new Set<number>([0, 1]);
+    const fallbackStep = new Set<number>([2]);
+    // 3 connects to 2 in Island B -> allowed
+    expect(isCandidateConnectedForStep(3, false, adj, prevWithA, fallbackStep)).toBe(true);
+    // 4 is in separate Island C -> NEVER lumped with Island B
+    expect(isCandidateConnectedForStep(4, false, adj, prevWithA, fallbackStep)).toBe(false);
   });
 });

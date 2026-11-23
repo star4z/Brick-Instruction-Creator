@@ -64,7 +64,9 @@ import {
   compareFrontierCandidates,
   computeBoundsFromBoxes,
   computeEvenRunTarget,
+  createGroundedPrereqChecker,
   expandBoundsWithBox,
+  isCandidateConnectedForStep,
   selectDynamicStepIndices,
 } from './engine/dynamicStepSizer';
 import {
@@ -3627,28 +3629,6 @@ function buildVerticalPrereqMap(boxes, adj, roles, claddingFlags, activeIndices)
   return { belowMap, baseMinY };
 }
 
-// Unlock any unplaced base-layer prerequisites sitting underneath blocked frontier parts
-// (e.g., two base bricks on the table bridged by a window frame above them).
-function collectBasePrereqs(blockedIndices, belowMap, remaining, boxes, baseMinY) {
-  const unlocked = new Set();
-  const seen = new Set();
-  const stack = [...blockedIndices];
-  while (stack.length > 0) {
-    const cur = stack.pop();
-    for (const u of belowMap[cur]) {
-      if (!remaining.has(u) || seen.has(u)) continue;
-      seen.add(u);
-      const uBlocked = belowMap[u].some(w => remaining.has(w));
-      if (!uBlocked) {
-        if (boxes[u].min[1] <= baseMinY + 24) unlocked.add(u);
-      } else {
-        stack.push(u);
-      }
-    }
-  }
-  return Array.from(unlocked);
-}
-
 // Build bottom-up zero-floating steps for 1 canonical copy of a duplicate submodel or modular section
 function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount) {
   const n = canonicalParts.length;
@@ -3658,7 +3638,7 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount) {
   const claddingFlags = canonicalParts.map((p, i) => isSidewaysCladdingPart(p, boxes[i]));
   const layerY = canonicalParts.map((p, i) => computeBuildLayerY(p, boxes[i]));
   const adj = buildSpatialAdjacency(canonicalParts, boxes, roles, sideCaps);
-  const { belowMap, baseMinY } = buildVerticalPrereqMap(boxes, adj, roles, claddingFlags);
+  const { belowMap } = buildVerticalPrereqMap(boxes, adj, roles, claddingFlags);
   const subDescriptors = canonicalParts.map((p, i) => ({
     index: i,
     partId: normId(p.p),
@@ -3680,6 +3660,9 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount) {
 
   while (remaining.size > 0) {
     const placedBeforeStep = new Set(placed);
+    const isPrereqGrounded = placedBeforeStep.size > 0
+      ? createGroundedPrereqChecker(adj, belowMap, placedBeforeStep, remaining)
+      : null;
     let frontier;
     if (placed.size === 0) {
       const nonWheels = Array.from(remaining).filter(i => roles[i] !== 'wheel' && !claddingFlags[i] && !belowMap[i].some(u => remaining.has(u)));
@@ -3690,13 +3673,10 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount) {
       const rawFrontier = Array.from(remaining).filter(i => adj[i].some(nb => placedBeforeStep.has(nb)));
       const unblocked = rawFrontier.filter(i =>
         !isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, placedBeforeStep)
-        && !belowMap[i].some(u => remaining.has(u))
+        && !belowMap[i].some(u => remaining.has(u) && isPrereqGrounded(u))
       );
-      const blocked = rawFrontier.filter(i => belowMap[i].some(u => remaining.has(u)));
-      const basePrereqs = blocked.length > 0 ? collectBasePrereqs(blocked, belowMap, remaining, boxes, baseMinY) : [];
-      const merged = Array.from(new Set([...basePrereqs, ...unblocked]));
-      if (merged.length > 0) {
-        frontier = merged;
+      if (unblocked.length > 0) {
+        frontier = unblocked;
       } else {
         const claddingReady = rawFrontier.filter(i => !isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, placedBeforeStep));
         frontier = claddingReady.length > 0 ? claddingReady : rawFrontier;
@@ -3712,6 +3692,7 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount) {
     }
     const anchor = frontier[0];
     const anchorY = layerY[anchor];
+    const anchorConnectedToPrev = placedBeforeStep.size > 0 && adj[anchor].some(nb => placedBeforeStep.has(nb));
     const stepIdx = selectDynamicStepIndices({
       anchor,
       parts: subDescriptors,
@@ -3722,17 +3703,11 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount) {
           if (Math.abs(layerY[i] - anchorY) > 12) return false;
           if (isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, supportSet)) return false;
           if (placedBeforeStep.size > 0) {
-            if (belowMap[i].some(u => !placedBeforeStep.has(u))) return false;
-            const touchesPrev = adj[i].some(nb => placedBeforeStep.has(nb));
-            const sameBaseLayer = boxes[i].min[1] <= baseMinY + 24 && Math.abs(boxes[i].min[1] - boxes[anchor].min[1]) <= 4 && belowMap[i].length === 0;
-            if (!touchesPrev && !sameBaseLayer) return false;
+            if (belowMap[i].some(u => !placedBeforeStep.has(u) && isPrereqGrounded(u))) return false;
           } else {
             if (belowMap[i].length > 0) return false;
-            const touchesCur = adj[i].some(nb => placedInStep.has(nb));
-            const sameBaseLayer = boxes[i].min[1] <= baseMinY + 24 && Math.abs(boxes[i].min[1] - boxes[anchor].min[1]) <= 4;
-            if (!touchesCur && !sameBaseLayer) return false;
           }
-          return true;
+          return isCandidateConnectedForStep(i, anchorConnectedToPrev, adj, placedBeforeStep, placedInStep);
         });
       },
       modelBounds: subModelBounds,
@@ -5008,7 +4983,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
     const indices = group.indices;
     const placed = new Set();
     const remaining = new Set(indices);
-    const { belowMap, baseMinY } = buildVerticalPrereqMap(boxes, adj, roles, claddingFlags, indices);
+    const { belowMap } = buildVerticalPrereqMap(boxes, adj, roles, claddingFlags, indices);
     let curSteps = [];
 
     // Analyze support & overhead enclosure for minifigures belonging to this model section
@@ -5107,21 +5082,23 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
       }
     };
 
-    const isInstBlockedFromBelow = (instIndices) => {
+    const isInstBlockedFromBelow = (instIndices, isPrereqGrounded = null) => {
       const instSet = new Set(instIndices);
       for (const pi of instIndices) {
         if (!remaining.has(pi)) continue;
         for (const u of belowMap[pi]) {
-          if (!instSet.has(u) && remaining.has(u)) return true;
+          if (!instSet.has(u) && remaining.has(u) && (!isPrereqGrounded || isPrereqGrounded(u))) {
+            return true;
+          }
         }
       }
       return false;
     };
 
-    const isPartBlockedFromBelow = (i) => {
+    const isPartBlockedFromBelow = (i, isPrereqGrounded = null) => {
       const di = partToDup.get(i);
-      if (di) return isInstBlockedFromBelow(di.group.instances[di.instIdx]);
-      return belowMap[i].some(u => remaining.has(u));
+      if (di) return isInstBlockedFromBelow(di.group.instances[di.instIdx], isPrereqGrounded);
+      return belowMap[i].some(u => remaining.has(u) && (!isPrereqGrounded || isPrereqGrounded(u)));
     };
 
     const flushMainSteps = () => {
@@ -5143,9 +5120,12 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
     let emittedInSection = 0;
 
     while (remaining.size > 0) {
+      const isPrereqGrounded = placed.size > 0
+        ? createGroundedPrereqChecker(adj, belowMap, placed, remaining)
+        : null;
       let frontier;
       if (placed.size === 0) {
-        const nonWheels = Array.from(remaining).filter(i => roles[i] !== 'wheel' && !claddingFlags[i] && !isPartBlockedFromBelow(i));
+        const nonWheels = Array.from(remaining).filter(i => roles[i] !== 'wheel' && !claddingFlags[i] && !isPartBlockedFromBelow(i, null));
         const pool = nonWheels.length > 0 ? nonWheels : Array.from(remaining);
         pool.sort((a, b) => layerY[a] - layerY[b]);
         const minY = layerY[pool[0]];
@@ -5160,24 +5140,10 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
         const rawFrontier = Array.from(remaining).filter(i => adj[i].some(nb => placed.has(nb)));
         const unblocked = rawFrontier.filter(i =>
           !isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, placed)
-          && !isPartBlockedFromBelow(i)
+          && !isPartBlockedFromBelow(i, isPrereqGrounded)
         );
-        const blockedSeeds = [];
-        for (const i of rawFrontier) {
-          if (!isPartBlockedFromBelow(i)) continue;
-          const di = partToDup.get(i);
-          if (di) {
-            for (const pi of di.group.instances[di.instIdx]) if (remaining.has(pi)) blockedSeeds.push(pi);
-          } else {
-            blockedSeeds.push(i);
-          }
-        }
-        const basePrereqs = blockedSeeds.length > 0
-          ? collectBasePrereqs(blockedSeeds, belowMap, remaining, boxes, baseMinY).filter(u => !isPartBlockedFromBelow(u))
-          : [];
-        const merged = Array.from(new Set([...basePrereqs, ...unblocked]));
-        if (merged.length > 0) {
-          frontier = merged;
+        if (unblocked.length > 0) {
+          frontier = unblocked;
         } else {
           const claddingReady = rawFrontier.filter(i => !isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, placed));
           frontier = claddingReady.length > 0 ? claddingReady : rawFrontier;
@@ -5205,8 +5171,8 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
           const unplacedInSec = instIndices.filter(pi => remaining.has(pi));
           if (unplacedInSec.length === 0) return;
           const isAnchorInst = instIdx === dupInfo.instIdx;
-          const touchesPlaced = placed.size === 0 || unplacedInSec.some(pi => adj[pi].some(nb => placed.has(nb)));
-          const underClear = !isInstBlockedFromBelow(instIndices);
+          const touchesPlaced = placed.size > 0 && unplacedInSec.some(pi => adj[pi].some(nb => placed.has(nb)));
+          const underClear = !isInstBlockedFromBelow(instIndices, isPrereqGrounded);
           if (isAnchorInst || (touchesPlaced && underClear)) readyInsts.push(unplacedInSec);
         });
 
@@ -5263,6 +5229,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
       // NORMAL STEP (non-duplicate-submodel bricks)
       const placedBeforeStep = new Set(placed);
       const anchorY = layerY[anchor];
+      const anchorConnectedToPrev = placedBeforeStep.size > 0 && adj[anchor].some(nb => placedBeforeStep.has(nb));
       const stepIndices = selectDynamicStepIndices({
         anchor,
         parts: allPartDescriptors,
@@ -5274,17 +5241,11 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
             if (isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, supportSet)) return false;
             if (Math.abs(layerY[i] - anchorY) > 12) return false;
             if (placedBeforeStep.size > 0) {
-              if (belowMap[i].some(u => !placedBeforeStep.has(u))) return false;
-              const touchesPrev = adj[i].some(nb => placedBeforeStep.has(nb));
-              const sameBaseLayer = boxes[i].min[1] <= baseMinY + 24 && Math.abs(boxes[i].min[1] - boxes[anchor].min[1]) <= 4 && belowMap[i].length === 0;
-              if (!touchesPrev && !sameBaseLayer) return false;
+              if (belowMap[i].some(u => !placedBeforeStep.has(u) && isPrereqGrounded(u))) return false;
             } else {
               if (belowMap[i].length > 0) return false;
-              const touchesCur = adj[i].some(nb => placedInStep.has(nb));
-              const sameBaseLayer = boxes[i].min[1] <= baseMinY + 24 && Math.abs(boxes[i].min[1] - boxes[anchor].min[1]) <= 4;
-              if (!touchesCur && !sameBaseLayer) return false;
             }
-            return true;
+            return isCandidateConnectedForStep(i, anchorConnectedToPrev, adj, placedBeforeStep, placedInStep);
           });
         },
         modelBounds: sectionBounds,
