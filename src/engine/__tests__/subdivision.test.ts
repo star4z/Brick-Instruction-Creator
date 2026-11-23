@@ -5,8 +5,10 @@ import { generateInstructionPlan } from '../stepGenerator';
 import {
   analyzeModelSubdivisions,
   assessModelSubdivisionNeed,
+  buildBaseplateSplitProposal,
   buildSpatialSectorsProposal,
   buildSubdivisionInputsFromCanonical,
+  detectGroundBaseplates,
   classifyConnectionEdge,
   classifySubdivisionPartFlags,
   computeHorizontalPrincipalAxis,
@@ -1041,5 +1043,83 @@ describe('Large & Elongated Model Subdivision Analyzer', () => {
       0,
     );
     expect(totalSections).toBe(3);
+  });
+
+  describe('Split by Baseplate', () => {
+    /** Two 16x32 baseplates side by side (x = -160 / +160), each with a small brick building, plus an optional bridge. */
+    function buildTwoBaseplateLdr(withBridge: boolean, withUpperFloorPlate = false): string {
+      const lines: string[] = ['0 Two Baseplate Layout'];
+      lines.push('1 2 -160 0 0 1 0 0 0 1 0 0 0 1 3857.dat');
+      lines.push('1 2 160 0 0 1 0 0 0 1 0 0 0 1 3857.dat');
+      for (const cx of [-160, 160]) {
+        for (const layerY of [-24, -48, -72]) {
+          for (const dz of [-120, -40, 40, 120]) {
+            lines.push(`1 4 ${cx - 40} ${layerY} ${dz} 1 0 0 0 1 0 0 0 1 3001.dat`);
+            lines.push(`1 4 ${cx + 40} ${layerY} ${dz} 1 0 0 0 1 0 0 0 1 3001.dat`);
+          }
+        }
+      }
+      if (withBridge) {
+        // 2x4 brick wall layers on each side of the seam + a plate tying them together on top
+        lines.push('1 15 -20 -24 0 0 0 1 0 1 0 -1 0 0 3001.dat');
+        lines.push('1 15 20 -24 0 0 0 1 0 1 0 -1 0 0 3001.dat');
+        lines.push('1 15 0 -32 0 1 0 0 0 1 0 0 0 1 3020.dat');
+      }
+      if (withUpperFloorPlate) {
+        // A 16x16 baseplate-sized plate used as an upper floor must NOT count as a ground baseplate
+        lines.push('1 7 -160 -76 0 1 0 0 0 1 0 0 0 1 3867.dat');
+      }
+      return lines.join('\n');
+    }
+
+    function prep(src: string) {
+      const model = parseLDrawSource(src, 'layout.ldr', 'ldr');
+      const graph = buildConnectivityGraph(model.parts);
+      return buildSubdivisionInputsFromCanonical(model, graph);
+    }
+
+    it('detects only ground-level baseplates', () => {
+      const { parts } = prep(buildTwoBaseplateLdr(false, true));
+      const plates = detectGroundBaseplates(parts);
+      expect(plates).toHaveLength(2);
+      for (const idx of plates) expect(parts[idx].partId).toContain('3857');
+    });
+
+    it('creates one connected section per baseplate covering every part', () => {
+      const { parts, adjacency } = prep(buildTwoBaseplateLdr(true));
+      const prop = buildBaseplateSplitProposal(parts, adjacency);
+      expect(prop).not.toBeNull();
+      expect(prop!.strategy).toBe('baseplates');
+      expect(prop!.outputMode).toBe('modular_chapters');
+      const plateSecs = prop!.sections.filter((s) => s.id.startsWith('sec_baseplate_'));
+      expect(plateSecs).toHaveLength(2);
+      expect(plateSecs[0].name).toMatch(/^Baseplate 1 \(16×32\)$/);
+      expect(verifyProposalZeroFloating(prop!, adjacency).valid).toBe(true);
+
+      const plates = detectGroundBaseplates(parts);
+      const owner = (idx: number) => plateSecs.findIndex((s) => s.partIndices.includes(idx));
+      expect(owner(plates[0])).not.toBe(owner(plates[1]));
+
+      const covered = new Set<number>();
+      for (const sec of prop!.sections) for (const idx of sec.partIndices) covered.add(idx);
+      expect(covered.size).toBe(parts.length);
+    });
+
+    it('works for separate unconnected baseplates and is offered by the analyzer', () => {
+      const { parts, adjacency } = prep(buildTwoBaseplateLdr(false));
+      const { proposals } = analyzeModelSubdivisions(parts, adjacency);
+      const prop = proposals.find((p) => p.strategy === 'baseplates');
+      expect(prop).toBeDefined();
+      expect(prop!.sections.filter((s) => s.id.startsWith('sec_baseplate_'))).toHaveLength(2);
+      expect(verifyProposalZeroFloating(prop!, adjacency).valid).toBe(true);
+      expect(recomputeProposalWithCount('baseplates', parts, adjacency, 2)?.strategy).toBe('baseplates');
+    });
+
+    it('is not offered when the model has a single baseplate', () => {
+      const lines = ['0 Single', '1 2 0 0 0 1 0 0 0 1 0 0 0 1 3811.dat'];
+      for (let i = 0; i < 12; i++) lines.push(`1 4 ${-200 + i * 40} -24 0 1 0 0 0 1 0 0 0 1 3001.dat`);
+      const { parts, adjacency } = prep(lines.join('\n'));
+      expect(buildBaseplateSplitProposal(parts, adjacency)).toBeNull();
+    });
   });
 });

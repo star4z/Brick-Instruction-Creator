@@ -182,7 +182,9 @@ const CATALOG_LIST: PartDefinition[] = [
   makeStandardPart('3035', 'Plate 4 x 8', 'Plate', 'plate', 8, 4, 8, true, true),
   makeStandardPart('3958', 'Plate 6 x 6', 'Plate', 'plate', 6, 6, 8, true, true),
   makeStandardPart('3036', 'Plate 6 x 8', 'Plate', 'plate', 8, 6, 8, true, true),
-  makeStandardPart('3811', 'Baseplate 8 x 8', 'Plate', 'plate', 8, 8, 8, true, true),
+  makeStandardPart('3811', 'Baseplate 32 x 32', 'Plate', 'plate', 32, 32, 4, true, false),
+  makeStandardPart('3857', 'Baseplate 16 x 32', 'Plate', 'plate', 16, 32, 4, true, false),
+  makeStandardPart('3867', 'Baseplate 16 x 16', 'Plate', 'plate', 16, 16, 4, true, false),
 
   // Tiles
   makeStandardPart('3070b', 'Tile 1 x 1', 'Tile', 'tile', 1, 1, 8, false, true),

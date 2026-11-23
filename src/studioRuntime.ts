@@ -3206,7 +3206,7 @@ function parseImportedModel(m1Text, m2Text, fileName) {
   } else {
     rawParts = f2.parts;
   }
-  if (rawParts.length === 0) throw new Error('No LEGO brick placements found inside this file.');
+  if (rawParts.length === 0) throw new Error('No LEGO part placements found inside this file.');
   const parts = fuseAssemblies(rawParts);
   return {
     title: cleanSubName(fileName),
@@ -6045,7 +6045,7 @@ function renderAll() {
   const ft = getModelFileTypeInfo();
 
   document.getElementById('desktopModelName').textContent = state.model.title;
-  document.getElementById('desktopModelMeta').textContent = `· ${ft.badge} · ${allParts.length} pcs`;
+  document.getElementById('desktopModelMeta').textContent = `· ${ft.badge} · ${formatPartCount(allParts.length)}`;
   document.getElementById('menuModelName').textContent = state.model.title;
   if (typeBadgeEl) {
     typeBadgeEl.textContent = ft.badge;
@@ -6057,7 +6057,7 @@ function renderAll() {
   }
   if (statsEl) {
     statsEl.innerHTML = `
-      <span class="px-2 py-0.5 rounded bg-[var(--card)] border border-[var(--border)]">${allParts.length} pieces</span>
+      <span class="px-2 py-0.5 rounded bg-[var(--card)] border border-[var(--border)]">${formatPartCount(allParts.length)}</span>
       <span class="px-2 py-0.5 rounded bg-[var(--card)] border border-[var(--border)]">${allSteps.length} steps</span>
       <span class="px-2 py-0.5 rounded bg-[var(--card)] border border-[var(--border)]">${state.pages.length} pages</span>`;
     statsEl.classList.remove('hidden');
@@ -7007,7 +7007,7 @@ function renderContextOverlay(page) {
       box.innerHTML = `
         <div class="pointer-events-auto studio-surface px-4 py-2.5 rounded-lg text-xs font-semibold flex items-center gap-2">
           <span class="w-2 h-2 rounded-full bg-[var(--primary)]"></span>
-          <span>Tap pieces in the 3D step or Parts List to move or split them</span>
+          <span>Tap parts in the 3D step or Parts List to move or split them</span>
         </div>`;
       return;
     }
@@ -7128,7 +7128,7 @@ function renderContextOverlay(page) {
     const splitSelectedToOffset = (deltaIdx) => {
       const moved = step.parts.filter(p => state.selectedPartIds.has(p.id));
       const kept = step.parts.filter(p => !state.selectedPartIds.has(p.id));
-      if (moved.length === 0 || kept.length === 0) { showToast('Select a subset of pieces in this step to split.'); return; }
+      if (moved.length === 0 || kept.length === 0) { showToast('Select a subset of parts in this step to split.'); return; }
       pushUndo();
       step.parts = kept;
       const idx = ch.steps.indexOf(step);
@@ -7142,7 +7142,7 @@ function renderContextOverlay(page) {
     box.querySelector('#actNewBefore').onclick = () => splitSelectedToOffset(-1);
     box.querySelector('#actNewAfter').onclick = () => splitSelectedToOffset(1);
     box.querySelector('#actMoveStep').onclick = () => {
-      const targetNum = parseInt(prompt('Move selected pieces to which Step number?'), 10);
+      const targetNum = parseInt(prompt('Move selected parts to which Step number?'), 10);
       if (!targetNum) return;
       const all = getAllSteps(state.model);
       const dest = all.find(x => x.step.num === targetNum);
@@ -9340,7 +9340,7 @@ async function importBricksLibraryFiles(fileList) {
       renderAll();
     }
     const helperNote = importedHelpers > 0 ? ` (+${importedHelpers.toLocaleString()} subparts & primitives)` : '';
-    showToast(`Imported ${importedParts.toLocaleString()} brick part${importedParts === 1 ? '' : 's'}${helperNote} into library.`);
+    showToast(`Imported ${formatPartCount(importedParts)}${helperNote} into library.`);
   } catch (err) {
     showToast(err?.message || 'Could not import bricks library.');
   } finally {
@@ -9391,7 +9391,7 @@ async function autoFetchMissingPartsForParsed(parsed, displayName = '') {
   const showOverlay = () => {
     if (overlayShown || !overlay) return;
     overlayShown = true;
-    if (titleEl) titleEl.textContent = displayName ? `Loading 3D shapes for ${cleanSubName(displayName)}…` : 'Downloading 3D brick shapes…';
+    if (titleEl) titleEl.textContent = displayName ? `Loading 3D shapes for ${cleanSubName(displayName)}…` : 'Downloading 3D part shapes…';
     if (subEl) subEl.textContent = 'Fetching official LDraw parts & caching locally for instant reuse.';
     if (labelEl) labelEl.textContent = 'Downloading parts…';
     if (pctEl) pctEl.textContent = '0%';
@@ -10359,8 +10359,8 @@ function computeModelDiagnostics() {
           title: isCompletelyFloating ? `Floating piece: ${name}` : `Weak connection: ${name}`,
           detail: isCompletelyFloating
             ? (p._floatHeight && p._floatHeight > 0
-                ? `Part "${p.p}" in Step ${step.num} is floating ${(p._floatHeight / 20).toFixed(2)} studs above the ground with no nearby pieces touching it.`
-                : `Part "${p.p}" in Step ${step.num} had no nearby pieces touching it and was placed on its own.`)
+                ? `Part "${p.p}" in Step ${step.num} is floating ${(p._floatHeight / 20).toFixed(2)} studs above the ground with no nearby parts touching it.`
+                : `Part "${p.p}" in Step ${step.num} had no nearby parts touching it and was placed on its own.`)
             : `Part "${p.p}" in Step ${step.num} was ${(p._detachedGap / 20).toFixed(2)} studs away from its nearest neighbor.`,
           stepNum: step.num,
           stepId: step.id,
@@ -13382,6 +13382,8 @@ let impState = {
   el: 28,
   isPostImport: false,
   skipAutoFetch: false,
+  pickerOpen: false,
+  pickerFocusIdx: 0,
 };
 
 function closeImportAssistant(keepPendingRaw = false) {
@@ -13395,6 +13397,7 @@ function closeImportAssistant(keepPendingRaw = false) {
   impState.activeProposal = null;
   impState.controlsVisible = false;
   impState.skipAutoFetch = false;
+  impState.pickerOpen = false;
   impPreviewMesh = null;
   document.getElementById('importModal').classList.add('hidden');
 }
@@ -13534,7 +13537,7 @@ function syncImportPreviewControlsUI() {
   if (colBtn) {
     const isSec = impState.colorMode === 'sections';
     colBtn.className = `glass-pill w-9 h-9 rounded-full flex items-center justify-center hover:scale-105 active:scale-95 transition ${isSec ? '!bg-[var(--primary)] !text-white !border-transparent' : ''}`;
-    colBtn.title = isSec ? 'Section Colors (tap for Brick Colors)' : 'Brick Colors (tap for Section Colors)';
+    colBtn.title = isSec ? 'Section Colors (tap for Part Colors)' : 'Part Colors (tap for Section Colors)';
     colBtn.setAttribute('aria-pressed', isSec ? 'true' : 'false');
   }
 }
@@ -13598,62 +13601,191 @@ function animateImportExplode(nextExploded) {
   canvas.addEventListener('pointercancel', () => { dragging = false; });
 })();
 
+const SINGLE_BUILD_DESCRIPTION = 'Generates clean, zero-floating steps in one continuous chapter without splitting the model into sections.';
+
+function formatPartCount(n) {
+  const v = Number(n) || 0;
+  return `${v.toLocaleString()} part${v === 1 ? '' : 's'}`;
+}
+
+function getImportPickerOptions() {
+  const shouldPrompt = Boolean(impState.assessment?.shouldPrompt);
+  const opts = impState.proposals.map((prop, idx) => {
+    const secs = (prop.sections || []).filter(s => s.role !== 'join');
+    return {
+      id: prop.id,
+      title: prop.title,
+      description: prop.rationale,
+      isRec: idx === 0 && shouldPrompt,
+      sections: secs,
+      totalParts: (prop.sections || []).reduce((acc, s) => {
+        const groups = s.repeatPartIndexGroups && s.repeatPartIndexGroups.length > 1 ? s.repeatPartIndexGroups : [s.partIndices || []];
+        return acc + groups.reduce((a, g) => a + g.length, 0);
+      }, 0),
+    };
+  });
+  opts.push({
+    id: 'none',
+    title: 'Single Continuous Build',
+    description: SINGLE_BUILD_DESCRIPTION,
+    isRec: !shouldPrompt,
+    sections: [],
+    totalParts: impState.parsed?.parts?.length || 0,
+  });
+  return opts;
+}
+
+function renderSectionChips(sections) {
+  if (!sections || sections.length === 0) return '';
+  return `<div class="flex flex-wrap gap-1.5 pt-1.5">${sections.map((s) => {
+    const repeat = s.repeatPartIndexGroups && s.repeatPartIndexGroups.length > 1 ? s.repeatPartIndexGroups.length : 1;
+    const count = s.partIndices?.length || 0;
+    return `<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-[var(--border)] bg-[var(--card)] text-[11px] font-semibold"><span class="w-2 h-2 rounded-full shrink-0" style="background:${escHtml(s.previewColor || 'var(--primary)')}" aria-hidden="true"></span>${escHtml(s.name)}<span class="font-normal text-[var(--muted-foreground)]">${repeat > 1 ? `×${repeat} · ` : ''}${formatPartCount(count)}${repeat > 1 ? ' each' : ''}</span></span>`;
+  }).join('')}</div>`;
+}
+
+const RECOMMENDED_BADGE_HTML = '<span class="px-1.5 py-0.5 rounded bg-[var(--primary)] text-[var(--primary-foreground)] text-[10px] font-bold uppercase tracking-wider">Recommended</span>';
+
+function selectImportProposal(pid) {
+  impState.selectedId = pid;
+  if (pid === 'none') {
+    impState.activeProposal = null;
+    impState.controlsVisible = false;
+  } else {
+    const found = impState.proposals.find(p => p.id === pid);
+    impState.activeProposal = found ? JSON.parse(JSON.stringify(found)) : null;
+  }
+  impState.pickerOpen = false;
+  renderImportAssistantUI();
+  rebuildAndDrawImportPreview();
+  document.getElementById('impProposalTrigger')?.focus();
+}
+
+function renderImportProposalPicker() {
+  const pickerEl = document.getElementById('impProposalPicker');
+  if (!pickerEl) return;
+  const opts = getImportPickerOptions();
+  const selectedIdx = Math.max(0, opts.findIndex(o => o.id === (impState.selectedId || 'none')));
+  const sel = opts[selectedIdx];
+  const isOpen = Boolean(impState.pickerOpen);
+  const focusIdx = Math.max(0, Math.min(opts.length - 1, impState.pickerFocusIdx ?? selectedIdx));
+
+  const chevron = `<svg class="w-4 h-4 shrink-0 mt-0.5 text-[var(--muted-foreground)] transition-transform duration-150 ${isOpen ? 'rotate-180' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>`;
+  const check = `<svg class="w-4 h-4 shrink-0 mt-0.5 text-[var(--primary)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>`;
+
+  const triggerHtml = `
+    <button id="impProposalTrigger" type="button" aria-haspopup="listbox" aria-expanded="${isOpen ? 'true' : 'false'}" aria-controls="impProposalListbox" aria-labelledby="impProposalLabel impProposalTrigger"
+      class="w-full text-left p-3 rounded-lg border ${isOpen ? 'border-[var(--primary)]' : 'border-[var(--border)]'} bg-[var(--surface-sunken)] hover:border-[var(--primary)] focus-visible:outline-2 focus-visible:outline-[var(--primary)] transition-colors cursor-pointer flex items-start gap-2.5">
+      <div class="min-w-0 flex-1 space-y-1">
+        <div class="flex items-center gap-1.5 flex-wrap">
+          <span class="text-[13px] font-bold text-[var(--foreground)]">${escHtml(sel.title)}</span>
+          ${sel.isRec ? RECOMMENDED_BADGE_HTML : ''}
+        </div>
+        <p class="text-xs text-[var(--muted-foreground)] leading-snug">${escHtml(sel.description)}</p>
+        ${renderSectionChips(sel.sections)}
+      </div>
+      ${chevron}
+    </button>`;
+
+  const listHtml = isOpen ? `
+    <ul id="impProposalListbox" role="listbox" tabindex="-1" aria-labelledby="impProposalLabel" aria-activedescendant="impProposalOpt_${focusIdx}"
+      class="mt-1.5 p-1 rounded-lg border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow-sheet)] space-y-0.5 outline-none">
+      ${opts.map((o, i) => {
+        const isSel = i === selectedIdx;
+        const isFocus = i === focusIdx;
+        const secCount = o.sections.length;
+        const meta = o.id === 'none'
+          ? `1 chapter · ${formatPartCount(o.totalParts)}`
+          : `${secCount} section${secCount === 1 ? '' : 's'} · ${formatPartCount(o.totalParts)}`;
+        return `
+        <li id="impProposalOpt_${i}" role="option" aria-selected="${isSel ? 'true' : 'false'}" data-opt-idx="${i}" data-opt-id="${escHtml(o.id)}"
+          class="flex items-start gap-2.5 px-2.5 py-2.5 rounded-md cursor-pointer transition-colors ${isFocus ? 'bg-[var(--surface-hover)]' : 'hover:bg-[var(--surface-hover)]'}">
+          <div class="min-w-0 flex-1 space-y-0.5">
+            <div class="flex items-center gap-1.5 flex-wrap">
+              <span class="text-[13px] font-semibold ${isSel ? 'text-[var(--primary)]' : 'text-[var(--foreground)]'}">${escHtml(o.title)}</span>
+              ${o.isRec ? RECOMMENDED_BADGE_HTML : ''}
+            </div>
+            <p class="text-xs text-[var(--muted-foreground)] leading-snug">${escHtml(o.description)}</p>
+            <p class="text-[11px] text-[var(--muted-foreground)] font-medium">${meta}</p>
+          </div>
+          ${isSel ? check : '<span class="w-4 shrink-0" aria-hidden="true"></span>'}
+        </li>`;
+      }).join('')}
+    </ul>` : '';
+
+  pickerEl.innerHTML = triggerHtml + listHtml;
+
+  const trigger = document.getElementById('impProposalTrigger');
+  const listbox = document.getElementById('impProposalListbox');
+  const openAt = (idx) => {
+    impState.pickerOpen = true;
+    impState.pickerFocusIdx = idx;
+    renderImportProposalPicker();
+    document.getElementById('impProposalListbox')?.focus();
+    document.getElementById(`impProposalOpt_${idx}`)?.scrollIntoView({ block: 'nearest' });
+  };
+  const close = () => {
+    impState.pickerOpen = false;
+    renderImportProposalPicker();
+    document.getElementById('impProposalTrigger')?.focus();
+  };
+
+  trigger.onclick = () => {
+    if (impState.pickerOpen) close();
+    else openAt(selectedIdx);
+  };
+  trigger.onkeydown = (e) => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      openAt(selectedIdx);
+    }
+  };
+  if (listbox) {
+    listbox.onkeydown = (e) => {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        const delta = e.key === 'ArrowDown' ? 1 : -1;
+        openAt((focusIdx + delta + opts.length) % opts.length);
+      } else if (e.key === 'Home' || e.key === 'End') {
+        e.preventDefault();
+        openAt(e.key === 'Home' ? 0 : opts.length - 1);
+      } else if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        selectImportProposal(opts[focusIdx].id);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        close();
+      } else if (e.key === 'Tab') {
+        impState.pickerOpen = false;
+        renderImportProposalPicker();
+      }
+    };
+    listbox.querySelectorAll('[role="option"]').forEach((li) => {
+      li.addEventListener('click', () => selectImportProposal(li.getAttribute('data-opt-id')));
+    });
+  }
+}
+
+// Close the Build Organization picker when tapping anywhere outside it
+document.addEventListener('pointerdown', (e) => {
+  if (!impState.pickerOpen) return;
+  const pickerEl = document.getElementById('impProposalPicker');
+  if (pickerEl && !pickerEl.contains(e.target)) {
+    impState.pickerOpen = false;
+    renderImportProposalPicker();
+  }
+});
+
 function renderImportAssistantUI() {
-  const selEl = document.getElementById('impProposalSelect');
-  const infoEl = document.getElementById('impProposalInfo');
   const autoBtn = document.getElementById('impBtnAuto');
   const dupChk = document.getElementById('toggleDetectDuplicates');
   if (dupChk) dupChk.checked = Boolean(state.detectDuplicates);
 
   syncImportPreviewControlsUI();
-
-  if (selEl) {
-    const optsHtml = impState.proposals.map((prop, idx) => {
-      const isRec = idx === 0 && impState.assessment?.shouldPrompt;
-      return `<option value="${escHtml(prop.id)}">${escHtml(prop.title)}${isRec ? ' (Recommended)' : ''}</option>`;
-    }).join('') + `<option value="none">Single Continuous Build${!impState.assessment?.shouldPrompt ? ' (Recommended)' : ''}</option>`;
-    selEl.innerHTML = optsHtml;
-    selEl.value = impState.selectedId || 'none';
-    selEl.onchange = () => {
-      const pid = selEl.value;
-      impState.selectedId = pid;
-      if (pid === 'none') {
-        impState.activeProposal = null;
-        impState.controlsVisible = false;
-      } else {
-        const found = impState.proposals.find(p => p.id === pid);
-        impState.activeProposal = found ? JSON.parse(JSON.stringify(found)) : null;
-      }
-      renderImportAssistantUI();
-      rebuildAndDrawImportPreview();
-    };
-  }
+  renderImportProposalPicker();
 
   const active = impState.activeProposal;
-  if (infoEl) {
-    if (!active) {
-      const isRec = !impState.assessment?.shouldPrompt;
-      infoEl.innerHTML = `
-        <div class="flex items-center gap-1.5 flex-wrap">
-          <span class="font-bold text-[var(--foreground)]">Single Continuous Build</span>
-          ${isRec ? '<span class="px-1.5 py-0.5 rounded bg-[var(--primary)] text-[var(--primary-foreground)] text-[10px] font-extrabold uppercase tracking-wider">Recommended</span>' : ''}
-        </div>
-        <p class="text-[11px] text-[var(--muted-foreground)] leading-snug">Auto-generates clean, zero-floating steps in one continuous chapter without splitting the model into separate sections.</p>`;
-    } else {
-      const isRec = impState.proposals[0]?.id === active.id && impState.assessment?.shouldPrompt;
-      const secs = (active.sections || []).filter(s => s.role !== 'join');
-      infoEl.innerHTML = `
-        <div class="flex items-center gap-1.5 flex-wrap">
-          <span class="font-bold text-[var(--foreground)]">${escHtml(active.title)}</span>
-          ${isRec ? '<span class="px-1.5 py-0.5 rounded bg-[var(--primary)] text-[var(--primary-foreground)] text-[10px] font-extrabold uppercase tracking-wider">Recommended</span>' : ''}
-        </div>
-        <p class="text-[11px] text-[var(--muted-foreground)] leading-snug">${escHtml(active.rationale)}</p>
-        ${secs.length > 0 ? `
-          <div class="flex flex-wrap gap-1.5 pt-1">
-            ${secs.map((s) => `<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-[var(--border)] bg-[var(--card)] text-[10px] font-semibold"><span class="w-2 h-2 rounded-full shrink-0" style="background:${s.colorHex || 'var(--primary)'}"></span>${escHtml(s.name)} <span class="font-mono text-[var(--muted-foreground)]">${s.partIndices?.length || 0}</span></span>`).join('')}
-          </div>` : ''}`;
-    }
-  }
 
   if (!active) {
     autoBtn.textContent = impState.isPostImport ? 'Regenerate & Apply Steps' : 'Generate Manual';
@@ -13683,6 +13815,7 @@ function openImportAssistant(parsed, isPostImport = false) {
   impState.assessment = assessment;
   impState.proposals = proposals;
   impState.isPostImport = isPostImport;
+  impState.pickerOpen = false;
   impState.colorMode = 'sections';
   impState.controlsVisible = false;
   impState.az = 38;
@@ -13719,7 +13852,7 @@ function openImportAssistant(parsed, isPostImport = false) {
 
   const reasonStr = assessment.reasons.length > 0
     ? `${parsed.title} · Detected ${assessment.reasons.join(' · ')}.`
-    : `${parsed.title} · ${parsed.parts.length} pieces${parsed.submodelCount ? ` across ${parsed.submodelCount} submodels` : ''}.`;
+    : `${parsed.title} · ${formatPartCount(parsed.parts.length)}${parsed.submodelCount ? ` across ${parsed.submodelCount} submodels` : ''}.`;
   document.getElementById('impSummary').textContent = reasonStr;
 
   document.getElementById('impKeepWrap').classList.toggle('hidden', !parsed.hasSteps);
@@ -13777,7 +13910,7 @@ function finishImport(parsed, mode, subdivisionPlan = null, isPostImport = false
   const subSummary = subdivisionPlan && subdivisionPlan.strategy !== 'none'
     ? ` · ${subdivisionPlan.title}`
     : '';
-  showToast(`${isPostImport ? 'Updated' : 'Imported'} ${parsed.title} (${parsed.parts.length} pieces, ${steps.length} steps${subSummary}).`);
+  showToast(`${isPostImport ? 'Updated' : 'Imported'} ${parsed.title} (${formatPartCount(parsed.parts.length)}, ${steps.length} steps${subSummary}).`);
   if (!isPostImport && state.diagnostics.length > 0) showImportErrorBanner();
   if (!isPostImport && !skipAutoFetch && lastSourceRecord?.kind === 'ldr') {
     void fetchMissingPartsOnline({ silent: true });

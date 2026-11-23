@@ -177,6 +177,7 @@ export type SubdivisionStrategyId =
   | 'horizontal_floors'
   | 'numbered_bags'
   | 'spatial_sectors'
+  | 'baseplates'
   | 'refine_existing';
 
 export type SubdivisionOutputMode =

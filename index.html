@@ -410,14 +410,14 @@
 
         <div class="space-y-3 pt-4 border-t border-[var(--border)]">
           <label class="flex items-center justify-between gap-2 cursor-pointer">
-            <span class="font-medium">Outline New Pieces</span>
+            <span class="font-medium">Outline New Parts</span>
             <div class="flex items-center gap-2">
               <input id="highlightColor" type="color" value="#ff2d55" class="w-6 h-6 rounded border border-[var(--border)] bg-transparent cursor-pointer" />
               <input id="toggleHighlight" type="checkbox" checked class="w-4 h-4 accent-[var(--primary)] cursor-pointer" />
             </div>
           </label>
           <label class="flex items-center justify-between gap-2 cursor-pointer">
-            <span class="font-medium">Fade Earlier Pieces</span>
+            <span class="font-medium">Fade Earlier Parts</span>
             <input id="toggleFade" type="checkbox" checked class="w-4 h-4 accent-[var(--primary)] cursor-pointer" />
           </label>
           <div class="space-y-1.5">
@@ -645,7 +645,7 @@
             </svg>
           </div>
           <div class="min-w-0 flex-1">
-            <h3 id="impFetchTitle" class="text-sm font-bold truncate">Downloading 3D brick shapes…</h3>
+            <h3 id="impFetchTitle" class="text-sm font-bold truncate">Downloading 3D part shapes…</h3>
             <p id="impFetchSub" class="text-xs text-[var(--muted-foreground)] mt-1 leading-relaxed">Fetching LDraw parts &amp; caching locally for future imports.</p>
           </div>
         </div>
@@ -746,7 +746,7 @@
           <div id="impPreviewPane" class="lg:w-[46%] shrink-0 bg-[var(--surface-sunken)] border-b lg:border-b-0 lg:border-r border-[var(--border)] flex flex-col">
             <div class="relative h-[32vh] min-h-[195px] sm:h-[260px] lg:h-auto lg:flex-1 min-h-0 w-full flex items-center justify-center overflow-hidden">
               <canvas id="impPreviewCanvas" class="w-full h-full touch-none cursor-grab active:cursor-grabbing"></canvas>
-              <!-- Tap-to-Reveal Overlay Icon Controls (Explode toggle + Section/Brick Colors toggle) -->
+              <!-- Tap-to-Reveal Overlay Icon Controls (Explode toggle + Section/Part Colors toggle) -->
               <div id="impPreviewControls" class="opacity-0 pointer-events-none scale-95 transition-all duration-200 absolute top-3 right-3 z-10 flex items-center gap-1.5">
                 <button id="impExplodeToggleBtn" type="button" title="Toggle exploded view" aria-label="Toggle exploded view" class="studio-surface w-9 h-9 rounded-md flex items-center justify-center hover:bg-[var(--surface-hover)] transition-colors cursor-pointer">
                   <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -754,7 +754,7 @@
                     <line x1="21" x2="14" y1="3" y2="10"/><line x1="3" x2="10" y1="21" y2="14"/>
                   </svg>
                 </button>
-                <button id="impColorModeToggleBtn" type="button" title="Switch between Section Colors and Brick Colors" aria-label="Switch between Section Colors and Brick Colors" class="studio-surface w-9 h-9 rounded-md flex items-center justify-center hover:bg-[var(--surface-hover)] transition-colors cursor-pointer">
+                <button id="impColorModeToggleBtn" type="button" title="Switch between Section Colors and Part Colors" aria-label="Switch between Section Colors and Part Colors" class="studio-surface w-9 h-9 rounded-md flex items-center justify-center hover:bg-[var(--surface-hover)] transition-colors cursor-pointer">
                   <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <circle cx="13.5" cy="6.5" r=".6" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".6" fill="currentColor"/>
                     <circle cx="8.5" cy="7.5" r=".6" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".6" fill="currentColor"/>
@@ -771,9 +771,9 @@
           <!-- Right / Bottom Pane: Build Organization Dropdown + Step Generation Options -->
           <div class="flex-1 min-h-0 lg:overflow-y-auto overscroll-contain p-5 space-y-4">
             <div class="space-y-2.5">
-              <label for="impProposalSelect" class="block text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Build Organization</label>
-              <select id="impProposalSelect" class="w-full px-3 py-2.5 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] text-xs font-semibold outline-none focus:border-[var(--primary)] cursor-pointer"></select>
-              <div id="impProposalInfo" class="p-3 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)]/70 space-y-1.5 text-xs"></div>
+              <div id="impProposalLabel" class="block text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Build Organization</div>
+              <!-- Custom listbox picker (rendered by renderImportAssistantUI): trigger shows the selected option with its description; options expand inline -->
+              <div id="impProposalPicker" class="relative"></div>
             </div>
 
             <!-- Step Generation Options -->
@@ -1319,7 +1319,7 @@
 
           <div class="space-y-2 pt-4 border-t border-[var(--border)]">
             <label class="flex items-center justify-between py-1 cursor-pointer">
-              <span class="font-medium">Show Part Names Under Pieces</span>
+              <span class="font-medium">Show Part Names in Parts List</span>
               <input id="toggleBomNames" type="checkbox" checked class="w-4 h-4 accent-[var(--primary)] cursor-pointer" />
             </label>
           </div>
@@ -1597,7 +1597,7 @@
               </div>
               <div id="libPreviewEmpty" class="py-12 text-center space-y-3 text-[var(--muted-foreground)]">
                 <svg class="w-7 h-7 mx-auto opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3 3 7.5 12 12l9-4.5L12 3Z"/><path d="m3 12 9 4.5 9-4.5"/><path d="m3 16.5 9 4.5 9-4.5"/></svg>
-                <p class="text-xs leading-relaxed">Select any brick from the list to inspect its 3D shape, angle views, and library source.</p>
+                <p class="text-xs leading-relaxed">Select any part from the list to inspect its 3D shape, angle views, and library source.</p>
               </div>
               <div id="libPreviewDetail" class="hidden space-y-3.5">
                 <div class="aspect-square w-full max-w-[230px] mx-auto rounded-lg border border-[var(--border)] bg-[var(--card)] flex items-center justify-center p-3 overflow-hidden relative">

@@ -564,7 +564,7 @@ export function assessModelSubdivisionNeed(parts: SubdivisionPartInput[]): Subdi
   const reasons: string[] = [];
 
   if (partCount >= 350) {
-    reasons.push(`${partCount.toLocaleString()} pieces`);
+    reasons.push(`${partCount.toLocaleString()} parts`);
   }
   const longestStuds = Math.round(longestSpanLdu / 20);
   if (longestSpanLdu >= 560) {
@@ -2540,20 +2540,20 @@ export function buildLongitudinalHalvesProposal(
 
   const joinNote =
     joinIndices.length > 0
-      ? ` + ${joinIndices.length}-piece center connector`
+      ? ` + ${joinIndices.length}-part center connector`
       : '';
   const articulatedDesc = hasArticulatedJoint
     ? [
-        endAssemblyIndices.length > 0 ? `${(endAssemblyName || 'center assembly').toLowerCase()} (${endAssemblyIndices.length} pcs)` : null,
+        endAssemblyIndices.length > 0 ? `${(endAssemblyName || 'center assembly').toLowerCase()} (${endAssemblyIndices.length} parts)` : null,
         pivotRodIndices.length > 0 ? `${pivotRodIndices.length} Technic axle` : null,
-        floatingCollarIndices.length > 0 ? `${floatingCollarIndices.length} cross-axle piece${floatingCollarIndices.length === 1 ? '' : 's'}` : null,
+        floatingCollarIndices.length > 0 ? `${floatingCollarIndices.length} cross-axle part${floatingCollarIndices.length === 1 ? '' : 's'}` : null,
       ]
         .filter(Boolean)
         .join(' + ')
     : '';
   const roofNote = capCount > 0 ? ` + ${capCount} removable tile-seam roof${capCount === 1 ? '' : 's'}` : '';
   const rationale = isIdenticalHalves
-    ? `Both halves match (${cleanSegments[0].length} pcs each${joinNote}) — build once ×2, then connect.`
+    ? `Both halves match (${cleanSegments[0].length} parts each${joinNote}) — build once ×2, then connect.`
     : heavySpanning
       ? `Splits along the ${Math.round(pca.majorSpan / 20)}-stud length into ${cleanSegments.length} connected stages (tightly interlocked spine).`
       : hasArticulatedJoint && articulatedDesc
@@ -3137,7 +3137,7 @@ export function buildStructuralModulesProposal(
     strategy: 'structural_modules',
     outputMode,
     title: `Structural Modules (${validGroups.length} Sub-Builds)`,
-    rationale: `Groups densely connected bricks into ${validGroups.length} cohesive modules (${Math.round(cutRatio * 100)}% seam edges) before final assembly.`,
+    rationale: `Groups densely connected parts into ${validGroups.length} cohesive modules (${Math.round(cutRatio * 100)}% seam edges) before final assembly.`,
     zoomGainEstimate,
     confidence,
     sections,
@@ -3318,7 +3318,7 @@ export function buildNumberedBagsProposal(
     strategy: 'numbered_bags',
     outputMode: 'numbered_bags',
     title: `Numbered Build Bags (${sections.length} Bags)`,
-    rationale: `Keeps one continuous zero-floating build divided into ${sections.length} connected numbered bags (~${avgBag} pcs/bag).`,
+    rationale: `Keeps one continuous zero-floating build divided into ${sections.length} connected numbered bags (~${avgBag} parts per bag).`,
     confidence,
     sections,
     estimatedStepCount,
@@ -3418,10 +3418,248 @@ export function buildSpatialSectorsProposal(
     id: `prop_sectors_${segments.length}`,
     strategy: 'spatial_sectors',
     outputMode,
-    title: `Baseplate Sectors (${segments.length} Quadrants)`,
+    title: `Footprint Quadrants (${segments.length} Sectors)`,
     rationale: `Splits the wide ${Math.round(bounds.spanX / 20)}×${Math.round(bounds.spanZ / 20)}-stud footprint into ${segments.length} connected quadrants.`,
     zoomGainEstimate,
     confidence: heavySeam ? 74 : 88,
+    sections,
+    estimatedStepCount,
+    estimatedPageCount,
+  };
+}
+
+/** Genuine LEGO baseplates (thin, studded ground plates incl. road plates). */
+const BASEPLATE_IDS = new Set([
+  '3811', '3867', '4186', '3857', '10701', '44336', '44341', '44342', '44343',
+]);
+
+/** A baseplate footprint must be at least ~16×16 studs when detected purely by geometry. */
+const BASEPLATE_MIN_FOOTPRINT_LDU = 300;
+const BASEPLATE_MAX_THICKNESS_LDU = 14;
+const BASEPLATE_GROUND_TOLERANCE_LDU = 12;
+
+/**
+ * Returns true if a part looks like a baseplate (or a large ground plate acting as one):
+ * known baseplate IDs, "Baseplate" in its name, or a thin plate spanning ≥ 16×16 studs.
+ */
+export function isBaseplateCandidate(p: SubdivisionPartInput): boolean {
+  if (p.isMinifig) return false;
+  const spanX = p.box.max[0] - p.box.min[0];
+  const spanY = p.box.max[1] - p.box.min[1];
+  const spanZ = p.box.max[2] - p.box.min[2];
+  if (spanY > BASEPLATE_MAX_THICKNESS_LDU) return false;
+  const { key, baseNum } = normalizeSubdivisionPartKey(p.partId);
+  if (BASEPLATE_IDS.has(key) || BASEPLATE_IDS.has(baseNum)) return true;
+  if (/\bbase\s*plate\b|\bbaseplate\b/i.test(p.partName || '')) return true;
+  return Math.min(spanX, spanZ) >= BASEPLATE_MIN_FOOTPRINT_LDU;
+}
+
+/**
+ * Detects the ground-level baseplates of a model. Plates stacked on/inside a larger
+ * baseplate's footprint (e.g. a 16×16 plate resting on a 32×32 baseplate) are ignored,
+ * as are large plates used as upper floors.
+ */
+export function detectGroundBaseplates(allParts: SubdivisionPartInput[]): number[] {
+  const active = allParts.filter((p) => !p.isMinifig);
+  if (active.length === 0) return [];
+  let globalMinY = Infinity;
+  let globalMaxY = -Infinity;
+  for (const p of active) {
+    if (p.box.min[1] < globalMinY) globalMinY = p.box.min[1];
+    if (p.box.max[1] > globalMaxY) globalMaxY = p.box.max[1];
+  }
+  const candidates = active.filter(isBaseplateCandidate);
+  // Y-up is the canonical convention, but tolerate Y-down sources by picking the side holding more plates
+  const low = candidates.filter((p) => p.box.min[1] <= globalMinY + BASEPLATE_GROUND_TOLERANCE_LDU);
+  const high = candidates.filter((p) => p.box.max[1] >= globalMaxY - BASEPLATE_GROUND_TOLERANCE_LDU);
+  const ground = high.length > low.length ? high : low;
+
+  const area = (p: SubdivisionPartInput) =>
+    (p.box.max[0] - p.box.min[0]) * (p.box.max[2] - p.box.min[2]);
+  const sorted = [...ground].sort((a, b) => area(b) - area(a));
+  const kept: SubdivisionPartInput[] = [];
+  for (const p of sorted) {
+    const covered = kept.some((k) => {
+      const ox = Math.min(p.box.max[0], k.box.max[0]) - Math.max(p.box.min[0], k.box.min[0]);
+      const oz = Math.min(p.box.max[2], k.box.max[2]) - Math.max(p.box.min[2], k.box.min[2]);
+      return ox > 0 && oz > 0 && ox * oz >= area(p) * 0.5;
+    });
+    if (!covered) kept.push(p);
+  }
+  return kept.map((p) => p.index);
+}
+
+function footprintDistanceXZ(p: SubdivisionPartInput, plate: SubdivisionPartInput): number {
+  const [x, , z] = p.box.center;
+  const dx = Math.max(0, plate.box.min[0] - x, x - plate.box.max[0]);
+  const dz = Math.max(0, plate.box.min[2] - z, z - plate.box.max[2]);
+  return Math.hypot(dx, dz);
+}
+
+/**
+ * Strategy F: Split by Baseplate.
+ * Each ground-level baseplate becomes its own connected section containing every part built on it
+ * (MILS modules, modular buildings on 16×32 baseplates, city layouts). Parts bridging two
+ * baseplates join whichever baseplate's footprint holds their center, falling back to any
+ * physically connected neighbor so every section stays one connected piece (zero floating parts).
+ */
+export function buildBaseplateSplitProposal(
+  allParts: SubdivisionPartInput[],
+  adjacency: number[][],
+): SubdivisionProposal | null {
+  const active = allParts.filter((p) => !p.isMinifig);
+  if (active.length < 8) return null;
+  const plateIndices = detectGroundBaseplates(allParts);
+  if (plateIndices.length < 2) return null;
+
+  const plates = plateIndices.map((i) => allParts[i]);
+  const allBounds = computeModelBounds(active);
+  const pca = computeHorizontalPrincipalAxis(plates);
+  const [ux, uz] = pca.axis;
+  const [px, pz] = pca.perp;
+  const projMajor = (p: SubdivisionPartInput) => p.box.center[0] * ux + p.box.center[2] * uz;
+  const projMinor = (p: SubdivisionPartInput) => p.box.center[0] * px + p.box.center[2] * pz;
+  // Number baseplates in reading order along the layout's long axis
+  const orderedPlates = [...plates].sort(
+    (a, b) => Math.round((projMajor(a) - projMajor(b)) / 40) || projMinor(a) - projMinor(b),
+  );
+  const plateSlot = new Map<number, number>();
+  orderedPlates.forEach((p, slot) => plateSlot.set(p.index, slot));
+
+  // Footprint bucket for every active part: smallest baseplate containing its center, else the nearest one
+  const bucketOf = new Map<number, number>();
+  for (const p of active) {
+    const own = plateSlot.get(p.index);
+    if (own !== undefined) {
+      bucketOf.set(p.index, own);
+      continue;
+    }
+    let best = 0;
+    let bestDist = Infinity;
+    let bestArea = Infinity;
+    orderedPlates.forEach((plate, slot) => {
+      const d = footprintDistanceXZ(p, plate);
+      const a = (plate.box.max[0] - plate.box.min[0]) * (plate.box.max[2] - plate.box.min[2]);
+      if (d < bestDist - 0.5 || (Math.abs(d - bestDist) <= 0.5 && a < bestArea)) {
+        best = slot;
+        bestDist = d;
+        bestArea = a;
+      }
+    });
+    bucketOf.set(p.index, best);
+  }
+
+  const members: number[][] = orderedPlates.map(() => []);
+  const orphanComps: number[][] = [];
+  const comps = getConnectedComponents(active.map((p) => p.index), adjacency);
+
+  for (const comp of comps) {
+    const compPlates = comp.filter((i) => plateSlot.has(i));
+    if (compPlates.length === 0) {
+      orphanComps.push(comp);
+      continue;
+    }
+    if (compPlates.length === 1) {
+      members[plateSlot.get(compPlates[0])!].push(...comp);
+      continue;
+    }
+
+    const compSet = new Set(comp);
+    const segOf = new Map<number, number>();
+    // Pass A: grow each baseplate across parts sitting on its own footprint
+    const queue: number[] = [];
+    for (const pi of compPlates) {
+      segOf.set(pi, plateSlot.get(pi)!);
+      queue.push(pi);
+    }
+    let head = 0;
+    while (head < queue.length) {
+      const u = queue[head++];
+      const seg = segOf.get(u)!;
+      for (const v of adjacency[u] ?? []) {
+        if (!compSet.has(v) || segOf.has(v) || bucketOf.get(v) !== seg) continue;
+        segOf.set(v, seg);
+        queue.push(v);
+      }
+    }
+    // Pass B: claim leftovers (parts only reachable through a neighboring baseplate's build)
+    const pending: number[] = [];
+    for (const u of comp) {
+      if (segOf.has(u)) continue;
+      if ((adjacency[u] ?? []).some((v) => segOf.has(v))) pending.push(u);
+    }
+    head = 0;
+    while (head < pending.length) {
+      const v = pending[head++];
+      if (segOf.has(v)) continue;
+      const counts = new Map<number, number>();
+      for (const nb of adjacency[v] ?? []) {
+        const s = segOf.get(nb);
+        if (s !== undefined) counts.set(s, (counts.get(s) ?? 0) + 1);
+      }
+      if (counts.size === 0) continue;
+      const own = bucketOf.get(v);
+      let chosen = own !== undefined && counts.has(own) ? own : -1;
+      if (chosen < 0) {
+        let bestCount = -1;
+        for (const [s, c] of counts) {
+          if (c > bestCount) {
+            bestCount = c;
+            chosen = s;
+          }
+        }
+      }
+      segOf.set(v, chosen);
+      for (const nb of adjacency[v] ?? []) {
+        if (compSet.has(nb) && !segOf.has(nb)) pending.push(nb);
+      }
+    }
+    for (const u of comp) {
+      const s = segOf.get(u);
+      if (s !== undefined) members[s].push(u);
+    }
+  }
+
+  const center = allBounds.center;
+  const sections: ProposedSection[] = orderedPlates.map((plate, slot) => {
+    const indices = members[slot];
+    const spanA = Math.round((plate.box.max[0] - plate.box.min[0]) / 20);
+    const spanB = Math.round((plate.box.max[2] - plate.box.min[2]) / 20);
+    const dims = `${Math.min(spanA, spanB)}×${Math.max(spanA, spanB)}`;
+    const dx = plate.box.center[0] - center[0];
+    const dz = plate.box.center[2] - center[2];
+    const hLen = Math.hypot(dx, dz) || 1;
+    return {
+      id: `sec_baseplate_${slot + 1}`,
+      name: `Baseplate ${slot + 1} (${dims})`,
+      partIndices: indices,
+      partIds: indices.map((i) => allParts[i].id),
+      role: 'module',
+      cutEdgeCount: countCutEdges(indices, adjacency),
+      explodeOffset: [(dx / hLen) * 0.8, 0, (dz / hLen) * 0.8],
+      previewColor: SECTION_PREVIEW_PALETTE[slot % SECTION_PREVIEW_PALETTE.length],
+    };
+  });
+
+  placeSecondaryGlobalComponents(
+    sections,
+    orphanComps,
+    allParts,
+    adjacency,
+    center,
+    'modular_chapters',
+    false,
+  );
+
+  const plateCount = orderedPlates.length;
+  const { estimatedStepCount, estimatedPageCount } = estimateStepsAndPages(active.length, sections.length);
+  return {
+    id: `prop_baseplates_${plateCount}`,
+    strategy: 'baseplates',
+    outputMode: 'modular_chapters',
+    title: `Split by Baseplate (${plateCount} Baseplates)`,
+    rationale: `Builds everything on each of the ${plateCount} baseplates as its own section, then sets the baseplates side by side.`,
+    confidence: 93,
     sections,
     estimatedStepCount,
     estimatedPageCount,
@@ -3452,9 +3690,17 @@ export function analyzeModelSubdivisions(
   if (modules) proposals.push(modules);
 
   proposals.sort((a, b) => b.confidence - a.confidence);
+  const ranked = proposals.slice(0, 4);
+
+  // Splitting by baseplate is always offered when 2+ ground baseplates exist (never trimmed by ranking)
+  const baseplates = buildBaseplateSplitProposal(parts, adjacency);
+  if (baseplates) {
+    ranked.push(baseplates);
+    ranked.sort((a, b) => b.confidence - a.confidence);
+  }
   return {
     assessment,
-    proposals: proposals.slice(0, 4),
+    proposals: ranked,
   };
 }
 
@@ -3479,6 +3725,8 @@ export function recomputeProposalWithCount(
       return buildNumberedBagsProposal(allParts, adjacency, targetCount);
     case 'spatial_sectors':
       return buildSpatialSectorsProposal(allParts, adjacency);
+    case 'baseplates':
+      return buildBaseplateSplitProposal(allParts, adjacency);
     default:
       return null;
   }

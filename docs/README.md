@@ -6,7 +6,7 @@ All architecture specifications and feature design proposals for **Brick Instruc
 
 - [`ARCHITECTURE.md`](./ARCHITECTURE.md) — Core system architecture, invariants, data model, algorithms, and deployment constraints.
 - [`COVER_PAGE_DESIGN.md`](./COVER_PAGE_DESIGN.md) — Official LEGO-style front cover layout, page-filling hero 3D render pipeline, pure-TS QR code generator, and clickable PDF link annotations.
-- [`SUBDIVISION_DESIGN.md`](./SUBDIVISION_DESIGN.md) — Large & elongated model subdivision suggestions on import (2D PCA halves, modular floors, natural sub-assemblies, spatial sectors, and 3D exploded import assistant with tap-to-reveal overlay controls).
+- [`SUBDIVISION_DESIGN.md`](./SUBDIVISION_DESIGN.md) — Large & elongated model subdivision suggestions on import (2D PCA halves, modular floors, natural sub-assemblies, footprint quadrants, Split by Baseplate, custom Build Organization listbox picker with inline descriptions, and 3D exploded import assistant with tap-to-reveal overlay controls).
 - [`MINIFIG_POSE_DESIGN.md`](./MINIFIG_POSE_DESIGN.md) — Standing upright minifigure normalization, default arm positioning (with purse/satchel/clearance exceptions), and pre-placement posing.
 - [`MINIFIG_STEP_STYLES_DESIGN.md`](./MINIFIG_STEP_STYLES_DESIGN.md) — Official LEGO minifigure instruction styles: Exploded Stack Callout (vertical white box, red arrows, horizontal connector, accessory callouts) and Sequential Step-by-Step (numbered sub-steps, blue arrows, multi-part accessory pill, completion starburst).
 - [`PART_TEXTURES_DESIGN.md`](./PART_TEXTURES_DESIGN.md) — BrickLink Studio `PE_TEX_PATH`/`PE_TEX_INFO` and LDraw `!TEXMAP`/`!DATA` embedded PNG decal pipeline, synchronous pre-decoding, direct RGB colors, and WebGL PBR/step compositing for minifigure faces and printed parts.
@@ -19,6 +19,7 @@ All architecture specifications and feature design proposals for **Brick Instruc
 - [`CONCAVE_CONTACT_AND_SUPPORT_DESIGN.md`](./CONCAVE_CONTACT_AND_SUPPORT_DESIGN.md) — Local concave sub-box collider from compiled `.dat` geometry, two-phase physical clutch verification, top-hung-safe vertical prerequisites, and zero-floating step invariants.
 - [`STEP_EDITOR_UX_DESIGN.md`](./STEP_EDITOR_UX_DESIGN.md) — Separation of concerns across `Pan`, `Select`, `Rotate`, and `Edit` (`#stepEditModal`), step-bound custom callouts, visual 3D Move/Tilt & Cube+Camera Rotate controls, Apply Camera Angle to Steps dual-handle range dialog, mobile zoom auto-hide, Proofing Table open/import dialog, and unified Step Generation menu & modal.
 - [`CUSTOM_FILE_EXTENSIONS_DESIGN.md`](./CUSTOM_FILE_EXTENSIONS_DESIGN.md) — Dedicated `.biw` project and `.biwtheme` custom theme file extensions, `brick-instruction-works-*` payload format headers, strict non-backward-compatible validation, and Safari/iOS extension preservation.
+- [`TERMINOLOGY.md`](./TERMINOLOGY.md) — UI wording convention: "parts" for elements and all counts in the editor, "pcs" only on printed manual pages, "brick" only for the category and product names.
 
 ## Conventions
 

@@ -18,7 +18,7 @@ For example, consider a long, narrow train chassis (e.g., 40–50 studs long, 4�
 
 ### Design Goals
 1. **Trigger on both Part Count *and* Physical Span / Readability**, so both high-piece-count models *and* long/wide models automatically receive tailored subdivision suggestions on import.
-2. **Offer LEGO-native subdivision strategies**—**Build Halves / Segments First**, **Modular Floors**, **Structural Modules**, **Numbered Build Bags**, and **Baseplate Sectors**—with live 3D exploded previews that work seamlessly on **both mobile portrait and desktop**.
+2. **Offer LEGO-native subdivision strategies**—**Build Halves / Segments First**, **Modular Floors**, **Structural Modules**, **Numbered Build Bags**, **Footprint Quadrants**, and **Split by Baseplate**—with live 3D exploded previews that work seamlessly on **both mobile portrait and desktop**.
 3. **Preserve all Core Design Invariants** from [`ARCHITECTURE.md`](./ARCHITECTURE.md): zero floating pieces, zero cascading layout corruption, optimal camera views, Smart Re-Import Diff compatibility, and 100% client-side Neocities static deployment.
 
 ---
@@ -130,9 +130,18 @@ Rather than relying on model-specific heuristics (such as train-only rules), sub
 *Universal fallback—valid on any model.*
 - Runs a spatially cohesive bottom-up grounded traversal, enforces per-bag single-component connectivity via `enforceConnectedPartition`, and orders bags via `orderConnectedSections` so **both** each individual bag **and** every cumulative prefix (`Bag 1 … Bag m`) are 100% connected.
 
-### Strategy E: Spatial Sectors / Baseplate Grid (`spatial_sectors`)
+### Strategy E: Footprint Quadrants (`spatial_sectors`)
 *Best for wide, flat dioramas and landscapes (`maxHoriz >= 480 LDU`, `minHoriz >= 240 LDU`).*
-- Splits into `2×2` connected quadrants via `enforceConnectedPartition` with zero floating seam pieces.
+- Splits into `2×2` connected quadrants via `enforceConnectedPartition` with zero floating seam parts.
+- Shown in the wizard as **Footprint Quadrants (N Sectors)** (formerly "Baseplate Sectors"; renamed so it is not confused with Strategy F, which follows real baseplates).
+
+### Strategy F: Split by Baseplate (`baseplates`)
+*Best for MILS modules, modular buildings on 16×32 baseplates, city/train layouts, and any model built across several baseplates.*
+- **Baseplate detection** ([`detectGroundBaseplates`](../src/engine/subdivisionAnalyzer.ts)): a part is a candidate if it is thin (`≤ 14 LDU` incl. studs) **and** either has a known baseplate ID (`3811`, `3867`, `3857`, `4186`, `10701`, road plates `44336`/`44341`/`44342`/`44343`), has "Baseplate" in its name, or spans `≥ 300 LDU` (~16×16 studs) in both horizontal directions (large plates used as bases).
+- **Ground-level only**: candidates must sit within `12 LDU` of the model's lowest point, so large plates used as upper floors are ignored. A candidate whose footprint is ≥ 50% covered by a larger ground baseplate is dropped (e.g. a 16×16 plate resting on a 32×32 baseplate).
+- **Offered when ≥ 2 ground baseplates exist**, always included in the wizard list (never trimmed by the top-4 ranking) with confidence `93`, so it is usually the recommended option for multi-baseplate models.
+- **Assignment** ([`buildBaseplateSplitProposal`](../src/engine/subdivisionAnalyzer.ts)): every part gets a footprint bucket (smallest baseplate containing its XZ center, else the nearest footprint). Per connected component: a component with one baseplate goes wholly to it; with several, each baseplate first grows (BFS) across physically connected parts in its own bucket, then leftover parts (only reachable through a neighbor's build, e.g. a bridge across the seam) are claimed by an adjacent section—preferring their own bucket—so **every section stays one connected piece** (zero floating parts). Components without any baseplate become standalone *Separate Assembly* sections.
+- **Output**: `modular_chapters`, one section per baseplate named `Baseplate N (W×L)`, numbered in reading order along the layout's long axis, exploding horizontally away from the layout center in the preview.
 
 ### Interactive Refinement Helpers
 - [`recomputeProposalWithCount`](../src/engine/subdivisionAnalyzer.ts): Re-partitions live when the user clicks `−` / `+` on the section count stepper or toggles `2×` collapse.
@@ -159,8 +168,14 @@ The upgraded `#importModal` in [`index.html`](../index.html) adapts automaticall
 - **Orbit**: 1-finger touch drag or mouse drag directly on the WebGL canvas (`WebGLBrickEngine`), reusing uploaded GPU buffers with zero re-uploads while orbiting.
 - **Tap-to-Reveal Overlay Icons**: Tapping inside the 3D preview reveals subtle circular overlay icon buttons in the top-right corner (hidden by default so the 3D model stays unobstructed):
   - **Animated Explode Toggle**: Binary exploded/assembled toggle that smoothly eases (`340 ms` cubic ease-in-out) each connected section outward along its computed `explodeOffset` vector (and collapses back cleanly). Whole-minifigure assemblies (via `extractMinifigureGroups`) ride with their host section.
-  - **Color Mode Toggle**: Switches between colorblind-safe **Section Colors** and true **Brick Colors**.
-- **Curated Wizard Proposals**: `analyzeModelSubdivisions()` offers **2-Half Longitudinal Splits**, **Horizontal Floors**, **Baseplate Sectors**, and **Natural Sub-Assemblies / Structural Modules** (alongside **Keep as Single Continuous Build**). Arbitrary 3-segment longitudinal splits and random Numbered Build Bags are excluded from wizard proposals, and confusing `~N× zoom` / redundant header chips are omitted.
+  - **Color Mode Toggle**: Switches between colorblind-safe **Section Colors** and true **Part Colors**.
+- **Curated Wizard Proposals**: `analyzeModelSubdivisions()` offers **2-Half Longitudinal Splits**, **Horizontal Floors**, **Footprint Quadrants**, **Natural Sub-Assemblies / Structural Modules**, and **Split by Baseplate** (alongside **Single Continuous Build**). Arbitrary 3-segment longitudinal splits and random Numbered Build Bags are excluded from wizard proposals, and confusing `~N× zoom` / redundant header chips are omitted.
+
+### Build Organization Picker
+The proposal chooser is a custom, theme-matched listbox (`#impProposalPicker`, rendered by `renderImportProposalPicker()` in [`studioRuntime.ts`](../src/studioRuntime.ts)) instead of a native `<select>` plus a separate description box:
+- **Trigger card** shows the selected option's title, *Recommended* badge, description, and per-section chips with their preview color and an explicit part count (e.g. `Front Half · 1,169 parts`, `×2 · 210 parts each` for collapsed identical halves).
+- **Options expand inline** below the trigger (no popover clipping inside the scrollable pane or mobile sheet). Each option includes its title, badge, description, and a summary line (`2 sections · 1,718 parts`), with a checkmark on the current choice.
+- **Accessibility**: `aria-haspopup="listbox"` / `aria-expanded` trigger, `role="listbox"` + `role="option"` + `aria-activedescendant`; ↑/↓/Home/End to move, Enter/Space to choose, Esc to close, Tab or tapping outside to dismiss.
 
 *(Note: The former "Customize Sections" inline split/merge/count-stepper panel and persistent bottom explode slider bar were intentionally removed to keep the Import Assistant clean and unobtrusive.)*
 
@@ -179,6 +194,6 @@ The upgraded `#importModal` in [`index.html`](../index.html) adapts automaticall
 | Phase | Scope | Status |
 | :--- | :--- | :--- |
 | **Phase 1: Engine Perf + Spread Guard** | Spatial hash broad-phase in `connectivity.ts` & `studioRuntime.ts`; precomputed AABB cache; spatial spread guard; 1,000-part benchmark test. | **Implemented** |
-| **Phase 2: Subdivision Analyzer & Join Chapters** | `subdivisionAnalyzer.ts` (5 strategies + 2D PCA + `2×` symmetry); `modular_chapters` & `numbered_bags` execution; `section_divider` pages in live view & PDF export. | **Implemented** |
+| **Phase 2: Subdivision Analyzer & Join Chapters** | `subdivisionAnalyzer.ts` (6 strategies incl. Split by Baseplate + 2D PCA + `2×` symmetry); `modular_chapters` & `numbered_bags` execution; `section_divider` pages in live view & PDF export. | **Implemented** |
 | **Phase 3: Mobile & Desktop 3D Import Assistant** | Responsive `#importModal` with live exploded 3D WebGL preview, touch/mouse orbit, color modes, ranked proposal cards, Menu re-entry, Undo & IndexedDB persistence. | **Implemented** |
 | **Phase 4: Multi-Booklet Export & Local-Focus Zoom** | Separate PDF booklet volumes for 1,500+ piece models; optional auto-zoom with mini-locator silhouette inset for post-join detail steps. | **Planned** |
