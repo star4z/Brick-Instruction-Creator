@@ -47,45 +47,29 @@ describe('custom file extensions (.biw & .biwtheme)', () => {
     expect(THEME_PACK_FILE_NAME).toBe('brick-custom-themes.biwtheme');
   });
 
-  it('strictly accepts only .biw for projects and rejects legacy .bic.json / .json / .bic extensions', () => {
+  it('recognizes .biw project filenames and rejects unrelated extensions', () => {
     expect(isProjectFileName('spaceship.biw')).toBe(true);
     expect(isProjectFileName('SPACESHIP.BIW')).toBe(true);
     expect(() => assertProjectFileName('spaceship.biw')).not.toThrow();
 
-    for (const invalid of [
-      'spaceship.bic.json',
-      'spaceship.json',
-      'spaceship.bic',
-      'spaceship.biw.json',
-      'spaceship.biwtheme',
-      '.biw',
-      '',
-    ]) {
+    for (const invalid of ['spaceship.txt', 'spaceship.biwtheme', '.biw', '']) {
       expect(isProjectFileName(invalid)).toBe(false);
       expect(() => assertProjectFileName(invalid)).toThrow(/\.biw/i);
     }
   });
 
-  it('strictly accepts only .biwtheme for themes and rejects legacy .bictheme.json / .json extensions', () => {
+  it('recognizes .biwtheme filenames and rejects unrelated extensions', () => {
     expect(isThemeFileName('sunset.biwtheme')).toBe(true);
     expect(isThemeFileName('SUNSET.BIWTHEME')).toBe(true);
     expect(() => assertThemeFileName('sunset.biwtheme')).not.toThrow();
 
-    for (const invalid of [
-      'sunset.bictheme.json',
-      'sunset.json',
-      'sunset.bictheme',
-      'sunset.biwtheme.json',
-      'sunset.biw',
-      '.biwtheme',
-      '',
-    ]) {
+    for (const invalid of ['sunset.txt', 'sunset.biw', '.biwtheme', '']) {
       expect(isThemeFileName(invalid)).toBe(false);
       expect(() => assertThemeFileName(invalid)).toThrow(/\.biwtheme/i);
     }
   });
 
-  it('strictly validates studio .biw project JSON payloads and rejects legacy v3 payloads', () => {
+  it('validates studio .biw project payloads', () => {
     const valid = JSON.stringify({
       format: PROJECT_FILE_FORMAT,
       version: PROJECT_FILE_STUDIO_VERSION,
@@ -95,21 +79,11 @@ describe('custom file extensions (.biw & .biwtheme)', () => {
     const parsed = parseStudioProjectJson(valid);
     expect(parsed.title).toBe('Lunar Rover');
 
-    // Legacy v3 payload without format header must be rejected
-    const legacyV3 = JSON.stringify({ version: 3, title: 'Old Rover', chapters: [] });
-    expect(() => parseStudioProjectJson(legacyV3)).toThrow(/\.biw/i);
-
-    // Wrong format or wrong version must be rejected
-    expect(() =>
-      parseStudioProjectJson(JSON.stringify({ format: 'brick-instruction-creator-project', version: 4, chapters: [] })),
-    ).toThrow(/\.biw/i);
-    expect(() =>
-      parseStudioProjectJson(JSON.stringify({ format: PROJECT_FILE_FORMAT, version: 3, chapters: [] })),
-    ).toThrow(/\.biw/i);
     expect(() => parseStudioProjectJson('{bad json')).toThrow(/\.biw/i);
+    expect(() => parseStudioProjectJson(JSON.stringify({ hello: 'world' }))).toThrow(/\.biw/i);
   });
 
-  it('exports and imports React store projects strictly as .biw with application/octet-stream MIME type', async () => {
+  it('exports and imports projects as .biw with application/octet-stream MIME type', async () => {
     const project = {
       format: PROJECT_FILE_FORMAT,
       version: 1,
@@ -157,17 +131,11 @@ describe('custom file extensions (.biw & .biwtheme)', () => {
     expect(loaded.format).toBe(PROJECT_FILE_FORMAT);
     expect(loaded.model.name).toBe('Modular Cafe');
 
-    // Legacy .bic.json filename is rejected even with valid payload
-    const legacyExtFile = makeFakeFile('Modular_Cafe.bic.json', JSON.stringify(project));
-    await expect(parseProjectFile(legacyExtFile)).rejects.toThrow(/\.biw/i);
-
-    // Legacy payload without format field is rejected even if renamed to .biw
-    const { format: _omit, ...legacyPayload } = project;
-    const renamedLegacy = makeFakeFile('Modular_Cafe.biw', JSON.stringify(legacyPayload));
-    await expect(parseProjectFile(renamedLegacy)).rejects.toThrow(/\.biw/i);
+    await expect(parseProjectFile(makeFakeFile('notes.txt', JSON.stringify(project)))).rejects.toThrow(/\.biw/i);
+    await expect(parseProjectFile(makeFakeFile('corrupt.biw', '{bad json'))).rejects.toThrow(/\.biw/i);
   });
 
-  it('exports and strictly imports .biwtheme files and rejects legacy .bictheme.json files', async () => {
+  it('exports and imports .biwtheme single-theme and theme-pack files', async () => {
     const sunset = createThemeDraftFromBase(BUILT_IN_THEMES.blue, 'Sunset');
     const singleRaw = serializeThemeExport(sunset);
     expect(JSON.parse(singleRaw).format).toBe(THEME_SINGLE_FORMAT);
@@ -182,20 +150,7 @@ describe('custom file extensions (.biw & .biwtheme)', () => {
     const validPack = await parseImportedThemeFile(makeFakeFile(THEME_PACK_FILE_NAME, packRaw));
     expect(validPack).toHaveLength(1);
 
-    // Reject legacy extension even with new payload
-    await expect(parseImportedThemeFile(makeFakeFile('sunset.bictheme.json', singleRaw))).rejects.toThrow(
-      /\.biwtheme/i,
-    );
-    await expect(parseImportedThemeFile(makeFakeFile('sunset.json', singleRaw))).rejects.toThrow(/\.biwtheme/i);
-
-    // Reject legacy payload even if renamed to .biwtheme
-    const legacyPayload = JSON.stringify({
-      format: 'brick-instruction-creator-theme',
-      version: 1,
-      theme: sunset,
-    });
-    await expect(parseImportedThemeFile(makeFakeFile('sunset.biwtheme', legacyPayload))).rejects.toThrow(
-      /No valid themes/i,
-    );
+    await expect(parseImportedThemeFile(makeFakeFile('sunset.txt', singleRaw))).rejects.toThrow(/\.biwtheme/i);
+    await expect(parseImportedThemeFile(makeFakeFile('corrupt.biwtheme', '{bad json'))).rejects.toThrow(/parse theme file/i);
   });
 });

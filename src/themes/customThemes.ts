@@ -512,8 +512,7 @@ function looksLikeThemeObject(obj: unknown): boolean {
 }
 
 /**
- * Strictly parses a Brick Instruction Works `.biwtheme` payload (single theme or
- * theme pack). Rejects legacy `.bictheme.json` and raw JSON payloads.
+ * Parses a Brick Instruction Works `.biwtheme` payload (single theme or theme pack).
  */
 export function parseImportedThemesJson(rawText: string): ManualTheme[] {
   let parsed: unknown;

@@ -1,9 +1,6 @@
 /**
- * Custom file extensions, MIME types, and strict format validators for
+ * Custom file extensions, MIME types, and format validators for
  * Brick Instruction Works project (`.biw`) and custom theme (`.biwtheme`) files.
- *
- * Strictly enforces `.biw` and `.biwtheme` without backward compatibility for
- * legacy `.bic.json`, `.bictheme.json`, or generic `.json` files.
  */
 
 export const PROJECT_FILE_EXT = '.biw';
