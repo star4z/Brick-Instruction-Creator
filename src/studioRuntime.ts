@@ -6,10 +6,6 @@
 import {
   analyzeModelSubdivisions,
   classifySubdivisionPartFlags,
-  mergeProposedSections,
-  recomputeProposalWithCount,
-  sectionsShareEdge,
-  splitProposedSection,
 } from './engine/subdivisionAnalyzer';
 import { compileDatEntry as compileLDrawDatEntry } from './engine/datCompiler';
 import {
@@ -9462,8 +9458,6 @@ let impState = {
   activeProposal: null,
   explodePct: 45,
   colorMode: 'sections', // 'sections' | 'bricks'
-  highlightedSecId: null,
-  allowRepeatCollapse: true,
   az: 38,
   el: 28,
   isPostImport: false,
@@ -9483,7 +9477,6 @@ function getPreviewPartMaps() {
   const prop = impState.activeProposal;
   const partOffsets = {};
   const partColorOverrides = impState.colorMode === 'sections' && prop ? {} : null;
-  const dimPartIds = impState.highlightedSecId && prop ? new Set() : null;
 
   if (prop && prop.sections?.length) {
     const spanRef = Math.max(160, impState.assessment?.longestSpanLdu || 320);
@@ -9492,7 +9485,6 @@ function getPreviewPartMaps() {
     const coveredIndices = new Set();
 
     prop.sections.forEach((sec) => {
-      const isHighlighted = !impState.highlightedSecId || impState.highlightedSecId === sec.id;
       const groups = sec.repeatPartIndexGroups && sec.repeatPartIndexGroups.length > 1
         ? sec.repeatPartIndexGroups
         : [sec.partIndices];
@@ -9512,7 +9504,6 @@ function getPreviewPartMaps() {
           if (!p) continue;
           if (explodeDist > 1) partOffsets[p.id] = { x: ox, y: oy, z: oz, arrow: false };
           if (partColorOverrides) partColorOverrides[p.id] = colHex;
-          if (dimPartIds && !isHighlighted) dimPartIds.add(p.id);
         }
       });
     });
@@ -9557,7 +9548,7 @@ function getPreviewPartMaps() {
       }
     }
   }
-  return { parts, partOffsets, partColorOverrides, dimPartIds };
+  return { parts, partOffsets, partColorOverrides };
 }
 
 function rebuildAndDrawImportPreview() {
@@ -9565,7 +9556,7 @@ function rebuildAndDrawImportPreview() {
   if (!canvas || !impState.parsed) return;
   if (!impPreviewEngine) impPreviewEngine = new WebGLBrickEngine(canvas);
 
-  const { parts, partOffsets, partColorOverrides, dimPartIds } = getPreviewPartMaps();
+  const { parts, partOffsets, partColorOverrides } = getPreviewPartMaps();
   impPreviewMesh = buildMeshBuffers([], parts, {
     highlightNew: false,
     fadePrev: false,
@@ -9574,7 +9565,6 @@ function rebuildAndDrawImportPreview() {
     accent: '#1a73e8',
     partOffsets,
     partColorOverrides,
-    dimPartIds,
   });
   drawImportPreviewFrame();
 }
@@ -9614,16 +9604,8 @@ function drawImportPreviewFrame() {
 
 function renderImportAssistantUI() {
   const listEl = document.getElementById('impProposalList');
-  const custWrap = document.getElementById('impCustomizeWrap');
-  const secListEl = document.getElementById('impSectionList');
   const zoomPill = document.getElementById('impZoomGainPill');
   const autoBtn = document.getElementById('impBtnAuto');
-  const granRow = document.getElementById('impGranularityRow');
-  const countVal = document.getElementById('impCountVal');
-  const identWrap = document.getElementById('impIdenticalWrap');
-  const identToggle = document.getElementById('impToggleIdentical');
-  const outModBtn = document.getElementById('impOutModular');
-  const outBagBtn = document.getElementById('impOutBags');
   const colSecBtn = document.getElementById('impColorModeSections');
   const colBrkBtn = document.getElementById('impColorModeBricks');
 
@@ -9660,13 +9642,11 @@ function renderImportAssistantUI() {
     btn.onclick = () => {
       const pid = btn.getAttribute('data-prop-id');
       impState.selectedId = pid;
-      impState.highlightedSecId = null;
       if (pid === 'none') {
         impState.activeProposal = null;
       } else {
         const found = impState.proposals.find(p => p.id === pid);
         impState.activeProposal = found ? JSON.parse(JSON.stringify(found)) : null;
-        impState.allowRepeatCollapse = Boolean(found?.hasIdenticalHalves);
       }
       renderImportAssistantUI();
       rebuildAndDrawImportPreview();
@@ -9675,13 +9655,11 @@ function renderImportAssistantUI() {
 
   const active = impState.activeProposal;
   if (!active) {
-    custWrap.classList.add('hidden');
     zoomPill.classList.add('hidden');
     autoBtn.textContent = impState.isPostImport ? 'Rebuild as Single Build' : 'Generate Manual';
     return;
   }
 
-  custWrap.classList.remove('hidden');
   if (active.zoomGainEstimate && active.zoomGainEstimate >= 1.25 && active.outputMode === 'modular_chapters') {
     zoomPill.textContent = `~${active.zoomGainEstimate}× larger bricks per step`;
     zoomPill.classList.remove('hidden');
@@ -9689,94 +9667,11 @@ function renderImportAssistantUI() {
     zoomPill.classList.add('hidden');
   }
 
-  // Output mode buttons
   const isMod = active.outputMode === 'modular_chapters';
-  outModBtn.className = `px-2.5 py-1 rounded-full transition ${isMod ? 'bg-[#1a73e8] text-white' : 'text-[var(--muted-foreground)]'}`;
-  outBagBtn.className = `px-2.5 py-1 rounded-full transition ${!isMod ? 'bg-[#1a73e8] text-white' : 'text-[var(--muted-foreground)]'}`;
-
-  // Section count stepper
   const primarySecs = active.sections.filter(s => s.role !== 'join');
-  const baseSegSecs = active.strategy === 'longitudinal_halves'
-    ? primarySecs.filter(s => !s.isDetachableCap)
-    : primarySecs;
-  const effectiveSegCount = active.hasIdenticalHalves ? 2 : Math.max(2, baseSegSecs.length);
-  countVal.textContent = String(effectiveSegCount);
-  granRow.classList.toggle('hidden', active.strategy === 'spatial_sectors');
-
-  // Show 2x Identical Halves toggle whenever longitudinal 2-half plan detected identical halves (or user toggled it off)
-  const canToggleIdentical = active.strategy === 'longitudinal_halves' && effectiveSegCount === 2 && (active.hasIdenticalHalves || impState.proposals.some(p => p.id === impState.selectedId && p.hasIdenticalHalves));
-  identWrap.classList.toggle('hidden', !canToggleIdentical || !isMod);
-  identToggle.checked = Boolean(active.hasIdenticalHalves);
-
-  // Editable sections list (tap to highlight in 3D, rename inline, 1-click Merge / Split)
-  secListEl.innerHTML = active.sections.map((sec, idx) => {
-    const isHi = impState.highlightedSecId === sec.id;
-    const isRep = sec.repeatPartIndexGroups && sec.repeatPartIndexGroups.length > 1;
-    const pcs = sec.partIndices.length;
-    const canMerge =
-      active.sections.length > 2 &&
-      idx < active.sections.length - 1 &&
-      Boolean(
-        impState.prep?.adjacency &&
-          sectionsShareEdge(sec, active.sections[idx + 1], impState.prep.adjacency),
-      );
-    const canSplit = !isRep && pcs >= 10 && active.sections.length < 8;
-    return `
-      <div data-sec-row="${sec.id}" class="flex items-center gap-2 px-2.5 py-2 rounded-2xl border transition cursor-pointer ${isHi ? 'border-[#1a73e8] bg-[#1a73e8]/10' : 'border-[var(--border)] bg-[var(--background)]'}">
-        <span class="w-3 h-3 rounded-full shrink-0 border border-black/15" style="background:${sec.previewColor}"></span>
-        <input data-sec-rename="${idx}" type="text" value="${escHtml(sec.name)}" class="flex-1 min-w-0 bg-transparent text-[11px] font-bold outline-none focus:underline" />
-        <span class="text-[10px] font-semibold text-[var(--muted-foreground)] shrink-0">${isRep ? `${sec.repeatPartIndexGroups.length}×${pcs}` : `${pcs} pcs`}</span>
-        ${canSplit ? `<button type="button" data-sec-split="${idx}" class="px-2 py-0.5 rounded-full border border-[var(--border)] bg-[var(--card)] text-[10px] font-semibold hover:border-[#1a73e8] shrink-0">Split</button>` : ''}
-        ${canMerge ? `<button type="button" data-sec-merge="${idx}" class="px-2 py-0.5 rounded-full border border-[var(--border)] bg-[var(--card)] text-[10px] font-semibold hover:border-[#1a73e8] shrink-0">Merge ↓</button>` : ''}
-      </div>`;
-  }).join('');
-
-  secListEl.querySelectorAll('[data-sec-row]').forEach((row) => {
-    row.onclick = (e) => {
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON') return;
-      const sid = row.getAttribute('data-sec-row');
-      impState.highlightedSecId = impState.highlightedSecId === sid ? null : sid;
-      renderImportAssistantUI();
-      rebuildAndDrawImportPreview();
-    };
-  });
-  secListEl.querySelectorAll('[data-sec-rename]').forEach((inp) => {
-    inp.oninput = () => {
-      const idx = parseInt(inp.getAttribute('data-sec-rename'), 10);
-      if (impState.activeProposal?.sections[idx]) {
-        impState.activeProposal.sections[idx].name = inp.value;
-      }
-    };
-  });
-  secListEl.querySelectorAll('[data-sec-merge]').forEach((btn) => {
-    btn.onclick = (e) => {
-      e.stopPropagation();
-      const idx = parseInt(btn.getAttribute('data-sec-merge'), 10);
-      if (!impState.activeProposal || !impState.prep) return;
-      impState.activeProposal = mergeProposedSections(
-        impState.activeProposal, idx, idx + 1, impState.prep.inputs, impState.prep.adjacency,
-      );
-      impState.highlightedSecId = null;
-      renderImportAssistantUI();
-      rebuildAndDrawImportPreview();
-    };
-  });
-  secListEl.querySelectorAll('[data-sec-split]').forEach((btn) => {
-    btn.onclick = (e) => {
-      e.stopPropagation();
-      const idx = parseInt(btn.getAttribute('data-sec-split'), 10);
-      if (!impState.activeProposal || !impState.prep) return;
-      impState.activeProposal = splitProposedSection(
-        impState.activeProposal, idx, impState.prep.inputs, impState.prep.adjacency,
-      );
-      impState.highlightedSecId = null;
-      renderImportAssistantUI();
-      rebuildAndDrawImportPreview();
-    };
-  });
-
+  const hasJoin = active.sections.some(s => s.role === 'join');
   const secCountLabel = isMod
-    ? `${primarySecs.length} Section${primarySecs.length === 1 ? '' : 's'} + Join`
+    ? `${primarySecs.length} Section${primarySecs.length === 1 ? '' : 's'}${hasJoin ? ' + Join' : ''}`
     : `${active.sections.length} Bags`;
   autoBtn.textContent = `${impState.isPostImport ? 'Apply' : 'Generate Manual'} (${secCountLabel})`;
 }
@@ -9793,7 +9688,6 @@ function openImportAssistant(parsed, isPostImport = false) {
   impState.isPostImport = isPostImport;
   impState.explodePct = assessment.shouldPrompt || isPostImport ? 45 : 0;
   impState.colorMode = 'sections';
-  impState.highlightedSecId = null;
   impState.az = 38;
   impState.el = 28;
 
@@ -9801,11 +9695,9 @@ function openImportAssistant(parsed, isPostImport = false) {
   if ((assessment.shouldPrompt || isPostImport) && proposals.length > 0) {
     impState.selectedId = proposals[0].id;
     impState.activeProposal = JSON.parse(JSON.stringify(proposals[0]));
-    impState.allowRepeatCollapse = Boolean(proposals[0].hasIdenticalHalves);
   } else {
     impState.selectedId = 'none';
     impState.activeProposal = null;
-    impState.allowRepeatCollapse = true;
   }
 
   document.getElementById('impTitle').textContent = isPostImport
@@ -9854,62 +9746,6 @@ document.getElementById('impColorModeBricks').onclick = () => {
   impState.colorMode = 'bricks';
   renderImportAssistantUI();
   rebuildAndDrawImportPreview();
-};
-document.getElementById('impOutModular').onclick = () => {
-  if (!impState.activeProposal) return;
-  impState.activeProposal.outputMode = 'modular_chapters';
-  impState.activeProposal.sections.forEach(s => { if (s.role === 'bag') s.role = 'module'; });
-  renderImportAssistantUI();
-};
-document.getElementById('impOutBags').onclick = () => {
-  if (!impState.activeProposal) return;
-  impState.activeProposal.outputMode = 'numbered_bags';
-  renderImportAssistantUI();
-};
-const adjustSectionCount = (delta) => {
-  const act = impState.activeProposal;
-  if (!act || !impState.prep) return;
-  const nonJoin = act.sections.filter(s => s.role !== 'join');
-  const baseSecs = act.strategy === 'longitudinal_halves' ? nonJoin.filter(s => !s.isDetachableCap) : nonJoin;
-  const currPrimary = act.hasIdenticalHalves ? 2 : Math.max(2, baseSecs.length);
-  const nextCount = Math.max(2, Math.min(8, currPrimary + delta));
-  if (nextCount === currPrimary) return;
-  const prevOut = act.outputMode;
-  const recomputed = recomputeProposalWithCount(
-    act.strategy,
-    impState.prep.inputs,
-    impState.prep.adjacency,
-    nextCount,
-    impState.allowRepeatCollapse && nextCount === 2,
-  );
-  if (recomputed) {
-    recomputed.outputMode = prevOut;
-    impState.activeProposal = recomputed;
-    impState.highlightedSecId = null;
-    renderImportAssistantUI();
-    rebuildAndDrawImportPreview();
-  }
-};
-document.getElementById('impCountMinus').onclick = () => adjustSectionCount(-1);
-document.getElementById('impCountPlus').onclick = () => adjustSectionCount(1);
-document.getElementById('impToggleIdentical').onchange = (e) => {
-  impState.allowRepeatCollapse = e.target.checked;
-  const act = impState.activeProposal;
-  if (!act || !impState.prep) return;
-  const recomputed = recomputeProposalWithCount(
-    act.strategy,
-    impState.prep.inputs,
-    impState.prep.adjacency,
-    2,
-    impState.allowRepeatCollapse,
-  );
-  if (recomputed) {
-    recomputed.outputMode = act.outputMode;
-    impState.activeProposal = recomputed;
-    impState.highlightedSecId = null;
-    renderImportAssistantUI();
-    rebuildAndDrawImportPreview();
-  }
 };
 
 function finishImport(parsed, mode, subdivisionPlan = null, isPostImport = false) {

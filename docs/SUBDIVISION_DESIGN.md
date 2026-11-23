@@ -152,14 +152,15 @@ Rather than relying on model-specific heuristics (such as train-only rules), sub
 ## 6. Mobile-First & Desktop UX
 
 The upgraded `#importModal` in [`index.html`](../index.html) adapts automatically to screen size:
-- **Mobile Portrait (`< lg`)**: Full-height bottom sheet with a touch-orbitable 3D exploded preview (`30vh`) + Explode slider pinned at the top, scrollable proposal cards and section controls below, and a sticky **Generate Manual** footer.
-- **Desktop (`lg+`)**: Responsive 2-pane modal (`max-w-4xl`) with the 3D preview on the left and ranked proposals + customization on the right.
+- **Mobile Portrait (`< lg`)**: Full-height bottom sheet with a touch-orbitable 3D exploded preview (`30vh`) + Explode slider at the top, scrollable proposal cards below, and a sticky **Generate Manual** footer.
+- **Desktop (`lg+`)**: Responsive 2-pane modal (`max-w-4xl`) with the 3D preview on the left and ranked proposals on the right.
 
 ### Live 3D Preview Controls
 - **Orbit**: 1-finger touch drag or mouse drag directly on the WebGL canvas (`WebGLBrickEngine`), reusing uploaded GPU buffers with zero re-uploads while orbiting.
 - **Explode Slider (`0%–100%`)**: Translates each connected section outward along its computed `explodeOffset` vector (pulling segments apart horizontally, keeping articulated bogie/rod joints centered on track level, lifting modular floors vertically, or separating quadrants diagonally). Whole-minifigure assemblies (via `extractMinifigureGroups`, including headgear/accessories while excluding seats/furniture) track their closest host section's `explodeOffset` so seated drivers and passengers ride inside their car instead of floating in empty space.
-- **Color Mode Toggle**: Switch between colorblind-safe **Section Colors** and true **Brick Colors** (tapping any section row dims all other sections to highlight it).
-- **Section Customization**: Toggle **Build & Connect** vs. **Numbered Bags**, adjust section count (`−` / `+`), toggle **2× Identical Halves**, rename sections inline, and 1-click **Split** or **Merge ↓** (shown only between physically touching sections).
+- **Color Mode Toggle**: Switch between colorblind-safe **Section Colors** and true **Brick Colors**.
+
+*(Note: The former "Customize Sections" inline split/merge/count-stepper panel was intentionally removed to keep the Import Assistant clean and free of vague post-hoc section editing controls.)*
 
 ---
 
@@ -176,6 +177,6 @@ The upgraded `#importModal` in [`index.html`](../index.html) adapts automaticall
 | Phase | Scope | Status |
 | :--- | :--- | :--- |
 | **Phase 1: Engine Perf + Spread Guard** | Spatial hash broad-phase in `connectivity.ts` & `studioRuntime.ts`; precomputed AABB cache; spatial spread guard; 1,000-part benchmark test. | **Implemented** |
-| **Phase 2: Subdivision Analyzer & Join Chapters** | `subdivisionAnalyzer.ts` (5 strategies + 2D PCA + `2×` symmetry + Merge/Split); `modular_chapters` & `numbered_bags` execution; `section_divider` pages in live view & PDF export. | **Implemented** |
-| **Phase 3: Mobile & Desktop 3D Import Assistant** | Responsive `#importModal` with live exploded 3D WebGL preview, touch/mouse orbit, color modes, granularity stepper, inline rename/merge/split, Menu re-entry, Undo & IndexedDB persistence. | **Implemented** |
+| **Phase 2: Subdivision Analyzer & Join Chapters** | `subdivisionAnalyzer.ts` (5 strategies + 2D PCA + `2×` symmetry); `modular_chapters` & `numbered_bags` execution; `section_divider` pages in live view & PDF export. | **Implemented** |
+| **Phase 3: Mobile & Desktop 3D Import Assistant** | Responsive `#importModal` with live exploded 3D WebGL preview, touch/mouse orbit, color modes, ranked proposal cards, Menu re-entry, Undo & IndexedDB persistence. | **Implemented** |
 | **Phase 4: Multi-Booklet Export & Local-Focus Zoom** | Separate PDF booklet volumes for 1,500+ piece models; optional auto-zoom with mini-locator silhouette inset for post-join detail steps. | **Planned** |
