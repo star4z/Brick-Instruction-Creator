@@ -209,7 +209,7 @@ function buildStaticFallbackHtml(payload: InteractiveHtmlPayload, safeEditorUrl:
               <div class="sf-meta">
                 <div class="sf-ch">${escapeHtmlText(pg.chapterName || st.label)}</div>
                 ${st.subLabel ? `<div class="sf-sub">${escapeHtmlText(st.subLabel)}</div>` : ''}
-                ${st.rotationCue ? `<span class="sf-badge">↻ ${escapeHtmlText(st.rotationCue)}</span>` : ''}
+                ${st.rotationCue ? `<span class="sf-badge sf-rot-badge"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 11.5A8.5 8.5 0 0 0 6.2 5.4L4 7.6"/><polyline points="4 3.5 4 7.6 8.1 7.6"/><path d="M3.5 12.5A8.5 8.5 0 0 0 17.8 18.6L20 16.4"/><polyline points="20 20.5 20 16.4 15.9 16.4"/></svg><span>${escapeHtmlText(st.rotationCue)}</span></span>` : ''}
               </div>
               <span class="sf-pg-num">Page ${pg.num}</span>
             </div>
@@ -493,9 +493,18 @@ export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload)
   .step-num-big { font-size: 30px; font-weight: 900; line-height: 1; letter-spacing: -0.03em; }
   .step-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .step-chapter { font-size: 11px; font-weight: 700; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+  .sf-rot-badge {
+    display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px;
+    font-size: 13px; font-weight: 800; box-shadow: 0 3px 10px rgba(0,0,0,0.16);
+  }
   .step-cue {
-    display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px;
-    background: var(--accent); color: #fff; font-size: 10px; font-weight: 800; width: fit-content;
+    display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px 4px 5px; border-radius: 999px;
+    background: #ffffff; color: #18181b; border: 2px solid var(--accent);
+    font-size: 12px; font-weight: 800; width: fit-content; box-shadow: 0 3px 10px rgba(0,0,0,0.18);
+  }
+  .step-cue-icon {
+    width: 24px; height: 24px; border-radius: 999px; background: var(--accent); color: #ffffff;
+    display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
   }
 
   .page-step-tabs { display: flex; flex-wrap: wrap; gap: 4px; }
@@ -1354,7 +1363,9 @@ ${staticFallbackHtml}
           '<div class="step-meta">' +
             '<div class="step-chapter">' + esc(pg.chapterName || step.label || '') + '</div>' +
             (step.subLabel ? '<div class="step-chapter" style="color:var(--accent)">' + esc(step.subLabel) + '</div>' : '') +
-            (step.rotationCue ? '<span class="step-cue">↻ ' + esc(step.rotationCue) + '</span>' : '') +
+            (step.rotationCue
+              ? '<span class="step-cue"><span class="step-cue-icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 11.5A8.5 8.5 0 0 0 6.2 5.4L4 7.6"/><polyline points="4 3.5 4 7.6 8.1 7.6"/><path d="M3.5 12.5A8.5 8.5 0 0 0 17.8 18.6L20 16.4"/><polyline points="20 20.5 20 16.4 15.9 16.4"/></svg></span><span>' + esc(step.rotationCue) + '</span></span>'
+              : '') +
           '</div>' +
         '</div>' +
         siblingTabs +

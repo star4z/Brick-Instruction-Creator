@@ -7,7 +7,6 @@ import {
   analyzeModelSubdivisions,
   classifySubdivisionPartFlags,
 } from './engine/subdivisionAnalyzer';
-import { DEMO_MODELS } from './data/demoModels';
 import {
   compileDatEntry as compileLDrawDatEntry,
   isDirectRgbColor,
@@ -5870,6 +5869,25 @@ function getStepCamera(step) {
   };
 }
 
+function getEffectiveStepCue(ch, step) {
+  if (!step) return 'none';
+  const steps = ch?.steps;
+  if (Array.isArray(steps)) {
+    const idx = steps.indexOf(step);
+    if (idx > 0) {
+      const prevStep = steps[idx - 1];
+      const hasCamOverride = (s) => {
+        const o = state.overrides[s?.id];
+        return Boolean(o && (o.side != null || o.corner != null || typeof o.az === 'number' || typeof o.el === 'number'));
+      };
+      if (hasCamOverride(step) || hasCamOverride(prevStep)) {
+        return computeStudioRotationCue(getStepCamera(prevStep), getStepCamera(step));
+      }
+    }
+  }
+  return step.cue || 'none';
+}
+
 function getActiveStepObj() {
   const pg = state.pages[state.pageIdx];
   if (!pg || pg.kind !== 'steps') return null;
@@ -6017,6 +6035,158 @@ function syncModePillButtons(page) {
       active ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--surface-hover)]'
     }`;
   });
+}
+
+function getRotationCueLabel(cue) {
+  if (cue === 'flip_vertical') return 'Flip Over';
+  if (cue === 'yaw_180') return 'Turn 180°';
+  return 'Rotate 90°';
+}
+
+function renderRotationCueBadgeHtml(cue, theme, typo, isTightSlot = false) {
+  if (!cue || cue === 'none') return '';
+  const label = getRotationCueLabel(cue);
+  const medallionPx = Math.max(isTightSlot ? 24 : 30, Math.round(typo.pt(isTightSlot ? 20 : 26)));
+  const svgPx = Math.max(15, Math.round(medallionPx * 0.66));
+  const fontPx = Math.max(isTightSlot ? 10 : 12, Math.round(typo.pt(isTightSlot ? 9 : 11)));
+  const padY = Math.max(3, Math.round(typo.pt(isTightSlot ? 2.5 : 3.5)));
+  const padL = Math.max(3, Math.round(typo.pt(isTightSlot ? 2.5 : 3.5)));
+  const padR = Math.max(9, Math.round(typo.pt(isTightSlot ? 7.5 : 10.5)));
+  const gapPx = Math.max(5, Math.round(typo.pt(isTightSlot ? 4.5 : 6)));
+  const borderPx = Math.max(2, Math.round(typo.pt(2.2)));
+
+  let svgInner = '';
+  if (cue === 'flip_vertical') {
+    svgInner = `
+      <path d="M5 10.5C5 6.3 8.1 3.5 12 3.5c3.9 0 7 2.8 7 7"/>
+      <polyline points="16.2 8.2 19 11 21.8 8.2"/>
+      <path d="M19 13.5c0 4.2-3.1 7-7 7-3.9 0-7-2.8-7-7"/>
+      <polyline points="7.8 15.8 5 13 2.2 15.8"/>`;
+  } else {
+    const mirror = cue === 'yaw_90_ccw' ? ' transform="translate(24 0) scale(-1 1)"' : '';
+    const pivotDot = cue === 'yaw_180' ? '<circle cx="12" cy="12" r="2.2" fill="currentColor" stroke="none"/>' : '';
+    svgInner = `<g${mirror}>
+      <path d="M20.5 11.5A8.5 8.5 0 0 0 6.2 5.4L4 7.6"/>
+      <polyline points="4 3.5 4 7.6 8.1 7.6"/>
+      <path d="M3.5 12.5A8.5 8.5 0 0 0 17.8 18.6L20 16.4"/>
+      <polyline points="20 20.5 20 16.4 15.9 16.4"/>
+      ${pivotDot}
+    </g>`;
+  }
+
+  return `<span class="inline-flex items-center font-extrabold rounded-full bg-white text-[#18181b] whitespace-nowrap shrink-0" style="gap:${gapPx}px;border:${borderPx}px solid ${theme.accent};font-size:${fontPx}px;padding:${padY}px ${padR}px ${padY}px ${padL}px;box-shadow:0 3px 10px rgba(0,0,0,0.18)" title="${label}">
+    <span class="rounded-full flex items-center justify-center shrink-0" style="width:${medallionPx}px;height:${medallionPx}px;background:${theme.accent};color:#ffffff">
+      <svg style="width:${svgPx}px;height:${svgPx}px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${svgInner}</svg>
+    </span>
+    <span class="tracking-tight leading-none">${label}</span>
+  </span>`;
+}
+
+function drawRotationCueBadgeCanvas(ctx, cue, rightX, topY, theme, typo, isTightSlot, drawRRect) {
+  if (!cue || cue === 'none') return rightX;
+  const label = getRotationCueLabel(cue);
+  const medallionD = Math.max(isTightSlot ? 24 : 30, Math.round(typo.pt(isTightSlot ? 20 : 26)));
+  const cueFont = Math.max(isTightSlot ? 10 : 12, Math.round(typo.pt(isTightSlot ? 9 : 11)));
+  const padY = Math.max(3, Math.round(typo.pt(isTightSlot ? 2.5 : 3.5)));
+  const padL = Math.max(3, Math.round(typo.pt(isTightSlot ? 2.5 : 3.5)));
+  const padR = Math.max(10, Math.round(typo.pt(isTightSlot ? 8 : 11)));
+  const gap = Math.max(5, Math.round(typo.pt(isTightSlot ? 4.5 : 6)));
+
+  ctx.save();
+  ctx.font = `800 ${cueFont}px -apple-system, BlinkMacSystemFont, sans-serif`;
+  const textW = Math.ceil(ctx.measureText(label).width);
+  const cueH = medallionD + padY * 2;
+  const cueW = padL + medallionD + gap + textW + padR;
+  const cueX = rightX - cueW;
+  const cueY = topY;
+
+  // Pill body with crisp drop shadow and accent border
+  ctx.save();
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.18)';
+  ctx.shadowBlur = 8;
+  ctx.shadowOffsetY = 2;
+  drawRRect(cueX, cueY, cueW, cueH, cueH / 2);
+  ctx.fillStyle = '#ffffff';
+  ctx.fill();
+  ctx.restore();
+
+  drawRRect(cueX, cueY, cueW, cueH, cueH / 2);
+  ctx.strokeStyle = theme.accent;
+  ctx.lineWidth = Math.max(2, typo.pt(2.2));
+  ctx.stroke();
+
+  // Solid accent circular medallion
+  const cx = cueX + padL + medallionD / 2;
+  const cy = cueY + cueH / 2;
+  const r = medallionD / 2;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fillStyle = theme.accent;
+  ctx.fill();
+
+  // Bold white dual curved arrows inside medallion
+  ctx.save();
+  ctx.translate(cx, cy);
+  if (cue === 'yaw_90_ccw') ctx.scale(-1, 1);
+  ctx.strokeStyle = '#ffffff';
+  ctx.fillStyle = '#ffffff';
+  ctx.lineWidth = Math.max(2, medallionD * 0.1);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  const ar = r * 0.56;
+  const drawArrowHead = (ax, ay, angle) => {
+    const hs = Math.max(3.2, medallionD * 0.16);
+    ctx.save();
+    ctx.translate(ax, ay);
+    ctx.rotate(angle);
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(-hs, -hs * 0.65);
+    ctx.lineTo(-hs, hs * 0.65);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  };
+
+  if (cue === 'flip_vertical') {
+    // Top arch right + bottom arch left
+    ctx.beginPath();
+    ctx.arc(0, -ar * 0.15, ar * 0.92, Math.PI * 1.12, Math.PI * 1.88, false);
+    ctx.stroke();
+    drawArrowHead(Math.cos(Math.PI * 1.88) * ar * 0.92, -ar * 0.15 + Math.sin(Math.PI * 1.88) * ar * 0.92, Math.PI * 0.42);
+
+    ctx.beginPath();
+    ctx.arc(0, ar * 0.15, ar * 0.92, Math.PI * 0.12, Math.PI * 0.88, false);
+    ctx.stroke();
+    drawArrowHead(Math.cos(Math.PI * 0.88) * ar * 0.92, ar * 0.15 + Math.sin(Math.PI * 0.88) * ar * 0.92, -Math.PI * 0.58);
+  } else {
+    // Dual opposing rotation arcs
+    ctx.beginPath();
+    ctx.arc(0, 0, ar, Math.PI * 1.15, Math.PI * 1.92, false);
+    ctx.stroke();
+    drawArrowHead(Math.cos(Math.PI * 1.92) * ar, Math.sin(Math.PI * 1.92) * ar, Math.PI * 0.42);
+
+    ctx.beginPath();
+    ctx.arc(0, 0, ar, Math.PI * 0.15, Math.PI * 0.92, false);
+    ctx.stroke();
+    drawArrowHead(Math.cos(Math.PI * 0.92) * ar, Math.sin(Math.PI * 0.92) * ar, -Math.PI * 0.58);
+
+    if (cue === 'yaw_180') {
+      ctx.beginPath();
+      ctx.arc(0, 0, Math.max(1.8, medallionD * 0.08), 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  ctx.restore();
+
+  // Bold label
+  ctx.fillStyle = '#18181b';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(label, cueX + padL + medallionD + gap, cy + 0.5);
+  ctx.restore();
+  return cueX - 8;
 }
 
 function getThemeForPage(page) {
@@ -6554,10 +6724,11 @@ function renderAll() {
                   }).join('')}
                 </div>` : '');
 
+            const effectiveCue = getEffectiveStepCue(ch, step);
             const headerBadgesHtml = [
               step.stepHint ? `<span class="font-bold rounded-full bg-white text-[#202124] shadow-xs whitespace-nowrap max-w-full truncate" style="border:1.5px solid ${theme.accent};font-size:${st.cueFont}px;padding:${Math.round(typo.pt(2))}px ${Math.round(typo.pt(6))}px">${escHtml(step.stepHint)}</span>` : '',
               step.minifigPrep ? `<span class="font-bold rounded-full bg-white text-[#202124] shadow-xs whitespace-nowrap max-w-full truncate" style="border:1.5px solid ${theme.accent};font-size:${st.cueFont}px;padding:${Math.round(typo.pt(2))}px ${Math.round(typo.pt(6))}px">↻ Prepare</span>` : '',
-              state.showRotCues && step.cue && step.cue !== 'none' ? `<span class="font-bold rounded-full bg-white text-[#202124] shadow-xs whitespace-nowrap max-w-full truncate" style="border:1.5px solid ${theme.accent};font-size:${st.cueFont}px;padding:${Math.round(typo.pt(2))}px ${Math.round(typo.pt(6))}px">↻ ${step.cue === 'flip_vertical' ? 'Flip Over' : step.cue === 'yaw_180' ? 'Turn 180°' : 'Rotate 90°'}</span>` : '',
+              state.showRotCues && effectiveCue && effectiveCue !== 'none' ? renderRotationCueBadgeHtml(effectiveCue, theme, typo, isTightSlot) : '',
             ].filter(Boolean).join('');
             const stackHeaderBadges = Boolean(headerBadgesHtml) && (isTightSlot || estSlotW < typo.pt(250));
 
@@ -6578,7 +6749,7 @@ function renderAll() {
                     ${showMfLabel ? `<span class="font-bold tracking-tight opacity-75 truncate" style="font-size:${st.pliSubNameFont}px">${escHtml(step.minifigName || `Minifigure ${step.num}`)}</span>` : ''}
                     ${pinBadgeHtml}
                   </div>
-                  ${headerBadgesHtml ? `<div class="flex items-center gap-1 shrink-0">${headerBadgesHtml}</div>` : ''}
+                  ${headerBadgesHtml ? `<div class="flex items-center gap-1.5 shrink-0">${headerBadgesHtml}</div>` : ''}
                 </div>`;
                   }
                   return stackHeaderBadges ? `
@@ -6588,7 +6759,7 @@ function renderAll() {
                       <span class="font-extrabold leading-none shrink-0" style="font-size:${stepNumPx}px">${step.num}</span>
                       ${pinBadgeHtml}
                     </div>
-                    <div class="flex items-center min-w-0 max-w-[75%] justify-end" style="gap:${Math.round(typo.pt(4))}px">${headerBadgesHtml}</div>
+                    <div class="flex items-center min-w-0 max-w-[82%] justify-end" style="gap:${Math.round(typo.pt(4))}px">${headerBadgesHtml}</div>
                   </div>
                   ${pliBoxHtml ? `<div class="min-w-0 max-w-full">${pliBoxHtml}</div>` : ''}
                 </div>` : `
@@ -6598,7 +6769,7 @@ function renderAll() {
                     ${pinBadgeHtml}
                     ${pliBoxHtml}
                   </div>
-                  ${headerBadgesHtml ? `<div class="flex items-center shrink-0 flex-wrap justify-end max-w-[45%]" style="gap:${Math.round(typo.pt(4))}px">${headerBadgesHtml}</div>` : ''}
+                  ${headerBadgesHtml ? `<div class="flex items-center shrink-0 flex-wrap justify-end max-w-[55%]" style="gap:${Math.round(typo.pt(4))}px">${headerBadgesHtml}</div>` : ''}
                 </div>`;
                 })()}
 
@@ -8467,6 +8638,7 @@ function syncMenuControls() {
   };
 
   setVisible('menuModelCard', vis.showModelCard);
+  setVisible('menuCloseModelBtn', vis.showCloseModel);
   setVisible('menuSaveProj', vis.showExportProject);
   setVisible('menuErrorsBtn', vis.showModelIssues);
   setVisible('menuPagePrintSection', vis.showPagePrintSection);
@@ -11529,27 +11701,9 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       }
 
       let badgeRightX = sx + slotW - 10;
-      if (state.showRotCues && step.cue && step.cue !== 'none') {
-        const cueLabel = step.cue === 'flip_vertical' ? '↻ Flip Over' : step.cue === 'yaw_180' ? '↻ Turn 180°' : '↻ Rotate 90°';
-        const cueFont = Math.max(10, Math.round(Math.min(pliH * 0.24, 13)));
-        ctx.font = `700 ${cueFont}px -apple-system, sans-serif`;
-        const cueW = Math.round(ctx.measureText(cueLabel).width + 18);
-        const cueH = Math.round(cueFont * 1.9);
-        const cueX = badgeRightX - cueW;
-        const cueY = sy + 12;
-        drawRRect(cueX, cueY, cueW, cueH, cueH / 2);
-        ctx.fillStyle = '#ffffff';
-        ctx.fill();
-        ctx.strokeStyle = theme.accent;
-        ctx.lineWidth = 1.6;
-        ctx.stroke();
-        ctx.fillStyle = '#202124';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(cueLabel, cueX + cueW / 2, cueY + cueH / 2 + 0.5);
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'top';
-        badgeRightX = cueX - 6;
+      const effectiveCue = getEffectiveStepCue(ch, step);
+      if (state.showRotCues && effectiveCue && effectiveCue !== 'none') {
+        badgeRightX = drawRotationCueBadgeCanvas(ctx, effectiveCue, badgeRightX, sy + 10, theme, typo, slots.length > 2, drawRRect);
       }
 
       if (step.stepHint) {
@@ -12821,8 +12975,9 @@ async function runInteractiveHtmlExport() {
             }
             pliMap.get(k).qty++;
           }
-          const cueLabel = state.showRotCues && step.cue && step.cue !== 'none'
-            ? (step.cue === 'flip_vertical' ? 'Flip Over' : step.cue === 'yaw_180' ? 'Turn 180°' : 'Rotate 90°')
+          const effectiveCue = getEffectiveStepCue(ch, step);
+          const cueLabel = state.showRotCues && effectiveCue && effectiveCue !== 'none'
+            ? getRotationCueLabel(effectiveCue)
             : undefined;
           const subLabel = step.attachedSubmodel
             ? `Attach ${step.attachedSubmodel.name} (×${step.attachedSubmodel.repeatCount || 1})`
@@ -13243,13 +13398,6 @@ const openModalImportBtn = document.getElementById('openModalImportBtn');
 if (openModalImportBtn) openModalImportBtn.onclick = triggerImport;
 const openModalLoadProjBtn = document.getElementById('openModalLoadProjBtn');
 if (openModalLoadProjBtn) openModalLoadProjBtn.onclick = triggerProjectLoad;
-const openModalSampleBtn = document.getElementById('openModalSampleBtn');
-if (openModalSampleBtn) {
-  openModalSampleBtn.onclick = () => {
-    closeOpenModelModal();
-    document.getElementById('emptySampleBtn')?.click();
-  };
-}
 
 // Errors Modal, Bottom Error Banner & Dedicated Bricks Library Screen Wiring
 document.getElementById('menuErrorsBtn').onclick = openErrorsModal;
@@ -14338,35 +14486,110 @@ document.getElementById('fileInput').onchange = async (e) => {
   await handleIncomingModelFile(file);
 };
 
-// Top-rail Export, Bricks Library, Open Project, and Welcome Sample / Dropzone handlers
+async function closeCurrentModel() {
+  if (!state.model) {
+    closeMenu();
+    return;
+  }
+  const closedTitle = state.model.title || 'model';
+  closeMenu();
+  closeStepEditModal();
+  closeBricksLibraryModal();
+  setStylePopoverOpen(false);
+  cleanupPrintAllPages();
+
+  for (const modalId of [
+    'openModelModal',
+    'exportModal',
+    'pageSetupModal',
+    'bomSetupModal',
+    'errorsModal',
+    'overviewModal',
+    'importModal',
+    'missingPartsModal',
+    'errorBanner',
+  ]) {
+    const el = document.getElementById(modalId);
+    if (el) el.classList.add('hidden');
+  }
+
+  if (activeLiveEngine) {
+    activeLiveEngine.dispose();
+    activeLiveEngine = null;
+  }
+  currentSlotRenderInfo.clear();
+
+  clearTimeout(savePrefsTimer);
+  savePrefsTimer = null;
+  lastSourceRecord = null;
+  pendingRawFile = null;
+
+  embeddedDatRaw.clear();
+  embeddedDatTitles.clear();
+  embeddedDatCompiled.clear();
+  compositePartDefs.clear();
+  pliThumbCache.clear();
+  submodelThumbCache.clear();
+  clearMinifigDiagramCaches();
+  textureStore.clearEmbedded();
+
+  state.model = null;
+  state.pages = [];
+  state.pageIdx = 0;
+  state.mode = 'pan';
+  state.selectedStepId = null;
+  state.selectedPartIds.clear();
+  state.selectedArrangeEl = null;
+  state.overrides = {};
+  state.pageInserts = {};
+  state.dividerAfter = {};
+  state.layoutGroups = [];
+  state.layout = 'auto';
+  state.layoutConfig = createDefaultPageLayoutSpec();
+  state.coverMeta = createDefaultCoverMeta();
+  state.completeMeta = {
+    title: 'Build Complete!',
+    subtitle: 'Ready for display!',
+    az: 315,
+    el: 28,
+    bgSrc: null,
+    showText: true,
+    showFireworks: true,
+  };
+  state.backMeta = {
+    title: '',
+    subtitle: 'Made with Brick Instruction Works',
+    az: 38,
+    el: 24,
+    bgSrc: null,
+  };
+  state.bomShortcutVisible = false;
+  state.pendingImport = null;
+  state.undoStack = [];
+  state.redoStack = [];
+  state.diagnostics = [];
+  state.seenDiagnosticKeys = new Set();
+
+  const frame = document.getElementById('pageFrame');
+  if (frame) frame.innerHTML = '';
+
+  resetZoom();
+  renderAll();
+  try {
+    await dbDelete('lastModel');
+  } catch (_) {}
+  showToast(`Closed ${closedTitle}.`);
+}
+
+// Top-rail Export, Bricks Library, Import Project, Close Model, and Dropzone handlers
+const menuCloseModelBtnEl = document.getElementById('menuCloseModelBtn');
+if (menuCloseModelBtnEl) menuCloseModelBtnEl.onclick = closeCurrentModel;
 const btnHeaderExportEl = document.getElementById('btnHeaderExport');
 if (btnHeaderExportEl) btnHeaderExportEl.onclick = openExportModal;
 const headerBricksLibBtnEl = document.getElementById('headerBricksLibBtn');
 if (headerBricksLibBtnEl) headerBricksLibBtnEl.onclick = () => openBricksLibraryModal();
 const headerLoadProjBtnEl = document.getElementById('headerLoadProjBtn');
 if (headerLoadProjBtnEl) headerLoadProjBtnEl.onclick = triggerProjectLoad;
-const emptyLoadProjBtnEl = document.getElementById('emptyLoadProjBtn');
-if (emptyLoadProjBtnEl) emptyLoadProjBtnEl.onclick = triggerProjectLoad;
-
-const emptySampleBtnEl = document.getElementById('emptySampleBtn');
-if (emptySampleBtnEl) {
-  emptySampleBtnEl.onclick = async () => {
-    const sample = DEMO_MODELS[0];
-    if (!sample) return;
-    showToast(`Loading sample: ${sample.name}…`);
-    try {
-      embeddedDatRaw.clear(); embeddedDatTitles.clear(); embeddedDatCompiled.clear(); compositePartDefs.clear(); pliThumbCache.clear(); submodelThumbCache.clear(); clearMinifigDiagramCaches();
-      textureStore.clearEmbedded();
-      const sampleFileName = `${sample.id}.ldr`;
-      pendingRawFile = { kind: 'ldr', fileName: sampleFileName, data: sample.ldrawSource };
-      const parsed = parseImportedModel(sample.ldrawSource, '', sampleFileName);
-      await textureStore.predecodeAllPending();
-      proceedAfterMissingPartsCheck(parsed, { skipAutoFetch: true });
-    } catch (err) {
-      showToast(err?.message || 'Could not load sample model.');
-    }
-  };
-}
 
 const emptyStateEl = document.getElementById('emptyState');
 const emptyDropZoneEl = document.getElementById('emptyDropZone');

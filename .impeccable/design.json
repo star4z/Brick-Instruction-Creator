@@ -507,8 +507,8 @@
       "name": "Secondary Archival Button",
       "kind": "button",
       "refersTo": "button-secondary",
-      "description": "Archival paper secondary button framed by a crisp mineral hairline for sample loads and sheet actions.",
-      "html": "<button type=\"button\" class=\"ds-btn-secondary\"><svg class=\"ds-btn-accent-icon\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><polygon points=\"6 4 20 12 6 20 6 4\"/></svg><span>Load Sample Model</span></button>",
+      "description": "Archival paper secondary button framed by a crisp mineral hairline for importing saved projects and sheet actions.",
+      "html": "<button type=\"button\" class=\"ds-btn-secondary\"><svg class=\"ds-btn-accent-icon\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.1\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z\"/><polyline points=\"14 2 14 8 20 8\"/><path d=\"M12 18v-6\"/><path d=\"m9 15 3-3 3 3\"/></svg><span>Import Project</span></button>",
       "css": ".ds-btn-secondary { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 44px; padding: 0 20px; border: 1px solid var(--border-strong, #aeada4); border-radius: 999px; background: var(--card, #faf9f6); color: var(--foreground, #1b1a18); font-family: var(--font-sans, \"Public Sans\", sans-serif); font-size: 14px; font-weight: 600; cursor: pointer; transition: background-color 150ms ease; } .ds-btn-secondary:hover { background: var(--surface-hover, #e2e1da); } .ds-btn-secondary:focus-visible { outline: 2px solid var(--primary, #c9341b); outline-offset: 2px; } .ds-btn-accent-icon { width: 16px; height: 16px; color: var(--primary, #c9341b); flex-shrink: 0; }"
     },
     {

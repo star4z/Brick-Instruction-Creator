@@ -228,19 +228,19 @@ export async function exportManualToPdf(
         doc.setFontSize(Math.round(22 * theme.stepNumberScale));
         doc.text(`${step.stepNumber}`, sx + 5, sy + 13);
 
-        // Rotation cue text pill
+        // Prominent rotation cue badge
         if (theme.showRotationIndicators && step.rotationCue !== 'none') {
           doc.setFillColor(...accentRgb);
-          doc.roundedRect(sx + slotW - 28, sy + 4, 24, 7, 1.5, 1.5, 'F');
+          doc.roundedRect(sx + slotW - 36, sy + 3.5, 32, 10, 5, 5, 'F');
           doc.setTextColor(255, 255, 255);
-          doc.setFontSize(7.5);
+          doc.setFontSize(9.5);
           const cueLabel =
             step.rotationCue === 'flip_vertical'
-              ? 'FLIP 180°'
+              ? 'FLIP OVER'
               : step.rotationCue === 'yaw_180'
                 ? 'TURN 180°'
                 : 'ROTATE 90°';
-          doc.text(cueLabel, sx + slotW - 16, sy + 8.8, { align: 'center' });
+          doc.text(cueLabel, sx + slotW - 20, sy + 9.8, { align: 'center' });
         }
 
         // PLI box
