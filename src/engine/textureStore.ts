@@ -73,6 +73,36 @@ export function extractBase64FromPeTexInfoLine(line: string): string | null {
   return last;
 }
 
+/**
+ * Extracts referenced image filenames (e.g. `3626cpx0a.png`) from LDraw
+ * `0 !TEXMAP START|NEXT PLANAR|CYLINDRICAL|SPHERICAL ... <file.png>` directives.
+ */
+export function extractTexmapTextureNamesFromLines(lines: string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    if (l.length < 18 || l[0] !== '0' || !/!TEXMAP/i.test(l)) continue;
+    const m = l.match(/^0\s+!TEXMAP\s+(?:START|NEXT)\s+(PLANAR|CYLINDRICAL|SPHERICAL)\s+(.+)$/i);
+    if (!m) continue;
+    const method = m[1].toUpperCase();
+    const paramCount = method === 'PLANAR' ? 9 : method === 'CYLINDRICAL' ? 10 : 11;
+    const rest = m[2].trim().split(/\s+/);
+    if (rest.length <= paramCount) continue;
+    let rawTex = rest[paramCount];
+    if (rawTex.startsWith('"')) {
+      const qm = rest.slice(paramCount).join(' ').match(/^"([^"]+)"/);
+      if (qm) rawTex = qm[1];
+    }
+    const norm = normalizeTextureName(rawTex);
+    if (norm && /\.(png|jpg|jpeg|webp)$/i.test(norm) && !seen.has(norm)) {
+      seen.add(norm);
+      out.push(norm);
+    }
+  }
+  return out;
+}
+
 class EmbeddedTextureStore {
   private byKey = new Map<string, TextureRecord>();
   private byName = new Map<string, string>();

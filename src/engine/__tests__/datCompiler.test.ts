@@ -7,6 +7,7 @@ import {
 } from '../datCompiler';
 import {
   extractBase64FromPeTexInfoLine,
+  extractTexmapTextureNamesFromLines,
   hashTextureBase64,
   normalizeTextureName,
   textureStore,
@@ -655,5 +656,17 @@ describe('textureStore — embedded PNG deduplication and scanning', () => {
     expect(normalizeTextureName('ldraw\\parts\\textures\\3626cpx0a.png')).toBe('3626cpx0a.png');
     expect(textureStore.lookupByName('3626cpx0a.png')?.texKey).toBe(namedKey);
     textureStore.clearAll();
+  });
+
+  it('extracts and deduplicates PNG filenames from LDraw !TEXMAP START and NEXT directives', () => {
+    const names = extractTexmapTextureNamesFromLines([
+      '0 Minifig Head with !TEXMAP',
+      '0 !TEXMAP START PLANAR -13 0 10 13 0 10 -13 21 10 3626cpx0a.png',
+      '0 !: 1 16 0 0 0 1 0 0 0 1 0 0 0 1 s/3626cpx0s01.dat',
+      '0 !TEXMAP NEXT CYLINDRICAL 0 0 0 0 -24 0 0 0 -10 180 "textures/3626cpx0b.png" GLOSSMAP g.png',
+      '0 !TEXMAP START SPHERICAL 0 0 0 0 -10 0 0 0 -10 180 90 parts\\textures\\3626cpx0a.png',
+      '0 !TEXMAP END',
+    ]);
+    expect(names).toEqual(['3626cpx0a.png', '3626cpx0b.png']);
   });
 });

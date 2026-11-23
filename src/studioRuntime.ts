@@ -11,7 +11,11 @@ import {
   compileDatEntry as compileLDrawDatEntry,
   isDirectRgbColor,
 } from './engine/datCompiler';
-import { textureStore } from './engine/textureStore';
+import {
+  extractTexmapTextureNamesFromLines,
+  normalizeTextureName,
+  textureStore,
+} from './engine/textureStore';
 import {
   classifyDetachedPart,
   computeGroundPlaneY,
@@ -753,8 +757,9 @@ function scheduleTextureReadyRerender() {
   }, 60);
 }
 
-// Fast recursive LDraw .dat compiler (checks embedded .io model2.ldr first, then user-imported LDraw Library!)
-function lookupEmbeddedDat(ref, allowVirtual = true) {
+// Exact raw .dat lookup (WITHOUT falling back to unprinted base molds like 3626c)
+// Used by fetchMissingPartsOnline so printed heads/torsos in .ldr files are fetched even when blank 3626c is cached.
+function lookupExactRawDat(ref) {
   const k = normId(ref);
   const stripped = k.replace(/^(48|8|s)\//, '');
   const base = k.split('/').pop();
@@ -769,6 +774,14 @@ function lookupEmbeddedDat(ref, allowVirtual = true) {
     if (store.has(stripped)) return { key: stripped, lines: store.get(stripped), offset: null };
     if (store.has(base)) return { key: base, lines: store.get(base), offset: null };
   }
+  return null;
+}
+
+// Fast recursive LDraw .dat compiler (checks embedded .io model2.ldr first, then user-imported LDraw Library!)
+function lookupEmbeddedDat(ref, allowVirtual = true) {
+  const exact = lookupExactRawDat(ref);
+  if (exact) return exact;
+  const k = normId(ref);
   const fbs = getPartIdFallbacks(k);
   const offset = isBrickLinkTorsoAssemblyId(k) ? [-20, -32, 10] : null;
   if (fbs.length > 0) {
@@ -7747,7 +7760,15 @@ async function loadSavedBricksLibrary() {
       req.onsuccess = (e) => {
         const cursor = e.target.result;
         if (cursor) {
-          registerUserLibDat(cursor.key, cursor.value);
+          const key = String(cursor.key || '');
+          if (key.startsWith('__tex__:')) {
+            const texName = key.slice(8);
+            if (typeof cursor.value === 'string') {
+              textureStore.registerBase64Texture(cursor.value, { name: texName, source: 'library' });
+            }
+          } else {
+            registerUserLibDat(key, cursor.value);
+          }
           cursor.continue();
         } else res();
       };
@@ -7809,13 +7830,25 @@ async function importBricksLibraryFiles(fileList) {
           }
           ptr += 46 + nameLen + extraLen + commentLen;
         }
+        const texToStore = [];
         for (const ent of texEntries) {
           try {
             const u8 = await readZipEntryBytes(bytes, view, ent);
             if (u8.length > 24) {
-              textureStore.registerBase64Texture(bytesToBase64(u8), { name: ent.name, source: 'library' });
+              const b64 = bytesToBase64(u8);
+              const normName = normalizeTextureName(ent.name);
+              textureStore.registerBase64Texture(b64, { name: normName, source: 'library' });
+              if (normName) texToStore.push([`__tex__:${normName}`, b64]);
             }
           } catch (_) {}
+        }
+        if (db && texToStore.length) {
+          await new Promise((res) => {
+            const tx = db.transaction(LIB_STORE, 'readwrite');
+            const st = tx.objectStore(LIB_STORE);
+            for (const [k, b64] of texToStore) st.put(b64, k);
+            tx.oncomplete = () => res(); tx.onerror = () => res();
+          });
         }
         // Batch write to IndexedDB in chunks of 250 for speed & stability
         for (let i = 0; i < datEntries.length; i += 250) {
@@ -7883,7 +7916,9 @@ function getSelectedPublicLibBases() {
 async function fetchDatFromPublicMirrors(normKey, bases) {
   const tryKeys = [normKey, ...getPartIdFallbacks(normKey)];
   let sawNetworkError = false;
-  for (const key of tryKeys) {
+  for (let ki = 0; ki < tryKeys.length; ki++) {
+    const key = tryKeys[ki];
+    if (ki > 0 && lookupExactRawDat(key)) break;
     const clean = key.replace(/\.dat$/i, '');
     const paths = clean.startsWith('s/')
       ? [`parts/${clean}.dat`, `${clean}.dat`]
@@ -7908,6 +7943,27 @@ async function fetchDatFromPublicMirrors(normKey, bases) {
     }
   }
   return { text: null, resolvedKey: normKey, networkBlocked: sawNetworkError };
+}
+
+async function fetchTextureFromPublicMirrors(texName, bases) {
+  const clean = normalizeTextureName(texName);
+  if (!clean) return null;
+  const paths = [`parts/textures/${clean}`, `textures/${clean}`, clean];
+  for (const base of bases) {
+    for (const rel of paths) {
+      try {
+        const res = await fetch(base + rel, { mode: 'cors' });
+        if (res.ok) {
+          const ab = await res.arrayBuffer();
+          const u8 = new Uint8Array(ab);
+          if (u8.length > 24) {
+            return { normName: clean, base64: bytesToBase64(u8) };
+          }
+        }
+      } catch (_) {}
+    }
+  }
+  return null;
 }
 
 let libHighlightTimer = null;
@@ -7936,45 +7992,68 @@ function scrollMenuToBricksLibrary(highlight = true) {
   }
 }
 
-async function fetchMissingPartsOnline() {
+let fetchPartsInFlight = false;
+async function fetchMissingPartsOnline(fetchOpts = {}) {
+  const silent = Boolean(fetchOpts && fetchOpts.silent);
+  if (fetchPartsInFlight) return;
+  fetchPartsInFlight = true;
   const progWrap = document.getElementById('libProgressWrap');
   const progLabel = document.getElementById('libProgressLabel');
   const progPct = document.getElementById('libProgressPct');
   const progBar = document.getElementById('libProgressBar');
-  progWrap.classList.remove('hidden');
-  progLabel.textContent = 'Checking missing parts…';
-  progPct.textContent = '0%';
-  progBar.style.width = '0%';
-  scrollMenuToBricksLibrary(false);
+  if (!silent) {
+    progWrap.classList.remove('hidden');
+    progLabel.textContent = 'Checking missing parts…';
+    progPct.textContent = '0%';
+    progBar.style.width = '0%';
+    scrollMenuToBricksLibrary(false);
+  }
 
-  // Gather missing leaf part IDs from current model (or starter set if no model loaded)
+  // Gather missing leaf part IDs + !TEXMAP PNG filenames from current model (or starter set if no model loaded)
   const queue = [];
   const queued = new Set();
   const visitedLoaded = new Set();
+  const texQueue = [];
+  const texQueued = new Set();
+
+  const enqueueTex = (texName) => {
+    const clean = normalizeTextureName(texName);
+    if (!clean || texQueued.has(clean) || textureStore.lookupByName(clean)) return;
+    texQueued.add(clean);
+    texQueue.push(clean);
+  };
+
+  const scanLinesForRefs = (lines) => {
+    for (const rawLine of lines) {
+      const tr = rawLine.trim();
+      const unwrapped = /^0\s+!:\s*/.test(tr) ? tr.replace(/^0\s+!:\s*/, '').trim() : tr;
+      if (/^1\s/.test(unwrapped)) {
+        const toks = unwrapped.split(/\s+/);
+        if (toks.length >= 15) enqueue(toks.slice(14).join(' '));
+      }
+    }
+    for (const tn of extractTexmapTextureNamesFromLines(lines)) enqueueTex(tn);
+  };
+
   const enqueue = (rawId) => {
     const k = normId(rawId);
     const base = k.split('/').pop();
     if (!k || queued.has(k)) return;
     // Skip standard studs/arcs/rects we already synthesize procedurally at high speed!
     if (/^(stud|stud2|stud2a|stud3|stud3a|stud4|stud4a|studp01|rect|rect2p|\d+-\d+(cyli|cylo|cylc|disc|edge|ring\d+|rin\d+|chrd|ndis))$/.test(base)) return;
-    // If already loaded as a real .dat (not a virtual synthesis), walk its nested type-1 subparts so partial shortcuts still fetch missing children!
-    const existing = lookupEmbeddedDat(k, false);
+    // Check EXACT raw .dat (NOT unprinted fallback!) so printed heads like 3626cp01 are still fetched even when 3626c is cached!
+    const existing = lookupExactRawDat(k);
     if (existing) {
       if (!visitedLoaded.has(existing.key)) {
         visitedLoaded.add(existing.key);
-        for (const line of existing.lines) {
-          const tr = line.trim();
-          if (/^1\s/.test(tr)) {
-            const toks = tr.split(/\s+/);
-            if (toks.length >= 15) enqueue(toks.slice(14).join(' '));
-          }
-        }
+        scanLinesForRefs(existing.lines);
       }
       return;
     }
-    // BrickLink-proprietary printed/prefixed IDs (bl_*, *-bl, *pb####*, *_torso) never exist verbatim
-    // in official LDraw mirrors — directly enqueue their canonical unprinted base LDraw ID!
-    if (!k.includes('/') && /^(?:bl_|.*-bl$|.*(?:pb|ps|pat|pr)\d+|.*_torso$)/i.test(k)) {
+    // BrickLink-proprietary printed/prefixed IDs (bl_*, *-bl, *pb####* with 3+ digits, *_torso) never exist verbatim
+    // in official LDraw mirrors — enqueue their canonical unprinted base LDraw ID instead, while keeping
+    // 1-2 digit official LDraw pattern codes (e.g. 3626cpb6, 3626cpb7, 3626cp01) eligible for direct fetch!
+    if (!k.includes('/') && /^(?:bl_|.*-bl$|.*(?:pb|ps|pat|pr)\d{3,}|.*_torso$)/i.test(k)) {
       const fbs = getPartIdFallbacks(k);
       if (fbs.length > 0) {
         enqueue(fbs[0]);
@@ -7996,15 +8075,18 @@ async function fetchMissingPartsOnline() {
     ['3001','3002','3003','3004','3005','3020','3021','3022','3023','3024','3069b','3070b','3040b','4073','4733'].forEach(enqueue);
   }
 
-  if (queue.length === 0) {
-    progWrap.classList.add('hidden');
-    showToast('All parts in this model already have 3D shapes loaded!');
+  if (queue.length === 0 && texQueue.length === 0) {
+    if (!silent) {
+      progWrap.classList.add('hidden');
+      showToast('All parts in this model already have 3D shapes loaded!');
+    }
+    fetchPartsInFlight = false;
     return;
   }
 
   const bases = getSelectedPublicLibBases();
   const db = await openSessionDB().catch(() => null);
-  let fetched = 0, processed = 0, blocked = 0;
+  let fetched = 0, fetchedTex = 0, processed = 0, blocked = 0;
 
   // Bounded BFS over parts + their nested subparts/primitives (concurrency = 6)
   try {
@@ -8023,14 +8105,7 @@ async function fetchMissingPartsOnline() {
           registerUserLibDat(storeKey, r.text);
           toStore.push([storeKey, r.text]);
           fetched++;
-          // Enqueue any referenced subparts / primitives inside this .dat!
-          for (const line of r.text.split(/\r?\n/)) {
-            const tr = line.trim();
-            if (/^1\s/.test(tr)) {
-              const toks = tr.split(/\s+/);
-              if (toks.length >= 15) enqueue(toks.slice(14).join(' '));
-            }
-          }
+          scanLinesForRefs(r.text.split(/\r?\n/));
         } else if (r.networkBlocked) {
           blocked++;
         }
@@ -8047,30 +8122,64 @@ async function fetchMissingPartsOnline() {
 
       // If first batch is completely blocked by sandbox CSP / offline, stop early and guide user clearly
       if (processed <= 6 && fetched === 0 && blocked === batch.length) {
-        progWrap.classList.add('hidden');
-        showToast('Online fetch is blocked in this preview sandbox (works on Neocities / web). Use Import .zip / .dat here.');
+        if (!silent) {
+          progWrap.classList.add('hidden');
+          showToast('Online fetch is blocked in this preview sandbox (works on Neocities / web). Use Import .zip / .dat here.');
+        }
         return;
       }
 
-      const pct = Math.min(99, Math.round((processed / Math.max(1, queue.length)) * 100));
-      progLabel.textContent = `Fetched ${fetched} part${fetched === 1 ? '' : 's'} (${processed}/${queue.length})…`;
-      progPct.textContent = pct + '%';
-      progBar.style.width = pct + '%';
+      if (!silent) {
+        const pct = Math.min(99, Math.round((processed / Math.max(1, queue.length)) * 100));
+        progLabel.textContent = `Fetched ${fetched} part${fetched === 1 ? '' : 's'} (${processed}/${queue.length})…`;
+        progPct.textContent = pct + '%';
+        progBar.style.width = pct + '%';
+      }
+    }
+
+    // Fetch any LDraw !TEXMAP PNG textures referenced by newly or previously loaded .dat files
+    if (texQueue.length > 0) {
+      const texToStore = [];
+      for (let i = 0; i < texQueue.length && i < 120; i += 6) {
+        const tBatch = texQueue.slice(i, i + 6);
+        const tRes = await Promise.all(tBatch.map((tn) => fetchTextureFromPublicMirrors(tn, bases)));
+        for (const tr of tRes) {
+          if (tr && tr.base64) {
+            textureStore.registerBase64Texture(tr.base64, { name: tr.normName, source: 'library' });
+            texToStore.push([`__tex__:${tr.normName}`, tr.base64]);
+            fetchedTex++;
+          }
+        }
+      }
+      if (db && texToStore.length) {
+        await new Promise((res) => {
+          const tx = db.transaction(LIB_STORE, 'readwrite');
+          const st = tx.objectStore(LIB_STORE);
+          for (const [k, b64] of texToStore) st.put(b64, k);
+          tx.oncomplete = () => res(); tx.onerror = () => res();
+        });
+      }
     }
 
     await textureStore.predecodeAllPending();
-    embeddedDatCompiled.clear(); pliThumbCache.clear(); submodelThumbCache.clear(); clearMinifigDiagramCaches(); coverHeroCache.clear();
-    updateLibraryStatusUI();
-    if (state.model) {
-      if (fetched > 0 && state.model._parsed) state.model = buildManualFromParsed(state.model._parsed, state.model._mode || 'auto', state.model._subdivisionPlan || null);
-      computeModelDiagnostics();
-      renderAll();
+    if (fetched > 0 || fetchedTex > 0) {
+      embeddedDatCompiled.clear(); pliThumbCache.clear(); submodelThumbCache.clear(); clearMinifigDiagramCaches(); coverHeroCache.clear();
+      updateLibraryStatusUI();
+      if (state.model) {
+        if (fetched > 0 && state.model._parsed) state.model = buildManualFromParsed(state.model._parsed, state.model._mode || 'auto', state.model._subdivisionPlan || null);
+        computeModelDiagnostics();
+        renderAll();
+      }
     }
-    showToast(fetched > 0
-      ? `Fetched ${fetched} part shape${fetched === 1 ? '' : 's'} from public LDraw library.`
-      : 'No matching parts found at that public source.');
+    if (!silent) {
+      const totalFetched = fetched + fetchedTex;
+      showToast(totalFetched > 0
+        ? `Fetched ${fetched} part shape${fetched === 1 ? '' : 's'}${fetchedTex > 0 ? ` and ${fetchedTex} decal texture${fetchedTex === 1 ? '' : 's'}` : ''} from public LDraw library.`
+        : 'No matching parts found at that public source.');
+    }
   } finally {
-    progWrap.classList.add('hidden');
+    fetchPartsInFlight = false;
+    if (!silent) progWrap.classList.add('hidden');
   }
 }
 
@@ -8481,6 +8590,7 @@ async function restoreLastSessionOnStart() {
     computeModelDiagnostics();
     resetZoom();
     renderAll();
+    if (rec.kind === 'ldr') void fetchMissingPartsOnline({ silent: true });
     showToast(`Reloaded ${state.model.title}`);
     if (getMenuIconErrorBadgeCount(state.diagnostics, state.seenDiagnosticKeys) > 0) showImportErrorBanner();
   } catch (_) {
@@ -10388,6 +10498,9 @@ function finishImport(parsed, mode, subdivisionPlan = null, isPostImport = false
     : '';
   showToast(`${isPostImport ? 'Updated' : 'Imported'} ${parsed.title} (${parsed.parts.length} pieces, ${steps.length} steps${subSummary}).`);
   if (!isPostImport && state.diagnostics.length > 0) showImportErrorBanner();
+  if (!isPostImport && lastSourceRecord?.kind === 'ldr') {
+    void fetchMissingPartsOnline({ silent: true });
+  }
 }
 
 document.getElementById('impBtnAuto').onclick = () => {

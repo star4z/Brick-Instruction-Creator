@@ -41,3 +41,16 @@ Previously, the `.dat` compiler ignored `0 PE_TEX_*` directives, discarded trail
   - Indexes `0 BL_Item_No <id>` aliases and checks `bl_*` / `*-bl` keys before falling back to unprinted base molds.
   - Prevents `.mpd` flattening from splitting `.dat` parts containing `PE_TEX_INFO` / `PE_TEX_PATH` / `!TEXMAP` into separate sub-parts.
   - Expands the LDraw `COLORS` table with the full standard `LDConfig` palette (skin tones, coral, pinks, metallics, sand colors) so polygon-printed faces never silently fall back to base head color.
+
+### 4. Standalone `.ldr` & `.mpd` Printed Face Support
+- **Exact-Match Online Fetching (`fetchMissingPartsOnline`)**:
+  - Uses `lookupExactRawDat(k)` (without unprinted base-mold fallback) when checking whether a part is already loaded, so official LDraw printed heads and torsos (e.g., `3626cp01`, `3626bp8a`, `3626cpx0`) are fetched verbatim even when the unprinted base mold (`3626c`) is already cached.
+  - Restricts BrickLink-proprietary ID skipping to 3+ digit pattern codes (`(?:pb|ps|pat|pr)\d{3,}`), allowing 1–2 digit official LDraw pattern IDs (e.g., `3626cpb6`, `3626cpb7`) to download directly from public LDraw mirrors.
+  - Avoids redundant re-downloads of already-cached fallback base molds in `fetchDatFromPublicMirrors`.
+- **`!TEXMAP` PNG Fetching & IndexedDB Persistence**:
+  - Scans both `1 ...` and `0 !: 1 ...` subfile references plus `0 !TEXMAP START|NEXT` image filenames (`extractTexmapTextureNamesFromLines`), downloads referenced `parts/textures/*.png` files via `fetchTextureFromPublicMirrors`, registers them in `textureStore`, and persists them in IndexedDB (`LIB_STORE` under `__tex__:<normName>`) alongside imported library `.png` textures.
+- **Silent Auto-Fetch on `.ldr` / `.mpd` Load & Session Restore**:
+  - Automatically triggers `fetchMissingPartsOnline({ silent: true })` (guarded by `fetchPartsInFlight`) after importing or restoring a `.ldr`/`.mpd` file so official LDraw printed faces appear without manual intervention.
+- **Format Boundary for BrickLink-Proprietary `pb####` Parts in Plain `.ldr`**:
+  - Plain `.ldr` files exported from BrickLink Studio reference proprietary part IDs (such as `3626cpb2451.dat` or `3626pb3988.dat`) without embedding Studio's `PE_TEX_INFO` PNG decals, and those proprietary PNGs are not hosted on official LDraw mirrors. Users who need those faces can either open the `.io` file directly (which bundles `model2.ldr` + embedded PNGs) or import their local Studio custom `.dat` files (or a `.zip` archive of them) once via **Menu → Bricks Library → Import .zip / .dat**.
+
