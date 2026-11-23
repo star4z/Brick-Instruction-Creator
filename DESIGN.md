@@ -312,13 +312,13 @@ Surfaces are completely opaque and use a restrained hybrid of tonal paper shifts
 
 Form language combines crisp floating pills for stage-overlay controls with architectural sheets for dialogs and printed artifacts:
 
-- **Micro (`2px`):** Swatch chips, rotated popover tail top-left tip (`border-top-left-radius: 2px`), and the `2×2` brick plate outline inside `public/logo.svg`.
+- **Micro (`2px`):** Swatch chips and rotated popover tail top-left tip (`border-top-left-radius: 2px`).
 - **Small (`4px`, `rounded`):** Inline monospace badges and file/status tags.
 - **Medium (`6px`, `rounded-md`):** Modal footer buttons, setup option grids, and compact numeric controls.
 - **Large (`8px`, `rounded-lg`):** Full-width drawer/export action buttons, text inputs, select dropdowns, drawer summary bands, and theme preview cards.
 - **Extra-Large (`12px`, `rounded-xl` / `rounded-t-xl`):** Welcome `.proof-sheet-frame`, floating modal sheets, and the anchored `#stylePopover` body.
 - **Full (`999px`, `rounded-full`):** Floating studio pills (`.studio-pill`, `#btnOpenMenu`, `#desktopModelChip`, `#headerEmptyActions`, `#topRightPills`, `#modePill`, Page & Zoom pill, hero welcome CTAs, `#errorBanner`, `#toast`), progress bar tracks, `7px` scrollbar thumbs, `8px` status dots, and circular error count badges.
-- **Geometric Emblem (`public/logo.svg`):** A `64×64` square mark with outer registration crop ticks framing a `36×36` (`rx="2"`) `2×2` archival-paper brick plate bearing four `r="5"` studs: top-left filled registration vermilion (`#C9341B`), top-right and bottom-left outlined carbon ink, bottom-right filled carbon ink (`#1B1A18`). At `20px` in the desktop identity pill, the outer crop ticks are dropped for optical clarity.
+- **Brand Emblem (`public/logo.svg`):** The restored `64×64` three-plume mark tilted `12°` around `(32, 32)` in sky blue (`#38bdf8`), deep maroon (`#7c152e`), and warm orange (`#ed7d1f`). Rendered directly on archival paper surfaces (`#emptyState` welcome header, `#desktopModelChip`, `#openModelModal`, and generated manual cover/back-cover badges) and seated on a `36×36` archival-paper tile (`#faf9f6`) inside the dark carbon-ink `#menuDrawer` header so the deep maroon center plume retains full contrast.
 
 ## Components
 
@@ -339,7 +339,7 @@ Controls feel crisp, immediate, and mechanical—instant color feedback on hover
 - **Option & Filter Grids:** Segmented multi-column choice buttons inside modals follow the same binary state rule: inactive `1px solid var(--border)` on `--background`/`--card`, active solid `--primary` + `--primary-foreground` (or `--primary-soft` + `--primary` border on descriptive format cards).
 
 ### Cards / Containers
-- **Welcome Proofing Sheet (`.proof-sheet-frame`):** `max-w-2xl` archival paper sheet (`--card`), `12px` radius, `1px solid var(--border-strong)`, `--shadow-page`. Divides cleanly into a sunken calibration strip (`Proofing Table` + `.io · .ldr · .mpd`), main identity & description body, dashed-top dropzone band (`#emptyDropZone`) with pill-shaped primary/secondary CTAs, and a 3-column capability strip.
+- **Welcome Proofing Sheet (`.proof-sheet-frame`):** `max-w-2xl` archival paper sheet (`--card`), `12px` radius, `1px solid var(--border-strong)`, `--shadow-page`. Divides cleanly into a sunken calibration strip (`Proofing Table` + `.io · .ldr · .mpd · .biw`), main identity band displaying the restored 3-plume logo beside the `Brick Instruction Works` title and subtitle (visible on both mobile and desktop), dashed-top dropzone band (`#emptyDropZone`) with equal-prominence pill CTAs (`Import Model File` and `Import Project`), and a 3-column capability strip.
 - **Modal Sheets (`.studio-sheet`):** Full-width bottom sheet (`rounded-t-xl`) on mobile and centered `12px` (`rounded-xl`) sheet on `sm+`, `1px solid var(--border)`, `--shadow-sheet`, over `rgba(0,0,0,0.5)` scrims. Top header and bottom footer use `--chrome` separated by `1px solid var(--border)` from the scrollable `--card` body.
 - **Slide-Out Menu Drawer (`#menuDrawer`):** Left-anchored `min(88vw, 356px)` full-height sheet (`--card`, right `--border`, `--shadow-sheet`) topped by a `--rail` carbon-ink header, flat hairline-separated sections (`gap-6`, `pt-5 border-t`), and a `--chrome` footer.
 - **Anchored Style Popover (`#stylePopover`):** Fixed top-right (`top: 60px`, `right: 12px`, `w-[min(92vw,336px)]`) `.studio-sheet` (`rounded-xl`, `p-4`) connected to `#btnStylePop` by a `13px × 13px` rotated `.style-popover-tail` diamond positioned dynamically via `--style-tail-right`.

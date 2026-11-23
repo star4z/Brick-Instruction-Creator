@@ -192,7 +192,13 @@ import {
   migrateLegacyLayoutGroups,
 } from './engine/stepNumbering';
 
-const BRAND_LOGO_SVG_BODY = `<path d="M6 15V6h9M49 6h9v9M58 49v9h-9M15 58H6v-9" stroke="#1B1A18" stroke-width="2.5" stroke-linecap="square"/><rect x="14" y="14" width="36" height="36" rx="2" stroke="#1B1A18" stroke-width="2.5" fill="#FAF9F6"/><circle cx="24" cy="24" r="5" fill="#C9341B"/><circle cx="40" cy="24" r="5" stroke="#1B1A18" stroke-width="2.2" fill="none"/><circle cx="24" cy="40" r="5" stroke="#1B1A18" stroke-width="2.2" fill="none"/><circle cx="40" cy="40" r="5" fill="#1B1A18"/>`;
+const BRAND_LOGO_ROTATION_DEG = 12;
+const BRAND_LOGO_PATHS: ReadonlyArray<readonly [string, string]> = [
+  ['M24.8 7.8 Q17.9 12.8 13.7 20.2 L16.3 19.7 Q13.8 23.2 11.6 26.6 Q11.3 31.1 11.6 35.3 L14.9 32.7 Q13.9 38.0 13.3 42.8 Q14.6 45.2 15.8 47.2 L18.2 42.8 Q19.8 48.9 21.1 54.7 Q14.1 52.2 6.7 49.4 L13.1 48.9 Q12.0 46.5 11.1 43.7 Q7.5 38.4 3.3 32.7 L8.9 35.6 Q8.9 31.0 9.8 26.2 Q9.4 20.7 8.7 14.7 L11.7 19.3 Q17.3 12.2 24.8 7.8 Z', '#38bdf8'],
+  ['M31.7 7.1 Q34.8 10.1 37.5 15.7 L40.5 12.6 Q39.4 17.0 38.6 21.0 Q39.3 24.7 39.7 28.3 L44.0 25.1 Q41.5 30.5 39.5 35.5 Q39.5 39.0 39.4 42.1 L45.1 39.1 Q41.3 43.9 38.0 48.3 Q37.7 50.7 37.2 52.6 L43.4 51.6 Q37.7 54.5 32.1 57.0 Q31.0 52.0 30.1 46.7 L33.7 51.3 Q34.4 49.7 35.3 47.6 Q34.4 43.5 33.2 39.1 L36.2 41.6 Q36.7 38.7 37.0 35.4 Q35.0 30.9 32.5 26.0 L36.9 28.4 Q36.8 24.9 36.5 21.3 Q34.9 18.4 32.8 15.4 L35.5 16.3 Q34.0 10.5 31.7 7.1 Z', '#7c152e'],
+  ['M38.5 8.3 Q46.1 12.5 51.9 18.8 L54.4 14.1 Q54.1 19.9 54.2 25.1 Q55.2 29.4 55.5 33.5 L60.9 30.3 Q57.1 36.0 53.8 41.3 Q53.3 43.4 52.6 45.4 L58.5 45.0 Q51.8 48.7 45.4 51.9 Q46.2 46.3 47.4 40.3 L49.8 43.9 Q50.7 42.4 51.6 40.6 Q50.8 36.2 49.6 31.4 L52.8 33.4 Q52.8 29.7 52.3 25.6 Q50.1 22.7 47.5 19.6 L50.0 19.8 Q45.5 13.1 38.5 8.3 Z', '#ed7d1f'],
+];
+const BRAND_LOGO_SVG_BODY = `<g transform="rotate(${BRAND_LOGO_ROTATION_DEG} 32 32)">${BRAND_LOGO_PATHS.map(([d, col]) => `<path d="${d}" fill="${col}"/>`).join('')}</g>`;
 
 let initialized = false;
 
@@ -11081,28 +11087,14 @@ function drawWrappedText(ctx, text, x, y, maxW, lineH, maxLines = 2) {
 }
 
 function drawBrandLogoCanvas(ctx, x, y, size) {
+  if (typeof Path2D === 'undefined') return;
   ctx.save();
   ctx.translate(x, y);
   ctx.scale(size / 64, size / 64);
-  ctx.strokeStyle = '#1B1A18';
-  ctx.lineWidth = 2.5;
-  ctx.lineCap = 'square';
-  ctx.beginPath();
-  ctx.moveTo(6, 15); ctx.lineTo(6, 6); ctx.lineTo(15, 6);
-  ctx.moveTo(49, 6); ctx.lineTo(58, 6); ctx.lineTo(58, 15);
-  ctx.moveTo(58, 49); ctx.lineTo(58, 58); ctx.lineTo(49, 58);
-  ctx.moveTo(15, 58); ctx.lineTo(6, 58); ctx.lineTo(6, 49);
-  ctx.stroke();
-  ctx.fillStyle = '#FAF9F6';
-  ctx.fillRect(14, 14, 36, 36);
-  ctx.strokeRect(14, 14, 36, 36);
-  ctx.fillStyle = '#C9341B';
-  ctx.beginPath(); ctx.arc(24, 24, 5, 0, Math.PI * 2); ctx.fill();
-  ctx.lineWidth = 2.2;
-  ctx.beginPath(); ctx.arc(40, 24, 5, 0, Math.PI * 2); ctx.stroke();
-  ctx.beginPath(); ctx.arc(24, 40, 5, 0, Math.PI * 2); ctx.stroke();
-  ctx.fillStyle = '#1B1A18';
-  ctx.beginPath(); ctx.arc(40, 40, 5, 0, Math.PI * 2); ctx.fill();
+  ctx.translate(32, 32);
+  ctx.rotate((BRAND_LOGO_ROTATION_DEG * Math.PI) / 180);
+  ctx.translate(-32, -32);
+  for (const [d, col] of BRAND_LOGO_PATHS) { ctx.fillStyle = col; ctx.fill(new Path2D(d)); }
   ctx.restore();
 }
 
