@@ -260,7 +260,7 @@ An achromatic pressroom palette—mineral stone, archival paper, and carbon ink�
 - **Title** (`600`–`700`, `0.875rem` (`14px`), line-height `1.35`, tracking `-0.015em`): Desktop identity pill wordmark (`Brick Instruction Works`), drawer model title, primary action buttons, format card titles, and manage-tab section headings.
 - **Body** (`400`–`500`, `0.875rem` (`14px`) default body / `0.75rem` (`12px`) compact control copy, line-height `1.45`–`1.625`, max measure `54ch` on welcome prose): Explanatory paragraphs, toggle labels, and helper descriptions.
 - **Label** (`600`, `0.75rem` (`12px`), tracking `0.05em`, uppercase): Section headers inside the slide-out drawer, Style popover, and setup modals (`Model & Project`, `Page & Export`, `Page Format`, `Custom Themes`).
-- **Mono / Telemetry** (`600`, `0.75rem` (`12px`), `font-variant-numeric: tabular-nums`): Folio readouts (`Page 1 · 1/N`), zoom percentage (`100%`), part counts, LDraw part IDs, file extensions (`.io · .ldr · .mpd`, `.bic.json`, `complete.zip`), paper dimensions (`8.5 × 11 in`), and progress percentages.
+- **Mono / Telemetry** (`600`, `0.75rem` (`12px`), `font-variant-numeric: tabular-nums`): Folio readouts (`Page 1 · 1/N`), zoom percentage (`100%`), part counts, LDraw part IDs, file extensions (`.io · .ldr · .mpd`, `.biw`, `.biwtheme`, `complete.zip`), paper dimensions (`8.5 × 11 in`), and progress percentages.
 
 ### Named Rules
 **The 12px Functional Floor Rule.** Every interactive label, helper caption, badge, and monospace readout in studio chrome sits at `>= 12px` (`0.75rem`), with primary prose and body at `14px` (`0.875rem`). Never drop studio UI labels to sub-12px micro-type.

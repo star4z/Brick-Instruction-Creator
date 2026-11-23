@@ -1,3 +1,10 @@
+import {
+  THEME_FILE_EXT,
+  THEME_PACK_FORMAT,
+  THEME_SINGLE_FORMAT,
+  assertThemeFileName,
+} from '../storage/fileFormats';
+
 export type ThemeBgType = 'solid' | 'gradient';
 
 export interface ManualTheme {
@@ -22,14 +29,14 @@ export interface ManualTheme {
 }
 
 export interface ThemeExportSinglePayload {
-  format: 'brick-instruction-creator-theme';
+  format: typeof THEME_SINGLE_FORMAT;
   version: 1;
   exportedAt: string;
   theme: Omit<ManualTheme, 'builtIn'>;
 }
 
 export interface ThemeExportPackPayload {
-  format: 'brick-instruction-creator-themes';
+  format: typeof THEME_PACK_FORMAT;
   version: 1;
   exportedAt: string;
   themes: Array<Omit<ManualTheme, 'builtIn'>>;
@@ -466,7 +473,7 @@ function stripBuiltInFlag(theme: ManualTheme): Omit<ManualTheme, 'builtIn'> {
 
 export function serializeThemeExport(theme: ManualTheme): string {
   const payload: ThemeExportSinglePayload = {
-    format: 'brick-instruction-creator-theme',
+    format: THEME_SINGLE_FORMAT,
     version: 1,
     exportedAt: new Date().toISOString(),
     theme: stripBuiltInFlag(theme),
@@ -476,7 +483,7 @@ export function serializeThemeExport(theme: ManualTheme): string {
 
 export function serializeThemesPackExport(themes: ManualTheme[]): string {
   const payload: ThemeExportPackPayload = {
-    format: 'brick-instruction-creator-themes',
+    format: THEME_PACK_FORMAT,
     version: 1,
     exportedAt: new Date().toISOString(),
     themes: themes.map(stripBuiltInFlag),
@@ -505,28 +512,24 @@ function looksLikeThemeObject(obj: unknown): boolean {
 }
 
 /**
- * Parses a JSON string exported as a single `.bictheme.json`, a theme pack,
- * an array of themes, or a raw theme object.
+ * Strictly parses a Brick Instruction Works `.biwtheme` payload (single theme or
+ * theme pack). Rejects legacy `.bictheme.json` and raw JSON payloads.
  */
 export function parseImportedThemesJson(rawText: string): ManualTheme[] {
   let parsed: unknown;
   try {
     parsed = JSON.parse(rawText);
   } catch {
-    throw new Error('Could not parse theme file. Please select a valid JSON theme file.');
+    throw new Error(`Could not parse theme file. Please select a valid ${THEME_FILE_EXT} theme file.`);
   }
 
   let candidates: unknown[] = [];
-  if (Array.isArray(parsed)) {
-    candidates = parsed;
-  } else if (parsed && typeof parsed === 'object') {
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
     const obj = parsed as Record<string, unknown>;
-    if (Array.isArray(obj.themes)) {
+    if (obj.format === THEME_PACK_FORMAT && obj.version === 1 && Array.isArray(obj.themes)) {
       candidates = obj.themes;
-    } else if (obj.theme && typeof obj.theme === 'object') {
+    } else if (obj.format === THEME_SINGLE_FORMAT && obj.version === 1 && obj.theme && typeof obj.theme === 'object') {
       candidates = [obj.theme];
-    } else if (looksLikeThemeObject(obj)) {
-      candidates = [obj];
     }
   }
 
@@ -538,9 +541,18 @@ export function parseImportedThemesJson(rawText: string): ManualTheme[] {
   }
 
   if (normalized.length === 0) {
-    throw new Error('No valid themes were found in this file.');
+    throw new Error(`No valid themes were found in this ${THEME_FILE_EXT} file.`);
   }
   return normalized;
+}
+
+/**
+ * Strictly validates that the file has a `.biwtheme` extension and parses its
+ * theme payload.
+ */
+export async function parseImportedThemeFile(file: File): Promise<ManualTheme[]> {
+  assertThemeFileName(file.name);
+  return parseImportedThemesJson(await file.text());
 }
 
 /**

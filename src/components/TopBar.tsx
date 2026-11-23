@@ -203,7 +203,7 @@ export function TopBar({ onOpenMobileSteps, onOpenMobileInspector }: Props) {
         <input
           ref={projectInputRef}
           type="file"
-          accept=".json,.bic"
+          accept=".biw"
           className="hidden"
           onChange={async (e) => {
             const file = e.target.files?.[0];
@@ -223,7 +223,7 @@ export function TopBar({ onOpenMobileSteps, onOpenMobileInspector }: Props) {
           type="button"
           onClick={() => projectInputRef.current?.click()}
           className="hidden md:inline-flex p-2 rounded-full text-[#5f6368] hover:bg-[#f1f3f4] cursor-pointer"
-          title="Open saved project"
+          title="Open saved project (.biw)"
           aria-label="Open project"
         >
           <FolderOpen className="w-4 h-4" />
@@ -235,7 +235,7 @@ export function TopBar({ onOpenMobileSteps, onOpenMobileInspector }: Props) {
             setStatusMessage('Project saved.');
           }}
           className="hidden md:inline-flex p-2 rounded-full text-[#5f6368] hover:bg-[#f1f3f4] cursor-pointer"
-          title="Save project file"
+          title="Save project file (.biw)"
           aria-label="Save project"
         >
           <Save className="w-4 h-4" />

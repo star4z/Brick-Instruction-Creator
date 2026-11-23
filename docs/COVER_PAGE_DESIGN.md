@@ -108,7 +108,7 @@ The pure-JS PDF 1.4 binary builder supports per-page URI link annotations (`PdfP
 
 ## 6. Data Model & Persistence
 
-`coverMeta` (persisted in undo history, IndexedDB session preferences, and `.bic.json` project exports):
+`coverMeta` (persisted in undo history, IndexedDB session preferences, and `.biw` project exports):
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |

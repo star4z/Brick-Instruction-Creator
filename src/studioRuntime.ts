@@ -132,14 +132,26 @@ import {
   loadCustomThemesFromStorage,
   mergeImportedThemes,
   normalizeCustomTheme,
-  parseImportedThemesJson,
+  parseImportedThemeFile,
   resolveThemeById,
   saveCustomThemesToStorage,
   serializeThemeExport,
   serializeThemesPackExport,
-  slugifyThemeFilename,
   toHexColor,
 } from './themes/customThemes';
+import {
+  CUSTOM_FILE_MIME_TYPE,
+  PROJECT_FILE_EXT,
+  PROJECT_FILE_FORMAT,
+  PROJECT_FILE_STUDIO_VERSION,
+  THEME_FILE_EXT,
+  THEME_PACK_FILE_NAME,
+  assertProjectFileName,
+  buildProjectFileName,
+  buildThemeFileName,
+  isProjectFileName,
+  parseStudioProjectJson,
+} from './storage/fileFormats';
 import {
   PROGRAM_NAME,
   PROGRAM_URL,
@@ -370,9 +382,9 @@ function persistCustomThemes() {
   }
 }
 
-async function shareOrDownloadJsonFile(jsonText, fileName, sharedMsg, savedMsg) {
-  const blob = new Blob([jsonText], { type: 'application/json' });
-  const file = new File([blob], fileName, { type: 'application/json' });
+async function shareOrDownloadCustomFile(textContent, fileName, sharedMsg, savedMsg) {
+  const blob = new Blob([textContent], { type: CUSTOM_FILE_MIME_TYPE });
+  const file = new File([blob], fileName, { type: CUSTOM_FILE_MIME_TYPE });
   if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
     try {
       await navigator.share({ files: [file], title: fileName });
@@ -5955,8 +5967,8 @@ function getModelFileTypeInfo() {
   if (lower.endsWith('.ldr') || rec?.kind === 'ldr') {
     return { badge: '.LDR', label: 'LDraw (.ldr)', cls: 'bg-[var(--warning-soft)] text-[var(--warning)]' };
   }
-  if (rec?.kind === 'project' || lower.endsWith('.json')) {
-    return { badge: '.JSON', label: 'Saved Project (.bic.json)', cls: 'bg-[var(--success-soft)] text-[var(--success)]' };
+  if (rec?.kind === 'project' || isProjectFileName(rawName)) {
+    return { badge: '.BIW', label: `Saved Project (${PROJECT_FILE_EXT})`, cls: 'bg-[var(--success-soft)] text-[var(--success)]' };
   }
   return { badge: 'MODEL', label: 'Imported Model', cls: 'bg-black/10 dark:bg-white/10 text-[var(--muted-foreground)]' };
 }
@@ -8540,8 +8552,8 @@ function syncMenuControls() {
   if (exportBtn) {
     exportBtn.classList.toggle('hidden', customThemes.length === 0);
     exportBtn.title = customThemes.length === 1
-      ? 'Export custom theme (.bictheme.json)'
-      : `Export all ${customThemes.length} custom themes (.bictheme.json)`;
+      ? `Export custom theme (${THEME_FILE_EXT})`
+      : `Export all ${customThemes.length} custom themes (${THEME_FILE_EXT})`;
   }
   if (cg) {
     cg.innerHTML = '';
@@ -11985,20 +11997,20 @@ document.getElementById('btnThemeEditorExport').onclick = async () => {
     name: cleanedName,
   });
   if (!normalized) return;
-  const json = serializeThemeExport(normalized);
-  const fileName = `${slugifyThemeFilename(normalized.name)}.bictheme.json`;
-  await shareOrDownloadJsonFile(json, fileName, `Shared "${normalized.name}" theme.`, `Exported ${fileName}`);
+  const payload = serializeThemeExport(normalized);
+  const fileName = buildThemeFileName(normalized.name);
+  await shareOrDownloadCustomFile(payload, fileName, `Shared "${normalized.name}" theme.`, `Exported ${fileName}`);
 };
 
 document.getElementById('btnExportThemes').onclick = async () => {
   if (!customThemes.length) { showToast('Create a custom theme first.'); return; }
   if (customThemes.length === 1) {
     const t = customThemes[0];
-    const fileName = `${slugifyThemeFilename(t.name)}.bictheme.json`;
-    await shareOrDownloadJsonFile(serializeThemeExport(t), fileName, `Shared "${t.name}" theme.`, `Exported ${fileName}`);
+    const fileName = buildThemeFileName(t.name);
+    await shareOrDownloadCustomFile(serializeThemeExport(t), fileName, `Shared "${t.name}" theme.`, `Exported ${fileName}`);
   } else {
-    const fileName = 'brick-custom-themes.bictheme.json';
-    await shareOrDownloadJsonFile(
+    const fileName = THEME_PACK_FILE_NAME;
+    await shareOrDownloadCustomFile(
       serializeThemesPackExport(customThemes),
       fileName,
       `Shared ${customThemes.length} custom themes.`,
@@ -12016,7 +12028,7 @@ document.getElementById('themeImportInput').onchange = async (e) => {
   e.target.value = '';
   if (!f) return;
   try {
-    const incoming = parseImportedThemesJson(await f.text());
+    const incoming = await parseImportedThemeFile(f);
     const { merged, importedIds } = mergeImportedThemes(customThemes, incoming);
     customThemes = merged;
     persistCustomThemes();
@@ -12990,23 +13002,22 @@ if (menuStepGenBtn) {
   };
 }
 
-// Export / Import .bic.json Project (supports iOS Share Sheet + Download!)
+// Export / Import .biw Project (supports iOS Share Sheet + Download!)
 document.getElementById('menuSaveProj').onclick = async () => {
   if (!state.model) return;
   const activeTheme = getActiveTheme();
   const embeddedCustomTheme = activeTheme && !activeTheme.builtIn && !BUILT_IN_THEME_IDS.has(activeTheme.id) ? activeTheme : undefined;
-  const payload = JSON.stringify({ version: 4, title: state.model.title, chapters: state.model.chapters, overrides: state.overrides, stepInserts: state.stepInserts, pageInserts: state.pageInserts, dividerAfter: state.dividerAfter, coverMeta: state.coverMeta, completeMeta: state.completeMeta, backMeta: state.backMeta, bomConfig: state.bomConfig, showStepBorders: state.showStepBorders, showPageTitle: state.showPageTitle, pageNumberFormat: state.pageNumberFormat, detectDuplicates: state.detectDuplicates, minifigStyle: state.minifigStyle, showMinifig1to1: state.showMinifig1to1, themeId: state.themeId, ...(embeddedCustomTheme ? { customTheme: embeddedCustomTheme } : {}), paperFormat: state.paperFormat, orientation: state.orientation, density: state.density, layout: state.layout, layoutConfig: state.layoutConfig, layoutGroups: state.layoutGroups }, null, 2);
-  const fileName = `${state.model.title.replace(/[^a-z0-9_-]+/gi, '_')}.bic.json`;
+  const payload = JSON.stringify({ format: PROJECT_FILE_FORMAT, version: PROJECT_FILE_STUDIO_VERSION, title: state.model.title, chapters: state.model.chapters, overrides: state.overrides, stepInserts: state.stepInserts, pageInserts: state.pageInserts, dividerAfter: state.dividerAfter, coverMeta: state.coverMeta, completeMeta: state.completeMeta, backMeta: state.backMeta, bomConfig: state.bomConfig, showStepBorders: state.showStepBorders, showPageTitle: state.showPageTitle, pageNumberFormat: state.pageNumberFormat, detectDuplicates: state.detectDuplicates, minifigStyle: state.minifigStyle, showMinifig1to1: state.showMinifig1to1, themeId: state.themeId, ...(embeddedCustomTheme ? { customTheme: embeddedCustomTheme } : {}), paperFormat: state.paperFormat, orientation: state.orientation, density: state.density, layout: state.layout, layoutConfig: state.layoutConfig, layoutGroups: state.layoutGroups }, null, 2);
+  const fileName = buildProjectFileName(state.model.title);
   closeMenu();
-  await shareOrDownloadJsonFile(payload, fileName, 'Shared project file.', `Exported ${fileName}`);
+  await shareOrDownloadCustomFile(payload, fileName, 'Shared project file.', `Exported ${fileName}`);
 };
-const triggerProjectLoad = () => { closeOpenModelModal(); document.getElementById('projectLoadInput').click(); };
-const emptyLoadProjBtn = document.getElementById('emptyLoadProjBtn');
-if (emptyLoadProjBtn) emptyLoadProjBtn.onclick = triggerProjectLoad;
-document.getElementById('projectLoadInput').onchange = async (e) => {
-  const f = e.target.files?.[0]; e.target.value = ''; if (!f) return;
+
+async function handleIncomingProjectFile(f) {
+  if (!f) return;
   try {
-    const data = JSON.parse(await f.text());
+    assertProjectFileName(f.name);
+    const data = parseStudioProjectJson(await f.text());
     submodelThumbCache.clear();
     coverHeroCache.clear();
     clearMinifigDiagramCaches();
@@ -13049,7 +13060,17 @@ document.getElementById('projectLoadInput').onchange = async (e) => {
     lastSourceRecord = { kind: 'project', fileName: f.name };
     computeModelDiagnostics();
     closeMenu(); closeOpenModelModal(); renderAll(); showToast(`Imported ${state.model.title}.`);
-  } catch (err) { showToast('Could not read project file.'); }
+  } catch (err) {
+    showToast(err?.message || `Could not read project (${PROJECT_FILE_EXT}) file.`);
+  }
+}
+
+const triggerProjectLoad = () => { closeOpenModelModal(); document.getElementById('projectLoadInput').click(); };
+const emptyLoadProjBtn = document.getElementById('emptyLoadProjBtn');
+if (emptyLoadProjBtn) emptyLoadProjBtn.onclick = triggerProjectLoad;
+document.getElementById('projectLoadInput').onchange = async (e) => {
+  const f = e.target.files?.[0]; e.target.value = ''; if (!f) return;
+  await handleIncomingProjectFile(f);
 };
 
 // Image Insert & Cover Image Uploads (Creator Logo, Series / Theme Logo, Background)
@@ -13120,14 +13141,8 @@ if (openModelModalEl) {
     closeOpenModelModal();
     const file = e.dataTransfer?.files?.[0];
     if (!file) return;
-    if (file.name.toLowerCase().endsWith('.json')) {
-      try {
-        const dt = new DataTransfer();
-        dt.items.add(file);
-        const inp = document.getElementById('projectLoadInput');
-        inp.files = dt.files;
-        inp.dispatchEvent(new Event('change'));
-      } catch (_) {}
+    if (isProjectFileName(file.name)) {
+      await handleIncomingProjectFile(file);
       return;
     }
     await handleIncomingModelFile(file);
@@ -14149,8 +14164,23 @@ if (emptyStateEl) {
     setDropActive(false);
     const file = e.dataTransfer?.files?.[0];
     if (!file) return;
-    await handleIncomingModelFile(file);
+    if (isProjectFileName(file.name)) {
+      await handleIncomingProjectFile(file);
+    } else {
+      await handleIncomingModelFile(file);
+    }
   });
+}
+
+// iOS/iPadOS Files app greys out unregistered custom extensions when `accept`
+// is set; strip `accept` on Apple touch devices while JS strictly enforces
+// `.biw` and `.biwtheme` extensions on every platform.
+const isAppleTouchDevice =
+  /iPad|iPhone|iPod/.test(navigator.userAgent || '') ||
+  (navigator.platform === 'MacIntel' && (navigator.maxTouchPoints || 0) > 1);
+if (isAppleTouchDevice) {
+  document.getElementById('projectLoadInput')?.removeAttribute('accept');
+  document.getElementById('themeImportInput')?.removeAttribute('accept');
 }
 
 window.addEventListener('resize', () => {

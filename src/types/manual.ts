@@ -374,6 +374,7 @@ export interface ReimportDiffReport {
 }
 
 export interface BicProjectFile {
+  format: 'brick-instruction-works-project';
   version: 1;
   savedAt: string;
   model: CanonicalModel;

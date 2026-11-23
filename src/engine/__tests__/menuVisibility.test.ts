@@ -63,7 +63,7 @@ describe('computeMenuVisibility', () => {
     expect(withPages.showPrintPdf).toBe(true);
   });
 
-  it('hides Auto-Generate Steps for imported .bic.json projects without parsed LDraw data', () => {
+  it('hides Auto-Generate Steps for imported .biw projects without parsed LDraw data', () => {
     const projectOnly = computeMenuVisibility(
       baseState({
         hasModel: true,

@@ -26,7 +26,7 @@ flowchart LR
     CamOpt --> Layout["Reactive Flow Layout Engine\n(Semantic Overrides + Pin Breaks)"]
     Layout --> Renderer["Three.js Technical Renderer\n(Edge Lines, Highlights, Fades,\nPresentation Transforms)"]
     Renderer --> UI["Studio Workspace\n(Desktop 3-Pane / Mobile Viewer)"]
-    Renderer --> Export["Exporters\n(Vector+Raster PDF, Interactive HTML,\n.bic Project + IDB Autosave)"]
+    Renderer --> Export["Exporters\n(Vector+Raster PDF, Interactive HTML,\n.biw Project + IDB Autosave)"]
 ```
 
 ### Tech Stack
@@ -34,7 +34,7 @@ flowchart LR
 - **3D Rendering**: Three.js (orthographic technical camera, soft plastic toon/lambert shading, crisp LDraw edge/conditional lines, silhouette highlight outlines, previous-step desaturation/fade, offscreen canvas pool for PLI & step snapshots)
 - **Compute Offloading**: Dedicated Web Worker pipeline architecture (clean pure-TS engine modules runnable in Workers or synchronously in tests)
 - **Archive & Export**: `jszip` (`.io` archive + local `complete.zip` parsing), `jspdf` (hybrid vector layout + high-DPI 3D renders), self-contained single-file HTML viewer exporter
-- **Persistence**: IndexedDB (`idb`) for project autosave & LDraw part geometry/snap cache + portable `.bic.json` project files
+- **Persistence**: IndexedDB (`idb`) for project autosave & LDraw part geometry/snap cache + portable `.biw` project and `.biwtheme` custom theme files
 
 ---
 
@@ -166,4 +166,4 @@ To satisfy both zero-setup usability and Neocities static hosting rules (no `.da
 
 - **PDF Export (`jspdf`)**: Renders crisp vector backgrounds, borders, PLI cards, step numbers, rotation SVGs, cover/back typography, and BOM tables combined with high-DPI WebGL 3D renders for every step and part preview.
 - **Interactive HTML Viewer Export**: Generates a single self-contained `.html` file embedding the rendered manual data, step-by-step interactive viewer, parts checklists, BOM, and an interactive canvas/3D step inspector so builders can follow instructions on any phone, tablet, or desktop browser.
-- **Project File (`.bic.json`) + IndexedDB Autosave**: Full lossless serialization of `CanonicalModel`, `InstructionPlan`, `ThemeSettings`, `StepOverrides`, and `Cover/Back` metadata.
+- **Project File (`.biw`) & Custom Theme (`.biwtheme`) + IndexedDB Autosave**: Full lossless serialization of `CanonicalModel`, `InstructionPlan`, `ThemeSettings`, `StepOverrides`, and `Cover/Back` metadata, plus shareable custom theme exports.

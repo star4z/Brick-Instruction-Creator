@@ -17,7 +17,7 @@ export interface StepFocusModeOption {
 }
 
 export interface CameraAnglePreset {
-  /** Legacy-compatible corner ID stored in overrides and .bic.json projects */
+  /** Corner ID stored in overrides and .biw projects */
   id: 'front_right' | 'back_right' | 'back_left' | 'front_left';
   /** Neutral display label (avoids implying an arbitrary "front" side of the model) */
   label: string;

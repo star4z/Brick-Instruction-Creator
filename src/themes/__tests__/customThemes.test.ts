@@ -87,9 +87,20 @@ describe('customThemes utilities', () => {
     expect(parsedPack[1].bp).toBe(true);
   });
 
-  it('rejects invalid or empty theme JSON imports with a clear error', () => {
+  it('rejects invalid, empty, legacy, or raw JSON theme imports with a clear error', () => {
+    const sample = createThemeDraftFromBase(BUILT_IN_THEMES.blue, 'Legacy Theme');
     expect(() => parseImportedThemesJson('{not json')).toThrow(/parse theme file/i);
     expect(() => parseImportedThemesJson(JSON.stringify({ hello: 'world' }))).toThrow(/No valid themes/i);
+    // Reject legacy brick-instruction-creator-theme(s) formats (no backward compatibility)
+    expect(() =>
+      parseImportedThemesJson(JSON.stringify({ format: 'brick-instruction-creator-theme', version: 1, theme: sample })),
+    ).toThrow(/No valid themes/i);
+    expect(() =>
+      parseImportedThemesJson(JSON.stringify({ format: 'brick-instruction-creator-themes', version: 1, themes: [sample] })),
+    ).toThrow(/No valid themes/i);
+    // Reject bare theme objects and arrays
+    expect(() => parseImportedThemesJson(JSON.stringify(sample))).toThrow(/No valid themes/i);
+    expect(() => parseImportedThemesJson(JSON.stringify([sample]))).toThrow(/No valid themes/i);
   });
 
   it('merges imported themes safely without clobbering unrelated themes', () => {

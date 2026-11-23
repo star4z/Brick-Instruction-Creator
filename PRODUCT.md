@@ -26,7 +26,7 @@ Unlike BrickLink Studio's instruction maker—where editing an early step cascad
 
 - **Equal priority across desktop and mobile/tablet**: Builders import models, inspect pages, arrange steps, lock 3D camera angles, customize themes, manage their Bricks Library, and export manuals on both desktop monitors and touch devices (including mobile Safari / iOS WebView).
 - **Direct manipulation over a live manual page**: The primary working artifact is the rendered instruction manual page itself (zoomable/pannable stage), supported by focused workflows for import & model subdivision, page/step arrangement, cover & BOM setup, theme customization, diagnostics/model issues, bricks library management, and PDF/HTML/project export.
-- **Offline-capable, client-side workflow**: Models, custom themes, and LDraw part libraries live locally in the browser (IndexedDB autosave, `.bic.json` portable project files, local `.dat`/`complete.zip` imports, and on-demand LDraw mirror fetches).
+- **Offline-capable, client-side workflow**: Models, custom themes, and LDraw part libraries live locally in the browser (IndexedDB autosave, `.biw` portable project files, `.biwtheme` custom theme files, local `.dat`/`complete.zip` imports, and on-demand LDraw mirror fetches).
 
 ## Capabilities and Constraints
 
@@ -36,7 +36,7 @@ Unlike BrickLink Studio's instruction maker—where editing an early step cascad
   - 3-tier cascading manual styling (opinionated theme presets, global design tokens, custom theme editor, per-step overrides) plus Cover Page and Bill of Materials (BOM) configuration.
   - Bricks Library browser with searchable 3D part preview and local/remote LDraw library management.
   - Diagnostics & Model Issues inspector (floating parts, missing shapes, tolerance warnings).
-  - Exports: high-resolution hybrid vector+raster PDF (desktop & iOS WebView safe), self-contained offline Interactive HTML Viewer, printable CSS layout (`@media print`), and portable `.bic.json` project save/load.
+  - Exports: high-resolution hybrid vector+raster PDF (desktop & iOS WebView safe), self-contained offline Interactive HTML Viewer, printable CSS layout (`@media print`), and portable `.biw` project / `.biwtheme` custom theme save/load.
 - **Technical & deployment constraints**:
   - 100% client-side static TypeScript + Vite + Tailwind CSS + Three.js + jsPDF web app (`base: './'`).
   - Deployed to GitHub Pages and verified for Neocities static hosting compliance (`< 5 MB` per output file, allowed static extensions only, checked via `npm run check:neocities`).

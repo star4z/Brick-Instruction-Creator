@@ -28,7 +28,7 @@ Replaces one-way "Apply Angle to Following" with a visual range-picker modal:
 5. **Step Notes & Images** *(Scope: `This step`)* — Custom callouts are bound to `step.id` (`state.stepInserts[step.id]`) rather than `page.id`, so they stay attached to their exact step even when pagination changes, render inside the step slot in both live previews and PDF exports, and include inline corner placement (`TL / TR / BL / BR`), scale (`− / % / +`), and `Delete` controls (with automatic backward-compatible migration of legacy `pageInserts`).
 
 ### 4. Main Drawer Menu Reorganization
-- **Model & Project**: `Import Model or Project…` opens the dismissible Proofing Table dialog (`#openModelModal`, mirroring the initial welcome sheet with drag-and-drop, Import Model, Load Sample, and Open `.bic.json` Project), plus `Export Project (.bic.json)` and `Model Issues`.
+- **Model & Project**: `Import Model or Project…` opens the dismissible Proofing Table dialog (`#openModelModal`, mirroring the initial welcome sheet with drag-and-drop, Import Model, Load Sample, and Open `.biw` Project), plus `Export Project (.biw)` and `Model Issues`.
 - **Page & Export**: `Page Setup`, `Parts List Setup`, `Export Interactive 3D (.html)`, `Print / Export PDF`.
 - **Step Generation** *(placed directly below `Page & Export` and above `Bricks Library`)*: Single neutral-styled **`Step Generation >`** button opening the unified `#importModal` where **Build Organization** is a `<select>` dropdown paired with **Auto-Detect Duplicate Submodels** so subdivision and step regeneration apply together in one step.
 - **Bricks Library** & **Page Inserts**.

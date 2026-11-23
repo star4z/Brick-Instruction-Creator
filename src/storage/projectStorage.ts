@@ -1,5 +1,12 @@
 import { openDB, type IDBPDatabase } from 'idb';
 import type { BicProjectFile } from '../types/manual';
+import {
+  CUSTOM_FILE_MIME_TYPE,
+  PROJECT_FILE_EXT,
+  PROJECT_FILE_FORMAT,
+  assertProjectFileName,
+  buildProjectFileName,
+} from './fileFormats';
 
 const DB_NAME = 'brick-instruction-creator-projects-v1';
 const STORE_NAME = 'autosave';
@@ -39,7 +46,7 @@ export async function loadAutosaveProject(): Promise<BicProjectFile | null> {
     const handle = await db;
     const data = (await handle.get(STORE_NAME, AUTOSAVE_KEY)) as BicProjectFile | undefined;
     if (data && data.version === 1 && data.model && data.plan) {
-      return data;
+      return { ...data, format: PROJECT_FILE_FORMAT };
     }
     return null;
   } catch {
@@ -48,22 +55,39 @@ export async function loadAutosaveProject(): Promise<BicProjectFile | null> {
 }
 
 export function downloadProjectFile(project: BicProjectFile): void {
-  const slug = project.model.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'manual';
-  const json = JSON.stringify(project, null, 2);
-  const blob = new Blob([json], { type: 'application/json' });
+  const payload: BicProjectFile = {
+    ...project,
+    format: PROJECT_FILE_FORMAT,
+  };
+  const json = JSON.stringify(payload, null, 2);
+  const blob = new Blob([json], { type: CUSTOM_FILE_MIME_TYPE });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `${slug}.bic.json`;
+  a.download = buildProjectFileName(project.model.name);
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 export async function parseProjectFile(file: File): Promise<BicProjectFile> {
+  assertProjectFileName(file.name);
   const text = await file.text();
-  const parsed = JSON.parse(text) as BicProjectFile;
-  if (!parsed || parsed.version !== 1 || !parsed.model || !parsed.plan) {
-    throw new Error('Invalid Brick Instruction Creator project (.bic.json) file.');
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error(`Invalid Brick Instruction Works project (${PROJECT_FILE_EXT}) file.`);
   }
-  return parsed;
+  const obj = parsed as Partial<BicProjectFile> | null;
+  if (
+    !obj ||
+    typeof obj !== 'object' ||
+    obj.format !== PROJECT_FILE_FORMAT ||
+    obj.version !== 1 ||
+    !obj.model ||
+    !obj.plan
+  ) {
+    throw new Error(`Invalid Brick Instruction Works project (${PROJECT_FILE_EXT}) file.`);
+  }
+  return obj as BicProjectFile;
 }

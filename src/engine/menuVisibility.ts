@@ -3,7 +3,7 @@
  *
  * Every button and section in the top-left menu drawer is hidden whenever it
  * cannot currently be used (e.g. no model loaded, zero model issues, no missing
- * parts to fetch online, `.bic.json` project without parsed LDraw geometry for
+ * parts to fetch online, `.biw` project without parsed LDraw geometry for
  * regeneration/subdivision, or current page not eligible for a divider insert).
  */
 

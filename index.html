@@ -19,10 +19,10 @@
     <input id="fileInput" type="file" class="hidden" />
     <input id="reimportInput" type="file" class="hidden" />
     <input id="libImportInput" type="file" multiple class="hidden" />
-    <input id="projectLoadInput" type="file" accept=".json,.bic.json" class="hidden" />
+    <input id="projectLoadInput" type="file" accept=".biw" class="hidden" />
     <input id="insertImageInput" type="file" accept="image/*" class="hidden" />
     <input id="coverImageInput" type="file" accept="image/*" class="hidden" />
-    <input id="themeImportInput" type="file" accept=".json,.bictheme.json,application/json" class="hidden" />
+    <input id="themeImportInput" type="file" accept=".biwtheme" class="hidden" />
 
     <!-- ================================================================ -->
     <!-- FLOATING TOP-LEFT PILL: Menu ☰ (+ Model Name chip on desktop)    -->
@@ -58,7 +58,7 @@
         <span class="hidden sm:inline">Bricks Library</span>
         <span class="sm:hidden">Bricks</span>
       </button>
-      <button id="headerLoadProjBtn" type="button" class="hidden sm:inline-flex studio-pill h-10 px-3.5 rounded-full hover:bg-[var(--surface-hover)] text-xs font-semibold items-center gap-1.5 transition-colors cursor-pointer">
+      <button id="headerLoadProjBtn" type="button" title="Open saved project (.biw)" class="hidden sm:inline-flex studio-pill h-10 px-3.5 rounded-full hover:bg-[var(--surface-hover)] text-xs font-semibold items-center gap-1.5 transition-colors cursor-pointer">
         <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
         <span>Open Project</span>
       </button>
@@ -129,8 +129,8 @@
           </div>
 
           <div class="flex flex-wrap items-center justify-between gap-2 text-xs text-[var(--muted-foreground)]">
-            <span>Drop a <strong class="font-mono text-[var(--foreground)]">.io</strong>, <strong class="font-mono text-[var(--foreground)]">.ldr</strong>, or <strong class="font-mono text-[var(--foreground)]">.mpd</strong> file anywhere on this sheet.</span>
-            <button id="emptyLoadProjBtn" type="button" class="font-semibold text-[var(--foreground)] underline hover:text-[var(--primary)] transition-colors cursor-pointer">Open saved .bic.json project</button>
+            <span>Drop a <strong class="font-mono text-[var(--foreground)]">.io</strong>, <strong class="font-mono text-[var(--foreground)]">.ldr</strong>, <strong class="font-mono text-[var(--foreground)]">.mpd</strong>, or <strong class="font-mono text-[var(--foreground)]">.biw</strong> file anywhere on this sheet.</span>
+            <button id="emptyLoadProjBtn" type="button" class="font-semibold text-[var(--foreground)] underline hover:text-[var(--primary)] transition-colors cursor-pointer">Open saved .biw project</button>
           </div>
         </div>
 
@@ -146,7 +146,7 @@
           </div>
           <div class="flex sm:flex-col justify-between gap-1">
             <span class="font-semibold text-[var(--foreground)]">Client-Side Export</span>
-            <span class="font-mono text-[var(--muted-foreground)]">PDF · HTML · .bic.json</span>
+            <span class="font-mono text-[var(--muted-foreground)]">PDF · HTML · .biw</span>
           </div>
         </div>
       </div>
@@ -263,11 +263,11 @@
               <span>Import Model or Project…</span>
             </button>
             <p class="text-xs text-[var(--muted-foreground)] leading-relaxed">
-              Open <strong class="font-mono whitespace-nowrap text-[var(--foreground)]">.io</strong>, <strong class="font-mono whitespace-nowrap text-[var(--foreground)]">.ldr / .mpd</strong>, sample models, or saved <strong class="font-mono whitespace-nowrap text-[var(--foreground)]">.bic.json</strong> projects.
+              Open <strong class="font-mono whitespace-nowrap text-[var(--foreground)]">.io</strong>, <strong class="font-mono whitespace-nowrap text-[var(--foreground)]">.ldr / .mpd</strong>, sample models, or saved <strong class="font-mono whitespace-nowrap text-[var(--foreground)]">.biw</strong> projects.
             </p>
-            <button id="menuSaveProj" type="button" class="hidden w-full py-2.5 px-3.5 rounded-lg border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer">
+            <button id="menuSaveProj" type="button" title="Export project (.biw)" class="hidden w-full py-2.5 px-3.5 rounded-lg border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer">
               <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
-              <span>Export Project (.bic.json)</span>
+              <span>Export Project (.biw)</span>
             </button>
             <button id="menuErrorsBtn" type="button" class="hidden w-full py-2.5 px-3.5 rounded-lg border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold text-left flex items-center justify-between gap-2 transition-colors cursor-pointer">
               <span class="flex items-center gap-2">
@@ -397,8 +397,8 @@
           <div class="flex items-center justify-between gap-2">
             <span class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Custom Themes</span>
             <div class="flex items-center gap-1.5">
-              <button id="btnImportTheme" type="button" title="Import theme file (.bictheme.json)" class="px-2.5 py-1 rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] hover:border-[var(--primary)] text-xs font-semibold transition-colors cursor-pointer">Import</button>
-              <button id="btnExportThemes" type="button" title="Export custom themes (.bictheme.json)" class="hidden px-2.5 py-1 rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] hover:border-[var(--primary)] text-xs font-semibold transition-colors cursor-pointer">Export</button>
+              <button id="btnImportTheme" type="button" title="Import theme file (.biwtheme)" class="px-2.5 py-1 rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] hover:border-[var(--primary)] text-xs font-semibold transition-colors cursor-pointer">Import</button>
+              <button id="btnExportThemes" type="button" title="Export custom themes (.biwtheme)" class="hidden px-2.5 py-1 rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] hover:border-[var(--primary)] text-xs font-semibold transition-colors cursor-pointer">Export</button>
             </div>
           </div>
           <div id="customThemeGrid" class="grid grid-cols-2 gap-2"></div>
@@ -586,7 +586,7 @@
 
         <div class="px-5 py-3.5 border-t border-[var(--border)] bg-[var(--chrome)] flex items-center justify-between gap-2 shrink-0">
           <div class="flex items-center gap-2">
-            <button id="btnThemeEditorExport" type="button" class="px-3.5 py-2 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold transition-colors cursor-pointer">Export</button>
+            <button id="btnThemeEditorExport" type="button" title="Export theme (.biwtheme)" class="px-3.5 py-2 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold transition-colors cursor-pointer">Export</button>
             <button id="btnThemeEditorDelete" type="button" class="hidden px-3.5 py-2 rounded-md border border-[var(--danger)]/35 bg-[var(--danger-soft)] text-[var(--danger)] font-semibold transition-colors cursor-pointer">Delete</button>
           </div>
           <div class="flex items-center gap-2">
@@ -1423,7 +1423,7 @@
         <div class="px-6 sm:px-8 py-3.5 border-b border-[var(--border)] bg-[var(--surface-sunken)] flex items-center justify-between gap-3">
           <div class="flex items-center gap-2.5 min-w-0">
             <span class="font-semibold text-[var(--foreground)]">Proofing Table</span>
-            <span class="font-mono text-[var(--muted-foreground)]">.io · .ldr · .mpd · .bic.json</span>
+            <span class="font-mono text-[var(--muted-foreground)]">.io · .ldr · .mpd · .biw</span>
           </div>
           <button id="btnCloseOpenModel" type="button" aria-label="Close Open Model dialog" class="w-8 h-8 rounded-md flex items-center justify-center hover:bg-[var(--surface-hover)] shrink-0 transition-colors cursor-pointer">
             <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
@@ -1443,7 +1443,7 @@
             <div class="min-w-0 space-y-1.5">
               <h2 id="openModelTitle" class="text-xl sm:text-2xl font-bold tracking-tight leading-tight text-[var(--foreground)]">Open a brick model or saved project.</h2>
               <p class="text-xs sm:text-sm text-[var(--muted-foreground)] leading-relaxed">
-                Import a BrickLink Studio or LDraw file, load the built-in sample model, or resume a saved <strong class="font-mono text-[var(--foreground)]">.bic.json</strong> manual project.
+                Import a BrickLink Studio or LDraw file, load the built-in sample model, or resume a saved <strong class="font-mono text-[var(--foreground)]">.biw</strong> manual project.
               </p>
             </div>
           </div>
@@ -1461,8 +1461,8 @@
             </button>
           </div>
           <div class="flex flex-wrap items-center justify-between gap-2 text-xs text-[var(--muted-foreground)]">
-            <span>Drop a <strong class="font-mono text-[var(--foreground)]">.io</strong>, <strong class="font-mono text-[var(--foreground)]">.ldr</strong>, or <strong class="font-mono text-[var(--foreground)]">.mpd</strong> file anywhere on this sheet.</span>
-            <button id="openModalLoadProjBtn" type="button" class="font-semibold text-[var(--foreground)] underline hover:text-[var(--primary)] transition-colors cursor-pointer">Open saved .bic.json project</button>
+            <span>Drop a <strong class="font-mono text-[var(--foreground)]">.io</strong>, <strong class="font-mono text-[var(--foreground)]">.ldr</strong>, <strong class="font-mono text-[var(--foreground)]">.mpd</strong>, or <strong class="font-mono text-[var(--foreground)]">.biw</strong> file anywhere on this sheet.</span>
+            <button id="openModalLoadProjBtn" type="button" class="font-semibold text-[var(--foreground)] underline hover:text-[var(--primary)] transition-colors cursor-pointer">Open saved .biw project</button>
           </div>
         </div>
       </div>

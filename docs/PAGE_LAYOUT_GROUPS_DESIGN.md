@@ -37,4 +37,4 @@ Implemented in [`src/engine/pageLayout.ts`](../src/engine/pageLayout.ts) and [`s
 2. **Orientation**: Separate horizontal (`Landscape`) and vertical (`Portrait`) rectangle icons.
 3. **Default Steps per Page & Grid**: Live `#layoutGridPreview` rendered directly from `computePageSlotRects()` in the current page's aspect ratio, margins, and borders, plus inline mini-diagram icons on Step Order Direction (`Rows` / `Columns`), Mixed Layouts, Page Density & Margins, and Page Number Format.
 4. **Step Range Groups**: Create, edit, and delete per-range layout/theme rules with a live `#grpGridPreview` inside the inline editor (`populateGroupThemeOptions()` iterates `Object.values(BUILT_IN_THEMES)`).
-5. **Persistence & Undo**: `layoutConfig` and `layoutGroups` are persisted in IndexedDB session prefs, included in `.bic.json` project exports/imports, and captured in Undo/Redo snapshots.
+5. **Persistence & Undo**: `layoutConfig` and `layoutGroups` are persisted in IndexedDB session prefs, included in `.biw` project exports/imports, and captured in Undo/Redo snapshots.

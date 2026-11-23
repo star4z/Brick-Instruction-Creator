@@ -12,7 +12,7 @@ An opinionated yet fully customizable client-side TypeScript web application tha
   1. **Opinionated Theme Presets**: Classic Manual Blue, Modern Studio White, Collector 18+ Dark, Drafting Blueprint.
   2. **Global Design Tokens**: Page size/orientation, `auto`/`1-up`–`4-up` multi-step layouts, solid/gradient/blueprint/image backgrounds, typography, highlight outlines for new pieces, fade/desaturation for unmodified pieces, placement arrows, Cover/Back pages, and sortable Bill of Materials (BOM).
   3. **Per-Step Overrides**: Semantic camera overrides, live 3D orbit angle locking, Pin Page Breaks, and piece presentation poses.
-- **Exports & Persistence**: High-res hybrid vector+raster **PDF**, self-contained offline **Interactive HTML Viewer**, portable `.bic.json` project save/load, browser **IndexedDB** autosave, and local LDraw `complete.zip`/`.dat` library caching.
+- **Exports & Persistence**: High-res hybrid vector+raster **PDF**, self-contained offline **Interactive HTML Viewer**, portable `.biw` project and `.biwtheme` custom theme save/load, browser **IndexedDB** autosave, and local LDraw `complete.zip`/`.dat` library caching.
 - **Neocities Static Ready**: Relative asset paths (`base: './'`), only Neocities-allowed static extensions, and code-split chunks strictly under 5 MB per file (verified automatically by `npm run check:neocities`).
 
 ## Getting Started

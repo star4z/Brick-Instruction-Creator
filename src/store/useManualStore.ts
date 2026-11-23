@@ -15,6 +15,7 @@ import {
 } from '../engine/stepEditing';
 import { generateInstructionPlan } from '../engine/stepGenerator';
 import { technicalRenderer } from '../renderer/technicalRenderer';
+import { PROJECT_FILE_FORMAT } from '../storage/fileFormats';
 import {
   loadAutosaveProject,
   saveAutosaveProject,
@@ -677,6 +678,7 @@ export const useManualStore = create<ManualState>((set, get) => {
     getProjectSnapshot: () => {
       const { model, plan, overrides, theme, cover, back, bom } = get();
       return {
+        format: PROJECT_FILE_FORMAT,
         version: 1,
         savedAt: new Date().toISOString(),
         model,
