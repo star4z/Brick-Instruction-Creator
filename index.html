@@ -263,12 +263,14 @@
               <span id="libStatusText" class="text-[11px] text-[var(--muted-foreground)]">0 saved</span>
             </div>
             <p class="text-[11px] text-[var(--muted-foreground)] leading-snug">
-              Studio <b>.io</b> files include 3D shapes automatically. For plain <b>.ldr</b> files, fetch missing parts online or import LDraw's <b>complete.zip</b> once.
+              Missing 3D shapes for <b>.ldr</b> &amp; <b>.mpd</b> files download automatically on import and cache locally. You can also refresh online or import LDraw's <b>complete.zip</b> for offline use.
             </p>
             <div id="menuFetchLibWrap" class="hidden flex flex-col gap-2">
               <select id="libSourceSelect" class="w-full py-1.5 px-2.5 rounded-xl border border-[var(--border)] bg-[var(--background)] text-[11px] font-semibold outline-none">
-                <option value="https://raw.githubusercontent.com/gkjohnson/ldraw-parts-library/master/complete/ldraw/">Public Mirror: GitHub LDraw Library</option>
-                <option value="https://cdn.jsdelivr.net/gh/gkjohnson/ldraw-parts-library@master/complete/ldraw/">Public Mirror: jsDelivr LDraw CDN</option>
+                <option value="https://raw.githubusercontent.com/kulits/ldraw-parts/master/ldraw/">Official LDraw Library (Daily Sync · GitHub)</option>
+                <option value="https://mrubens.github.io/ldraw-library/">Official LDraw Library (GitHub Pages Mirror)</option>
+                <option value="https://raw.githubusercontent.com/gkjohnson/ldraw-parts-library/master/complete/ldraw/">Classic LDraw Mirror (GitHub)</option>
+                <option value="https://cdn.jsdelivr.net/gh/kulits/ldraw-parts@master/ldraw/">Official LDraw Library (jsDelivr CDN)</option>
                 <option value="custom">Custom Public LDraw Base URL…</option>
               </select>
               <input id="libCustomUrlInput" type="url" placeholder="https://example.com/ldraw/" class="hidden w-full py-1.5 px-2.5 rounded-xl border border-[var(--border)] bg-[var(--background)] text-[11px] outline-none" />
@@ -589,6 +591,40 @@
           <button id="btnClearAllPins" type="button" class="hidden shrink-0 px-2.5 py-1 rounded-full text-[11px] font-semibold text-[#1a73e8] bg-[#1a73e8]/10 hover:bg-[#1a73e8]/15 whitespace-nowrap transition"></button>
         </div>
         <div id="overviewList" class="flex-1 overflow-y-auto overscroll-contain p-3 space-y-2 text-xs"></div>
+      </div>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- AUTO-FETCH LDRAW PARTS PROGRESS OVERLAY (.ldr / .mpd import)     -->
+    <!-- ================================================================ -->
+    <div id="importFetchOverlay" class="no-print hidden fixed inset-0 z-[55] bg-black/45 backdrop-blur-[2px] flex items-center justify-center p-4">
+      <div class="w-full max-w-sm rounded-3xl bg-[var(--card)] border border-[var(--border)] shadow-2xl p-5 space-y-3.5 text-xs">
+        <div class="flex items-start gap-3">
+          <div class="w-9 h-9 rounded-2xl bg-[#1a73e8]/15 text-[#1a73e8] flex items-center justify-center shrink-0">
+            <svg class="w-5 h-5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+              <circle cx="12" cy="12" r="9" class="opacity-25"></circle>
+              <path d="M21 12a9 9 0 0 0-9-9" stroke-linecap="round"></path>
+            </svg>
+          </div>
+          <div class="min-w-0 flex-1">
+            <h3 id="impFetchTitle" class="text-sm font-bold truncate">Downloading 3D brick shapes…</h3>
+            <p id="impFetchSub" class="text-[11px] text-[var(--muted-foreground)] mt-0.5 leading-snug">Fetching LDraw parts &amp; caching locally for future imports.</p>
+          </div>
+        </div>
+        <div class="space-y-1.5">
+          <div class="flex justify-between text-[11px] font-semibold">
+            <span id="impFetchLabel">Checking LDraw library…</span>
+            <span id="impFetchPct">0%</span>
+          </div>
+          <div class="w-full h-2 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden">
+            <div id="impFetchBar" class="h-full bg-[#1a73e8] transition-all duration-100" style="width:0%"></div>
+          </div>
+        </div>
+        <div class="flex justify-end">
+          <button id="impFetchSkipBtn" type="button" class="px-3.5 py-1.5 rounded-full border border-[var(--border)] bg-[var(--background)] text-[11px] font-semibold text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition">
+            Skip &amp; Continue
+          </button>
+        </div>
       </div>
     </div>
 

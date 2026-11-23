@@ -17,6 +17,17 @@ import {
   textureStore,
 } from './engine/textureStore';
 import {
+  PUBLIC_LDRAW_MIRRORS,
+  buildMirrorConfigList,
+  extractCleanDatTitle,
+  extractMovedToTarget,
+  fetchLDrawDependencyGraph,
+  hasMpdGeometryOrPartLines,
+  isLDrawPartSubfile,
+  normalizeMpdSubfileKey,
+  parseLDrawColorToken,
+} from './engine/ldrLibrary';
+import {
   classifyDetachedPart,
   computeGroundPlaneY,
 } from './engine/floatingCheck';
@@ -234,7 +245,62 @@ const COLORS = {
   462:{name:'Medium Orange',hex:'#ffa70b',edge:'#a86800'},
   484:{name:'Dark Orange',hex:'#a95500',edge:'#5e2f00'},
   503:{name:'Very Light Gray',hex:'#e6e3da',edge:'#99968e'},
+  // Additional standard LDConfig.ldr rubber, translucent, satin, metallic & modern LEGO colors
+  21:{name:'Glow In Dark Opaque',hex:'#e0ffb0',edge:'#8fa66a'},
+  32:{name:'Trans-Black IR Lens',hex:'#2b2024',edge:'#140d10',alpha:0.55},
+  49:{name:'Trans-Very Light Green',hex:'#c0e8c0',edge:'#6f996f',alpha:0.44},
+  114:{name:'Glitter Trans-Dark Pink',hex:'#df6695',edge:'#8a3657',alpha:0.48},
+  117:{name:'Glitter Trans-Clear',hex:'#e8f0f7',edge:'#8a99a8',alpha:0.38},
+  129:{name:'Glitter Trans-Purple',hex:'#7f66a8',edge:'#463466',alpha:0.48},
+  137:{name:'Metal Blue',hex:'#6a7a8a',edge:'#38434f'},
+  154:{name:'New Dark Red',hex:'#720e0f',edge:'#3d0607'},
+  182:{name:'Trans-Bright Orange',hex:'#f08f1c',edge:'#945205',alpha:0.50},
+  231:{name:'Trans-Bright Light Orange',hex:'#fcb76d',edge:'#a87032',alpha:0.50},
+  234:{name:'Trans-Fire Yellow',hex:'#fbe890',edge:'#a69444',alpha:0.50},
+  256:{name:'Rubber Black',hex:'#212121',edge:'#555860'},
+  273:{name:'Rubber Blue',hex:'#0033b2',edge:'#001c66'},
+  284:{name:'Trans-Reddish Lilac',hex:'#c281a5',edge:'#784662',alpha:0.48},
+  285:{name:'Trans-Light Green',hex:'#7dc291',edge:'#3e784f',alpha:0.46},
+  293:{name:'Trans-Light Blue Violet',hex:'#6babeb',edge:'#36689c',alpha:0.46},
+  294:{name:'Glow In Dark Trans',hex:'#bdc6ad',edge:'#727a66',alpha:0.62},
+  300:{name:'Metallic Copper',hex:'#c27f53',edge:'#734629'},
+  324:{name:'Rubber Red',hex:'#c40026',edge:'#6e0015'},
+  329:{name:'Glow In Dark White',hex:'#f5f3d7',edge:'#a3a082'},
+  339:{name:'Satin Trans-Light Blue',hex:'#68bcc5',edge:'#36767d',alpha:0.52},
+  360:{name:'Satin Trans-Clear',hex:'#dce6ee',edge:'#8a99a8',alpha:0.46},
+  362:{name:'Satin Trans-Dark Blue',hex:'#155299',edge:'#0a2c54',alpha:0.52},
+  363:{name:'Satin Trans-Brown',hex:'#6b5a52',edge:'#382e29',alpha:0.50},
+  364:{name:'Satin Trans-Purple',hex:'#845e84',edge:'#4a334a',alpha:0.52},
+  365:{name:'Satin Trans-Bright Green',hex:'#56e646',edge:'#2d8723',alpha:0.52},
+  367:{name:'Satin Trans-Dark Pink',hex:'#df6695',edge:'#8a3657',alpha:0.52},
+  370:{name:'Medium Brown',hex:'#755945',edge:'#423125'},
+  371:{name:'Warm Tan',hex:'#cca373',edge:'#80613e'},
+  375:{name:'Rubber Light Gray',hex:'#c1c2c1',edge:'#737573'},
+  402:{name:'Reddish Orange',hex:'#ca4c0b',edge:'#782b04'},
+  406:{name:'Rubber Dark Blue',hex:'#001d68',edge:'#000d33'},
+  422:{name:'Sienna Brown',hex:'#915c3c',edge:'#52321e'},
+  423:{name:'Umber Brown',hex:'#5e3f33',edge:'#332018'},
+  449:{name:'Rubber Purple',hex:'#81007b',edge:'#450042'},
+  490:{name:'Rubber Lime',hex:'#d7f000',edge:'#7f8f00'},
+  494:{name:'Electric Contact Alloy',hex:'#d0d0d0',edge:'#7c7c7c'},
+  495:{name:'Electric Contact Copper',hex:'#ae7a59',edge:'#66432d'},
+  496:{name:'Rubber Light Bluish Gray',hex:'#a3a2a4',edge:'#5c5c5e'},
+  504:{name:'Rubber Flat Silver',hex:'#898788',edge:'#4e4d4e'},
+  511:{name:'Rubber White',hex:'#fafafa',edge:'#9aa0a6'},
 };
+
+function resolveColorInfo(colorId) {
+  if (COLORS[colorId]) return COLORS[colorId];
+  if (typeof colorId === 'number' && isDirectRgbColor(colorId)) {
+    const rgb = colorId & 0xffffff;
+    const r = (rgb >> 16) & 255, g = (rgb >> 8) & 255, b = rgb & 255;
+    const hex = '#' + rgb.toString(16).padStart(6, '0');
+    const er = Math.round(r * 0.58), eg = Math.round(g * 0.58), eb = Math.round(b * 0.58);
+    const edge = '#' + ((er << 16) | (eg << 8) | eb).toString(16).padStart(6, '0');
+    return { name: `RGB ${hex.toUpperCase()}`, hex, edge };
+  }
+  return null;
+}
 
 const THEMES = BUILT_IN_THEMES;
 let customThemes = loadCustomThemesFromStorage();
@@ -317,6 +383,7 @@ const PARTS_CATALOG = {
   '3832':{name:'Plate 2×10',sx:10,sz:2,h:8,studs:true}, '2445':{name:'Plate 2×12',sx:12,sz:2,h:8,studs:true},
   '3031':{name:'Plate 4×4',sx:4,sz:4,h:8,studs:true}, '3032':{name:'Plate 4×6',sx:6,sz:4,h:8,studs:true},
   '3035':{name:'Plate 4×8',sx:8,sz:4,h:8,studs:true}, '3030':{name:'Plate 4×10',sx:10,sz:4,h:8,studs:true},
+  '3029':{name:'Plate 4×12',sx:12,sz:4,h:8,studs:true},
   '3958':{name:'Plate 6×6',sx:6,sz:6,h:8,studs:true}, '3036':{name:'Plate 6×8',sx:8,sz:6,h:8,studs:true},
   '3033':{name:'Plate 6×10',sx:10,sz:6,h:8,studs:true}, '3028':{name:'Plate 6×12',sx:12,sz:6,h:8,studs:true},
   '35480':{name:'Rounded Plate 1×2',sx:2,sz:1,h:8,studs:true}, '3794':{name:'Jumper Plate 1×2',sx:2,sz:1,h:8,studs:true},
@@ -377,6 +444,8 @@ const embeddedDatTitles = new Map();
 const userLibRaw = new Map();
 const userLibTitles = new Map();
 const embeddedDatCompiled = new Map();
+const movedToAliases = new Map(); // LDraw ~Moved to <target> redirect chains for clean human names
+const notFoundDatCache = new Set(); // Session cache of confirmed 404 part IDs to avoid repeat probes
 const compositePartDefs = new Map(); // Fused assemblies (e.g., Minifig Torso+Arms+Hands, Hips+Legs)
 
 function normId(raw) {
@@ -490,17 +559,29 @@ const KNOWN_EXTRA_PART_NAMES = {
 };
 
 function getHumanPartName(pid) {
-  const k = normId(pid);
-  const isMeaningfulTitle = (t, id) => Boolean(t && normId(t) !== normId(id));
+  let k = normId(pid);
+  // Follow LDraw `~Moved to <target>` redirect chains (up to 4 hops) for clean official titles
+  for (let hop = 0; hop < 4 && movedToAliases.has(k); hop++) {
+    const next = movedToAliases.get(k);
+    if (!next || next === k) break;
+    k = next;
+  }
+  const isMeaningfulTitle = (t, id) => Boolean(t && !/^~?Moved\s+to\s+/i.test(t) && normId(t) !== normId(id));
   const directTitle = embeddedDatTitles.get(k) || userLibTitles.get(k);
   if (isMeaningfulTitle(directTitle, k)) return directTitle;
 
   const isPrinted = /(?:pb|ps|pat|pr)\d+/i.test(k) || /^\d{3,}[a-z]?p[0-9a-z]{2,}/i.test(k);
   const lookupName = (id) => {
-    const t = embeddedDatTitles.get(id) || userLibTitles.get(id);
-    if (isMeaningfulTitle(t, id)) return t;
-    if (KNOWN_EXTRA_PART_NAMES[id]) return KNOWN_EXTRA_PART_NAMES[id];
-    if (PARTS_CATALOG[id]?.name) return PARTS_CATALOG[id].name;
+    let cur = id;
+    for (let hop = 0; hop < 4 && movedToAliases.has(cur); hop++) {
+      const next = movedToAliases.get(cur);
+      if (!next || next === cur) break;
+      cur = next;
+    }
+    const t = embeddedDatTitles.get(cur) || userLibTitles.get(cur);
+    if (isMeaningfulTitle(t, cur)) return t;
+    if (KNOWN_EXTRA_PART_NAMES[cur]) return KNOWN_EXTRA_PART_NAMES[cur];
+    if (PARTS_CATALOG[cur]?.name) return PARTS_CATALOG[cur].name;
     return null;
   };
 
@@ -547,7 +628,7 @@ function explainMissingPartReason(pid) {
 function hasKnownShape(pid) {
   const k = normId(pid);
   if (compositePartDefs.has(k)) return true;
-  if (lookupEmbeddedDat(k)) return true;
+  if (compileEmbeddedDat(k)) return true;
   if (PARTS_CATALOG[k]) return true;
   for (const fb of getPartIdFallbacks(k)) {
     if (PARTS_CATALOG[fb]) return true;
@@ -1388,7 +1469,7 @@ function buildMeshBuffers(prevParts, newParts, opts) {
 
   const emitSingleLeaf = (leafPart, isNew, isSelected, offX, offY, offZ, hingeRad, parentId = null, isGhost = false) => {
     const def = resolvePart(leafPart.p);
-    const cInfo = COLORS[leafPart.c] || COLORS[71];
+    const cInfo = resolveColorInfo(leafPart.c) || COLORS[71];
     const lookupId = parentId || leafPart.id;
     const overrideHex = isGhost ? null : (opts.partColorOverrides?.[lookupId] || opts.partColorOverrides?.[leafPart.id] || null);
     const isDimmed = !isGhost && Boolean(opts.dimPartIds && (opts.dimPartIds.has(lookupId) || opts.dimPartIds.has(leafPart.id)));
@@ -2773,7 +2854,7 @@ function splitMpd(src, fallbackName) {
   const lines = src.replace(/^\uFEFF/, '').split(/\r?\n/);
   let name = fallbackName, buf = [], sawFile = false;
   let dataName = null, dataChunks = [];
-  const flushFile = () => { if (buf.length > 0 && name) map.set(name.toLowerCase(), { name, lines: buf }); };
+  const flushFile = () => { if (buf.length > 0 && name) map.set(normalizeMpdSubfileKey(name), { name, lines: buf }); };
   const flushData = () => {
     if (dataName && dataChunks.length > 0) {
       textureStore.registerBase64Texture(dataChunks.join(''), { name: dataName, source: 'embedded' });
@@ -2786,7 +2867,8 @@ function splitMpd(src, fallbackName) {
     const mFile = l.match(/^0\s+FILE\s+(.+)$/i);
     if (mFile) {
       flushData();
-      if (sawFile || buf.length > 0) flushFile();
+      // Ignore comment-only preambles before the first `0 FILE` so the first real subfile becomes root
+      if (sawFile || (buf.length > 0 && hasMpdGeometryOrPartLines(buf))) flushFile();
       sawFile = true;
       name = mFile[1].trim();
       buf = [];
@@ -2795,7 +2877,7 @@ function splitMpd(src, fallbackName) {
     const mData = l.match(/^0\s+!DATA\s+(.+)$/i);
     if (mData) {
       flushData();
-      if (sawFile || buf.length > 0) flushFile();
+      if (sawFile || (buf.length > 0 && hasMpdGeometryOrPartLines(buf))) flushFile();
       sawFile = true;
       name = null;
       buf = [];
@@ -2819,9 +2901,12 @@ function splitMpd(src, fallbackName) {
 
 function registerEmbeddedDatEntry(sf, source = 'embedded') {
   const nk = normId(sf.name);
-  const title = getSubfileTitle(sf);
+  const movedTarget = extractMovedToTarget(sf.lines);
+  if (movedTarget && movedTarget !== nk) movedToAliases.set(nk, movedTarget);
+  const cleanTitle = extractCleanDatTitle(sf.lines);
+  const title = cleanTitle || cleanSubName(sf.name);
   embeddedDatRaw.set(nk, sf.lines);
-  embeddedDatTitles.set(nk, title);
+  if (cleanTitle || !movedTarget) embeddedDatTitles.set(nk, title);
   textureStore.scanDatLinesForTextures(sf.lines, source);
   // Also alias BrickLink Studio `0 BL_Item_No <id>` so model.ldr refs like `3626pb3988` resolve directly to `bl_3626pb3988`
   for (let i = 0; i < Math.min(sf.lines.length, 16); i++) {
@@ -2830,7 +2915,7 @@ function registerEmbeddedDatEntry(sf, source = 'embedded') {
       const alias = normId(mBl[1]);
       if (alias && alias !== nk && !embeddedDatRaw.has(alias)) {
         embeddedDatRaw.set(alias, sf.lines);
-        embeddedDatTitles.set(alias, title);
+        if (cleanTitle || !movedTarget) embeddedDatTitles.set(alias, title);
       }
       break;
     }
@@ -2851,8 +2936,7 @@ function isAssemblySubfile(sf) {
 }
 
 function getSubfileTitle(sf) {
-  const tLine = sf.lines.find(l => l.startsWith('0 ') && !/^0\s+(FILE|Name:|Author:|IsSubModel|BL_|Flexible|Render|IsAssembly|!|BFC|PE_TEX_)/i.test(l));
-  return tLine ? tLine.replace(/^0\s+/, '').trim() : cleanSubName(sf.name);
+  return extractCleanDatTitle(sf.lines) || cleanSubName(sf.name);
 }
 
 async function readZipEntryBytes(bytes, view, entry) {
@@ -2959,8 +3043,7 @@ function flattenMpd(source, fileName, useIsSubModelFlag = false) {
       if (!line.startsWith('1 ') && !line.startsWith('11 ')) continue;
       const t = line.split(/\s+/);
       if (t.length < 15) continue;
-      let c = parseInt(t[1], 10);
-      if (c === 16 || c < 0 || !isFinite(c)) c = parentCol;
+      const c = parseLDrawColorToken(t[1], parentCol);
       const lx=+t[2], ly=+t[3], lz=+t[4];
       const lm=[+t[5],+t[6],+t[7], +t[8],+t[9],+t[10], +t[11],+t[12],+t[13]];
       if ([lx,ly,lz,...lm].some(n => !isFinite(n))) continue;
@@ -2968,14 +3051,11 @@ function flattenMpd(source, fileName, useIsSubModelFlag = false) {
       const wx = px+r[0], wy = py+r[1], wz = pz+r[2];
       const wm = mat3Mul(pm, lm);
       const ref = t.slice(14).join(' ').trim();
-      const child = subfiles.get(ref.toLowerCase());
+      const child = subfiles.get(normalizeMpdSubfileKey(ref));
 
       // Detect pre-assembled LEGO assemblies (Minifig Torso+Arms+Hands, Hips+Legs) -> tag all children with same assemblyTag!
       const childIsAsm = !assemblyTag && child && isAssemblySubfile(child);
-      const childLooksLikePart = child && (
-        child.name.toLowerCase().endsWith('.dat') ||
-        child.lines.some(l => /^[234]\s+/.test(l) || /^0\s+(?:PE_TEX_INFO|PE_TEX_PATH|!TEXMAP|!LDRAW_ORG)\b/i.test(l))
-      );
+      const childLooksLikePart = child && isLDrawPartSubfile(child.name, child.lines);
       const isChildSub = useIsSubModelFlag
         ? (child && child.lines.some(l => /^0\s+IsSubModel\s+True/i.test(l)))
         : (child && (childIsAsm || !childLooksLikePart));
@@ -3049,9 +3129,7 @@ function parseImportedModel(m1Text, m2Text, fileName) {
   if (m1Text) {
     const m1Map = splitMpd(m1Text, fileName);
     for (const sf of m1Map.values()) {
-      const isEmbeddedPart =
-        sf.name.toLowerCase().endsWith('.dat') ||
-        sf.lines.some(l => /^[234]\s+/.test(l) || /^0\s+(?:PE_TEX_INFO|PE_TEX_PATH|!TEXMAP|!LDRAW_ORG)\b/i.test(l));
+      const isEmbeddedPart = isLDrawPartSubfile(sf.name, sf.lines);
       if (isEmbeddedPart) {
         const nk = normId(sf.name);
         if (!embeddedDatRaw.has(nk)) {
@@ -3867,14 +3945,14 @@ function appendOccluderBoxes(partsList, out) {
   for (const p of partsList || []) {
     if (p.children && p.children.length > 0) {
       for (const ch of p.children) {
-        const col = COLORS[ch.c];
+        const col = resolveColorInfo(ch.c);
         out.push({
           box: computeLeafWorldBox(ch),
           transparent: Boolean(col && typeof col.alpha === 'number' && col.alpha < 0.99),
         });
       }
     } else {
-      const col = COLORS[p.c];
+      const col = resolveColorInfo(p.c);
       out.push({
         box: computeLeafWorldBox(p),
         transparent: Boolean(col && typeof col.alpha === 'number' && col.alpha < 0.99),
@@ -5361,7 +5439,7 @@ function classifyBomCategory(part) {
 }
 
 function getColorSortKey(colorId) {
-  const col = COLORS[colorId] || { name: `Color ${colorId}`, hex: '#9ea3a8' };
+  const col = resolveColorInfo(colorId) || { name: `Color ${colorId}`, hex: '#9ea3a8' };
   const cname = (col.name || '').toLowerCase();
   const isSpecial = /trans|chrome|pearl|metal|glow|glitter/.test(cname);
   const hex = (col.hex || '#9ea3a8').replace('#', '');
@@ -7752,13 +7830,22 @@ async function dbClearStore(storeName) {
 }
 
 function registerUserLibDat(rawName, text) {
+  if (typeof rawName === 'string' && rawName.startsWith('__tex__:')) {
+    const texName = rawName.slice('__tex__:'.length);
+    if (texName && typeof text === 'string' && text.length > 16) {
+      textureStore.registerBase64Texture(text, { name: texName, source: 'library' });
+    }
+    return;
+  }
   const k = normId(rawName);
-  const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const lines = String(text || '').replace(/^\uFEFF/, '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
   if (!lines.length) return;
   userLibRaw.set(k, lines);
+  notFoundDatCache.delete(k);
   textureStore.scanDatLinesForTextures(lines, 'library');
-  const tLine = lines.find(l => l.startsWith('0 ') && !/^0\s+(FILE|Name:|Author:|IsSubModel|BL_|Flexible|Render|IsAssembly|!|BFC|PE_TEX_)/i.test(l));
-  const title = tLine ? tLine.replace(/^0\s+/, '').trim() : null;
+  const movedTarget = extractMovedToTarget(lines);
+  if (movedTarget && movedTarget !== k) movedToAliases.set(k, movedTarget);
+  const title = extractCleanDatTitle(lines);
   if (title) userLibTitles.set(k, title);
   for (let i = 0; i < Math.min(lines.length, 16); i++) {
     const mBl = lines[i].match(/^0\s+BL_Item_No\s+(\S+)/i);
@@ -7770,6 +7857,48 @@ function registerUserLibDat(rawName, text) {
       }
       break;
     }
+  }
+}
+
+function getDirectLoadedDatLines(normKey) {
+  const k = normId(normKey);
+  const blPrefixed = !k.includes('/') && !k.startsWith('bl_') ? `bl_${k}` : null;
+  const blSuffixed = !k.includes('/') && !k.endsWith('-bl') ? `${k}-bl` : null;
+  const noBlPrefix = k.startsWith('bl_') ? k.slice(3) : null;
+  for (const store of [embeddedDatRaw, userLibRaw]) {
+    if (store.has(k)) return store.get(k);
+    if (blPrefixed && store.has(blPrefixed)) return store.get(blPrefixed);
+    if (blSuffixed && store.has(blSuffixed)) return store.get(blSuffixed);
+    if (noBlPrefix && store.has(noBlPrefix)) return store.get(noBlPrefix);
+  }
+  return null;
+}
+
+function collectLeafPartIdsFromParsed(parsed) {
+  const ids = [];
+  if (!parsed || !Array.isArray(parsed.parts)) return ids;
+  for (const p of parsed.parts) {
+    const leaves = p.children && p.children.length > 0 ? p.children : [p];
+    for (const lf of leaves) {
+      if (lf?.p) ids.push(lf.p);
+    }
+  }
+  return ids;
+}
+
+function refreshSubdivisionPlanForParsed(parsed, prevPlan) {
+  if (!parsed || !prevPlan || prevPlan.strategy === 'none') return prevPlan || null;
+  try {
+    const prep = prepareSubdivisionData(parsed);
+    const { proposals } = analyzeModelSubdivisions(prep.inputs, prep.adjacency);
+    const matched =
+      proposals.find(p => p.id === prevPlan.id) ||
+      proposals.find(p => p.strategy === prevPlan.strategy && p.outputMode === prevPlan.outputMode) ||
+      proposals.find(p => p.strategy === prevPlan.strategy) ||
+      null;
+    return matched ? JSON.parse(JSON.stringify(matched)) : prevPlan;
+  } catch (_) {
+    return prevPlan;
   }
 }
 
@@ -7877,18 +8006,21 @@ async function importBricksLibraryFiles(fileList) {
             if (u8.length > 24) {
               const b64 = bytesToBase64(u8);
               const normName = normalizeTextureName(ent.name);
-              textureStore.registerBase64Texture(b64, { name: normName, source: 'library' });
+              textureStore.registerBase64Texture(b64, { name: normName || ent.name, source: 'library' });
               if (normName) texToStore.push([`__tex__:${normName}`, b64]);
             }
           } catch (_) {}
         }
         if (db && texToStore.length) {
-          await new Promise((res) => {
-            const tx = db.transaction(LIB_STORE, 'readwrite');
-            const st = tx.objectStore(LIB_STORE);
-            for (const [k, b64] of texToStore) st.put(b64, k);
-            tx.oncomplete = () => res(); tx.onerror = () => res();
-          });
+          for (let i = 0; i < texToStore.length; i += 100) {
+            const chunk = texToStore.slice(i, i + 100);
+            await new Promise((res) => {
+              const tx = db.transaction(LIB_STORE, 'readwrite');
+              const st = tx.objectStore(LIB_STORE);
+              for (const [k, b64] of chunk) st.put(b64, k);
+              tx.oncomplete = () => res(); tx.onerror = () => res();
+            });
+          }
         }
         // Batch write to IndexedDB in chunks of 250 for speed & stability
         for (let i = 0; i < datEntries.length; i += 250) {
@@ -7919,11 +8051,21 @@ async function importBricksLibraryFiles(fileList) {
         }
       }
     }
+    notFoundDatCache.clear();
     await textureStore.predecodeAllPending();
     embeddedDatCompiled.clear(); pliThumbCache.clear(); submodelThumbCache.clear(); clearMinifigDiagramCaches(); coverHeroCache.clear();
     updateLibraryStatusUI();
     if (state.model) {
-      if (state.model._parsed) state.model = buildManualFromParsed(state.model._parsed, state.model._mode || 'auto', state.model._subdivisionPlan || null);
+      if (state.model._parsed) {
+        const nextPlan = imported > 0
+          ? refreshSubdivisionPlanForParsed(state.model._parsed, state.model._subdivisionPlan || null)
+          : (state.model._subdivisionPlan || null);
+        state.model = buildManualFromParsed(state.model._parsed, state.model._mode || 'auto', nextPlan);
+        if (lastSourceRecord && nextPlan !== state.model._subdivisionPlan) {
+          lastSourceRecord = { ...lastSourceRecord, subdivisionPlan: nextPlan };
+          dbPut('lastModel', lastSourceRecord);
+        }
+      }
       computeModelDiagnostics();
       renderAll();
     }
@@ -7935,75 +8077,25 @@ async function importBricksLibraryFiles(fileList) {
   }
 }
 
-const PUBLIC_LDRAW_MIRRORS = [
-  'https://raw.githubusercontent.com/gkjohnson/ldraw-parts-library/master/complete/ldraw/',
-  'https://cdn.jsdelivr.net/gh/gkjohnson/ldraw-parts-library@master/complete/ldraw/',
-];
-
-function getSelectedPublicLibBases() {
-  const sel = document.getElementById('libSourceSelect')?.value || PUBLIC_LDRAW_MIRRORS[0];
-  if (sel === 'custom') {
-    const raw = (document.getElementById('libCustomUrlInput')?.value || '').trim();
-    if (raw) {
-      const normalized = raw.endsWith('/') ? raw : raw + '/';
-      return [normalized, ...PUBLIC_LDRAW_MIRRORS];
-    }
-    return [...PUBLIC_LDRAW_MIRRORS];
-  }
-  return [sel, ...PUBLIC_LDRAW_MIRRORS.filter(u => u !== sel)];
+function getSelectedMirrorConfigs() {
+  const sel = document.getElementById('libSourceSelect')?.value || PUBLIC_LDRAW_MIRRORS[0].url;
+  const custom = (document.getElementById('libCustomUrlInput')?.value || '').trim();
+  return buildMirrorConfigList(sel, custom);
 }
 
-async function fetchDatFromPublicMirrors(normKey, bases) {
-  const tryKeys = [normKey, ...getPartIdFallbacks(normKey)];
-  let sawNetworkError = false;
-  for (let ki = 0; ki < tryKeys.length; ki++) {
-    const key = tryKeys[ki];
-    if (ki > 0 && lookupExactRawDat(key)) break;
-    const clean = key.replace(/\.dat$/i, '');
-    const paths = clean.startsWith('s/')
-      ? [`parts/${clean}.dat`, `${clean}.dat`]
-      : clean.startsWith('48/') || clean.startsWith('8/')
-        ? [`p/${clean}.dat`, `${clean}.dat`]
-        : [`parts/${clean}.dat`, `p/${clean}.dat`, `parts/s/${clean}.dat`];
-
-    for (const base of bases) {
-      for (const rel of paths) {
-        try {
-          const res = await fetch(base + rel, { mode: 'cors' });
-          if (res.ok) {
-            const text = await res.text();
-            if (text && text.length > 10 && !/^\s*<!doctype/i.test(text)) {
-              return { text, resolvedKey: clean, networkBlocked: false };
-            }
-          }
-        } catch (_) {
-          sawNetworkError = true;
-        }
-      }
+async function persistLibraryBatchToDb(db, datBatch, texBatch) {
+  if (!db || (datBatch.length === 0 && texBatch.length === 0)) return;
+  await new Promise((res) => {
+    const tx = db.transaction(LIB_STORE, 'readwrite');
+    const st = tx.objectStore(LIB_STORE);
+    for (const [k, txt] of datBatch) st.put(txt, k);
+    for (const [texName, b64] of texBatch) {
+      const normName = normalizeTextureName(texName) || texName;
+      st.put(b64, `__tex__:${normName}`);
     }
-  }
-  return { text: null, resolvedKey: normKey, networkBlocked: sawNetworkError };
-}
-
-async function fetchTextureFromPublicMirrors(texName, bases) {
-  const clean = normalizeTextureName(texName);
-  if (!clean) return null;
-  const paths = [`parts/textures/${clean}`, `textures/${clean}`, clean];
-  for (const base of bases) {
-    for (const rel of paths) {
-      try {
-        const res = await fetch(base + rel, { mode: 'cors' });
-        if (res.ok) {
-          const ab = await res.arrayBuffer();
-          const u8 = new Uint8Array(ab);
-          if (u8.length > 24) {
-            return { normName: clean, base64: bytesToBase64(u8) };
-          }
-        }
-      } catch (_) {}
-    }
-  }
-  return null;
+    tx.oncomplete = () => res();
+    tx.onerror = () => res();
+  });
 }
 
 let libHighlightTimer = null;
@@ -8029,6 +8121,92 @@ function scrollMenuToBricksLibrary(highlight = true) {
     libHighlightTimer = setTimeout(() => {
       sec.classList.remove('ring-2', 'ring-[#1a73e8]/60', 'rounded-2xl', 'p-2.5', '-mx-2.5', 'bg-[#1a73e8]/5');
     }, 1800);
+  }
+}
+
+/**
+ * Automatically downloads missing official LDraw 3D shapes, nested subparts/primitives, and
+ * `!TEXMAP` PNG textures for a newly parsed `.ldr`/`.mpd` (or `.io`) model BEFORE subdivision
+ * analysis, 3D import preview, and zero-floating step generation run!
+ */
+async function autoFetchMissingPartsForParsed(parsed, displayName = '') {
+  const rootPartIds = collectLeafPartIdsFromParsed(parsed);
+  if (rootPartIds.length === 0) {
+    return { fetched: 0, texturesFetched: 0, networkBlocked: false, aborted: false, alreadyComplete: true };
+  }
+
+  const overlay = document.getElementById('importFetchOverlay');
+  const titleEl = document.getElementById('impFetchTitle');
+  const subEl = document.getElementById('impFetchSub');
+  const labelEl = document.getElementById('impFetchLabel');
+  const pctEl = document.getElementById('impFetchPct');
+  const barEl = document.getElementById('impFetchBar');
+  const skipBtn = document.getElementById('impFetchSkipBtn');
+
+  let overlayShown = false;
+  const showOverlay = () => {
+    if (overlayShown || !overlay) return;
+    overlayShown = true;
+    if (titleEl) titleEl.textContent = displayName ? `Loading 3D shapes for ${cleanSubName(displayName)}…` : 'Downloading 3D brick shapes…';
+    if (subEl) subEl.textContent = 'Fetching official LDraw parts & caching locally for instant reuse.';
+    if (labelEl) labelEl.textContent = 'Downloading parts…';
+    if (pctEl) pctEl.textContent = '0%';
+    if (barEl) barEl.style.width = '4%';
+    overlay.classList.remove('hidden');
+  };
+
+  const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const onSkip = () => { if (ctrl) ctrl.abort(); };
+  if (skipBtn) skipBtn.addEventListener('click', onSkip, { once: true });
+
+  // Only reveal overlay if network fetch actually starts (avoids flicker when all parts are already cached!)
+  const overlayTimer = setTimeout(showOverlay, 120);
+  const mirrors = getSelectedMirrorConfigs();
+  const db = await openSessionDB().catch(() => null);
+
+  try {
+    const res = await fetchLDrawDependencyGraph({
+      rootPartIds,
+      mirrors,
+      getDirectLoadedLines: getDirectLoadedDatLines,
+      getFallbacks: getPartIdFallbacks,
+      hasTexture: (texName) => Boolean(textureStore.lookupByName(texName)),
+      notFoundCache: notFoundDatCache,
+      onDatLoaded: (storeKey, _reqKey, text) => {
+        registerUserLibDat(storeKey, text);
+      },
+      onTextureLoaded: (texName, b64) => {
+        const normName = normalizeTextureName(texName) || texName;
+        textureStore.registerBase64Texture(b64, { name: normName, source: 'library' });
+      },
+      onBatchComplete: (datBatch, texBatch) => persistLibraryBatchToDb(db, datBatch, texBatch),
+      onProgress: ({ fetched, processed, total }) => {
+        showOverlay();
+        const pct = Math.min(99, Math.max(4, Math.round((processed / Math.max(1, total)) * 100)));
+        if (labelEl) labelEl.textContent = `Loaded ${fetched} shape${fetched === 1 ? '' : 's'} (${processed}/${total})…`;
+        if (pctEl) pctEl.textContent = pct + '%';
+        if (barEl) barEl.style.width = pct + '%';
+      },
+      concurrency: 16,
+      maxQueue: 2500,
+      timeoutMs: 8000,
+      signal: ctrl?.signal,
+    });
+
+    if (res.fetched > 0 || res.texturesFetched > 0) {
+      await textureStore.predecodeAllPending();
+      embeddedDatCompiled.clear();
+      pliThumbCache.clear();
+      submodelThumbCache.clear();
+      clearMinifigDiagramCaches();
+      coverHeroCache.clear();
+      updateLibraryStatusUI();
+    }
+    return res;
+  } finally {
+    clearTimeout(overlayTimer);
+    if (skipBtn) skipBtn.removeEventListener('click', onSkip);
+    if (overlay) overlay.classList.add('hidden');
   }
 }
 
@@ -8064,9 +8242,7 @@ function collectMissingFetchTargets() {
     const k = normId(rawId);
     const base = k.split('/').pop();
     if (!k || queued.has(k)) return;
-    // Skip standard studs/arcs/rects we already synthesize procedurally at high speed!
     if (/^(stud|stud2|stud2a|stud3|stud3a|stud4|stud4a|studp01|rect|rect2p|\d+-\d+(cyli|cylo|cylc|disc|edge|ring\d+|rin\d+|chrd|ndis))$/.test(base)) return;
-    // Check EXACT raw .dat (NOT unprinted fallback!) so printed heads like 3626cp01 are still fetched even when 3626c is cached!
     const existing = lookupExactRawDat(k);
     if (existing) {
       if (!visitedLoaded.has(existing.key)) {
@@ -8075,9 +8251,6 @@ function collectMissingFetchTargets() {
       }
       return;
     }
-    // BrickLink-proprietary printed/prefixed IDs (bl_*, *-bl, *pb####* with 3+ digits, *_torso) never exist verbatim
-    // in official LDraw mirrors — enqueue their canonical unprinted base LDraw ID instead, while keeping
-    // 1-2 digit official LDraw pattern codes (e.g. 3626cpb6, 3626cpb7, 3626cp01) eligible for direct fetch!
     if (!k.includes('/') && /^(?:bl_|.*-bl$|.*(?:pb|ps|pat|pr)\d{3,}|.*_torso$)/i.test(k)) {
       const fbs = getPartIdFallbacks(k);
       if (fbs.length > 0) {
@@ -8093,7 +8266,9 @@ function collectMissingFetchTargets() {
     for (const { step } of getAllSteps(state.model)) {
       for (const p of step.parts) {
         const leaves = p.children && p.children.length > 0 ? p.children : [p];
-        for (const lf of leaves) enqueue(lf.p);
+        for (const lf of leaves) {
+          if (lf?.p) enqueue(lf.p);
+        }
       }
     }
   }
@@ -8111,6 +8286,7 @@ async function fetchMissingPartsOnline(fetchOpts = {}) {
   const silent = Boolean(fetchOpts && fetchOpts.silent);
   if (fetchPartsInFlight || !state.model) return;
   fetchPartsInFlight = true;
+
   const progWrap = document.getElementById('libProgressWrap');
   const progLabel = document.getElementById('libProgressLabel');
   const progPct = document.getElementById('libProgressPct');
@@ -8121,112 +8297,82 @@ async function fetchMissingPartsOnline(fetchOpts = {}) {
     progPct.textContent = '0%';
     progBar.style.width = '0%';
     scrollMenuToBricksLibrary(false);
+    // Manual trigger clears session 404 cache so switching mirrors or reconnecting retries cleanly
+    notFoundDatCache.clear();
   }
 
-  // Gather missing leaf part IDs + !TEXMAP PNG filenames from current model
-  const { queue, texQueue, scanLinesForRefs } = collectMissingFetchTargets();
-
-  if (queue.length === 0 && texQueue.length === 0) {
-    if (!silent) {
-      progWrap.classList.add('hidden');
-      showToast('All parts in this model already have 3D shapes loaded!');
+  const rootPartIds = [];
+  for (const { step } of getAllSteps(state.model)) {
+    for (const p of step.parts) {
+      const leaves = p.children && p.children.length > 0 ? p.children : [p];
+      for (const lf of leaves) {
+        if (lf?.p) rootPartIds.push(lf.p);
+      }
     }
-    fetchPartsInFlight = false;
-    syncMenuControls();
-    return;
   }
 
-  const bases = getSelectedPublicLibBases();
+  const mirrors = getSelectedMirrorConfigs();
   const db = await openSessionDB().catch(() => null);
-  let fetched = 0, fetchedTex = 0, processed = 0, blocked = 0;
 
-  // Bounded BFS over parts + their nested subparts/primitives (concurrency = 6)
   try {
-    while (processed < queue.length && processed < 1500) {
-      const batch = queue.slice(processed, Math.min(queue.length, processed + 6));
-      processed += batch.length;
-      const results = await Promise.all(batch.map(async (k) => {
-        const res = await fetchDatFromPublicMirrors(k, bases);
-        return { k, ...res };
-      }));
-
-      const toStore = [];
-      for (const r of results) {
-        if (r.text) {
-          const storeKey = r.resolvedKey || r.k;
-          registerUserLibDat(storeKey, r.text);
-          toStore.push([storeKey, r.text]);
-          fetched++;
-          scanLinesForRefs(r.text.split(/\r?\n/));
-        } else if (r.networkBlocked) {
-          blocked++;
-        }
-      }
-
-      if (db && toStore.length) {
-        await new Promise((res) => {
-          const tx = db.transaction(LIB_STORE, 'readwrite');
-          const st = tx.objectStore(LIB_STORE);
-          for (const [k, txt] of toStore) st.put(txt, k);
-          tx.oncomplete = () => res(); tx.onerror = () => res();
-        });
-      }
-
-      // If first batch is completely blocked by sandbox CSP / offline, stop early and guide user clearly
-      if (processed <= 6 && fetched === 0 && blocked === batch.length) {
-        if (!silent) {
-          progWrap.classList.add('hidden');
-          showToast('Online fetch is blocked in this preview sandbox (works on Neocities / web). Use Import .zip / .dat here.');
-        }
-        return;
-      }
-
-      if (!silent) {
-        const pct = Math.min(99, Math.round((processed / Math.max(1, queue.length)) * 100));
-        progLabel.textContent = `Fetched ${fetched} part${fetched === 1 ? '' : 's'} (${processed}/${queue.length})…`;
+    const res = await fetchLDrawDependencyGraph({
+      rootPartIds,
+      mirrors,
+      getDirectLoadedLines: getDirectLoadedDatLines,
+      getFallbacks: getPartIdFallbacks,
+      hasTexture: (texName) => Boolean(textureStore.lookupByName(texName)),
+      notFoundCache: notFoundDatCache,
+      onDatLoaded: (storeKey, _reqKey, text) => {
+        registerUserLibDat(storeKey, text);
+      },
+      onTextureLoaded: (texName, b64) => {
+        const normName = normalizeTextureName(texName) || texName;
+        textureStore.registerBase64Texture(b64, { name: normName, source: 'library' });
+      },
+      onBatchComplete: (datBatch, texBatch) => persistLibraryBatchToDb(db, datBatch, texBatch),
+      onProgress: ({ fetched, processed, total }) => {
+        if (silent) return;
+        const pct = Math.min(99, Math.round((processed / Math.max(1, total)) * 100));
+        progLabel.textContent = `Fetched ${fetched} part${fetched === 1 ? '' : 's'} (${processed}/${total})…`;
         progPct.textContent = pct + '%';
         progBar.style.width = pct + '%';
-      }
+      },
+      concurrency: 16,
+      maxQueue: 2500,
+      timeoutMs: 8000,
+    });
+
+    if (res.alreadyComplete) {
+      if (!silent) showToast('All parts in this model already have 3D shapes loaded!');
+      return;
     }
 
-    // Fetch any LDraw !TEXMAP PNG textures referenced by newly or previously loaded .dat files
-    if (texQueue.length > 0) {
-      const texToStore = [];
-      for (let i = 0; i < texQueue.length && i < 120; i += 6) {
-        const tBatch = texQueue.slice(i, i + 6);
-        const tRes = await Promise.all(tBatch.map((tn) => fetchTextureFromPublicMirrors(tn, bases)));
-        for (const tr of tRes) {
-          if (tr && tr.base64) {
-            textureStore.registerBase64Texture(tr.base64, { name: tr.normName, source: 'library' });
-            texToStore.push([`__tex__:${tr.normName}`, tr.base64]);
-            fetchedTex++;
-          }
-        }
-      }
-      if (db && texToStore.length) {
-        await new Promise((res) => {
-          const tx = db.transaction(LIB_STORE, 'readwrite');
-          const st = tx.objectStore(LIB_STORE);
-          for (const [k, b64] of texToStore) st.put(b64, k);
-          tx.oncomplete = () => res(); tx.onerror = () => res();
-        });
-      }
+    if (res.networkBlocked) {
+      if (!silent) showToast('Online fetch is blocked or offline. Use Import .zip / .dat for offline libraries.');
+      return;
     }
 
     await textureStore.predecodeAllPending();
-    if (fetched > 0 || fetchedTex > 0) {
+    if (res.fetched > 0 || res.texturesFetched > 0) {
       embeddedDatCompiled.clear(); pliThumbCache.clear(); submodelThumbCache.clear(); clearMinifigDiagramCaches(); coverHeroCache.clear();
       updateLibraryStatusUI();
       if (state.model) {
-        if (fetched > 0 && state.model._parsed) state.model = buildManualFromParsed(state.model._parsed, state.model._mode || 'auto', state.model._subdivisionPlan || null);
+        if (res.fetched > 0 && state.model._parsed) {
+          const nextPlan = refreshSubdivisionPlanForParsed(state.model._parsed, state.model._subdivisionPlan || null);
+          state.model = buildManualFromParsed(state.model._parsed, state.model._mode || 'auto', nextPlan);
+          if (lastSourceRecord && nextPlan) {
+            lastSourceRecord = { ...lastSourceRecord, subdivisionPlan: nextPlan };
+            dbPut('lastModel', lastSourceRecord);
+          }
+        }
         computeModelDiagnostics();
         renderAll();
       }
     }
     if (!silent) {
-      const totalFetched = fetched + fetchedTex;
+      const totalFetched = res.fetched + res.texturesFetched;
       showToast(totalFetched > 0
-        ? `Fetched ${fetched} part shape${fetched === 1 ? '' : 's'}${fetchedTex > 0 ? ` and ${fetchedTex} decal texture${fetchedTex === 1 ? '' : 's'}` : ''} from public LDraw library.`
+        ? `Fetched ${res.fetched} part shape${res.fetched === 1 ? '' : 's'}${res.texturesFetched > 0 ? ` and ${res.texturesFetched} decal texture${res.texturesFetched === 1 ? '' : 's'}` : ''} from public LDraw library.`
         : 'No matching parts found at that public source.');
     }
   } finally {
@@ -8267,7 +8413,7 @@ function computeModelDiagnostics() {
       }
       // 2. Check for unmapped / unknown LDraw color IDs
       for (const lf of leaves) {
-        if (!COLORS[lf.c]) {
+        if (!resolveColorInfo(lf.c)) {
           if (!unknownColors.has(lf.c)) unknownColors.set(lf.c, { colorId: lf.c, count: 0, steps: new Set() });
           const rec = unknownColors.get(lf.c);
           rec.count++; rec.steps.add(step.num);
@@ -8606,21 +8752,38 @@ async function restoreLastSessionOnStart() {
     if (typeof prefs.showExtras === 'boolean') state.showExtras = prefs.showExtras;
     if (prefs.bomConfig) state.bomConfig = { ...state.bomConfig, ...prefs.bomConfig };
 
+    let effectiveRec = rec;
     if (rec.kind === 'io' && rec.data) {
       const { m1Text, m2Text } = await extractIoArchive(rec.data);
       const parsed = parseImportedModel(m1Text, m2Text, rec.fileName);
+      const fetchRes = await autoFetchMissingPartsForParsed(parsed, rec.fileName);
       await textureStore.predecodeAllPending();
-      state.model = buildManualFromParsed(parsed, rec.importMode || 'auto', rec.subdivisionPlan || null);
+      const subPlan = (fetchRes.fetched > 0 && rec.subdivisionPlan && rec.subdivisionPlan.strategy !== 'none')
+        ? refreshSubdivisionPlanForParsed(parsed, rec.subdivisionPlan)
+        : (rec.subdivisionPlan || null);
+      if (subPlan !== rec.subdivisionPlan) {
+        effectiveRec = { ...rec, subdivisionPlan: subPlan };
+        dbPut('lastModel', effectiveRec);
+      }
+      state.model = buildManualFromParsed(parsed, rec.importMode || 'auto', subPlan);
     } else if (rec.kind === 'ldr' && typeof rec.data === 'string') {
       textureStore.clearEmbedded();
       const parsed = parseImportedModel(rec.data, '', rec.fileName);
+      const fetchRes = await autoFetchMissingPartsForParsed(parsed, rec.fileName);
       await textureStore.predecodeAllPending();
-      state.model = buildManualFromParsed(parsed, rec.importMode || 'auto', rec.subdivisionPlan || null);
+      const subPlan = (fetchRes.fetched > 0 && rec.subdivisionPlan && rec.subdivisionPlan.strategy !== 'none')
+        ? refreshSubdivisionPlanForParsed(parsed, rec.subdivisionPlan)
+        : (rec.subdivisionPlan || null);
+      if (subPlan !== rec.subdivisionPlan) {
+        effectiveRec = { ...rec, subdivisionPlan: subPlan };
+        dbPut('lastModel', effectiveRec);
+      }
+      state.model = buildManualFromParsed(parsed, rec.importMode || 'auto', subPlan);
     } else {
       renderAll(); return;
     }
 
-    lastSourceRecord = rec;
+    lastSourceRecord = effectiveRec;
     state.overrides = prefs.overrides || {};
     state.pageInserts = prefs.pageInserts || {};
     state.dividerAfter = prefs.dividerAfter || {};
@@ -10208,6 +10371,7 @@ document.getElementById('btnCloseErrors').onclick = () => document.getElementByI
 document.getElementById('btnBannerSeeErrors').onclick = openErrorsModal;
 document.getElementById('btnBannerDismiss').onclick = dismissErrorBanner;
 document.getElementById('libSourceSelect').onchange = (e) => {
+  notFoundDatCache.clear();
   document.getElementById('libCustomUrlInput').classList.toggle('hidden', e.target.value !== 'custom');
 };
 document.getElementById('menuFetchLibBtn').onclick = () => fetchMissingPartsOnline();
@@ -10218,7 +10382,7 @@ document.getElementById('libImportInput').onchange = async (e) => {
   e.target.value = '';
 };
 document.getElementById('menuClearLibBtn').onclick = async () => {
-  userLibRaw.clear(); userLibTitles.clear(); embeddedDatCompiled.clear(); pliThumbCache.clear(); submodelThumbCache.clear(); clearMinifigDiagramCaches(); coverHeroCache.clear();
+  userLibRaw.clear(); userLibTitles.clear(); movedToAliases.clear(); notFoundDatCache.clear(); embeddedDatCompiled.clear(); pliThumbCache.clear(); submodelThumbCache.clear(); clearMinifigDiagramCaches(); coverHeroCache.clear();
   await dbClearStore(LIB_STORE);
   updateLibraryStatusUI();
   if (state.model) { computeModelDiagnostics(); renderAll(); }
@@ -10589,6 +10753,7 @@ document.getElementById('fileInput').onchange = async (e) => {
       pendingRawFile = { kind: 'io', fileName: file.name, data: ab };
       const { m1Text, m2Text } = await extractIoArchive(ab);
       parsed = parseImportedModel(m1Text, m2Text, file.name);
+      await autoFetchMissingPartsForParsed(parsed, file.name);
       await textureStore.predecodeAllPending();
     } else {
       embeddedDatRaw.clear(); embeddedDatTitles.clear(); embeddedDatCompiled.clear(); compositePartDefs.clear(); pliThumbCache.clear(); submodelThumbCache.clear(); clearMinifigDiagramCaches();
@@ -10596,6 +10761,7 @@ document.getElementById('fileInput').onchange = async (e) => {
       const txt = await file.text();
       pendingRawFile = { kind: 'ldr', fileName: file.name, data: txt };
       parsed = parseImportedModel(txt, '', file.name);
+      await autoFetchMissingPartsForParsed(parsed, file.name);
       await textureStore.predecodeAllPending();
     }
     const prep = prepareSubdivisionData(parsed);

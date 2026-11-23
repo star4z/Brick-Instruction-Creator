@@ -338,8 +338,10 @@ class LayeredPartsProvider {
     onProgress?: (fetched: number, processed: number, total: number) => void,
   ): Promise<{ fetched: number; networkBlocked: boolean }> {
     const defaultMirrors = [
+      'https://raw.githubusercontent.com/kulits/ldraw-parts/master/ldraw/',
+      'https://mrubens.github.io/ldraw-library/',
       'https://raw.githubusercontent.com/gkjohnson/ldraw-parts-library/master/complete/ldraw/',
-      'https://cdn.jsdelivr.net/gh/gkjohnson/ldraw-parts-library@master/complete/ldraw/',
+      'https://cdn.jsdelivr.net/gh/kulits/ldraw-parts@master/ldraw/',
     ];
     const bases = customBaseUrl
       ? [customBaseUrl.endsWith('/') ? customBaseUrl : `${customBaseUrl}/`, ...defaultMirrors]
@@ -350,8 +352,8 @@ class LayeredPartsProvider {
     const enqueue = (rawId: string) => {
       const k = normalizePartId(rawId);
       const base = k.split('/').pop() ?? k;
-      if (!k || queued.has(k) || this.rawSources.has(k) || this.rawSources.has(base)) return;
-      if (/^(stud|stud2|stud2a|stud3|stud3a|stud4|stud4a|\d+-\d+(cyli|cylo|disc|edge))$/.test(base)) return;
+      if (!k || queued.has(k) || this.rawSources.has(k)) return;
+      if (/^(stud|stud2|stud2a|stud3|stud3a|stud4|stud4a|studp01|rect|rect2p|\d+-\d+(cyli|cylo|cylc|disc|edge|ring\d+|rin\d+|chrd|ndis))$/.test(base)) return;
       queued.add(k);
       queue.push(k);
     };
@@ -363,27 +365,31 @@ class LayeredPartsProvider {
     let processed = 0;
     let blocked = 0;
 
-    while (processed < queue.length && processed < 1500) {
-      const batch = queue.slice(processed, Math.min(queue.length, processed + 6));
+    while (processed < queue.length && processed < 2500) {
+      const batch = queue.slice(processed, Math.min(queue.length, processed + 16));
       processed += batch.length;
 
       const results = await Promise.all(
         batch.map(async (k) => {
           const clean = k.replace(/\.dat$/i, '');
           const paths = clean.startsWith('s/')
-            ? [`parts/${clean}.dat`, `${clean}.dat`]
+            ? [`parts/${clean}.dat`]
             : clean.startsWith('48/') || clean.startsWith('8/')
-              ? [`p/${clean}.dat`, `${clean}.dat`]
-              : [`parts/${clean}.dat`, `p/${clean}.dat`, `parts/s/${clean}.dat`];
+              ? [`p/${clean}.dat`]
+              : /^(?:box|rect|tri|quad|edge|cyl|con|disc|ndis|chrd|ring|rin|stud|stug|axle|peg|conn|clip|bush|hinge|beam|npeg|t\d{2}[oiq]\d{4}|\d+-\d+[a-z])/.test(clean)
+                ? [`p/${clean}.dat`, `parts/${clean}.dat`]
+                : /^\d{3,}[a-z0-9_-]*$/.test(clean)
+                  ? [`parts/${clean}.dat`]
+                  : [`parts/${clean}.dat`, `p/${clean}.dat`, `parts/s/${clean}.dat`];
 
           let sawErr = false;
-          for (const base of bases) {
-            for (const rel of paths) {
+          for (const rel of paths) {
+            for (const base of bases) {
               try {
                 const res = await fetch(`${base}${rel}`, { mode: 'cors' });
                 if (res.ok) {
                   const text = await res.text();
-                  if (text.length > 10 && !/^\s*<!doctype/i.test(text)) {
+                  if (text.length > 10 && !/^\s*(?:<!doctype|<html\b)/i.test(text)) {
                     return { k, text, sawErr: false };
                   }
                 }
@@ -413,7 +419,7 @@ class LayeredPartsProvider {
         }
       }
 
-      if (processed <= 6 && fetched === 0 && blocked === batch.length) {
+      if (processed <= 16 && fetched === 0 && blocked === batch.length) {
         return { fetched: 0, networkBlocked: true };
       }
       onProgress?.(fetched, processed, queue.length);
