@@ -932,6 +932,148 @@ describe('Minifigure Group Extraction & Chair/Furniture Exclusion', () => {
     expect(claimed[4]).toBe(0); // a_chair
     expect(claimed[9]).toBe(0); // b_chair
   });
+
+  it('excludes train stanchion/handrail bars (30374 Bar 4L, 63965, 87994, 4095) from standing passengers in Stage A and Stage B', () => {
+    // BrickLink Studio names 30374 as "Bar 4L (Lightsaber Blade / Wand)" and 4095 as "Bar 6.6L with Stop Ring (Patio Umbrella Stand)"
+    expect(isNonMinifigPart('30374', 'Bar 4L (Lightsaber Blade / Wand)')).toBe(true);
+    expect(isNonMinifigPart('4095', 'Bar 6.6L with Stop Ring (Patio Umbrella Stand)')).toBe(true);
+    expect(isNonMinifigPart('63965', 'Bar 6L with Stop Ring')).toBe(true);
+    expect(isNonMinifigPart('87994', 'Bar 3L (Bar Arrow)')).toBe(true);
+    expect(isNonMinifigPart('21462', 'Bar 2L')).toBe(true);
+    expect(
+      classifyMinifigGroupKind(
+        { id: 'bar1', p: '30374', c: 297, x: -22, y: 56, z: 0 },
+        () => 'Bar 4L (Lightsaber Blade / Wand)',
+      ),
+    ).toBeNull();
+
+    // Standing passenger (like BART Minifigure 6) flanked by two vertical pearl-gold 30374 grab bars
+    const parts: RuntimePart[] = [
+      { id: 'mf_legs', p: '970c00', c: 1, x: 0, y: 20, z: 0, m: R_IDENTITY },
+      { id: 'mf_torso', p: '973', c: 72, x: 0, y: 56, z: 0, m: R_IDENTITY },
+      { id: 'mf_head', p: '3626c', c: 14, x: 0, y: 86, z: 0, m: R_IDENTITY },
+      { id: 'mf_hair', p: '21778', c: 0, x: 0, y: 102, z: 0, m: R_IDENTITY },
+      { id: 'rail_l', p: '30374', c: 297, x: -24, y: 56, z: 6, m: R_IDENTITY },
+      { id: 'rail_r', p: '30374', c: 297, x: 24, y: 56, z: 6, m: R_IDENTITY },
+      { id: 'floor_plate', p: '3022', c: 71, x: 0, y: 0, z: 0, m: R_IDENTITY },
+    ];
+    const barNames: Record<string, string> = {
+      ...NAMES,
+      '30374': 'Bar 4L (Lightsaber Blade / Wand)',
+      '3022': 'Plate 2 x 2',
+    };
+    const boxes = parts.map((p) =>
+      customBox(p, {
+        rail_l: [3, 40, 3],
+        rail_r: [3, 40, 3],
+        floor_plate: [40, 4, 40],
+      }),
+    );
+    const adjacency: number[][] = [
+      [1, 6], // legs
+      [0, 2], // torso
+      [1, 3], // head
+      [2],    // hair
+      [6],    // rail_l anchored to floor_plate
+      [6],    // rail_r anchored to floor_plate
+      [0, 4, 5],
+    ];
+
+    const { groups, claimed } = extractMinifigureGroups(parts, boxes, (pid) => barNames[pid] || pid, adjacency);
+    expect(groups).toHaveLength(1);
+    const ids = groups[0].indices.map((i) => parts[i].id);
+    expect(ids).toEqual(['mf_torso', 'mf_legs', 'mf_head', 'mf_hair']);
+    expect(claimed[4]).toBe(0); // rail_l stays in train!
+    expect(claimed[5]).toBe(0); // rail_r stays in train!
+
+    // Even when grouped inside a single-figure submodel (Stage A), vertical bars and unknown side poles stay in the train
+    const sub = [{ name: 'Commuter', instId: 501 }];
+    const subParts: RuntimePart[] = [
+      { id: 's_legs', p: '970c00', c: 1, x: 0, y: 20, z: 0, m: R_IDENTITY, subChain: sub },
+      { id: 's_torso', p: '973', c: 72, x: 0, y: 56, z: 0, m: R_IDENTITY, subChain: sub },
+      { id: 's_head', p: '3626c', c: 14, x: 0, y: 86, z: 0, m: R_IDENTITY, subChain: sub },
+      { id: 's_hair', p: '21778', c: 0, x: 0, y: 102, z: 0, m: R_IDENTITY, subChain: sub },
+      { id: 's_rail', p: '30374', c: 297, x: 22, y: 56, z: 4, m: R_IDENTITY, subChain: sub },
+      { id: 's_unknown_pole', p: 'bl_custom_pole', c: 297, x: -20, y: 64, z: 4, m: R_IDENTITY, subChain: sub },
+    ];
+    const subBoxes = subParts.map((p) =>
+      customBox(p, {
+        s_rail: [3, 40, 3],
+        s_unknown_pole: [3, 28, 3], // 56 LDU tall thin vertical side pole
+      }),
+    );
+    const subRes = extractMinifigureGroups(subParts, subBoxes, (pid) => barNames[pid] || pid);
+    expect(subRes.groups).toHaveLength(1);
+    expect(subRes.groups[0].indices.map((i) => subParts[i].id)).toEqual(['s_legs', 's_torso', 's_head', 's_hair']);
+    expect(subRes.claimed[4]).toBe(0);
+    expect(subRes.claimed[5]).toBe(0);
+  });
+
+  it('keeps genuine lightsaber blade (30374) attached to a minifigure lightsaber hilt while keeping model-anchored props in the model', () => {
+    const parts: RuntimePart[] = [
+      {
+        id: 'v_legs',
+        p: '970c00',
+        c: 0,
+        x: 0,
+        y: 20,
+        z: 0,
+        m: R_IDENTITY,
+      },
+      {
+        id: 'v_torso',
+        p: 'asm_973c01_0',
+        c: 0,
+        x: 0,
+        y: 56,
+        z: 0,
+        m: R_IDENTITY,
+        children: [
+          { id: 'v_torso_b', p: '973', c: 0, x: 0, y: 56, z: 0, m: R_IDENTITY },
+          { id: 'v_hand_r', p: '3820', c: 0, x: -20, y: 48, z: 10, m: R_IDENTITY },
+        ],
+      },
+      { id: 'v_head', p: '3626c', c: 71, x: 0, y: 86, z: 0, m: R_IDENTITY },
+      { id: 'v_hilt', p: '64567', c: 71, x: -20, y: 52, z: 12, m: R_IDENTITY },
+      { id: 'v_blade', p: '30374', c: 36, x: -20, y: 98, z: 12, m: R_IDENTITY },
+      // A mug sitting on a train table (anchored to table brick, NOT touching minifigure hand)
+      { id: 'table_mug', p: '3899', c: 4, x: 28, y: 38, z: 10, m: R_IDENTITY },
+      { id: 'train_table', p: '3022', c: 71, x: 28, y: 24, z: 10, m: R_IDENTITY },
+    ];
+    const extraNames: Record<string, string> = {
+      ...NAMES,
+      asm_973c01_0: 'Minifigure Torso Assembly',
+      '64567': 'Minifigure, Weapon Lightsaber Hilt Straight',
+      '30374': 'Bar 4L (Lightsaber Blade / Wand)',
+      '3022': 'Plate 2 x 2',
+    };
+    const boxes = parts.map((p) =>
+      customBox(p, {
+        v_hilt: [4, 10, 4],
+        v_blade: [3, 40, 3],
+        table_mug: [6, 6, 6],
+        train_table: [16, 4, 16],
+      }),
+    );
+    const adjacency: number[][] = [
+      [1],          // v_legs
+      [0, 2, 3],    // v_torso
+      [1],          // v_head
+      [1, 4],       // v_hilt touches torso/hand + blade
+      [3],          // v_blade touches ONLY hilt (NOT train structure!)
+      [6],          // table_mug anchored to train_table
+      [5],          // train_table
+    ];
+
+    const { groups, claimed } = extractMinifigureGroups(parts, boxes, (pid) => extraNames[pid] || pid, adjacency);
+    expect(groups).toHaveLength(1);
+    const picked = groups[0].indices.map((i) => parts[i].id);
+    expect(picked).toContain('v_hilt');
+    expect(picked).toContain('v_blade');
+    expect(picked).not.toContain('table_mug');
+    expect(claimed[4]).toBe(1); // v_blade claimed with hilt!
+    expect(claimed[5]).toBe(0); // table_mug stays on train table!
+  });
 });
 
 describe('Front-Facing Minifig Pose Step & 3D Rotation Indicators', () => {

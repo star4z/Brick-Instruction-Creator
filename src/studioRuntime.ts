@@ -3357,7 +3357,7 @@ function prepareSubdivisionData(parsed) {
   const {
     groups: minifigGroups,
     claimed: mfClaimed,
-  } = extractMinifigureGroups(parts, boxes, (pid) => resolvePart(pid).name);
+  } = extractMinifigureGroups(parts, boxes, (pid) => resolvePart(pid).name, adjacency);
   const inputs = parts.map((p, index) => {
     const def = resolvePart(p.p);
     const m = p.m || R_ID;
@@ -3534,7 +3534,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
     groups: minifigGroups,
     kinds: mfKinds,
     claimed: mfClaimed,
-  } = extractMinifigureGroups(parts, boxes, (pid) => resolvePart(pid).name);
+  } = extractMinifigureGroups(parts, boxes, (pid) => resolvePart(pid).name, adj);
   for (let i = 0; i < parts.length; i++) {
     if (mfClaimed[i]) parts[i]._floatHeight = 0;
   }

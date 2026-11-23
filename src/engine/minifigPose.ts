@@ -268,6 +268,13 @@ const CORE_HEAD_ID_RE = /^(?:bl_)?(?:3626|28621)(?:[^0-9]|$)/i;
 const NON_MINIFIG_PART_ID_RE =
   /^(?:bl_)?(?:4079|4598|30149|29602|65767|61482|60583|90195|3828|3829|73081|2819|30663|4491|2491|4719|30187|50859|15396|25214|38339|38340|29085|28740|bb892)(?:[^0-9]|$)/i;
 
+/** Structural LEGO bar, pole, handrail, antenna, and hose part IDs (e.g. 30374 Bar 4L, 63965 Bar 6L, 87994 Bar 3L, 4095 Bar 6.6L). */
+const STRUCTURAL_BAR_PART_ID_RE =
+  /^(?:bl_)?(?:30374|63965|87994|4095|21462|78258|32828|48729|23443|30359|61975|28921|92690|87618|99784|3957|2569|75c\d+|78c\d+)(?:[^0-9]|$)/i;
+
+/** Known LEGO lightsaber hilt IDs (distinct from generic structural bars). */
+const LIGHTSABER_HILT_ID_RE = /^(?:bl_)?(?:64567|577|30373|23801|61199)(?:[^0-9]|$)/i;
+
 /** Known LEGO minifigure hair and headgear part IDs. */
 const HEADGEAR_ID_RE =
   /^(?:bl_)?(?:76925|26066|11303|66913|21778|98385|11256|25376|3842|3901|4530|62810|92081|20595|25972|28551|23186|88283|64798|87991|92746|15500|21268|21269|24791|25409|35699|68212|79768)(?:[^0-9]|$)/i;
@@ -280,9 +287,9 @@ const WEARABLE_ACCESSORY_ID_RE =
 const NON_MINIFIG_FURNITURE_RE =
   /\b(seat|seats|seating|chair|chairs|armchair|recliner|stool|bench|sofa|couch|throne|bed|bunk|table|desk|toilet|sink|bathtub|wheelchair|saddle|stretcher|pram|stroller|crib|baseplate|steering|dashboard|console|cockpit|door|window|windscreen|windshield|fence|railing|ladder|stairs?|crate|barrel|cabinet|cupboard|locker|shelf|counter)\b/i;
 
-/** Structural bricks, plates, vehicles, and Technic elements (only checked for non-core, non-wearable parts). */
+/** Structural bricks, plates, bars, poles, vehicles, and Technic elements (only checked for non-core, non-wearable parts). */
 const NON_MINIFIG_STRUCTURAL_RE =
-  /\b(bicycle|bike|tricycle|motorcycle|motorbike|scooter|vespa|skateboard|surfboard|snowboard|boat|kayak|canoe|raft|cart|wagon|wheelbarrow|brick|plate|tile|slope|wedge|panel|bracket|hinge|technic|liftarm|beam|axle|pin|gear|turntable|wheel|tire|tyre|rim|bogie|track|rail|motor|coupler|buffer|arch|cylinder|cone|dish|dome|frame|glass|lattice|grille|jumper)\b|\b(?:car|vehicle|engine|truck)\s+hood\b/i;
+  /\b(bicycle|bike|tricycle|motorcycle|motorbike|scooter|vespa|skateboard|surfboard|snowboard|boat|kayak|canoe|raft|cart|wagon|wheelbarrow|brick|plate|tile|slope|wedge|panel|bracket|hinge|technic|liftarm|beam|axle|pin|gear|turntable|wheel|tire|tyre|rim|bogie|track|rail|motor|coupler|buffer|arch|cylinder|cone|dish|dome|frame|glass|lattice|grille|jumper|bar|handrail|stanchion|pole|hose|antenna|mast|pillar|column|pipe|tube)\b|\b(?:car|vehicle|engine|truck)\s+hood\b/i;
 
 const MINIFIG_WEARABLE_NAME_RE =
   /\b(hair|helmet|hat|cap|hood|headgear|visor|crown|scarf|cape|cloak|armor|armour|backpack|ponytail|wig|beard|moustache|mustache|glasses|goggles|headphones?|earmuffs?|neckwear|collar|epaulette|pauldron|quiver|scabbard|jetpack|tiara|turban|beanie|beret|bandana|headband)\b/i;
@@ -294,9 +301,35 @@ function isCoreBodyId(k: string): boolean {
   return CORE_LEGS_ID_RE.test(k) || CORE_TORSO_ID_RE.test(k) || CORE_HEAD_ID_RE.test(k) || /_(?:torso|leg_?[lr]|arm_?[lr])$/i.test(k);
 }
 
+function isLightsaberHiltPart(partId: string, partName = ''): boolean {
+  const k = normPartId(partId).replace(/-bl$/, '');
+  if (LIGHTSABER_HILT_ID_RE.test(k)) return true;
+  const name = (partName || '').toLowerCase();
+  return !/\bbar\b/i.test(name) && /\blightsaber\b.*\bhilt\b|\bhilt\b.*\blightsaber\b/i.test(name);
+}
+
+function isLightsaberBladeCandidate(partId: string, partName = ''): boolean {
+  const k = normPartId(partId).replace(/-bl$/, '');
+  if (/^(?:bl_)?30374(?:[^0-9]|$)/i.test(k)) return true;
+  return /\blightsaber\s+blade\b/i.test(partName || '');
+}
+
+function isWearableOrBagPart(part: RuntimePart, resolveName: (partId: string) => string): boolean {
+  const k = normPartId(part.p).replace(/-bl$/, '');
+  const name = (resolveName(part.p) || '').toLowerCase();
+  const childIds = (part.children || []).map((c) => normPartId(c.p).replace(/-bl$/, ''));
+  const allIds = [k, ...childIds];
+  return (
+    allIds.some((id) => HEADGEAR_ID_RE.test(id) || WEARABLE_ACCESSORY_ID_RE.test(id)) ||
+    MINIFIG_WEARABLE_NAME_RE.test(name) ||
+    isArmPosingAccessory(k, name)
+  );
+}
+
 /**
  * Returns true if a part is definitively NOT a minifigure body part, headgear, or wearable/handheld accessory
- * (for example, LEGO seats/chairs like 4079 "Minifigure Seat 2x2", furniture, vehicles, or structural bricks).
+ * (for example, LEGO seats/chairs like 4079 "Minifigure Seat 2x2", structural bars/poles like 30374 "Bar 4L",
+ * furniture, vehicles, or structural bricks).
  */
 export function isNonMinifigPart(partId: string, partName = '', childPartIds: string[] = []): boolean {
   const k = normPartId(partId).replace(/-bl$/, '');
@@ -306,8 +339,12 @@ export function isNonMinifigPart(partId: string, partName = '', childPartIds: st
   if (normChildren.some((ck) => isCoreBodyId(ck))) return false;
   if (isCoreBodyId(k)) return false;
 
-  // Explicit non-minifig furniture/seat/vehicle IDs (e.g. 4079 chair/seat)
-  if (NON_MINIFIG_PART_ID_RE.test(k) || normChildren.some((ck) => NON_MINIFIG_PART_ID_RE.test(ck))) {
+  // Explicit non-minifig furniture/seat/vehicle/structural-bar IDs (e.g. 4079 chair/seat, 30374 Bar 4L, 63965 Bar 6L)
+  if (
+    NON_MINIFIG_PART_ID_RE.test(k) ||
+    STRUCTURAL_BAR_PART_ID_RE.test(k) ||
+    normChildren.some((ck) => NON_MINIFIG_PART_ID_RE.test(ck) || STRUCTURAL_BAR_PART_ID_RE.test(ck))
+  ) {
     return true;
   }
 
@@ -329,7 +366,7 @@ export function isNonMinifigPart(partId: string, partName = '', childPartIds: st
     return false;
   }
 
-  // Reject structural bricks, plates, tiles, slopes, wheels, Technic, and vehicles
+  // Reject structural bricks, plates, tiles, slopes, bars, poles, wheels, Technic, and vehicles
   if (NON_MINIFIG_STRUCTURAL_RE.test(name)) {
     return true;
   }
@@ -1643,13 +1680,15 @@ function getCoreBodyLeaf(part: RuntimePart, resolveName: (partId: string) => str
 
 /**
  * Detects whole minifigure assemblies across an imported model while strictly excluding
- * chairs/seats (e.g. 4079), furniture, vehicles, and structural bricks — even when a designer
- * grouped a seated minifigure and its chair together inside the same Studio submodel.
+ * chairs/seats (e.g. 4079), structural bars/poles/handrails (e.g. 30374 Bar 4L, 63965 Bar 6L),
+ * furniture, vehicles, and structural bricks — even when a designer grouped a minifigure
+ * with nearby vehicle fixtures inside the same Studio submodel.
  */
 export function extractMinifigureGroups(
   parts: RuntimePart[],
   boxes: WorldBox[],
   resolveName: (partId: string) => string,
+  adjacency?: number[][],
 ): {
   groups: DetectedMinifigGroup[];
   kinds: MinifigGroupKind[];
@@ -1675,6 +1714,40 @@ export function extractMinifigureGroups(
     return mat3Col(mat3Orthonormalize(leaf.m || R_IDENTITY), 1);
   };
 
+  const isAnchoredToModelStructure = (partIdx: number, ignoreIndices?: Set<number>): boolean => {
+    const nbs = adjacency?.[partIdx];
+    if (!nbs || nbs.length === 0) return false;
+    const selfIsHilt = isLightsaberHiltPart(parts[partIdx].p, resolveName(parts[partIdx].p));
+    for (const nb of nbs) {
+      if (ignoreIndices?.has(nb)) continue;
+      if (kinds[nb] !== null) continue;
+      // Do not treat an unanchored lightsaber blade plugged into a lightsaber hilt as model structure
+      if (selfIsHilt && isLightsaberBladeCandidate(parts[nb].p, resolveName(parts[nb].p))) {
+        const bladeNbs = adjacency?.[nb] || [];
+        const bladeAnchored = bladeNbs.some(
+          (bnb) => bnb !== partIdx && !ignoreIndices?.has(bnb) && kinds[bnb] === null,
+        );
+        if (!bladeAnchored) continue;
+      }
+      return true;
+    }
+    return false;
+  };
+
+  const collectGroupHandPoints = (indices: number[]): Vec3[] => {
+    const pts: Vec3[] = [];
+    for (const idx of indices) {
+      const p = parts[idx];
+      const leaves = p.children && p.children.length > 0 ? p.children : [p];
+      for (const lf of leaves) {
+        if (classifyMinifigLeafRole(lf.p, resolveName(lf.p)) === 'hand') {
+          pts.push([lf.x, lf.y, lf.z]);
+        }
+      }
+    }
+    return pts;
+  };
+
   const isUnknownPartAttachedToFigure = (
     candIdx: number,
     coreIndices: number[],
@@ -1684,7 +1757,11 @@ export function extractMinifigureGroups(
     headLocal: WorldBox | null,
     hipsLocal: WorldBox | null,
     handLocals: Vec3[],
+    subIndexSet: Set<number>,
   ): boolean => {
+    // Reject unknown parts physically anchored to the surrounding train/building structure
+    if (isAnchoredToModelStructure(candIdx, subIndexSet)) return false;
+
     const lb = transformBoxToLocal(boxes[candIdx], origin, rInv);
     const sizeX = lb.max[0] - lb.min[0];
     const sizeY = lb.max[1] - lb.min[1];
@@ -1716,13 +1793,18 @@ export function extractMinifigureGroups(
 
     const horizDist = Math.hypot(lb.center[0] - bodyCenterX, lb.center[2] - bodyCenterZ);
 
+    // Reject tall thin vertical poles/stanchions standing off to the side of the torso
+    const isSideVerticalPole =
+      sizeY >= 32 && Math.max(sizeX, sizeZ) <= 10 && Math.abs(lb.center[0] - bodyCenterX) >= 10;
+
     // 1. Head / neck / shoulders wearable zone (unrecognized hair, hats, headphones, collars, scarves)
-    if (horizDist <= 26 && lb.center[1] >= torsoCenterY - 2 && lb.min[1] >= waistY - 8) {
+    if (!isSideVerticalPole && horizDist <= 26 && lb.center[1] >= torsoCenterY - 2 && lb.min[1] >= waistY - 8) {
       return true;
     }
 
     // 2. Thin cape or backpack directly behind the torso
     if (
+      !isSideVerticalPole &&
       horizDist <= 24 &&
       sizeZ <= 14 &&
       lb.max[2] <= (torsoLocal ? torsoLocal.min[2] + 8 : -2) &&
@@ -1758,7 +1840,7 @@ export function extractMinifigureGroups(
   };
 
   // Stage A: Explicit minifigure submodels (2..16 parts containing >= 2 core body types for a SINGLE minifigure).
-  // Non-minifigure parts (such as chairs/seats, plates, or vehicle controls grouped with a seated passenger)
+  // Non-minifigure parts (such as chairs/seats, structural bars, plates, or vehicle controls grouped with a passenger)
   // are filtered OUT so they stay in the main model and never clip into the standing minifigure build step.
   const mfSubInsts = new Map<string | number, { name: string; indices: number[] }>();
   for (let i = 0; i < parts.length; i++) {
@@ -1789,7 +1871,7 @@ export function extractMinifigureGroups(
     if (torsoCount > 1 || headCount > 1) continue;
 
     // Build local body frame from torso -> legs -> head so unknown wearables (hair/headphones) are kept
-    // while seats, chairs, floor plates, and other non-minifigure items are excluded.
+    // while seats, chairs, structural bars, floor plates, and other non-minifigure items are excluded.
     const refIdx =
       coreIndices.find((i) => isCoreTorsoPart(parts[i], i)) ??
       coreIndices.find((i) => kinds[i] === 'legs') ??
@@ -1818,6 +1900,7 @@ export function extractMinifigureGroups(
       }
     }
 
+    const subIndexSet = new Set(rec.indices);
     const coreCenters = coreIndices.map((i) => boxes[i].center);
     const filtered: number[] = [];
 
@@ -1852,6 +1935,7 @@ export function extractMinifigureGroups(
           headLocal,
           hipsLocal,
           handLocals,
+          subIndexSet,
         )
       ) {
         filtered.push(i);
@@ -1939,13 +2023,24 @@ export function extractMinifigureGroups(
       }
     }
     if (bestHead >= 0) grp.push(bestHead);
-    // Attach nearby headgear / collar / accessories belonging to this figure (chairs/furniture already have kind === null)
+    // Attach nearby headgear / wearables / handheld accessories belonging to this figure
+    // (chairs/furniture/structural bars already have kind === null; loose props anchored to the model stay in the model)
     const anchors = grp.map((idx) => boxes[idx].center);
+    const handPts = collectGroupHandPoints(grp);
+    const grpSet = new Set(grp);
     for (let j = 0; j < parts.length; j++) {
       if (claimed[j] || grp.includes(j) || kinds[j] !== 'headgear') continue;
       const c = boxes[j].center;
       const near = anchors.some((ac) => Math.hypot(c[0] - ac[0], c[1] - ac[1], c[2] - ac[2]) <= 46);
-      if (near) grp.push(j);
+      if (!near) continue;
+      if (!isWearableOrBagPart(parts[j], resolveName)) {
+        // Non-wearable handheld props (mugs, phones, radios, hilts, tools) that are physically mounted to
+        // a non-minifig model structure (e.g. a train table, wall clip, or console) stay in the model unless gripped in hand
+        const touchesHand = handPts.some((hp) => pointToBoxDistance(hp, boxes[j]) <= 12);
+        if (isAnchoredToModelStructure(j, grpSet) && !touchesHand) continue;
+      }
+      grp.push(j);
+      grpSet.add(j);
     }
     if (grp.length >= 2) {
       grp.forEach((i) => {
@@ -1986,6 +2081,25 @@ export function extractMinifigureGroups(
           parts[j]._detachedGap = 0;
         }
       }
+    }
+  }
+
+  // Post-pass: attach a genuine lightsaber blade (e.g. 30374 Bar 4L) ONLY when plugged directly into
+  // a minifigure's lightsaber hilt and NOT anchored to any surrounding model/train structure.
+  for (const g of groups) {
+    const hiltIndices = g.indices.filter((idx) => isLightsaberHiltPart(parts[idx].p, resolveName(parts[idx].p)));
+    if (hiltIndices.length === 0) continue;
+    const groupSet = new Set(g.indices);
+    for (let b = 0; b < parts.length; b++) {
+      if (claimed[b]) continue;
+      if (!isLightsaberBladeCandidate(parts[b].p, resolveName(parts[b].p))) continue;
+      if (isAnchoredToModelStructure(b, groupSet)) continue;
+      const touchesHilt = hiltIndices.some((hi) => boxToBoxDistance(boxes[b], boxes[hi]) <= 8);
+      if (!touchesHilt) continue;
+      g.indices.push(b);
+      groupSet.add(b);
+      claimed[b] = 1;
+      parts[b]._detachedGap = 0;
     }
   }
 
