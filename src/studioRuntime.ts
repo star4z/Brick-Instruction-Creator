@@ -13,6 +13,14 @@ import {
   computeGroundPlaneY,
 } from './engine/floatingCheck';
 import {
+  acknowledgeDiagnostics,
+  deserializeSeenDiagnosticKeys,
+  formatMenuIconErrorBadge,
+  getMenuIconErrorBadgeCount,
+  pruneSeenDiagnosticKeys,
+  serializeSeenDiagnosticKeys,
+} from './engine/diagnosticsBadge';
+import {
   MINIFIG_BUILD_CAMERA,
   MINIFIG_POSE_CAMERA,
   classifyMinifigGroupKind,
@@ -7495,11 +7503,17 @@ async function fetchMissingPartsOnline() {
 
 // ---- MODEL ERRORS & DIAGNOSTICS ENGINE ----
 state.diagnostics = [];
+state.seenDiagnosticKeys = new Set();
 let errFilter = 'all', errorBannerTimer = null;
 
 function computeModelDiagnostics() {
   const diags = [];
-  if (!state.model) { state.diagnostics = []; updateErrorIndicators(); return; }
+  if (!state.model) {
+    state.diagnostics = [];
+    state.seenDiagnosticKeys = new Set();
+    updateErrorIndicators();
+    return;
+  }
   const missingByPart = new Map();
   const unknownColors = new Map();
   const allSteps = getMainSteps(state.model);
@@ -7566,6 +7580,7 @@ function computeModelDiagnostics() {
     diags.push({
       category: 'color',
       severity: 'warning',
+      colorId: rec.colorId,
       title: `Unknown LDraw color #${rec.colorId} (${rec.count}×)`,
       detail: `Color ID ${rec.colorId} is not in the color palette and fell back to Light Bluish Gray. First seen in Step ${stepArr[0]}.`,
       stepNum: stepArr[0],
@@ -7574,22 +7589,38 @@ function computeModelDiagnostics() {
   }
 
   state.diagnostics = diags;
-  updateErrorIndicators();
+  state.seenDiagnosticKeys = pruneSeenDiagnosticKeys(diags, state.seenDiagnosticKeys);
   const errModalEl = document.getElementById('errorsModal');
-  if (errModalEl && !errModalEl.classList.contains('hidden')) renderErrorsModal();
+  const isErrorsModalOpen = Boolean(errModalEl && !errModalEl.classList.contains('hidden'));
+  if (isErrorsModalOpen) {
+    state.seenDiagnosticKeys = acknowledgeDiagnostics(diags, state.seenDiagnosticKeys);
+  }
+  updateErrorIndicators();
+  if (isErrorsModalOpen) renderErrorsModal();
+}
+
+function acknowledgeCurrentDiagnostics() {
+  if (state.diagnostics.length === 0) return;
+  const beforeSize = state.seenDiagnosticKeys.size;
+  state.seenDiagnosticKeys = acknowledgeDiagnostics(state.diagnostics, state.seenDiagnosticKeys);
+  updateErrorIndicators();
+  if (state.seenDiagnosticKeys.size !== beforeSize) {
+    scheduleSaveSessionPrefs();
+  }
 }
 
 function updateErrorIndicators() {
-  const n = state.diagnostics.length;
+  const totalCount = state.diagnostics.length;
+  const badgeCount = getMenuIconErrorBadgeCount(state.diagnostics, state.seenDiagnosticKeys);
   const menuDot = document.getElementById('menuBtnErrorBadge');
   const menuPill = document.getElementById('menuErrorCountBadge');
   if (menuDot) {
-    menuDot.textContent = n > 99 ? '99+' : String(n);
-    menuDot.classList.toggle('hidden', n === 0);
+    menuDot.textContent = formatMenuIconErrorBadge(badgeCount);
+    menuDot.classList.toggle('hidden', badgeCount === 0);
   }
   if (menuPill) {
-    menuPill.textContent = String(n);
-    menuPill.className = n > 0
+    menuPill.textContent = String(totalCount);
+    menuPill.className = totalCount > 0
       ? 'px-2 py-0.5 rounded-full text-[11px] font-bold bg-red-600 text-white'
       : 'px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300';
   }
@@ -7749,6 +7780,7 @@ function openErrorsModal() {
   if (errFilter !== 'all' && state.diagnostics.length > 0 && !state.diagnostics.some(d => d.category === errFilter)) {
     errFilter = 'all';
   }
+  acknowledgeCurrentDiagnostics();
   renderErrorsModal();
   document.getElementById('errorsModal').classList.remove('hidden');
 }
@@ -7782,6 +7814,7 @@ function scheduleSaveSessionPrefs() {
       showExtras: state.showExtras, bomConfig: state.bomConfig,
       overrides: state.overrides, pageInserts: state.pageInserts, dividerAfter: state.dividerAfter,
       coverMeta: state.coverMeta, completeMeta: state.completeMeta, backMeta: state.backMeta, pageIdx: state.pageIdx,
+      seenDiagnosticKeys: serializeSeenDiagnosticKeys(state.seenDiagnosticKeys),
     });
   }, 450);
 }
@@ -7855,6 +7888,7 @@ async function restoreLastSessionOnStart() {
     if (prefs.completeMeta) state.completeMeta = { ...state.completeMeta, ...prefs.completeMeta };
     if (prefs.backMeta) state.backMeta = { ...state.backMeta, ...prefs.backMeta };
     state.pageIdx = Math.max(0, prefs.pageIdx || 0);
+    state.seenDiagnosticKeys = deserializeSeenDiagnosticKeys(prefs.seenDiagnosticKeys);
     // Sync checkboxes in DOM
     document.getElementById('togglePrintGuides').checked = state.showPrintGuides;
     document.getElementById('toggleExtras').checked = state.showExtras;
@@ -7872,7 +7906,7 @@ async function restoreLastSessionOnStart() {
     resetZoom();
     renderAll();
     showToast(`Reloaded ${state.model.title}`);
-    if (state.diagnostics.length > 0) showImportErrorBanner();
+    if (getMenuIconErrorBadgeCount(state.diagnostics, state.seenDiagnosticKeys) > 0) showImportErrorBanner();
   } catch (_) {
     renderAll();
   }
@@ -9367,6 +9401,7 @@ document.getElementById('projectLoadInput').onchange = async (e) => {
     if (data.density) state.density = data.density;
     if (data.layout) state.layout = data.layout;
     state.pageIdx = 0; state.undoStack = []; state.redoStack = [];
+    state.seenDiagnosticKeys = new Set();
     errFilter = 'all';
     lastSourceRecord = { kind: 'project', fileName: f.name };
     computeModelDiagnostics();
@@ -9756,6 +9791,7 @@ function finishImport(parsed, mode, subdivisionPlan = null, isPostImport = false
     state.overrides = {}; state.pageInserts = {}; state.dividerAfter = {};
     state.coverMeta = createDefaultCoverMeta();
     state.undoStack = []; state.redoStack = [];
+    state.seenDiagnosticKeys = new Set();
   }
   state.pageIdx = 0; state.mode = 'pan'; state.selectedPartIds.clear();
   errFilter = 'all';
