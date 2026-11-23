@@ -532,8 +532,8 @@ const KNOWN_EXTRA_PART_NAMES = {
   '28621': 'Minifigure Head (Hollow Stud)',
   '29085': 'Train Buffer Beam with Magnet Coupler',
   '29085c01': 'Train Buffer Beam with Magnet Coupler',
-  'bb892': 'Powered Up Train Motor',
-  'bb892c01': 'Powered Up Train Motor',
+  'bb892': 'Powered Up Bluetooth Hub',
+  'bb892c01': 'Powered Up Bluetooth Hub',
   '28740': 'Powered Up Train Motor',
   '28740c01': 'Powered Up Train Motor',
   '76925': 'Minifigure Hair / Headgear',
@@ -8338,7 +8338,7 @@ function collectMissingFetchTargets() {
       }
       return;
     }
-    if (!k.includes('/') && /^(?:bl_|.*-bl$|.*(?:pb|ps|pat|pr)\d{3,}|.*_torso$)/i.test(k)) {
+    if (!k.includes('/') && /(?:(?:pb|ps|pat|pr)\d{3,}|_torso$)/i.test(k)) {
       const fbs = getPartIdFallbacks(k);
       if (fbs.length > 0) {
         enqueue(fbs[0]);

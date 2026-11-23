@@ -342,6 +342,7 @@ class LayeredPartsProvider {
       'https://mrubens.github.io/ldraw-library/',
       'https://raw.githubusercontent.com/gkjohnson/ldraw-parts-library/master/complete/ldraw/',
       'https://cdn.jsdelivr.net/gh/kulits/ldraw-parts@master/ldraw/',
+      'https://raw.githubusercontent.com/iefierros/LegoMaster/main/ldraw/UnOfficial/',
     ];
     const bases = customBaseUrl
       ? [customBaseUrl.endsWith('/') ? customBaseUrl : `${customBaseUrl}/`, ...defaultMirrors]

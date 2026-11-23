@@ -35,11 +35,13 @@ flowchart LR
 - Downloaded `.dat` files and `!TEXMAP` PNG textures (stored under `__tex__:<filename>`) are batch-persisted to IndexedDB so future imports are instant.
 - If a restored model or manual **Fetch Online** / **Import .zip** adds missing shapes to a model with an active subdivision plan, `refreshSubdivisionPlanForParsed` re-evaluates the matching subdivision strategy against the real 3D bounding boxes.
 
-### 2.2 Up-to-Date CORS Mirror Chain & Smart Failover
-- Primary mirror: `https://raw.githubusercontent.com/kulits/ldraw-parts/master/ldraw/` (daily-synced official LDraw `complete.zip`, including 2024–2026 updates, served via GitHub Fastly CDN with `Access-Control-Allow-Origin: *`).
-- Independent fallbacks: `https://mrubens.github.io/ldraw-library/`, `https://raw.githubusercontent.com/gkjohnson/ldraw-parts-library/master/complete/ldraw/`, and `https://cdn.jsdelivr.net/gh/kulits/ldraw-parts@master/ldraw/`.
+### 2.2 Up-to-Date Official + Unofficial/Studio CORS Mirror Chain & Smart Failover
+- Primary official mirror: `https://raw.githubusercontent.com/kulits/ldraw-parts/master/ldraw/` (daily-synced official LDraw `complete.zip`, including 2024–2026 updates, served via GitHub Fastly CDN with `Access-Control-Allow-Origin: *`).
+- Independent official fallbacks: `https://mrubens.github.io/ldraw-library/`, `https://raw.githubusercontent.com/gkjohnson/ldraw-parts-library/master/complete/ldraw/`, and `https://cdn.jsdelivr.net/gh/kulits/ldraw-parts@master/ldraw/`.
+- Unofficial & BrickLink Studio custom parts mirror: `https://raw.githubusercontent.com/iefierros/LegoMaster/main/ldraw/UnOfficial/` (`scope: 'unofficial'`), covering LDraw Unofficial parts (e.g., `35287.dat` + `s/35287s01.dat`), BrickLink Studio custom shapes (`bl_76925.dat`), and BrickLink assemblies (`bb892c01.dat`).
+- **Scope-aware routing**: Studio custom IDs (`bl_*`, `*-bl`, `bb####`) route directly to `unofficial` / `custom` mirrors without wasting 404 probes on official LDraw mirrors, while standard LDraw IDs check official mirrors first and fall through to `unofficial` when not yet official. Only BrickLink *printed/decorated* suffixes (`pb####`, `ps####`, `pat####`, `pr####`, `*_torso`) bypass directly to unprinted base molds.
 - Mirrors share a `repoGroup` tag: a clean HTTP `404` skips duplicate mirrors of the same repository, whereas `403` / `429` / `5xx` / timeout / network errors transparently fail over to the next mirror.
-- Candidate paths are ordered by LDraw directory conventions (`s/` → `parts/s/`, `48/`/`8/` → `p/`, primitive prefixes → `p/` first, standard numeric parts → `parts/` only), eliminating wasted 404 probes.
+- Candidate paths are ordered by LDraw directory conventions (`s/` → `parts/s/`, `48/`/`8/` → `p/`, Studio custom IDs → `parts/`, primitive prefixes → `p/` first, standard numeric parts → `parts/` only), eliminating wasted 404 probes.
 
 ### 2.3 Direct-Match BFS & `!TEXMAP` Support
 - `fetchLDrawDependencyGraph` checks exact/direct cache membership (`getDirectLoadedDatLines`) rather than stripped fallbacks, ensuring official printed parts (`3626cp01`, `3069bp01`) are downloaded even when their unprinted base mold is already cached.

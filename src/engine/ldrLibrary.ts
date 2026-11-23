@@ -9,6 +9,8 @@ export interface LDrawMirrorConfig {
   label: string;
   /** Mirrors sharing the same upstream repository commit share a repoGroup so clean 404s aren't retried redundantly. */
   repoGroup: string;
+  /** 'official' = official LDraw complete library; 'unofficial' = LDraw unofficial + BrickLink Studio custom parts. */
+  scope?: 'official' | 'unofficial' | 'custom';
 }
 
 export const PUBLIC_LDRAW_MIRRORS: readonly LDrawMirrorConfig[] = [
@@ -16,21 +18,31 @@ export const PUBLIC_LDRAW_MIRRORS: readonly LDrawMirrorConfig[] = [
     url: 'https://raw.githubusercontent.com/kulits/ldraw-parts/master/ldraw/',
     label: 'Official LDraw Library (Daily Sync · GitHub)',
     repoGroup: 'kulits',
+    scope: 'official',
   },
   {
     url: 'https://mrubens.github.io/ldraw-library/',
     label: 'Official LDraw Library (GitHub Pages Mirror)',
     repoGroup: 'mrubens',
+    scope: 'official',
   },
   {
     url: 'https://raw.githubusercontent.com/gkjohnson/ldraw-parts-library/master/complete/ldraw/',
     label: 'Classic LDraw Parts Mirror (GitHub)',
     repoGroup: 'gkjohnson',
+    scope: 'official',
   },
   {
     url: 'https://cdn.jsdelivr.net/gh/kulits/ldraw-parts@master/ldraw/',
     label: 'Official LDraw Library (jsDelivr CDN)',
     repoGroup: 'kulits',
+    scope: 'official',
+  },
+  {
+    url: 'https://raw.githubusercontent.com/iefierros/LegoMaster/main/ldraw/UnOfficial/',
+    label: 'LDraw Unofficial & Studio Parts Mirror (GitHub)',
+    repoGroup: 'iefierros-unofficial',
+    scope: 'unofficial',
   },
 ];
 
@@ -52,6 +64,14 @@ const PRIMITIVE_FIRST_RE =
 
 /** Standard numeric LDraw part IDs (3+ digits, e.g. 3029, 27448, 86210, 3069b, 3626cp01). */
 const STANDARD_NUMERIC_PART_RE = /^\d{3,}[a-z0-9_-]*$/;
+
+/** BrickLink Studio custom / assembly part IDs (e.g. bl_76925, bb892c01, 1234-bl) hosted in UnOfficial libraries. */
+const STUDIO_CUSTOM_PART_RE = /^(?:bl_|.*-bl$|bb\d+)/i;
+
+export function isStudioCustomPartId(cleanKey: string): boolean {
+  const clean = normalizeDatRef(cleanKey);
+  return Boolean(clean && !clean.includes('/') && STUDIO_CUSTOM_PART_RE.test(clean));
+}
 
 export function isSynthesizedPrimitiveBase(base: string): boolean {
   return SYNTHESIZED_PRIMITIVE_BASE_RE.test(base);
@@ -161,6 +181,9 @@ export function buildLDrawCandidatePaths(cleanKey: string): string[] {
   if (clean.startsWith('48/') || clean.startsWith('8/')) {
     return [`p/${clean}.dat`];
   }
+  if (isStudioCustomPartId(clean)) {
+    return [`parts/${clean}.dat`];
+  }
   if (PRIMITIVE_FIRST_RE.test(clean)) {
     return [`p/${clean}.dat`, `parts/${clean}.dat`];
   }
@@ -245,7 +268,7 @@ export function buildMirrorConfigList(selectedBaseUrl?: string, customBaseUrl?: 
     if (seen.has(url)) return;
     seen.add(url);
     const known = PUBLIC_LDRAW_MIRRORS.find((m) => m.url === url);
-    out.push(known ?? { url, label: 'Custom LDraw Mirror', repoGroup: `custom:${url}` });
+    out.push(known ?? { url, label: 'Custom LDraw Mirror', repoGroup: `custom:${url}`, scope: 'custom' });
   };
 
   if (selectedBaseUrl === 'custom') {
@@ -304,6 +327,7 @@ export async function fetchDatFromMirrors(
   const tryKeys = [normKey, ...getFallbacks(normKey)];
   let sawNetworkError = false;
   let sawAnyHttpResponse = false;
+  const hasScopedUnofficial = mirrors.some((m) => m.scope === 'unofficial' || m.scope === 'custom');
 
   for (const key of tryKeys) {
     if (signal?.aborted) break;
@@ -311,10 +335,17 @@ export async function fetchDatFromMirrors(
     const paths = buildLDrawCandidatePaths(clean);
     if (paths.length === 0) continue;
 
+    // Studio custom IDs (bl_*, *-bl, bb####) only live in UnOfficial / custom mirrors —
+    // probe those directly without wasting 404s against official LDraw mirrors!
+    const keyMirrors =
+      isStudioCustomPartId(clean) && hasScopedUnofficial
+        ? mirrors.filter((m) => m.scope === 'unofficial' || m.scope === 'custom')
+        : mirrors;
+
     for (const rel of paths) {
       if (signal?.aborted) break;
       const confirmed404Groups = new Set<string>();
-      for (const mirror of mirrors) {
+      for (const mirror of keyMirrors) {
         if (signal?.aborted) break;
         if (confirmed404Groups.has(mirror.repoGroup)) continue;
         try {
@@ -489,10 +520,11 @@ export async function fetchLDrawDependencyGraph(
       return;
     }
 
-    // BrickLink-proprietary printed/prefixed IDs (bl_*, *-bl, *pb####* with 3+ digits, *_torso) never exist
-    // verbatim in official LDraw mirrors — enqueue their canonical unprinted base LDraw ID directly, while
-    // keeping 1-2 digit official LDraw pattern codes (e.g. 3626cpb6, 3626cp01) eligible for direct fetch!
-    if (!k.includes('/') && /^(?:bl_|.*-bl$|.*(?:pb|ps|pat|pr)\d{3,}|.*_torso$)/i.test(k)) {
+    // BrickLink-proprietary printed/decorated IDs (*pb####* with 3+ digits, *_torso) never exist
+    // verbatim in public LDraw mirrors — enqueue their canonical unprinted base LDraw ID directly,
+    // while keeping unprinted Studio custom shapes (bl_76925, bb892c01) and 1-2 digit official LDraw
+    // pattern codes (3626cpb6, 3626cp01) eligible for direct fetch from UnOfficial / Official mirrors!
+    if (!k.includes('/') && /(?:(?:pb|ps|pat|pr)\d{3,}|_torso$)/i.test(k)) {
       const fbs = getFallbacks(k);
       if (fbs.length > 0) {
         enqueue(fbs[0]);

@@ -248,6 +248,61 @@ describe('ldrLibrary mirror fetching and dependency graph BFS', () => {
 
     const customList = buildMirrorConfigList('custom', 'https://my-ldraw.example.com/lib');
     expect(customList[0].url).toBe('https://my-ldraw.example.com/lib/');
+    expect(customList[0].scope).toBe('custom');
     expect(customList.length).toBe(PUBLIC_LDRAW_MIRRORS.length + 1);
+  });
+
+  it('routes Studio custom IDs (bl_76925, bb892c01) directly to UnOfficial mirrors and falls through for unofficial parts like 35287', async () => {
+    const scopedMirrors: LDrawMirrorConfig[] = [
+      { url: 'https://official.test/ldraw/', label: 'Official', repoGroup: 'off', scope: 'official' },
+      { url: 'https://unofficial.test/UnOfficial/', label: 'UnOfficial', repoGroup: 'unoff', scope: 'unofficial' },
+    ];
+    const requested: string[] = [];
+    const store = new Map<string, string[]>();
+
+    const fakeFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      requested.push(url);
+      if (url === 'https://unofficial.test/UnOfficial/parts/bl_76925.dat') {
+        return mockResponse(200, '0 WIG NO. 50\n3 16 0 0 0 1 0 0 0 1 0\n');
+      }
+      if (url === 'https://unofficial.test/UnOfficial/parts/bb892c01.dat') {
+        return mockResponse(200, '0 Powered Up Hub\n1 16 0 0 0 1 0 0 0 1 0 0 0 1 stug-4x4.dat\n');
+      }
+      if (url === 'https://official.test/ldraw/p/stug-4x4.dat') {
+        return mockResponse(200, '0 Stud Group 4x4\n4 16 0 0 0 1 0 0 1 0 1 0 0 1\n');
+      }
+      if (url === 'https://unofficial.test/UnOfficial/parts/35287.dat') {
+        return mockResponse(200, '0 Glass for Window 1 x 2 x 3\n1 16 0 0 0 1 0 0 0 1 0 0 0 1 s\\35287s01.dat\n');
+      }
+      if (url === 'https://unofficial.test/UnOfficial/parts/s/35287s01.dat') {
+        return mockResponse(200, '0 ~Glass Subfile\n4 16 0 0 0 1 0 0 1 0 1 0 0 1\n');
+      }
+      return mockResponse(404);
+    });
+
+    expect(buildLDrawCandidatePaths('bl_76925')).toEqual(['parts/bl_76925.dat']);
+    expect(buildLDrawCandidatePaths('bb892c01')).toEqual(['parts/bb892c01.dat']);
+
+    const res = await fetchLDrawDependencyGraph({
+      rootPartIds: ['bl_76925', 'bb892c01', '35287'],
+      mirrors: scopedMirrors,
+      getDirectLoadedLines: (k) => store.get(k) ?? null,
+      getFallbacks: (k) => (k === 'bl_76925' ? ['76925'] : []),
+      onDatLoaded: (storeKey, _reqKey, text) => {
+        store.set(storeKey, text.split('\n'));
+      },
+      fetchImpl: fakeFetch as unknown as typeof fetch,
+    });
+
+    expect(res.fetched).toBe(5); // bl_76925, bb892c01, 35287, stug-4x4, s/35287s01
+    expect(store.has('bl_76925')).toBe(true);
+    expect(store.has('bb892c01')).toBe(true);
+    expect(store.has('35287')).toBe(true);
+    expect(store.has('s/35287s01')).toBe(true);
+    expect(store.has('stug-4x4')).toBe(true);
+    // Studio custom IDs never wasted 404 probes against the official mirror!
+    expect(requested).not.toContain('https://official.test/ldraw/parts/bl_76925.dat');
+    expect(requested).not.toContain('https://official.test/ldraw/parts/bb892c01.dat');
   });
 });
