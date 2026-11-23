@@ -183,6 +183,13 @@ import {
   getModelFetchCopy,
   parsePartIdListInput,
 } from './engine/bricksLibrary';
+import {
+  assignAbsoluteStepNumbers,
+  formatAbsRange,
+  formatDualStepLabel,
+  getAbsStepNum,
+  migrateLegacyLayoutGroups,
+} from './engine/stepNumbering';
 
 const BRAND_LOGO_SVG_BODY = `<path d="M6 15V6h9M49 6h9v9M58 49v9h-9M15 58H6v-9" stroke="#1B1A18" stroke-width="2.5" stroke-linecap="square"/><rect x="14" y="14" width="36" height="36" rx="2" stroke="#1B1A18" stroke-width="2.5" fill="#FAF9F6"/><circle cx="24" cy="24" r="5" fill="#C9341B"/><circle cx="40" cy="24" r="5" stroke="#1B1A18" stroke-width="2.2" fill="none"/><circle cx="24" cy="40" r="5" stroke="#1B1A18" stroke-width="2.2" fill="none"/><circle cx="40" cy="40" r="5" fill="#1B1A18"/>`;
 
@@ -5433,21 +5440,29 @@ function getEffectiveMinifigStyle(step) {
   return normalizeMinifigStepStyle(ovStyle || state.minifigStyle);
 }
 function renumberContinuousSteps(model) {
+  // `num` = printed step number (restarts per submodel / non-classic minifig chapter).
+  // `absNum` = absolute step number, unique across the whole manual; used for all ranges.
   let mainNum = 0;
   for (const ch of model.chapters) {
     if (ch.kind === 'submodel') {
       const rep = ch.repeatCount ?? (ch.isSectionModule ? 1 : 2);
       ch.steps.forEach((s, idx) => {
         s.num = idx + 1;
+        s.isMainNumbered = false;
         s.isSubmodelStep = true;
         s.isSubmodelFinal = idx === ch.steps.length - 1 && rep > 1;
         s.submodelRepeat = rep;
       });
     } else if (ch.kind === 'minifigure' && normalizeMinifigStepStyle(state.minifigStyle) !== 'classic') {
-      ch.steps.forEach((s, idx) => { s.num = idx + 1; });
+      ch.steps.forEach((s, idx) => { s.num = idx + 1; s.isMainNumbered = false; });
     } else {
-      for (const s of ch.steps) s.num = ++mainNum;
+      for (const s of ch.steps) { s.num = ++mainNum; s.isMainNumbered = true; }
     }
+  }
+  assignAbsoluteStepNumbers(model.chapters);
+  if (state.layoutGroups?.some((g) => g.stepBasis !== 'absolute')) {
+    const refs = getAllSteps(model).map(({ step }) => ({ num: step.num, absNum: step.absNum, isMain: Boolean(step.isMainNumbered) }));
+    state.layoutGroups = migrateLegacyLayoutGroups(state.layoutGroups, refs);
   }
 }
 function getPreviousPartsForStep(model, ch, step) {
@@ -5746,7 +5761,7 @@ function rebuildPages() {
       }
       const nextStep = ch.steps[i + 1];
       const isPosePlacePair = Boolean(first.isMinifigPoseStep && nextStep?.attachedMinifig);
-      const firstGroup = findLayoutGroupForStep(state.layoutGroups, first.num);
+      const firstGroup = findLayoutGroupForStep(state.layoutGroups, getAbsStepNum(first));
       const pageLayoutSpec = firstGroup ? firstGroup.layout : state.layoutConfig;
       const explicitCap = getSpecStepsPerPageCap(pageLayoutSpec);
       const cap = explicitCap !== null
@@ -5759,7 +5774,7 @@ function rebuildPages() {
       const slots = [];
       for (let k = 0; k < cap && i < ch.steps.length; k++) {
         const s = ch.steps[i];
-        const sGroup = findLayoutGroupForStep(state.layoutGroups, s.num);
+        const sGroup = findLayoutGroupForStep(state.layoutGroups, getAbsStepNum(s));
         if (k > 0 && (sGroup?.id || null) !== (firstGroup?.id || null)) break;
         const isSMfBuild = Boolean((s.isStandaloneFigure || ch.kind === 'minifigure') && !s.isMinifigPoseStep);
         if (k > 0 && isSMfBuild && getEffectiveMinifigStyle(s) === 'sequential') break;
@@ -7142,10 +7157,11 @@ function renderContextOverlay(page) {
     box.querySelector('#actNewBefore').onclick = () => splitSelectedToOffset(-1);
     box.querySelector('#actNewAfter').onclick = () => splitSelectedToOffset(1);
     box.querySelector('#actMoveStep').onclick = () => {
-      const targetNum = parseInt(prompt('Move selected parts to which Step number?'), 10);
+      // Absolute step number: printed numbers restart in each submodel and are not unique.
+      const targetNum = parseInt(prompt(`Move selected parts to which absolute Step # (1–${getAllSteps(state.model).length})? This step is #${getAbsStepNum(step)}.`), 10);
       if (!targetNum) return;
       const all = getAllSteps(state.model);
-      const dest = all.find(x => x.step.num === targetNum);
+      const dest = all.find(x => getAbsStepNum(x.step) === targetNum);
       if (!dest || dest.step.id === step.id) { showToast('Pick a different valid step number.'); return; }
       pushUndo();
       const moved = step.parts.filter(p => state.selectedPartIds.has(p.id));
@@ -7156,7 +7172,7 @@ function renderContextOverlay(page) {
         delete state.overrides[step.id];
       }
       state.selectedPartIds.clear();
-      showToast(`Moved ${moved.length} piece(s) to Step ${targetNum}.`);
+      showToast(`Moved ${moved.length} part(s) to ${dest.ch.name ? `${dest.ch.name} ` : ""}Step ${dest.step.num} (#${targetNum}).`);
       renderAll();
     };
     box.querySelector('#actMergePrev').onclick = () => {
@@ -7358,27 +7374,29 @@ function openApplyAngleModal(step, ch) {
   const allSteps = getAllSteps(state.model);
   if (allSteps.length < 2) return;
   const cam = getStepCamera(step);
-  const maxNum = allSteps[allSteps.length - 1].step.num;
-  const chMaxNum = ch?.steps?.length ? ch.steps[ch.steps.length - 1].step?.num ?? ch.steps[ch.steps.length - 1].num : maxNum;
+  // All range values below are ABSOLUTE step numbers (unique across the manual).
+  const maxNum = getAbsStepNum(allSteps[allSteps.length - 1].step);
+  const srcAbs = getAbsStepNum(step);
+  const chMaxNum = ch?.steps?.length ? getAbsStepNum(ch.steps[ch.steps.length - 1]) : maxNum;
 
   applyAngleState.sourceStep = step;
   applyAngleState.sourceCh = ch;
   applyAngleState.camera = { side: cam.side, corner: cam.corner, az: Math.round(cam.az), el: Math.round(cam.el) };
   applyAngleState.allSteps = allSteps;
-  applyAngleState.startNum = step.num;
-  applyAngleState.endNum = Math.min(maxNum, Math.max(step.num, chMaxNum || maxNum));
+  applyAngleState.startNum = srcAbs;
+  applyAngleState.endNum = Math.min(maxNum, Math.max(srcAbs, chMaxNum || maxNum));
   applyAngleState.awaitingEndClick = false;
   applyAngleState.thumbCache.clear();
   applyAngleState.renderJobId++;
 
   const sub = document.getElementById('applyAngleSubtitle');
   if (sub) {
-    sub.textContent = `Sharing Step ${step.num} camera (${cam.side === 'bottom' ? 'Bottom' : 'Top'} · ${Math.round(cam.az)}° / ${Math.round(cam.el)}°)`;
+    sub.textContent = `Sharing ${ch?.name ? `${ch.name} · ` : ''}${formatDualStepLabel(step, { alwaysShowAbs: true })} camera (${cam.side === 'bottom' ? 'Bottom' : 'Top'} · ${Math.round(cam.az)}° / ${Math.round(cam.el)}°)`;
   }
 
   const minInp = document.getElementById('angleRangeMin');
   const maxInp = document.getElementById('angleRangeMax');
-  const firstNum = allSteps[0].step.num;
+  const firstNum = getAbsStepNum(allSteps[0].step);
   if (minInp && maxInp) {
     minInp.min = String(firstNum);
     minInp.max = String(maxNum);
@@ -7393,8 +7411,8 @@ function openApplyAngleModal(step, ch) {
 function syncApplyAngleRangeUI() {
   const allSteps = applyAngleState.allSteps;
   if (!allSteps.length) return;
-  const minBound = allSteps[0].step.num;
-  const maxBound = allSteps[allSteps.length - 1].step.num;
+  const minBound = getAbsStepNum(allSteps[0].step);
+  const maxBound = getAbsStepNum(allSteps[allSteps.length - 1].step);
   const lo = Math.min(applyAngleState.startNum, applyAngleState.endNum);
   const hi = Math.max(applyAngleState.startNum, applyAngleState.endNum);
 
@@ -7414,10 +7432,12 @@ function syncApplyAngleRangeUI() {
 
   const startLbl = document.getElementById('angleRangeStartLbl');
   const endLbl = document.getElementById('angleRangeEndLbl');
-  if (startLbl) startLbl.textContent = `Step ${lo}`;
-  if (endLbl) endLbl.textContent = `Step ${hi}`;
+  const loStep = allSteps.find(({ step }) => getAbsStepNum(step) === lo)?.step;
+  const hiStep = allSteps.find(({ step }) => getAbsStepNum(step) === hi)?.step;
+  if (startLbl) startLbl.textContent = loStep ? formatDualStepLabel(loStep, { alwaysShowAbs: true }) : `#${lo}`;
+  if (endLbl) endLbl.textContent = hiStep ? formatDualStepLabel(hiStep, { alwaysShowAbs: true }) : `#${hi}`;
 
-  const selectedCount = allSteps.filter(({ step }) => step.num >= lo && step.num <= hi).length;
+  const selectedCount = allSteps.filter(({ step }) => getAbsStepNum(step) >= lo && getAbsStepNum(step) <= hi).length;
   const countBadge = document.getElementById('angleRangeCountBadge');
   if (countBadge) countBadge.textContent = `${selectedCount} step${selectedCount === 1 ? '' : 's'}`;
 
@@ -7467,18 +7487,25 @@ function renderApplyAngleModal(scrollToSource = false) {
   const srcId = applyAngleState.sourceStep?.id;
   const jobId = ++applyAngleState.renderJobId;
 
+  let prevChId = null;
   listEl.innerHTML = allSteps.map(({ ch, step }) => {
     const isCur = step.id === srcId;
     const stepCam = getStepCamera(step);
-    return `
-      <button type="button" data-step-num="${step.num}" data-step-id="${step.id}" class="angle-step-row w-full flex items-center gap-3 p-2 rounded-lg border border-[var(--border)] bg-[var(--card)] text-left transition-colors cursor-pointer">
+    const abs = getAbsStepNum(step);
+    const chHeader = ch.id !== prevChId
+      ? `<div class="angle-ch-header px-1 pt-2 pb-0.5 text-[10px] font-bold uppercase tracking-wide text-[var(--muted-foreground)]">${escHtml(ch.name || 'Steps')} · #${abs}–#${getAbsStepNum(ch.steps[ch.steps.length - 1])}</div>`
+      : '';
+    prevChId = ch.id;
+    return `${chHeader}
+      <button type="button" data-step-num="${abs}" data-step-id="${step.id}" class="angle-step-row w-full flex items-center gap-3 p-2 rounded-lg border border-[var(--border)] bg-[var(--card)] text-left transition-colors cursor-pointer">
         <div class="w-14 h-14 rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] shrink-0 overflow-hidden flex items-center justify-center relative">
-          <img data-angle-thumb="${step.id}" alt="Step ${step.num} 3D preview" class="w-full h-full object-contain opacity-0 transition-opacity duration-150" />
-          <span data-angle-ph="${step.id}" class="font-mono text-[10px] text-[var(--muted-foreground)] absolute">#${step.num}</span>
+          <img data-angle-thumb="${step.id}" alt="Step ${step.num} (absolute #${abs}) 3D preview" class="w-full h-full object-contain opacity-0 transition-opacity duration-150" />
+          <span data-angle-ph="${step.id}" class="font-mono text-[10px] text-[var(--muted-foreground)] absolute">#${abs}</span>
         </div>
         <div class="flex-1 min-w-0">
           <div class="flex items-center gap-1.5 flex-wrap">
             <span class="font-bold text-xs">Step ${step.num}</span>
+            <span class="px-1 py-0.5 rounded border border-[var(--border)] font-mono text-[10px] font-semibold text-[var(--muted-foreground)]" title="Absolute step number (unique across the whole manual)">#${abs}</span>
             ${isCur ? `<span class="px-1.5 py-0.5 rounded bg-[var(--surface-sunken)] border border-[var(--border)] text-[10px] font-bold text-[var(--foreground)]">Current</span>` : ''}
             <span class="font-mono text-[10px] text-[var(--muted-foreground)]">${step.parts.length} pc${step.parts.length === 1 ? '' : 's'}</span>
           </div>
@@ -7619,7 +7646,7 @@ function renderStepEditModal() {
   });
 
   if (subtitle) {
-    subtitle.textContent = `Page ${page.num} of ${state.pages.length} · ${page.label} · Editing ${stepShortLabel}`;
+    subtitle.textContent = `Page ${page.num} of ${state.pages.length} · ${page.label} · Editing ${stepShortLabel} · #${getAbsStepNum(step)}`;
   }
 
   // Multi-step switcher bar at top of modal
@@ -8227,16 +8254,17 @@ function renderLayoutGroupsList() {
   listEl.innerHTML = state.layoutGroups.map((grp) => {
     const themeObj = grp.themeId ? resolveThemeById(grp.themeId, customThemes) : null;
     const summary = describePageLayoutSpec(grp.layout);
-    const rangeLabel = grp.startStepNum === grp.endStepNum ? `Step ${grp.startStepNum}` : `Steps ${grp.startStepNum}–${grp.endStepNum}`;
+    const rangeLabel = formatAbsRange(grp.startStepNum, grp.endStepNum);
+    const rangeDetail = describeAbsStepRange(grp.startStepNum, grp.endStepNum);
     return `
       <div class="flex items-center justify-between gap-2 px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--background)]">
         <div class="min-w-0">
           <div class="flex items-center gap-1.5 flex-wrap">
             <span class="font-bold text-xs truncate">${escHtml(grp.name)}</span>
-            <span class="px-1.5 py-0.5 rounded-full bg-[var(--primary-soft)] text-[var(--primary)] text-[10px] font-bold">${escHtml(rangeLabel)}</span>
+            <span class="px-1.5 py-0.5 rounded-full bg-[var(--primary-soft)] text-[var(--primary)] text-[10px] font-bold font-mono" title="Absolute step range">${escHtml(rangeLabel)}</span>
             ${themeObj ? `<span class="px-1.5 py-0.5 rounded-full border border-[var(--border)] bg-[var(--card)] text-[10px] font-semibold">${escHtml(themeObj.name)}</span>` : ''}
           </div>
-          <div class="text-[10px] text-[var(--muted-foreground)] mt-0.5">${escHtml(summary)}</div>
+          <div class="text-[10px] text-[var(--muted-foreground)] mt-0.5">${escHtml(summary)}${rangeDetail ? ` · ${escHtml(rangeDetail)}` : ''}</div>
         </div>
         <button type="button" data-edit-grp="${escHtml(grp.id)}" class="grp-edit-btn px-2.5 py-1 rounded-full border border-[var(--border)] bg-[var(--card)] text-[11px] font-semibold hover:border-[var(--primary)] shrink-0 transition cursor-pointer">Edit</button>
       </div>`;
@@ -8251,6 +8279,30 @@ function renderLayoutGroupsList() {
   });
 }
 
+/** Finds a step by its absolute step number (unique across the manual). */
+function findStepByAbsNum(absNum) {
+  return getAllSteps(state.model).find(({ step }) => getAbsStepNum(step) === absNum) || null;
+}
+
+/** Human-readable mapping of an absolute range to chapter + printed step numbers. */
+function describeAbsStepRange(lo, hi) {
+  if (!state.model) return '';
+  const a = findStepByAbsNum(Math.min(lo, hi));
+  const b = findStepByAbsNum(Math.max(lo, hi));
+  const fmt = (x) => (x ? `${x.ch.name ? `${x.ch.name} ` : ''}Step ${x.step.num}` : 'out of range');
+  if (lo === hi) return fmt(a);
+  if (a && b && a.ch.id === b.ch.id) return `${a.ch.name ? `${a.ch.name} ` : ''}Steps ${a.step.num}–${b.step.num}`;
+  return `${fmt(a)} → ${fmt(b)}`;
+}
+
+function syncGroupRangeHintUI() {
+  const hint = document.getElementById('grpRangeHint');
+  if (!hint) return;
+  const s = parseInt(document.getElementById('grpStartStepInput')?.value, 10) || 1;
+  const e = parseInt(document.getElementById('grpEndStepInput')?.value, 10) || s;
+  hint.textContent = `${formatAbsRange(s, e)} = ${describeAbsStepRange(s, e)}`;
+}
+
 function openLayoutGroupEditor(existingGroup = null, prefillRange = null) {
   const wrap = document.getElementById('layoutGroupEditor');
   if (!wrap) return;
@@ -8258,16 +8310,21 @@ function openLayoutGroupEditor(existingGroup = null, prefillRange = null) {
   const maxStep = Math.max(1, allSteps.length);
   const curPage = state.pages[state.pageIdx];
   const curSlots = curPage?.slots || [];
-  const defaultStart = prefillRange?.start ?? (curSlots[0]?.step?.num || 1);
-  const defaultEnd = prefillRange?.end ?? (curSlots[curSlots.length - 1]?.step?.num || Math.min(maxStep, defaultStart + 3));
+  const defaultStart = prefillRange?.start ?? (curSlots[0]?.step ? getAbsStepNum(curSlots[0].step) : 1);
+  const defaultEnd = prefillRange?.end ?? (curSlots[curSlots.length - 1]?.step ? getAbsStepNum(curSlots[curSlots.length - 1].step) : Math.min(maxStep, defaultStart + 3));
 
   layoutGroupEditorState.editingId = existingGroup?.id || null;
   layoutGroupEditorState.slotSizes = existingGroup?.layout?.slotSizes ? [...existingGroup.layout.slotSizes] : [];
 
   document.getElementById('grpEditorTitle').textContent = existingGroup ? `Edit "${existingGroup.name}"` : 'New Step Range Group';
-  document.getElementById('grpNameInput').value = existingGroup ? existingGroup.name : `Steps ${defaultStart}–${defaultEnd}`;
+  document.getElementById('grpNameInput').value = existingGroup ? existingGroup.name : `Steps ${formatAbsRange(defaultStart, defaultEnd)}`;
   document.getElementById('grpStartStepInput').value = String(existingGroup ? existingGroup.startStepNum : defaultStart);
   document.getElementById('grpEndStepInput').value = String(existingGroup ? existingGroup.endStepNum : defaultEnd);
+  for (const id of ['grpStartStepInput', 'grpEndStepInput']) {
+    const inp = document.getElementById(id);
+    if (inp) { inp.max = String(maxStep); inp.oninput = syncGroupRangeHintUI; }
+  }
+  syncGroupRangeHintUI();
   document.getElementById('grpStepsPerPageInput').value = String(existingGroup ? existingGroup.layout.stepsPerPage : Math.max(2, Math.min(6, defaultEnd - defaultStart + 1)));
   document.getElementById('grpColsSelect').value = existingGroup ? String(existingGroup.layout.cols) : 'auto';
   document.getElementById('grpRowsSelect').value = existingGroup ? String(existingGroup.layout.rows) : 'auto';
@@ -8662,10 +8719,10 @@ function renderOverviewModal() {
     if (overviewRangeState.startStep != null && overviewRangeState.endStep != null) {
       const lo = Math.min(overviewRangeState.startStep, overviewRangeState.endStep);
       const hi = Math.max(overviewRangeState.startStep, overviewRangeState.endStep);
-      rangeStatus.textContent = lo === hi ? `Selected Step ${lo}` : `Selected Steps ${lo}–${hi}`;
+      rangeStatus.textContent = `Selected ${formatAbsRange(lo, hi)} · ${describeAbsStepRange(lo, hi)}`;
       rangeCreateBtn.disabled = false;
     } else if (overviewRangeState.startStep != null) {
-      rangeStatus.textContent = `Start: Step ${overviewRangeState.startStep} · Tap an end step`;
+      rangeStatus.textContent = `Start: #${overviewRangeState.startStep} (${describeAbsStepRange(overviewRangeState.startStep, overviewRangeState.startStep)}) · Tap an end step`;
       rangeCreateBtn.disabled = false;
     } else {
       rangeStatus.textContent = 'Tap a start step, then an end step to group them';
@@ -8763,7 +8820,7 @@ function renderOverviewModal() {
       <span class="text-xs font-semibold text-[var(--muted-foreground)] shrink-0">${slots.length === 1 ? '1 step' : `${slots.length} steps`}</span>`;
     pageHeader.onclick = () => {
       if (overviewRangeState.active) {
-        pickRangeSpan(slots[0].step.num, slots[slots.length - 1].step.num);
+        pickRangeSpan(getAbsStepNum(slots[0].step), getAbsStepNum(slots[slots.length - 1].step));
       } else {
         jumpToPageAndStep(idx, firstStep.id);
       }
@@ -8778,12 +8835,13 @@ function renderOverviewModal() {
       const isSeqCont = isStepBreakContinuationSlice(slot);
       const hasBreak = hasStepPageBreak(state.overrides, step.id, slot);
       const isStepActive = active && (state.selectedStepId === step.id || (!state.selectedStepId && slotIdx === 0));
-      const inSelRange = isStepInOverviewRange(step.num);
+      const inSelRange = isStepInOverviewRange(getAbsStepNum(step));
       const isMfBuild = Boolean((step.isStandaloneFigure || slot.ch?.kind === 'minifigure') && !step.isMinifigPoseStep);
 
       const stepTitle = isMfBuild && step.minifigName
         ? `Step ${step.num} · ${step.minifigName}`
         : `Step ${step.num}`;
+      const absBadge = `#${getAbsStepNum(step)}`;
 
       const metaParts = [];
       if (slot.minifigSeqSlice) {
@@ -8813,7 +8871,7 @@ function renderOverviewModal() {
         <div class="flex items-center gap-2 min-w-0">
           ${inSelRange ? '<span class="w-4 h-4 rounded bg-[var(--primary)] text-[var(--primary-foreground)] text-xs font-bold inline-flex items-center justify-center shrink-0">✓</span>' : (isStepActive ? '<span class="w-1.5 h-1.5 rounded-full bg-[var(--primary)] shrink-0" aria-hidden="true"></span>' : '')}
           <div class="min-w-0">
-            <div class="font-semibold truncate ${inSelRange || isStepActive ? 'text-[var(--primary)]' : ''}">${escHtml(stepTitle)}</div>
+            <div class="flex items-center gap-1.5 min-w-0"><span class="font-semibold truncate ${inSelRange || isStepActive ? 'text-[var(--primary)]' : ''}">${escHtml(stepTitle)}</span><span class="shrink-0 px-1 py-0.5 rounded border border-[var(--border)] font-mono text-[10px] font-semibold text-[var(--muted-foreground)]" title="Absolute step number (unique across the whole manual)">${absBadge}</span></div>
             ${stepMeta ? `<div class="text-xs text-[var(--muted-foreground)] truncate">${escHtml(stepMeta)}</div>` : ''}
           </div>
         </div>
@@ -8825,7 +8883,7 @@ function renderOverviewModal() {
 
       stepRow.onclick = () => {
         if (overviewRangeState.active) {
-          pickRangeStep(step.num);
+          pickRangeStep(getAbsStepNum(step));
         } else {
           jumpToPageAndStep(idx, step.id);
         }
@@ -10339,14 +10397,14 @@ function computeModelDiagnostics() {
         const k = normId(missingLeaf.p);
         if (!missingByPart.has(k)) missingByPart.set(k, { partId: k, count: 0, steps: new Set() });
         const rec = missingByPart.get(k);
-        rec.count++; rec.steps.add(step.num);
+        rec.count++; rec.steps.add(getAbsStepNum(step));
       }
       // 2. Check for unmapped / unknown LDraw color IDs
       for (const lf of leaves) {
         if (!resolveColorInfo(lf.c)) {
           if (!unknownColors.has(lf.c)) unknownColors.set(lf.c, { colorId: lf.c, count: 0, steps: new Set() });
           const rec = unknownColors.get(lf.c);
-          rec.count++; rec.steps.add(step.num);
+          rec.count++; rec.steps.add(getAbsStepNum(step));
         }
       }
       // 3. Check for disconnected / floating pieces
@@ -10363,6 +10421,7 @@ function computeModelDiagnostics() {
                 : `Part "${p.p}" in Step ${step.num} had no nearby parts touching it and was placed on its own.`)
             : `Part "${p.p}" in Step ${step.num} was ${(p._detachedGap / 20).toFixed(2)} studs away from its nearest neighbor.`,
           stepNum: step.num,
+          stepAbsNum: getAbsStepNum(step),
           stepId: step.id,
         });
       }
@@ -10371,7 +10430,7 @@ function computeModelDiagnostics() {
 
   for (const rec of missingByPart.values()) {
     const stepArr = Array.from(rec.steps).sort((a, b) => a - b);
-    const firstStep = allSteps.find(x => x.step.num === stepArr[0])?.step;
+    const firstStep = allSteps.find(x => getAbsStepNum(x.step) === stepArr[0])?.step;
     const friendlyName = getHumanPartName(rec.partId);
     const reason = explainMissingPartReason(rec.partId);
     diags.push({
@@ -10379,22 +10438,24 @@ function computeModelDiagnostics() {
       severity: 'error',
       title: `${friendlyName} (${rec.count}×)`,
       partCode: `${rec.partId}.dat`,
-      detail: `${reason} Used in Step${stepArr.length > 1 ? 's' : ''} ${stepArr.slice(0, 5).join(', ')}${stepArr.length > 5 ? '…' : ''}.`,
-      stepNum: stepArr[0],
+      detail: `${reason} Used in Step${stepArr.length > 1 ? 's' : ''} ${stepArr.slice(0, 5).map(n => `#${n}`).join(', ')}${stepArr.length > 5 ? '…' : ''}.`,
+      stepNum: firstStep?.num ?? stepArr[0],
+      stepAbsNum: stepArr[0],
       stepId: firstStep?.id || null,
     });
   }
 
   for (const rec of unknownColors.values()) {
     const stepArr = Array.from(rec.steps).sort((a, b) => a - b);
-    const firstStep = allSteps.find(x => x.step.num === stepArr[0])?.step;
+    const firstStep = allSteps.find(x => getAbsStepNum(x.step) === stepArr[0])?.step;
     diags.push({
       category: 'color',
       severity: 'warning',
       colorId: rec.colorId,
       title: `Unknown LDraw color #${rec.colorId} (${rec.count}×)`,
-      detail: `Color ID ${rec.colorId} is not in the color palette and fell back to Light Bluish Gray. First seen in Step ${stepArr[0]}.`,
-      stepNum: stepArr[0],
+      detail: `Color ID ${rec.colorId} is not in the color palette and fell back to Light Bluish Gray. First seen in Step #${stepArr[0]}.`,
+      stepNum: firstStep?.num ?? stepArr[0],
+      stepAbsNum: stepArr[0],
       stepId: firstStep?.id || null,
     });
   }
@@ -10551,7 +10612,7 @@ function renderErrorsModal() {
           </div>
           <p class="text-xs text-[var(--muted-foreground)] leading-relaxed break-words">${escHtml(d.detail)}</p>
         </div>
-        ${d.stepId ? `<button data-jump-step="${escHtml(d.stepId)}" class="jump-step-btn shrink-0 px-2.5 py-1.5 rounded-md border border-[var(--border)] bg-[var(--card)] font-semibold hover:border-[var(--primary)] hover:text-[var(--primary)]">Step ${d.stepNum} →</button>` : ''}
+        ${d.stepId ? `<button data-jump-step="${escHtml(d.stepId)}" class="jump-step-btn shrink-0 px-2.5 py-1.5 rounded-md border border-[var(--border)] bg-[var(--card)] font-semibold hover:border-[var(--primary)] hover:text-[var(--primary)]">Step ${d.stepNum}${d.stepAbsNum && d.stepAbsNum !== d.stepNum ? ` · #${d.stepAbsNum}` : ''} →</button>` : ''}
       </div>`;
   }).join('');
 
@@ -12124,8 +12185,8 @@ if (btnAnglePresetFollowing) {
   btnAnglePresetFollowing.onclick = () => {
     const all = applyAngleState.allSteps;
     if (!all.length || !applyAngleState.sourceStep) return;
-    applyAngleState.startNum = applyAngleState.sourceStep.num;
-    applyAngleState.endNum = all[all.length - 1].step.num;
+    applyAngleState.startNum = getAbsStepNum(applyAngleState.sourceStep);
+    applyAngleState.endNum = getAbsStepNum(all[all.length - 1].step);
     applyAngleState.awaitingEndClick = false;
     syncApplyAngleRangeUI();
   };
@@ -12135,8 +12196,8 @@ if (btnAnglePresetSection) {
   btnAnglePresetSection.onclick = () => {
     const chSteps = applyAngleState.sourceCh?.steps || [];
     if (!chSteps.length) return;
-    applyAngleState.startNum = chSteps[0].num;
-    applyAngleState.endNum = chSteps[chSteps.length - 1].num;
+    applyAngleState.startNum = getAbsStepNum(chSteps[0]);
+    applyAngleState.endNum = getAbsStepNum(chSteps[chSteps.length - 1]);
     applyAngleState.awaitingEndClick = false;
     syncApplyAngleRangeUI();
   };
@@ -12146,8 +12207,8 @@ if (btnAnglePresetAll) {
   btnAnglePresetAll.onclick = () => {
     const all = applyAngleState.allSteps;
     if (!all.length) return;
-    applyAngleState.startNum = all[0].step.num;
-    applyAngleState.endNum = all[all.length - 1].step.num;
+    applyAngleState.startNum = getAbsStepNum(all[0].step);
+    applyAngleState.endNum = getAbsStepNum(all[all.length - 1].step);
     applyAngleState.awaitingEndClick = false;
     syncApplyAngleRangeUI();
   };
@@ -12300,10 +12361,11 @@ if (btnGrpUseCur) {
   btnGrpUseCur.onclick = () => {
     const curSlots = state.pages[state.pageIdx]?.slots || [];
     if (curSlots.length === 0) { showToast('Navigate to a step page first.'); return; }
-    const s1 = curSlots[0].step.num;
-    const s2 = curSlots[curSlots.length - 1].step.num;
+    const s1 = getAbsStepNum(curSlots[0].step);
+    const s2 = getAbsStepNum(curSlots[curSlots.length - 1].step);
     document.getElementById('grpStartStepInput').value = String(s1);
     document.getElementById('grpEndStepInput').value = String(s2);
+    syncGroupRangeHintUI();
   };
 }
 const grpMixedSel = document.getElementById('grpMixedSelect');
@@ -12329,13 +12391,14 @@ if (btnGrpSave) {
     const flow = document.getElementById('grpFlowSelect')?.value === 'column' ? 'column' : 'row';
     const mixedLayout = document.getElementById('grpMixedSelect')?.value || 'even';
     const themeId = (document.getElementById('grpThemeSelect')?.value || '').trim() || null;
-    const name = (document.getElementById('grpNameInput')?.value || '').trim() || `Steps ${startStepNum}–${endStepNum}`;
+    const name = (document.getElementById('grpNameInput')?.value || '').trim() || `Steps ${formatAbsRange(startStepNum, endStepNum)}`;
 
     const newGroup = {
       id: layoutGroupEditorState.editingId || `grp_${Date.now().toString(36)}`,
       name,
       startStepNum,
       endStepNum,
+      stepBasis: 'absolute',
       layout: normalizePageLayoutSpec({
         mode: 'custom',
         stepsPerPage,

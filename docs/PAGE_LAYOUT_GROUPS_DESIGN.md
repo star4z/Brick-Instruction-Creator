@@ -22,7 +22,7 @@ Implemented in [`src/engine/pageLayout.ts`](../src/engine/pageLayout.ts) and [`s
     - `'hero_right'`: Companion steps stacked smaller on the left; final step featured large on the right
     - `'custom_weights'`: Per-slot `S / M / L` relative sizing (`slotSizes: ('sm' | 'md' | 'lg')[]`)
 - **`StepLayoutGroup`**:
-  - Named, editable rule covering an inclusive 1-based step range (`startStepNum..endStepNum`)
+  - Named, editable rule covering an inclusive 1-based **absolute** step range (`startStepNum..endStepNum`, `stepBasis: 'absolute'`; see [`ABSOLUTE_STEP_NUMBERING_DESIGN.md`](./ABSOLUTE_STEP_NUMBERING_DESIGN.md))
   - Carries its own `PageLayoutSpec`, optional `themeId` style override, and optional `showStepBorders` override
   - Multiple groups can coexist; overlapping ranges resolve with latest-group precedence so narrower overrides can refine broader sections.
 

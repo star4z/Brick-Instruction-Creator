@@ -36,8 +36,15 @@ export interface PageLayoutSpec {
 export interface StepLayoutGroup {
   id: string;
   name: string;
+  /** Inclusive range start. Absolute step number (unique across the manual) when stepBasis === 'absolute'. */
   startStepNum: number;
   endStepNum: number;
+  /**
+   * 'absolute' — range uses absolute step numbers (current format).
+   * 'legacy'   — saved before absolute numbering; range uses printed main-build numbers
+   *              and is migrated by migrateLegacyLayoutGroups() once the model is known.
+   */
+  stepBasis?: 'absolute' | 'legacy';
   layout: PageLayoutSpec;
   themeId?: string | null;
   showStepBorders?: boolean | null;
@@ -453,7 +460,8 @@ export function computePageSlotRects(
 }
 
 /**
- * Finds the matching StepLayoutGroup for a given 1-based continuous step number.
+ * Finds the matching StepLayoutGroup for a given 1-based ABSOLUTE step number
+ * (unique across the manual — never the printed per-submodel number).
  * Later groups in the array take precedence if ranges overlap (allowing users to
  * refine a sub-range inside a broader group without losing the outer group).
  */
@@ -496,6 +504,7 @@ export function normalizeLayoutGroups(raw: unknown): StepLayoutGroup[] {
           : `Steps ${start}–${end}`,
       startStepNum: start,
       endStepNum: end,
+      stepBasis: obj.stepBasis === 'absolute' ? 'absolute' : 'legacy',
       layout: normalizePageLayoutSpec(obj.layout),
       themeId: typeof obj.themeId === 'string' && obj.themeId.trim() ? obj.themeId.trim() : null,
       showStepBorders: typeof obj.showStepBorders === 'boolean' ? obj.showStepBorders : null,

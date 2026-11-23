@@ -20,6 +20,7 @@ All architecture specifications and feature design proposals for **Brick Instruc
 - [`STEP_EDITOR_UX_DESIGN.md`](./STEP_EDITOR_UX_DESIGN.md) — Separation of concerns across `Pan`, `Select`, `Rotate`, and `Edit` (`#stepEditModal`), step-bound custom callouts, visual 3D Move/Tilt & Cube+Camera Rotate controls, Apply Camera Angle to Steps dual-handle range dialog, mobile zoom auto-hide, Proofing Table open/import dialog, and unified Step Generation menu & modal.
 - [`CUSTOM_FILE_EXTENSIONS_DESIGN.md`](./CUSTOM_FILE_EXTENSIONS_DESIGN.md) — Dedicated `.biw` project and `.biwtheme` custom theme file extensions, `brick-instruction-works-*` payload format headers, file/payload validation, and Safari/iOS extension preservation.
 - [`TERMINOLOGY.md`](./TERMINOLOGY.md) — UI wording convention: "parts" for elements and all counts in the editor, "pcs" only on printed manual pages, "brick" only for the category and product names.
+- [`ABSOLUTE_STEP_NUMBERING_DESIGN.md`](./ABSOLUTE_STEP_NUMBERING_DESIGN.md) — Printed (per-submodel) vs absolute (manual-wide, unique) step numbers; all step ranges (camera angle, Step Range Groups, overview selection) use absolute numbers, both shown in the UI, with legacy group migration.
 
 ## Conventions
 

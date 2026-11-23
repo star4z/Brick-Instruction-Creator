@@ -206,6 +206,21 @@ describe('Step Toolbar & Full-Page Editor Capabilities', () => {
     expect(res.overrides.s5).toBeUndefined();
   });
 
+  it('applies camera ranges by absolute step number so submodel steps with the same printed number are not included', () => {
+    // Minifigures steps 1–3 (abs 1–3), then Front Half submodel restarts at Step 1 (abs 4–6).
+    const steps = [
+      { id: 'mf1', num: 1, absNum: 1 },
+      { id: 'mf2', num: 2, absNum: 2 },
+      { id: 'mf3', num: 3, absNum: 3 },
+      { id: 'fh1', num: 1, absNum: 4 },
+      { id: 'fh2', num: 2, absNum: 5 },
+      { id: 'fh3', num: 3, absNum: 6 },
+    ];
+    const res = applyCameraAngleToStepRange(steps, {}, 1, 2, { side: 'top', corner: 'front_right', az: 38, el: 29 });
+    expect(res.appliedCount).toBe(2);
+    expect(Object.keys(res.overrides).sort()).toEqual(['mf1', 'mf2']);
+  });
+
   it('computes accurate paper format preview box proportions for landscape, portrait, A4, A5, and square', () => {
     expect(PAPER_FORMAT_ORDER).toContain('letter');
     expect(PAPER_FORMAT_ORDER).toContain('a4');

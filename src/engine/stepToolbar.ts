@@ -423,11 +423,13 @@ export function clearStepArrangeOverride<T extends StepOverrideLike>(override?: 
 }
 
 /**
- * Applies a camera orientation to every step in the inclusive step-number range [startNum..endNum].
+ * Applies a camera orientation to every step in the inclusive ABSOLUTE step range [startNum..endNum].
+ * Uses `absNum` (unique across the manual) so submodels whose printed numbers restart at 1
+ * are not accidentally included. Falls back to `num` only when `absNum` is missing.
  * Allows targeting steps both before and after the currently edited step.
  */
 export function applyCameraAngleToStepRange<T extends StepOverrideLike>(
-  steps: ReadonlyArray<{ id: string; num: number }>,
+  steps: ReadonlyArray<{ id: string; num: number; absNum?: number }>,
   overrides: Readonly<Record<string, T>>,
   startNum: number,
   endNum: number,
@@ -438,7 +440,8 @@ export function applyCameraAngleToStepRange<T extends StepOverrideLike>(
   const next: Record<string, T> = { ...overrides };
   let appliedCount = 0;
   for (const s of steps) {
-    if (s.num >= lo && s.num <= hi) {
+    const n = typeof s.absNum === 'number' ? s.absNum : s.num;
+    if (n >= lo && n <= hi) {
       next[s.id] = {
         ...(next[s.id] || ({} as T)),
         side: camera.side,
