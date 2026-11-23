@@ -25,72 +25,70 @@
     <input id="themeImportInput" type="file" accept=".json,.bictheme.json,application/json" class="hidden" />
 
     <!-- ================================================================ -->
-    <!-- ANCHORED TOP STUDIO RAIL (Committed Carbon-Ink Pressroom Bar)    -->
+    <!-- FLOATING TOP-LEFT PILL: Menu ☰ (+ Model Name chip on desktop)    -->
     <!-- ================================================================ -->
-    <header class="no-print h-14 sm:h-13 shrink-0 bg-[var(--rail)] text-[var(--rail-foreground)] border-b border-[var(--rail-border)] px-2.5 sm:px-4 flex items-center justify-between gap-2 z-40">
-      <div class="flex items-center gap-2 min-w-0">
-        <button id="btnOpenMenu" type="button" title="Open studio menu" aria-label="Open studio menu" class="relative h-10 w-10 sm:h-9 sm:w-9 rounded-md border border-transparent hover:border-[var(--rail-border)] hover:bg-[var(--rail-hover)] flex items-center justify-center transition-colors shrink-0 cursor-pointer">
-          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-            <line x1="4" x2="20" y1="7" y2="7"/><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="17" y2="17"/>
-          </svg>
-          <span id="menuBtnErrorBadge" class="hidden absolute -top-1 -right-1 min-w-[20px] h-[20px] px-1 rounded-full bg-[var(--danger)] text-white font-mono text-xs font-semibold flex items-center justify-center">0</span>
+    <div class="no-print fixed top-3 left-3 z-40 flex items-center gap-2 max-w-[calc(100vw-160px)]">
+      <button id="btnOpenMenu" type="button" title="Open studio menu" aria-label="Open studio menu" class="relative studio-pill h-10 w-10 rounded-full flex items-center justify-center hover:bg-[var(--surface-hover)] transition-colors shrink-0 cursor-pointer">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <line x1="4" x2="20" y1="7" y2="7"/><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="17" y2="17"/>
+        </svg>
+        <span id="menuBtnErrorBadge" class="hidden absolute -top-1 -right-1 min-w-[20px] h-[20px] px-1 rounded-full bg-[var(--danger)] text-white font-mono text-xs font-semibold flex items-center justify-center">0</span>
+      </button>
+
+      <!-- Model & Studio Identity Pill (Desktop only — hidden on mobile!) -->
+      <button id="desktopModelChip" type="button" class="hidden md:inline-flex studio-pill h-10 pl-3 pr-4 rounded-full items-center gap-2 text-xs font-semibold truncate max-w-[360px] hover:bg-[var(--surface-hover)] transition-colors cursor-pointer">
+        <svg class="w-5 h-5 shrink-0" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <rect x="2" y="2" width="20" height="20" rx="2" stroke="currentColor" stroke-width="1.8"/>
+          <circle cx="8" cy="8" r="2.6" fill="var(--primary)"/>
+          <circle cx="16" cy="8" r="2.2" stroke="currentColor" stroke-width="1.6"/>
+          <circle cx="8" cy="16" r="2.2" stroke="currentColor" stroke-width="1.6"/>
+          <circle cx="16" cy="16" r="2.6" fill="currentColor"/>
+        </svg>
+        <span id="desktopModelName" class="text-sm font-semibold tracking-tight truncate">Brick Instruction Works</span>
+        <span id="desktopModelMeta" class="font-mono text-xs text-[var(--muted-foreground)] shrink-0"></span>
+      </button>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- FLOATING TOP-RIGHT PILLS: Empty-State Tools / Loaded Actions     -->
+    <!-- ================================================================ -->
+    <div id="headerEmptyActions" class="no-print fixed top-3 right-3 z-40 flex items-center gap-1.5 shrink-0">
+      <button id="headerBricksLibBtn" type="button" class="studio-pill h-10 px-3.5 rounded-full hover:bg-[var(--surface-hover)] text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer">
+        <svg class="w-4 h-4 text-[var(--primary)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 3 7.5 12 12l9-4.5L12 3Z"/><path d="m3 12 9 4.5 9-4.5"/><path d="m3 16.5 9 4.5 9-4.5"/></svg>
+        <span class="hidden sm:inline">Bricks Library</span>
+        <span class="sm:hidden">Bricks</span>
+      </button>
+      <button id="headerLoadProjBtn" type="button" class="hidden sm:inline-flex studio-pill h-10 px-3.5 rounded-full hover:bg-[var(--surface-hover)] text-xs font-semibold items-center gap-1.5 transition-colors cursor-pointer">
+        <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
+        <span>Open Project</span>
+      </button>
+    </div>
+
+    <!-- Loaded-Model Floating Pills: Undo / Redo + Style + Export -->
+    <div id="topRightPills" class="no-print hidden fixed top-3 right-3 z-40 flex items-center gap-1.5 shrink-0">
+      <div class="studio-pill h-10 rounded-full px-1 inline-flex items-center gap-0.5">
+        <button id="btnUndo" type="button" title="Undo" aria-label="Undo" class="h-8 w-8 rounded-full flex items-center justify-center hover:bg-[var(--surface-hover)] disabled:opacity-35 transition-colors cursor-pointer disabled:cursor-default">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"/></svg>
         </button>
-
-        <div class="h-5 w-px bg-[var(--rail-border)] shrink-0" aria-hidden="true"></div>
-
-        <!-- Model & Studio Identity Button (Optical-Scale 20px Emblem) -->
-        <button id="desktopModelChip" type="button" class="inline-flex h-10 sm:h-9 px-2.5 rounded-md border border-transparent hover:border-[var(--rail-border)] hover:bg-[var(--rail-hover)] items-center gap-2.5 min-w-0 max-w-[56vw] sm:max-w-[420px] transition-colors cursor-pointer">
-          <svg class="w-5 h-5 shrink-0" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <rect x="2" y="2" width="20" height="20" rx="2" stroke="currentColor" stroke-width="1.8"/>
-            <circle cx="8" cy="8" r="2.6" fill="var(--rail-accent)"/>
-            <circle cx="16" cy="8" r="2.2" stroke="currentColor" stroke-width="1.6"/>
-            <circle cx="8" cy="16" r="2.2" stroke="currentColor" stroke-width="1.6"/>
-            <circle cx="16" cy="16" r="2.6" fill="currentColor"/>
-          </svg>
-          <span id="desktopModelName" class="text-sm font-semibold tracking-tight truncate">Brick Instruction Works</span>
-          <span id="desktopModelMeta" class="hidden md:inline font-mono text-xs text-[var(--rail-muted)] shrink-0"></span>
+        <button id="btnRedo" type="button" title="Redo" aria-label="Redo" class="h-8 w-8 rounded-full flex items-center justify-center hover:bg-[var(--surface-hover)] disabled:opacity-35 transition-colors cursor-pointer disabled:cursor-default">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5A5.5 5.5 0 0 0 9.5 20H13"/></svg>
         </button>
       </div>
-
-      <!-- Empty-State Quick Tools (hidden once a model is open) -->
-      <div id="headerEmptyActions" class="flex items-center gap-1.5 shrink-0">
-        <button id="headerBricksLibBtn" type="button" class="h-10 sm:h-9 px-3 rounded-md border border-[var(--rail-border)] bg-[var(--rail-surface)] hover:bg-[var(--rail-hover)] text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer">
-          <svg class="w-4 h-4 text-[var(--rail-accent)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 3 7.5 12 12l9-4.5L12 3Z"/><path d="m3 12 9 4.5 9-4.5"/><path d="m3 16.5 9 4.5 9-4.5"/></svg>
-          <span class="hidden sm:inline">Bricks Library</span>
-          <span class="sm:hidden">Bricks</span>
-        </button>
-        <button id="headerLoadProjBtn" type="button" class="hidden sm:inline-flex h-10 sm:h-9 px-3 rounded-md border border-[var(--rail-border)] bg-[var(--rail-surface)] hover:bg-[var(--rail-hover)] text-xs font-semibold items-center gap-1.5 transition-colors cursor-pointer">
-          <svg class="w-3.5 h-3.5 text-[var(--rail-muted)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
-          <span>Open Project</span>
-        </button>
-      </div>
-
-      <!-- Loaded-Model Actions: Undo / Redo + Style + Export -->
-      <div id="topRightPills" class="hidden flex items-center gap-1.5 sm:gap-2 shrink-0">
-        <div class="h-10 sm:h-9 rounded-md border border-[var(--rail-border)] bg-[var(--rail-surface)] inline-flex items-center divide-x divide-[var(--rail-border)]">
-          <button id="btnUndo" type="button" title="Undo" aria-label="Undo" class="h-full w-10 sm:w-9 rounded-l-md flex items-center justify-center hover:bg-[var(--rail-hover)] disabled:opacity-35 transition-colors cursor-pointer disabled:cursor-default">
-            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"/></svg>
-          </button>
-          <button id="btnRedo" type="button" title="Redo" aria-label="Redo" class="h-full w-10 sm:w-9 rounded-r-md flex items-center justify-center hover:bg-[var(--rail-hover)] disabled:opacity-35 transition-colors cursor-pointer disabled:cursor-default">
-            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5A5.5 5.5 0 0 0 9.5 20H13"/></svg>
-          </button>
-        </div>
-        <button id="btnStylePop" type="button" aria-haspopup="true" aria-expanded="false" class="h-10 sm:h-9 px-3 rounded-md border border-[var(--rail-border)] bg-[var(--rail-surface)] hover:bg-[var(--rail-hover)] flex items-center gap-1.5 text-xs font-semibold transition-colors cursor-pointer">
-          <svg class="w-4 h-4 text-[var(--rail-accent)] transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="13.5" cy="6.5" r=".6" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".6" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".6" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".6" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></svg>
-          <span>Style</span>
-        </button>
-        <button id="btnHeaderExport" type="button" title="Print or export PDF" class="h-10 sm:h-9 px-3 sm:px-3.5 rounded-md bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] flex items-center gap-1.5 text-xs font-semibold transition-colors cursor-pointer">
-          <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect width="12" height="8" x="6" y="14"/></svg>
-          <span class="hidden sm:inline">Export</span>
-        </button>
-      </div>
-    </header>
+      <button id="btnStylePop" type="button" aria-haspopup="true" aria-expanded="false" class="studio-pill h-10 px-3.5 rounded-full hover:bg-[var(--surface-hover)] flex items-center gap-1.5 text-xs font-semibold transition-colors cursor-pointer">
+        <svg class="w-4 h-4 text-[var(--primary)] transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="13.5" cy="6.5" r=".6" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".6" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".6" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".6" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></svg>
+        <span>Style</span>
+      </button>
+      <button id="btnHeaderExport" type="button" title="Print or export" aria-label="Export and print" class="h-10 w-10 sm:w-auto sm:px-3.5 rounded-full bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] shadow-[var(--shadow-surface)] flex items-center justify-center gap-1.5 text-xs font-semibold transition-colors cursor-pointer">
+        <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect width="12" height="8" x="6" y="14"/></svg>
+        <span class="hidden sm:inline">Export</span>
+      </button>
+    </div>
 
     <!-- ================================================================ -->
     <!-- EMPTY WELCOME PROOFING SHEET (shown until model is loaded)       -->
     <!-- ================================================================ -->
-    <section id="emptyState" class="proofing-stage flex-1 min-h-0 flex items-center justify-center p-5 sm:p-8 overflow-y-auto">
-      <div class="relative z-10 w-full max-w-2xl rounded-md proof-sheet-frame overflow-hidden">
+    <section id="emptyState" class="proofing-stage flex-1 min-h-0 flex items-center justify-center pt-16 pb-6 px-4 sm:p-8 overflow-y-auto">
+      <div class="relative z-10 w-full max-w-2xl rounded-xl proof-sheet-frame overflow-hidden">
         <!-- Sheet Calibration Strip -->
         <div class="px-6 sm:px-8 py-3 border-b border-[var(--border)] bg-[var(--surface-sunken)] flex items-center justify-between gap-3 text-xs text-[var(--muted-foreground)]">
           <span class="font-semibold text-[var(--foreground)]">Proofing Table</span>
@@ -120,11 +118,11 @@
         <!-- Interactive Drop & Action Band (flush hairline band, zero nested card) -->
         <div id="emptyDropZone" class="px-6 sm:px-8 py-5 border-t border-dashed border-[var(--border-strong)] bg-[var(--surface-sunken)]/45 space-y-3.5 transition-colors">
           <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
-            <button id="emptyImportBtn" type="button" class="sm:flex-1 shrink-0 h-11 px-5 rounded-md bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors cursor-pointer">
+            <button id="emptyImportBtn" type="button" class="sm:flex-1 shrink-0 h-11 px-5 rounded-full bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors cursor-pointer">
               <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
               <span>Import Model File</span>
             </button>
-            <button id="emptySampleBtn" type="button" class="shrink-0 h-11 px-4 rounded-md border border-[var(--border-strong)] bg-[var(--card)] hover:bg-[var(--surface-hover)] text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors cursor-pointer">
+            <button id="emptySampleBtn" type="button" class="shrink-0 h-11 px-5 rounded-full border border-[var(--border-strong)] bg-[var(--card)] hover:bg-[var(--surface-hover)] text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors cursor-pointer">
               <svg class="w-4 h-4 text-[var(--primary)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="6 4 20 12 6 20 6 4"/></svg>
               <span>Load Sample Model</span>
             </button>
@@ -157,7 +155,7 @@
     <!-- ================================================================ -->
     <!-- FULL-SCREEN ZOOMABLE LIVE PAGE STAGE                             -->
     <!-- ================================================================ -->
-    <main id="stageViewport" class="stage-viewport proofing-stage hidden flex-1 min-h-0 relative w-full overflow-hidden flex items-center justify-center p-4 sm:p-6">
+    <main id="stageViewport" class="stage-viewport proofing-stage hidden flex-1 min-h-0 relative w-full h-full overflow-hidden flex items-center justify-center pt-16 pb-28 px-3">
       <div id="stageContainer" class="relative z-10 w-0 h-0 overflow-visible origin-center will-change-transform flex items-center justify-center">
         <div id="pageFrame" class="shrink-0 studio-page-frame overflow-hidden relative transition-colors"></div>
       </div>
@@ -166,63 +164,61 @@
     <!-- ================================================================ -->
     <!-- FLOATING CONTEXTUAL CONTROLS (Mode-specific overlays over page)  -->
     <!-- ================================================================ -->
-    <div id="contextOverlay" class="no-print hidden fixed left-1/2 -translate-x-1/2 bottom-[122px] md:bottom-[72px] z-35 w-[min(94vw,540px)] pointer-events-none flex flex-col items-center gap-2"></div>
+    <div id="contextOverlay" class="no-print hidden fixed left-1/2 -translate-x-1/2 bottom-[114px] z-35 w-[min(94vw,540px)] pointer-events-none flex flex-col items-center gap-2"></div>
 
     <!-- ================================================================ -->
-    <!-- ANCHORED BOTTOM STUDIO DOCK: Mode Segmented Bar + Folio & Zoom   -->
+    <!-- FLOATING BOTTOM DOCK: Mode Pill + Page & Zoom Pill               -->
     <!-- ================================================================ -->
-    <footer id="bottomDock" class="no-print hidden shrink-0 bg-[var(--chrome)] border-t border-[var(--border)] px-3 sm:px-4 py-2 z-40 flex flex-col md:flex-row items-center justify-between gap-2">
-      <!-- Mode Segmented Control -->
-      <div id="modePill" class="p-1 rounded-lg bg-[var(--surface-sunken)] border border-[var(--border)] inline-flex items-center gap-0.5 text-xs font-semibold whitespace-nowrap max-w-full overflow-x-auto no-scrollbar">
-        <button data-mode="pan" type="button" class="mode-btn min-h-[40px] sm:min-h-[34px] px-2.5 sm:px-3 py-1.5 rounded-md flex items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer">
+    <div id="bottomDock" class="no-print hidden fixed bottom-3 left-1/2 -translate-x-1/2 z-40 flex flex-col items-center gap-2 max-w-[96vw]">
+      <!-- Mode Pill -->
+      <div id="modePill" class="studio-pill p-1 rounded-full flex items-center gap-0.5 text-xs font-semibold whitespace-nowrap max-w-full overflow-x-auto no-scrollbar">
+        <button data-mode="pan" type="button" class="mode-btn min-h-[34px] px-2.5 sm:px-3 py-1.5 rounded-full flex items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer">
           <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/><path d="M11 8v6"/><path d="M8 11h6"/></svg>
           <span>Pan</span>
         </button>
-        <button data-mode="select" type="button" class="mode-btn min-h-[40px] sm:min-h-[34px] px-2.5 sm:px-3 py-1.5 rounded-md flex items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer">
+        <button data-mode="select" type="button" class="mode-btn min-h-[34px] px-2.5 sm:px-3 py-1.5 rounded-full flex items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer">
           <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m4 4 7.07 17 2.51-7.39L21 11.07z"/></svg>
           <span>Select</span>
         </button>
-        <button data-mode="rotate" type="button" class="mode-btn min-h-[40px] sm:min-h-[34px] px-2.5 sm:px-3 py-1.5 rounded-md flex items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer">
+        <button data-mode="rotate" type="button" class="mode-btn min-h-[34px] px-2.5 sm:px-3 py-1.5 rounded-full flex items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer">
           <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3.6 9h16.8"/><path d="M3.6 15h16.8"/><path d="M11.5 3a17 17 0 0 0 0 18"/><path d="M12.5 3a17 17 0 0 1 0 18"/></svg>
           <span>Rotate</span>
         </button>
-        <button data-mode="arrange" type="button" class="mode-btn min-h-[40px] sm:min-h-[34px] px-2.5 sm:px-3 py-1.5 rounded-md flex items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer">
+        <button data-mode="arrange" type="button" class="mode-btn min-h-[34px] px-2.5 sm:px-3 py-1.5 rounded-full flex items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer">
           <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>
           <span>Arrange</span>
         </button>
-        <button data-mode="edit" type="button" class="mode-btn min-h-[40px] sm:min-h-[34px] px-2.5 sm:px-3 py-1.5 rounded-md flex items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer">
+        <button data-mode="edit" type="button" class="mode-btn min-h-[34px] px-2.5 sm:px-3 py-1.5 rounded-full flex items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer">
           <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4Z"/></svg>
           <span>Edit</span>
         </button>
       </div>
 
-      <!-- Calibrated Print-Folio Navigator & Zoom Stepper -->
-      <div class="w-full md:w-auto max-w-[460px] flex items-center gap-2 text-xs font-semibold">
-        <div class="flex-1 md:flex-initial min-w-0 p-1 rounded-lg border border-[var(--border)] bg-[var(--card)] flex items-center gap-1">
-          <button id="prevPage" type="button" title="Previous Page" aria-label="Previous Page" class="h-10 w-10 sm:h-8 sm:w-8 rounded-md flex items-center justify-center hover:bg-[var(--surface-hover)] disabled:opacity-35 transition-colors shrink-0 cursor-pointer disabled:cursor-default">
-            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m15 18-6-6 6-6"/></svg>
-          </button>
-          <button id="btnPageOverview" type="button" class="h-10 sm:h-8 px-2.5 rounded-md hover:bg-[var(--surface-hover)] flex items-center justify-center gap-1.5 min-w-0 flex-1 overflow-hidden transition-colors cursor-pointer">
-            <span id="pageLabelText" class="truncate min-w-0 font-semibold">Page 1</span>
-            <span id="pageCountText" class="shrink-0 font-mono text-xs text-[var(--muted-foreground)] whitespace-nowrap"></span>
-            <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
-          </button>
-          <button id="nextPage" type="button" title="Next Page" aria-label="Next Page" class="h-10 w-10 sm:h-8 sm:w-8 rounded-md bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] flex items-center justify-center disabled:opacity-35 transition-colors shrink-0 cursor-pointer disabled:cursor-default">
-            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m9 18 6-6-6-6"/></svg>
-          </button>
-        </div>
+      <!-- Page & Zoom Pill -->
+      <div class="studio-pill w-[min(94vw,420px)] max-w-full min-w-0 px-1.5 py-1 rounded-full flex items-center gap-1 text-xs font-semibold">
+        <button id="prevPage" type="button" title="Previous Page" aria-label="Previous Page" class="h-8 w-8 rounded-full flex items-center justify-center hover:bg-[var(--surface-hover)] disabled:opacity-35 transition-colors shrink-0 cursor-pointer disabled:cursor-default">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m15 18-6-6 6-6"/></svg>
+        </button>
+        <button id="btnPageOverview" type="button" class="h-8 px-2 rounded-full hover:bg-[var(--surface-hover)] flex items-center justify-center gap-1.5 min-w-0 flex-1 overflow-hidden transition-colors cursor-pointer">
+          <span id="pageLabelText" class="truncate min-w-0 font-semibold">Page 1</span>
+          <span id="pageCountText" class="shrink-0 font-mono text-xs text-[var(--muted-foreground)] whitespace-nowrap"></span>
+          <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
+        </button>
+        <button id="nextPage" type="button" title="Next Page" aria-label="Next Page" class="h-8 w-8 rounded-full bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] flex items-center justify-center disabled:opacity-35 transition-colors shrink-0 cursor-pointer disabled:cursor-default">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m9 18 6-6-6-6"/></svg>
+        </button>
 
-        <div class="p-1 rounded-lg border border-[var(--border)] bg-[var(--card)] inline-flex items-center gap-0.5 shrink-0">
-          <button id="btnZoomOut" type="button" title="Zoom Out" aria-label="Zoom Out" class="h-10 w-10 sm:h-8 sm:w-8 rounded-md flex items-center justify-center hover:bg-[var(--surface-hover)] transition-colors cursor-pointer">
-            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="5" x2="19" y1="12" y2="12"/></svg>
-          </button>
-          <button id="btnZoomFit" type="button" title="Reset Zoom" class="h-10 sm:h-8 w-12 rounded-md font-mono text-xs font-semibold flex items-center justify-center hover:bg-[var(--surface-hover)] transition-colors cursor-pointer">100%</button>
-          <button id="btnZoomIn" type="button" title="Zoom In" aria-label="Zoom In" class="h-10 w-10 sm:h-8 sm:w-8 rounded-md flex items-center justify-center hover:bg-[var(--surface-hover)] transition-colors cursor-pointer">
-            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="12" x2="12" y1="5" y2="19"/><line x1="5" x2="19" y1="12" y2="12"/></svg>
-          </button>
-        </div>
+        <div class="w-px h-5 bg-[var(--border)] mx-0.5 shrink-0" aria-hidden="true"></div>
+
+        <button id="btnZoomOut" type="button" title="Zoom Out" aria-label="Zoom Out" class="h-8 w-8 rounded-full flex items-center justify-center hover:bg-[var(--surface-hover)] transition-colors shrink-0 cursor-pointer">
+          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="5" x2="19" y1="12" y2="12"/></svg>
+        </button>
+        <button id="btnZoomFit" type="button" title="Reset Zoom" class="h-8 w-12 rounded-full font-mono text-xs font-semibold flex items-center justify-center hover:bg-[var(--surface-hover)] transition-colors shrink-0 cursor-pointer">100%</button>
+        <button id="btnZoomIn" type="button" title="Zoom In" aria-label="Zoom In" class="h-8 w-8 rounded-full flex items-center justify-center hover:bg-[var(--surface-hover)] transition-colors shrink-0 cursor-pointer">
+          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="12" x2="12" y1="5" y2="19"/><line x1="5" x2="19" y1="12" y2="12"/></svg>
+        </button>
       </div>
-    </footer>
+    </div>
 
     <!-- ================================================================ -->
     <!-- TOP-LEFT SLIDE-OUT MENU DRAWER                                   -->
@@ -316,7 +312,7 @@
             </button>
             <button id="menuExportHtmlBtn" type="button" class="hidden w-full py-2.5 px-4 rounded-lg border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer">
               <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 3 7.5 12 12l9-4.5L12 3Z"/><path d="M3 7.5V16.5L12 21l9-4.5V7.5"/><path d="M12 12v9"/></svg>
-              <span>Export Interactive 3D (.html)</span>
+              <span>Export 3D Interactive Viewer (HTML)</span>
             </button>
             <button id="menuPrintBtn" type="button" class="hidden w-full py-2.5 px-4 rounded-lg border border-[var(--border-strong)] bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer">
               <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect width="12" height="8" x="6" y="14"/></svg>
@@ -401,7 +397,7 @@
     <!-- ================================================================ -->
     <!-- FLOATING STYLE POPOVER (Top-Right, anchored to Style button)     -->
     <!-- ================================================================ -->
-    <div id="stylePopover" role="dialog" aria-label="Style options" class="no-print hidden fixed top-[60px] right-3 sm:right-4 z-45 w-[min(92vw,336px)]">
+    <div id="stylePopover" role="dialog" aria-label="Style options" class="no-print hidden fixed top-[60px] right-3 z-45 w-[min(92vw,336px)]">
       <div class="style-popover-tail" aria-hidden="true"></div>
       <div class="style-popover-body rounded-xl studio-sheet p-4 space-y-4 text-xs max-h-[76vh] overflow-y-auto overscroll-contain">
         <div id="presetGrid" class="grid grid-cols-2 gap-2"></div>
@@ -826,20 +822,14 @@
 
         <div class="p-5 space-y-4">
           <div id="expActions" class="space-y-2.5">
-            <button id="btnExpCurrentPdf" type="button" class="w-full py-3 px-4 rounded-lg bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] text-sm font-semibold flex items-center justify-between transition-colors cursor-pointer">
-              <span>Export Current Page as PDF</span>
-              <span class="font-mono text-xs opacity-90">Instant</span>
+            <button id="btnExpAllPdf" type="button" class="w-full py-3 px-4 rounded-lg bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] text-sm font-semibold flex items-center justify-center text-center transition-colors cursor-pointer">
+              Export to PDF
             </button>
-            <button id="btnExpAllPdf" type="button" class="w-full py-3 px-4 rounded-lg border border-[var(--primary-border)] text-[var(--primary)] bg-[var(--primary-soft)] text-sm font-semibold flex items-center justify-between transition-colors cursor-pointer">
-              <span>Export Full Manual as PDF</span>
-              <span id="expPageCountBadge" class="font-mono text-xs"></span>
+            <button id="btnExpInteractiveHtml" type="button" class="w-full py-3 px-4 rounded-lg border border-[var(--border-strong)] bg-[var(--card)] hover:bg-[var(--surface-hover)] text-[var(--foreground)] text-sm font-semibold flex items-center justify-center text-center transition-colors cursor-pointer">
+              Export 3D Interactive Viewer (HTML)
             </button>
-            <button id="btnExpInteractiveHtml" type="button" class="w-full py-2.5 px-4 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] font-semibold flex items-center justify-between transition-colors cursor-pointer">
-              <span>Export Interactive 3D (.html)</span>
-              <span class="font-mono text-xs text-[var(--muted-foreground)]">Offline</span>
-            </button>
-            <button id="btnSysPrint" type="button" class="w-full py-2.5 px-4 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] font-semibold transition-colors cursor-pointer">
-              Open System Print Dialog
+            <button id="btnSysPrint" type="button" class="w-full py-3 px-4 rounded-lg border border-[var(--border-strong)] bg-[var(--card)] hover:bg-[var(--surface-hover)] text-[var(--foreground)] text-sm font-semibold flex items-center justify-center text-center transition-colors cursor-pointer">
+              Print
             </button>
           </div>
 
@@ -1535,20 +1525,22 @@
     <!-- ================================================================ -->
     <!-- DISMISSIBLE BOTTOM IMPORT ERROR NOTIFICATION                     -->
     <!-- ================================================================ -->
-    <div id="errorBanner" class="no-print hidden fixed left-1/2 -translate-x-1/2 bottom-[112px] md:bottom-[68px] z-45 max-w-[94vw] transition-opacity duration-300">
-      <div class="flex items-center gap-3 px-4 py-2.5 rounded-lg bg-[var(--ink-bar)] text-[var(--ink-bar-foreground)] shadow-[var(--shadow-sheet)] border border-white/15 text-xs font-semibold">
+    <div id="errorBanner" class="no-print hidden fixed left-1/2 -translate-x-1/2 bottom-[114px] z-45 max-w-[94vw] transition-opacity duration-300">
+      <div class="flex items-center gap-3 px-4 py-2.5 rounded-full bg-[var(--ink-bar)] text-[var(--ink-bar-foreground)] shadow-[var(--shadow-sheet)] border border-white/15 text-xs font-semibold">
         <span class="w-2 h-2 rounded-full bg-[var(--primary)] shrink-0"></span>
         <span id="errorBannerText" class="whitespace-nowrap">There are 0 issues.</span>
-        <button id="btnBannerSeeErrors" type="button" class="px-2.5 py-1 rounded bg-white/12 hover:bg-white/20 text-[var(--ink-bar-accent)] font-semibold whitespace-nowrap transition-colors cursor-pointer">See issues</button>
-        <button id="btnBannerDismiss" type="button" title="Dismiss" aria-label="Dismiss notification" class="w-7 h-7 rounded hover:bg-white/15 flex items-center justify-center opacity-80 cursor-pointer">
+        <button id="btnBannerSeeErrors" type="button" class="px-2.5 py-1 rounded-full bg-white/12 hover:bg-white/20 text-[var(--ink-bar-accent)] font-semibold whitespace-nowrap transition-colors cursor-pointer">See issues</button>
+        <button id="btnBannerDismiss" type="button" title="Dismiss" aria-label="Dismiss notification" class="w-7 h-7 rounded-full hover:bg-white/15 flex items-center justify-center opacity-80 cursor-pointer">
           <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
         </button>
       </div>
     </div>
 
     <!-- Toast Banner -->
-    <div id="toast" class="no-print hidden fixed top-16 left-1/2 -translate-x-1/2 z-[60] px-4 py-2.5 rounded-lg text-xs font-semibold bg-[var(--ink-bar)] text-[var(--ink-bar-foreground)] shadow-[var(--shadow-sheet)] border border-white/15 max-w-[90vw] text-center pointer-events-none"></div>
+    <div id="toast" class="no-print hidden fixed top-16 left-1/2 -translate-x-1/2 z-[60] px-4 py-2 rounded-2xl text-xs font-semibold bg-[var(--ink-bar)] text-[var(--ink-bar-foreground)] shadow-[var(--shadow-sheet)] border border-white/15 max-w-[90vw] text-center pointer-events-none"></div>
   </div>
+  <!-- Dedicated Multi-Page Print Surface (populated on Print, cleared afterprint) -->
+  <div id="printAllPagesContainer" aria-hidden="true"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

@@ -5986,8 +5986,8 @@ function syncModePillButtons(page) {
       : editModalOpen
         ? m === 'edit'
         : m === state.mode;
-    b.className = `mode-btn ${visible ? 'flex' : 'hidden'} min-h-[40px] sm:min-h-[34px] px-2.5 sm:px-3 py-1.5 rounded-md items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer ${
-      active ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--card)]/70'
+    b.className = `mode-btn ${visible ? 'flex' : 'hidden'} min-h-[34px] px-2.5 sm:px-3 py-1.5 rounded-full items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer ${
+      active ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--surface-hover)]'
     }`;
   });
 }
@@ -12331,9 +12331,103 @@ async function runInteractiveHtmlExport() {
   }
 }
 
+let isPrintPrepActive = false;
+
+function cleanupPrintAllPages() {
+  document.body.classList.remove('printing-all-pages');
+  const container = document.getElementById('printAllPagesContainer');
+  if (container) container.innerHTML = '';
+  const dynStyle = document.getElementById('dynamicPrintPageStyle');
+  if (dynStyle) dynStyle.remove();
+}
+
+async function runSystemPrintAllPages() {
+  if (!state.model || state.pages.length === 0 || isPrintPrepActive) return;
+  if (typeof window.print !== 'function') {
+    showToast('Printing is not supported in this browser.');
+    return;
+  }
+  isPrintPrepActive = true;
+  const progWrap = document.getElementById('expProgressWrap');
+  const progLbl = document.getElementById('expProgressLabel');
+  const progPct = document.getElementById('expProgressPct');
+  const progBar = document.getElementById('expProgressBar');
+  const readyWrap = document.getElementById('expReadyWrap');
+  const printContainer = document.getElementById('printAllPagesContainer');
+
+  try {
+    cleanupPrintAllPages();
+    if (readyWrap) readyWrap.classList.add('hidden');
+    if (progWrap) progWrap.classList.remove('hidden');
+
+    const pagesToPrint = state.pages;
+    const [pageWpt, pageHpt] = getPdfPaperPts();
+    const [wIn, hIn] = getActivePagePhysicalInches();
+    const basePxW = Math.round(pageWpt * 1.45);
+    const basePxH = Math.round(pageHpt * 1.45);
+    const coverPxW = Math.min(2400, Math.round(pageWpt * 2.1));
+    const coverPxH = Math.min(2400, Math.round(pageHpt * 2.1));
+
+    const renderedPages = [];
+    for (let i = 0; i < pagesToPrint.length; i++) {
+      const pct = Math.round(((i + 1) / pagesToPrint.length) * 100);
+      if (progLbl) progLbl.textContent = `Preparing page ${i + 1} of ${pagesToPrint.length} for print…`;
+      if (progPct) progPct.textContent = `${pct}%`;
+      if (progBar) progBar.style.width = `${pct}%`;
+      await new Promise((r) => setTimeout(r, 8));
+      const pg = pagesToPrint[i];
+      const w = pg.kind === 'cover' ? coverPxW : basePxW;
+      const h = pg.kind === 'cover' ? coverPxH : basePxH;
+      renderedPages.push(await renderPageToJpegBytes(pg, w, h, pageWpt, pageHpt));
+    }
+
+    if (printContainer) {
+      const decodePromises = [];
+      for (let i = 0; i < renderedPages.length; i++) {
+        const sheet = document.createElement('div');
+        sheet.className = 'print-page-sheet';
+        const img = document.createElement('img');
+        img.className = 'print-page-img';
+        img.alt = `Page ${i + 1}`;
+        img.src = renderedPages[i].dataUrl;
+        sheet.appendChild(img);
+        printContainer.appendChild(sheet);
+        if (typeof img.decode === 'function') {
+          decodePromises.push(img.decode().catch(() => {}));
+        }
+      }
+      await Promise.all(decodePromises);
+
+      const styleEl = document.createElement('style');
+      styleEl.id = 'dynamicPrintPageStyle';
+      styleEl.textContent = `@media print { @page { size: ${wIn.toFixed(2)}in ${hIn.toFixed(2)}in; margin: 0; } }`;
+      document.head.appendChild(styleEl);
+      document.body.classList.add('printing-all-pages');
+    }
+
+    if (progWrap) progWrap.classList.add('hidden');
+    document.getElementById('exportModal').classList.add('hidden');
+    resetZoom();
+
+    const onAfterPrint = () => {
+      window.removeEventListener('afterprint', onAfterPrint);
+      cleanupPrintAllPages();
+    };
+    window.addEventListener('afterprint', onAfterPrint);
+    window.print();
+  } catch (_) {
+    cleanupPrintAllPages();
+    if (progWrap) progWrap.classList.add('hidden');
+    showToast('Could not prepare pages for printing.');
+  } finally {
+    isPrintPrepActive = false;
+  }
+}
+
 // Open real Export & Print Modal (never silently closes!)
 function openExportModal() {
   if (!state.model || state.pages.length === 0) { showToast('Import a model first.'); return; }
+  cleanupPrintAllPages();
   closeMenu();
   closeBricksLibraryModal();
   closeStepEditModal();
@@ -12342,7 +12436,6 @@ function openExportModal() {
   const fmt = PAPER_FORMATS[state.paperFormat] || PAPER_FORMATS.letter;
   const [wIn, hIn] = getActivePagePhysicalInches();
   document.getElementById('expFormatSummary').textContent = `${fmt.name} (${formatPhysicalDims(wIn, hIn)}) · ${state.pages.length} pages`;
-  document.getElementById('expPageCountBadge').textContent = `${state.pages.length} pages`;
   const sysPrintBtn = document.getElementById('btnSysPrint');
   if (sysPrintBtn) sysPrintBtn.classList.toggle('hidden', typeof window.print !== 'function');
   document.getElementById('expProgressWrap').classList.add('hidden');
@@ -12379,7 +12472,6 @@ document.getElementById('bomSetupJumpBtn').onclick = () => {
 };
 document.getElementById('errorsModal').onclick = (e) => { if (e.target.id === 'errorsModal') document.getElementById('errorsModal').classList.add('hidden'); };
 document.getElementById('btnCloseExport').onclick = () => document.getElementById('exportModal').classList.add('hidden');
-document.getElementById('btnExpCurrentPdf').onclick = () => runPdfExport([state.pages[state.pageIdx]]);
 document.getElementById('btnExpAllPdf').onclick = () => runPdfExport(state.pages);
 document.getElementById('btnSharePdf').onclick = async () => {
   if (!lastGeneratedPdfBlob) return;
@@ -12389,10 +12481,7 @@ document.getElementById('btnSharePdf').onclick = async () => {
   } catch (_) {}
 };
 document.getElementById('btnSysPrint').onclick = () => {
-  document.getElementById('exportModal').classList.add('hidden');
-  resetZoom();
-  // Synchronous print directly inside click gesture (required on iOS Safari!)
-  window.print();
+  runSystemPrintAllPages();
 };
 
 document.getElementById('menuAddDivider').onclick = () => {
