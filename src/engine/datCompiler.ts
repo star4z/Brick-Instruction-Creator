@@ -8,6 +8,15 @@ import { hashTextureBase64 } from './textureStore';
  */
 export const DIRECT_RGB_COLOR_FLAG = 0x2000000;
 
+/**
+ * Returns true iff `cid` is a tagged LDraw direct RGB color (`0x2RRGGBB`).
+ * Uses a range check rather than bitwise `&` so negative signed integers (such as `-1`,
+ * whose 32-bit two's complement representation is `0xFFFFFFFF`) can never false-match as white.
+ */
+export function isDirectRgbColor(cid: number): boolean {
+  return cid >= DIRECT_RGB_COLOR_FLAG && cid < DIRECT_RGB_COLOR_FLAG + 0x1000000;
+}
+
 export interface DatEntrySource {
   key: string;
   lines: string[];
@@ -1040,12 +1049,14 @@ export function compileDatEntry(
   };
 
   const resolveLineCol = (rawColStr: string, curColor: number): number => {
-    if (rawColStr.length === 9 && (rawColStr[0] === '0' && (rawColStr[1] === 'x' || rawColStr[1] === 'X') && rawColStr[2] === '2')) {
+    if (/^0[xX]2[0-9a-fA-F]{6}$/.test(rawColStr)) {
       const rgb = parseInt(rawColStr.slice(3), 16);
       if (Number.isFinite(rgb)) return DIRECT_RGB_COLOR_FLAG | (rgb & 0xffffff);
     }
     const c = parseInt(rawColStr, 10);
-    return Number.isFinite(c) && c !== 16 && c !== 24 ? c : curColor;
+    // BrickLink Studio model2.ldr encodes LDraw color 16 (inherit/main) as -1 and color 24 (edge) as -2.
+    // Negative color IDs must always inherit `curColor` instead of leaking into `triCols`.
+    return Number.isFinite(c) && c >= 0 && c !== 16 && c !== 24 ? c : curColor;
   };
 
   const walk = (

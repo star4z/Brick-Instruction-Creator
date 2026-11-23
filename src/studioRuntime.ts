@@ -8,8 +8,8 @@ import {
   classifySubdivisionPartFlags,
 } from './engine/subdivisionAnalyzer';
 import {
-  DIRECT_RGB_COLOR_FLAG,
   compileDatEntry as compileLDrawDatEntry,
+  isDirectRgbColor,
 } from './engine/datCompiler';
 import { textureStore } from './engine/textureStore';
 import {
@@ -1420,10 +1420,10 @@ function buildMeshBuffers(prevParts, newParts, opts) {
       const allowSubCols = !isSelected && !overrideHex && !isGhost;
       const subColCache = allowSubCols ? new Map() : null;
       const resolveSubColor = (cid) => {
-        if (!subColCache || cid === 16) return null;
+        if (!subColCache || cid === 16 || cid < 0) return null;
         let cached = subColCache.get(cid);
         if (cached !== undefined) return cached;
-        if ((cid & DIRECT_RGB_COLOR_FLAG) === DIRECT_RGB_COLOR_FLAG) {
+        if (isDirectRgbColor(cid)) {
           const r = (cid >> 16) & 255, g = (cid >> 8) & 255, b = cid & 255;
           cached = {
             rgb: [

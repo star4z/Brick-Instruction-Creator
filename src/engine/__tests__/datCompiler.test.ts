@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   compileDatEntry,
+  isDirectRgbColor,
   normalizeDatRef,
   type DatEntrySource,
 } from '../datCompiler';
@@ -559,7 +560,7 @@ describe('compileDatEntry — minifigure torso & sibling-fair budgeting', () => 
     expect(Array.from(withoutTex!.triCols!)).toEqual([0]);
   });
 
-  it('preserves direct RGB 0x2RRGGBB colors in Int32Array triCols', () => {
+  it('preserves direct RGB 0x2RRGGBB colors in Int32Array triCols and never confuses negative IDs with direct RGB', () => {
     const part: DatEntrySource = {
       key: 'direct_rgb_face',
       lines: ['3 0x2FF8844 0 0 -13 5 0 -13 0 5 -13'],
@@ -568,6 +569,57 @@ describe('compileDatEntry — minifigure torso & sibling-fair budgeting', () => 
     expect(mesh).not.toBeNull();
     expect(mesh!.triCols).toBeInstanceOf(Int32Array);
     expect(mesh!.triCols![0]).toBe(0x2ff8844);
+
+    expect(isDirectRgbColor(0x2000000)).toBe(true);
+    expect(isDirectRgbColor(0x2ff8844)).toBe(true);
+    expect(isDirectRgbColor(0x2ffffff)).toBe(true);
+    expect(isDirectRgbColor(-1)).toBe(false);
+    expect(isDirectRgbColor(-2)).toBe(false);
+    expect(isDirectRgbColor(0)).toBe(false);
+    expect(isDirectRgbColor(15)).toBe(false);
+    expect(isDirectRgbColor(16)).toBe(false);
+    expect(isDirectRgbColor(0x3000000)).toBe(false);
+  });
+
+  it('treats BrickLink Studio model2.ldr -1/-2 color codes as inherited main color (16) instead of leaking white', () => {
+    const pngB64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    const subfile: DatEntrySource = {
+      key: 's/sub_panel',
+      lines: [
+        '3 -1 0 0 0 10 0 0 0 10 0',
+        '4 -1 0 0 0 10 0 0 10 0 10 0 0 10',
+      ],
+    };
+    const studioBrick: DatEntrySource = {
+      key: 'studio_brick_3001',
+      lines: [
+        '0 Brick 2 x 4',
+        '0 IsSubModel False',
+        '1 -1 0 0 0 1 0 0 0 1 0 0 0 1 s/sub_panel.dat',
+        '3 -1 0 24 0 20 24 0 0 24 20',
+        '4 -2 0 0 0 20 0 0 20 24 0 0 24 0',
+        '0 PE_TEX_PATH -1',
+        `0 PE_TEX_INFO ${pngB64}`,
+        '4 -1 0 0 20 20 0 20 20 24 20 0 24 20 0 1 1 1 1 0 0 0',
+      ],
+    };
+
+    const mesh = compileDatEntry(studioBrick, (ref) => (ref === 's/sub_panel' ? subfile : null));
+    expect(mesh).not.toBeNull();
+    // All polygons inherit main brick color (16) -> no sub-color override array allocated!
+    expect(mesh!.triCols).toBeNull();
+    expect(mesh!.texBatches?.length).toBe(1);
+    expect(mesh!.texBatches![0].triCols).toBeNull();
+
+    // Nested subfile placed with an explicit sub-color (Red = 4) must pass 4 down to -1 polygons
+    const redAccentPart: DatEntrySource = {
+      key: 'studio_red_accent',
+      lines: ['1 4 0 0 0 1 0 0 0 1 0 0 0 1 s/sub_panel.dat'],
+    };
+    const accentMesh = compileDatEntry(redAccentPart, (ref) => (ref === 's/sub_panel' ? subfile : null));
+    expect(accentMesh).not.toBeNull();
+    expect(accentMesh!.triCols).toBeInstanceOf(Int32Array);
+    expect(Array.from(accentMesh!.triCols!)).toEqual([4, 4, 4]);
   });
 });
 

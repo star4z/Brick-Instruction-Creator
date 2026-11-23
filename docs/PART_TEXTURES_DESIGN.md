@@ -25,8 +25,9 @@ Previously, the `.dat` compiler ignored `0 PE_TEX_*` directives, discarded trail
 - **Official LDraw `!TEXMAP`**:
   - Resolves `PLANAR`, `CYLINDRICAL`, and `SPHERICAL` blocks when the referenced texture exists in `textureStore`, computing exact OpenGL-convention UVs (`v = 0` bottom, `v = 1` top).
   - Gracefully falls back to `0 !TEXMAP FALLBACK` polygon geometry when the texture image is unavailable.
-- **Direct RGB Colors (`0x2RRGGBB`)**:
-  - Upgrades `triCols` to `Int32Array` and encodes `0x2RRGGBB` direct colors with `DIRECT_RGB_COLOR_FLAG` (`0x2000000`).
+- **Direct RGB Colors (`0x2RRGGBB`) & Studio `-1`/`-2` Inheritance**:
+  - Upgrades `triCols` to `Int32Array`, encodes `0x2RRGGBB` direct colors with `DIRECT_RGB_COLOR_FLAG` (`0x2000000`), and validates them via range-checked `isDirectRgbColor(cid)` (`[0x2000000, 0x3000000)`) so signed negative values can never false-match via bitwise `&`.
+  - Normalizes BrickLink Studio `model2.ldr` negative sentinel color IDs (`-1` main / `-2` edge) to inherit `curColor` just like LDraw `16` / `24`, preserving true brick colors and avoiding unnecessary `triCols` allocations on single-color `.io` parts.
 - Emits textured geometry in `CompiledDatMesh.texBatches` alongside untextured `tris`/`norms`/`edges`, contributing to bounding box calculations so camera framing remains exact.
 
 ### 3. WebGL Decal Compositing (`src/studioRuntime.ts` & `src/cover/studioPhotoRenderer.ts`)
