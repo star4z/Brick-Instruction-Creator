@@ -6849,7 +6849,7 @@ function renderContextOverlay(page) {
               ${hasThemeImg ? `<button id="covThemeImgClr" title="Remove theme image" class="pr-2 pl-1 py-1 opacity-85 hover:opacity-100">×</button>` : ''}
             </div>
             <div class="inline-flex items-center rounded-full overflow-hidden ${hasBg ? 'bg-[#1a73e8] text-white' : 'bg-black/5 dark:bg-white/10'}">
-              <button id="covBgBtn" class="px-2.5 py-1 font-semibold">Bg Image</button>
+              <button id="covBgBtn" class="px-2.5 py-1 font-semibold">Background Image</button>
               ${hasBg ? `<button id="covBgClr" title="Remove background image" class="pr-2 pl-1 py-1 opacity-85 hover:opacity-100">×</button>` : ''}
             </div>
             <button id="covQrToggle" class="px-2.5 py-1 rounded-full font-semibold ${qrOn ? 'bg-[#1a73e8] text-white' : 'bg-black/5 dark:bg-white/10'}">QR Code</button>
@@ -6896,7 +6896,7 @@ function renderContextOverlay(page) {
               <button id="compToggleText" class="px-2.5 py-1 rounded-full ${meta.showText !== false ? 'bg-[#1a73e8] text-white' : 'bg-black/5 dark:bg-white/10'}">Text</button>
               <button id="compToggleFw" class="px-2.5 py-1 rounded-full ${meta.showFireworks !== false ? 'bg-[#1a73e8] text-white' : 'bg-black/5 dark:bg-white/10'}">✦ Fireworks</button>
             ` : ''}
-            <button id="covBgBtn" class="px-2.5 py-1 rounded-full bg-[#1a73e8] text-white">Bg Image</button>
+            <button id="covBgBtn" class="px-2.5 py-1 rounded-full bg-[#1a73e8] text-white">Background Image</button>
           </div>
         </div>
         ${isBack ? `
