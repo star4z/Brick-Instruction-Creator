@@ -81,6 +81,7 @@ describe('interactiveHtmlExporter', () => {
           num: 1,
           label: 'Cover',
           title: 'Space Rover',
+          previewUrl: 'data:image/jpeg;base64,COVERPREVIEW',
           scene: { prevPartIdx: [], newPartIdx: [0], az: 38, el: 28, zoom: 1.0, hero: true },
         },
         {
@@ -93,6 +94,7 @@ describe('interactiveHtmlExporter', () => {
               stepId: 's1',
               stepNum: 1,
               label: 'Step 1',
+              previewUrl: 'data:image/jpeg;base64,STEP1PREVIEW',
               prevPartIdx: [],
               newPartIdx: [0],
               az: 38,
@@ -117,11 +119,22 @@ describe('interactiveHtmlExporter', () => {
     expect(html).toContain('<!doctype html>');
     expect(html).toContain('Space Rover — Interactive 3D Instructions');
     expect(html).toContain(DEFAULT_EDITOR_URL);
+    expect(html).toContain('Brick Instruction Creator ↗');
+    expect(html).not.toContain('Brick Studio');
+    expect(html).toContain('id="noJsFallback"');
+    expect(html).toContain('data:image/jpeg;base64,COVERPREVIEW');
+    expect(html).toContain('data:image/jpeg;base64,STEP1PREVIEW');
     expect(html).toContain('canvas id="glStage"');
     expect(html).toContain('Start Building');
     expect(html).toContain('"kind":"cover"');
     expect(html).toContain('"kind":"complete"');
     // Zero external script tags (100% offline self-contained)
     expect(html).not.toMatch(/<script[^>]+src=/i);
+
+    // Inline script must parse with zero syntax errors and omit duplicated previewUrl blobs
+    const scriptMatch = html.match(/<script>([\s\S]*?)<\/script>/);
+    expect(scriptMatch).toBeTruthy();
+    expect(() => new Function(scriptMatch![1])).not.toThrow();
+    expect(scriptMatch![1]).not.toContain('STEP1PREVIEW');
   });
 });

@@ -11537,11 +11537,37 @@ async function runInteractiveHtmlExport() {
     const allPartIndices = allParts.map((p) => registerPart(p));
     if (modalOpen && progPct && progBar) { progPct.textContent = '55%'; progBar.style.width = '55%'; await new Promise((r) => setTimeout(r, 10)); }
 
+    const fbCanvas = document.createElement('canvas');
+    fbCanvas.width = 480;
+    fbCanvas.height = 320;
+    const fbCtx = fbCanvas.getContext('2d');
+    const renderFallbackPreview = (prevList, newList, az, el, zoom, extraOpts = {}) => {
+      try {
+        const snap = renderSnapshot(prevList, newList, az, el, 480, 320, zoom || 1.0, {
+          highlightNew: state.highlightNew,
+          highlightColor: state.highlightColor,
+          fadePrev: state.fadePrev,
+          fadeOpacity: state.fadeOpacity,
+          showArrows: false,
+          accent: theme.accent,
+          ...extraOpts,
+        });
+        if (!fbCtx || !snapshotCanvas) return snap?.url || '';
+        fbCtx.fillStyle = theme.bg || '#ffffff';
+        fbCtx.fillRect(0, 0, fbCanvas.width, fbCanvas.height);
+        fbCtx.drawImage(snapshotCanvas, 0, 0, fbCanvas.width, fbCanvas.height);
+        return fbCanvas.toDataURL('image/jpeg', 0.78);
+      } catch (_) {
+        return '';
+      }
+    };
+
     const cm = normalizeCoverMeta(state.coverMeta);
     const exportPages = [];
 
     for (const pg of state.pages) {
       if (pg.kind === 'cover') {
+        const az = cm.az ?? 38, el = cm.el ?? 26, zoom = cm.zoom ?? 1.0;
         exportPages.push({
           id: pg.id,
           kind: 'cover',
@@ -11550,16 +11576,18 @@ async function runInteractiveHtmlExport() {
           title: (cm.title || state.model.title || 'Untitled Model').trim(),
           subtitle: (cm.subtitle || `${allParts.length} pieces · ${allSteps.length} steps`).trim(),
           badge: cm.creatorName ? cm.creatorName.trim() : `${allParts.length} pcs`,
+          previewUrl: renderFallbackPreview([], allParts, az, el, zoom, { highlightNew: false, fadePrev: false }),
           scene: {
             prevPartIdx: [],
             newPartIdx: allPartIndices,
-            az: cm.az ?? 38,
-            el: cm.el ?? 26,
-            zoom: cm.zoom ?? 1.0,
+            az,
+            el,
+            zoom,
             hero: true,
           },
         });
       } else if (pg.kind === 'complete') {
+        const az = state.completeMeta?.az ?? 315, el = state.completeMeta?.el ?? 28;
         exportPages.push({
           id: pg.id,
           kind: 'complete',
@@ -11568,16 +11596,18 @@ async function runInteractiveHtmlExport() {
           title: state.completeMeta?.title || 'Build Complete!',
           subtitle: state.completeMeta?.subtitle || `${allParts.length} pieces assembled`,
           badge: 'Complete',
+          previewUrl: renderFallbackPreview([], allParts, az, el, 1.0, { highlightNew: false, fadePrev: false }),
           scene: {
             prevPartIdx: [],
             newPartIdx: allPartIndices,
-            az: state.completeMeta?.az ?? 315,
-            el: state.completeMeta?.el ?? 28,
+            az,
+            el,
             zoom: 1.0,
             hero: true,
           },
         });
       } else if (pg.kind === 'back') {
+        const az = state.backMeta?.az ?? 215, el = state.backMeta?.el ?? 24;
         exportPages.push({
           id: pg.id,
           kind: 'back',
@@ -11586,11 +11616,12 @@ async function runInteractiveHtmlExport() {
           title: state.backMeta?.title || state.model.title,
           subtitle: state.backMeta?.subtitle || 'Made with Brick Instruction Creator',
           note: `${allParts.length} pieces · ${allSteps.length} steps`,
+          previewUrl: renderFallbackPreview([], allParts, az, el, 0.95, { highlightNew: false, fadePrev: false }),
           scene: {
             prevPartIdx: [],
             newPartIdx: allPartIndices,
-            az: state.backMeta?.az ?? 215,
-            el: state.backMeta?.el ?? 24,
+            az,
+            el,
             zoom: 0.95,
             hero: true,
           },
@@ -11605,10 +11636,12 @@ async function runInteractiveHtmlExport() {
           title: pg.chapterName || pg.label,
           subtitle: `${pg.pieceCount || previewIdx.length} pieces · ${pg.stepCount || 0} steps`,
           badge: pg.bagNumber ? `Section ${pg.bagNumber}` : 'Section',
+          previewUrl: (pg.previewParts || []).length > 0 ? renderFallbackPreview([], pg.previewParts, 38, 28, 1.0, { highlightNew: false, fadePrev: false }) : undefined,
           scene: previewIdx.length > 0 ? { prevPartIdx: [], newPartIdx: previewIdx, az: 38, el: 28, zoom: 1.0, hero: true } : undefined,
         });
       } else if (pg.kind === 'submodel_page' && pg.step?.subassembly) {
-        const subParts = (pg.step.subassembly.buildParts || []).map((p) => registerPart(p));
+        const subRaw = pg.step.subassembly.buildParts || [];
+        const subParts = subRaw.map((p) => registerPart(p));
         exportPages.push({
           id: pg.id,
           kind: 'submodel_page',
@@ -11616,6 +11649,7 @@ async function runInteractiveHtmlExport() {
           label: pg.label || pg.step.subassembly.name,
           title: pg.step.subassembly.name || 'Submodel',
           badge: `×${pg.step.subassembly.repeatCount || 1}`,
+          previewUrl: subRaw.length > 0 ? renderFallbackPreview([], subRaw, 38, 28, 1.0, { highlightNew: false, fadePrev: false }) : undefined,
           scene: { prevPartIdx: [], newPartIdx: subParts, az: 38, el: 28, zoom: 1.0, hero: false },
         });
       } else if (pg.kind === 'bom') {
@@ -11687,6 +11721,7 @@ async function runInteractiveHtmlExport() {
             rotationCue: cueLabel,
             subLabel,
             pli: Array.from(pliMap.values()),
+            previewUrl: renderFallbackPreview(prev, step.parts || [], cam.az, cam.el, ov.modelScale || 1.0, { partOffsets: effOffsets }),
             prevPartIdx,
             newPartIdx,
             az: cam.az,

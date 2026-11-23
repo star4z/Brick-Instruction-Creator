@@ -22,6 +22,9 @@ Implemented in [`src/export/interactiveHtmlExporter.ts`](../src/export/interacti
   - Keyboard `←`/`→`, scrubber slider, multi-step page switcher pills, and full Pages & Steps drawer.
   - Toggleable Parts Needed (PLI) tray and Highlight New Pieces toggle.
 
-## Security & Robustness
+## Security, iOS Compatibility & Robustness
+- **iOS Quick Look Fallback (`#noJsFallback`)**: iOS Files, Mail, Messages, and AirDrop open `.html` files in Quick Look (`QLPreviewController`), which disables `<script>` execution. The exported HTML renders a complete, scrollable static illustrated manual (Cover, step renders + parts boxes, Parts List, and Back Cover with a `Brick Instruction Creator ↗` link) by default alongside a brief note explaining that opening in a browser unlocks interactive 3D rotation & zoom.
+- **Graceful 3D Activation**: When opened in any JS + WebGL browser, the boot script validates shader compilation/linking and enables `html.js-3d-active` inside a `try/catch`, hiding `#noJsFallback` and launching the full-screen 3D viewer. If WebGL is unavailable or throws, `#noJsFallback` stays visible so the user never sees a blank screen.
+- **Strict WebGL1 Attribute Hygiene**: Explicitly resets enabled vertex attribute arrays (`resetAttribs`) between triangle, decal-textured, and edge-line shader passes for iOS Safari compatibility, and respects `100dvh` + `env(safe-area-inset-*)`.
 - All embedded JSON is serialized via `serializeJsonForScriptTag()` (escaping `<`, `>`, `&`, U+2028, U+2029) so model metadata can never terminate the inline `<script>` tag.
 - Supports `navigator.share({ files })` on iOS/mobile with automatic blob download fallback on desktop.

@@ -8,10 +8,15 @@
  *   Divider Pages, Build Complete, Parts List, and Back Cover) — making even
  *   editorial pages like Cover and Build Complete rotatable in 3D!
  * - Deduplicated GPU-cached part geometry + embedded decal textures
- * - Direct link back to Brick Instruction Creator editor
+ * - Full static HTML+CSS fallback (#noJsFallback) rendered by default so viewers
+ *   that disable JavaScript (such as iOS Quick Look in Files/Mail/AirDrop) still
+ *   display the complete illustrated manual instead of a blank screen, with a clear
+ *   prompt to open in a browser for interactive 3D controls.
+ * - Direct link back to Brick Instruction Creator
  */
 
 export const DEFAULT_EDITOR_URL = 'https://star4z.github.io/Brick-Instruction-Creator/';
+export const TOOL_DISPLAY_NAME = 'Brick Instruction Creator';
 
 export interface InteractiveTexDraw {
   k: string;   // texture key in payload.textures
@@ -65,6 +70,7 @@ export interface InteractiveStepScene extends InteractiveSceneSpec {
   rotationCue?: string;
   pli: InteractivePliEntry[];
   subLabel?: string;
+  previewUrl?: string; // Static preview fallback image for JS-disabled viewers (e.g., iOS Quick Look)
 }
 
 export interface InteractiveViewerPage {
@@ -77,6 +83,7 @@ export interface InteractiveViewerPage {
   subtitle?: string;
   note?: string;
   badge?: string;
+  previewUrl?: string; // Static preview fallback image for JS-disabled viewers (e.g., iOS Quick Look)
   scene?: InteractiveSceneSpec;
   steps?: InteractiveStepScene[];
   bomItems?: InteractivePliEntry[];
@@ -173,25 +180,148 @@ export function buildInteractiveHtmlFilename(title: string): string {
 }
 
 /**
+ * Builds the static, zero-JavaScript HTML manual view rendered by default.
+ * In browsers with JS + WebGL, this view is hidden immediately on boot;
+ * in iOS Quick Look (Files / Mail / AirDrop) or JS-disabled viewers, users see
+ * the complete illustrated manual instead of an empty screen.
+ */
+function buildStaticFallbackHtml(payload: InteractiveHtmlPayload, safeEditorUrl: string): string {
+  const cards: string[] = [];
+
+  for (const pg of payload.pages) {
+    if (pg.kind === 'steps' && pg.steps && pg.steps.length > 0) {
+      for (const st of pg.steps) {
+        const pliHtml =
+          st.pli && st.pli.length > 0
+            ? `<div class="sf-pli">${st.pli
+                .map(
+                  (p) =>
+                    `<div class="sf-pli-item">${
+                      p.thumb ? `<img src="${p.thumb}" alt="${escapeHtmlText(p.name)}" />` : ''
+                    }<div><strong>${p.qty}×</strong><span>${escapeHtmlText(p.partId.toUpperCase())}</span></div></div>`,
+                )
+                .join('')}</div>`
+            : '';
+        cards.push(`
+          <section class="sf-card">
+            <div class="sf-card-head">
+              <div class="sf-step-num">${st.stepNum}</div>
+              <div class="sf-meta">
+                <div class="sf-ch">${escapeHtmlText(pg.chapterName || st.label)}</div>
+                ${st.subLabel ? `<div class="sf-sub">${escapeHtmlText(st.subLabel)}</div>` : ''}
+                ${st.rotationCue ? `<span class="sf-badge">↻ ${escapeHtmlText(st.rotationCue)}</span>` : ''}
+              </div>
+              <span class="sf-pg-num">Page ${pg.num}</span>
+            </div>
+            ${pliHtml}
+            ${
+              st.previewUrl
+                ? `<img class="sf-img" src="${st.previewUrl}" alt="Step ${st.stepNum}" />`
+                : ''
+            }
+          </section>`);
+      }
+    } else if (pg.kind === 'bom' && pg.bomItems && pg.bomItems.length > 0) {
+      cards.push(`
+        <section class="sf-card">
+          <div class="sf-card-head">
+            <div class="sf-meta"><h2 class="sf-h2">${escapeHtmlText(pg.title || 'Parts List')}</h2></div>
+            <span class="sf-pg-num">Page ${pg.num}</span>
+          </div>
+          <div class="sf-bom-grid">
+            ${pg.bomItems
+              .map(
+                (b) =>
+                  `<div class="sf-bom-item">${
+                    b.thumb ? `<img src="${b.thumb}" alt="${escapeHtmlText(b.name)}" />` : ''
+                  }<strong>${b.qty}×</strong><span>${escapeHtmlText(b.name)}</span><small>${escapeHtmlText(
+                    (b.colorName ? `${b.colorName} · ` : '') + b.partId.toUpperCase(),
+                  )}</small></div>`,
+              )
+              .join('')}
+          </div>
+        </section>`);
+    } else {
+      cards.push(`
+        <section class="sf-card sf-hero-card">
+          <div class="sf-card-head">
+            <div class="sf-meta">
+              ${pg.badge ? `<span class="sf-badge">${escapeHtmlText(pg.badge)}</span>` : ''}
+              <h2 class="sf-h2">${escapeHtmlText(pg.title || pg.label)}</h2>
+              ${pg.subtitle ? `<p class="sf-desc">${escapeHtmlText(pg.subtitle)}</p>` : ''}
+              ${pg.note ? `<p class="sf-desc">${escapeHtmlText(pg.note)}</p>` : ''}
+            </div>
+            <span class="sf-pg-num">Page ${pg.num}</span>
+          </div>
+          ${
+            pg.previewUrl
+              ? `<img class="sf-img" src="${pg.previewUrl}" alt="${escapeHtmlText(pg.title || pg.label)}" />`
+              : ''
+          }
+          ${
+            pg.kind === 'back'
+              ? `<div style="margin-top:14px;text-align:center"><a class="sf-link-btn" href="${safeEditorUrl}" target="_blank" rel="noopener noreferrer">Open in ${TOOL_DISPLAY_NAME} ↗</a></div>`
+              : ''
+          }
+        </section>`);
+    }
+  }
+
+  return `
+  <div id="noJsFallback" class="sf-root">
+    <header class="sf-topbar">
+      <div class="sf-brand">
+        <h1>${escapeHtmlText(payload.title || TOOL_DISPLAY_NAME)}</h1>
+        <span>${payload.totalPieces} pieces · ${payload.totalSteps} steps</span>
+      </div>
+      <a class="sf-link-btn" href="${safeEditorUrl}" target="_blank" rel="noopener noreferrer">${TOOL_DISPLAY_NAME} ↗</a>
+    </header>
+    <div class="sf-notice">
+      <strong>Static Preview Mode</strong> — Interactive 3D rotation &amp; zoom require JavaScript (iOS Quick Look disables scripts in local HTML previews). Open this file in a web browser for full interactive 3D viewing.
+    </div>
+    <main class="sf-pages">
+      ${cards.join('')}
+    </main>
+  </div>`;
+}
+
+/**
  * Generates the complete, self-contained, zero-dependency Interactive 3D HTML file.
  */
 export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload): string {
-  const safeTitle = escapeHtmlText(payload.title || 'Brick Instruction Manual');
+  const safeTitle = escapeHtmlText(payload.title || TOOL_DISPLAY_NAME);
   const safeEditorUrl = escapeHtmlText(payload.editorUrl || DEFAULT_EDITOR_URL);
   const t = payload.theme;
   const pageBgCss =
     t.bgType === 'gradient' && t.bgEnd
       ? `linear-gradient(${t.bgAngle ?? 180}deg, ${t.bg}, ${t.bgEnd})`
       : t.bg;
-  const glassBg = t.isDark ? 'rgba(22, 26, 34, 0.84)' : 'rgba(255, 255, 255, 0.86)';
+  const glassBg = t.isDark ? 'rgba(22, 26, 34, 0.86)' : 'rgba(255, 255, 255, 0.88)';
   const glassBorder = t.isDark ? 'rgba(255, 255, 255, 0.14)' : 'rgba(15, 23, 42, 0.12)';
-  const jsonPayload = serializeJsonForScriptTag(payload);
+  const staticFallbackHtml = buildStaticFallbackHtml(payload, safeEditorUrl);
+
+  // Strip static fallback preview URLs from the JS 3D payload to avoid duplicating bytes in RAM
+  const runtimePayload: InteractiveHtmlPayload = {
+    ...payload,
+    pages: payload.pages.map((pg) => {
+      const { previewUrl: _p, steps, ...rest } = pg;
+      return {
+        ...rest,
+        ...(steps
+          ? {
+              steps: steps.map(({ previewUrl: _sp, ...sRest }) => sRest),
+            }
+          : {}),
+      };
+    }),
+  };
+  const jsonPayload = serializeJsonForScriptTag(runtimePayload);
 
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover" />
 <title>${safeTitle} — Interactive 3D Instructions</title>
 <style>
   :root {
@@ -208,15 +338,88 @@ export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload)
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body {
-    margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden;
+    margin: 0; padding: 0; width: 100%; min-height: 100%;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     background: var(--page-bg);
     color: var(--text);
-    user-select: none;
-    -webkit-user-select: none;
   }
+  /* Active 3D mode (enabled only when JavaScript + WebGL boot cleanly) */
+  html.js-3d-active, html.js-3d-active body {
+    height: 100%; height: 100dvh; overflow: hidden;
+    user-select: none; -webkit-user-select: none;
+  }
+  html.js-3d-active #noJsFallback { display: none; }
+  #interactiveApp { display: none; }
+  html.js-3d-active #interactiveApp { display: flex; }
+
+  /* Static Fallback (shown automatically in iOS Quick Look & JS-disabled previews) */
+  .sf-root {
+    max-width: 820px; margin: 0 auto; padding: 14px 14px 48px;
+    display: flex; flex-direction: column; gap: 14px;
+  }
+  .sf-topbar {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+    padding: 12px 16px; border-radius: 20px;
+    background: var(--glass-bg); border: 1px solid var(--glass-border);
+  }
+  .sf-brand h1 { margin: 0; font-size: 17px; font-weight: 800; line-height: 1.2; }
+  .sf-brand span { font-size: 12px; color: var(--muted); font-weight: 600; }
+  .sf-link-btn {
+    display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border-radius: 999px;
+    background: var(--accent); color: #fff; text-decoration: none; font-size: 12px; font-weight: 700;
+    white-space: nowrap;
+  }
+  .sf-notice {
+    padding: 10px 14px; border-radius: 14px; font-size: 12px; line-height: 1.45;
+    background: var(--callout-bg); border: 1px solid var(--callout-border); color: var(--text);
+  }
+  .sf-pages { display: flex; flex-direction: column; gap: 14px; }
+  .sf-card {
+    border-radius: 20px; padding: 14px;
+    background: var(--glass-bg); border: 1px solid var(--glass-border);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.08);
+  }
+  .sf-card-head {
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 10px;
+  }
+  .sf-step-num { font-size: 28px; font-weight: 900; line-height: 1; letter-spacing: -0.03em; }
+  .sf-meta { flex: 1; min-width: 0; }
+  .sf-h2 { margin: 2px 0 0; font-size: 19px; font-weight: 900; line-height: 1.2; }
+  .sf-ch { font-size: 12px; font-weight: 700; color: var(--muted); }
+  .sf-sub { font-size: 11px; font-weight: 700; color: var(--accent); margin-top: 2px; }
+  .sf-desc { margin: 4px 0 0; font-size: 13px; color: var(--muted); font-weight: 600; }
+  .sf-pg-num { font-size: 11px; font-weight: 700; color: var(--muted); white-space: nowrap; }
+  .sf-badge {
+    display: inline-block; margin-top: 4px; padding: 2px 9px; border-radius: 999px;
+    background: var(--accent); color: #fff; font-size: 10px; font-weight: 800;
+  }
+  .sf-pli {
+    display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; border-radius: 12px; margin-bottom: 10px;
+    background: var(--pli-bg); border: 1px solid var(--pli-border);
+  }
+  .sf-pli-item {
+    display: flex; align-items: center; gap: 5px; padding: 3px 6px; border-radius: 8px;
+    background: rgba(127,127,127,0.08); font-size: 12px;
+  }
+  .sf-pli-item img { width: 32px; height: 32px; object-fit: contain; }
+  .sf-pli-item strong { display: block; font-size: 12px; line-height: 1.1; }
+  .sf-pli-item span { display: block; font-size: 10px; color: var(--muted); }
+  .sf-img {
+    display: block; width: 100%; max-height: 440px; object-fit: contain; border-radius: 12px; margin: 4px auto 0;
+  }
+  .sf-bom-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px;
+  }
+  .sf-bom-item {
+    background: var(--pli-bg); border: 1px solid var(--pli-border); border-radius: 12px; padding: 8px;
+    display: flex; flex-direction: column; align-items: center; text-align: center; gap: 3px; font-size: 11px;
+  }
+  .sf-bom-item img { width: 48px; height: 48px; object-fit: contain; }
+  .sf-bom-item small { font-size: 10px; color: var(--muted); }
+
+  /* Interactive 3D App Styles */
   .app {
-    position: relative; width: 100%; height: 100%; display: flex; flex-direction: column; overflow: hidden;
+    position: relative; width: 100%; height: 100%; flex-direction: column; overflow: hidden;
   }
   .stage-wrap {
     position: relative; flex: 1; min-height: 0; width: 100%; height: 100%; overflow: hidden;
@@ -234,13 +437,13 @@ export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload)
     box-shadow: 0 8px 28px rgba(0,0,0,0.12);
   }
   .topbar {
-    position: fixed; top: 12px; left: 12px; right: 12px; z-index: 20;
+    position: fixed; top: max(12px, env(safe-area-inset-top)); left: 12px; right: 12px; z-index: 20;
     display: flex; align-items: center; justify-content: space-between; gap: 8px;
     pointer-events: none;
   }
   .topbar > * { pointer-events: auto; }
   .pill {
-    display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 14px;
+    display: inline-flex; align-items: center; gap: 6px; height: 40px; padding: 0 14px;
     border-radius: 999px; font-size: 13px; font-weight: 700; color: var(--text);
     text-decoration: none; cursor: pointer; transition: transform 120ms ease, opacity 120ms ease;
     border: 1px solid var(--glass-border);
@@ -250,15 +453,15 @@ export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload)
     box-shadow: 0 6px 20px rgba(0,0,0,0.1);
   }
   .pill:active { transform: scale(0.97); }
-  .pill.icon-only { width: 40px; padding: 0; justify-content: center; }
   .pill.primary { background: var(--accent); color: #fff; border-color: transparent; }
-  .title-pill { max-width: min(56vw, 340px); overflow: hidden; }
+  .title-pill { max-width: min(50vw, 320px); overflow: hidden; }
   .title-pill span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .editor-link { font-size: 12px; font-weight: 600; opacity: 0.92; }
+  .editor-link { font-size: 12px; font-weight: 600; opacity: 0.92; max-width: min(46vw, 240px); overflow: hidden; }
+  .editor-link span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .editor-link:hover { opacity: 1; }
 
   .hero-overlay {
-    position: fixed; top: 64px; left: 50%; transform: translateX(-50%); z-index: 15;
+    position: fixed; top: calc(max(12px, env(safe-area-inset-top)) + 52px); left: 50%; transform: translateX(-50%); z-index: 15;
     width: min(92vw, 520px); text-align: center; pointer-events: none;
     display: flex; flex-direction: column; align-items: center; gap: 6px;
   }
@@ -279,7 +482,7 @@ export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload)
   }
 
   .step-hud {
-    position: fixed; top: 64px; left: 12px; z-index: 15;
+    position: fixed; top: calc(max(12px, env(safe-area-inset-top)) + 52px); left: 12px; z-index: 15;
     display: flex; flex-direction: column; align-items: flex-start; gap: 8px;
     max-width: min(64vw, 380px); pointer-events: none;
   }
@@ -295,9 +498,7 @@ export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload)
     background: var(--accent); color: #fff; font-size: 10px; font-weight: 800; width: fit-content;
   }
 
-  .page-step-tabs {
-    display: flex; flex-wrap: wrap; gap: 4px;
-  }
+  .page-step-tabs { display: flex; flex-wrap: wrap; gap: 4px; }
   .step-tab-btn {
     border: 1px solid var(--glass-border); background: var(--glass-bg); color: var(--text);
     border-radius: 999px; padding: 4px 10px; font-size: 11px; font-weight: 700; cursor: pointer;
@@ -305,7 +506,7 @@ export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload)
   .step-tab-btn.active { background: var(--accent); color: #fff; border-color: transparent; }
 
   .pli-panel {
-    border-radius: 16px; padding: 8px 10px; max-width: min(88vw, 360px); max-height: 36vh; overflow-y: auto;
+    border-radius: 16px; padding: 8px 10px; max-width: min(88vw, 360px); max-height: 34vh; overflow-y: auto;
     background: var(--pli-bg); border: 1.5px solid var(--pli-border);
     box-shadow: 0 8px 24px rgba(0,0,0,0.12);
   }
@@ -319,7 +520,7 @@ export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload)
   .pli-id { font-size: 10px; color: var(--muted); font-weight: 600; }
 
   .cam-tools {
-    position: fixed; right: 12px; top: 64px; z-index: 15;
+    position: fixed; right: 12px; top: calc(max(12px, env(safe-area-inset-top)) + 52px); z-index: 15;
     display: flex; flex-direction: column; gap: 6px;
   }
   .tool-btn {
@@ -332,20 +533,18 @@ export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload)
   .tool-btn.active { background: var(--accent); color: #fff; border-color: transparent; }
 
   .hint-chip {
-    position: fixed; left: 50%; transform: translateX(-50%); bottom: 92px; z-index: 12;
+    position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(max(14px, env(safe-area-inset-bottom)) + 78px); z-index: 12;
     padding: 4px 12px; border-radius: 999px; font-size: 11px; font-weight: 600;
     background: rgba(0,0,0,0.36); color: #fff; pointer-events: none; white-space: nowrap;
     transition: opacity 400ms ease;
   }
 
   .bottom-dock {
-    position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); z-index: 20;
+    position: fixed; bottom: max(14px, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); z-index: 20;
     width: min(94vw, 520px); border-radius: 24px; padding: 8px 10px;
     display: flex; flex-direction: column; gap: 6px;
   }
-  .dock-row {
-    display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  }
+  .dock-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .nav-btn {
     height: 36px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--glass-border);
     background: transparent; color: var(--text); font-size: 13px; font-weight: 700; cursor: pointer;
@@ -359,9 +558,7 @@ export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload)
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   .page-btn:hover { background: rgba(127,127,127,0.12); }
-  .scrubber {
-    width: 100%; accent-color: var(--accent); height: 4px; cursor: pointer; margin: 0;
-  }
+  .scrubber { width: 100%; accent-color: var(--accent); height: 4px; cursor: pointer; margin: 0; }
 
   .flat-view {
     position: absolute; inset: 0; z-index: 16; overflow-y: auto; padding: 74px 16px 116px;
@@ -382,10 +579,7 @@ export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload)
   .bom-qty { font-size: 14px; font-weight: 900; }
   .bom-name { font-size: 11px; font-weight: 600; line-height: 1.25; }
   .bom-sub { font-size: 10px; color: var(--muted); }
-
-  .divider-card {
-    max-width: 520px; margin: 12vh auto 0; padding: 32px 24px; border-radius: 28px; text-align: center;
-  }
+  .divider-card { max-width: 520px; margin: 12vh auto 0; padding: 32px 24px; border-radius: 28px; text-align: center; }
 
   .drawer-backdrop {
     position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,0.45);
@@ -400,9 +594,7 @@ export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload)
     padding: 14px 16px; border-bottom: 1px solid var(--glass-border);
     display: flex; align-items: center; justify-content: space-between; font-weight: 800; font-size: 14px;
   }
-  .drawer-list {
-    overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 6px;
-  }
+  .drawer-list { overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 6px; }
   .drawer-item {
     display: flex; align-items: center; justify-content: space-between; gap: 8px;
     width: 100%; padding: 10px 12px; border-radius: 14px; border: 1px solid var(--glass-border);
@@ -412,20 +604,21 @@ export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload)
   .drawer-num { font-size: 11px; opacity: 0.72; flex-shrink: 0; }
 
   @media (max-width: 600px) {
-    .editor-link .label-long { display: none; }
     .step-num-big { font-size: 24px; }
     .pli-panel { max-height: 24vh; }
   }
 </style>
 </head>
 <body>
-<div class="app">
+${staticFallbackHtml}
+
+<div id="interactiveApp" class="app">
   <header class="topbar">
     <button id="btnPagesTop" class="pill title-pill" type="button" title="Browse pages">
       <span>${safeTitle}</span>
     </button>
-    <a class="pill editor-link" href="${safeEditorUrl}" target="_blank" rel="noopener noreferrer" title="Open Brick Instruction Creator">
-      <span class="label-long">Edit in </span><span>Brick Studio ↗</span>
+    <a class="pill editor-link" href="${safeEditorUrl}" target="_blank" rel="noopener noreferrer" title="Open ${TOOL_DISPLAY_NAME}">
+      <span>${TOOL_DISPLAY_NAME} ↗</span>
     </a>
   </header>
 
@@ -466,6 +659,7 @@ export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload)
 
 <script>
 (function() {
+  try {
   const DATA = ${jsonPayload};
 
   function b64ToBytes(b64) {
@@ -492,7 +686,6 @@ export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload)
     return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }
 
-  // Matrix helpers (column-major Float32Array for WebGL)
   function orthoMat4(l, r, b, t, n, f) {
     const o = new Float32Array(16);
     o[0] = 2 / (r - l); o[5] = 2 / (t - b); o[10] = -2 / (f - n);
@@ -526,7 +719,6 @@ export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload)
   }
   function partModelMat4(p) {
     const m = p.m || [1,0,0, 0,1,0, 0,0,1];
-    // Convert row-major 3x3 + translation to column-major mat4
     return new Float32Array([
       m[0], m[3], m[6], 0,
       m[1], m[4], m[7], 0,
@@ -536,7 +728,6 @@ export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload)
   }
   function partNormMat3(p) {
     const m = p.m || [1,0,0, 0,1,0, 0,0,1];
-    // Cofactor matrix (inverse-transpose * det) in column-major order handles non-uniform/mirrored parts
     const c00 = m[4]*m[8] - m[5]*m[7];
     const c01 = -(m[3]*m[8] - m[5]*m[6]);
     const c02 = m[3]*m[7] - m[4]*m[6];
@@ -553,6 +744,161 @@ export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload)
       c01*inv, c11*inv, c21*inv,
       c02*inv, c12*inv, c22*inv,
     ]);
+  }
+
+  const canvas = document.getElementById('glStage');
+  const gl = canvas.getContext('webgl', { antialias: true, alpha: true, powerPreference: 'default' })
+    || canvas.getContext('experimental-webgl', { antialias: true, alpha: true });
+  if (!gl) return; // Keep #noJsFallback visible cleanly if WebGL is unavailable
+
+  const cmp = (type, src) => {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src);
+    gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error('Shader compile failed');
+    return s;
+  };
+  const lnk = (v, f) => {
+    const p = gl.createProgram();
+    gl.attachShader(p, cmp(gl.VERTEX_SHADER, v));
+    gl.attachShader(p, cmp(gl.FRAGMENT_SHADER, f));
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error('Program link failed');
+    return p;
+  };
+
+  const vsTri = \`
+    attribute vec3 aPos; attribute vec3 aNorm; attribute vec4 aCol;
+    uniform mat4 uVP; uniform mat4 uModel; uniform mat3 uNormMat;
+    varying vec3 vNorm; varying vec4 vCol;
+    void main() {
+      gl_Position = uVP * uModel * vec4(aPos, 1.0);
+      vNorm = uNormMat * aNorm;
+      vCol = aCol;
+    }\`;
+  const fsTri = \`
+    precision mediump float;
+    uniform float uHeroMode; uniform float uFadeMix; uniform vec3 uViewDir;
+    varying vec3 vNorm; varying vec4 vCol;
+    void main() {
+      vec3 n = normalize(vNorm);
+      if (!gl_FrontFacing) n = -n;
+      vec3 base = mix(vCol.rgb, vec3(0.855, 0.871, 0.894), uFadeMix);
+      if (uHeroMode > 0.5) {
+        vec3 v = normalize(uViewDir);
+        vec3 keyDir = normalize(vec3(0.42, 0.86, 0.52));
+        vec3 fillDir = normalize(vec3(-0.68, 0.38, 0.34));
+        vec3 rimDir = normalize(vec3(-0.22, 0.58, -0.78));
+        float diff = min(1.06, 0.50 + 0.14*n.y + 0.05*max(-n.y,0.0) + max(dot(n,keyDir),0.0)*0.44 + max(dot(n,fillDir),0.0)*0.18 + max(dot(n,rimDir),0.0)*0.12);
+        float spec = pow(max(dot(n, normalize(keyDir+v)), 0.0), 42.0)*0.16 + pow(max(dot(n, normalize(rimDir+v)), 0.0), 26.0)*0.07;
+        gl_FragColor = vec4(min(vec3(1.0), base * diff + vec3(spec)), vCol.a);
+      } else {
+        float key = max(dot(n, normalize(vec3(0.55, 0.85, 0.55))), 0.0);
+        float fill = max(dot(n, normalize(vec3(-0.7, 0.35, -0.5))), 0.0);
+        float shade = min(1.08, 0.50 + 0.15*n.y + key*0.44 + fill*0.18);
+        gl_FragColor = vec4(base * shade, vCol.a);
+      }
+    }\`;
+
+  const vsTex = \`
+    attribute vec3 aPos; attribute vec3 aNorm; attribute vec2 aUv; attribute vec4 aCol;
+    uniform mat4 uVP; uniform mat4 uModel; uniform mat3 uNormMat;
+    varying vec3 vNorm; varying vec2 vUv; varying vec4 vCol;
+    void main() {
+      gl_Position = uVP * uModel * vec4(aPos, 1.0);
+      vNorm = uNormMat * aNorm; vUv = aUv; vCol = aCol;
+    }\`;
+  const fsTex = \`
+    precision mediump float;
+    uniform sampler2D uTex; uniform float uUseTex; uniform float uFadeMix; uniform float uHeroMode; uniform vec3 uViewDir;
+    varying vec3 vNorm; varying vec2 vUv; varying vec4 vCol;
+    void main() {
+      vec3 n = normalize(vNorm);
+      if (!gl_FrontFacing) n = -n;
+      vec3 base = mix(vCol.rgb, vec3(0.855, 0.871, 0.894), uFadeMix);
+      if (uUseTex > 0.5 && vUv.x >= 0.0 && vUv.x <= 1.0 && vUv.y >= 0.0 && vUv.y <= 1.0) {
+        vec4 d = texture2D(uTex, vUv);
+        vec3 dr = mix(d.rgb, vec3(0.855, 0.871, 0.894), uFadeMix);
+        base = mix(base, dr, d.a);
+      }
+      float key = max(dot(n, normalize(vec3(0.55, 0.85, 0.55))), 0.0);
+      float fill = max(dot(n, normalize(vec3(-0.7, 0.35, -0.5))), 0.0);
+      float shade = min(1.08, 0.50 + 0.15*n.y + key*0.44 + fill*0.18);
+      gl_FragColor = vec4(base * shade, vCol.a);
+    }\`;
+
+  const vsLine = \`
+    attribute vec3 aPos; attribute vec4 aCol;
+    uniform mat4 uVP; uniform mat4 uModel;
+    varying vec4 vCol;
+    void main() {
+      gl_Position = uVP * uModel * vec4(aPos, 1.0);
+      gl_Position.z -= 0.00024;
+      vCol = aCol;
+    }\`;
+  const fsLine = \`
+    precision mediump float;
+    uniform float uLineAlpha; uniform float uUseOverride; uniform vec3 uOverrideCol; uniform float uFadeMix;
+    varying vec4 vCol;
+    void main() {
+      vec3 col = uUseOverride > 0.5 ? uOverrideCol : mix(vCol.rgb, vec3(0.75, 0.78, 0.82), uFadeMix * 0.85);
+      gl_FragColor = vec4(col, vCol.a * uLineAlpha);
+    }\`;
+
+  const triProg = lnk(vsTri, fsTri);
+  const texProg = lnk(vsTex, fsTex);
+  const lineProg = lnk(vsLine, fsLine);
+  const progs = {
+    tri: {
+      p: triProg,
+      vp: gl.getUniformLocation(triProg, 'uVP'),
+      model: gl.getUniformLocation(triProg, 'uModel'),
+      nmat: gl.getUniformLocation(triProg, 'uNormMat'),
+      hero: gl.getUniformLocation(triProg, 'uHeroMode'),
+      fade: gl.getUniformLocation(triProg, 'uFadeMix'),
+      vdir: gl.getUniformLocation(triProg, 'uViewDir'),
+      pos: gl.getAttribLocation(triProg, 'aPos'),
+      norm: gl.getAttribLocation(triProg, 'aNorm'),
+      col: gl.getAttribLocation(triProg, 'aCol'),
+    },
+    tex: {
+      p: texProg,
+      vp: gl.getUniformLocation(texProg, 'uVP'),
+      model: gl.getUniformLocation(texProg, 'uModel'),
+      nmat: gl.getUniformLocation(texProg, 'uNormMat'),
+      hero: gl.getUniformLocation(texProg, 'uHeroMode'),
+      fade: gl.getUniformLocation(texProg, 'uFadeMix'),
+      vdir: gl.getUniformLocation(texProg, 'uViewDir'),
+      tex: gl.getUniformLocation(texProg, 'uTex'),
+      useTex: gl.getUniformLocation(texProg, 'uUseTex'),
+      pos: gl.getAttribLocation(texProg, 'aPos'),
+      norm: gl.getAttribLocation(texProg, 'aNorm'),
+      uv: gl.getAttribLocation(texProg, 'aUv'),
+      col: gl.getAttribLocation(texProg, 'aCol'),
+    },
+    line: {
+      p: lineProg,
+      vp: gl.getUniformLocation(lineProg, 'uVP'),
+      model: gl.getUniformLocation(lineProg, 'uModel'),
+      alpha: gl.getUniformLocation(lineProg, 'uLineAlpha'),
+      useOv: gl.getUniformLocation(lineProg, 'uUseOverride'),
+      ovCol: gl.getUniformLocation(lineProg, 'uOverrideCol'),
+      fade: gl.getUniformLocation(lineProg, 'uFadeMix'),
+      pos: gl.getAttribLocation(lineProg, 'aPos'),
+      col: gl.getAttribLocation(lineProg, 'aCol'),
+    },
+  };
+  const glTextures = new Map();
+  const emptyTex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, emptyTex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0,0,0,0]));
+
+  const maxAttribs = Math.min(8, gl.getParameter(gl.MAX_VERTEX_ATTRIBS) || 8);
+  function resetAttribs(enabledList) {
+    for (let i = 0; i < maxAttribs; i++) {
+      if (enabledList.indexOf(i) >= 0) gl.enableVertexAttribArray(i);
+      else gl.disableVertexAttribArray(i);
+    }
   }
 
   // Decode prototypes & precompute part matrices
@@ -583,7 +929,6 @@ export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload)
     m: p.m || [1,0,0, 0,1,0, 0,0,1],
   }));
 
-  // Compute bounding sphere for a scene's part list
   function computeSceneBounds(indices) {
     let minX = Infinity, minY = Infinity, minZ = Infinity;
     let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
@@ -615,164 +960,26 @@ export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload)
     return { center: [cx, cy, cz], radius };
   }
 
-  // Lightweight Vanilla WebGL Renderer (matches Studio brick shaders + decals)
-  const canvas = document.getElementById('glStage');
-  const gl = canvas.getContext('webgl', { antialias: true, alpha: true, powerPreference: 'default' });
-  const glTextures = new Map();
-  let emptyTex = null;
-  let progs = null;
-
-  if (gl) {
-    const cmp = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); return s; };
-    const lnk = (v, f) => { const p = gl.createProgram(); gl.attachShader(p, cmp(gl.VERTEX_SHADER, v)); gl.attachShader(p, cmp(gl.FRAGMENT_SHADER, f)); gl.linkProgram(p); return p; };
-
-    const vsTri = \`
-      attribute vec3 aPos; attribute vec3 aNorm; attribute vec4 aCol;
-      uniform mat4 uVP; uniform mat4 uModel; uniform mat3 uNormMat;
-      varying vec3 vNorm; varying vec4 vCol;
-      void main() {
-        gl_Position = uVP * uModel * vec4(aPos, 1.0);
-        vNorm = uNormMat * aNorm;
-        vCol = aCol;
-      }\`;
-    const fsTri = \`
-      precision mediump float;
-      uniform float uHeroMode; uniform float uFadeMix; uniform vec3 uViewDir;
-      varying vec3 vNorm; varying vec4 vCol;
-      void main() {
-        vec3 n = normalize(vNorm);
-        if (!gl_FrontFacing) n = -n;
-        vec3 base = mix(vCol.rgb, vec3(0.855, 0.871, 0.894), uFadeMix);
-        if (uHeroMode > 0.5) {
-          vec3 v = normalize(uViewDir);
-          vec3 keyDir = normalize(vec3(0.42, 0.86, 0.52));
-          vec3 fillDir = normalize(vec3(-0.68, 0.38, 0.34));
-          vec3 rimDir = normalize(vec3(-0.22, 0.58, -0.78));
-          float diff = min(1.06, 0.50 + 0.14*n.y + 0.05*max(-n.y,0.0) + max(dot(n,keyDir),0.0)*0.44 + max(dot(n,fillDir),0.0)*0.18 + max(dot(n,rimDir),0.0)*0.12);
-          float spec = pow(max(dot(n, normalize(keyDir+v)), 0.0), 42.0)*0.16 + pow(max(dot(n, normalize(rimDir+v)), 0.0), 26.0)*0.07;
-          gl_FragColor = vec4(min(vec3(1.0), base * diff + vec3(spec)), vCol.a);
-        } else {
-          float key = max(dot(n, normalize(vec3(0.55, 0.85, 0.55))), 0.0);
-          float fill = max(dot(n, normalize(vec3(-0.7, 0.35, -0.5))), 0.0);
-          float shade = min(1.08, 0.50 + 0.15*n.y + key*0.44 + fill*0.18);
-          gl_FragColor = vec4(base * shade, vCol.a);
-        }
-      }\`;
-
-    const vsTex = \`
-      attribute vec3 aPos; attribute vec3 aNorm; attribute vec2 aUv; attribute vec4 aCol;
-      uniform mat4 uVP; uniform mat4 uModel; uniform mat3 uNormMat;
-      varying vec3 vNorm; varying vec2 vUv; varying vec4 vCol;
-      void main() {
-        gl_Position = uVP * uModel * vec4(aPos, 1.0);
-        vNorm = uNormMat * aNorm; vUv = aUv; vCol = aCol;
-      }\`;
-    const fsTex = \`
-      precision mediump float;
-      uniform sampler2D uTex; uniform float uUseTex; uniform float uFadeMix; uniform float uHeroMode; uniform vec3 uViewDir;
-      varying vec3 vNorm; varying vec2 vUv; varying vec4 vCol;
-      void main() {
-        vec3 n = normalize(vNorm);
-        if (!gl_FrontFacing) n = -n;
-        vec3 base = mix(vCol.rgb, vec3(0.855, 0.871, 0.894), uFadeMix);
-        if (uUseTex > 0.5 && vUv.x >= 0.0 && vUv.x <= 1.0 && vUv.y >= 0.0 && vUv.y <= 1.0) {
-          vec4 d = texture2D(uTex, vUv);
-          vec3 dr = mix(d.rgb, vec3(0.855, 0.871, 0.894), uFadeMix);
-          base = mix(base, dr, d.a);
-        }
-        float key = max(dot(n, normalize(vec3(0.55, 0.85, 0.55))), 0.0);
-        float fill = max(dot(n, normalize(vec3(-0.7, 0.35, -0.5))), 0.0);
-        float shade = min(1.08, 0.50 + 0.15*n.y + key*0.44 + fill*0.18);
-        gl_FragColor = vec4(base * shade, vCol.a);
-      }\`;
-
-    const vsLine = \`
-      attribute vec3 aPos; attribute vec4 aCol;
-      uniform mat4 uVP; uniform mat4 uModel;
-      varying vec4 vCol;
-      void main() {
-        gl_Position = uVP * uModel * vec4(aPos, 1.0);
-        gl_Position.z -= 0.00024;
-        vCol = aCol;
-      }\`;
-    const fsLine = \`
-      precision mediump float;
-      uniform float uLineAlpha; uniform float uUseOverride; uniform vec3 uOverrideCol; uniform float uFadeMix;
-      varying vec4 vCol;
-      void main() {
-        vec3 col = uUseOverride > 0.5 ? uOverrideCol : mix(vCol.rgb, vec3(0.75, 0.78, 0.82), uFadeMix * 0.85);
-        gl_FragColor = vec4(col, vCol.a * uLineAlpha);
-      }\`;
-
-    const triProg = lnk(vsTri, fsTri);
-    const texProg = lnk(vsTex, fsTex);
-    const lineProg = lnk(vsLine, fsLine);
-    progs = {
-      tri: {
-        p: triProg,
-        vp: gl.getUniformLocation(triProg, 'uVP'),
-        model: gl.getUniformLocation(triProg, 'uModel'),
-        nmat: gl.getUniformLocation(triProg, 'uNormMat'),
-        hero: gl.getUniformLocation(triProg, 'uHeroMode'),
-        fade: gl.getUniformLocation(triProg, 'uFadeMix'),
-        vdir: gl.getUniformLocation(triProg, 'uViewDir'),
-        pos: gl.getAttribLocation(triProg, 'aPos'),
-        norm: gl.getAttribLocation(triProg, 'aNorm'),
-        col: gl.getAttribLocation(triProg, 'aCol'),
-      },
-      tex: {
-        p: texProg,
-        vp: gl.getUniformLocation(texProg, 'uVP'),
-        model: gl.getUniformLocation(texProg, 'uModel'),
-        nmat: gl.getUniformLocation(texProg, 'uNormMat'),
-        hero: gl.getUniformLocation(texProg, 'uHeroMode'),
-        fade: gl.getUniformLocation(texProg, 'uFadeMix'),
-        vdir: gl.getUniformLocation(texProg, 'uViewDir'),
-        tex: gl.getUniformLocation(texProg, 'uTex'),
-        useTex: gl.getUniformLocation(texProg, 'uUseTex'),
-        pos: gl.getAttribLocation(texProg, 'aPos'),
-        norm: gl.getAttribLocation(texProg, 'aNorm'),
-        uv: gl.getAttribLocation(texProg, 'aUv'),
-        col: gl.getAttribLocation(texProg, 'aCol'),
-      },
-      line: {
-        p: lineProg,
-        vp: gl.getUniformLocation(lineProg, 'uVP'),
-        model: gl.getUniformLocation(lineProg, 'uModel'),
-        alpha: gl.getUniformLocation(lineProg, 'uLineAlpha'),
-        useOv: gl.getUniformLocation(lineProg, 'uUseOverride'),
-        ovCol: gl.getUniformLocation(lineProg, 'uOverrideCol'),
-        fade: gl.getUniformLocation(lineProg, 'uFadeMix'),
-        pos: gl.getAttribLocation(lineProg, 'aPos'),
-        col: gl.getAttribLocation(lineProg, 'aCol'),
-      },
+  for (const [k, dataUrl] of Object.entries(DATA.textures || {})) {
+    const img = new Image();
+    img.onload = () => {
+      const tex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 0);
+      glTextures.set(k, tex);
+      requestDraw();
     };
-    emptyTex = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, emptyTex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0,0,0,0]));
-
-    // Decode embedded PNG decal textures asynchronously
-    for (const [k, dataUrl] of Object.entries(DATA.textures || {})) {
-      const img = new Image();
-      img.onload = () => {
-        const tex = gl.createTexture();
-        gl.bindTexture(gl.TEXTURE_2D, tex);
-        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
-        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 0);
-        glTextures.set(k, tex);
-        requestDraw();
-      };
-      img.src = dataUrl;
-    }
+    img.src = dataUrl;
   }
 
   function ensureProtoGpu(pr) {
-    if (pr.gpu || !gl) return pr.gpu;
+    if (pr.gpu) return pr.gpu;
     const mk = (arr) => {
       const b = gl.createBuffer();
       gl.bindBuffer(gl.ARRAY_BUFFER, b);
@@ -794,7 +1001,6 @@ export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload)
     return pr.gpu;
   }
 
-  // Flatten viewer items: each page or each individual step on a multi-step page
   const viewerItems = [];
   for (let pi = 0; pi < DATA.pages.length; pi++) {
     const pg = DATA.pages[pi];
@@ -806,6 +1012,9 @@ export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload)
       viewerItems.push({ page: pg, pageIndex: pi, step: null, stepSlotIndex: 0 });
     }
   }
+
+  // Activate interactive 3D UI now that WebGL + shaders + buffers initialized cleanly
+  document.documentElement.classList.add('js-3d-active');
 
   let curIdx = 0;
   let cam = { az: 38, el: 28, zoom: 1.0, panX: 0, panY: 0 };
@@ -842,11 +1051,11 @@ export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload)
   }
 
   function drawScene() {
-    if (!gl || !progs || !activeScene) return;
+    if (!activeScene) return;
     const rect = canvas.getBoundingClientRect();
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const w = Math.max(100, Math.round(rect.width * dpr));
-    const h = Math.max(100, Math.round(rect.height * dpr));
+    const w = Math.max(100, Math.round((rect.width || window.innerWidth) * dpr));
+    const h = Math.max(100, Math.round((rect.height || window.innerHeight) * dpr));
     if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
 
     gl.viewport(0, 0, w, h);
@@ -885,9 +1094,7 @@ export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload)
     gl.uniformMatrix4fv(progs.tri.vp, false, vp);
     gl.uniform1f(progs.tri.hero, isHero);
     gl.uniform3f(progs.tri.vdir, vdir[0], vdir[1], vdir[2]);
-    gl.enableVertexAttribArray(progs.tri.pos);
-    gl.enableVertexAttribArray(progs.tri.norm);
-    gl.enableVertexAttribArray(progs.tri.col);
+    resetAttribs([progs.tri.pos, progs.tri.norm, progs.tri.col]);
 
     for (const grp of drawGroups) {
       gl.uniform1f(progs.tri.fade, grp.fade);
@@ -914,10 +1121,7 @@ export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload)
     gl.uniform1f(progs.tex.hero, isHero);
     gl.uniform3f(progs.tex.vdir, vdir[0], vdir[1], vdir[2]);
     gl.uniform1i(progs.tex.tex, 0);
-    gl.enableVertexAttribArray(progs.tex.pos);
-    gl.enableVertexAttribArray(progs.tex.norm);
-    gl.enableVertexAttribArray(progs.tex.uv);
-    gl.enableVertexAttribArray(progs.tex.col);
+    resetAttribs([progs.tex.pos, progs.tex.norm, progs.tex.uv, progs.tex.col]);
 
     for (const grp of drawGroups) {
       gl.uniform1f(progs.tex.fade, grp.fade);
@@ -942,16 +1146,13 @@ export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload)
         }
       }
     }
-    gl.disableVertexAttribArray(progs.tex.uv);
     gl.polygonOffset(1.0, 1.0);
 
     // 3. Transparent triangles
     gl.depthMask(false);
     gl.useProgram(progs.tri.p);
     gl.uniformMatrix4fv(progs.tri.vp, false, vp);
-    gl.enableVertexAttribArray(progs.tri.pos);
-    gl.enableVertexAttribArray(progs.tri.norm);
-    gl.enableVertexAttribArray(progs.tri.col);
+    resetAttribs([progs.tri.pos, progs.tri.norm, progs.tri.col]);
     for (const grp of drawGroups) {
       gl.uniform1f(progs.tri.fade, grp.fade);
       for (let i = 0; i < grp.list.length; i++) {
@@ -976,8 +1177,7 @@ export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload)
     gl.uniformMatrix4fv(progs.line.vp, false, vp);
     gl.uniform1f(progs.line.alpha, isHero > 0.5 ? 0.55 : 0.92);
     gl.uniform3f(progs.line.ovCol, hlRgb[0], hlRgb[1], hlRgb[2]);
-    gl.enableVertexAttribArray(progs.line.pos);
-    gl.enableVertexAttribArray(progs.line.col);
+    resetAttribs([progs.line.pos, progs.line.col]);
     for (const grp of drawGroups) {
       gl.uniform1f(progs.line.fade, grp.fade);
       gl.uniform1f(progs.line.useOv, grp.hl ? 1.0 : 0.0);
@@ -996,7 +1196,6 @@ export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload)
     }
   }
 
-  // Interactive pointer + touch orbit / pan / pinch-zoom
   const pointers = new Map();
   let lastPinchDist = 0;
   let lastMid = null;
@@ -1010,7 +1209,7 @@ export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload)
   }
 
   canvas.addEventListener('pointerdown', (e) => {
-    canvas.setPointerCapture(e.pointerId);
+    try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, btn: e.button, shift: e.shiftKey });
     targetCam = null;
     if (pointers.size === 2) {
@@ -1060,9 +1259,7 @@ export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload)
   };
   canvas.addEventListener('pointerup', (e) => {
     const now = Date.now();
-    if (pointers.size === 1 && now - lastTapTime < 280) {
-      resetCameraSmooth();
-    }
+    if (pointers.size === 1 && now - lastTapTime < 280) resetCameraSmooth();
     lastTapTime = now;
     endPtr(e);
   });
@@ -1170,7 +1367,7 @@ export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload)
       const ctaBtn = pg.kind === 'cover' && viewerItems.length > 1
         ? '<button id="heroStartBtn" type="button" class="pill primary">Start Building →</button>'
         : pg.kind === 'back'
-          ? '<a class="pill primary" href="' + esc(DATA.editorUrl) + '" target="_blank" rel="noopener noreferrer">Open in Brick Instruction Creator ↗</a>'
+          ? '<a class="pill primary" href="' + esc(DATA.editorUrl) + '" target="_blank" rel="noopener noreferrer">Open in ${TOOL_DISPLAY_NAME} ↗</a>'
           : '';
       heroEl.innerHTML =
         (pg.badge ? '<span class="hero-badge">' + esc(pg.badge) + '</span>' : '') +
@@ -1216,7 +1413,6 @@ export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload)
       flatEl.classList.add('open');
     }
 
-    // Update bottom dock
     document.getElementById('btnPrev').disabled = curIdx <= 0;
     document.getElementById('btnNext').disabled = curIdx >= viewerItems.length - 1;
     const pgPicker = document.getElementById('btnPagePicker');
@@ -1270,6 +1466,9 @@ export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload)
   window.addEventListener('resize', requestDraw);
 
   renderView();
+  } catch (err) {
+    document.documentElement.classList.remove('js-3d-active');
+  }
 })();
 </script>
 </body>
