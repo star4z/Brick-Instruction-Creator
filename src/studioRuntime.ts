@@ -9496,7 +9496,7 @@ function getPreviewPartMaps() {
         const oz = (sec.explodeOffset?.[2] || 0) * explodeDist * sign;
         const colHex = groups.length === 2 && gIdx === 1 ? '#38bdf8' : sec.previewColor;
 
-        renderedGroups.push({ indices: grp, ox, oy, oz, isHighlighted });
+        renderedGroups.push({ indices: grp, ox, oy, oz });
 
         for (const pi of grp) {
           coveredIndices.add(pi);
@@ -9543,7 +9543,6 @@ function getPreviewPartMaps() {
           if (explodeDist > 1) {
             partOffsets[p.id] = { x: bestGrp.ox, y: bestGrp.oy, z: bestGrp.oz, arrow: false };
           }
-          if (dimPartIds && !bestGrp.isHighlighted) dimPartIds.add(p.id);
         }
       }
     }
