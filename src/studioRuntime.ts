@@ -7,7 +7,11 @@ import {
   analyzeModelSubdivisions,
   classifySubdivisionPartFlags,
 } from './engine/subdivisionAnalyzer';
-import { compileDatEntry as compileLDrawDatEntry } from './engine/datCompiler';
+import {
+  DIRECT_RGB_COLOR_FLAG,
+  compileDatEntry as compileLDrawDatEntry,
+} from './engine/datCompiler';
+import { textureStore } from './engine/textureStore';
 import {
   classifyDetachedPart,
   computeGroundPlaneY,
@@ -119,12 +123,16 @@ const COLORS = {
   9:{name:'Light Blue',hex:'#b4d2e3',edge:'#6f93a8'},
   10:{name:'Bright Green',hex:'#4b9f4a',edge:'#295e28'},
   11:{name:'Light Turquoise',hex:'#55a5af',edge:'#2e646b'},
+  12:{name:'Salmon',hex:'#f2705e',edge:'#9e3a2d'},
+  13:{name:'Pink',hex:'#fc97ac',edge:'#a85466'},
   14:{name:'Yellow',hex:'#f2cd37',edge:'#9e810d'},
   15:{name:'White',hex:'#f6f7f9',edge:'#9aa0a6'},
   17:{name:'Light Green',hex:'#c2dab8',edge:'#739168'},
   18:{name:'Light Yellow',hex:'#fbe696',edge:'#ad9747'},
   19:{name:'Tan',hex:'#e4cd9e',edge:'#947d50'},
+  20:{name:'Light Violet',hex:'#c9cae2',edge:'#7f809c'},
   22:{name:'Purple',hex:'#81007b',edge:'#4a0047'},
+  23:{name:'Dark Blue-Violet',hex:'#2032b0',edge:'#101a66'},
   25:{name:'Orange',hex:'#fe8a18',edge:'#a15003'},
   26:{name:'Magenta',hex:'#923978',edge:'#541d44'},
   27:{name:'Lime',hex:'#bbe90b',edge:'#6d8a04'},
@@ -134,41 +142,90 @@ const COLORS = {
   31:{name:'Lavender',hex:'#e1d5ed',edge:'#9683ab'},
   33:{name:'Trans-Dark Blue',hex:'#0020a0',edge:'#001155',alpha:0.46},
   34:{name:'Trans-Green',hex:'#237841',edge:'#124223',alpha:0.46},
+  35:{name:'Trans-Bright Green',hex:'#56e646',edge:'#2d8723',alpha:0.48},
   36:{name:'Trans-Red',hex:'#c91a09',edge:'#730e04',alpha:0.48},
+  37:{name:'Trans-Dark Pink',hex:'#df6695',edge:'#8a3657',alpha:0.48},
+  38:{name:'Trans-Neon Orange',hex:'#ff800d',edge:'#9e4a00',alpha:0.50},
   40:{name:'Trans-Black',hex:'#42464f',edge:'#1d2026',alpha:0.42},
   41:{name:'Trans-Light Blue',hex:'#7ec8f2',edge:'#3b7ca3',alpha:0.44},
   42:{name:'Trans-Neon Green',hex:'#d8f030',edge:'#849613',alpha:0.50},
   43:{name:'Trans-Very Lt Blue',hex:'#c1dff0',edge:'#719ab3',alpha:0.42},
+  44:{name:'Trans-Light Purple',hex:'#96709f',edge:'#563a5e',alpha:0.46},
+  45:{name:'Trans-Pink',hex:'#fc97ac',edge:'#a85466',alpha:0.46},
   46:{name:'Trans-Yellow',hex:'#f5cd2f',edge:'#9c7e09',alpha:0.50},
   47:{name:'Trans-Clear',hex:'#e2ecf5',edge:'#8a99a8',alpha:0.34},
+  52:{name:'Trans-Purple',hex:'#a5a5cb',edge:'#5e5e82',alpha:0.46},
+  54:{name:'Trans-Neon Yellow',hex:'#dab000',edge:'#826800',alpha:0.48},
   57:{name:'Trans-Orange',hex:'#f08f1c',edge:'#945205',alpha:0.50},
+  68:{name:'Very Light Orange',hex:'#f3cf9b',edge:'#a68352'},
+  69:{name:'Light Purple',hex:'#cd6298',edge:'#80355b'},
   70:{name:'Reddish Brown',hex:'#582a12',edge:'#2e1406'},
   71:{name:'Light Bluish Gray',hex:'#a0a5a9',edge:'#5c6064'},
   72:{name:'Dark Bluish Gray',hex:'#6c6e68',edge:'#3a3c38'},
   73:{name:'Medium Blue',hex:'#5a93db',edge:'#2e5991'},
   74:{name:'Medium Green',hex:'#73dca1',edge:'#388a5b'},
+  77:{name:'Light Pink',hex:'#fecccf',edge:'#b37d81'},
   78:{name:'Light Nougat',hex:'#f6d7b3',edge:'#a88760'},
+  80:{name:'Metallic Silver',hex:'#a5a9b4',edge:'#626670'},
+  81:{name:'Metallic Green',hex:'#899b5f',edge:'#505c34'},
+  82:{name:'Metallic Gold',hex:'#dbac34',edge:'#8a6915'},
   84:{name:'Medium Nougat',hex:'#aa7d55',edge:'#63452a'},
   85:{name:'Dark Purple',hex:'#3f3691',edge:'#211b54'},
+  86:{name:'Dark Nougat',hex:'#7c503a',edge:'#452a1d'},
+  89:{name:'Royal Blue',hex:'#4c61db',edge:'#25348a'},
+  92:{name:'Nougat',hex:'#d09168',edge:'#825335'},
+  100:{name:'Light Salmon',hex:'#febabd',edge:'#b06f72'},
   110:{name:'Violet',hex:'#4354a3',edge:'#242f63'},
+  112:{name:'Blue-Violet',hex:'#6874ca',edge:'#394282'},
   115:{name:'Medium Lime',hex:'#c7d23c',edge:'#7c8519'},
-  151:{name:'Sand Green',hex:'#a0bcac',edge:'#5b7566'},
+  118:{name:'Aqua',hex:'#b3d7d1',edge:'#6a8f89'},
+  120:{name:'Light Lime',hex:'#d9e4a7',edge:'#8c965c'},
+  125:{name:'Light Orange',hex:'#f9ba61',edge:'#a87429'},
+  128:{name:'Dark Nougat Alt',hex:'#ad6140',edge:'#66351f'},
+  134:{name:'Copper',hex:'#ae7a59',edge:'#66432d'},
+  135:{name:'Pearl Light Gray',hex:'#9ca3a8',edge:'#5a6066'},
+  142:{name:'Pearl Light Gold',hex:'#dcbe61',edge:'#8c752e'},
+  148:{name:'Pearl Dark Gray',hex:'#575857',edge:'#2d2e2d'},
+  150:{name:'Pearl Very Light Gray',hex:'#bbbfc2',edge:'#73777a'},
+  151:{name:'Very Light Bluish Gray',hex:'#e6e3e0',edge:'#9c9895'},
+  178:{name:'Flat Dark Gold',hex:'#b48455',edge:'#6b4b2b'},
   179:{name:'Flat Silver',hex:'#898788',edge:'#4e4d4e'},
+  183:{name:'Pearl White',hex:'#f2f3f2',edge:'#9ea19e'},
   191:{name:'Bright Light Orange',hex:'#f8bb3d',edge:'#a37414'},
   212:{name:'Bright Light Blue',hex:'#9fc3e9',edge:'#577ea8'},
+  216:{name:'Rust',hex:'#b31004',edge:'#690700'},
+  218:{name:'Reddish Lilac',hex:'#8e5597',edge:'#522c59'},
+  219:{name:'Lilac',hex:'#564e9d',edge:'#2d275e'},
+  222:{name:'Light Purple',hex:'#ee9dc3',edge:'#a3587b'},
   226:{name:'Bright Light Yellow',hex:'#fff03a',edge:'#a69a12'},
+  232:{name:'Sky Blue',hex:'#7dbfdd',edge:'#427a94'},
   272:{name:'Dark Blue',hex:'#0a3463',edge:'#041a33'},
   288:{name:'Dark Green',hex:'#184632',edge:'#0b2419'},
+  295:{name:'Flamingo Pink',hex:'#ff94c2',edge:'#b0537b'},
   297:{name:'Pearl Gold',hex:'#aa7f2e',edge:'#614613'},
   308:{name:'Dark Brown',hex:'#352100',edge:'#1a1000'},
+  313:{name:'Maersk Blue',hex:'#3592c3',edge:'#1b5778'},
   320:{name:'Dark Red',hex:'#720e0f',edge:'#3d0607'},
   321:{name:'Dark Azure',hex:'#078bc9',edge:'#034e73'},
   322:{name:'Medium Azure',hex:'#36aebf',edge:'#1b6570'},
   323:{name:'Light Aqua',hex:'#adc3c0',edge:'#637a77'},
+  325:{name:'Lavender Alt',hex:'#cda4de',edge:'#845c94'},
   326:{name:'Yellowish Green',hex:'#dfeea5',edge:'#8e9e53'},
   330:{name:'Olive Green',hex:'#9b9a5a',edge:'#57562d'},
-  378:{name:'Sand Blue',hex:'#6074a1',edge:'#374566'},
+  334:{name:'Chrome Gold',hex:'#bba53d',edge:'#70611b'},
+  335:{name:'Sand Red',hex:'#d67572',edge:'#8a413f'},
+  351:{name:'Medium Dark Pink',hex:'#f785b1',edge:'#a8476d'},
+  353:{name:'Vibrant Coral',hex:'#ff6d77',edge:'#b03b43'},
+  366:{name:'Earth Orange',hex:'#fa9c1c',edge:'#a66005'},
+  368:{name:'Neon Yellow',hex:'#edff21',edge:'#9aa807'},
+  373:{name:'Sand Purple',hex:'#845e84',edge:'#4d334d'},
+  378:{name:'Sand Green',hex:'#a0bcac',edge:'#5b7566'},
+  379:{name:'Sand Blue',hex:'#6074a1',edge:'#374566'},
+  383:{name:'Chrome Silver',hex:'#e0e0e0',edge:'#8c8c8c'},
+  450:{name:'Fabuland Brown',hex:'#b67b50',edge:'#6e4629'},
+  462:{name:'Medium Orange',hex:'#ffa70b',edge:'#a86800'},
   484:{name:'Dark Orange',hex:'#a95500',edge:'#5e2f00'},
+  503:{name:'Very Light Gray',hex:'#e6e3da',edge:'#99968e'},
 };
 
 const THEMES = BUILT_IN_THEMES;
@@ -683,13 +740,32 @@ function lookupVirtualMinifigDat(targetKey, offset) {
   return null;
 }
 
+let texReadyRerenderTimer = null;
+function scheduleTextureReadyRerender() {
+  if (texReadyRerenderTimer) return;
+  texReadyRerenderTimer = setTimeout(() => {
+    texReadyRerenderTimer = null;
+    pliThumbCache.clear();
+    submodelThumbCache.clear();
+    clearMinifigDiagramCaches();
+    coverHeroCache.clear();
+    if (state.model) renderAll();
+  }, 60);
+}
+
 // Fast recursive LDraw .dat compiler (checks embedded .io model2.ldr first, then user-imported LDraw Library!)
 function lookupEmbeddedDat(ref, allowVirtual = true) {
   const k = normId(ref);
   const stripped = k.replace(/^(48|8|s)\//, '');
   const base = k.split('/').pop();
+  const blPrefixed = !k.includes('/') && !k.startsWith('bl_') ? `bl_${k}` : null;
+  const blSuffixed = !k.includes('/') && !k.endsWith('-bl') ? `${k}-bl` : null;
+  const noBlPrefix = k.startsWith('bl_') ? k.slice(3) : null;
   for (const store of [embeddedDatRaw, userLibRaw]) {
     if (store.has(k)) return { key: k, lines: store.get(k), offset: null };
+    if (blPrefixed && store.has(blPrefixed)) return { key: blPrefixed, lines: store.get(blPrefixed), offset: null };
+    if (blSuffixed && store.has(blSuffixed)) return { key: blSuffixed, lines: store.get(blSuffixed), offset: null };
+    if (noBlPrefix && store.has(noBlPrefix)) return { key: noBlPrefix, lines: store.get(noBlPrefix), offset: null };
     if (store.has(stripped)) return { key: stripped, lines: store.get(stripped), offset: null };
     if (store.has(base)) return { key: base, lines: store.get(base), offset: null };
   }
@@ -714,7 +790,20 @@ function lookupEmbeddedDat(ref, allowVirtual = true) {
 }
 
 function compileDatEntry(found) {
-  return compileLDrawDatEntry(found, lookupEmbeddedDat);
+  const res = compileLDrawDatEntry(found, lookupEmbeddedDat, {
+    lookupTexture: (texName) => textureStore.lookupByName(texName),
+  });
+  if (res?.texBatches?.length) {
+    for (const tb of res.texBatches) {
+      if (tb.base64Png && !textureStore.getRecord(tb.texKey)) {
+        textureStore.registerBase64Texture(tb.base64Png, { source: 'embedded' });
+      }
+      if (!textureStore.getDecodedImage(tb.texKey)) {
+        textureStore.decodeTexture(tb.texKey, scheduleTextureReadyRerender);
+      }
+    }
+  }
+  return res;
 }
 
 function compileEmbeddedDat(partId) {
@@ -747,6 +836,11 @@ class FloatBuf {
     const nd = new Float32Array(nc); nd.set(this.d.subarray(0, this.len)); this.d = nd;
   }
   push3(a, b, c) { this.ensure(3); const i = this.len; this.d[i]=a; this.d[i+1]=b; this.d[i+2]=c; this.len = i+3; }
+  push6(a0,a1, b0,b1, c0,c1) {
+    this.ensure(6); const i = this.len, d = this.d;
+    d[i]=a0; d[i+1]=a1; d[i+2]=b0; d[i+3]=b1; d[i+4]=c0; d[i+5]=c1;
+    this.len = i+6;
+  }
   push9(a0,a1,a2, b0,b1,b2, c0,c1,c2) {
     this.ensure(9); const i = this.len, d = this.d;
     d[i]=a0; d[i+1]=a1; d[i+2]=a2; d[i+3]=b0; d[i+4]=b1; d[i+5]=b2; d[i+6]=c0; d[i+7]=c1; d[i+8]=c2;
@@ -778,6 +872,7 @@ function buildMeshBuffers(prevParts, newParts, opts) {
   const opPos = new FloatBuf(totalParts * 180), opNorm = new FloatBuf(totalParts * 180), opCol = new ByteBuf(totalParts * 240);
   const trPos = new FloatBuf(2048), trNorm = new FloatBuf(2048), trCol = new ByteBuf(2048);
   const lnPos = new FloatBuf(totalParts * 60), lnCol = new ByteBuf(totalParts * 80);
+  const texGroups = new Map();
 
   const heroQuality = Boolean(opts.heroQuality);
 
@@ -787,6 +882,28 @@ function buildMeshBuffers(prevParts, newParts, opts) {
     P.push9(a[0],a[1],a[2], b[0],b[1],b[2], c[0],c[1],c[2]);
     N.push9(n[0],n[1],n[2], n[0],n[1],n[2], n[0],n[1],n[2]);
     C.push12(col[0], col[1], col[2], aByte);
+  };
+  const pushTexTri = (texKey, fadeMix, isNewPart, a, b, c, n, uv0, uv1, uv2, col, aByte) => {
+    const fadeKey = Math.round(fadeMix * 100);
+    const gKey = `${texKey}|${fadeKey}`;
+    let g = texGroups.get(gKey);
+    if (!g) {
+      g = {
+        texKey,
+        fadeMix,
+        pos: new FloatBuf(512),
+        norm: new FloatBuf(512),
+        uv: new FloatBuf(342),
+        col: new ByteBuf(684),
+        prevPosEnd: 0,
+      };
+      texGroups.set(gKey, g);
+    }
+    if (!isNewPart) g.prevPosEnd = g.pos.len + 9;
+    g.pos.push9(a[0],a[1],a[2], b[0],b[1],b[2], c[0],c[1],c[2]);
+    g.norm.push9(n[0],n[1],n[2], n[0],n[1],n[2], n[0],n[1],n[2]);
+    g.uv.push6(uv0[0],uv0[1], uv1[0],uv1[1], uv2[0],uv2[1]);
+    g.col.push12(col[0], col[1], col[2], aByte);
   };
   const pushTriSmooth = (a, b, c, na, nb, nc, col, aByte) => {
     const isTrans = aByte < 245;
@@ -1300,7 +1417,35 @@ function buildMeshBuffers(prevParts, newParts, opts) {
     const compiled = compileEmbeddedDat(leafPart.p);
     if (compiled) {
       const T = compiled.tris, N = compiled.norms, E = compiled.edges, TC = compiled.triCols;
-      const subColCache = TC && !isSelected && !overrideHex && !isGhost ? new Map() : null;
+      const allowSubCols = !isSelected && !overrideHex && !isGhost;
+      const subColCache = allowSubCols ? new Map() : null;
+      const resolveSubColor = (cid) => {
+        if (!subColCache || cid === 16) return null;
+        let cached = subColCache.get(cid);
+        if (cached !== undefined) return cached;
+        if ((cid & DIRECT_RGB_COLOR_FLAG) === DIRECT_RGB_COLOR_FLAG) {
+          const r = (cid >> 16) & 255, g = (cid >> 8) & 255, b = cid & 255;
+          cached = {
+            rgb: [
+              Math.round(r * (1 - fadeMix) + 218 * fadeMix),
+              Math.round(g * (1 - fadeMix) + 222 * fadeMix),
+              Math.round(b * (1 - fadeMix) + 228 * fadeMix),
+            ],
+            alpha: 255,
+          };
+        } else if (COLORS[cid]) {
+          const sc = COLORS[cid];
+          const scTrans = (sc.alpha || 1) < 0.96;
+          cached = {
+            rgb: hexToRgb255(sc.hex, fadeMix),
+            alpha: scTrans ? Math.round(255 * (sc.alpha || 0.7) * (isFaded ? Math.max(0.55, opts.fadeOpacity) : 1)) : 255,
+          };
+        } else {
+          cached = null;
+        }
+        subColCache.set(cid, cached);
+        return cached;
+      };
       for (let i = 0, ti = 0; i < T.length; i += 9, ti++) {
         const a = xformPt([T[i],T[i+1],T[i+2]], m, ox, oy, oz, hingeRad);
         const b = xformPt([T[i+3],T[i+4],T[i+5]], m, ox, oy, oz, hingeRad);
@@ -1308,24 +1453,44 @@ function buildMeshBuffers(prevParts, newParts, opts) {
         const n = xformNorm([N[i],N[i+1],N[i+2]], m, hingeRad);
         let triRgb = baseCol;
         let triAlpha = aByte;
-        if (subColCache) {
-          const cid = TC[ti];
-          if (cid !== 16 && COLORS[cid]) {
-            let cached = subColCache.get(cid);
-            if (!cached) {
-              const sc = COLORS[cid];
-              const scTrans = (sc.alpha || 1) < 0.96;
-              cached = {
-                rgb: hexToRgb255(sc.hex, fadeMix),
-                alpha: scTrans ? Math.round(255 * (sc.alpha || 0.7) * (isFaded ? Math.max(0.55, opts.fadeOpacity) : 1)) : 255,
-              };
-              subColCache.set(cid, cached);
-            }
-            triRgb = cached.rgb;
-            triAlpha = cached.alpha;
-          }
+        if (TC && subColCache) {
+          const sc = resolveSubColor(TC[ti]);
+          if (sc) { triRgb = sc.rgb; triAlpha = sc.alpha; }
         }
         pushTri(a, b, c, n, triRgb, triAlpha);
+      }
+      if (compiled.texBatches && compiled.texBatches.length > 0) {
+        const useTextures = !isSelected && !overrideHex && !isGhost;
+        for (const tb of compiled.texBatches) {
+          const BT = tb.tris, BN = tb.norms, BU = tb.uvs, BTC = tb.triCols;
+          for (let i = 0, ui = 0, ti = 0; i < BT.length; i += 9, ui += 6, ti++) {
+            const a = xformPt([BT[i],BT[i+1],BT[i+2]], m, ox, oy, oz, hingeRad);
+            const b = xformPt([BT[i+3],BT[i+4],BT[i+5]], m, ox, oy, oz, hingeRad);
+            const c = xformPt([BT[i+6],BT[i+7],BT[i+8]], m, ox, oy, oz, hingeRad);
+            const n = xformNorm([BN[i],BN[i+1],BN[i+2]], m, hingeRad);
+            let triRgb = baseCol;
+            let triAlpha = aByte;
+            if (BTC && subColCache) {
+              const sc = resolveSubColor(BTC[ti]);
+              if (sc) { triRgb = sc.rgb; triAlpha = sc.alpha; }
+            }
+            if (useTextures) {
+              pushTexTri(
+                tb.texKey,
+                fadeMix,
+                isNew,
+                a, b, c, n,
+                [BU[ui], BU[ui+1]],
+                [BU[ui+2], BU[ui+3]],
+                [BU[ui+4], BU[ui+5]],
+                triRgb,
+                triAlpha,
+              );
+            } else {
+              pushTri(a, b, c, n, triRgb, triAlpha);
+            }
+          }
+        }
       }
       if ((includeEdges || isNew || isSelected || isGhost) && E.length > 0) {
         for (let i = 0; i < E.length; i += 6) {
@@ -1432,19 +1597,41 @@ function buildMeshBuffers(prevParts, newParts, opts) {
   const triNorm = new Float32Array(opN.length + trN.length); triNorm.set(opN, 0); triNorm.set(trN, opN.length);
   const triCol = new Uint8Array(opC.length + trC.length); triCol.set(opC, 0); triCol.set(trC, opC.length);
 
+  const texDraws = [];
+  for (const g of texGroups.values()) {
+    if (g.pos.len < 9) continue;
+    texDraws.push({
+      texKey: g.texKey,
+      fadeMix: g.fadeMix,
+      prevPosEnd: g.prevPosEnd,
+      triPos: new Float32Array(g.pos.slice()),
+      triNorm: new Float32Array(g.norm.slice()),
+      triUv: new Float32Array(g.uv.slice()),
+      triCol: new Uint8Array(g.col.slice()),
+    });
+  }
+
   // 1. Full model bounding sphere
   let minX=Infinity,minY=Infinity,minZ=Infinity,maxX=-Infinity,maxY=-Infinity,maxZ=-Infinity;
-  for (let i=0; i<triPos.length; i+=3) {
-    const x=triPos[i], y=triPos[i+1], z=triPos[i+2];
-    if(x<minX)minX=x;if(x>maxX)maxX=x;if(y<minY)minY=y;if(y>maxY)maxY=y;if(z<minZ)minZ=z;if(z>maxZ)maxZ=z;
-  }
+  const scanBounds = (arr) => {
+    for (let i=0; i<arr.length; i+=3) {
+      const x=arr[i], y=arr[i+1], z=arr[i+2];
+      if(x<minX)minX=x;if(x>maxX)maxX=x;if(y<minY)minY=y;if(y>maxY)maxY=y;if(z<minZ)minZ=z;if(z>maxZ)maxZ=z;
+    }
+  };
+  scanBounds(triPos);
+  for (const td of texDraws) scanBounds(td.triPos);
   const fcx=isFinite(minX)?(minX+maxX)/2:0, fcy=isFinite(minY)?(minY+maxY)/2:0, fcz=isFinite(minZ)?(minZ+maxZ)/2:0;
   let fullR2 = 0;
-  for (let i=0; i<triPos.length; i+=3) {
-    const dx=triPos[i]-fcx, dy=triPos[i+1]-fcy, dz=triPos[i+2]-fcz;
-    const r2 = dx*dx + dy*dy + dz*dz;
-    if (r2 > fullR2) fullR2 = r2;
-  }
+  const scanFullR = (arr) => {
+    for (let i=0; i<arr.length; i+=3) {
+      const dx=arr[i]-fcx, dy=arr[i+1]-fcy, dz=arr[i+2]-fcz;
+      const r2 = dx*dx + dy*dy + dz*dz;
+      if (r2 > fullR2) fullR2 = r2;
+    }
+  };
+  scanFullR(triPos);
+  for (const td of texDraws) scanFullR(td.triPos);
   const fullRadius = Math.max(Math.sqrt(fullR2), 20);
 
   // 2. New-pieces-only bounding sphere (for smart Close-Up framing on large models!)
@@ -1457,6 +1644,7 @@ function buildMeshBuffers(prevParts, newParts, opts) {
   };
   scanRange(opP, prevOpEnd, opP.length);
   scanRange(trP, prevTrEnd, trP.length);
+  for (const td of texDraws) scanRange(td.triPos, td.prevPosEnd, td.triPos.length);
 
   let targetCenter = [fcx, fcy, fcz];
   let viewRadius = fullRadius;
@@ -1474,6 +1662,7 @@ function buildMeshBuffers(prevParts, newParts, opts) {
     };
     scanR(opP, prevOpEnd, opP.length);
     scanR(trP, prevTrEnd, trP.length);
+    for (const td of texDraws) scanR(td.triPos, td.prevPosEnd, td.triPos.length);
     const newRadius = Math.max(Math.sqrt(newR2), 18);
     const focusMode = opts.ov?.focusMode || 'auto';
 
@@ -1494,6 +1683,7 @@ function buildMeshBuffers(prevParts, newParts, opts) {
     triPos, triNorm, triCol,
     opaqueCount: opP.length / 3,
     transCount: trP.length / 3,
+    texDraws,
     linePos: new Float32Array(lnPos.slice()),
     lineCol: new Uint8Array(lnCol.slice()),
     center: targetCenter,
@@ -1509,6 +1699,7 @@ class WebGLBrickEngine {
   constructor(canvas) {
     this.canvas = canvas;
     this.uploadedMesh = null;
+    this.glTextures = new Map();
     const gl = canvas.getContext('webgl', { antialias: true, alpha: true, preserveDrawingBuffer: true, powerPreference: 'default' });
     this.gl = gl;
     if (!gl) return;
@@ -1545,11 +1736,55 @@ class WebGLBrickEngine {
           gl_FragColor = vec4(vCol.rgb * shade, vCol.a);
         }
       }`;
+    const vsTex = `attribute vec3 aPos; attribute vec3 aNorm; attribute vec2 aUv; attribute vec4 aCol; uniform mat4 uMVP; varying vec3 vNorm; varying vec2 vUv; varying vec4 vCol; void main(){ gl_Position = uMVP * vec4(aPos,1.0); vNorm = aNorm; vUv = aUv; vCol = aCol; }`;
+    const fsTex = `precision mediump float;
+      uniform float uHeroMode;
+      uniform vec3 uViewDir;
+      uniform sampler2D uTex;
+      uniform float uUseTex;
+      uniform float uFadeMix;
+      varying vec3 vNorm;
+      varying vec2 vUv;
+      varying vec4 vCol;
+      void main(){
+        vec3 n = normalize(vNorm);
+        if (!gl_FrontFacing) n = -n;
+        vec3 baseRgb = vCol.rgb;
+        if (uUseTex > 0.5 && vUv.x >= 0.0 && vUv.x <= 1.0 && vUv.y >= 0.0 && vUv.y <= 1.0) {
+          vec4 decal = texture2D(uTex, vUv);
+          vec3 decalRgb = mix(decal.rgb, vec3(0.855, 0.871, 0.894), uFadeMix);
+          baseRgb = mix(baseRgb, decalRgb, decal.a);
+        }
+        if (uHeroMode > 0.5) {
+          vec3 v = normalize(uViewDir);
+          vec3 keyDir = normalize(vec3(0.42, 0.86, 0.52));
+          vec3 fillDir = normalize(vec3(-0.68, 0.38, 0.34));
+          vec3 rimDir = normalize(vec3(-0.22, 0.58, -0.78));
+          float key = max(dot(n, keyDir), 0.0);
+          float fill = max(dot(n, fillDir), 0.0);
+          float rim = max(dot(n, rimDir), 0.0);
+          float hemi = 0.50 + 0.14 * n.y + 0.05 * max(-n.y, 0.0);
+          float diff = min(1.06, hemi + key * 0.44 + fill * 0.18 + rim * 0.12);
+          vec3 hKey = normalize(keyDir + v);
+          float specKey = pow(max(dot(n, hKey), 0.0), 42.0) * 0.17;
+          vec3 hRim = normalize(rimDir + v);
+          float specRim = pow(max(dot(n, hRim), 0.0), 26.0) * 0.07;
+          vec3 col = min(vec3(1.0), baseRgb * diff + vec3(specKey + specRim));
+          gl_FragColor = vec4(col, vCol.a);
+        } else {
+          float key = max(dot(n, normalize(vec3(0.55,0.85,0.55))), 0.0);
+          float fill = max(dot(n, normalize(vec3(-0.7,0.35,-0.5))), 0.0);
+          float hemi = 0.50 + 0.15 * n.y;
+          float shade = min(1.08, hemi + key * 0.44 + fill * 0.18);
+          gl_FragColor = vec4(baseRgb * shade, vCol.a);
+        }
+      }`;
     const vsLine = `attribute vec3 aPos; attribute vec4 aCol; uniform mat4 uMVP; varying vec4 vCol; void main(){ gl_Position = uMVP * vec4(aPos,1.0); gl_Position.z -= 0.00022; vCol = aCol; }`;
     const fsLine = `precision mediump float; uniform float uLineAlpha; varying vec4 vCol; void main(){ gl_FragColor = vec4(vCol.rgb, vCol.a * uLineAlpha); }`;
     const cmp = (t, s) => { const sh = gl.createShader(t); gl.shaderSource(sh, s); gl.compileShader(sh); return sh; };
     const lnk = (v, f) => { const p = gl.createProgram(); gl.attachShader(p, cmp(gl.VERTEX_SHADER, v)); gl.attachShader(p, cmp(gl.FRAGMENT_SHADER, f)); gl.linkProgram(p); return p; };
     this.triProg = lnk(vsTri, fsTri);
+    this.texProg = lnk(vsTex, fsTex);
     this.lineProg = lnk(vsLine, fsLine);
     this.loc = {
       tMVP: gl.getUniformLocation(this.triProg, 'uMVP'),
@@ -1558,13 +1793,53 @@ class WebGLBrickEngine {
       tPos: gl.getAttribLocation(this.triProg, 'aPos'),
       tNorm: gl.getAttribLocation(this.triProg, 'aNorm'),
       tCol: gl.getAttribLocation(this.triProg, 'aCol'),
+      xMVP: gl.getUniformLocation(this.texProg, 'uMVP'),
+      xHeroMode: gl.getUniformLocation(this.texProg, 'uHeroMode'),
+      xViewDir: gl.getUniformLocation(this.texProg, 'uViewDir'),
+      xTex: gl.getUniformLocation(this.texProg, 'uTex'),
+      xUseTex: gl.getUniformLocation(this.texProg, 'uUseTex'),
+      xFadeMix: gl.getUniformLocation(this.texProg, 'uFadeMix'),
+      xPos: gl.getAttribLocation(this.texProg, 'aPos'),
+      xNorm: gl.getAttribLocation(this.texProg, 'aNorm'),
+      xUv: gl.getAttribLocation(this.texProg, 'aUv'),
+      xCol: gl.getAttribLocation(this.texProg, 'aCol'),
       lMVP: gl.getUniformLocation(this.lineProg, 'uMVP'),
       lAlpha: gl.getUniformLocation(this.lineProg, 'uLineAlpha'),
       lPos: gl.getAttribLocation(this.lineProg, 'aPos'),
       lCol: gl.getAttribLocation(this.lineProg, 'aCol'),
     };
     this.bTriPos = gl.createBuffer(); this.bTriNorm = gl.createBuffer(); this.bTriCol = gl.createBuffer();
+    this.bTexPos = gl.createBuffer(); this.bTexNorm = gl.createBuffer(); this.bTexUv = gl.createBuffer(); this.bTexCol = gl.createBuffer();
     this.bLinePos = gl.createBuffer(); this.bLineCol = gl.createBuffer();
+    this.emptyTex = gl.createTexture();
+    if (this.emptyTex) {
+      gl.bindTexture(gl.TEXTURE_2D, this.emptyTex);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 0]));
+    }
+  }
+  getOrCreateGlTexture(texKey) {
+    const gl = this.gl;
+    if (!gl) return null;
+    const cached = this.glTextures.get(texKey);
+    if (cached) return cached;
+    const img = textureStore.getDecodedImage(texKey);
+    if (!img) return null;
+    const tex = gl.createTexture();
+    if (!tex) return null;
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 0);
+    this.glTextures.set(texKey, tex);
+    return tex;
   }
   uploadIfNeeded(mesh) {
     if (this.uploadedMesh === mesh || !this.gl) return;
@@ -1586,8 +1861,11 @@ class WebGLBrickEngine {
     const near = Math.max(1, dist - clipRadius * 2.4);
     const far = dist + clipRadius * 2.4;
     const view = lookAtMat4(eye, center, [0, 1, 0]);
-    if (tightFit && fixedHalfH <= 0 && mesh.triPos && mesh.triPos.length >= 9) {
-      const tb = computeTightCameraBounds(mesh.triPos, center, azDeg, elDeg, w, h, zoom, 1.07);
+    const tightPos = mesh.triPos && mesh.triPos.length >= 9
+      ? mesh.triPos
+      : (mesh.texDraws && mesh.texDraws.length > 0 ? mesh.texDraws[0].triPos : null);
+    if (tightFit && fixedHalfH <= 0 && tightPos && tightPos.length >= 9) {
+      const tb = computeTightCameraBounds(tightPos, center, azDeg, elDeg, w, h, zoom, 1.07);
       if (tb) {
         // Reserve a small bottom strip (~3.5%) so the soft studio floor shadow never clips
         const shadowShiftY = tb.halfH * 0.035;
@@ -1612,7 +1890,8 @@ class WebGLBrickEngine {
   }
   draw(mesh, w, h, azDeg, elDeg, zoom = 1, fixedHalfH = 0, drawOpts = null) {
     const gl = this.gl;
-    if (!gl || mesh.triPos.length === 0) return null;
+    const hasTexDraws = Boolean(mesh.texDraws && mesh.texDraws.length > 0);
+    if (!gl || (mesh.triPos.length === 0 && !hasTexDraws)) return null;
     if (this.canvas.width !== w || this.canvas.height !== h) { this.canvas.width = w; this.canvas.height = h; }
     this.uploadIfNeeded(mesh);
     gl.viewport(0, 0, w, h);
@@ -1639,6 +1918,55 @@ class WebGLBrickEngine {
 
     gl.depthMask(true);
     if (mesh.opaqueCount > 0) gl.drawArrays(gl.TRIANGLES, 0, mesh.opaqueCount);
+
+    if (hasTexDraws) {
+      gl.polygonOffset(0.5, 0.5);
+      gl.useProgram(this.texProg);
+      gl.uniformMatrix4fv(this.loc.xMVP, false, mvp);
+      gl.uniform1f(this.loc.xHeroMode, heroShading ? 1.0 : 0.0);
+      gl.uniform3f(this.loc.xViewDir, forward[0], forward[1], forward[2]);
+      gl.uniform1i(this.loc.xTex, 0);
+      gl.enableVertexAttribArray(this.loc.xPos);
+      gl.enableVertexAttribArray(this.loc.xNorm);
+      gl.enableVertexAttribArray(this.loc.xUv);
+      gl.enableVertexAttribArray(this.loc.xCol);
+      for (const td of mesh.texDraws) {
+        if (td.triPos.length < 9) continue;
+        const glTex = this.getOrCreateGlTexture(td.texKey);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, glTex || this.emptyTex);
+        gl.uniform1f(this.loc.xUseTex, glTex ? 1.0 : 0.0);
+        gl.uniform1f(this.loc.xFadeMix, td.fadeMix || 0.0);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.bTexPos);
+        gl.bufferData(gl.ARRAY_BUFFER, td.triPos, gl.DYNAMIC_DRAW);
+        gl.vertexAttribPointer(this.loc.xPos, 3, gl.FLOAT, false, 0, 0);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.bTexNorm);
+        gl.bufferData(gl.ARRAY_BUFFER, td.triNorm, gl.DYNAMIC_DRAW);
+        gl.vertexAttribPointer(this.loc.xNorm, 3, gl.FLOAT, false, 0, 0);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.bTexUv);
+        gl.bufferData(gl.ARRAY_BUFFER, td.triUv, gl.DYNAMIC_DRAW);
+        gl.vertexAttribPointer(this.loc.xUv, 2, gl.FLOAT, false, 0, 0);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.bTexCol);
+        gl.bufferData(gl.ARRAY_BUFFER, td.triCol, gl.DYNAMIC_DRAW);
+        gl.vertexAttribPointer(this.loc.xCol, 4, gl.UNSIGNED_BYTE, true, 0, 0);
+
+        gl.drawArrays(gl.TRIANGLES, 0, td.triPos.length / 3);
+      }
+      gl.disableVertexAttribArray(this.loc.xUv);
+      gl.polygonOffset(1.0, 1.0);
+      // Restore triProg for transparent bricks if needed
+      if (mesh.transCount > 0) {
+        gl.useProgram(this.triProg);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.bTriPos); gl.enableVertexAttribArray(this.loc.tPos); gl.vertexAttribPointer(this.loc.tPos, 3, gl.FLOAT, false, 0, 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.bTriNorm); gl.enableVertexAttribArray(this.loc.tNorm); gl.vertexAttribPointer(this.loc.tNorm, 3, gl.FLOAT, false, 0, 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.bTriCol); gl.enableVertexAttribArray(this.loc.tCol); gl.vertexAttribPointer(this.loc.tCol, 4, gl.UNSIGNED_BYTE, true, 0, 0);
+      }
+    }
+
     if (mesh.transCount > 0) {
       gl.depthMask(false);
       gl.drawArrays(gl.TRIANGLES, mesh.opaqueCount, mesh.transCount);
@@ -1656,6 +1984,10 @@ class WebGLBrickEngine {
   }
   dispose() {
     if (!this.gl) return;
+    for (const tex of this.glTextures.values()) this.gl.deleteTexture(tex);
+    this.glTextures.clear();
+    if (this.emptyTex) this.gl.deleteTexture(this.emptyTex);
+    this.emptyTex = null;
     this.gl.getExtension('WEBGL_lose_context')?.loseContext();
     this.gl = null;
   }
@@ -1739,6 +2071,7 @@ function renderCoverHeroSnapshot(parts, az, el, zoom, targetW, targetH, theme) {
       height: rh,
       zoom: safeZoom,
       darkBackground: darkTheme,
+      getTextureImage: (texKey) => textureStore.getDecodedImage(texKey),
     });
     if (rendered) {
       const out = { url: rendered.url, mesh, mvp: null, w: rendered.width, h: rendered.height };
@@ -2422,17 +2755,69 @@ function splitMpd(src, fallbackName) {
   const map = new Map();
   const lines = src.replace(/^\uFEFF/, '').split(/\r?\n/);
   let name = fallbackName, buf = [], sawFile = false;
-  const flush = () => { if (buf.length > 0 && name) map.set(name.toLowerCase(), { name, lines: buf }); };
+  let dataName = null, dataChunks = [];
+  const flushFile = () => { if (buf.length > 0 && name) map.set(name.toLowerCase(), { name, lines: buf }); };
+  const flushData = () => {
+    if (dataName && dataChunks.length > 0) {
+      textureStore.registerBase64Texture(dataChunks.join(''), { name: dataName, source: 'embedded' });
+    }
+    dataName = null;
+    dataChunks = [];
+  };
   for (const raw of lines) {
     const l = raw.trim(); if (!l) continue;
-    const m = l.match(/^0\s+FILE\s+(.+)$/i);
-    if (m) { if (sawFile || buf.length > 0) flush(); sawFile = true; name = m[1].trim(); buf = []; continue; }
-    if (/^0\s+NOFILE\b/i.test(l)) { flush(); name = null; buf = []; continue; }
+    const mFile = l.match(/^0\s+FILE\s+(.+)$/i);
+    if (mFile) {
+      flushData();
+      if (sawFile || buf.length > 0) flushFile();
+      sawFile = true;
+      name = mFile[1].trim();
+      buf = [];
+      continue;
+    }
+    const mData = l.match(/^0\s+!DATA\s+(.+)$/i);
+    if (mData) {
+      flushData();
+      if (sawFile || buf.length > 0) flushFile();
+      sawFile = true;
+      name = null;
+      buf = [];
+      dataName = mData[1].trim();
+      dataChunks = [];
+      continue;
+    }
+    if (/^0\s+NOFILE\b/i.test(l)) { flushData(); flushFile(); name = null; buf = []; continue; }
+    if (dataName) {
+      const mChunk = l.match(/^0\s+!:\s*(.+)$/);
+      if (mChunk) dataChunks.push(mChunk[1].trim());
+      continue;
+    }
     if (!name) name = fallbackName;
     buf.push(l);
   }
-  flush();
+  flushData();
+  flushFile();
   return map;
+}
+
+function registerEmbeddedDatEntry(sf, source = 'embedded') {
+  const nk = normId(sf.name);
+  const title = getSubfileTitle(sf);
+  embeddedDatRaw.set(nk, sf.lines);
+  embeddedDatTitles.set(nk, title);
+  textureStore.scanDatLinesForTextures(sf.lines, source);
+  // Also alias BrickLink Studio `0 BL_Item_No <id>` so model.ldr refs like `3626pb3988` resolve directly to `bl_3626pb3988`
+  for (let i = 0; i < Math.min(sf.lines.length, 16); i++) {
+    const mBl = sf.lines[i].match(/^0\s+BL_Item_No\s+(\S+)/i);
+    if (mBl && mBl[1] && mBl[1] !== '-1') {
+      const alias = normId(mBl[1]);
+      if (alias && alias !== nk && !embeddedDatRaw.has(alias)) {
+        embeddedDatRaw.set(alias, sf.lines);
+        embeddedDatTitles.set(alias, title);
+      }
+      break;
+    }
+  }
 }
 
 function cleanSubName(raw) {
@@ -2449,21 +2834,35 @@ function isAssemblySubfile(sf) {
 }
 
 function getSubfileTitle(sf) {
-  const tLine = sf.lines.find(l => l.startsWith('0 ') && !/^0\s+(FILE|Name:|Author:|IsSubModel|BL_|Flexible|Render|IsAssembly|!|BFC)/i.test(l));
+  const tLine = sf.lines.find(l => l.startsWith('0 ') && !/^0\s+(FILE|Name:|Author:|IsSubModel|BL_|Flexible|Render|IsAssembly|!|BFC|PE_TEX_)/i.test(l));
   return tLine ? tLine.replace(/^0\s+/, '').trim() : cleanSubName(sf.name);
 }
 
-async function readZipEntryText(bytes, view, entry) {
+async function readZipEntryBytes(bytes, view, entry) {
   if (entry.flags & 1) throw new Error('This .io file uses legacy Studio encryption. Re-save in Studio 2.x or export as .ldr.');
   const lOff = entry.localOffset;
   const dataStart = lOff + 30 + view.getUint16(lOff + 26, true) + view.getUint16(lOff + 28, true);
   const compBytes = bytes.subarray(dataStart, dataStart + entry.compSize);
-  if (entry.method === 0) return new TextDecoder().decode(compBytes);
+  if (entry.method === 0) return compBytes;
   if (entry.method === 8) {
     const stream = new Blob([compBytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
-    return await new Response(stream).text();
+    return new Uint8Array(await new Response(stream).arrayBuffer());
   }
   throw new Error(`Unsupported ZIP method (${entry.method}).`);
+}
+
+async function readZipEntryText(bytes, view, entry) {
+  const u8 = await readZipEntryBytes(bytes, view, entry);
+  return new TextDecoder().decode(u8);
+}
+
+function bytesToBase64(u8) {
+  let bin = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < u8.length; i += chunk) {
+    bin += String.fromCharCode.apply(null, u8.subarray(i, i + chunk));
+  }
+  return btoa(bin);
 }
 
 async function extractIoArchive(arrayBuffer) {
@@ -2500,17 +2899,31 @@ async function extractIoArchive(arrayBuffer) {
   const m2Text = m2Entry ? await readZipEntryText(bytes, view, m2Entry) : '';
 
   embeddedDatRaw.clear(); embeddedDatTitles.clear(); embeddedDatCompiled.clear(); compositePartDefs.clear(); pliThumbCache.clear(); submodelThumbCache.clear(); clearMinifigDiagramCaches();
+  textureStore.clearEmbedded();
+
+  // Extract any embedded texture PNGs bundled directly in the .io archive (skipping thumbnail.png)
+  for (const ent of entries) {
+    const lowerName = ent.name.toLowerCase();
+    const baseName = lowerName.split('/').pop() || '';
+    if (!/\.(png|jpg|jpeg|webp)$/i.test(baseName) || baseName === 'thumbnail.png' || (ent.flags & 1)) continue;
+    try {
+      const u8 = await readZipEntryBytes(bytes, view, ent);
+      if (u8.length > 24) {
+        textureStore.registerBase64Texture(bytesToBase64(u8), { name: ent.name, source: 'embedded' });
+      }
+    } catch (_) {}
+  }
+
   if (m2Text) {
     const m2Map = splitMpd(m2Text, 'model2.ldr');
     for (const sf of m2Map.values()) {
       const isPart = sf.name.toLowerCase().endsWith('.dat') || sf.lines.some(l => /^0\s+IsSubModel\s+False/i.test(l));
       if (isPart) {
-        const nk = normId(sf.name);
-        embeddedDatRaw.set(nk, sf.lines);
-        embeddedDatTitles.set(nk, getSubfileTitle(sf));
+        registerEmbeddedDatEntry(sf, 'embedded');
       }
     }
   }
+  await textureStore.predecodeAllPending();
   return { m1Text, m2Text };
 }
 
@@ -2542,9 +2955,13 @@ function flattenMpd(source, fileName, useIsSubModelFlag = false) {
 
       // Detect pre-assembled LEGO assemblies (Minifig Torso+Arms+Hands, Hips+Legs) -> tag all children with same assemblyTag!
       const childIsAsm = !assemblyTag && child && isAssemblySubfile(child);
+      const childLooksLikePart = child && (
+        child.name.toLowerCase().endsWith('.dat') ||
+        child.lines.some(l => /^[234]\s+/.test(l) || /^0\s+(?:PE_TEX_INFO|PE_TEX_PATH|!TEXMAP|!LDRAW_ORG)\b/i.test(l))
+      );
       const isChildSub = useIsSubModelFlag
         ? (child && child.lines.some(l => /^0\s+IsSubModel\s+True/i.test(l)))
-        : (child && !child.lines.some(l => /^[234]\s+/.test(l)));
+        : (child && (childIsAsm || !childLooksLikePart));
 
       if (isChildSub && child !== sf) {
         if (depth === 0 && !childIsAsm) submodelCount++;
@@ -2615,12 +3032,15 @@ function parseImportedModel(m1Text, m2Text, fileName) {
   if (m1Text) {
     const m1Map = splitMpd(m1Text, fileName);
     for (const sf of m1Map.values()) {
-      const isEmbeddedPart = sf.name.toLowerCase().endsWith('.dat') || sf.lines.some(l => /^[234]\s+/.test(l));
+      const isEmbeddedPart =
+        sf.name.toLowerCase().endsWith('.dat') ||
+        sf.lines.some(l => /^[234]\s+/.test(l) || /^0\s+(?:PE_TEX_INFO|PE_TEX_PATH|!TEXMAP|!LDRAW_ORG)\b/i.test(l));
       if (isEmbeddedPart) {
         const nk = normId(sf.name);
         if (!embeddedDatRaw.has(nk)) {
-          embeddedDatRaw.set(nk, sf.lines);
-          embeddedDatTitles.set(nk, getSubfileTitle(sf));
+          registerEmbeddedDatEntry(sf, 'embedded');
+        } else {
+          textureStore.scanDatLinesForTextures(sf.lines, 'embedded');
         }
       }
     }
@@ -7288,8 +7708,21 @@ function registerUserLibDat(rawName, text) {
   const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
   if (!lines.length) return;
   userLibRaw.set(k, lines);
-  const tLine = lines.find(l => l.startsWith('0 ') && !/^0\s+(FILE|Name:|Author:|IsSubModel|BL_|Flexible|Render|IsAssembly|!|BFC)/i.test(l));
-  if (tLine) userLibTitles.set(k, tLine.replace(/^0\s+/, '').trim());
+  textureStore.scanDatLinesForTextures(lines, 'library');
+  const tLine = lines.find(l => l.startsWith('0 ') && !/^0\s+(FILE|Name:|Author:|IsSubModel|BL_|Flexible|Render|IsAssembly|!|BFC|PE_TEX_)/i.test(l));
+  const title = tLine ? tLine.replace(/^0\s+/, '').trim() : null;
+  if (title) userLibTitles.set(k, title);
+  for (let i = 0; i < Math.min(lines.length, 16); i++) {
+    const mBl = lines[i].match(/^0\s+BL_Item_No\s+(\S+)/i);
+    if (mBl && mBl[1] && mBl[1] !== '-1') {
+      const alias = normId(mBl[1]);
+      if (alias && alias !== k && !userLibRaw.has(alias)) {
+        userLibRaw.set(alias, lines);
+        if (title) userLibTitles.set(alias, title);
+      }
+      break;
+    }
+  }
 }
 
 function updateLibraryStatusUI() {
@@ -7321,6 +7754,7 @@ async function loadSavedBricksLibrary() {
       req.onerror = () => rej(req.error);
     });
   } catch (_) {}
+  await textureStore.predecodeAllPending();
   updateLibraryStatusUI();
 }
 
@@ -7356,6 +7790,7 @@ async function importBricksLibraryFiles(fileList) {
         const cdCount = view.getUint16(eocd + 10, true);
         let ptr = view.getUint32(eocd + 16, true);
         const datEntries = [];
+        const texEntries = [];
         for (let i = 0; i < cdCount; i++) {
           if (view.getUint32(ptr, true) !== 0x02014b50) break;
           const flags = view.getUint16(ptr + 8, true);
@@ -7366,10 +7801,21 @@ async function importBricksLibraryFiles(fileList) {
           const commentLen = view.getUint16(ptr + 32, true);
           const localOffset = view.getUint32(ptr + 42, true);
           const name = new TextDecoder().decode(bytes.subarray(ptr + 46, ptr + 46 + nameLen));
-          if (name.toLowerCase().endsWith('.dat') && !(flags & 1)) {
+          const ln = name.toLowerCase();
+          if (ln.endsWith('.dat') && !(flags & 1)) {
             datEntries.push({ name, flags, method, compSize, localOffset });
+          } else if (/\.(png|jpg|jpeg|webp)$/i.test(ln) && ln.includes('texture') && !(flags & 1)) {
+            texEntries.push({ name, flags, method, compSize, localOffset });
           }
           ptr += 46 + nameLen + extraLen + commentLen;
+        }
+        for (const ent of texEntries) {
+          try {
+            const u8 = await readZipEntryBytes(bytes, view, ent);
+            if (u8.length > 24) {
+              textureStore.registerBase64Texture(bytesToBase64(u8), { name: ent.name, source: 'library' });
+            }
+          } catch (_) {}
         }
         // Batch write to IndexedDB in chunks of 250 for speed & stability
         for (let i = 0; i < datEntries.length; i += 250) {
@@ -7400,6 +7846,7 @@ async function importBricksLibraryFiles(fileList) {
         }
       }
     }
+    await textureStore.predecodeAllPending();
     embeddedDatCompiled.clear(); pliThumbCache.clear(); submodelThumbCache.clear(); clearMinifigDiagramCaches(); coverHeroCache.clear();
     updateLibraryStatusUI();
     if (state.model) {
@@ -7611,6 +8058,7 @@ async function fetchMissingPartsOnline() {
       progBar.style.width = pct + '%';
     }
 
+    await textureStore.predecodeAllPending();
     embeddedDatCompiled.clear(); pliThumbCache.clear(); submodelThumbCache.clear(); clearMinifigDiagramCaches(); coverHeroCache.clear();
     updateLibraryStatusUI();
     if (state.model) {
@@ -7997,9 +8445,12 @@ async function restoreLastSessionOnStart() {
     if (rec.kind === 'io' && rec.data) {
       const { m1Text, m2Text } = await extractIoArchive(rec.data);
       const parsed = parseImportedModel(m1Text, m2Text, rec.fileName);
+      await textureStore.predecodeAllPending();
       state.model = buildManualFromParsed(parsed, rec.importMode || 'auto', rec.subdivisionPlan || null);
     } else if (rec.kind === 'ldr' && typeof rec.data === 'string') {
+      textureStore.clearEmbedded();
       const parsed = parseImportedModel(rec.data, '', rec.fileName);
+      await textureStore.predecodeAllPending();
       state.model = buildManualFromParsed(parsed, rec.importMode || 'auto', rec.subdivisionPlan || null);
     } else {
       renderAll(); return;
@@ -9967,11 +10418,14 @@ document.getElementById('fileInput').onchange = async (e) => {
       pendingRawFile = { kind: 'io', fileName: file.name, data: ab };
       const { m1Text, m2Text } = await extractIoArchive(ab);
       parsed = parseImportedModel(m1Text, m2Text, file.name);
+      await textureStore.predecodeAllPending();
     } else {
       embeddedDatRaw.clear(); embeddedDatTitles.clear(); embeddedDatCompiled.clear(); compositePartDefs.clear(); pliThumbCache.clear(); submodelThumbCache.clear(); clearMinifigDiagramCaches();
+      textureStore.clearEmbedded();
       const txt = await file.text();
       pendingRawFile = { kind: 'ldr', fileName: file.name, data: txt };
       parsed = parseImportedModel(txt, '', file.name);
+      await textureStore.predecodeAllPending();
     }
     const prep = prepareSubdivisionData(parsed);
     const { assessment } = analyzeModelSubdivisions(prep.inputs, prep.adjacency);

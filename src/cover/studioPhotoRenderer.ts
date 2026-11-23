@@ -8,12 +8,22 @@
 
 import { computeCameraBasis } from './coverLayout';
 
+export interface StudioTexDraw {
+  texKey: string;
+  triPos: Float32Array;
+  triNorm: Float32Array;
+  triUv: Float32Array;
+  triCol: Uint8Array;
+  fadeMix?: number;
+}
+
 export interface StudioMeshData {
   triPos: Float32Array;
   triNorm: Float32Array;
   triCol: Uint8Array;
   opaqueCount: number;
   transCount: number;
+  texDraws?: StudioTexDraw[];
   linePos: Float32Array;
   lineCol: Uint8Array;
   center: [number, number, number];
@@ -48,6 +58,7 @@ export interface StudioRenderOptions {
   zoom?: number;
   darkBackground?: boolean;
   fovYDeg?: number;
+  getTextureImage?: (texKey: string) => TexImageSource | null;
 }
 
 // =========================================================================
@@ -335,6 +346,7 @@ const VS_PBR = `
 attribute vec3 aPos;
 attribute vec3 aNorm;
 attribute vec4 aCol;
+attribute vec2 aUv;
 uniform mat4 uMVP;
 uniform mat4 uKeyMVP;
 uniform mat4 uFillMVP;
@@ -342,6 +354,7 @@ uniform mat4 uOverMVP;
 varying vec3 vWorldPos;
 varying vec3 vWorldNorm;
 varying vec4 vCol;
+varying vec2 vUv;
 varying vec3 vKeyCoord;
 varying vec3 vFillCoord;
 varying vec3 vOverCoord;
@@ -350,6 +363,7 @@ void main() {
   vWorldPos = aPos;
   vWorldNorm = aNorm;
   vCol = aCol;
+  vUv = aUv;
   vec4 kp = uKeyMVP * vec4(aPos, 1.0);
   vKeyCoord = (kp.xyz / kp.w) * 0.5 + 0.5;
   vec4 fp = uFillMVP * vec4(aPos, 1.0);
@@ -369,6 +383,8 @@ uniform vec3 uOverDir;
 uniform sampler2D uKeyMap;
 uniform sampler2D uFillMap;
 uniform sampler2D uOverMap;
+uniform sampler2D uDecalMap;
+uniform float uUseDecal;
 uniform vec2 uKeyTexel;
 uniform vec2 uFillTexel;
 uniform vec2 uOverTexel;
@@ -378,6 +394,7 @@ uniform float uModelHeight;
 varying vec3 vWorldPos;
 varying vec3 vWorldNorm;
 varying vec4 vCol;
+varying vec2 vUv;
 varying vec3 vKeyCoord;
 varying vec3 vFillCoord;
 varying vec3 vOverCoord;
@@ -458,8 +475,14 @@ void main() {
   vec3 V = normalize(uEyePos - vWorldPos);
   float NdotV = max(dot(N, V), 0.001);
 
+  // Composite printed decal (e.g. minifigure face/torso) over plastic base color in sRGB, then convert to linear
+  vec3 srgbBase = vCol.rgb;
+  if (uUseDecal > 0.5 && vUv.x >= 0.0 && vUv.x <= 1.0 && vUv.y >= 0.0 && vUv.y <= 1.0) {
+    vec4 decal = texture2D(uDecalMap, vUv);
+    srgbBase = mix(srgbBase, decal.rgb, decal.a);
+  }
   // sRGB -> Linear albedo (with slight photographic saturation fidelity)
-  vec3 albedo = pow(clamp(vCol.rgb, 0.0, 1.0), vec3(2.2));
+  vec3 albedo = pow(clamp(srgbBase, 0.0, 1.0), vec3(2.2));
   float alpha = vCol.a;
   float isTrans = step(alpha, 0.96);
 
@@ -837,10 +860,17 @@ export class StudioPhotoRenderer {
   private bTriPos: WebGLBuffer | null = null;
   private bTriNorm: WebGLBuffer | null = null;
   private bTriCol: WebGLBuffer | null = null;
+  private bDecalPos: WebGLBuffer | null = null;
+  private bDecalNorm: WebGLBuffer | null = null;
+  private bDecalUv: WebGLBuffer | null = null;
+  private bDecalCol: WebGLBuffer | null = null;
   private bLinePos: WebGLBuffer | null = null;
   private bLineCol: WebGLBuffer | null = null;
   private bFloorPos: WebGLBuffer | null = null;
   private bQuadPos: WebGLBuffer | null = null;
+
+  private glTextures = new Map<string, WebGLTexture>();
+  private emptyTex: WebGLTexture | null = null;
 
   private keyFbo: FboTarget | null = null;
   private fillFbo: FboTarget | null = null;
@@ -876,10 +906,25 @@ export class StudioPhotoRenderer {
     this.bTriPos = gl.createBuffer();
     this.bTriNorm = gl.createBuffer();
     this.bTriCol = gl.createBuffer();
+    this.bDecalPos = gl.createBuffer();
+    this.bDecalNorm = gl.createBuffer();
+    this.bDecalUv = gl.createBuffer();
+    this.bDecalCol = gl.createBuffer();
     this.bLinePos = gl.createBuffer();
     this.bLineCol = gl.createBuffer();
     this.bFloorPos = gl.createBuffer();
     this.bQuadPos = gl.createBuffer();
+
+    const empty = gl.createTexture();
+    if (empty) {
+      gl.bindTexture(gl.TEXTURE_2D, empty);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 0]));
+      this.emptyTex = empty;
+    }
 
     gl.bindBuffer(gl.ARRAY_BUFFER, this.bQuadPos);
     gl.bufferData(
@@ -894,6 +939,30 @@ export class StudioPhotoRenderer {
     this.overFbo = createFboTarget(gl, 768, 768, false);
 
     this.ready = Boolean(this.keyFbo && this.fillFbo && this.overFbo);
+  }
+
+  private getOrCreateDecalTexture(
+    texKey: string,
+    getTextureImage?: (key: string) => TexImageSource | null,
+  ): WebGLTexture | null {
+    const gl = this.gl;
+    if (!gl) return null;
+    const cached = this.glTextures.get(texKey);
+    if (cached) return cached;
+    const img = getTextureImage?.(texKey) ?? null;
+    if (!img) return null;
+    const tex = gl.createTexture();
+    if (!tex) return null;
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 0);
+    this.glTextures.set(texKey, tex);
+    return tex;
   }
 
   isAvailable(): boolean {
@@ -952,12 +1021,22 @@ export class StudioPhotoRenderer {
 
     const totalTris = mesh.opaqueCount + mesh.transCount;
     if (totalTris > 0) gl.drawArrays(gl.TRIANGLES, 0, totalTris);
+    if (mesh.texDraws && mesh.texDraws.length > 0) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.bDecalPos);
+      gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, 0, 0);
+      for (const td of mesh.texDraws) {
+        if (td.triPos.length < 9) continue;
+        gl.bufferData(gl.ARRAY_BUFFER, td.triPos, gl.DYNAMIC_DRAW);
+        gl.drawArrays(gl.TRIANGLES, 0, td.triPos.length / 3);
+      }
+    }
     gl.disable(gl.POLYGON_OFFSET_FILL);
   }
 
   render(mesh: StudioMeshData, options: StudioRenderOptions): { url: string; width: number; height: number } | null {
     const gl = this.gl;
-    if (!gl || !this.ready || mesh.triPos.length < 9) return null;
+    const hasTexDraws = Boolean(mesh.texDraws && mesh.texDraws.length > 0);
+    if (!gl || !this.ready || (mesh.triPos.length < 9 && !hasTexDraws)) return null;
 
     const w = Math.max(320, Math.min(2048, Math.round(options.width)));
     const h = Math.max(240, Math.min(2048, Math.round(options.height)));
@@ -969,7 +1048,7 @@ export class StudioPhotoRenderer {
     this.uploadMesh(mesh);
 
     const cam = computeStudioTelephotoCamera(
-      mesh.triPos,
+      mesh.triPos.length >= 9 ? mesh.triPos : mesh.texDraws![0].triPos,
       mesh.center,
       options.azDeg,
       options.elDeg,
@@ -1013,6 +1092,15 @@ export class StudioPhotoRenderer {
       gl.enableVertexAttribArray(posLoc);
       gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, 0, 0);
       if (mesh.opaqueCount > 0) gl.drawArrays(gl.TRIANGLES, 0, mesh.opaqueCount);
+      if (mesh.texDraws && mesh.texDraws.length > 0) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.bDecalPos);
+        gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, 0, 0);
+        for (const td of mesh.texDraws) {
+          if (td.triPos.length < 9) continue;
+          gl.bufferData(gl.ARRAY_BUFFER, td.triPos, gl.DYNAMIC_DRAW);
+          gl.drawArrays(gl.TRIANGLES, 0, td.triPos.length / 3);
+        }
+      }
     }
 
     // 3. Render Main Studio Floor Shadow-Catcher + Photorealistic PBR Model
@@ -1075,7 +1163,7 @@ export class StudioPhotoRenderer {
       gl.depthMask(true);
     }
 
-    // 3b. Photorealistic PBR LEGO Bricks (Opaque + Transparent)
+    // 3b. Photorealistic PBR LEGO Bricks (Opaque + Textured Decals + Transparent)
     {
       const prog = this.pbrProg!;
       gl.useProgram(prog);
@@ -1093,15 +1181,21 @@ export class StudioPhotoRenderer {
       gl.uniform1i(gl.getUniformLocation(prog, 'uKeyMap'), 0);
       gl.uniform1i(gl.getUniformLocation(prog, 'uFillMap'), 1);
       gl.uniform1i(gl.getUniformLocation(prog, 'uOverMap'), 2);
+      gl.uniform1i(gl.getUniformLocation(prog, 'uDecalMap'), 3);
+      gl.uniform1f(gl.getUniformLocation(prog, 'uUseDecal'), 0.0);
       gl.uniform2f(gl.getUniformLocation(prog, 'uKeyTexel'), 1 / this.keyFbo!.w, 1 / this.keyFbo!.h);
       gl.uniform2f(gl.getUniformLocation(prog, 'uFillTexel'), 1 / this.fillFbo!.w, 1 / this.fillFbo!.h);
       gl.uniform2f(gl.getUniformLocation(prog, 'uOverTexel'), 1 / this.overFbo!.w, 1 / this.overFbo!.h);
       gl.uniform1f(gl.getUniformLocation(prog, 'uMinY'), mesh.bounds.minY);
       gl.uniform1f(gl.getUniformLocation(prog, 'uModelHeight'), Math.max(10, mesh.bounds.maxY - mesh.bounds.minY));
 
+      gl.activeTexture(gl.TEXTURE3);
+      gl.bindTexture(gl.TEXTURE_2D, this.emptyTex);
+
       const pLoc = gl.getAttribLocation(prog, 'aPos');
       const nLoc = gl.getAttribLocation(prog, 'aNorm');
       const cLoc = gl.getAttribLocation(prog, 'aCol');
+      const uvLoc = gl.getAttribLocation(prog, 'aUv');
       gl.bindBuffer(gl.ARRAY_BUFFER, this.bTriPos);
       gl.enableVertexAttribArray(pLoc);
       gl.vertexAttribPointer(pLoc, 3, gl.FLOAT, false, 0, 0);
@@ -1111,9 +1205,60 @@ export class StudioPhotoRenderer {
       gl.bindBuffer(gl.ARRAY_BUFFER, this.bTriCol);
       gl.enableVertexAttribArray(cLoc);
       gl.vertexAttribPointer(cLoc, 4, gl.UNSIGNED_BYTE, true, 0, 0);
+      if (uvLoc >= 0) {
+        gl.disableVertexAttribArray(uvLoc);
+        gl.vertexAttrib2f(uvLoc, 0, 0);
+      }
 
       gl.depthMask(true);
       if (mesh.opaqueCount > 0) gl.drawArrays(gl.TRIANGLES, 0, mesh.opaqueCount);
+
+      if (mesh.texDraws && mesh.texDraws.length > 0) {
+        gl.polygonOffset(0.5, 0.5);
+        const useDecalLoc = gl.getUniformLocation(prog, 'uUseDecal');
+        if (uvLoc >= 0) gl.enableVertexAttribArray(uvLoc);
+        for (const td of mesh.texDraws) {
+          if (td.triPos.length < 9) continue;
+          const glTex = this.getOrCreateDecalTexture(td.texKey, options.getTextureImage);
+          gl.activeTexture(gl.TEXTURE3);
+          gl.bindTexture(gl.TEXTURE_2D, glTex ?? this.emptyTex);
+          gl.uniform1f(useDecalLoc, glTex ? 1.0 : 0.0);
+
+          gl.bindBuffer(gl.ARRAY_BUFFER, this.bDecalPos);
+          gl.bufferData(gl.ARRAY_BUFFER, td.triPos, gl.DYNAMIC_DRAW);
+          gl.vertexAttribPointer(pLoc, 3, gl.FLOAT, false, 0, 0);
+
+          gl.bindBuffer(gl.ARRAY_BUFFER, this.bDecalNorm);
+          gl.bufferData(gl.ARRAY_BUFFER, td.triNorm, gl.DYNAMIC_DRAW);
+          gl.vertexAttribPointer(nLoc, 3, gl.FLOAT, false, 0, 0);
+
+          gl.bindBuffer(gl.ARRAY_BUFFER, this.bDecalCol);
+          gl.bufferData(gl.ARRAY_BUFFER, td.triCol, gl.DYNAMIC_DRAW);
+          gl.vertexAttribPointer(cLoc, 4, gl.UNSIGNED_BYTE, true, 0, 0);
+
+          if (uvLoc >= 0) {
+            gl.bindBuffer(gl.ARRAY_BUFFER, this.bDecalUv);
+            gl.bufferData(gl.ARRAY_BUFFER, td.triUv, gl.DYNAMIC_DRAW);
+            gl.vertexAttribPointer(uvLoc, 2, gl.FLOAT, false, 0, 0);
+          }
+
+          gl.drawArrays(gl.TRIANGLES, 0, td.triPos.length / 3);
+        }
+        gl.uniform1f(useDecalLoc, 0.0);
+        if (uvLoc >= 0) {
+          gl.disableVertexAttribArray(uvLoc);
+          gl.vertexAttrib2f(uvLoc, 0, 0);
+        }
+        // Rebind main buffers for transparent pass
+        gl.polygonOffset(1.0, 1.0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.bTriPos);
+        gl.vertexAttribPointer(pLoc, 3, gl.FLOAT, false, 0, 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.bTriNorm);
+        gl.vertexAttribPointer(nLoc, 3, gl.FLOAT, false, 0, 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.bTriCol);
+        gl.vertexAttribPointer(cLoc, 4, gl.UNSIGNED_BYTE, true, 0, 0);
+      }
+
       if (mesh.transCount > 0) {
         gl.depthMask(false);
         gl.drawArrays(gl.TRIANGLES, mesh.opaqueCount, mesh.transCount);
@@ -1176,6 +1321,10 @@ export class StudioPhotoRenderer {
   dispose(): void {
     const gl = this.gl;
     if (!gl) return;
+    for (const tex of this.glTextures.values()) gl.deleteTexture(tex);
+    this.glTextures.clear();
+    if (this.emptyTex) gl.deleteTexture(this.emptyTex);
+    this.emptyTex = null;
     destroyFboTarget(gl, this.keyFbo);
     destroyFboTarget(gl, this.fillFbo);
     destroyFboTarget(gl, this.overFbo);

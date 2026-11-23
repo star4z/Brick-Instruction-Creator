@@ -4,6 +4,12 @@ import {
   normalizeDatRef,
   type DatEntrySource,
 } from '../datCompiler';
+import {
+  extractBase64FromPeTexInfoLine,
+  hashTextureBase64,
+  normalizeTextureName,
+  textureStore,
+} from '../textureStore';
 
 function makeTriangles(count: number, cx: number, cy: number, cz: number, color = 16): string[] {
   const out: string[] = [];
@@ -382,5 +388,220 @@ describe('compileDatEntry — minifigure torso & sibling-fair budgeting', () => 
     expect(hasVertexNearX(mesh!.tris, 30, 1.5)).toBe(true);
     expect(hasVertexNearX(mesh!.tris, 40, 1.5)).toBe(false);
     expect(hasVertexNearX(mesh!.tris, 50, 1.5)).toBe(false);
+  });
+
+  it('compiles BrickLink Studio dual-sided minifigure heads with PE_TEX_PATH 1/2 and PE_TEX_INFO base64 PNG decals', () => {
+    const frontPngB64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    const backPngB64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+    const db = new Map<string, DatEntrySource>([
+      [
+        's/bl_3626pb3997_0',
+        {
+          key: 's/bl_3626pb3997_0',
+          lines: [
+            '0 BFC CERTIFY CCW',
+            '3 16 -12.6 -5 -1 12.6 -5 -1 0 -22 -1',
+          ],
+        },
+      ],
+      [
+        's/bl_3626pb3997_1',
+        {
+          key: 's/bl_3626pb3997_1',
+          lines: [
+            '0 BFC CERTIFY CCW',
+            '3 16 12.8 -5 0 0 -5 -12.8 0 -22 -12.8 0.99 0.18 0.50 0.18 0.50 0.88',
+            '3 16 -12.8 -5 0 0 -22 -12.8 0 -5 -12.8 0.01 0.18 0.50 0.88 0.50 0.18',
+          ],
+        },
+      ],
+      [
+        's/bl_3626pb3997_2',
+        {
+          key: 's/bl_3626pb3997_2',
+          lines: [
+            '0 BFC CERTIFY CCW',
+            '3 16 -12.7 -5 0 0 -5 12.7 0 -22 12.7 0.99 0.18 0.50 0.18 0.50 0.88',
+          ],
+        },
+      ],
+    ]);
+
+    const headPart: DatEntrySource = {
+      key: 'bl_3626pb3997',
+      lines: [
+        '0 Minifigure, Head Dual Sided',
+        '0 Name: bl_3626pb3997.dat',
+        '0 BL_Item_No 3626pb3997',
+        '0 BFC CERTIFY CCW',
+        '0 PE_TEX_PATH 1',
+        `0 PE_TEX_INFO ${frontPngB64}`,
+        '0 PE_TEX_PATH 2',
+        `0 PE_TEX_INFO ${backPngB64}`,
+        '1 16 0 0 0 1 0 0 0 1 0 0 0 1 s/bl_3626pb3997_0.dat',
+        '1 16 0 0 0 1 0 0 0 1 0 0 0 1 s/bl_3626pb3997_1.dat',
+        '1 16 0 0 0 1 0 0 0 1 0 0 0 1 s/bl_3626pb3997_2.dat',
+      ],
+    };
+
+    const mesh = compileDatEntry(headPart, (ref) => db.get(normalizeDatRef(ref)));
+    expect(mesh).not.toBeNull();
+    // Base untextured head mesh (_0) has 1 triangle
+    expect(mesh!.tris.length / 9).toBe(1);
+    // Front (_1) and Back (_2) face decals compile into 2 distinct textured batches
+    expect(mesh!.texBatches).toBeDefined();
+    expect(mesh!.texBatches!.length).toBe(2);
+
+    const frontBatch = mesh!.texBatches!.find((b) => b.base64Png === frontPngB64);
+    const backBatch = mesh!.texBatches!.find((b) => b.base64Png === backPngB64);
+    expect(frontBatch).toBeDefined();
+    expect(backBatch).toBeDefined();
+    expect(frontBatch!.tris.length / 9).toBe(2);
+    expect(frontBatch!.uvs.length).toBe(2 * 6);
+    expect(frontBatch!.uvs[0]).toBeCloseTo(0.99, 3);
+    expect(frontBatch!.uvs[1]).toBeCloseTo(0.18, 3);
+    expect(frontBatch!.uvs[5]).toBeCloseTo(0.88, 3);
+    expect(backBatch!.tris.length / 9).toBe(1);
+    // Bounds include both front (+Z) and back (-Z) textured shells
+    expect(mesh!.max[2]).toBeCloseTo(12.8, 1);
+    expect(mesh!.min[2]).toBeCloseTo(-12.7, 1);
+  });
+
+  it('supports PE_TEX_PATH -1 with explicit quad UVs and preserves UVs across concave quad triangulation', () => {
+    const pngB64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    const part: DatEntrySource = {
+      key: 'quad_uv_test',
+      lines: [
+        '0 PE_TEX_PATH -1',
+        `0 PE_TEX_INFO ${pngB64}`,
+        // Concave quad at b=(1,1) with explicit UVs (0,0), (0.25,0.25), (1,0), (0.25,1)
+        '4 16 0 0 0 1 1 0 4 0 0 1 4 0 0 0 0.25 0.25 1 0 0.25 1',
+      ],
+    };
+
+    const mesh = compileDatEntry(part, () => null);
+    expect(mesh).not.toBeNull();
+    expect(mesh!.tris.length).toBe(0);
+    expect(mesh!.texBatches?.length).toBe(1);
+    const tb = mesh!.texBatches![0];
+    expect(tb.tris.length / 9).toBe(2);
+    expect(tb.uvs.length).toBe(12);
+    // All UVs must remain within [0, 1]
+    for (let i = 0; i < tb.uvs.length; i++) {
+      expect(tb.uvs[i]).toBeGreaterThanOrEqual(0);
+      expect(tb.uvs[i]).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('supports Studio PE_TEX_INFO 16-float planar box projection on un-UV-mapped subfiles', () => {
+    const pngB64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    const db = new Map<string, DatEntrySource>([
+      [
+        'tile_base',
+        {
+          key: 'tile_base',
+          lines: [
+            // Top face at y=0 spanning x=-10..10, z=-10..10
+            '4 16 -10 0 -10 10 0 -10 10 0 10 -10 0 10',
+            // Bottom face at y=8 (outside projection box y in [-2, 2])
+            '4 16 -10 8 -10 10 8 -10 10 8 10 -10 8 10',
+          ],
+        },
+      ],
+    ]);
+    const part: DatEntrySource = {
+      key: 'bl_3070bpb001',
+      lines: [
+        '0 PE_TEX_PATH 0',
+        `0 PE_TEX_INFO 0 0 0 20 0 0 0 4 0 0 0 20 -10 -10 10 10 ${pngB64}`,
+        '1 16 0 0 0 1 0 0 0 1 0 0 0 1 tile_base.dat',
+      ],
+    };
+
+    const mesh = compileDatEntry(part, (ref) => db.get(normalizeDatRef(ref)));
+    expect(mesh).not.toBeNull();
+    // Top face (2 tris) projected into texBatch; bottom face (2 tris) stays untextured
+    expect(mesh!.texBatches?.length).toBe(1);
+    expect(mesh!.texBatches![0].tris.length / 9).toBe(2);
+    expect(mesh!.tris.length / 9).toBe(2);
+  });
+
+  it('projects LDraw !TEXMAP START PLANAR UVs when texture is resolved and falls back otherwise', () => {
+    const part: DatEntrySource = {
+      key: '3626cpx0_test',
+      lines: [
+        '0 !TEXMAP START PLANAR -13 0 10 13 0 10 -13 21 10 3626cpx0a.png',
+        '0 !: 4 16 -13 0 -13 13 0 -13 13 21 -13 -13 21 -13',
+        '0 !TEXMAP FALLBACK',
+        '3 0 -4 8 -13 4 8 -13 0 12 -13',
+        '0 !TEXMAP END',
+      ],
+    };
+
+    // With texture available -> uses !TEXMAP geometry with projected UVs (top-left -> u=0,v=1; bottom-right -> u=1,v=0)
+    const withTex = compileDatEntry(part, () => null, {
+      lookupTexture: (name) => (name === '3626cpx0a.png' ? { texKey: 'tex_cpx0a' } : null),
+    });
+    expect(withTex).not.toBeNull();
+    expect(withTex!.texBatches?.length).toBe(1);
+    expect(withTex!.texBatches![0].texKey).toBe('tex_cpx0a');
+    expect(withTex!.texBatches![0].tris.length / 9).toBe(2);
+    // Vertex 0 is (-13, 0, -13) -> u=0, v=1 (top-left in OpenGL UV space)
+    expect(withTex!.texBatches![0].uvs[0]).toBeCloseTo(0, 4);
+    expect(withTex!.texBatches![0].uvs[1]).toBeCloseTo(1, 4);
+
+    // Without texture -> keeps FALLBACK polygon (1 black triangle)
+    const withoutTex = compileDatEntry(part, () => null);
+    expect(withoutTex).not.toBeNull();
+    expect(withoutTex!.texBatches).toBeUndefined();
+    expect(withoutTex!.tris.length / 9).toBe(1);
+    expect(Array.from(withoutTex!.triCols!)).toEqual([0]);
+  });
+
+  it('preserves direct RGB 0x2RRGGBB colors in Int32Array triCols', () => {
+    const part: DatEntrySource = {
+      key: 'direct_rgb_face',
+      lines: ['3 0x2FF8844 0 0 -13 5 0 -13 0 5 -13'],
+    };
+    const mesh = compileDatEntry(part, () => null);
+    expect(mesh).not.toBeNull();
+    expect(mesh!.triCols).toBeInstanceOf(Int32Array);
+    expect(mesh!.triCols![0]).toBe(0x2ff8844);
+  });
+});
+
+describe('textureStore — embedded PNG deduplication and scanning', () => {
+  it('deduplicates identical base64 PNGs, extracts PE_TEX_INFO lines, and resolves named textures', () => {
+    textureStore.clearAll();
+    const b64A = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    const b64B = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+    expect(hashTextureBase64(b64A)).toBe(hashTextureBase64(b64A));
+    expect(hashTextureBase64(b64A)).not.toBe(hashTextureBase64(b64B));
+
+    expect(extractBase64FromPeTexInfoLine(`0 PE_TEX_INFO ${b64A}`)).toBe(b64A);
+    expect(
+      extractBase64FromPeTexInfoLine(`0 PE_TEX_INFO 0 0 0 1 0 0 0 1 0 0 0 1 -1 -1 1 1 ${b64B}`),
+    ).toBe(b64B);
+
+    const scanned = textureStore.scanDatLinesForTextures([
+      '0 PE_TEX_PATH 1',
+      `0 PE_TEX_INFO ${b64A}`,
+      '0 PE_TEX_PATH 2',
+      `0 PE_TEX_INFO ${b64A}`,
+    ]);
+    expect(scanned.length).toBe(2);
+    expect(scanned[0]).toBe(scanned[1]);
+    expect(textureStore.size).toBe(1);
+
+    const namedKey = textureStore.registerBase64Texture(b64B, {
+      name: 'ldraw/parts/textures/3626cpx0a.png',
+      source: 'embedded',
+    });
+    expect(namedKey).not.toBeNull();
+    expect(normalizeTextureName('ldraw\\parts\\textures\\3626cpx0a.png')).toBe('3626cpx0a.png');
+    expect(textureStore.lookupByName('3626cpx0a.png')?.texKey).toBe(namedKey);
+    textureStore.clearAll();
   });
 });
