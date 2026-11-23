@@ -261,45 +261,22 @@
             </button>
           </div>
 
-          <!-- Bricks Library (Public Fetch + Local complete.zip / .dat) -->
+          <!-- Bricks Library (Dedicated Screen: Browse, Search, Fetch & Import) -->
           <div id="menuBricksLibSection" class="flex flex-col gap-2 pt-4 border-t border-[var(--border)] transition-all">
-            <div class="flex items-center justify-between">
-              <span class="text-[11px] font-bold uppercase tracking-wider text-[var(--muted-foreground)]">Bricks Library</span>
-              <span id="libStatusText" class="text-[11px] text-[var(--muted-foreground)]">0 saved</span>
-            </div>
-            <p class="text-[11px] text-[var(--muted-foreground)] leading-snug">
-              Missing 3D shapes for <b>.ldr</b> &amp; <b>.mpd</b> files download automatically on import and cache locally. You can also refresh online or import LDraw's <b>complete.zip</b> for offline use.
+            <div class="text-[11px] font-bold uppercase tracking-wider text-[var(--muted-foreground)]">Bricks Library</div>
+            <button id="menuBricksLibBtn" class="w-full py-2.5 px-3 rounded-xl border border-[var(--border)] bg-[var(--background)] font-semibold text-left flex items-center justify-between gap-2">
+              <span class="flex items-center gap-2 min-w-0">
+                <svg class="w-4 h-4 text-[#1a73e8] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1"><path d="M12 3 3 7.5 12 12l9-4.5L12 3Z"/><path d="m3 12 9 4.5 9-4.5"/><path d="m3 16.5 9 4.5 9-4.5"/></svg>
+                <span>Bricks Library</span>
+              </span>
+              <span class="flex items-center gap-1.5 shrink-0 max-w-[56%]">
+                <span id="libStatusText" class="text-[11px] font-medium text-[var(--muted-foreground)] truncate">Built-in shapes</span>
+                <span class="opacity-50">→</span>
+              </span>
+            </button>
+            <p class="text-[11px] text-[var(--muted-foreground)] leading-snug px-0.5">
+              Preview &amp; search 3D brick shapes, download starter packs or model parts online, or import LDraw's <b>complete.zip</b>.
             </p>
-            <div id="menuFetchLibWrap" class="hidden flex flex-col gap-2">
-              <select id="libSourceSelect" class="w-full py-1.5 px-2.5 rounded-xl border border-[var(--border)] bg-[var(--background)] text-[11px] font-semibold outline-none">
-                <option value="https://raw.githubusercontent.com/kulits/ldraw-parts/master/ldraw/">Official LDraw Library (Daily Sync · GitHub)</option>
-                <option value="https://mrubens.github.io/ldraw-library/">Official LDraw Library (GitHub Pages Mirror)</option>
-                <option value="https://raw.githubusercontent.com/gkjohnson/ldraw-parts-library/master/complete/ldraw/">Classic LDraw Mirror (GitHub)</option>
-                <option value="https://cdn.jsdelivr.net/gh/kulits/ldraw-parts@master/ldraw/">Official LDraw Library (jsDelivr CDN)</option>
-                <option value="custom">Custom Public LDraw Base URL…</option>
-              </select>
-              <input id="libCustomUrlInput" type="url" placeholder="https://example.com/ldraw/" class="hidden w-full py-1.5 px-2.5 rounded-xl border border-[var(--border)] bg-[var(--background)] text-[11px] outline-none" />
-              <button id="menuFetchLibBtn" class="w-full py-2 px-3 rounded-xl bg-[#1a73e8]/15 border border-[#1a73e8]/40 text-[#1a73e8] font-semibold flex items-center justify-center gap-1.5">
-                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 12a9 9 0 0 1-9 9m9-9a9 9 0 0 0-9-9m9 9H3m9 9a9 9 0 0 1-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"/></svg>
-                Fetch Missing Parts Online
-              </button>
-            </div>
-            <div class="flex gap-2">
-              <button id="menuImportLibBtn" class="flex-1 py-2 px-3 rounded-xl border border-[var(--border)] bg-[var(--background)] font-semibold flex items-center justify-center gap-1.5">
-                <svg class="w-3.5 h-3.5 text-[#1a73e8]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
-                Import .zip / .dat
-              </button>
-              <button id="menuClearLibBtn" title="Clear Saved Library" class="hidden py-2 px-3 rounded-xl border border-[var(--border)] bg-[var(--background)] text-red-600 font-semibold">Clear</button>
-            </div>
-            <div id="libProgressWrap" class="hidden space-y-1">
-              <div class="flex justify-between text-[11px] font-semibold">
-                <span id="libProgressLabel">Loading library…</span>
-                <span id="libProgressPct">0%</span>
-              </div>
-              <div class="w-full h-1.5 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden">
-                <div id="libProgressBar" class="h-full bg-[#1a73e8]" style="width:0%"></div>
-              </div>
-            </div>
           </div>
 
           <!-- Auto-Step Regeneration (Moved out of live step view to remove redundancy) -->
@@ -992,6 +969,250 @@
         </div>
         <div id="errFilterBar" class="px-4 py-2.5 border-b border-[var(--border)] flex items-center gap-1.5 overflow-x-auto no-scrollbar shrink-0"></div>
         <div id="errListBody" class="flex-1 min-h-0 min-h-[240px] overflow-y-auto overscroll-contain p-3.5 space-y-2"></div>
+      </div>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- BRICKS LIBRARY SCREEN MODAL (Browse/Search + Fetch/Manage)       -->
+    <!-- ================================================================ -->
+    <div id="bricksLibraryModal" role="dialog" aria-label="Bricks Library" class="no-print hidden fixed inset-0 z-50 bg-black/50 backdrop-blur-[2px] flex items-end sm:items-center justify-center p-0 sm:p-3">
+      <div class="w-full max-w-4xl h-[92vh] sm:h-[86vh] rounded-t-3xl sm:rounded-3xl bg-[var(--card)] border border-[var(--border)] shadow-2xl flex flex-col overflow-hidden text-xs">
+        <!-- Modal Header -->
+        <div class="p-4 border-b border-[var(--border)] flex items-center justify-between gap-2 shrink-0">
+          <div class="min-w-0">
+            <h2 class="text-sm font-bold flex items-center gap-2">
+              <svg class="w-4 h-4 text-[#1a73e8] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 3 3 7.5 12 12l9-4.5L12 3Z"/><path d="m3 12 9 4.5 9-4.5"/><path d="m3 16.5 9 4.5 9-4.5"/></svg>
+              <span>Bricks Library</span>
+            </h2>
+            <p id="libModalSubtitle" class="text-[11px] text-[var(--muted-foreground)] truncate">Preview, search, fetch online, or import LDraw 3D part shapes</p>
+          </div>
+          <button id="btnCloseBricksLib" aria-label="Close Bricks Library" class="w-8 h-8 rounded-full flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/10 shrink-0">✕</button>
+        </div>
+
+        <!-- Top Segmented Tabs -->
+        <div class="px-4 py-2.5 border-b border-[var(--border)] flex items-center justify-between gap-2 flex-wrap shrink-0 bg-[var(--background)]/40">
+          <div class="inline-flex p-1 rounded-full border border-[var(--border)] bg-[var(--background)] gap-1">
+            <button data-lib-tab="browse" class="lib-tab-btn px-3.5 py-1.5 rounded-full font-semibold flex items-center gap-1.5 transition">
+              <span>Browse &amp; Search</span>
+              <span id="libTabBrowseCount" class="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-black/8 dark:bg-white/10">0</span>
+            </button>
+            <button data-lib-tab="manage" class="lib-tab-btn px-3.5 py-1.5 rounded-full font-semibold flex items-center gap-1.5 transition">
+              <span>Fetch &amp; Import</span>
+              <span id="libTabManageBadge" class="hidden px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-700 dark:text-amber-300">0</span>
+            </button>
+          </div>
+          <div id="libHeaderStatsPills" class="flex items-center gap-1.5 flex-wrap text-[11px] text-[var(--muted-foreground)]"></div>
+        </div>
+
+        <!-- Shared Live Operation Progress Bar -->
+        <div id="libProgressWrap" class="hidden px-4 py-2.5 border-b border-[var(--border)] bg-[#1a73e8]/[0.07] space-y-1.5 shrink-0">
+          <div class="flex items-center justify-between gap-2 text-[11px] font-semibold">
+            <span id="libProgressLabel" class="truncate">Loading library…</span>
+            <div class="flex items-center gap-2 shrink-0">
+              <span id="libProgressPct">0%</span>
+              <button id="libCancelOpBtn" class="hidden px-2.5 py-0.5 rounded-full border border-[var(--border)] bg-[var(--card)] hover:border-red-500/50 hover:text-red-600 text-[10px] font-bold transition">Cancel</button>
+            </div>
+          </div>
+          <div class="w-full h-1.5 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden">
+            <div id="libProgressBar" class="h-full bg-[#1a73e8] transition-[width] duration-150" style="width:0%"></div>
+          </div>
+        </div>
+
+        <!-- TAB 1: BROWSE & SEARCH PARTS LIBRARY -->
+        <div id="libTabBrowse" class="flex-1 min-h-0 flex flex-col overflow-hidden">
+          <!-- Search & Filter Controls -->
+          <div class="px-4 py-3 border-b border-[var(--border)] space-y-2.5 shrink-0">
+            <div class="flex items-center gap-2 flex-wrap">
+              <div class="relative flex-1 min-w-[200px]">
+                <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                <input id="libSearchInput" type="search" placeholder="Search by part ID or name (e.g. 3001, brick 2x4, slope, minifig)…" class="w-full pl-8 pr-8 py-2 rounded-xl border border-[var(--border)] bg-[var(--background)] text-xs outline-none focus:border-[#1a73e8]" />
+                <button id="libSearchClearBtn" title="Clear search" class="hidden absolute right-2 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full hover:bg-black/10 dark:hover:bg-white/10 text-[var(--muted-foreground)] flex items-center justify-center">✕</button>
+              </div>
+              <select id="libCategorySelect" aria-label="Filter by category" class="py-2 px-2.5 rounded-xl border border-[var(--border)] bg-[var(--background)] text-[11px] font-semibold outline-none">
+                <option value="all">All Categories</option>
+                <option value="bricks">Bricks</option>
+                <option value="plates">Plates</option>
+                <option value="tiles">Tiles</option>
+                <option value="slopes">Slopes &amp; Curves</option>
+                <option value="technic">Technic &amp; Bars</option>
+                <option value="minifigs">Minifigures</option>
+                <option value="windows">Windows &amp; Panels</option>
+                <option value="other">Other Parts</option>
+              </select>
+            </div>
+            <div class="flex items-center justify-between gap-2 flex-wrap">
+              <div id="libScopeFilterBar" class="flex items-center gap-1.5 overflow-x-auto no-scrollbar"></div>
+              <label class="flex items-center gap-1.5 text-[11px] text-[var(--muted-foreground)] cursor-pointer select-none shrink-0">
+                <input id="libIncludeHelpersToggle" type="checkbox" class="w-3.5 h-3.5 accent-[#1a73e8]" />
+                <span>Show subparts &amp; primitives</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- Split Grid + 3D Preview Inspector -->
+          <div class="flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden relative">
+            <!-- Scrollable Parts Grid -->
+            <div id="libBrowseGridWrap" class="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 space-y-3">
+              <div class="flex items-center justify-between gap-2 flex-wrap text-[11px] text-[var(--muted-foreground)]">
+                <span id="libBrowseSummary">Showing 0 parts</span>
+                <div class="flex items-center gap-1.5">
+                  <span class="text-[10px] uppercase tracking-wider font-semibold">Color:</span>
+                  <div id="libColorSwatches" class="flex items-center gap-1"></div>
+                </div>
+              </div>
+              <div id="libSearchFetchBanner" class="hidden p-3 rounded-2xl border border-[#1a73e8]/35 bg-[#1a73e8]/10 flex items-center justify-between gap-2 flex-wrap"></div>
+              <div id="libBrowseGrid" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5"></div>
+              <div id="libLoadMoreWrap" class="hidden pt-2 text-center">
+                <button id="libLoadMoreBtn" class="px-4 py-2 rounded-full border border-[var(--border)] bg-[var(--background)] hover:border-[#1a73e8] hover:text-[#1a73e8] font-semibold transition">Load more parts</button>
+              </div>
+            </div>
+
+            <!-- Selected Part 3D Preview Inspector -->
+            <aside id="libPreviewPane" class="hidden md:flex absolute inset-0 z-10 md:static md:z-auto md:w-[290px] shrink-0 md:border-l border-[var(--border)] bg-[var(--card)] md:bg-[var(--background)]/70 flex-col overflow-y-auto overscroll-contain p-4 space-y-3">
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-[10px] font-bold uppercase tracking-wider text-[var(--muted-foreground)]">Part Preview</span>
+                <button id="btnCloseLibPreview" class="md:hidden px-2.5 py-1 rounded-full border border-[var(--border)] bg-[var(--background)] text-[11px] font-semibold">← Back to Parts</button>
+              </div>
+              <div id="libPreviewEmpty" class="py-10 text-center space-y-2 text-[var(--muted-foreground)]">
+                <div class="w-11 h-11 mx-auto rounded-2xl border border-dashed border-[var(--border)] flex items-center justify-center opacity-70">
+                  <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3 3 7.5 12 12l9-4.5L12 3Z"/><path d="m3 12 9 4.5 9-4.5"/><path d="m3 16.5 9 4.5 9-4.5"/></svg>
+                </div>
+                <p class="text-[11px] leading-relaxed">Select any brick from the list to inspect its 3D shape, angle views, and library source.</p>
+              </div>
+              <div id="libPreviewDetail" class="hidden space-y-3">
+                <div class="aspect-square w-full max-w-[230px] mx-auto rounded-2xl border border-[var(--border)] bg-[var(--card)] flex items-center justify-center p-2 overflow-hidden relative">
+                  <img id="libPreviewImg" alt="3D part preview" class="w-full h-full object-contain" />
+                </div>
+                <div id="libPreviewAngles" class="flex items-center justify-center gap-1 flex-wrap">
+                  <button data-lib-az="38" class="lib-angle-btn px-2 py-1 rounded-full border border-[var(--border)] bg-[var(--card)] text-[10px] font-semibold">Front</button>
+                  <button data-lib-az="142" class="lib-angle-btn px-2 py-1 rounded-full border border-[var(--border)] bg-[var(--card)] text-[10px] font-semibold">Right</button>
+                  <button data-lib-az="218" class="lib-angle-btn px-2 py-1 rounded-full border border-[var(--border)] bg-[var(--card)] text-[10px] font-semibold">Back</button>
+                  <button data-lib-az="322" class="lib-angle-btn px-2 py-1 rounded-full border border-[var(--border)] bg-[var(--card)] text-[10px] font-semibold">Left</button>
+                  <button id="libPreviewFlipBtn" title="Toggle top/bottom view" class="px-2 py-1 rounded-full border border-[var(--border)] bg-[var(--card)] text-[10px] font-semibold">Flip</button>
+                </div>
+                <div id="libPreviewMeta" class="space-y-1.5"></div>
+                <div id="libPreviewActions" class="space-y-2 pt-2 border-t border-[var(--border)]"></div>
+              </div>
+            </aside>
+          </div>
+        </div>
+
+        <!-- TAB 2: FETCH ONLINE, IMPORT LOCAL, & MANAGE LIBRARY -->
+        <div id="libTabManage" class="hidden flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 space-y-4">
+          <!-- Card 1: Current Model Parts (Context-Aware!) -->
+          <section id="libModelFetchCard" class="p-4 rounded-2xl border border-[var(--border)] bg-[var(--background)] space-y-2.5">
+            <div class="flex items-start justify-between gap-3 flex-wrap">
+              <div class="space-y-1 min-w-0 flex-1">
+                <div class="text-[10px] font-bold uppercase tracking-wider text-[var(--muted-foreground)]">Current Model</div>
+                <h3 id="libModelFetchHeading" class="text-[13px] font-bold">No Model Loaded</h3>
+                <p id="libModelFetchDesc" class="text-[11px] text-[var(--muted-foreground)] leading-relaxed">
+                  Load an LDraw (.ldr / .mpd) model to detect and fetch its missing 3D part shapes automatically.
+                </p>
+              </div>
+              <button id="libFetchModelBtn" disabled class="px-4 py-2 rounded-xl bg-[#1a73e8] text-white font-semibold flex items-center gap-1.5 shrink-0 disabled:opacity-45 disabled:cursor-not-allowed">
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 12a9 9 0 0 1-9 9m9-9a9 9 0 0 0-9-9m9 9H3m9 9a9 9 0 0 1-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"/></svg>
+                <span id="libFetchModelBtnLabel">Load a Model to Check Missing Parts</span>
+              </button>
+            </div>
+            <div id="libModelMissingChips" class="hidden flex items-center gap-1.5 flex-wrap pt-1"></div>
+          </section>
+
+          <!-- Card 2: Download Parts Online (Mirror + Starter Packs + Custom IDs) -->
+          <section class="p-4 rounded-2xl border border-[var(--border)] bg-[var(--background)] space-y-3.5">
+            <div class="flex items-start justify-between gap-3 flex-wrap">
+              <div class="space-y-0.5">
+                <div class="text-[10px] font-bold uppercase tracking-wider text-[var(--muted-foreground)]">Online LDraw Library</div>
+                <h3 class="text-[13px] font-bold">Download Starter Packs or Specific Parts</h3>
+                <p class="text-[11px] text-[var(--muted-foreground)] leading-relaxed">
+                  Fetch official LDraw 3D shapes (plus their required subparts &amp; primitives) on demand. Saved shapes persist in this browser across sessions.
+                </p>
+              </div>
+              <button id="libFetchAllPacksBtn" class="px-3.5 py-2 rounded-xl bg-[#1a73e8]/15 border border-[#1a73e8]/40 text-[#1a73e8] font-semibold shrink-0 hover:bg-[#1a73e8]/20 transition">
+                Fetch All Starter Packs
+              </button>
+            </div>
+
+            <!-- Public Mirror Selector -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <label class="space-y-1">
+                <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Public LDraw Source</span>
+                <select id="libSourceSelect" class="w-full py-2 px-2.5 rounded-xl border border-[var(--border)] bg-[var(--card)] text-[11px] font-semibold outline-none">
+                  <option value="https://raw.githubusercontent.com/kulits/ldraw-parts/master/ldraw/">Official LDraw Library (Daily Sync · GitHub)</option>
+                  <option value="https://mrubens.github.io/ldraw-library/">Official LDraw Library (GitHub Pages Mirror)</option>
+                  <option value="https://raw.githubusercontent.com/gkjohnson/ldraw-parts-library/master/complete/ldraw/">Classic LDraw Mirror (GitHub)</option>
+                  <option value="https://cdn.jsdelivr.net/gh/kulits/ldraw-parts@master/ldraw/">Official LDraw Library (jsDelivr CDN)</option>
+                  <option value="custom">Custom Public LDraw Base URL…</option>
+                </select>
+              </label>
+              <label id="libCustomUrlWrap" class="hidden space-y-1">
+                <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Custom Base URL</span>
+                <input id="libCustomUrlInput" type="url" placeholder="https://example.com/ldraw/" class="w-full py-2 px-2.5 rounded-xl border border-[var(--border)] bg-[var(--card)] text-[11px] outline-none" />
+              </label>
+            </div>
+
+            <!-- Curated Starter Packs Grid -->
+            <div id="libStarterPacksGrid" class="grid grid-cols-1 sm:grid-cols-2 gap-2.5"></div>
+
+            <!-- Fetch Specific Part IDs -->
+            <div class="pt-3 border-t border-[var(--border)] space-y-1.5">
+              <div class="text-[11px] font-semibold">Fetch Specific LDraw Part IDs</div>
+              <div class="flex items-center gap-2">
+                <input id="libCustomIdsInput" type="text" placeholder="Enter part IDs separated by commas or spaces (e.g. 3001, 3069b, 3626c)" class="flex-1 py-2 px-3 rounded-xl border border-[var(--border)] bg-[var(--card)] text-[11px] outline-none focus:border-[#1a73e8]" />
+                <button id="libFetchCustomIdsBtn" class="px-3.5 py-2 rounded-xl border border-[#1a73e8]/45 bg-[#1a73e8]/12 text-[#1a73e8] font-semibold shrink-0 hover:bg-[#1a73e8]/20 transition">Fetch IDs</button>
+              </div>
+            </div>
+          </section>
+
+          <!-- Card 3: Import Local Library Files (.zip / .dat) — Clearly Separate from Clear! -->
+          <section class="p-4 rounded-2xl border border-[var(--border)] bg-[var(--background)] space-y-2.5">
+            <div class="space-y-0.5">
+              <div class="text-[10px] font-bold uppercase tracking-wider text-[var(--muted-foreground)]">Full Offline Library</div>
+              <h3 class="text-[13px] font-bold">Import Local Files (.zip / .dat)</h3>
+              <p class="text-[11px] text-[var(--muted-foreground)] leading-relaxed">
+                For the entire official LDraw catalog (~20,000+ parts), download <b>complete.zip</b> from LDraw.org once and import it here — or import individual <b>.dat</b> files. Studio <b>.io</b> models already bundle their own 3D shapes automatically.
+              </p>
+            </div>
+            <div class="flex items-center gap-2 flex-wrap pt-0.5">
+              <button id="libImportLocalBtn" class="px-4 py-2 rounded-xl border border-[var(--border)] bg-[var(--card)] hover:border-[#1a73e8] font-semibold flex items-center gap-2 transition">
+                <svg class="w-4 h-4 text-[#1a73e8]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
+                Import .zip / .dat Files…
+              </button>
+              <a href="https://library.ldraw.org/updates?latest" target="_blank" rel="noopener noreferrer" class="px-3.5 py-2 rounded-xl border border-[var(--border)] bg-[var(--card)] hover:border-[#1a73e8] text-[var(--muted-foreground)] hover:text-[var(--foreground)] font-semibold inline-flex items-center gap-1.5 transition">
+                <span>Get complete.zip at LDraw.org</span>
+                <svg class="w-3.5 h-3.5 opacity-65" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
+              </a>
+            </div>
+          </section>
+
+          <!-- Card 4: Saved Library Storage (Danger Zone — Clearly Separated from Import!) -->
+          <section class="p-4 rounded-2xl border border-red-500/30 bg-red-500/[0.04] space-y-2.5">
+            <div class="space-y-0.5">
+              <div class="text-[10px] font-bold uppercase tracking-wider text-red-600 dark:text-red-400">Saved Library Storage</div>
+              <h3 id="libStorageSummary" class="text-[13px] font-bold">0 saved files in browser storage</h3>
+              <p class="text-[11px] text-[var(--muted-foreground)] leading-relaxed">
+                Clearing deletes all parts fetched online or imported from <b>.zip</b> / <b>.dat</b> files out of your browser's saved Bricks Library. Your currently loaded model, embedded <b>.io</b> shapes, and built-in shapes are not affected.
+              </p>
+            </div>
+            <div class="flex items-center gap-2 flex-wrap">
+              <button id="libClearSavedBtn" disabled class="px-4 py-2 rounded-xl border border-red-500/40 bg-[var(--card)] text-red-600 dark:text-red-400 hover:bg-red-500/10 font-semibold disabled:opacity-40 disabled:cursor-not-allowed transition">
+                Clear Entire Saved Library
+              </button>
+            </div>
+            <div id="libClearConfirmWrap" class="hidden p-3 rounded-xl border border-red-500/40 bg-[var(--card)] flex items-center justify-between gap-2 flex-wrap">
+              <span id="libClearConfirmText" class="text-[11px] font-semibold text-red-600 dark:text-red-400">Delete all saved library files from this browser?</span>
+              <div class="flex items-center gap-1.5 shrink-0">
+                <button id="libClearConfirmCancel" class="px-3 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--background)] font-semibold">Cancel</button>
+                <button id="libClearConfirmYes" class="px-3 py-1.5 rounded-lg bg-red-600 text-white font-semibold hover:bg-red-700 transition">Yes, Clear Saved Library</button>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <!-- Modal Footer -->
+        <div class="p-3.5 border-t border-[var(--border)] flex items-center justify-between gap-2 shrink-0 bg-[var(--card)]">
+          <span id="libFooterHint" class="text-[11px] text-[var(--muted-foreground)] truncate">Saved parts stay cached locally in this browser.</span>
+          <button id="bricksLibDoneBtn" class="px-5 py-2 rounded-full bg-[#1a73e8] text-white font-semibold shrink-0">Done</button>
+        </div>
       </div>
     </div>
 

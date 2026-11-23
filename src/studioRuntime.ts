@@ -111,6 +111,18 @@ import {
   computePageTypography,
   estimateBomCellGeometry,
 } from './engine/pageTypography';
+import {
+  ONLINE_STARTER_PACKS,
+  buildLibraryIndex,
+  classifyDatEntryKind,
+  computeStarterPackProgress,
+  extractFetchablePartIdFromQuery,
+  filterLibraryItems,
+  formatLibraryMenuSummary,
+  getAllStarterPackPartIds,
+  getModelFetchCopy,
+  parsePartIdListInput,
+} from './engine/bricksLibrary';
 
 const BRAND_LOGO_ROTATION_DEG = 12;
 const BRAND_LOGO_PATHS: ReadonlyArray<readonly [string, string]> = [
@@ -7828,6 +7840,16 @@ async function dbClearStore(storeName) {
     });
   } catch (_) {}
 }
+async function dbDelete(key, storeName = DB_STORE) {
+  try {
+    const db = await openSessionDB();
+    await new Promise((res, rej) => {
+      const tx = db.transaction(storeName, 'readwrite');
+      tx.objectStore(storeName).delete(key);
+      tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error);
+    });
+  } catch (_) {}
+}
 
 function registerUserLibDat(rawName, text) {
   if (typeof rawName === 'string' && rawName.startsWith('__tex__:')) {
@@ -7902,21 +7924,105 @@ function refreshSubdivisionPlanForParsed(parsed, prevPlan) {
   }
 }
 
-function updateLibraryStatusUI() {
-  const libCount = userLibRaw.size;
-  const embCount = embeddedDatRaw.size;
-  const statusEl = document.getElementById('libStatusText');
-  const clearBtn = document.getElementById('menuClearLibBtn');
-  if (statusEl) {
-    statusEl.textContent = libCount > 0
-      ? `${libCount.toLocaleString()} saved${embCount ? ` · ${embCount} embedded` : ''}`
-      : (embCount > 0 ? `${embCount} embedded (.io)` : 'None imported');
+const LIB_PREVIEW_COLORS = [
+  { id: 4, label: 'Red' },
+  { id: 1, label: 'Blue' },
+  { id: 14, label: 'Yellow' },
+  { id: 2, label: 'Green' },
+  { id: 15, label: 'White' },
+  { id: 71, label: 'Light Gray' },
+  { id: 72, label: 'Dark Gray' },
+  { id: 0, label: 'Black' },
+  { id: 19, label: 'Tan' },
+  { id: 25, label: 'Orange' },
+];
+
+const libThumbCache = new Map();
+const libUiState = {
+  tab: 'browse', // 'browse' | 'manage'
+  query: '',
+  scope: 'all',
+  category: 'all',
+  includeHelpers: false,
+  previewColor: 4,
+  previewAz: 38,
+  previewEl: 24,
+  selectedId: null,
+  visibleLimit: 48,
+};
+
+let libCachedSnapshot = null;
+let libThumbObserver = null;
+let libThumbQueue = [];
+let libThumbRafId = 0;
+let libSearchDebounceTimer = null;
+
+function invalidateLibraryRenderCaches() {
+  embeddedDatCompiled.clear();
+  pliThumbCache.clear();
+  submodelThumbCache.clear();
+  clearMinifigDiagramCaches();
+  coverHeroCache.clear();
+  libThumbCache.clear();
+  libCachedSnapshot = null;
+}
+
+function collectCurrentModelPartSets() {
+  const modelPartIds = new Set();
+  const missingShapePartIds = new Set();
+  const missingExactDatPartIds = new Set();
+  if (state.model) {
+    for (const { step } of getAllSteps(state.model)) {
+      for (const p of step.parts) {
+        const leaves = p.children && p.children.length > 0 ? p.children : [p];
+        for (const lf of leaves) {
+          const k = normId(lf.p);
+          if (!k) continue;
+          modelPartIds.add(k);
+          if (!hasKnownShape(k)) missingShapePartIds.add(k);
+          if (!lookupExactRawDat(k)) missingExactDatPartIds.add(k);
+        }
+      }
+    }
   }
-  if (clearBtn) clearBtn.classList.toggle('hidden', libCount === 0);
-  const fetchWrap = document.getElementById('menuFetchLibWrap');
-  if (fetchWrap) {
-    const showFetch = Boolean(state.model) && (hasMissingPartsToFetch() || fetchPartsInFlight);
-    fetchWrap.classList.toggle('hidden', !showFetch);
+  return { modelPartIds, missingShapePartIds, missingExactDatPartIds };
+}
+
+function getLibrarySnapshot(forceRebuild = false) {
+  if (!forceRebuild && libCachedSnapshot) return libCachedSnapshot;
+  const { modelPartIds, missingShapePartIds, missingExactDatPartIds } = collectCurrentModelPartSets();
+  libCachedSnapshot = buildLibraryIndex({
+    userLibRaw,
+    userLibTitles,
+    embeddedDatRaw,
+    embeddedDatTitles,
+    builtInCatalog: PARTS_CATALOG,
+    modelPartIds,
+    missingShapePartIds,
+    missingExactDatPartIds,
+    resolveName: (id) => getHumanPartName(id),
+    savedTextureCount: textureStore.getLibraryCount(),
+  });
+  return libCachedSnapshot;
+}
+
+function isBricksLibraryModalOpen() {
+  const el = document.getElementById('bricksLibraryModal');
+  return Boolean(el && !el.classList.contains('hidden'));
+}
+
+function updateLibraryStatusUI() {
+  const snapshot = getLibrarySnapshot(true);
+  const { stats } = snapshot;
+  const statusEl = document.getElementById('libStatusText');
+  if (statusEl) {
+    statusEl.textContent = formatLibraryMenuSummary(stats);
+    statusEl.classList.toggle('text-amber-600', stats.modelMissingShapeCount > 0);
+    statusEl.classList.toggle('dark:text-amber-400', stats.modelMissingShapeCount > 0);
+    statusEl.classList.toggle('font-bold', stats.modelMissingShapeCount > 0);
+  }
+  if (isBricksLibraryModalOpen()) {
+    renderBricksLibraryModal(false);
   }
 }
 
@@ -7955,9 +8061,12 @@ async function importBricksLibraryFiles(fileList) {
   const progLabel = document.getElementById('libProgressLabel');
   const progPct = document.getElementById('libProgressPct');
   const progBar = document.getElementById('libProgressBar');
-  progWrap.classList.remove('hidden');
+  const cancelBtn = document.getElementById('libCancelOpBtn');
+  if (progWrap) progWrap.classList.remove('hidden');
+  if (cancelBtn) cancelBtn.classList.add('hidden');
 
-  let imported = 0;
+  let importedParts = 0;
+  let importedHelpers = 0;
   try {
     const db = await openSessionDB().catch(() => null);
     for (const file of files) {
@@ -7966,10 +8075,12 @@ async function importBricksLibraryFiles(fileList) {
         const text = await file.text();
         const k = normId(file.name);
         registerUserLibDat(k, text);
+        const kind = classifyDatEntryKind(k, userLibRaw.get(k), userLibTitles.get(k));
+        if (kind === 'part') importedParts++;
+        else importedHelpers++;
         if (db) await dbPut(k, text, LIB_STORE);
-        imported++;
       } else if (lower.endsWith('.zip')) {
-        progLabel.textContent = `Reading ${file.name}…`;
+        if (progLabel) progLabel.textContent = `Reading ${file.name}…`;
         const ab = await file.arrayBuffer();
         const bytes = new Uint8Array(ab), view = new DataView(ab);
         let eocd = -1;
@@ -8031,8 +8142,10 @@ async function importBricksLibraryFiles(fileList) {
               const txt = await readZipEntryText(bytes, view, ent);
               const k = normId(ent.name);
               registerUserLibDat(k, txt);
+              const kind = classifyDatEntryKind(k, userLibRaw.get(k), userLibTitles.get(k));
+              if (kind === 'part') importedParts++;
+              else importedHelpers++;
               decoded.push([k, txt]);
-              imported++;
             } catch (_) {}
           }
           if (db && decoded.length) {
@@ -8043,21 +8156,22 @@ async function importBricksLibraryFiles(fileList) {
               tx.oncomplete = () => res(); tx.onerror = () => res();
             });
           }
+          const totalDone = importedParts + importedHelpers;
           const pct = Math.round((Math.min(i + 250, datEntries.length) / Math.max(1, datEntries.length)) * 100);
-          progLabel.textContent = `Imported ${imported.toLocaleString()} / ${datEntries.length.toLocaleString()} parts…`;
-          progPct.textContent = pct + '%';
-          progBar.style.width = pct + '%';
+          if (progLabel) progLabel.textContent = `Imported ${importedParts.toLocaleString()} parts (+${importedHelpers.toLocaleString()} subparts/primitives · ${totalDone.toLocaleString()}/${datEntries.length.toLocaleString()} files)…`;
+          if (progPct) progPct.textContent = pct + '%';
+          if (progBar) progBar.style.width = pct + '%';
           await new Promise(r => setTimeout(r, 4));
         }
       }
     }
     notFoundDatCache.clear();
     await textureStore.predecodeAllPending();
-    embeddedDatCompiled.clear(); pliThumbCache.clear(); submodelThumbCache.clear(); clearMinifigDiagramCaches(); coverHeroCache.clear();
+    invalidateLibraryRenderCaches();
     updateLibraryStatusUI();
     if (state.model) {
       if (state.model._parsed) {
-        const nextPlan = imported > 0
+        const nextPlan = (importedParts + importedHelpers) > 0
           ? refreshSubdivisionPlanForParsed(state.model._parsed, state.model._subdivisionPlan || null)
           : (state.model._subdivisionPlan || null);
         state.model = buildManualFromParsed(state.model._parsed, state.model._mode || 'auto', nextPlan);
@@ -8069,11 +8183,12 @@ async function importBricksLibraryFiles(fileList) {
       computeModelDiagnostics();
       renderAll();
     }
-    showToast(`Imported ${imported.toLocaleString()} brick shape${imported === 1 ? '' : 's'} into library.`);
+    const helperNote = importedHelpers > 0 ? ` (+${importedHelpers.toLocaleString()} subparts & primitives)` : '';
+    showToast(`Imported ${importedParts.toLocaleString()} brick part${importedParts === 1 ? '' : 's'}${helperNote} into library.`);
   } catch (err) {
     showToast(err?.message || 'Could not import bricks library.');
   } finally {
-    progWrap.classList.add('hidden');
+    if (progWrap) progWrap.classList.add('hidden');
   }
 }
 
@@ -8096,32 +8211,6 @@ async function persistLibraryBatchToDb(db, datBatch, texBatch) {
     tx.oncomplete = () => res();
     tx.onerror = () => res();
   });
-}
-
-let libHighlightTimer = null;
-function scrollMenuToBricksLibrary(highlight = true) {
-  const scrollBox = document.getElementById('menuScrollBody');
-  const sec = document.getElementById('menuBricksLibSection');
-  if (!sec) return;
-  const doScroll = () => {
-    if (scrollBox) {
-      const boxRect = scrollBox.getBoundingClientRect();
-      const secRect = sec.getBoundingClientRect();
-      const targetTop = scrollBox.scrollTop + (secRect.top - boxRect.top) - 12;
-      scrollBox.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' });
-    } else {
-      sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-  };
-  // Two animation frames guarantee the newly unhidden drawer has completed layout on iOS Safari
-  requestAnimationFrame(() => requestAnimationFrame(doScroll));
-  if (highlight) {
-    clearTimeout(libHighlightTimer);
-    sec.classList.add('ring-2', 'ring-[#1a73e8]/60', 'rounded-2xl', 'p-2.5', '-mx-2.5', 'bg-[#1a73e8]/5');
-    libHighlightTimer = setTimeout(() => {
-      sec.classList.remove('ring-2', 'ring-[#1a73e8]/60', 'rounded-2xl', 'p-2.5', '-mx-2.5', 'bg-[#1a73e8]/5');
-    }, 1800);
-  }
 }
 
 /**
@@ -8195,11 +8284,7 @@ async function autoFetchMissingPartsForParsed(parsed, displayName = '') {
 
     if (res.fetched > 0 || res.texturesFetched > 0) {
       await textureStore.predecodeAllPending();
-      embeddedDatCompiled.clear();
-      pliThumbCache.clear();
-      submodelThumbCache.clear();
-      clearMinifigDiagramCaches();
-      coverHeroCache.clear();
+      invalidateLibraryRenderCaches();
       updateLibraryStatusUI();
     }
     return res;
@@ -8211,6 +8296,8 @@ async function autoFetchMissingPartsForParsed(parsed, displayName = '') {
 }
 
 let fetchPartsInFlight = false;
+let fetchCancelRequested = false;
+let activeFetchAbortCtrl = null;
 
 function collectMissingFetchTargets() {
   const queue = [];
@@ -8282,37 +8369,74 @@ function hasMissingPartsToFetch() {
   return queue.length > 0 || texQueue.length > 0;
 }
 
-async function fetchMissingPartsOnline(fetchOpts = {}) {
-  const silent = Boolean(fetchOpts && fetchOpts.silent);
-  if (fetchPartsInFlight || !state.model) return;
+async function fetchPartsOnline(opts = {}) {
+  const mode = opts.mode || 'model_missing'; // 'model_missing' | 'pack' | 'custom_ids'
+  const silent = Boolean(opts.silent);
+  const label = opts.label || (mode === 'model_missing' ? 'missing model parts' : 'selected parts');
+  const maxFiles = opts.maxFiles || 2500;
+
+  if (fetchPartsInFlight) {
+    if (!silent) showToast('A library download is already in progress.');
+    return { fetchedParts: 0, fetchedHelpers: 0, fetchedTex: 0, canceled: false };
+  }
+
+  // Never silently download an arbitrary starter set when asked to fetch missing model parts with no model loaded!
+  if (mode === 'model_missing' && !state.model) {
+    if (!silent) {
+      showToast('No model is loaded. Choose a starter pack, enter part IDs, or import complete.zip.');
+    }
+    return { fetchedParts: 0, fetchedHelpers: 0, fetchedTex: 0, canceled: false };
+  }
+
+  const rootPartIds = [];
+  if (mode === 'model_missing' && state.model) {
+    for (const { step } of getAllSteps(state.model)) {
+      for (const p of step.parts) {
+        const leaves = p.children && p.children.length > 0 ? p.children : [p];
+        for (const lf of leaves) {
+          if (lf?.p) rootPartIds.push(lf.p);
+        }
+      }
+    }
+  } else if (Array.isArray(opts.partIds)) {
+    for (const pid of opts.partIds) {
+      if (pid) rootPartIds.push(pid);
+    }
+  }
+
+  if (rootPartIds.length === 0) {
+    if (!silent) showToast('No part IDs to fetch.');
+    return { fetchedParts: 0, fetchedHelpers: 0, fetchedTex: 0, canceled: false };
+  }
+
   fetchPartsInFlight = true;
+  fetchCancelRequested = false;
+  activeFetchAbortCtrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
 
   const progWrap = document.getElementById('libProgressWrap');
   const progLabel = document.getElementById('libProgressLabel');
   const progPct = document.getElementById('libProgressPct');
   const progBar = document.getElementById('libProgressBar');
-  if (!silent) {
+  const cancelBtn = document.getElementById('libCancelOpBtn');
+
+  if (!silent && progWrap) {
     progWrap.classList.remove('hidden');
-    progLabel.textContent = 'Checking missing parts…';
-    progPct.textContent = '0%';
-    progBar.style.width = '0%';
-    scrollMenuToBricksLibrary(false);
+    if (progLabel) progLabel.textContent = `Checking ${label}…`;
+    if (progPct) progPct.textContent = '0%';
+    if (progBar) progBar.style.width = '0%';
+    if (cancelBtn) {
+      cancelBtn.classList.remove('hidden');
+      cancelBtn.disabled = false;
+      cancelBtn.textContent = 'Cancel';
+    }
     // Manual trigger clears session 404 cache so switching mirrors or reconnecting retries cleanly
     notFoundDatCache.clear();
   }
 
-  const rootPartIds = [];
-  for (const { step } of getAllSteps(state.model)) {
-    for (const p of step.parts) {
-      const leaves = p.children && p.children.length > 0 ? p.children : [p];
-      for (const lf of leaves) {
-        if (lf?.p) rootPartIds.push(lf.p);
-      }
-    }
-  }
-
   const mirrors = getSelectedMirrorConfigs();
   const db = await openSessionDB().catch(() => null);
+  let fetchedParts = 0;
+  let fetchedHelpers = 0;
 
   try {
     const res = await fetchLDrawDependencyGraph({
@@ -8324,40 +8448,51 @@ async function fetchMissingPartsOnline(fetchOpts = {}) {
       notFoundCache: notFoundDatCache,
       onDatLoaded: (storeKey, _reqKey, text) => {
         registerUserLibDat(storeKey, text);
+        const kind = classifyDatEntryKind(storeKey, userLibRaw.get(storeKey), userLibTitles.get(storeKey));
+        if (kind === 'part') fetchedParts++;
+        else fetchedHelpers++;
       },
       onTextureLoaded: (texName, b64) => {
         const normName = normalizeTextureName(texName) || texName;
         textureStore.registerBase64Texture(b64, { name: normName, source: 'library' });
       },
       onBatchComplete: (datBatch, texBatch) => persistLibraryBatchToDb(db, datBatch, texBatch),
-      onProgress: ({ fetched, processed, total }) => {
+      onProgress: ({ processed, total }) => {
         if (silent) return;
         const pct = Math.min(99, Math.round((processed / Math.max(1, total)) * 100));
-        progLabel.textContent = `Fetched ${fetched} part${fetched === 1 ? '' : 's'} (${processed}/${total})…`;
-        progPct.textContent = pct + '%';
-        progBar.style.width = pct + '%';
+        const helperTxt = fetchedHelpers > 0 ? ` + ${fetchedHelpers} subparts` : '';
+        if (progLabel) progLabel.textContent = `Fetching ${label}: ${fetchedParts} part${fetchedParts === 1 ? '' : 's'}${helperTxt} (${processed}/${total} files)…`;
+        if (progPct) progPct.textContent = pct + '%';
+        if (progBar) progBar.style.width = pct + '%';
       },
       concurrency: 16,
-      maxQueue: 2500,
+      maxQueue: maxFiles,
       timeoutMs: 8000,
+      signal: activeFetchAbortCtrl?.signal,
     });
 
     if (res.alreadyComplete) {
-      if (!silent) showToast('All parts in this model already have 3D shapes loaded!');
-      return;
+      if (!silent) {
+        showToast(mode === 'model_missing'
+          ? 'All parts in this model already have exact 3D shapes loaded!'
+          : 'All requested parts are already saved in your Bricks Library!');
+      }
+      return { fetchedParts: 0, fetchedHelpers: 0, fetchedTex: 0, canceled: false };
     }
 
     if (res.networkBlocked) {
       if (!silent) showToast('Online fetch is blocked or offline. Use Import .zip / .dat for offline libraries.');
-      return;
+      return { fetchedParts: 0, fetchedHelpers: 0, fetchedTex: 0, canceled: false };
     }
 
     await textureStore.predecodeAllPending();
-    if (res.fetched > 0 || res.texturesFetched > 0) {
-      embeddedDatCompiled.clear(); pliThumbCache.clear(); submodelThumbCache.clear(); clearMinifigDiagramCaches(); coverHeroCache.clear();
+    const totalDatFetched = fetchedParts + fetchedHelpers;
+    const fetchedTex = res.texturesFetched || 0;
+    if (totalDatFetched > 0 || fetchedTex > 0) {
+      invalidateLibraryRenderCaches();
       updateLibraryStatusUI();
       if (state.model) {
-        if (res.fetched > 0 && state.model._parsed) {
+        if (totalDatFetched > 0 && state.model._parsed) {
           const nextPlan = refreshSubdivisionPlanForParsed(state.model._parsed, state.model._subdivisionPlan || null);
           state.model = buildManualFromParsed(state.model._parsed, state.model._mode || 'auto', nextPlan);
           if (lastSourceRecord && nextPlan) {
@@ -8370,16 +8505,631 @@ async function fetchMissingPartsOnline(fetchOpts = {}) {
       }
     }
     if (!silent) {
-      const totalFetched = res.fetched + res.texturesFetched;
-      showToast(totalFetched > 0
-        ? `Fetched ${res.fetched} part shape${res.fetched === 1 ? '' : 's'}${res.texturesFetched > 0 ? ` and ${res.texturesFetched} decal texture${res.texturesFetched === 1 ? '' : 's'}` : ''} from public LDraw library.`
-        : 'No matching parts found at that public source.');
+      const totalFetched = totalDatFetched + fetchedTex;
+      if (fetchCancelRequested || res.aborted) {
+        showToast(totalDatFetched > 0
+          ? `Canceled download. Saved ${fetchedParts} part${fetchedParts === 1 ? '' : 's'}${fetchedHelpers > 0 ? ` (+${fetchedHelpers} subparts/primitives)` : ''} so far.`
+          : 'Download canceled.');
+      } else if (totalFetched > 0) {
+        const helperPart = fetchedHelpers > 0 ? ` (+${fetchedHelpers} subpart${fetchedHelpers === 1 ? '' : 's'}/primitive${fetchedHelpers === 1 ? '' : 's'})` : '';
+        const texPart = fetchedTex > 0 ? ` and ${fetchedTex} decal texture${fetchedTex === 1 ? '' : 's'}` : '';
+        showToast(`Fetched ${fetchedParts} part${fetchedParts === 1 ? '' : 's'}${helperPart}${texPart} from public LDraw library.`);
+      } else {
+        showToast('No matching parts found at that public source.');
+      }
     }
+    return { fetchedParts, fetchedHelpers, fetchedTex, canceled: Boolean(fetchCancelRequested || res.aborted) };
   } finally {
     fetchPartsInFlight = false;
-    if (!silent) progWrap.classList.add('hidden');
+    fetchCancelRequested = false;
+    activeFetchAbortCtrl = null;
+    if (!silent && progWrap) progWrap.classList.add('hidden');
     syncMenuControls();
   }
+}
+
+async function fetchMissingPartsOnline(fetchOpts = {}) {
+  return fetchPartsOnline({
+    mode: 'model_missing',
+    silent: Boolean(fetchOpts && fetchOpts.silent),
+    label: state.model?.title ? `${state.model.title} parts` : 'missing model parts',
+  });
+}
+
+// ---- DEDICATED BRICKS LIBRARY SCREEN (BROWSE, SEARCH, 3D PREVIEW, FETCH & MANAGE) ----
+function renderPartPreviewDataUrl(partId, colorId, size = 144, az = 38, el = 24) {
+  const cacheKey = `${partId}:${colorId}:${size}:${az}:${el}`;
+  if (libThumbCache.has(cacheKey)) return libThumbCache.get(cacheKey);
+  const rawPart = { id: `lib_${partId}`, p: partId, c: colorId, x: 0, y: 0, z: 0, r: R_ID };
+  const samplePart = normalizeCompositeThumbPart(rawPart, (pid) => resolvePart(pid).name, computeWorldBox);
+  const mesh = buildMeshBuffers([], [samplePart], { highlightNew: false, fadePrev: false, showArrows: false, accent: '#1a73e8' });
+  snapshotEngine.draw(mesh, size, size, az, el, 1.08);
+  const url = snapshotCanvas.toDataURL('image/png');
+  if (libThumbCache.size > 320) {
+    const oldestKey = libThumbCache.keys().next().value;
+    if (oldestKey !== undefined) libThumbCache.delete(oldestKey);
+  }
+  libThumbCache.set(cacheKey, url);
+  return url;
+}
+
+function stopLibThumbQueue() {
+  libThumbQueue = [];
+  if (libThumbRafId) {
+    cancelAnimationFrame(libThumbRafId);
+    libThumbRafId = 0;
+  }
+  if (libThumbObserver) {
+    libThumbObserver.disconnect();
+    libThumbObserver = null;
+  }
+}
+
+function flushLibThumbQueue() {
+  libThumbRafId = 0;
+  if (!isBricksLibraryModalOpen() || libUiState.tab !== 'browse') {
+    libThumbQueue = [];
+    return;
+  }
+  const budget = 4;
+  let rendered = 0;
+  while (libThumbQueue.length > 0 && rendered < budget) {
+    const imgEl = libThumbQueue.shift();
+    if (!imgEl || !imgEl.isConnected || imgEl.dataset.loaded === '1') continue;
+    const pid = imgEl.dataset.partId;
+    const col = Number(imgEl.dataset.colorId || libUiState.previewColor);
+    if (!pid) continue;
+    try {
+      imgEl.src = renderPartPreviewDataUrl(pid, col, 144, 34, 22);
+      imgEl.dataset.loaded = '1';
+      imgEl.classList.remove('opacity-0');
+    } catch (_) {}
+    rendered++;
+  }
+  if (libThumbQueue.length > 0) {
+    libThumbRafId = requestAnimationFrame(flushLibThumbQueue);
+  }
+}
+
+function enqueueLibThumbImg(imgEl) {
+  if (!imgEl || imgEl.dataset.loaded === '1') return;
+  const pid = imgEl.dataset.partId;
+  const col = Number(imgEl.dataset.colorId || libUiState.previewColor);
+  const cacheKey = `${pid}:${col}:144:34:22`;
+  if (libThumbCache.has(cacheKey)) {
+    imgEl.src = libThumbCache.get(cacheKey);
+    imgEl.dataset.loaded = '1';
+    imgEl.classList.remove('opacity-0');
+    return;
+  }
+  libThumbQueue.push(imgEl);
+  if (!libThumbRafId) {
+    libThumbRafId = requestAnimationFrame(flushLibThumbQueue);
+  }
+}
+
+function attachLibThumbLazyLoader(gridEl, scrollRoot) {
+  stopLibThumbQueue();
+  const imgs = Array.from(gridEl.querySelectorAll('img[data-part-id]'));
+  if (!imgs.length) return;
+  if (typeof IntersectionObserver !== 'undefined') {
+    libThumbObserver = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) {
+          libThumbObserver?.unobserve(entry.target);
+          enqueueLibThumbImg(entry.target);
+        }
+      }
+    }, { root: scrollRoot || null, rootMargin: '140px 0px' });
+    for (const img of imgs) libThumbObserver.observe(img);
+  } else {
+    for (const img of imgs) enqueueLibThumbImg(img);
+  }
+}
+
+function getSourceBadgeHtml(item) {
+  if (item.isMissingInModel) {
+    return '<span class="px-1.5 py-0.5 rounded-md text-[9px] font-bold bg-red-500/15 text-red-600 dark:text-red-400">Missing</span>';
+  }
+  if (item.primarySource === 'embedded') {
+    return '<span class="px-1.5 py-0.5 rounded-md text-[9px] font-bold bg-purple-500/15 text-purple-700 dark:text-purple-300">.io</span>';
+  }
+  if (item.primarySource === 'saved') {
+    return '<span class="px-1.5 py-0.5 rounded-md text-[9px] font-bold bg-[#1a73e8]/15 text-[#1a73e8]">LDraw</span>';
+  }
+  return '<span class="px-1.5 py-0.5 rounded-md text-[9px] font-semibold bg-black/6 dark:bg-white/10 text-[var(--muted-foreground)]">Built-in</span>';
+}
+
+function renderLibColorSwatches() {
+  const wrap = document.getElementById('libColorSwatches');
+  if (!wrap) return;
+  wrap.innerHTML = LIB_PREVIEW_COLORS.map((sw) => {
+    const col = COLORS[sw.id] || { hex: '#c91a09', name: sw.label };
+    const active = libUiState.previewColor === sw.id;
+    return `<button type="button" data-lib-color="${sw.id}" title="${escHtml(sw.label)}" class="w-4 h-4 rounded-full border transition ${active ? 'ring-2 ring-[#1a73e8] ring-offset-1 ring-offset-[var(--card)] scale-110 border-white/80' : 'border-black/25 dark:border-white/25 hover:scale-110'}" style="background:${col.hex}"></button>`;
+  }).join('');
+  wrap.querySelectorAll('button[data-lib-color]').forEach((btn) => {
+    btn.onclick = () => {
+      const nextColor = Number(btn.getAttribute('data-lib-color'));
+      if (Number.isFinite(nextColor) && nextColor !== libUiState.previewColor) {
+        libUiState.previewColor = nextColor;
+        renderLibColorSwatches();
+        renderLibBrowseTab(false);
+        renderLibPreviewInspector();
+      }
+    };
+  });
+}
+
+function renderLibPreviewInspector() {
+  const pane = document.getElementById('libPreviewPane');
+  const emptyEl = document.getElementById('libPreviewEmpty');
+  const detailEl = document.getElementById('libPreviewDetail');
+  const imgEl = document.getElementById('libPreviewImg');
+  const metaEl = document.getElementById('libPreviewMeta');
+  const actionsEl = document.getElementById('libPreviewActions');
+  const flipBtn = document.getElementById('libPreviewFlipBtn');
+  if (!pane || !emptyEl || !detailEl || !imgEl || !metaEl || !actionsEl) return;
+
+  const { items } = getLibrarySnapshot();
+  const item = libUiState.selectedId ? items.find((x) => x.id === libUiState.selectedId) : null;
+
+  if (!item) {
+    emptyEl.classList.remove('hidden');
+    detailEl.classList.add('hidden');
+    // On mobile, keep inspector collapsed when nothing is selected
+    pane.classList.add('hidden');
+    pane.classList.add('md:flex');
+    return;
+  }
+
+  pane.classList.remove('hidden');
+  pane.classList.add('flex');
+  emptyEl.classList.add('hidden');
+  detailEl.classList.remove('hidden');
+
+  try {
+    imgEl.src = renderPartPreviewDataUrl(item.id, libUiState.previewColor, 260, libUiState.previewAz, libUiState.previewEl);
+  } catch (_) {}
+
+  document.querySelectorAll('.lib-angle-btn').forEach((btn) => {
+    const az = Number(btn.getAttribute('data-lib-az'));
+    const active = az === libUiState.previewAz;
+    btn.classList.toggle('bg-[#1a73e8]', active);
+    btn.classList.toggle('text-white', active);
+    btn.classList.toggle('border-[#1a73e8]', active);
+  });
+  if (flipBtn) {
+    const flipped = libUiState.previewEl < 0;
+    flipBtn.classList.toggle('bg-[#1a73e8]', flipped);
+    flipBtn.classList.toggle('text-white', flipped);
+    flipBtn.classList.toggle('border-[#1a73e8]', flipped);
+    flipBtn.textContent = flipped ? 'Bottom' : 'Top';
+  }
+
+  const sourceLabels = [];
+  if (item.sources.includes('embedded')) sourceLabels.push('<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-500/15 text-purple-700 dark:text-purple-300">Embedded (.io)</span>');
+  if (item.sources.includes('saved')) sourceLabels.push('<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#1a73e8]/15 text-[#1a73e8]">Saved LDraw .dat</span>');
+  if (item.sources.includes('builtin')) sourceLabels.push('<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-black/6 dark:bg-white/10 text-[var(--muted-foreground)]">Built-in Shape</span>');
+  if (item.isMissingInModel) sourceLabels.push('<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-500/15 text-red-600 dark:text-red-400">Missing in Model</span>');
+  else if (item.inCurrentModel) sourceLabels.push('<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">In Current Model</span>');
+
+  const kindLabel = item.kind === 'part' ? 'Part' : item.kind === 'subpart' ? 'Subpart' : 'Primitive';
+  const colorName = COLORS[libUiState.previewColor]?.name || `Color ${libUiState.previewColor}`;
+
+  metaEl.innerHTML = `
+    <div class="font-bold text-[13px] leading-snug break-words">${escHtml(item.name)}</div>
+    <div class="flex items-center gap-1.5 flex-wrap">
+      <span class="px-2 py-0.5 rounded-md font-mono text-[11px] font-bold bg-black/6 dark:bg-white/10">${escHtml(item.id)}.dat</span>
+      <span class="text-[11px] text-[var(--muted-foreground)] capitalize">${escHtml(kindLabel)} · ${escHtml(item.category)}</span>
+    </div>
+    <div class="flex items-center gap-1 flex-wrap pt-0.5">${sourceLabels.join('')}</div>
+    <div class="text-[11px] text-[var(--muted-foreground)] pt-0.5">
+      Preview color: <b>${escHtml(colorName)}</b>${item.subpartRefCount > 0 ? ` · ${item.subpartRefCount} subfile ref${item.subpartRefCount === 1 ? '' : 's'}` : ''}
+    </div>
+  `;
+
+  const actionButtons = [];
+  if (!item.sources.includes('saved')) {
+    actionButtons.push(`
+      <button id="libPreviewFetchBtn" class="w-full py-2 px-3 rounded-xl bg-[#1a73e8] text-white font-semibold hover:opacity-95 transition">
+        Fetch Exact ${escHtml(item.id)}.dat Online
+      </button>
+    `);
+  }
+  if (item.sources.includes('saved')) {
+    actionButtons.push(`
+      <button id="libPreviewRemoveBtn" class="w-full py-2 px-3 rounded-xl border border-red-500/35 bg-[var(--card)] text-red-600 dark:text-red-400 hover:bg-red-500/10 font-semibold transition">
+        Remove ${escHtml(item.id)}.dat from Saved Library
+      </button>
+    `);
+  }
+  actionsEl.innerHTML = actionButtons.join('');
+
+  const fetchOneBtn = actionsEl.querySelector('#libPreviewFetchBtn');
+  if (fetchOneBtn) {
+    fetchOneBtn.onclick = async () => {
+      await fetchPartsOnline({
+        mode: 'custom_ids',
+        partIds: [item.id],
+        label: `part ${item.id}`,
+      });
+      renderBricksLibraryModal(false);
+    };
+  }
+  const removeOneBtn = actionsEl.querySelector('#libPreviewRemoveBtn');
+  if (removeOneBtn) {
+    removeOneBtn.onclick = async () => {
+      const removedLines = userLibRaw.get(item.id);
+      userLibRaw.delete(item.id);
+      userLibTitles.delete(item.id);
+      if (removedLines) {
+        for (const [k, lns] of Array.from(userLibRaw.entries())) {
+          if (lns === removedLines) {
+            userLibRaw.delete(k);
+            userLibTitles.delete(k);
+          }
+        }
+      }
+      await dbDelete(item.id, LIB_STORE);
+      invalidateLibraryRenderCaches();
+      updateLibraryStatusUI();
+      if (state.model) {
+        computeModelDiagnostics();
+        renderAll();
+      }
+      showToast(`Removed ${item.id}.dat from Saved Bricks Library.`);
+      renderBricksLibraryModal(false);
+    };
+  }
+}
+
+function renderLibBrowseTab(resetLimit = false) {
+  if (resetLimit) libUiState.visibleLimit = 48;
+  const { items, stats } = getLibrarySnapshot();
+
+  // Render scope filter pills
+  const scopeBar = document.getElementById('libScopeFilterBar');
+  if (scopeBar) {
+    const scopeDefs = [
+      { id: 'all', label: 'All', show: true },
+      { id: 'saved', label: `Saved (${stats.savedParts.toLocaleString()})`, show: true },
+      { id: 'embedded', label: `Embedded .io (${stats.embeddedParts.toLocaleString()})`, show: stats.embeddedParts > 0 },
+      { id: 'builtin', label: `Built-in (${stats.builtInParts})`, show: true },
+      { id: 'model', label: `In Model (${stats.modelUniqueParts})`, show: Boolean(state.model) },
+      { id: 'missing', label: `Missing (${stats.modelMissingShapeCount})`, show: stats.modelMissingShapeCount > 0 },
+    ].filter((s) => s.show);
+
+    if (!scopeDefs.some((s) => s.id === libUiState.scope)) {
+      libUiState.scope = 'all';
+    }
+
+    scopeBar.innerHTML = scopeDefs.map((s) => {
+      const active = libUiState.scope === s.id;
+      return `<button type="button" data-lib-scope="${s.id}" class="px-2.5 py-1 rounded-full border text-[11px] font-semibold whitespace-nowrap transition ${active ? 'bg-[#1a73e8] text-white border-[#1a73e8]' : 'bg-[var(--background)] border-[var(--border)] hover:border-[#1a73e8]/50'}">${escHtml(s.label)}</button>`;
+    }).join('');
+    scopeBar.querySelectorAll('button[data-lib-scope]').forEach((btn) => {
+      btn.onclick = () => {
+        libUiState.scope = btn.getAttribute('data-lib-scope') || 'all';
+        renderLibBrowseTab(true);
+      };
+    });
+  }
+
+  const filtered = filterLibraryItems(items, {
+    query: libUiState.query,
+    scope: libUiState.scope,
+    category: libUiState.category,
+    includeHelpers: libUiState.includeHelpers,
+  });
+
+  const summaryEl = document.getElementById('libBrowseSummary');
+  const gridEl = document.getElementById('libBrowseGrid');
+  const gridWrap = document.getElementById('libBrowseGridWrap');
+  const loadMoreWrap = document.getElementById('libLoadMoreWrap');
+  const loadMoreBtn = document.getElementById('libLoadMoreBtn');
+  const fetchBannerEl = document.getElementById('libSearchFetchBanner');
+  if (!gridEl) return;
+
+  const shown = filtered.slice(0, libUiState.visibleLimit);
+  if (summaryEl) {
+    if (filtered.length === 0) {
+      summaryEl.textContent = 'No matching parts in current view';
+    } else if (filtered.length > shown.length) {
+      summaryEl.textContent = `Showing ${shown.length.toLocaleString()} of ${filtered.length.toLocaleString()} matching parts`;
+    } else {
+      summaryEl.textContent = `${filtered.length.toLocaleString()} part${filtered.length === 1 ? '' : 's'}`;
+    }
+  }
+
+  // If the user typed a specific part ID (e.g. "3010" or "3626cp01") that isn't saved yet, offer direct online fetch!
+  if (fetchBannerEl) {
+    const fetchableId = extractFetchablePartIdFromQuery(libUiState.query);
+    if (fetchableId && !userLibRaw.has(fetchableId)) {
+      fetchBannerEl.classList.remove('hidden');
+      fetchBannerEl.innerHTML = `
+        <div class="text-[11px] min-w-0">
+          <div class="font-bold text-[#1a73e8]">Fetch <span class="font-mono">${escHtml(fetchableId)}.dat</span> from online LDraw library?</div>
+          <div class="text-[var(--muted-foreground)]">Downloads its exact 3D geometry and subparts into your saved library.</div>
+        </div>
+        <button id="libQuickSearchFetchBtn" class="px-3.5 py-1.5 rounded-full bg-[#1a73e8] text-white font-semibold shrink-0 hover:opacity-95 transition">
+          Fetch ${escHtml(fetchableId)} Online
+        </button>
+      `;
+      const qBtn = fetchBannerEl.querySelector('#libQuickSearchFetchBtn');
+      if (qBtn) {
+        qBtn.onclick = async () => {
+          const res = await fetchPartsOnline({
+            mode: 'custom_ids',
+            partIds: [fetchableId],
+            label: `part ${fetchableId}`,
+          });
+          if (res.fetchedParts > 0 || userLibRaw.has(fetchableId)) {
+            libUiState.selectedId = fetchableId;
+          }
+          renderBricksLibraryModal(false);
+        };
+      }
+    } else {
+      fetchBannerEl.classList.add('hidden');
+      fetchBannerEl.innerHTML = '';
+    }
+  }
+
+  if (shown.length === 0) {
+    stopLibThumbQueue();
+    gridEl.innerHTML = `
+      <div class="col-span-full py-10 text-center space-y-2 text-[var(--muted-foreground)]">
+        <div class="font-bold text-sm text-[var(--foreground)]">No parts found</div>
+        <p class="text-[11px] max-w-sm mx-auto leading-relaxed">
+          Try a different part ID or name, switch filters above, or go to <b>Fetch &amp; Import</b> to download starter packs or import <b>complete.zip</b>.
+        </p>
+      </div>
+    `;
+    if (loadMoreWrap) loadMoreWrap.classList.add('hidden');
+    return;
+  }
+
+  gridEl.innerHTML = shown.map((item) => {
+    const selected = libUiState.selectedId === item.id;
+    return `
+      <button type="button" data-lib-part="${escHtml(item.id)}" class="group text-left p-2 rounded-2xl border transition flex flex-col gap-1.5 ${selected ? 'border-[#1a73e8] ring-2 ring-[#1a73e8]/25 bg-[#1a73e8]/[0.06]' : 'border-[var(--border)] bg-[var(--background)] hover:border-[#1a73e8]/55'}">
+        <div class="aspect-square w-full rounded-xl bg-[var(--card)] border border-[var(--border)]/60 relative flex items-center justify-center p-1.5 overflow-hidden">
+          <img data-part-id="${escHtml(item.id)}" data-color-id="${libUiState.previewColor}" alt="${escHtml(item.name)}" class="w-full h-full object-contain opacity-0 transition-opacity duration-150" />
+          <div class="absolute top-1.5 right-1.5">${getSourceBadgeHtml(item)}</div>
+        </div>
+        <div class="px-0.5 min-w-0 space-y-0.5">
+          <div class="font-mono text-[11px] font-bold truncate">${escHtml(item.id)}</div>
+          <div class="text-[10px] text-[var(--muted-foreground)] leading-tight line-clamp-2 min-h-[26px]">${escHtml(item.name)}</div>
+        </div>
+      </button>
+    `;
+  }).join('');
+
+  gridEl.querySelectorAll('button[data-lib-part]').forEach((btn) => {
+    btn.onclick = () => {
+      const pid = btn.getAttribute('data-lib-part');
+      libUiState.selectedId = pid;
+      // Highlight selection without rebuilding the entire grid DOM
+      gridEl.querySelectorAll('button[data-lib-part]').forEach((card) => {
+        const isSel = card.getAttribute('data-lib-part') === pid;
+        card.classList.toggle('border-[#1a73e8]', isSel);
+        card.classList.toggle('ring-2', isSel);
+        card.classList.toggle('ring-[#1a73e8]/25', isSel);
+        card.classList.toggle('bg-[#1a73e8]/[0.06]', isSel);
+        card.classList.toggle('border-[var(--border)]', !isSel);
+        card.classList.toggle('bg-[var(--background)]', !isSel);
+      });
+      renderLibPreviewInspector();
+    };
+  });
+
+  if (loadMoreWrap && loadMoreBtn) {
+    const remaining = filtered.length - shown.length;
+    loadMoreWrap.classList.toggle('hidden', remaining <= 0);
+    if (remaining > 0) {
+      loadMoreBtn.textContent = `Load more parts (${remaining.toLocaleString()} remaining)`;
+    }
+  }
+
+  attachLibThumbLazyLoader(gridEl, gridWrap);
+}
+
+function renderLibManageTab() {
+  const { items, stats } = getLibrarySnapshot();
+
+  // 1. Current Model Fetch Card (unambiguous whether a model is loaded or not!)
+  const modelCopy = getModelFetchCopy({
+    hasModel: Boolean(state.model),
+    modelTitle: state.model?.title,
+    missingShapeCount: stats.modelMissingShapeCount,
+    missingExactDatCount: stats.modelMissingExactDatCount,
+  });
+  const headingEl = document.getElementById('libModelFetchHeading');
+  const descEl = document.getElementById('libModelFetchDesc');
+  const fetchModelBtn = document.getElementById('libFetchModelBtn');
+  const fetchModelBtnLabel = document.getElementById('libFetchModelBtnLabel');
+  const chipsEl = document.getElementById('libModelMissingChips');
+
+  if (headingEl) headingEl.textContent = modelCopy.heading;
+  if (descEl) descEl.textContent = modelCopy.description;
+  if (fetchModelBtn) fetchModelBtn.disabled = !modelCopy.buttonEnabled || fetchPartsInFlight;
+  if (fetchModelBtnLabel) fetchModelBtnLabel.textContent = modelCopy.buttonLabel;
+
+  if (chipsEl) {
+    const missingItems = items.filter((it) => it.isMissingInModel);
+    if (state.model && missingItems.length > 0) {
+      chipsEl.classList.remove('hidden');
+      const maxChips = 10;
+      const chipHtml = missingItems.slice(0, maxChips).map((it) =>
+        `<span class="px-2 py-0.5 rounded-md font-mono text-[10px] font-bold bg-red-500/12 text-red-600 dark:text-red-400 border border-red-500/25">${escHtml(it.id)}.dat</span>`,
+      ).join('');
+      const moreHtml = missingItems.length > maxChips
+        ? `<span class="text-[10px] font-semibold text-[var(--muted-foreground)]">+${missingItems.length - maxChips} more</span>`
+        : '';
+      chipsEl.innerHTML = chipHtml + moreHtml;
+    } else {
+      chipsEl.classList.add('hidden');
+      chipsEl.innerHTML = '';
+    }
+  }
+
+  // 2. Curated Starter Packs Grid
+  const allPackIds = getAllStarterPackPartIds();
+  const allPackRemaining = allPackIds.filter((id) => !userLibRaw.has(id));
+  const fetchAllBtn = document.getElementById('libFetchAllPacksBtn');
+  if (fetchAllBtn) {
+    fetchAllBtn.disabled = allPackRemaining.length === 0 || fetchPartsInFlight;
+    fetchAllBtn.textContent = allPackRemaining.length === 0
+      ? `All ${allPackIds.length} Starter Parts Saved ✓`
+      : `Fetch All Starter Packs (${allPackRemaining.length} remaining)`;
+  }
+
+  const packsGrid = document.getElementById('libStarterPacksGrid');
+  if (packsGrid) {
+    packsGrid.innerHTML = ONLINE_STARTER_PACKS.map((pack) => {
+      const prog = computeStarterPackProgress(pack, (id) => userLibRaw.has(id));
+      const done = prog.missingIds.length === 0;
+      return `
+        <div class="p-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] flex flex-col justify-between gap-2.5">
+          <div class="space-y-1">
+            <div class="flex items-center justify-between gap-2">
+              <span class="font-bold text-[12px]">${escHtml(pack.name)}</span>
+              <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${done ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' : 'bg-black/6 dark:bg-white/10 text-[var(--muted-foreground)]'}">${prog.savedCount} / ${prog.totalCount} saved</span>
+            </div>
+            <p class="text-[11px] text-[var(--muted-foreground)] leading-snug">${escHtml(pack.description)}</p>
+          </div>
+          <button type="button" data-fetch-pack="${escHtml(pack.id)}" ${done || fetchPartsInFlight ? 'disabled' : ''} class="w-full py-1.5 px-3 rounded-xl font-semibold transition ${done ? 'border border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 cursor-default' : 'border border-[#1a73e8]/40 bg-[#1a73e8]/10 text-[#1a73e8] hover:bg-[#1a73e8]/20 disabled:opacity-45'}">
+            ${done ? 'Saved in Library ✓' : `Fetch ${prog.missingIds.length} Part${prog.missingIds.length === 1 ? '' : 's'}`}
+          </button>
+        </div>
+      `;
+    }).join('');
+
+    packsGrid.querySelectorAll('button[data-fetch-pack]').forEach((btn) => {
+      btn.onclick = async () => {
+        const packId = btn.getAttribute('data-fetch-pack');
+        const pack = ONLINE_STARTER_PACKS.find((p) => p.id === packId);
+        if (!pack) return;
+        const prog = computeStarterPackProgress(pack, (id) => userLibRaw.has(id));
+        if (!prog.missingIds.length) return;
+        await fetchPartsOnline({
+          mode: 'pack',
+          partIds: prog.missingIds,
+          label: `${pack.name} pack`,
+        });
+        renderBricksLibraryModal(false);
+      };
+    });
+  }
+
+  // 3. Saved Library Storage (Danger Zone — clearly separated from Import!)
+  const storageEl = document.getElementById('libStorageSummary');
+  const clearBtn = document.getElementById('libClearSavedBtn');
+  const confirmWrap = document.getElementById('libClearConfirmWrap');
+  const confirmText = document.getElementById('libClearConfirmText');
+  const totalStored = stats.savedTotalFiles + stats.savedTextures;
+  if (storageEl) {
+    if (totalStored === 0) {
+      storageEl.textContent = '0 saved files in browser storage';
+    } else {
+      const partsLabel = `${stats.savedParts.toLocaleString()} part${stats.savedParts === 1 ? '' : 's'}`;
+      const helpersLabel = stats.savedHelpers > 0 ? ` + ${stats.savedHelpers.toLocaleString()} subpart${stats.savedHelpers === 1 ? '' : 's'}/primitive${stats.savedHelpers === 1 ? '' : 's'}` : '';
+      const texLabel = stats.savedTextures > 0 ? ` · ${stats.savedTextures.toLocaleString()} texture${stats.savedTextures === 1 ? '' : 's'}` : '';
+      storageEl.textContent = `${partsLabel}${helpersLabel} (${stats.savedTotalFiles.toLocaleString()} files${texLabel})`;
+    }
+  }
+  if (clearBtn) clearBtn.disabled = totalStored === 0;
+  if (confirmWrap && totalStored === 0) confirmWrap.classList.add('hidden');
+  if (confirmText) {
+    confirmText.textContent = `Delete all ${stats.savedTotalFiles.toLocaleString()} saved file${stats.savedTotalFiles === 1 ? '' : 's'}${stats.savedTextures > 0 ? ` and ${stats.savedTextures.toLocaleString()} texture${stats.savedTextures === 1 ? '' : 's'}` : ''} from your Bricks Library?`;
+  }
+}
+
+function renderBricksLibraryModal(resetLimit = false) {
+  const { items, stats } = getLibrarySnapshot();
+
+  // Header subtitle & stats pills
+  const subtitleEl = document.getElementById('libModalSubtitle');
+  if (subtitleEl) {
+    const partsBreakdown = stats.savedParts > 0
+      ? `${stats.savedParts.toLocaleString()} saved part${stats.savedParts === 1 ? '' : 's'}${stats.savedHelpers > 0 ? ` (+${stats.savedHelpers.toLocaleString()} subparts/primitives)` : ''}`
+      : 'No saved LDraw parts yet';
+    subtitleEl.textContent = `${partsBreakdown} · ${stats.builtInParts} built-in shapes${stats.embeddedParts > 0 ? ` · ${stats.embeddedParts.toLocaleString()} embedded (.io)` : ''}`;
+  }
+
+  const browseCountEl = document.getElementById('libTabBrowseCount');
+  if (browseCountEl) {
+    const browsableParts = items.filter((it) => it.kind === 'part').length;
+    browseCountEl.textContent = browsableParts.toLocaleString();
+  }
+
+  const manageBadgeEl = document.getElementById('libTabManageBadge');
+  if (manageBadgeEl) {
+    manageBadgeEl.classList.toggle('hidden', stats.modelMissingShapeCount === 0);
+    manageBadgeEl.textContent = `${stats.modelMissingShapeCount} missing`;
+  }
+
+  const statsPillsEl = document.getElementById('libHeaderStatsPills');
+  if (statsPillsEl) {
+    const pills = [];
+    if (stats.savedParts > 0) {
+      pills.push(`<span class="px-2 py-0.5 rounded-full bg-[#1a73e8]/12 text-[#1a73e8] font-semibold">${stats.savedParts.toLocaleString()} saved</span>`);
+    }
+    if (stats.embeddedParts > 0) {
+      pills.push(`<span class="px-2 py-0.5 rounded-full bg-purple-500/12 text-purple-700 dark:text-purple-300 font-semibold">${stats.embeddedParts.toLocaleString()} embedded (.io)</span>`);
+    }
+    if (stats.modelMissingShapeCount > 0) {
+      pills.push(`<span class="px-2 py-0.5 rounded-full bg-red-500/12 text-red-600 dark:text-red-400 font-bold">${stats.modelMissingShapeCount} missing in model</span>`);
+    }
+    statsPillsEl.innerHTML = pills.join('');
+  }
+
+  // Active tab state
+  document.querySelectorAll('.lib-tab-btn').forEach((btn) => {
+    const active = btn.getAttribute('data-lib-tab') === libUiState.tab;
+    btn.classList.toggle('bg-[#1a73e8]', active);
+    btn.classList.toggle('text-white', active);
+    btn.classList.toggle('shadow-xs', active);
+    btn.classList.toggle('text-[var(--muted-foreground)]', !active);
+  });
+
+  const browsePanel = document.getElementById('libTabBrowse');
+  const managePanel = document.getElementById('libTabManage');
+  if (browsePanel) browsePanel.classList.toggle('hidden', libUiState.tab !== 'browse');
+  if (managePanel) managePanel.classList.toggle('hidden', libUiState.tab !== 'manage');
+
+  if (libUiState.tab === 'browse') {
+    renderLibColorSwatches();
+    renderLibBrowseTab(resetLimit);
+    renderLibPreviewInspector();
+  } else {
+    stopLibThumbQueue();
+    renderLibManageTab();
+  }
+}
+
+function openBricksLibraryModal(preferredTab = null) {
+  closeMenu();
+  const confirmWrap = document.getElementById('libClearConfirmWrap');
+  if (confirmWrap) confirmWrap.classList.add('hidden');
+  const { stats } = getLibrarySnapshot(true);
+  if (preferredTab === 'browse' || preferredTab === 'manage') {
+    libUiState.tab = preferredTab;
+  } else if (stats.modelMissingShapeCount > 0) {
+    libUiState.tab = 'manage';
+  }
+  const modal = document.getElementById('bricksLibraryModal');
+  if (modal) modal.classList.remove('hidden');
+  renderBricksLibraryModal(true);
+}
+
+function closeBricksLibraryModal() {
+  stopLibThumbQueue();
+  const confirmWrap = document.getElementById('libClearConfirmWrap');
+  if (confirmWrap) confirmWrap.classList.add('hidden');
+  const modal = document.getElementById('bricksLibraryModal');
+  if (modal) modal.classList.add('hidden');
 }
 
 // ---- MODEL ERRORS & DIAGNOSTICS ENGINE ----
@@ -8477,6 +9227,7 @@ function computeModelDiagnostics() {
     state.seenDiagnosticKeys = acknowledgeDiagnostics(diags, state.seenDiagnosticKeys);
   }
   updateErrorIndicators();
+  updateLibraryStatusUI();
   if (isErrorsModalOpen) renderErrorsModal();
 }
 
@@ -8633,15 +9384,13 @@ function renderErrorsModal() {
   const quickFetch = body.querySelector('#errFetchLibQuick');
   if (quickFetch) quickFetch.onclick = async () => {
     document.getElementById('errorsModal').classList.add('hidden');
-    openMenu();
-    scrollMenuToBricksLibrary(true);
+    openBricksLibraryModal('manage');
     await fetchMissingPartsOnline();
   };
   const quickLib = body.querySelector('#errImportLibQuick');
   if (quickLib) quickLib.onclick = () => {
     document.getElementById('errorsModal').classList.add('hidden');
-    openMenu();
-    scrollMenuToBricksLibrary(true);
+    openBricksLibraryModal('manage');
     document.getElementById('libImportInput').click();
   };
   body.querySelectorAll('.jump-step-btn').forEach(btn => {
@@ -10049,7 +10798,9 @@ document.getElementById('themeImportInput').onchange = async (e) => {
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   const ovModal = document.getElementById('overviewModal');
-  if (ovModal && !ovModal.classList.contains('hidden')) {
+  if (isBricksLibraryModalOpen()) {
+    closeBricksLibraryModal();
+  } else if (ovModal && !ovModal.classList.contains('hidden')) {
     ovModal.classList.add('hidden');
   } else if (themeEditorModalEl && !themeEditorModalEl.classList.contains('hidden')) {
     closeThemeEditor();
@@ -10185,6 +10936,7 @@ document.getElementById('toggleDetectDuplicates').onchange = (e) => {
 function openExportModal() {
   if (!state.model || state.pages.length === 0) { showToast('Import a model first.'); return; }
   closeMenu();
+  closeBricksLibraryModal();
   document.getElementById('pageSetupModal').classList.add('hidden');
   document.getElementById('bomSetupModal').classList.add('hidden');
   const fmt = PAPER_FORMATS[state.paperFormat] || PAPER_FORMATS.letter;
@@ -10365,28 +11117,198 @@ const triggerImport = () => { closeMenu(); document.getElementById('fileInput').
 document.getElementById('emptyImportBtn').onclick = triggerImport;
 document.getElementById('menuImportBtn').onclick = triggerImport;
 
-// Errors Modal, Bottom Error Banner & Bricks Library Wiring
+// Errors Modal, Bottom Error Banner & Dedicated Bricks Library Screen Wiring
 document.getElementById('menuErrorsBtn').onclick = openErrorsModal;
 document.getElementById('btnCloseErrors').onclick = () => document.getElementById('errorsModal').classList.add('hidden');
 document.getElementById('btnBannerSeeErrors').onclick = openErrorsModal;
 document.getElementById('btnBannerDismiss').onclick = dismissErrorBanner;
+document.getElementById('menuBricksLibBtn').onclick = () => openBricksLibraryModal();
+document.getElementById('btnCloseBricksLib').onclick = closeBricksLibraryModal;
+document.getElementById('bricksLibDoneBtn').onclick = closeBricksLibraryModal;
+document.getElementById('bricksLibraryModal').onclick = (e) => {
+  if (e.target.id === 'bricksLibraryModal') closeBricksLibraryModal();
+};
+
+document.querySelectorAll('.lib-tab-btn').forEach((btn) => {
+  btn.onclick = () => {
+    const nextTab = btn.getAttribute('data-lib-tab');
+    if (nextTab === 'browse' || nextTab === 'manage') {
+      libUiState.tab = nextTab;
+      renderBricksLibraryModal(false);
+    }
+  };
+});
+
+const libSearchInputEl = document.getElementById('libSearchInput');
+const libSearchClearBtnEl = document.getElementById('libSearchClearBtn');
+if (libSearchInputEl) {
+  libSearchInputEl.oninput = (e) => {
+    const val = e.target.value || '';
+    if (libSearchClearBtnEl) libSearchClearBtnEl.classList.toggle('hidden', val.length === 0);
+    clearTimeout(libSearchDebounceTimer);
+    libSearchDebounceTimer = setTimeout(() => {
+      libUiState.query = val;
+      renderLibBrowseTab(true);
+    }, 90);
+  };
+}
+if (libSearchClearBtnEl) {
+  libSearchClearBtnEl.onclick = () => {
+    libUiState.query = '';
+    if (libSearchInputEl) {
+      libSearchInputEl.value = '';
+      libSearchInputEl.focus();
+    }
+    libSearchClearBtnEl.classList.add('hidden');
+    renderLibBrowseTab(true);
+  };
+}
+
+const libCategorySelectEl = document.getElementById('libCategorySelect');
+if (libCategorySelectEl) {
+  libCategorySelectEl.onchange = (e) => {
+    libUiState.category = e.target.value || 'all';
+    renderLibBrowseTab(true);
+  };
+}
+
+const libIncludeHelpersEl = document.getElementById('libIncludeHelpersToggle');
+if (libIncludeHelpersEl) {
+  libIncludeHelpersEl.onchange = (e) => {
+    libUiState.includeHelpers = Boolean(e.target.checked);
+    renderLibBrowseTab(true);
+  };
+}
+
+const libLoadMoreBtnEl = document.getElementById('libLoadMoreBtn');
+if (libLoadMoreBtnEl) {
+  libLoadMoreBtnEl.onclick = () => {
+    libUiState.visibleLimit += 48;
+    renderLibBrowseTab(false);
+  };
+}
+
+const btnCloseLibPreviewEl = document.getElementById('btnCloseLibPreview');
+if (btnCloseLibPreviewEl) {
+  btnCloseLibPreviewEl.onclick = () => {
+    libUiState.selectedId = null;
+    renderLibBrowseTab(false);
+    renderLibPreviewInspector();
+  };
+}
+
+document.querySelectorAll('.lib-angle-btn').forEach((btn) => {
+  btn.onclick = () => {
+    const az = Number(btn.getAttribute('data-lib-az'));
+    if (Number.isFinite(az)) {
+      libUiState.previewAz = az;
+      renderLibPreviewInspector();
+    }
+  };
+});
+
+const libPreviewFlipBtnEl = document.getElementById('libPreviewFlipBtn');
+if (libPreviewFlipBtnEl) {
+  libPreviewFlipBtnEl.onclick = () => {
+    libUiState.previewEl = libUiState.previewEl > 0 ? -24 : 24;
+    renderLibPreviewInspector();
+  };
+}
+
 document.getElementById('libSourceSelect').onchange = (e) => {
   notFoundDatCache.clear();
-  document.getElementById('libCustomUrlInput').classList.toggle('hidden', e.target.value !== 'custom');
+  const customWrap = document.getElementById('libCustomUrlWrap');
+  if (customWrap) customWrap.classList.toggle('hidden', e.target.value !== 'custom');
 };
-document.getElementById('menuFetchLibBtn').onclick = () => fetchMissingPartsOnline();
-document.getElementById('menuImportLibBtn').onclick = () => document.getElementById('libImportInput').click();
+
+document.getElementById('libCancelOpBtn').onclick = () => {
+  if (!fetchPartsInFlight) return;
+  fetchCancelRequested = true;
+  if (activeFetchAbortCtrl) activeFetchAbortCtrl.abort();
+  const cancelBtn = document.getElementById('libCancelOpBtn');
+  if (cancelBtn) {
+    cancelBtn.disabled = true;
+    cancelBtn.textContent = 'Canceling…';
+  }
+};
+
+document.getElementById('libFetchModelBtn').onclick = async () => {
+  await fetchMissingPartsOnline();
+  renderBricksLibraryModal(false);
+};
+
+document.getElementById('libFetchAllPacksBtn').onclick = async () => {
+  const remaining = getAllStarterPackPartIds().filter((id) => !userLibRaw.has(id));
+  if (!remaining.length) {
+    showToast('All starter pack parts are already saved in your Bricks Library!');
+    return;
+  }
+  await fetchPartsOnline({
+    mode: 'pack',
+    partIds: remaining,
+    label: 'all starter packs',
+    maxFiles: 3500,
+  });
+  renderBricksLibraryModal(false);
+};
+
+const runCustomIdsFetch = async () => {
+  const input = document.getElementById('libCustomIdsInput');
+  const ids = parsePartIdListInput(input?.value || '');
+  if (!ids.length) {
+    showToast('Enter at least one LDraw part ID (for example: 3001, 3069b, 3626c).');
+    return;
+  }
+  const res = await fetchPartsOnline({
+    mode: 'custom_ids',
+    partIds: ids,
+    label: ids.length === 1 ? `part ${ids[0]}` : `${ids.length} part IDs`,
+  });
+  if (res.fetchedParts > 0 && input) input.value = '';
+  if (ids.length === 1 && userLibRaw.has(ids[0])) {
+    libUiState.selectedId = ids[0];
+  }
+  renderBricksLibraryModal(false);
+};
+document.getElementById('libFetchCustomIdsBtn').onclick = runCustomIdsFetch;
+document.getElementById('libCustomIdsInput').onkeydown = (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    void runCustomIdsFetch();
+  }
+};
+
+document.getElementById('libImportLocalBtn').onclick = () => document.getElementById('libImportInput').click();
 document.getElementById('libImportInput').onchange = async (e) => {
   const files = e.target.files;
   if (files && files.length) await importBricksLibraryFiles(files);
   e.target.value = '';
 };
-document.getElementById('menuClearLibBtn').onclick = async () => {
-  userLibRaw.clear(); userLibTitles.clear(); movedToAliases.clear(); notFoundDatCache.clear(); embeddedDatCompiled.clear(); pliThumbCache.clear(); submodelThumbCache.clear(); clearMinifigDiagramCaches(); coverHeroCache.clear();
+
+document.getElementById('libClearSavedBtn').onclick = () => {
+  const confirmWrap = document.getElementById('libClearConfirmWrap');
+  if (confirmWrap) confirmWrap.classList.remove('hidden');
+};
+document.getElementById('libClearConfirmCancel').onclick = () => {
+  const confirmWrap = document.getElementById('libClearConfirmWrap');
+  if (confirmWrap) confirmWrap.classList.add('hidden');
+};
+document.getElementById('libClearConfirmYes').onclick = async () => {
+  userLibRaw.clear();
+  userLibTitles.clear();
+  movedToAliases.clear();
+  notFoundDatCache.clear();
+  textureStore.clearLibrary();
+  invalidateLibraryRenderCaches();
   await dbClearStore(LIB_STORE);
+  const confirmWrap = document.getElementById('libClearConfirmWrap');
+  if (confirmWrap) confirmWrap.classList.add('hidden');
   updateLibraryStatusUI();
-  if (state.model) { computeModelDiagnostics(); renderAll(); }
-  showToast('Cleared saved Bricks Library.');
+  if (state.model) {
+    computeModelDiagnostics();
+    renderAll();
+  }
+  showToast('Cleared all saved files from Bricks Library.');
 };
 
 let pendingRawFile = null; // { kind:'io'|'ldr', fileName, data }

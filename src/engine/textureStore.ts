@@ -242,6 +242,23 @@ class EmbeddedTextureStore {
     }
   }
 
+  clearLibrary(): void {
+    for (const [k, rec] of this.byKey.entries()) {
+      if (rec.source === 'library') this.byKey.delete(k);
+    }
+    for (const [name, k] of this.byName.entries()) {
+      if (!this.byKey.has(k)) this.byName.delete(name);
+    }
+  }
+
+  getLibraryCount(): number {
+    let count = 0;
+    for (const rec of this.byKey.values()) {
+      if (rec.source === 'library') count++;
+    }
+    return count;
+  }
+
   clearAll(): void {
     this.byKey.clear();
     this.byName.clear();

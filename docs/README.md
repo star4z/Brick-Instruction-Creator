@@ -11,6 +11,7 @@ All architecture specifications and feature design proposals for **Brick Instruc
 - [`MINIFIG_STEP_STYLES_DESIGN.md`](./MINIFIG_STEP_STYLES_DESIGN.md) — Official LEGO minifigure instruction styles: Exploded Stack Callout (vertical white box, red arrows, horizontal connector, accessory callouts) and Sequential Step-by-Step (numbered sub-steps, blue arrows, multi-part accessory pill, completion starburst).
 - [`PART_TEXTURES_DESIGN.md`](./PART_TEXTURES_DESIGN.md) — BrickLink Studio `PE_TEX_PATH`/`PE_TEX_INFO` and LDraw `!TEXMAP`/`!DATA` embedded PNG decal pipeline, synchronous pre-decoding, direct RGB colors, and WebGL PBR/step compositing for minifigure faces and printed parts.
 - [`LDR_IMPORT_DESIGN.md`](./LDR_IMPORT_DESIGN.md) — Automatic LDraw (`.ldr`/`.mpd`) part shape & `!TEXMAP` texture downloading on import and session restore, CORS mirror failover, MPD parser normalization, `~Moved to` title resolution, and extended LDConfig color support.
+- [`BRICKS_LIBRARY_DESIGN.md`](./BRICKS_LIBRARY_DESIGN.md) — Dedicated Bricks Library screen linked from the menu: searchable 3D parts preview & multi-angle inspector, top-level parts vs subparts/primitives classification, context-aware model fetch, curated online starter packs, local `.zip`/`.dat` import, and clearly separated 2-step Saved Library clearing.
 
 ## Conventions
 
