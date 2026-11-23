@@ -102,12 +102,18 @@ import {
   normalizePageLayoutSpec,
 } from './engine/pageLayout';
 import {
+  CAMERA_ANGLE_PRESETS,
   FOCUS_MODE_OPTIONS,
   MINIFIG_STYLE_OPTIONS,
+  PAPER_FORMAT_SPECS,
+  applyCameraAngleToStepRange,
   clearStepArrangeOverride,
   clearStepCameraOverride,
+  computePaperPreviewBox,
+  getCameraAngleLabel,
   getFocusModeDescription,
   getVisibleModeTabs,
+  migratePageInsertsToSteps,
   resolveStepToolbarCapabilities,
 } from './engine/stepToolbar';
 import {
@@ -387,13 +393,7 @@ async function shareOrDownloadJsonFile(jsonText, fileName, sharedMsg, savedMsg) 
   showToast(savedMsg);
 }
 
-const PAPER_FORMATS = {
-  screen: { id:'screen', name:'Screen Fit',     wIn: 11,   hIn: 8.5 },
-  letter: { id:'letter', name:'US Letter',      wIn: 8.5,  hIn: 11 },
-  a4:     { id:'a4',     name:'A4 Paper',       wIn: 8.27, hIn: 11.69 },
-  square: { id:'square', name:'Booklet Square', wIn: 8.5,  hIn: 8.5 },
-  custom: { id:'custom', name:'Custom Size',    wIn: 10,   hIn: 8 },
-};
+const PAPER_FORMATS = PAPER_FORMAT_SPECS;
 
 const DENSITY_PAD = {
   compact:  { pad: 12, gap: 8 },
@@ -401,12 +401,7 @@ const DENSITY_PAD = {
   spacious: { pad: 30, gap: 20 },
 };
 
-const CORNERS = [
-  { id:'front_right', label:'Front Right', az: 38 },
-  { id:'back_right',  label:'Back Right',  az: 142 },
-  { id:'back_left',   label:'Back Left',   az: 218 },
-  { id:'front_left',  label:'Front Left',  az: 322 },
-];
+const CORNERS = CAMERA_ANGLE_PRESETS;
 
 const PARTS_CATALOG = {
   // Standard Bricks
@@ -5334,7 +5329,8 @@ const state = {
   pageNumberFormat: 'page_n', // 'number' | 'page_n' | 'n_of_total' | 'none'
   showExtras: true,
   overrides: {},           // keyed by stepId: { pin, side, corner, az, el, modelScale, pliScale, pliPos:{x,y}, calloutPos:{x,y}, calloutDir, calloutAsPages, minifigStyle, partOffsets:{ [partId]: {x,y,z,tilt,arrow} } }
-  pageInserts: {},         // keyed by pageId: [ { id, kind:'text'|'image', text, src, x, y, scale } ]
+  stepInserts: {},         // keyed by stepId: [ { id, kind:'text'|'image', text, src, corner, x, y, scale } ]
+  pageInserts: {},         // legacy page-keyed inserts (auto-migrated to stepInserts on load)
   dividerAfter: {},        // keyed by pageId: { title, note }
   coverMeta: createDefaultCoverMeta(),
   completeMeta: { title:'Build Complete!', subtitle:'Ready for display!', az:315, el:28, bgSrc:null, showText:true, showFireworks:true },
@@ -5350,10 +5346,10 @@ const state = {
   bomShortcutVisible: false,
   pages: [],
   pageIdx: 0,
-  mode: 'pan',             // pan | edit | select | rotate | arrange
+  mode: 'pan',             // pan | select | rotate | edit
   selectedStepId: null,
   selectedPartIds: new Set(),
-  selectedArrangeEl: null, // { stepId, kind:'pli'|'callout'|'insert', insertId? }
+  selectedArrangeEl: null, // legacy / optional dragged element state
   zoom: 1,
   panX: 0,
   panY: 0,
@@ -5370,6 +5366,7 @@ function pushUndo() {
   const snap = JSON.stringify({
     chapters: state.model.chapters,
     overrides: state.overrides,
+    stepInserts: state.stepInserts,
     pageInserts: state.pageInserts,
     dividerAfter: state.dividerAfter,
     coverMeta: state.coverMeta,
@@ -5387,7 +5384,8 @@ function applyHistorySnap(json) {
   const s = JSON.parse(json);
   state.model.chapters = s.chapters;
   state.overrides = s.overrides;
-  state.pageInserts = s.pageInserts;
+  state.stepInserts = s.stepInserts || {};
+  state.pageInserts = s.pageInserts || {};
   state.dividerAfter = s.dividerAfter;
   state.coverMeta = normalizeCoverMeta(s.coverMeta);
   if (s.completeMeta) state.completeMeta = s.completeMeta;
@@ -5920,7 +5918,7 @@ function getActivePagePhysicalInches() {
     return [wIn, hIn];
   }
   const fmt = PAPER_FORMATS[state.paperFormat] || PAPER_FORMATS.letter;
-  if (state.paperFormat === 'square') return [fmt.wIn, fmt.hIn];
+  if (!fmt.supportsOrientation) return [fmt.wIn, fmt.hIn];
   const shortSide = Math.min(fmt.wIn, fmt.hIn), longSide = Math.max(fmt.wIn, fmt.hIn);
   return state.orientation === 'portrait' ? [shortSide, longSide] : [longSide, shortSide];
 }
@@ -6066,11 +6064,18 @@ function renderAll() {
 
   const isSteps = page.kind === 'steps';
   const isSimpleEdit = isSimpleEditPage(page);
+  if (state.mode === 'arrange') {
+    state.mode = 'pan';
+  }
   if (isSteps && state.mode === 'edit') {
     state.mode = 'pan';
   }
   if (!isSteps && isStepEditModalOpen()) {
     closeStepEditModal();
+  }
+  if (state.pageInserts && Object.keys(state.pageInserts).length > 0 && state.pages.length > 0) {
+    state.stepInserts = migratePageInsertsToSteps(state.pageInserts, state.stepInserts, state.pages);
+    state.pageInserts = {};
   }
 
   // Update Mode Pill visibility & styling for the current page type
@@ -6364,7 +6369,7 @@ function renderAll() {
       const rw = (slots.length === 1 || slotRect.isFeatured) ? 760 : (slotRect.isCompact ? 400 : 500);
       const rh = (slots.length === 1 || slotRect.isFeatured) ? 500 : (slotRect.isCompact ? 300 : 360);
       const snap = renderSnapshot(prev, step.parts, cam.az, cam.el, rw, rh, modelScale, opts);
-      currentSlotRenderInfo.set(step.id, { ch, step, prev, cam, ov, snap, modelScale });
+      currentSlotRenderInfo.set(step.id, { ch, step, prev, cam, ov, snap, modelScale, opts, isMfBuild, isMfExploded, isMfSeq });
 
       let mfExploded = null;
       let mfSeqStages = null;
@@ -6581,7 +6586,7 @@ function renderAll() {
 
                   <div class="flex-1 min-w-0 min-h-0 w-full h-full flex items-center justify-center relative overflow-hidden">
                     ${showLive3D
-                      ? `<canvas id="liveRotateCanvas" class="w-full h-full object-contain cursor-grab active:cursor-grabbing"></canvas>`
+                      ? `<canvas id="liveRotateCanvas" class="absolute inset-0 w-full h-full object-contain cursor-grab active:cursor-grabbing"></canvas>`
                       : isMfExploded && mfExploded
                         ? `<img data-pick-step="${step.id}" src="${mfExploded.url}" alt="${escHtml(step.minifigName || 'Minifigure assembly')}" class="absolute inset-0 w-full h-full object-contain pointer-events-none" />`
                         : isMfSeq && mfSeqStages
@@ -6620,19 +6625,30 @@ function renderAll() {
                         <span>${escHtml(ind.label)}</span>
                       </span>`).join('')}
                   </div>` : ''}
+                <!-- Step-Specific Custom Callouts (Notes & Images bound to this exact step) -->
+                ${(state.stepInserts[step.id] || []).map((ins, insIdx) => {
+                  const corner = ins.corner || 'bottom-right';
+                  const hasCustomXY = typeof ins.x === 'number' && typeof ins.y === 'number';
+                  const offsetPx = Math.round(typo.pt(8));
+                  const stackShift = insIdx * Math.round(typo.pt(28));
+                  const posStyle = hasCustomXY
+                    ? `left:${ins.x}px;top:${ins.y}px;transform-origin:top left;`
+                    : corner === 'top-left'
+                      ? `left:${offsetPx}px;top:${offsetPx + stackShift}px;transform-origin:top left;`
+                      : corner === 'top-right'
+                        ? `right:${offsetPx}px;top:${offsetPx + stackShift}px;transform-origin:top right;`
+                        : corner === 'bottom-left'
+                          ? `left:${offsetPx}px;bottom:${offsetPx + stackShift}px;transform-origin:bottom left;`
+                          : `right:${offsetPx}px;bottom:${offsetPx + stackShift}px;transform-origin:bottom right;`;
+                  return `<div data-drag="step-insert" data-step="${step.id}" data-insert-id="${ins.id}" class="draggable-el absolute z-20 ${state.mode === 'select' ? 'cursor-move' : 'pointer-events-none'}" style="${posStyle}padding:${Math.round(typo.pt(5))}px ${Math.round(typo.pt(7))}px;border-radius:${Math.round(typo.pt(8))}px;transform:scale(${ins.scale || 1});border:1px solid ${ins.kind === 'text' ? theme.calloutBorder : 'transparent'};background:${ins.kind === 'text' ? theme.calloutBg : 'transparent'};box-shadow:0 2px 6px rgba(0,0,0,0.08)">
+                    ${ins.kind === 'text'
+                      ? `<div class="font-bold leading-snug break-words overflow-hidden" style="font-size:${st.insertTextFont}px;max-width:${st.insertTextMaxW}px">${escHtml(ins.text)}</div>`
+                      : `<img src="${ins.src}" style="width:${st.insertImgSize}px;height:${st.insertImgSize}px" class="object-contain rounded-lg pointer-events-none" />`}
+                  </div>`;
+                }).join('')}
               </div>`;
           }).join('')}
         </div>
-
-        <!-- Custom Page Inserts (Text Notes & Images — Draggable in Arrange Mode!) -->
-        ${(state.pageInserts[page.id] || []).map(ins => {
-          const isInsSel = isArrangeMode && state.selectedArrangeEl?.kind === 'insert' && state.selectedArrangeEl?.insertId === ins.id;
-          return `<div data-drag="insert" data-insert-id="${ins.id}" class="draggable-el absolute z-20 ${isArrangeMode ? 'cursor-move' : ''}" style="left:${ins.x}px;top:${ins.y}px;padding:${Math.round(typo.pt(6))}px;border-radius:${Math.round(typo.pt(8))}px;transform:scale(${ins.scale || 1});transform-origin:top left;border:${isInsSel ? `2px solid ${theme.accent}` : '1px solid transparent'};background:${ins.kind === 'text' ? theme.pliBg : 'transparent'}">
-            ${ins.kind === 'text'
-              ? `<div class="font-bold leading-snug break-words overflow-hidden" style="font-size:${st.insertTextFont}px;max-width:${st.insertTextMaxW}px">${escHtml(ins.text)}</div>`
-              : `<img src="${ins.src}" style="width:${st.insertImgSize}px;height:${st.insertImgSize}px" class="object-contain rounded-lg pointer-events-none" />`}
-          </div>`;
-        }).join('')}
 
         <!-- Page Footer -->
         <div class="absolute flex justify-between font-medium pointer-events-none" style="bottom:${footerPadBottom}px;left:${padPx}px;right:${padPx}px;font-size:${typo.footerFont}px;color:${theme.muted}">
@@ -6722,15 +6738,20 @@ function bindStepPageInteractions(page) {
     });
   });
 
-  // ROTATE 3D MODE: Attach single GPU-cached live WebGL canvas (0 bytes uploaded while dragging!)
+  // ROTATE 3D MODE: Attach single GPU-cached live WebGL canvas matching static snapshot size identically!
   if (state.mode === 'rotate') {
     const liveCanvas = document.getElementById('liveRotateCanvas');
     const info = currentSlotRenderInfo.get(state.selectedStepId);
     if (liveCanvas && info) {
       activeLiveEngine = new WebGLBrickEngine(liveCanvas);
-      const w = 640, h = 420;
+      const w = info.snap.w || 760;
+      const h = info.snap.h || 500;
+      const fixedHalfH = info.opts?.fixedHalfH || 0;
+      const liveDrawOpts = (info.isMfExploded || info.isMfSeq)
+        ? { ...(info.opts || {}), tightFit: true }
+        : (info.opts || null);
       let az = info.cam.az, el = info.cam.el;
-      activeLiveEngine.draw(info.snap.mesh, w, h, az, el, info.modelScale);
+      activeLiveEngine.draw(info.snap.mesh, w, h, az, el, info.modelScale, fixedHalfH, liveDrawOpts);
 
       let dragging = false, lx = 0, ly = 0;
       liveCanvas.onpointerdown = (e) => { e.stopPropagation(); dragging = true; lx = e.clientX; ly = e.clientY; liveCanvas.setPointerCapture(e.pointerId); };
@@ -6741,54 +6762,53 @@ function bindStepPageInteractions(page) {
         el = Math.max(-75, Math.min(75, el + (e.clientY - ly) * 0.5));
         lx = e.clientX; ly = e.clientY;
         state.overrides[info.step.id] = { ...(state.overrides[info.step.id] || {}), az: Math.round(az), el: Math.round(el) };
-        activeLiveEngine.draw(info.snap.mesh, w, h, az, el, info.modelScale);
+        activeLiveEngine.draw(info.snap.mesh, w, h, az, el, info.modelScale, fixedHalfH, liveDrawOpts);
       };
       liveCanvas.onpointerup = () => { dragging = false; };
     }
   }
 
-  // ARRANGE MODE: Direct 1-finger drag for PLI Box, Callout Box, and Custom Inserts!
-  if (state.mode === 'arrange') {
-    frame.querySelectorAll('.draggable-el').forEach(el => {
-      let dragging = false, sx = 0, sy = 0, origX = 0, origY = 0;
-      const kind = el.getAttribute('data-drag');
+  // SELECT MODE: Allow dragging step-bound custom callouts directly inside their step slot
+  if (state.mode === 'select') {
+    frame.querySelectorAll('[data-drag="step-insert"]').forEach(el => {
+      let dragging = false, sx = 0, sy = 0, origX = 0, origY = 0, moved = false;
       const sid = el.getAttribute('data-step');
       const insId = el.getAttribute('data-insert-id');
-
       el.onpointerdown = (e) => {
         e.stopPropagation();
-        dragging = true; sx = e.clientX; sy = e.clientY;
+        dragging = true; moved = false;
+        sx = e.clientX; sy = e.clientY;
         el.setPointerCapture(e.pointerId);
-        state.selectedArrangeEl = { stepId: sid, kind, insertId: insId };
-        if (sid) state.selectedStepId = sid;
-        if (kind === 'pli') { const p = state.overrides[sid]?.pliPos || { x:0, y:0 }; origX = p.x; origY = p.y; }
-        else if (kind === 'callout') { const p = state.overrides[sid]?.calloutPos || { x:0, y:0 }; origX = p.x; origY = p.y; }
-        else if (kind === 'insert') {
-          const ins = (state.pageInserts[page.id] || []).find(x => x.id === insId);
-          origX = ins?.x || 24; origY = ins?.y || 24;
-        }
-        renderContextOverlay(page);
+        const slotEl = el.closest('.step-slot');
+        const slotRect = slotEl ? slotEl.getBoundingClientRect() : null;
+        const elRect = el.getBoundingClientRect();
+        const effScale = getEffectiveStageScale();
+        origX = slotRect ? Math.round((elRect.left - slotRect.left) / effScale) : 12;
+        origY = slotRect ? Math.round((elRect.top - slotRect.top) / effScale) : 12;
       };
       el.onpointermove = (e) => {
         if (!dragging) return;
         e.stopPropagation();
         const effScale = getEffectiveStageScale();
         const dx = (e.clientX - sx) / effScale, dy = (e.clientY - sy) / effScale;
-        const nx = Math.round(origX + dx), ny = Math.round(origY + dy);
-        if (kind === 'pli') {
-          const ov = state.overrides[sid] || {};
-          state.overrides[sid] = { ...ov, pliPos: { x: nx, y: ny } };
-          el.style.transform = `translate(${nx}px,${ny}px) scale(${ov.pliScale || 1})`;
-        } else if (kind === 'callout') {
-          const ov = state.overrides[sid] || {};
-          state.overrides[sid] = { ...ov, calloutPos: { x: nx, y: ny } };
-          el.style.transform = `translate(${nx}px,${ny}px)`;
-        } else if (kind === 'insert') {
-          const ins = (state.pageInserts[page.id] || []).find(x => x.id === insId);
-          if (ins) { ins.x = nx; ins.y = ny; el.style.left = nx + 'px'; el.style.top = ny + 'px'; }
+        if (Math.hypot(dx, dy) > 2) moved = true;
+        if (!moved) return;
+        const nx = Math.max(0, Math.round(origX + dx));
+        const ny = Math.max(0, Math.round(origY + dy));
+        const ins = (state.stepInserts[sid] || []).find(x => x.id === insId);
+        if (ins) {
+          ins.x = nx; ins.y = ny;
+          el.style.right = 'auto';
+          el.style.bottom = 'auto';
+          el.style.left = nx + 'px';
+          el.style.top = ny + 'px';
+          el.style.transformOrigin = 'top left';
         }
       };
-      el.onpointerup = () => { dragging = false; };
+      el.onpointerup = (e) => {
+        if (dragging && moved) { e.stopPropagation(); }
+        dragging = false;
+      };
     });
   }
 }
@@ -6982,41 +7002,61 @@ function renderContextOverlay(page) {
 
     const firstId = Array.from(state.selectedPartIds)[0];
     const pOv = ov.partOffsets?.[firstId] || step.defaultPartOffsets?.[firstId] || { x:0, y:0, z:0, tilt:0, arrow:true };
-    const icoArrUp = '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>';
-    const icoArrDown = '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></svg>';
-    const icoArrLeft = '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>';
-    const icoArrRight = '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>';
-    const icoArrFwd = '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 7 7 17"/><path d="M17 17H7V7"/></svg>';
-    const icoArrBack = '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7"/><path d="M7 7h10v10"/></svg>';
-    const icoTiltL = '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>';
-    const icoTiltR = '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>';
+    const studY = Math.round((pOv.y || 0) / 20);
+    const studX = Math.round((pOv.x || 0) / 20);
+    const studZ = Math.round((pOv.z || 0) / 20);
+    const tiltDeg = Math.round(pOv.tilt || 0);
+    const icoArrUp = '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="m6 11 6-6 6 6"/></svg>';
+    const icoArrDown = '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="m18 13-6 6-6-6"/></svg>';
+    const icoArrLeft = '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m11 18-6-6 6-6"/></svg>';
+    const icoArrRight = '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>';
+    const icoArrFwd = '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M17 7 7 17"/><path d="M16 17H7V8"/></svg>';
+    const icoArrBack = '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7"/><path d="M8 7h9v9"/></svg>';
+    const icoTiltL = '<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="10" width="10" height="7" rx="1.2" transform="rotate(-16 12 13.5)" fill="currentColor" fill-opacity="0.14"/><path d="M6.5 6.5A8 8 0 0 1 16 5"/><path d="M6.5 3.5v3.5H10"/></svg>';
+    const icoTiltR = '<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="10" width="10" height="7" rx="1.2" transform="rotate(16 12 13.5)" fill="currentColor" fill-opacity="0.14"/><path d="M17.5 6.5A8 8 0 0 0 8 5"/><path d="M17.5 3.5v3.5H14"/></svg>';
     const icoDismiss = '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
     box.innerHTML = `
       <div class="pointer-events-auto studio-surface rounded-xl p-3.5 w-full space-y-2.5 text-xs">
         <div class="flex items-center justify-between gap-2">
           <span class="font-bold text-[var(--primary)]">${selCount} piece${selCount > 1 ? 's' : ''} selected · Step ${step.num}</span>
           <div class="flex items-center gap-1.5">
-            <button id="btnToggleArrow" type="button" class="px-2.5 py-1.5 rounded-md border text-xs font-semibold ${pOv.arrow !== false ? 'bg-[var(--primary-soft)] border-[var(--primary)] text-[var(--primary)]' : 'border-[var(--border)] bg-[var(--surface-sunken)]'}">Arrow ${pOv.arrow !== false ? 'On' : 'Off'}</button>
-            <button id="btnResetSelPos" type="button" class="px-2.5 py-1.5 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] text-xs font-semibold">Reset Pos</button>
-            <button id="btnClearSel" type="button" aria-label="Clear selection" class="w-8 h-8 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] flex items-center justify-center">${icoDismiss}</button>
+            <button id="btnToggleArrow" type="button" class="px-2.5 py-1.5 rounded-md border text-xs font-semibold cursor-pointer ${pOv.arrow !== false ? 'bg-[var(--primary-soft)] border-[var(--primary)] text-[var(--primary)]' : 'border-[var(--border)] bg-[var(--surface-sunken)]'}">Arrow ${pOv.arrow !== false ? 'On' : 'Off'}</button>
+            <button id="btnResetSelPos" type="button" class="px-2.5 py-1.5 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] text-xs font-semibold cursor-pointer">Reset</button>
+            <button id="btnClearSel" type="button" aria-label="Clear selection" class="w-8 h-8 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] flex items-center justify-center cursor-pointer">${icoDismiss}</button>
           </div>
         </div>
 
-        <!-- Directional Pad (1-stud crisp nudges + Tilt) -->
+        <!-- Visual 3D Axis Move Pad + Brick Tilt Control -->
         <div class="flex items-center justify-between gap-2 flex-wrap">
-          <div class="flex items-center gap-1">
-            <span class="text-xs font-semibold text-[var(--muted-foreground)] mr-1">Move</span>
-            <button data-nudge="0,20,0" type="button" class="nudge-btn h-8 w-8 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] flex items-center justify-center" title="Lift Up" aria-label="Lift Up">${icoArrUp}</button>
-            <button data-nudge="0,-20,0" type="button" class="nudge-btn h-8 w-8 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] flex items-center justify-center" title="Lower" aria-label="Lower">${icoArrDown}</button>
-            <button data-nudge="-20,0,0" type="button" class="nudge-btn h-8 w-8 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] flex items-center justify-center" title="Left" aria-label="Left">${icoArrLeft}</button>
-            <button data-nudge="20,0,0" type="button" class="nudge-btn h-8 w-8 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] flex items-center justify-center" title="Right" aria-label="Right">${icoArrRight}</button>
-            <button data-nudge="0,0,20" type="button" class="nudge-btn h-8 w-8 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] flex items-center justify-center" title="Forward" aria-label="Forward">${icoArrFwd}</button>
-            <button data-nudge="0,0,-20" type="button" class="nudge-btn h-8 w-8 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] flex items-center justify-center" title="Back" aria-label="Back">${icoArrBack}</button>
+          <div class="flex items-center gap-1.5 flex-wrap">
+            <!-- Up / Down (Y Axis) -->
+            <div class="inline-flex items-center gap-0.5 p-0.5 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)]" title="Move Up / Down">
+              <span class="px-1.5 text-[10px] font-bold uppercase tracking-wider text-[var(--success)]">Up/Dn</span>
+              <button data-nudge="0,20,0" type="button" class="nudge-btn h-7 w-7 rounded-md bg-[var(--card)] hover:bg-[var(--surface-hover)] text-[var(--success)] flex items-center justify-center cursor-pointer" title="Lift Up 1 stud" aria-label="Lift Up">${icoArrUp}</button>
+              <button data-nudge="0,-20,0" type="button" class="nudge-btn h-7 w-7 rounded-md bg-[var(--card)] hover:bg-[var(--surface-hover)] text-[var(--success)] flex items-center justify-center cursor-pointer" title="Lower 1 stud" aria-label="Lower">${icoArrDown}</button>
+              ${studY !== 0 ? `<span class="px-1 font-mono text-[10px] font-bold">${studY > 0 ? `+${studY}` : studY}</span>` : ''}
+            </div>
+            <!-- Left / Right (X Axis) -->
+            <div class="inline-flex items-center gap-0.5 p-0.5 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)]" title="Move Left / Right">
+              <span class="px-1.5 text-[10px] font-bold uppercase tracking-wider text-[var(--primary)]">L/R</span>
+              <button data-nudge="-20,0,0" type="button" class="nudge-btn h-7 w-7 rounded-md bg-[var(--card)] hover:bg-[var(--surface-hover)] text-[var(--primary)] flex items-center justify-center cursor-pointer" title="Move Left 1 stud" aria-label="Left">${icoArrLeft}</button>
+              <button data-nudge="20,0,0" type="button" class="nudge-btn h-7 w-7 rounded-md bg-[var(--card)] hover:bg-[var(--surface-hover)] text-[var(--primary)] flex items-center justify-center cursor-pointer" title="Move Right 1 stud" aria-label="Right">${icoArrRight}</button>
+              ${studX !== 0 ? `<span class="px-1 font-mono text-[10px] font-bold">${studX > 0 ? `+${studX}` : studX}</span>` : ''}
+            </div>
+            <!-- Forward / Back (Z Axis) -->
+            <div class="inline-flex items-center gap-0.5 p-0.5 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)]" title="Move Forward / Back">
+              <span class="px-1.5 text-[10px] font-bold uppercase tracking-wider text-[var(--info)]">Depth</span>
+              <button data-nudge="0,0,20" type="button" class="nudge-btn h-7 w-7 rounded-md bg-[var(--card)] hover:bg-[var(--surface-hover)] text-[var(--info)] flex items-center justify-center cursor-pointer" title="Move Forward 1 stud" aria-label="Forward">${icoArrFwd}</button>
+              <button data-nudge="0,0,-20" type="button" class="nudge-btn h-7 w-7 rounded-md bg-[var(--card)] hover:bg-[var(--surface-hover)] text-[var(--info)] flex items-center justify-center cursor-pointer" title="Move Back 1 stud" aria-label="Back">${icoArrBack}</button>
+              ${studZ !== 0 ? `<span class="px-1 font-mono text-[10px] font-bold">${studZ > 0 ? `+${studZ}` : studZ}</span>` : ''}
+            </div>
           </div>
-          <div class="flex items-center gap-1">
-            <span class="text-xs font-semibold text-[var(--muted-foreground)] mr-1">Tilt</span>
-            <button data-tilt="-15" type="button" class="tilt-btn h-8 w-8 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] flex items-center justify-center" title="Tilt Left" aria-label="Tilt Left">${icoTiltL}</button>
-            <button data-tilt="15" type="button" class="tilt-btn h-8 w-8 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] flex items-center justify-center" title="Tilt Right" aria-label="Tilt Right">${icoTiltR}</button>
+          <!-- Visual Brick Tilt Control -->
+          <div class="inline-flex items-center gap-1 p-0.5 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)]" title="Tilt selected piece">
+            <span class="px-1.5 text-[10px] font-bold uppercase tracking-wider text-[var(--muted-foreground)]">Tilt</span>
+            <button data-tilt="-15" type="button" class="tilt-btn h-7 w-7 rounded-md bg-[var(--card)] hover:bg-[var(--surface-hover)] flex items-center justify-center cursor-pointer" title="Tilt Left −15°" aria-label="Tilt Left">${icoTiltL}</button>
+            <span class="font-mono text-[11px] font-bold min-w-[30px] text-center">${tiltDeg > 0 ? `+${tiltDeg}°` : `${tiltDeg}°`}</span>
+            <button data-tilt="15" type="button" class="tilt-btn h-7 w-7 rounded-md bg-[var(--card)] hover:bg-[var(--surface-hover)] flex items-center justify-center cursor-pointer" title="Tilt Right +15°" aria-label="Tilt Right">${icoTiltR}</button>
           </div>
         </div>
 
@@ -7134,30 +7174,57 @@ function renderContextOverlay(page) {
   }
 
   const slots = page.slots || [];
+  const allStepsList = getAllSteps(state.model);
   const stepIdxInCh = ch.steps.indexOf(step);
   const followingCount = stepIdxInCh >= 0 ? Math.max(0, ch.steps.length - 1 - stepIdxInCh) : 0;
   const isMfBuild = Boolean((step.isStandaloneFigure || ch.kind === 'minifigure') && !step.isMinifigPoseStep);
   const curMfStyle = isMfBuild ? getEffectiveMinifigStyle(step) : 'classic';
-  const pageInserts = state.pageInserts[page.id] || [];
+  const stepInserts = state.stepInserts[step.id] || [];
   const caps = resolveStepToolbarCapabilities({
     isMinifigBuild: isMfBuild,
     minifigStyle: curMfStyle,
     hasSubassembly: Boolean(step.subassembly),
     override: ov,
-    pageInsertCount: pageInserts.length,
+    stepInsertCount: stepInserts.length,
+    totalStepCount: allStepsList.length,
     followingStepCount: followingCount,
   });
 
-  const renderSlotSwitcher = (btnClass, hintText) => slots.length > 1
-    ? `<div class="flex items-center gap-2 flex-wrap min-w-0">
-        <div class="inline-flex items-center gap-0.5 rounded-md bg-[var(--surface-sunken)] p-0.5 text-xs font-bold">
-          ${slots.map(sl => `<button type="button" data-pick-slot="${sl.step.id}" class="${btnClass} px-2.5 py-0.5 rounded-md transition-colors cursor-pointer ${sl.step.id === step.id ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'hover:bg-[var(--surface-hover)]'}">Step ${sl.step.num}</button>`).join('')}
-        </div>
-        <span class="text-xs text-[var(--muted-foreground)] truncate">${hintText}</span>
-      </div>`
-    : `<span class="font-bold truncate">${isMfBuild ? escHtml(step.minifigName || `Step ${step.num}`) : `Step ${step.num}`} · <span class="font-medium text-[var(--muted-foreground)]">${hintText}</span></span>`;
+  // Visual Cube + Simple Stylized Camera SVG icons for View (Top / Bottom) & 4 Isometric Angles
+  const buildCameraViewSvg = (kind) => {
+    if (kind === 'top') {
+      return `<svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <rect x="8" y="2" width="8" height="4.5" rx="1.2" fill="currentColor"/>
+        <path d="M10.5 6.5 9 9.5h6l-1.5-3" fill="currentColor" opacity="0.5"/>
+        <path d="M12 11.5 18 14.5 12 17.5 6 14.5 12 11.5Z" fill="currentColor" fill-opacity="0.22" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+        <path d="M6 14.5V19.5L12 22.5L18 19.5V14.5M12 17.5V22.5" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+      </svg>`;
+    }
+    if (kind === 'bottom') {
+      return `<svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M12 1.5 18 4.5 12 7.5 6 4.5 12 1.5Z" fill="currentColor" fill-opacity="0.16" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+        <path d="M6 4.5V9.5L12 12.5L18 9.5V4.5M12 7.5V12.5" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+        <path d="M10.5 17.5 9 14.5h6l-1.5 3" fill="currentColor" opacity="0.5"/>
+        <rect x="8" y="17.5" width="8" height="4.5" rx="1.2" fill="currentColor"/>
+      </svg>`;
+    }
+    // 4 isometric corners around a centered simple 3D cube
+    const camPos = {
+      se: { x: 18.5, y: 18.5, ray: 'M15.8 16.2 13.8 14.6' },
+      ne: { x: 18.5, y: 5.5,  ray: 'M15.8 7.8 13.8 9.4' },
+      nw: { x: 5.5,  y: 5.5,  ray: 'M8.2 7.8 10.2 9.4' },
+      sw: { x: 5.5,  y: 18.5, ray: 'M8.2 16.2 10.2 14.6' },
+    }[kind] || { x: 18.5, y: 18.5, ray: 'M15.8 16.2 13.8 14.6' };
+    return `<svg class="w-5 h-5 shrink-0" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M12 7.2 16.4 9.5 12 11.8 7.6 9.5 12 7.2Z" fill="currentColor" fill-opacity="0.2" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+      <path d="M7.6 9.5V14.5L12 16.8L16.4 14.5V9.5M12 11.8V16.8" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+      <path d="${camPos.ray}" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" opacity="0.7"/>
+      <rect x="${(camPos.x - 3).toFixed(1)}" y="${(camPos.y - 2.3).toFixed(1)}" width="6" height="4.6" rx="1.2" fill="currentColor"/>
+      <circle cx="${camPos.x}" cy="${camPos.y}" r="1.1" fill="var(--card)"/>
+    </svg>`;
+  };
 
-  // ---- MODE: ROTATE 3D (Strictly 3D Camera Angle & Orientation — Zero Overlap!) ----
+  // ---- MODE: ROTATE 3D (Strictly 3D Camera Angle & Orientation) ----
   if (state.mode === 'rotate') {
     const cam = getStepCamera(step);
     const isMfStep = isMfBuild || Boolean(step.isMinifigPoseStep);
@@ -7169,27 +7236,38 @@ function renderContextOverlay(page) {
     box.innerHTML = `
       <div class="pointer-events-auto studio-surface rounded-xl p-3.5 w-full space-y-2.5 text-xs">
         <div class="flex items-center justify-between gap-2 flex-wrap">
-          ${renderSlotSwitcher('rotate-step-btn', 'Drag 3D to orbit')}
+          <div class="flex items-center gap-2 flex-wrap min-w-0">
+            ${slots.length > 1 ? `
+              <div class="inline-flex items-center gap-0.5 rounded-md bg-[var(--surface-sunken)] p-0.5 text-xs font-bold">
+                ${slots.map(sl => `<button type="button" data-pick-slot="${sl.step.id}" class="rotate-step-btn px-2 py-0.5 rounded-md transition-colors cursor-pointer ${sl.step.id === step.id ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'hover:bg-[var(--surface-hover)]'}">Step ${sl.step.num}</button>`).join('')}
+              </div>` : ''}
+            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[var(--primary-soft)] border border-[var(--primary-border)] text-[var(--foreground)] font-extrabold text-xs tracking-tight">
+              <svg class="w-3.5 h-3.5 text-[var(--primary)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 0 1-15.5 6.3"/><path d="M3 12a9 9 0 0 1 15.5-6.3"/><polyline points="3 16 3 12 7 12"/><polyline points="21 8 21 12 17 12"/></svg>
+              <span>Drag 3D model to orbit</span>
+            </span>
+          </div>
           <div class="flex items-center gap-1.5 shrink-0">
             <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">View</span>
-            <div class="inline-flex rounded-md bg-[var(--surface-sunken)] p-0.5 text-xs font-semibold">
-              <button type="button" id="camTop" title="Look down from above" class="px-2.5 py-0.5 rounded-md transition-colors cursor-pointer ${cam.side === 'top' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'hover:bg-[var(--surface-hover)]'}">Top</button>
-              <button type="button" id="camBot" title="Look up from underneath" class="px-2.5 py-0.5 rounded-md transition-colors cursor-pointer ${cam.side === 'bottom' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'hover:bg-[var(--surface-hover)]'}">Bottom</button>
+            <div class="inline-flex rounded-md bg-[var(--surface-sunken)] p-0.5 text-xs font-semibold gap-0.5">
+              <button type="button" id="camTop" title="Look down from above" class="px-2.5 py-1 rounded-md inline-flex items-center gap-1.5 transition-colors cursor-pointer ${cam.side === 'top' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'hover:bg-[var(--surface-hover)]'}">${buildCameraViewSvg('top')}<span>Top</span></button>
+              <button type="button" id="camBot" title="Look up from underneath" class="px-2.5 py-1 rounded-md inline-flex items-center gap-1.5 transition-colors cursor-pointer ${cam.side === 'bottom' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'hover:bg-[var(--surface-hover)]'}">${buildCameraViewSvg('bottom')}<span>Bottom</span></button>
             </div>
           </div>
         </div>
         <div class="flex items-center gap-1.5 flex-wrap">
           <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)] mr-0.5">Angle</span>
-          ${isMfStep ? `<button type="button" id="btnMfFront34" class="px-2.5 py-1 rounded-md text-xs font-semibold transition-colors cursor-pointer ${isFront34 ? 'bg-[var(--primary-soft)] text-[var(--primary)] ring-1 ring-[var(--primary)]' : 'bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)]'}">Front 3/4</button>` : ''}
-          ${CORNERS.map(c => `<button type="button" data-corner="${c.id}" class="corner-btn px-2.5 py-1 rounded-md text-xs font-semibold transition-colors cursor-pointer ${!isFront34 && cam.corner === c.id ? 'bg-[var(--primary-soft)] text-[var(--primary)] ring-1 ring-[var(--primary)]' : 'bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)]'}">${c.label}</button>`).join('')}
+          ${isMfStep ? `<button type="button" id="btnMfFront34" class="px-2.5 py-1 rounded-md text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer ${isFront34 ? 'bg-[var(--primary-soft)] text-[var(--primary)] ring-1 ring-[var(--primary)]' : 'bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)]'}"><span>3/4 Pose</span></button>` : ''}
+          ${CORNERS.map(c => `<button type="button" data-corner="${c.id}" title="Orbit camera to ${c.label} corner" class="corner-btn px-2 py-1 rounded-md text-xs font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer ${!isFront34 && cam.corner === c.id ? 'bg-[var(--primary-soft)] text-[var(--primary)] ring-1 ring-[var(--primary)]' : 'bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)]'}">${buildCameraViewSvg(c.quadrant)}<span class="font-mono">${c.label}</span></button>`).join('')}
         </div>
-        ${(caps.canApplyAngleToFollowing || caps.hasCustomCameraAngle) ? `
+        ${(caps.canApplyAngleToRange || caps.hasCustomCameraAngle) ? `
           <div class="flex items-center justify-between gap-2 flex-wrap pt-2 border-t border-[var(--border)]">
             ${caps.hasCustomCameraAngle
               ? `<button type="button" id="btnResetCam" class="px-2.5 py-1 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] text-xs font-semibold cursor-pointer">Reset Angle</button>`
               : `<span></span>`}
-            ${caps.canApplyAngleToFollowing
-              ? `<button type="button" id="btnApplyFollowing" class="px-3 py-1 rounded-md bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] text-xs font-semibold cursor-pointer">Apply Angle to Following (${followingCount})</button>`
+            ${caps.canApplyAngleToRange
+              ? `<button type="button" id="btnApplyAngleRange" class="px-3 py-1.5 rounded-md bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer">
+                  <span>Apply Angle to Steps…</span>
+                </button>`
               : ''}
           </div>` : ''}
       </div>`;
@@ -7236,118 +7314,226 @@ function renderContextOverlay(page) {
         renderAll();
       };
     }
-    const applyFollowingBtn = box.querySelector('#btnApplyFollowing');
-    if (applyFollowingBtn) {
-      applyFollowingBtn.onclick = () => {
-        pushUndo();
-        const curCam = getStepCamera(step);
-        const idx = ch.steps.indexOf(step);
-        let count = 0;
-        for (let i = idx + 1; i < ch.steps.length; i++) {
-          const s = ch.steps[i];
-          state.overrides[s.id] = { ...(state.overrides[s.id] || {}), side: curCam.side, corner: curCam.corner, az: curCam.az, el: curCam.el };
-          count++;
-        }
-        showToast(`Applied camera angle to ${count} following step(s).`);
-        renderAll();
-      };
+    const applyRangeBtn = box.querySelector('#btnApplyAngleRange');
+    if (applyRangeBtn) {
+      applyRangeBtn.onclick = () => openApplyAngleModal(step, ch);
     }
     return;
   }
+}
 
-  // ---- MODE: ARRANGE LAYOUT (Strictly 2D Box Positioning & Box Sizing — Zero Overlap!) ----
-  if (state.mode === 'arrange') {
-    const pliPct = Math.round((ov.pliScale || 1.0) * 100);
-    const selectedInsert = state.selectedArrangeEl?.kind === 'insert'
-      ? pageInserts.find(x => x.id === state.selectedArrangeEl.insertId) || null
-      : null;
-    const insertPct = selectedInsert ? Math.round((selectedInsert.scale || 1.0) * 100) : 100;
+// =========================================================================
+// 8A. APPLY CAMERA ANGLE TO STEP RANGE MODAL (Dual-Handle Range + 3D Thumbs)
+// =========================================================================
+const applyAngleState = {
+  sourceStep: null,
+  sourceCh: null,
+  camera: null,
+  allSteps: [],
+  startNum: 1,
+  endNum: 1,
+  awaitingEndClick: false,
+  thumbCache: new Map(),
+  renderJobId: 0,
+};
 
-    box.innerHTML = `
-      <div class="pointer-events-auto studio-surface rounded-xl p-3.5 w-full space-y-2.5 text-xs">
-        <div class="flex items-center justify-between gap-2 flex-wrap">
-          ${renderSlotSwitcher('arrange-step-btn', caps.hasMovableElements ? 'Drag boxes to move' : '2D layout')}
-          ${(caps.hasPartsBox || caps.hasMovableCallout) ? `
-            <button type="button" id="btnResetArrange" class="px-2.5 py-1 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] text-xs font-semibold cursor-pointer">Reset Box Layout</button>` : ''}
-        </div>
+function closeApplyAngleModal() {
+  applyAngleState.renderJobId++;
+  document.getElementById('applyAngleModal')?.classList.add('hidden');
+}
 
-        ${caps.hasPartsBox ? `
-          <div class="flex items-center justify-between gap-2 flex-wrap">
-            <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Parts Box Size</span>
-            <div class="inline-flex items-center gap-1 bg-[var(--surface-sunken)] rounded-md px-1.5 py-0.5">
-              <button type="button" id="pliDown" aria-label="Decrease Parts Box size" class="w-6 h-6 rounded-md hover:bg-[var(--surface-hover)] font-bold cursor-pointer">−</button>
-              <span class="text-xs font-bold tabular-nums min-w-[38px] text-center">${pliPct}%</span>
-              <button type="button" id="pliUp" aria-label="Increase Parts Box size" class="w-6 h-6 rounded-md hover:bg-[var(--surface-hover)] font-bold cursor-pointer">+</button>
-            </div>
-          </div>` : ''}
+function openApplyAngleModal(step, ch) {
+  const allSteps = getAllSteps(state.model);
+  if (allSteps.length < 2) return;
+  const cam = getStepCamera(step);
+  const maxNum = allSteps[allSteps.length - 1].step.num;
+  const chMaxNum = ch?.steps?.length ? ch.steps[ch.steps.length - 1].step?.num ?? ch.steps[ch.steps.length - 1].num : maxNum;
 
-        ${selectedInsert ? `
-          <div class="flex items-center justify-between gap-2 flex-wrap pt-2 border-t border-[var(--border)]">
-            <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--primary)]">Selected ${selectedInsert.kind === 'text' ? 'Note' : 'Image'}</span>
-            <div class="flex items-center gap-1.5">
-              <div class="inline-flex items-center gap-1 bg-[var(--surface-sunken)] rounded-md px-1.5 py-0.5">
-                <button type="button" id="insScaleDown" aria-label="Decrease insert size" class="w-6 h-6 rounded-md hover:bg-[var(--surface-hover)] font-bold cursor-pointer">−</button>
-                <span class="text-xs font-bold tabular-nums min-w-[38px] text-center">${insertPct}%</span>
-                <button type="button" id="insScaleUp" aria-label="Increase insert size" class="w-6 h-6 rounded-md hover:bg-[var(--surface-hover)] font-bold cursor-pointer">+</button>
-              </div>
-              <button type="button" id="btnDelInsert" class="px-2.5 py-1 rounded-md bg-[var(--danger-soft)] text-[var(--danger)] text-xs font-semibold cursor-pointer">Delete</button>
-            </div>
-          </div>` : ''}
+  applyAngleState.sourceStep = step;
+  applyAngleState.sourceCh = ch;
+  applyAngleState.camera = { side: cam.side, corner: cam.corner, az: Math.round(cam.az), el: Math.round(cam.el) };
+  applyAngleState.allSteps = allSteps;
+  applyAngleState.startNum = step.num;
+  applyAngleState.endNum = Math.min(maxNum, Math.max(step.num, chMaxNum || maxNum));
+  applyAngleState.awaitingEndClick = false;
+  applyAngleState.thumbCache.clear();
+  applyAngleState.renderJobId++;
 
-        ${!caps.hasMovableElements ? `
-          <div class="flex items-center justify-between gap-2 flex-wrap pt-1">
-            <span class="text-xs text-[var(--muted-foreground)]">No movable Parts Box in ${curMfStyle === 'exploded' ? 'Exploded' : 'Step-by-Step'} style yet.</span>
-            <button type="button" id="btnArrangeOpenEdit" class="px-3 py-1.5 rounded-md bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] text-xs font-semibold shrink-0 cursor-pointer">Open Edit →</button>
-          </div>` : ''}
-      </div>`;
-
-    box.querySelectorAll('.arrange-step-btn').forEach(b => {
-      b.onclick = () => {
-        const sid = b.getAttribute('data-pick-slot');
-        if (sid && state.selectedStepId !== sid) {
-          state.selectedStepId = sid;
-          state.selectedPartIds.clear();
-          renderAll();
-        }
-      };
-    });
-    const pliDown = box.querySelector('#pliDown');
-    const pliUp = box.querySelector('#pliUp');
-    if (pliDown) pliDown.onclick = () => { pushUndo(); state.overrides[step.id] = { ...ov, pliScale: Math.max(0.6, (ov.pliScale || 1) - 0.1) }; renderAll(); };
-    if (pliUp) pliUp.onclick = () => { pushUndo(); state.overrides[step.id] = { ...ov, pliScale: Math.min(1.6, (ov.pliScale || 1) + 0.1) }; renderAll(); };
-    const resetArrBtn = box.querySelector('#btnResetArrange');
-    if (resetArrBtn) {
-      resetArrBtn.onclick = () => {
-        pushUndo();
-        state.overrides[step.id] = clearStepArrangeOverride(ov);
-        showToast(`Reset box positions for Step ${step.num}.`);
-        renderAll();
-      };
-    }
-    const insDown = box.querySelector('#insScaleDown');
-    const insUp = box.querySelector('#insScaleUp');
-    if (selectedInsert && insDown && insUp) {
-      insDown.onclick = () => {
-        pushUndo();
-        selectedInsert.scale = Math.max(0.5, Number(((selectedInsert.scale || 1) - 0.15).toFixed(2)));
-        renderAll();
-      };
-      insUp.onclick = () => {
-        pushUndo();
-        selectedInsert.scale = Math.min(2.2, Number(((selectedInsert.scale || 1) + 0.15).toFixed(2)));
-        renderAll();
-      };
-    }
-    const delBtn = box.querySelector('#btnDelInsert');
-    if (delBtn) delBtn.onclick = () => {
-      pushUndo();
-      state.pageInserts[page.id] = (state.pageInserts[page.id] || []).filter(x => x.id !== state.selectedArrangeEl.insertId);
-      state.selectedArrangeEl = null;
-      renderAll();
-    };
-    const openEditBtn = box.querySelector('#btnArrangeOpenEdit');
-    if (openEditBtn) openEditBtn.onclick = () => openStepEditModal();
+  const sub = document.getElementById('applyAngleSubtitle');
+  if (sub) {
+    sub.textContent = `Sharing Step ${step.num} camera (${cam.side === 'bottom' ? 'Bottom' : 'Top'} · ${Math.round(cam.az)}° / ${Math.round(cam.el)}°)`;
   }
+
+  const minInp = document.getElementById('angleRangeMin');
+  const maxInp = document.getElementById('angleRangeMax');
+  const firstNum = allSteps[0].step.num;
+  if (minInp && maxInp) {
+    minInp.min = String(firstNum);
+    minInp.max = String(maxNum);
+    maxInp.min = String(firstNum);
+    maxInp.max = String(maxNum);
+  }
+
+  document.getElementById('applyAngleModal')?.classList.remove('hidden');
+  renderApplyAngleModal(true);
+}
+
+function syncApplyAngleRangeUI() {
+  const allSteps = applyAngleState.allSteps;
+  if (!allSteps.length) return;
+  const minBound = allSteps[0].step.num;
+  const maxBound = allSteps[allSteps.length - 1].step.num;
+  const lo = Math.min(applyAngleState.startNum, applyAngleState.endNum);
+  const hi = Math.max(applyAngleState.startNum, applyAngleState.endNum);
+
+  const minInp = document.getElementById('angleRangeMin');
+  const maxInp = document.getElementById('angleRangeMax');
+  if (minInp) minInp.value = String(lo);
+  if (maxInp) maxInp.value = String(hi);
+
+  const span = Math.max(1, maxBound - minBound);
+  const leftPct = ((lo - minBound) / span) * 100;
+  const rightPct = ((hi - minBound) / span) * 100;
+  const fill = document.getElementById('angleRangeFill');
+  if (fill) {
+    fill.style.left = `${leftPct.toFixed(2)}%`;
+    fill.style.width = `${Math.max(2, rightPct - leftPct).toFixed(2)}%`;
+  }
+
+  const startLbl = document.getElementById('angleRangeStartLbl');
+  const endLbl = document.getElementById('angleRangeEndLbl');
+  if (startLbl) startLbl.textContent = `Step ${lo}`;
+  if (endLbl) endLbl.textContent = `Step ${hi}`;
+
+  const selectedCount = allSteps.filter(({ step }) => step.num >= lo && step.num <= hi).length;
+  const countBadge = document.getElementById('angleRangeCountBadge');
+  if (countBadge) countBadge.textContent = `${selectedCount} step${selectedCount === 1 ? '' : 's'}`;
+
+  const confirmBtn = document.getElementById('btnConfirmApplyAngle');
+  if (confirmBtn) confirmBtn.textContent = `Apply Angle to ${selectedCount} Step${selectedCount === 1 ? '' : 's'}`;
+
+  // Update row highlights without recreating thumbnails
+  const listEl = document.getElementById('angleStepList');
+  if (!listEl) return;
+  listEl.querySelectorAll('.angle-step-row').forEach((row) => {
+    const num = Number(row.getAttribute('data-step-num'));
+    const inRange = num >= lo && num <= hi;
+    const isEdge = num === lo || num === hi;
+    const badge = row.querySelector('.angle-edge-badge');
+    row.className = `angle-step-row w-full flex items-center gap-3 p-2 rounded-lg border text-left transition-colors cursor-pointer ${
+      isEdge
+        ? 'border-[var(--primary)] bg-[var(--primary-soft)] ring-1 ring-[var(--primary)]'
+        : inRange
+          ? 'border-[var(--primary-border)] bg-[var(--primary-soft)]/55'
+          : 'border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)]'
+    }`;
+    if (badge) {
+      if (num === lo && num === hi) {
+        badge.textContent = 'Start & End';
+        badge.className = 'angle-edge-badge px-2 py-0.5 rounded-md bg-[var(--primary)] text-[var(--primary-foreground)] text-[10px] font-bold shrink-0';
+      } else if (num === lo) {
+        badge.textContent = 'Start';
+        badge.className = 'angle-edge-badge px-2 py-0.5 rounded-md bg-[var(--primary)] text-[var(--primary-foreground)] text-[10px] font-bold shrink-0';
+      } else if (num === hi) {
+        badge.textContent = 'End';
+        badge.className = 'angle-edge-badge px-2 py-0.5 rounded-md bg-[var(--primary)] text-[var(--primary-foreground)] text-[10px] font-bold shrink-0';
+      } else if (inRange) {
+        badge.textContent = 'Included';
+        badge.className = 'angle-edge-badge px-2 py-0.5 rounded-md bg-[var(--card)] border border-[var(--primary-border)] text-[var(--primary)] text-[10px] font-semibold shrink-0';
+      } else {
+        badge.textContent = '';
+        badge.className = 'angle-edge-badge hidden';
+      }
+    }
+  });
+}
+
+function renderApplyAngleModal(scrollToSource = false) {
+  const listEl = document.getElementById('angleStepList');
+  if (!listEl) return;
+  const allSteps = applyAngleState.allSteps;
+  const srcId = applyAngleState.sourceStep?.id;
+  const jobId = ++applyAngleState.renderJobId;
+
+  listEl.innerHTML = allSteps.map(({ ch, step }) => {
+    const isCur = step.id === srcId;
+    const stepCam = getStepCamera(step);
+    return `
+      <button type="button" data-step-num="${step.num}" data-step-id="${step.id}" class="angle-step-row w-full flex items-center gap-3 p-2 rounded-lg border border-[var(--border)] bg-[var(--card)] text-left transition-colors cursor-pointer">
+        <div class="w-14 h-14 rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] shrink-0 overflow-hidden flex items-center justify-center relative">
+          <img data-angle-thumb="${step.id}" alt="Step ${step.num} 3D preview" class="w-full h-full object-contain opacity-0 transition-opacity duration-150" />
+          <span data-angle-ph="${step.id}" class="font-mono text-[10px] text-[var(--muted-foreground)] absolute">#${step.num}</span>
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-1.5 flex-wrap">
+            <span class="font-bold text-xs">Step ${step.num}</span>
+            ${isCur ? `<span class="px-1.5 py-0.5 rounded bg-[var(--surface-sunken)] border border-[var(--border)] text-[10px] font-bold text-[var(--foreground)]">Current</span>` : ''}
+            <span class="font-mono text-[10px] text-[var(--muted-foreground)]">${step.parts.length} pc${step.parts.length === 1 ? '' : 's'}</span>
+          </div>
+          <div class="text-[11px] text-[var(--muted-foreground)] truncate mt-0.5">${escHtml(ch.name)} · ${stepCam.side === 'bottom' ? 'Bottom' : 'Top'} ${Math.round(stepCam.az)}°</div>
+        </div>
+        <span class="angle-edge-badge hidden"></span>
+      </button>`;
+  }).join('');
+
+  listEl.querySelectorAll('.angle-step-row').forEach((row) => {
+    row.onclick = () => {
+      const clickedNum = Number(row.getAttribute('data-step-num'));
+      if (!applyAngleState.awaitingEndClick) {
+        applyAngleState.startNum = clickedNum;
+        applyAngleState.endNum = clickedNum;
+        applyAngleState.awaitingEndClick = true;
+      } else {
+        applyAngleState.endNum = clickedNum;
+        applyAngleState.awaitingEndClick = false;
+      }
+      syncApplyAngleRangeUI();
+    };
+  });
+
+  syncApplyAngleRangeUI();
+
+  if (scrollToSource && srcId) {
+    const curRow = listEl.querySelector(`[data-step-id="${srcId}"]`);
+    if (curRow) curRow.scrollIntoView({ block: 'center', behavior: 'instant' });
+  }
+
+  // Progressively render 3D square step thumbnails in small batches so UI stays 60fps
+  const theme = getActiveTheme();
+  let idx = 0;
+  const renderBatch = () => {
+    if (applyAngleState.renderJobId !== jobId) return;
+    const end = Math.min(allSteps.length, idx + 4);
+    for (; idx < end; idx++) {
+      const { ch, step } = allSteps[idx];
+      const imgEl = listEl.querySelector(`[data-angle-thumb="${step.id}"]`);
+      const phEl = listEl.querySelector(`[data-angle-ph="${step.id}"]`);
+      if (!imgEl) continue;
+      let url = applyAngleState.thumbCache.get(step.id);
+      if (!url) {
+        const prev = getPreviousPartsForStep(state.model, ch, step);
+        const c = getStepCamera(step);
+        const snap = renderSnapshot(prev, step.parts, c.az, c.el, 112, 112, 1.0, {
+          highlightNew: state.highlightNew,
+          highlightColor: state.highlightColor,
+          fadePrev: state.fadePrev,
+          fadeOpacity: state.fadeOpacity,
+          showArrows: false,
+          accent: theme.accent,
+          ov: state.overrides[step.id] || {},
+        });
+        url = snap.url;
+        applyAngleState.thumbCache.set(step.id, url);
+      }
+      imgEl.src = url;
+      imgEl.classList.remove('opacity-0');
+      if (phEl) phEl.classList.add('hidden');
+    }
+    if (idx < allSteps.length) {
+      requestAnimationFrame(renderBatch);
+    }
+  };
+  requestAnimationFrame(renderBatch);
 }
 
 // =========================================================================
@@ -7403,8 +7589,8 @@ function renderStepEditModal() {
   const modelScalePct = Math.round((ov.modelScale || 1.0) * 100);
   const pliScalePct = Math.round((ov.pliScale || 1.0) * 100);
   const cam = getStepCamera(step);
-  const cornerLabel = (CORNERS.find(c => c.id === cam.corner) || CORNERS[0]).label;
-  const pageInserts = state.pageInserts[page.id] || [];
+  const cornerLabel = getCameraAngleLabel(cam.corner);
+  const stepInserts = state.stepInserts[step.id] || [];
   const stepIdxInCh = ch.steps.indexOf(step);
   const followingCount = stepIdxInCh >= 0 ? Math.max(0, ch.steps.length - 1 - stepIdxInCh) : 0;
   const isPinned = Boolean(ov.pin);
@@ -7416,7 +7602,7 @@ function renderStepEditModal() {
     minifigStyle: curMfStyle,
     hasSubassembly: Boolean(step.subassembly),
     override: ov,
-    pageInsertCount: pageInserts.length,
+    stepInsertCount: stepInserts.length,
     followingStepCount: followingCount,
   });
 
@@ -7612,12 +7798,12 @@ function renderStepEditModal() {
     <section class="p-4 rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)]/60 space-y-3">
       <div class="flex items-center justify-between gap-2 flex-wrap">
         <div>
-          <div class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Page Notes &amp; Images</div>
-          <h3 class="text-sm font-bold mt-0.5">Custom Callouts on Page ${page.num}</h3>
+          <div class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Step Notes &amp; Images</div>
+          <h3 class="text-sm font-bold mt-0.5">Custom Callouts on Step ${step.num}</h3>
         </div>
-        ${scopeBadge('This page')}
+        ${scopeBadge('This step')}
       </div>
-      <p class="text-[11px] text-[var(--muted-foreground)] leading-snug">Add builder tips, warnings, or custom logos onto this page. Switch to <b>Arrange</b> mode afterward to drag or resize them.</p>
+      <p class="text-[11px] text-[var(--muted-foreground)] leading-snug">Add builder tips, warnings, or logos attached directly to Step ${step.num} so they stay with this step even if pagination changes. You can also drag them in <b>Select</b> mode.</p>
 
       <div class="flex items-center gap-2">
         <input id="stepEditNoteInput" type="text" maxlength="160" placeholder="Type a builder note (e.g. Press firmly until it clicks)…" class="flex-1 min-w-0 px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--card)] outline-none focus:border-[var(--primary)]" />
@@ -7629,22 +7815,44 @@ function renderStepEditModal() {
           <svg class="w-3.5 h-3.5 text-[var(--primary)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
           <span>+ Add Image / Logo</span>
         </button>
-        ${pageInserts.length > 0 ? `<button type="button" id="stepEditGoArrange" class="px-3 py-2 rounded-md border border-[var(--primary)]/40 bg-[var(--primary-soft)] text-[var(--primary)] font-semibold cursor-pointer">Move in Arrange →</button>` : ''}
       </div>
 
-      ${pageInserts.length > 0 ? `
-        <div class="space-y-1.5 pt-2.5 border-t border-[var(--border)]">
-          <div class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">On This Page (${pageInserts.length})</div>
-          ${pageInserts.map(ins => `
-            <div class="flex items-center justify-between gap-2 p-2 rounded-lg border border-[var(--border)] bg-[var(--card)]">
-              <div class="flex items-center gap-2 min-w-0 flex-1">
-                ${ins.kind === 'image'
-                  ? `<img src="${ins.src}" alt="Page image" class="w-8 h-8 rounded-md object-contain border border-[var(--border)] shrink-0 bg-[var(--surface-sunken)]" />`
-                  : `<span class="px-2 py-0.5 rounded-md bg-[var(--primary-soft)] text-[var(--primary)] text-[10px] font-bold shrink-0">Note</span>`}
-                <span class="truncate font-medium">${ins.kind === 'text' ? escHtml(ins.text) : `Custom Image (${Math.round((ins.scale || 1) * 100)}%)`}</span>
+      ${stepInserts.length > 0 ? `
+        <div class="space-y-2 pt-2.5 border-t border-[var(--border)]">
+          <div class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Attached to Step ${step.num} (${stepInserts.length})</div>
+          ${stepInserts.map(ins => {
+            const curCorner = ins.corner || 'bottom-right';
+            const insPct = Math.round((ins.scale || 1) * 100);
+            const corners = [
+              { id: 'top-left', lbl: 'TL', title: 'Top Left' },
+              { id: 'top-right', lbl: 'TR', title: 'Top Right' },
+              { id: 'bottom-left', lbl: 'BL', title: 'Bottom Left' },
+              { id: 'bottom-right', lbl: 'BR', title: 'Bottom Right' },
+            ];
+            return `
+            <div class="p-2.5 rounded-lg border border-[var(--border)] bg-[var(--card)] space-y-2">
+              <div class="flex items-center justify-between gap-2">
+                <div class="flex items-center gap-2 min-w-0 flex-1">
+                  ${ins.kind === 'image'
+                    ? `<img src="${ins.src}" alt="Step image" class="w-8 h-8 rounded-md object-contain border border-[var(--border)] shrink-0 bg-[var(--surface-sunken)]" />`
+                    : `<span class="px-2 py-0.5 rounded-md bg-[var(--primary-soft)] text-[var(--primary)] text-[10px] font-bold shrink-0">Note</span>`}
+                  <span class="truncate font-medium">${ins.kind === 'text' ? escHtml(ins.text) : `Custom Image (${insPct}%)`}</span>
+                </div>
+                <button type="button" data-del-insert="${ins.id}" class="step-edit-del-ins px-2.5 py-1 rounded-md bg-[var(--danger-soft)] text-[var(--danger)] font-semibold shrink-0 cursor-pointer">Delete</button>
               </div>
-              <button type="button" data-del-insert="${ins.id}" class="step-edit-del-ins px-2.5 py-1 rounded-md bg-[var(--danger-soft)] text-[var(--danger)] font-semibold shrink-0 cursor-pointer">Delete</button>
-            </div>`).join('')}
+              <div class="flex items-center justify-between gap-2 flex-wrap pt-1.5 border-t border-[var(--border)]/60">
+                <div class="inline-flex items-center gap-1">
+                  <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)] mr-0.5">Corner</span>
+                  ${corners.map(c => `<button type="button" data-ins-corner="${ins.id}:${c.id}" title="${c.title}" class="step-edit-ins-corner px-1.5 py-0.5 rounded border text-[10px] font-mono font-bold cursor-pointer ${curCorner === c.id && typeof ins.x !== 'number' ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)]'}">${c.lbl}</button>`).join('')}
+                </div>
+                <div class="inline-flex items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] px-1 py-0.5">
+                  <button type="button" data-ins-scale="${ins.id}:down" aria-label="Smaller" class="step-edit-ins-scale w-5 h-5 rounded hover:bg-[var(--surface-hover)] font-bold cursor-pointer">−</button>
+                  <span class="font-mono text-[10px] font-bold min-w-[32px] text-center">${insPct}%</span>
+                  <button type="button" data-ins-scale="${ins.id}:up" aria-label="Larger" class="step-edit-ins-scale w-5 h-5 rounded hover:bg-[var(--surface-hover)] font-bold cursor-pointer">+</button>
+                </div>
+              </div>
+            </div>`;
+          }).join('')}
         </div>` : ''}
     </section>
   `;
@@ -7722,7 +7930,7 @@ function renderStepEditModal() {
     openPageSetupModal();
   };
 
-  // Bind Page Notes & Images controls
+  // Bind Step Notes & Images controls (step-specific!)
   const noteInput = body.querySelector('#stepEditNoteInput');
   const addNote = () => {
     const txt = (noteInput?.value || '').trim();
@@ -7732,10 +7940,10 @@ function renderStepEditModal() {
       return;
     }
     pushUndo();
-    const arr = state.pageInserts[page.id] || [];
-    arr.push({ id: 'ins_' + Date.now().toString(36), kind: 'text', text: txt, x: 30, y: 80, scale: 1 });
-    state.pageInserts[page.id] = arr;
-    showToast(`Added note to Page ${page.num}.`);
+    const arr = state.stepInserts[step.id] || [];
+    arr.push({ id: 'ins_' + Date.now().toString(36), kind: 'text', text: txt, corner: 'bottom-right', scale: 1 });
+    state.stepInserts[step.id] = arr;
+    showToast(`Added note to Step ${step.num}.`);
     renderAll();
   };
   body.querySelector('#stepEditAddNoteBtn').onclick = addNote;
@@ -7748,21 +7956,35 @@ function renderStepEditModal() {
     };
   }
   body.querySelector('#stepEditAddImgBtn').onclick = () => document.getElementById('insertImageInput').click();
-  const goArrangeBtn = body.querySelector('#stepEditGoArrange');
-  if (goArrangeBtn) {
-    goArrangeBtn.onclick = () => {
-      closeStepEditModal();
-      state.mode = 'arrange';
-      state.selectedPartIds.clear();
+  body.querySelectorAll('.step-edit-ins-corner').forEach(b => {
+    b.onclick = () => {
+      const [id, corner] = (b.getAttribute('data-ins-corner') || '').split(':');
+      const ins = (state.stepInserts[step.id] || []).find(x => x.id === id);
+      if (!ins || !corner) return;
+      pushUndo();
+      ins.corner = corner;
+      delete ins.x;
+      delete ins.y;
       renderAll();
     };
-  }
+  });
+  body.querySelectorAll('.step-edit-ins-scale').forEach(b => {
+    b.onclick = () => {
+      const [id, dir] = (b.getAttribute('data-ins-scale') || '').split(':');
+      const ins = (state.stepInserts[step.id] || []).find(x => x.id === id);
+      if (!ins) return;
+      pushUndo();
+      const delta = dir === 'up' ? 0.15 : -0.15;
+      ins.scale = Math.max(0.5, Math.min(2.2, Number(((ins.scale || 1) + delta).toFixed(2))));
+      renderAll();
+    };
+  });
   body.querySelectorAll('.step-edit-del-ins').forEach(b => {
     b.onclick = () => {
       const id = b.getAttribute('data-del-insert');
       pushUndo();
-      state.pageInserts[page.id] = (state.pageInserts[page.id] || []).filter(x => x.id !== id);
-      if (state.selectedArrangeEl?.insertId === id) state.selectedArrangeEl = null;
+      state.stepInserts[step.id] = (state.stepInserts[step.id] || []).filter(x => x.id !== id);
+      if (state.stepInserts[step.id].length === 0) delete state.stepInserts[step.id];
       renderAll();
     };
   });
@@ -7870,10 +8092,117 @@ function renderSlotSizeButtons(containerEl, count, sizesArr, onChange) {
 function populateGroupThemeOptions(selectedThemeId = '') {
   const sel = document.getElementById('grpThemeSelect');
   if (!sel) return;
-  const allThemes = [...BUILT_IN_THEMES, ...customThemes];
+  const allThemes = [...Object.values(BUILT_IN_THEMES), ...customThemes];
   sel.innerHTML = `<option value="">Use Manual Default</option>` +
     allThemes.map((t) => `<option value="${escHtml(t.id)}">${escHtml(t.name)}</option>`).join('');
   sel.value = selectedThemeId || '';
+}
+
+function renderPaperFormatPreviewUI() {
+  const boxEl = document.getElementById('paperFormatPreview');
+  const dimsEl = document.getElementById('paperFormatDimsLabel');
+  const ratioEl = document.getElementById('paperFormatRatioLabel');
+  const selEl = document.getElementById('paperFormatSelect');
+  if (selEl && selEl.value !== state.paperFormat) {
+    selEl.value = state.paperFormat;
+  }
+  const cDiv = state.customUnit === 'cm' ? 2.54 : 1;
+  const cWIn = Math.max(2, (Number(state.customWidth) || 10) / cDiv);
+  const cHIn = Math.max(2, (Number(state.customHeight) || 8) / cDiv);
+  const screenAspect = Math.max(0.62, Math.min(1.68, (window.innerWidth - 24) / Math.max(300, window.innerHeight - 170)));
+  const preview = computePaperPreviewBox({
+    paperFormat: state.paperFormat,
+    orientation: state.orientation,
+    customWidthIn: cWIn,
+    customHeightIn: cHIn,
+    screenAspect,
+    maxWidthPx: 82,
+    maxHeightPx: 66,
+  });
+  const activeFmt = PAPER_FORMATS[state.paperFormat] || PAPER_FORMATS.screen;
+  if (dimsEl) {
+    dimsEl.textContent = state.paperFormat === 'screen'
+      ? 'Adapts automatically to your current screen'
+      : `${formatPhysicalDims(preview.widthIn, preview.heightIn)}`;
+  }
+  if (ratioEl) {
+    ratioEl.textContent = state.paperFormat === 'screen'
+      ? (preview.isLandscape ? 'Screen · Wide' : 'Screen · Tall')
+      : `${preview.isLandscape ? 'Landscape' : (Math.abs(preview.widthIn - preview.heightIn) < 0.05 ? 'Square' : 'Portrait')} · ${preview.ratioLabel}`;
+  }
+  if (boxEl) {
+    const shortLbl = activeFmt.shortName || activeFmt.name;
+    boxEl.innerHTML = `
+      <div class="relative rounded-[4px] border-2 border-[var(--primary)] bg-[var(--card)] shadow-xs flex flex-col items-center justify-center transition-all duration-150 overflow-hidden" style="width:${preview.widthPx}px;height:${preview.heightPx}px">
+        <span class="absolute top-0.5 left-0.5 w-1.5 h-1.5 border-t border-l border-[var(--primary)]/60"></span>
+        <span class="absolute top-0.5 right-0.5 w-1.5 h-1.5 border-t border-r border-[var(--primary)]/60"></span>
+        <span class="absolute bottom-0.5 left-0.5 w-1.5 h-1.5 border-b border-l border-[var(--primary)]/60"></span>
+        <span class="absolute bottom-0.5 right-0.5 w-1.5 h-1.5 border-b border-r border-[var(--primary)]/60"></span>
+        <span class="font-mono text-[9px] font-bold text-[var(--primary)] leading-tight text-center px-1 truncate max-w-full">${escHtml(shortLbl)}</span>
+        ${state.paperFormat !== 'screen' ? `<span class="font-mono text-[8px] text-[var(--muted-foreground)] leading-none mt-0.5">${preview.widthIn.toFixed(1)}×${preview.heightIn.toFixed(1)}"</span>` : ''}
+      </div>`;
+  }
+}
+
+function renderGridPreviewInto(containerEl, spec, maxW = 136, maxH = 92) {
+  if (!containerEl) return;
+  const cDiv = state.customUnit === 'cm' ? 2.54 : 1;
+  const cWIn = Math.max(2, (Number(state.customWidth) || 10) / cDiv);
+  const cHIn = Math.max(2, (Number(state.customHeight) || 8) / cDiv);
+  const screenAspect = Math.max(0.62, Math.min(1.68, (window.innerWidth - 24) / Math.max(300, window.innerHeight - 170)));
+  const pageBox = computePaperPreviewBox({
+    paperFormat: state.paperFormat,
+    orientation: state.orientation,
+    customWidthIn: cWIn,
+    customHeightIn: cHIn,
+    screenAspect,
+    maxWidthPx: maxW,
+    maxHeightPx: maxH,
+  });
+  const padPx = state.density === 'compact' ? 4 : state.density === 'spacious' ? 9 : 6;
+  const gapPx = state.density === 'compact' ? 2 : state.density === 'spacious' ? 4 : 3;
+  const innerW = Math.max(24, pageBox.widthPx - padPx * 2);
+  const innerH = Math.max(20, pageBox.heightPx - padPx * 2 - 6);
+  const sampleCount = spec.mode === 'auto'
+    ? (spec.mixedLayout !== 'even' ? 3 : 2)
+    : Math.max(1, Math.min(12, spec.stepsPerPage || 2));
+  const rects = computePageSlotRects(sampleCount, spec, pageBox.isLandscape, innerW, innerH, gapPx);
+  const showBorders = state.showStepBorders !== false;
+  containerEl.innerHTML = `
+    <div class="relative rounded-[5px] border border-[var(--border-strong)] bg-[var(--card)] shadow-xs overflow-hidden transition-all duration-150" style="width:${pageBox.widthPx}px;height:${pageBox.heightPx}px;padding:${padPx}px ${padPx}px ${padPx + 5}px">
+      <div class="relative w-full h-full">
+        ${rects.map((r, i) => {
+          const leftPct = (r.x / innerW) * 100;
+          const topPct = (r.y / innerH) * 100;
+          const widthPct = (r.w / innerW) * 100;
+          const heightPct = (r.h / innerH) * 100;
+          const accentFill = r.isFeatured ? 'bg-[var(--primary-soft)] border-[var(--primary)] text-[var(--primary)]' : 'bg-[var(--surface-sunken)] border-[var(--border-strong)] text-[var(--foreground)]';
+          const borderCls = showBorders ? 'border' : 'border border-dashed opacity-85';
+          return `<div class="absolute rounded-[3px] ${borderCls} ${accentFill} flex items-center justify-center font-mono font-bold" style="left:${leftPct.toFixed(2)}%;top:${topPct.toFixed(2)}%;width:${widthPct.toFixed(2)}%;height:${heightPct.toFixed(2)}%;font-size:${sampleCount > 6 ? 8 : 10}px">${i + 1}</div>`;
+        }).join('')}
+      </div>
+      <div class="absolute bottom-1 right-1.5 font-mono text-[7px] text-[var(--muted-foreground)] leading-none pointer-events-none">${spec.flow === 'column' ? '↓' : '→'}</div>
+    </div>`;
+}
+
+function renderGroupGridPreviewUI() {
+  const el = document.getElementById('grpGridPreview');
+  if (!el) return;
+  const stepsPerPage = Math.max(1, Math.min(24, parseInt(document.getElementById('grpStepsPerPageInput')?.value, 10) || 4));
+  const colsRaw = document.getElementById('grpColsSelect')?.value || 'auto';
+  const rowsRaw = document.getElementById('grpRowsSelect')?.value || 'auto';
+  const flow = document.getElementById('grpFlowSelect')?.value === 'column' ? 'column' : 'row';
+  const mixedLayout = document.getElementById('grpMixedSelect')?.value || 'even';
+  const draftSpec = normalizePageLayoutSpec({
+    mode: 'custom',
+    stepsPerPage,
+    cols: colsRaw === 'auto' ? 'auto' : parseInt(colsRaw, 10),
+    rows: rowsRaw === 'auto' ? 'auto' : parseInt(rowsRaw, 10),
+    flow,
+    mixedLayout,
+    slotSizes: mixedLayout === 'custom_weights' ? [...layoutGroupEditorState.slotSizes] : [],
+  });
+  renderGridPreviewInto(el, draftSpec, 128, 78);
 }
 
 function renderLayoutGroupsList() {
@@ -7897,7 +8226,7 @@ function renderLayoutGroupsList() {
           </div>
           <div class="text-[10px] text-[var(--muted-foreground)] mt-0.5">${escHtml(summary)}</div>
         </div>
-        <button type="button" data-edit-grp="${escHtml(grp.id)}" class="grp-edit-btn px-2.5 py-1 rounded-full border border-[var(--border)] bg-[var(--card)] text-[11px] font-semibold hover:border-[var(--primary)] shrink-0 transition">Edit</button>
+        <button type="button" data-edit-grp="${escHtml(grp.id)}" class="grp-edit-btn px-2.5 py-1 rounded-full border border-[var(--border)] bg-[var(--card)] text-[11px] font-semibold hover:border-[var(--primary)] shrink-0 transition cursor-pointer">Edit</button>
       </div>`;
   }).join('');
 
@@ -7935,6 +8264,7 @@ function openLayoutGroupEditor(existingGroup = null, prefillRange = null) {
   populateGroupThemeOptions(existingGroup?.themeId || '');
   document.getElementById('btnGrpDelete').classList.toggle('hidden', !existingGroup);
   syncGroupEditorSlotSizesUI();
+  renderGroupGridPreviewUI();
   wrap.classList.remove('hidden');
   wrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
@@ -7958,6 +8288,7 @@ function syncGroupEditorSlotSizesUI() {
       syncGroupEditorSlotSizesUI();
     });
   }
+  renderGroupGridPreviewUI();
 }
 
 function syncPageLayoutControlsUI() {
@@ -7965,12 +8296,32 @@ function syncPageLayoutControlsUI() {
   const chip = document.getElementById('layoutSummaryChip');
   if (chip) chip.textContent = describePageLayoutSpec(lc);
 
+  // Render live default grid preview & explanatory text
+  renderGridPreviewInto(document.getElementById('layoutGridPreview'), lc, 138, 94);
+  const gridTitle = document.getElementById('layoutGridPreviewTitle');
+  const gridDesc = document.getElementById('layoutGridPreviewDesc');
+  if (gridTitle && gridDesc) {
+    if (lc.mode === 'auto') {
+      gridTitle.textContent = 'Smart Auto Grid';
+      gridDesc.textContent = 'Automatically chooses 1–2 steps per page based on each step’s complexity and your paper orientation.';
+    } else {
+      const flowTxt = lc.flow === 'column' ? 'top-to-bottom columns' : 'left-to-right rows';
+      const mixedTxt = lc.mixedLayout === 'hero_left' ? 'with Step 1 featured large on the left'
+        : lc.mixedLayout === 'hero_top' ? 'with Step 1 featured wide across the top'
+        : lc.mixedLayout === 'hero_right' ? 'with the final step featured large on the right'
+        : lc.mixedLayout === 'custom_weights' ? 'using custom S / M / L slot sizes'
+        : 'in evenly sized step cells';
+      gridTitle.textContent = `${lc.stepsPerPage} Step${lc.stepsPerPage === 1 ? '' : 's'} per Page · ${describePageLayoutSpec(lc)}`;
+      gridDesc.textContent = `Fills ${flowTxt}, ${mixedTxt}.`;
+    }
+  }
+
   document.querySelectorAll('.layout-btn').forEach((b) => {
     const preset = b.getAttribute('data-layout-preset');
     const act = preset === 'auto'
       ? lc.mode === 'auto'
       : (lc.mode === 'custom' && String(lc.stepsPerPage) === preset);
-    b.className = `layout-btn py-2 rounded-full border font-semibold transition ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
+    b.className = `layout-btn py-2 rounded-md border font-semibold transition cursor-pointer ${preset !== 'auto' ? 'font-mono ' : ''}${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)]'}`;
   });
 
   const stepsInp = document.getElementById('layoutStepsInput');
@@ -7984,12 +8335,12 @@ function syncPageLayoutControlsUI() {
 
   document.querySelectorAll('.step-flow-btn').forEach((b) => {
     const act = b.getAttribute('data-step-flow') === lc.flow;
-    b.className = `step-flow-btn py-1.5 px-2.5 rounded-full border font-semibold transition ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
+    b.className = `step-flow-btn py-2 px-3 rounded-md border font-semibold flex items-center justify-center gap-2 transition cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)]'}`;
   });
 
   document.querySelectorAll('.mixed-layout-btn').forEach((b) => {
     const act = b.getAttribute('data-mixed-layout') === lc.mixedLayout;
-    b.className = `mixed-layout-btn py-1.5 px-2 rounded-full border font-semibold text-[11px] transition ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
+    b.className = `mixed-layout-btn py-2 px-2 rounded-md border font-semibold text-xs flex flex-col items-center gap-1 transition cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)]'}`;
   });
 
   const defWrap = document.getElementById('defaultSlotSizesWrap');
@@ -8042,65 +8393,66 @@ function syncMenuControls() {
   setVisible('menuFetchLibWrap', vis.showFetchLibrary);
   setVisible('menuClearLibBtn', vis.showClearLibrary);
   setVisible('menuAutoGenSection', vis.showAutoGenerateSection);
-  setVisible('menuRegenBtn', vis.showRegenerateSteps);
-  setVisible('menuSubdivideBtn', vis.showSubdivideModel);
+  setVisible('menuStepGenBtn', vis.showAutoGenerateSection);
   setVisible('menuPageInsertsSection', vis.showPageInsertsSection);
   setVisible('menuAddDivider', vis.showInsertDivider);
 
-  document.querySelectorAll('.fmt-btn').forEach(b => {
-    const fmtId = b.getAttribute('data-format');
-    const act = fmtId === state.paperFormat;
-    b.className = `fmt-btn py-2.5 px-3 rounded-xl border text-left transition ${fmtId === 'custom' ? 'sm:col-span-2 ' : ''}${act ? 'border-[var(--primary)] bg-[var(--primary-soft)] text-[var(--primary)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
-  });
+  const stepGenSum = document.getElementById('menuStepGenSummary');
+  if (stepGenSum) {
+    const plan = state.model?._subdivisionPlan;
+    stepGenSum.textContent = plan?.sections?.length
+      ? `${plan.sections.length} Sections`
+      : (state.detectDuplicates ? 'Auto · Dupes On' : 'Single Build');
+  }
+
+  const activeFmt = PAPER_FORMATS[state.paperFormat] || PAPER_FORMATS.screen;
   document.getElementById('customSizeWrap').classList.toggle('hidden', state.paperFormat !== 'custom');
-  document.getElementById('orientationWrap').classList.toggle('hidden', state.paperFormat === 'screen' || state.paperFormat === 'square' || state.paperFormat === 'custom');
+  document.getElementById('orientationWrap').classList.toggle('hidden', !activeFmt.supportsOrientation);
   const wInEl = document.getElementById('customWidthIn'), hInEl = document.getElementById('customHeightIn');
   if (wInEl && document.activeElement !== wInEl) wInEl.value = String(Number(state.customWidth.toFixed(2)));
   if (hInEl && document.activeElement !== hInEl) hInEl.value = String(Number(state.customHeight.toFixed(2)));
   document.querySelectorAll('.unit-btn').forEach(b => {
     const act = b.getAttribute('data-unit') === state.customUnit;
-    b.className = `unit-btn px-2.5 py-1 rounded text-xs font-semibold transition ${act ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'text-[var(--muted-foreground)]'}`;
+    b.className = `unit-btn px-2.5 py-1 rounded text-xs font-semibold transition cursor-pointer ${act ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'text-[var(--muted-foreground)]'}`;
   });
   const cDiv = state.customUnit === 'cm' ? 2.54 : 1;
   const cWIn = Math.max(2, (Number(state.customWidth) || 10) / cDiv);
   const cHIn = Math.max(2, (Number(state.customHeight) || 8) / cDiv);
-  const customFmtSub = document.getElementById('customFmtSub');
-  if (customFmtSub) customFmtSub.textContent = formatPhysicalDims(cWIn, cHIn);
   const equivEl = document.getElementById('customUnitEquiv');
   if (equivEl) {
     equivEl.textContent = state.customUnit === 'in'
       ? `= ${(cWIn * 2.54).toFixed(1)} × ${(cHIn * 2.54).toFixed(1)} cm`
       : `= ${cWIn.toFixed(2)} × ${cHIn.toFixed(2)} in`;
   }
-  const activeFmt = PAPER_FORMATS[state.paperFormat] || PAPER_FORMATS.screen;
   const [actWIn, actHIn] = getActivePagePhysicalInches();
   const menuPageSum = document.getElementById('menuPageSetupSummary');
   if (menuPageSum) {
-    const orientShort = (state.paperFormat === 'letter' || state.paperFormat === 'a4')
+    const orientShort = activeFmt.supportsOrientation
       ? ` · ${state.orientation === 'portrait' ? 'Portrait' : 'Landscape'}`
       : state.paperFormat === 'custom'
         ? ` · ${state.customWidth}×${state.customHeight} ${state.customUnit}`
         : '';
-    menuPageSum.textContent = `${activeFmt.name}${orientShort}`;
+    menuPageSum.textContent = `${activeFmt.shortName || activeFmt.name}${orientShort}`;
   }
   const pageSetupSub = document.getElementById('pageSetupSubtitle');
   if (pageSetupSub) {
     pageSetupSub.textContent = state.paperFormat === 'screen'
       ? 'Adapts to current screen · Change paper size, grids & step groups'
-      : `${activeFmt.name} · ${formatPhysicalDims(actWIn, actHIn)}`;
+      : `${activeFmt.shortName || activeFmt.name} · ${formatPhysicalDims(actWIn, actHIn)}`;
   }
+  renderPaperFormatPreviewUI();
   document.querySelectorAll('.orient-btn').forEach(b => {
     const act = b.getAttribute('data-orient') === state.orientation;
-    b.className = `orient-btn py-2 rounded-md border font-semibold transition ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
+    b.className = `orient-btn py-2.5 px-3 rounded-lg border font-semibold flex items-center justify-center gap-2.5 transition cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)]'}`;
   });
   syncPageLayoutControlsUI();
   document.querySelectorAll('.dens-btn').forEach(b => {
     const act = b.getAttribute('data-density') === state.density;
-    b.className = `dens-btn py-2 rounded-md border font-semibold transition ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
+    b.className = `dens-btn py-2.5 px-2 rounded-lg border font-semibold flex flex-col items-center gap-1.5 transition cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)]'}`;
   });
   document.querySelectorAll('.pgnum-btn').forEach(b => {
     const act = b.getAttribute('data-pgnum') === state.pageNumberFormat;
-    b.className = `pgnum-btn py-2 rounded-md border font-semibold transition ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
+    b.className = `pgnum-btn py-2.5 px-1.5 rounded-lg border font-semibold flex flex-col items-center gap-1 transition cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)]'}`;
   });
   const setChk = (id, val) => { const el = document.getElementById(id); if (el) el.checked = Boolean(val); };
   setChk('toggleStepBorders', state.showStepBorders);
@@ -10261,7 +10613,7 @@ function scheduleSaveSessionPrefs() {
       showSizeGuides: state.showSizeGuides, minifigStyle: state.minifigStyle, showMinifig1to1: state.showMinifig1to1, showStepBorders: state.showStepBorders,
       showPageTitle: state.showPageTitle, pageNumberFormat: state.pageNumberFormat,
       showExtras: state.showExtras, bomConfig: state.bomConfig,
-      overrides: state.overrides, pageInserts: state.pageInserts, dividerAfter: state.dividerAfter,
+      overrides: state.overrides, stepInserts: state.stepInserts, pageInserts: state.pageInserts, dividerAfter: state.dividerAfter,
       coverMeta: state.coverMeta, completeMeta: state.completeMeta, backMeta: state.backMeta, pageIdx: state.pageIdx,
       seenDiagnosticKeys: serializeSeenDiagnosticKeys(state.seenDiagnosticKeys),
     });
@@ -10353,6 +10705,7 @@ async function restoreLastSessionOnStart() {
 
     lastSourceRecord = effectiveRec;
     state.overrides = prefs.overrides || {};
+    state.stepInserts = prefs.stepInserts || {};
     state.pageInserts = prefs.pageInserts || {};
     state.dividerAfter = prefs.dividerAfter || {};
     if (prefs.coverMeta) state.coverMeta = normalizeCoverMeta({ ...state.coverMeta, ...prefs.coverMeta });
@@ -11268,6 +11621,56 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
         ctx.textAlign = 'left';
         ctx.textBaseline = 'top';
       }
+
+      // Step-specific custom callouts (notes & images)
+      const slotInserts = state.stepInserts[step.id] || [];
+      for (let insIdx = 0; insIdx < slotInserts.length; insIdx++) {
+        const ins = slotInserts[insIdx];
+        const scale = ins.scale || 1;
+        const corner = ins.corner || 'bottom-right';
+        const padIn = Math.round(typo.pt(8));
+        const stackShift = insIdx * Math.round(typo.pt(28));
+        if (ins.kind === 'text' && ins.text) {
+          const fontPx = Math.round(st.insertTextFont * scale);
+          ctx.font = `700 ${fontPx}px -apple-system, sans-serif`;
+          const maxBoxW = Math.min(slotW - padIn * 2, Math.round(st.insertTextMaxW * scale));
+          const txtW = Math.min(maxBoxW, Math.ceil(ctx.measureText(ins.text).width));
+          const boxPadX = Math.round(typo.pt(7) * scale);
+          const boxPadY = Math.round(typo.pt(5) * scale);
+          const boxW = txtW + boxPadX * 2;
+          const boxH = Math.round(fontPx * 1.35) + boxPadY * 2;
+          let ix = corner.endsWith('left') ? sx + padIn : sx + slotW - padIn - boxW;
+          let iy = corner.startsWith('top') ? sy + padIn + stackShift : sy + slotH - padIn - boxH - stackShift;
+          if (typeof ins.x === 'number' && typeof ins.y === 'number') {
+            ix = sx + ins.x;
+            iy = sy + ins.y;
+          }
+          drawRRect(ix, iy, boxW, boxH, Math.round(typo.pt(8)));
+          ctx.fillStyle = theme.calloutBg;
+          ctx.fill();
+          ctx.strokeStyle = theme.calloutBorder;
+          ctx.lineWidth = 1.25;
+          ctx.stroke();
+          ctx.fillStyle = theme.text;
+          ctx.textBaseline = 'top';
+          drawTruncatedText(ins.text, ix + boxPadX, iy + boxPadY, Math.max(10, boxW - boxPadX * 2));
+        } else if (ins.kind === 'image' && ins.src) {
+          try {
+            const insImg = await loadImgPromise(ins.src);
+            const imgSz = Math.round(st.insertImgSize * scale);
+            let ix = corner.endsWith('left') ? sx + padIn : sx + slotW - padIn - imgSz;
+            let iy = corner.startsWith('top') ? sy + padIn + stackShift : sy + slotH - padIn - imgSz - stackShift;
+            if (typeof ins.x === 'number' && typeof ins.y === 'number') {
+              ix = sx + ins.x;
+              iy = sy + ins.y;
+            }
+            const ar = insImg.naturalWidth / Math.max(1, insImg.naturalHeight);
+            const dw = ar >= 1 ? imgSz : Math.round(imgSz * ar);
+            const dh = ar >= 1 ? Math.round(imgSz / ar) : imgSz;
+            ctx.drawImage(insImg, ix + (imgSz - dw) / 2, iy + (imgSz - dh) / 2, dw, dh);
+          } catch (_) {}
+        }
+      }
     }
 
     drawFooter(page.chapterName || '');
@@ -11662,16 +12065,99 @@ document.getElementById('overviewModal').onclick = (e) => {
 
 document.getElementById('btnUndo').onclick = () => {
   if (!state.undoStack.length) return;
-  const cur = JSON.stringify({ chapters: state.model.chapters, overrides: state.overrides, pageInserts: state.pageInserts, dividerAfter: state.dividerAfter, coverMeta: state.coverMeta, completeMeta: state.completeMeta, backMeta: state.backMeta, layoutConfig: state.layoutConfig, layoutGroups: state.layoutGroups });
+  const cur = JSON.stringify({ chapters: state.model.chapters, overrides: state.overrides, stepInserts: state.stepInserts, pageInserts: state.pageInserts, dividerAfter: state.dividerAfter, coverMeta: state.coverMeta, completeMeta: state.completeMeta, backMeta: state.backMeta, layoutConfig: state.layoutConfig, layoutGroups: state.layoutGroups });
   state.redoStack.push(cur);
   applyHistorySnap(state.undoStack.pop());
 };
 document.getElementById('btnRedo').onclick = () => {
   if (!state.redoStack.length) return;
-  const cur = JSON.stringify({ chapters: state.model.chapters, overrides: state.overrides, pageInserts: state.pageInserts, dividerAfter: state.dividerAfter, coverMeta: state.coverMeta, completeMeta: state.completeMeta, backMeta: state.backMeta, layoutConfig: state.layoutConfig, layoutGroups: state.layoutGroups });
+  const cur = JSON.stringify({ chapters: state.model.chapters, overrides: state.overrides, stepInserts: state.stepInserts, pageInserts: state.pageInserts, dividerAfter: state.dividerAfter, coverMeta: state.coverMeta, completeMeta: state.completeMeta, backMeta: state.backMeta, layoutConfig: state.layoutConfig, layoutGroups: state.layoutGroups });
   state.undoStack.push(cur);
   applyHistorySnap(state.redoStack.pop());
 };
+
+// Apply Camera Angle to Step Range Modal bindings
+const applyAngleModalEl = document.getElementById('applyAngleModal');
+if (applyAngleModalEl) {
+  applyAngleModalEl.onclick = (e) => { if (e.target === applyAngleModalEl) closeApplyAngleModal(); };
+}
+const btnCloseApplyAngle = document.getElementById('btnCloseApplyAngle');
+if (btnCloseApplyAngle) btnCloseApplyAngle.onclick = closeApplyAngleModal;
+const btnCancelApplyAngle = document.getElementById('btnCancelApplyAngle');
+if (btnCancelApplyAngle) btnCancelApplyAngle.onclick = closeApplyAngleModal;
+const angleRangeMinEl = document.getElementById('angleRangeMin');
+const angleRangeMaxEl = document.getElementById('angleRangeMax');
+if (angleRangeMinEl) {
+  angleRangeMinEl.oninput = (e) => {
+    const val = Number(e.target.value);
+    const curHi = Math.max(applyAngleState.startNum, applyAngleState.endNum);
+    applyAngleState.startNum = Math.min(val, curHi);
+    applyAngleState.endNum = curHi;
+    applyAngleState.awaitingEndClick = false;
+    syncApplyAngleRangeUI();
+  };
+}
+if (angleRangeMaxEl) {
+  angleRangeMaxEl.oninput = (e) => {
+    const val = Number(e.target.value);
+    const curLo = Math.min(applyAngleState.startNum, applyAngleState.endNum);
+    applyAngleState.startNum = curLo;
+    applyAngleState.endNum = Math.max(val, curLo);
+    applyAngleState.awaitingEndClick = false;
+    syncApplyAngleRangeUI();
+  };
+}
+const btnAnglePresetFollowing = document.getElementById('btnAnglePresetFollowing');
+if (btnAnglePresetFollowing) {
+  btnAnglePresetFollowing.onclick = () => {
+    const all = applyAngleState.allSteps;
+    if (!all.length || !applyAngleState.sourceStep) return;
+    applyAngleState.startNum = applyAngleState.sourceStep.num;
+    applyAngleState.endNum = all[all.length - 1].step.num;
+    applyAngleState.awaitingEndClick = false;
+    syncApplyAngleRangeUI();
+  };
+}
+const btnAnglePresetSection = document.getElementById('btnAnglePresetSection');
+if (btnAnglePresetSection) {
+  btnAnglePresetSection.onclick = () => {
+    const chSteps = applyAngleState.sourceCh?.steps || [];
+    if (!chSteps.length) return;
+    applyAngleState.startNum = chSteps[0].num;
+    applyAngleState.endNum = chSteps[chSteps.length - 1].num;
+    applyAngleState.awaitingEndClick = false;
+    syncApplyAngleRangeUI();
+  };
+}
+const btnAnglePresetAll = document.getElementById('btnAnglePresetAll');
+if (btnAnglePresetAll) {
+  btnAnglePresetAll.onclick = () => {
+    const all = applyAngleState.allSteps;
+    if (!all.length) return;
+    applyAngleState.startNum = all[0].step.num;
+    applyAngleState.endNum = all[all.length - 1].step.num;
+    applyAngleState.awaitingEndClick = false;
+    syncApplyAngleRangeUI();
+  };
+}
+const btnConfirmApplyAngle = document.getElementById('btnConfirmApplyAngle');
+if (btnConfirmApplyAngle) {
+  btnConfirmApplyAngle.onclick = () => {
+    if (!applyAngleState.camera || !applyAngleState.allSteps.length) return;
+    pushUndo();
+    const res = applyCameraAngleToStepRange(
+      applyAngleState.allSteps.map(x => x.step),
+      state.overrides,
+      applyAngleState.startNum,
+      applyAngleState.endNum,
+      applyAngleState.camera,
+    );
+    state.overrides = res.overrides;
+    closeApplyAngleModal();
+    showToast(`Applied camera angle to ${res.appliedCount} step${res.appliedCount === 1 ? '' : 's'}.`);
+    renderAll();
+  };
+}
 
 document.querySelectorAll('.mode-btn').forEach(b => {
   b.onclick = () => {
@@ -11689,7 +12175,7 @@ document.querySelectorAll('.mode-btn').forEach(b => {
     state.mode = nextMode;
     if (state.mode === 'pan') state.bomShortcutVisible = false;
     if (state.mode !== 'select') state.selectedPartIds.clear();
-    if (state.mode !== 'arrange') state.selectedArrangeEl = null;
+    state.selectedArrangeEl = null;
     renderAll();
   };
 });
@@ -11707,7 +12193,14 @@ document.getElementById('btnZoomOut').onclick = () => setZoom(state.zoom * 0.82)
 document.getElementById('btnZoomFit').onclick = resetZoom;
 
 // Print & Page Setup + Parts List Setup
-document.querySelectorAll('.fmt-btn').forEach(b => { b.onclick = () => { state.paperFormat = b.getAttribute('data-format'); resetZoom(); renderAll(); }; });
+const paperFormatSelectEl = document.getElementById('paperFormatSelect');
+if (paperFormatSelectEl) {
+  paperFormatSelectEl.onchange = (e) => {
+    state.paperFormat = e.target.value;
+    resetZoom();
+    renderAll();
+  };
+}
 document.querySelectorAll('.unit-btn').forEach(b => {
   b.onclick = () => {
     const nextUnit = b.getAttribute('data-unit');
@@ -11804,7 +12297,13 @@ if (btnGrpUseCur) {
 const grpMixedSel = document.getElementById('grpMixedSelect');
 if (grpMixedSel) grpMixedSel.onchange = syncGroupEditorSlotSizesUI;
 const grpStepsInp = document.getElementById('grpStepsPerPageInput');
-if (grpStepsInp) grpStepsInp.onchange = syncGroupEditorSlotSizesUI;
+if (grpStepsInp) { grpStepsInp.onchange = syncGroupEditorSlotSizesUI; grpStepsInp.oninput = renderGroupGridPreviewUI; }
+const grpColsSel = document.getElementById('grpColsSelect');
+if (grpColsSel) grpColsSel.onchange = renderGroupGridPreviewUI;
+const grpRowsSel = document.getElementById('grpRowsSelect');
+if (grpRowsSel) grpRowsSel.onchange = renderGroupGridPreviewUI;
+const grpFlowSel = document.getElementById('grpFlowSelect');
+if (grpFlowSel) grpFlowSel.onchange = renderGroupGridPreviewUI;
 const btnGrpSave = document.getElementById('btnGrpSave');
 if (btnGrpSave) {
   btnGrpSave.onclick = () => {
@@ -11928,24 +12427,14 @@ document.getElementById('togglePageTitle').onchange = setPageTitle;
 document.getElementById('togglePageTitleSetup').onchange = setPageTitle;
 document.getElementById('toggleCompleteText').onchange = (e) => { state.completeMeta.showText = e.target.checked; renderAll(); };
 document.getElementById('toggleCompleteFireworks').onchange = (e) => { state.completeMeta.showFireworks = e.target.checked; renderAll(); };
-document.getElementById('toggleDetectDuplicates').onchange = (e) => {
-  state.detectDuplicates = e.target.checked;
-  if (state.model?._parsed) {
-    pushUndo();
-    submodelThumbCache.clear();
-    state.model = buildManualFromParsed(state.model._parsed, state.model._mode || 'auto', state.model._subdivisionPlan || null);
-    state.pageIdx = 0; state.selectedPartIds.clear();
-    computeModelDiagnostics();
-    renderAll();
-    const subCount = state.model.chapters.filter(c => c.kind === 'submodel').length;
-    showToast(state.detectDuplicates
-      ? (subCount > 0 ? `Detected ${subCount} duplicate submodel${subCount === 1 ? '' : 's'}.` : 'No repeated submodels detected in this build.')
-      : 'Duplicate submodel grouping disabled.');
-  } else {
+const toggleDupEl = document.getElementById('toggleDetectDuplicates');
+if (toggleDupEl) {
+  toggleDupEl.onchange = (e) => {
+    state.detectDuplicates = e.target.checked;
     scheduleSaveSessionPrefs();
     syncMenuControls();
-  }
-};
+  };
+}
 
 // Self-Contained Interactive 3D HTML Export (LEGO Builder-style offline shareable viewer)
 async function runInteractiveHtmlExport() {
@@ -12492,18 +12981,9 @@ document.getElementById('menuAddDivider').onclick = () => {
   state.dividerAfter[pg.id] = { title: 'Next Section', note: '' };
   closeMenu(); renderAll(); showToast('Inserted divider page after current page.');
 };
-document.getElementById('menuRegenBtn').onclick = () => {
-  if (!state.model?._parsed) return;
-  pushUndo();
-  submodelThumbCache.clear();
-  state.model = buildManualFromParsed(state.model._parsed, 'auto', state.model._subdivisionPlan || null);
-  state.pageIdx = 0; state.selectedPartIds.clear();
-  computeModelDiagnostics();
-  closeMenu(); renderAll(); showToast('Regenerated clean steps.');
-};
-const menuSubdivideBtn = document.getElementById('menuSubdivideBtn');
-if (menuSubdivideBtn) {
-  menuSubdivideBtn.onclick = () => {
+const menuStepGenBtn = document.getElementById('menuStepGenBtn');
+if (menuStepGenBtn) {
+  menuStepGenBtn.onclick = () => {
     if (!state.model?._parsed) { showToast('Import a model first.'); return; }
     closeMenu();
     openImportAssistant(state.model._parsed, true);
@@ -12515,13 +12995,12 @@ document.getElementById('menuSaveProj').onclick = async () => {
   if (!state.model) return;
   const activeTheme = getActiveTheme();
   const embeddedCustomTheme = activeTheme && !activeTheme.builtIn && !BUILT_IN_THEME_IDS.has(activeTheme.id) ? activeTheme : undefined;
-  const payload = JSON.stringify({ version: 3, title: state.model.title, chapters: state.model.chapters, overrides: state.overrides, pageInserts: state.pageInserts, dividerAfter: state.dividerAfter, coverMeta: state.coverMeta, completeMeta: state.completeMeta, backMeta: state.backMeta, bomConfig: state.bomConfig, showStepBorders: state.showStepBorders, showPageTitle: state.showPageTitle, pageNumberFormat: state.pageNumberFormat, detectDuplicates: state.detectDuplicates, minifigStyle: state.minifigStyle, showMinifig1to1: state.showMinifig1to1, themeId: state.themeId, ...(embeddedCustomTheme ? { customTheme: embeddedCustomTheme } : {}), paperFormat: state.paperFormat, orientation: state.orientation, density: state.density, layout: state.layout, layoutConfig: state.layoutConfig, layoutGroups: state.layoutGroups }, null, 2);
+  const payload = JSON.stringify({ version: 4, title: state.model.title, chapters: state.model.chapters, overrides: state.overrides, stepInserts: state.stepInserts, pageInserts: state.pageInserts, dividerAfter: state.dividerAfter, coverMeta: state.coverMeta, completeMeta: state.completeMeta, backMeta: state.backMeta, bomConfig: state.bomConfig, showStepBorders: state.showStepBorders, showPageTitle: state.showPageTitle, pageNumberFormat: state.pageNumberFormat, detectDuplicates: state.detectDuplicates, minifigStyle: state.minifigStyle, showMinifig1to1: state.showMinifig1to1, themeId: state.themeId, ...(embeddedCustomTheme ? { customTheme: embeddedCustomTheme } : {}), paperFormat: state.paperFormat, orientation: state.orientation, density: state.density, layout: state.layout, layoutConfig: state.layoutConfig, layoutGroups: state.layoutGroups }, null, 2);
   const fileName = `${state.model.title.replace(/[^a-z0-9_-]+/gi, '_')}.bic.json`;
   closeMenu();
   await shareOrDownloadJsonFile(payload, fileName, 'Shared project file.', `Exported ${fileName}`);
 };
-const triggerProjectLoad = () => document.getElementById('projectLoadInput').click();
-document.getElementById('menuLoadProj').onclick = triggerProjectLoad;
+const triggerProjectLoad = () => { closeOpenModelModal(); document.getElementById('projectLoadInput').click(); };
 const emptyLoadProjBtn = document.getElementById('emptyLoadProjBtn');
 if (emptyLoadProjBtn) emptyLoadProjBtn.onclick = triggerProjectLoad;
 document.getElementById('projectLoadInput').onchange = async (e) => {
@@ -12532,7 +13011,9 @@ document.getElementById('projectLoadInput').onchange = async (e) => {
     coverHeroCache.clear();
     clearMinifigDiagramCaches();
     state.model = { title: data.title || 'Loaded Manual', subtitle: '', chapters: data.chapters || [] };
-    state.overrides = data.overrides || {}; state.pageInserts = data.pageInserts || {};
+    state.overrides = data.overrides || {};
+    state.stepInserts = data.stepInserts || {};
+    state.pageInserts = data.pageInserts || {};
     state.dividerAfter = data.dividerAfter || {};
     state.coverMeta = normalizeCoverMeta(data.coverMeta);
     if (data.completeMeta) state.completeMeta = { ...state.completeMeta, ...data.completeMeta };
@@ -12567,7 +13048,7 @@ document.getElementById('projectLoadInput').onchange = async (e) => {
     errFilter = 'all';
     lastSourceRecord = { kind: 'project', fileName: f.name };
     computeModelDiagnostics();
-    closeMenu(); renderAll(); showToast(`Imported ${state.model.title}.`);
+    closeMenu(); closeOpenModelModal(); renderAll(); showToast(`Imported ${state.model.title}.`);
   } catch (err) { showToast('Could not read project file.'); }
 };
 
@@ -12583,12 +13064,13 @@ document.getElementById('insertImageInput').onchange = (e) => {
   const f = e.target.files?.[0]; e.target.value = ''; if (!f) return;
   const r = new FileReader();
   r.onload = () => {
-    const pg = state.pages[state.pageIdx];
+    const active = getActiveStepObj();
+    if (!active) return;
     pushUndo();
-    const arr = state.pageInserts[pg.id] || [];
-    arr.push({ id: 'ins_' + Date.now().toString(36), kind: 'image', src: r.result, x: 40, y: 90, scale: 1 });
-    state.pageInserts[pg.id] = arr;
-    showToast(`Added image to Page ${pg.num}.`);
+    const arr = state.stepInserts[active.step.id] || [];
+    arr.push({ id: 'ins_' + Date.now().toString(36), kind: 'image', src: r.result, corner: 'bottom-right', scale: 1 });
+    state.stepInserts[active.step.id] = arr;
+    showToast(`Added image to Step ${active.step.num}.`);
     renderAll();
   };
   r.readAsDataURL(f);
@@ -12616,10 +13098,52 @@ document.getElementById('coverImageInput').onchange = (e) => {
   r.readAsDataURL(f);
 };
 
-// Model Import Triggers
-const triggerImport = () => { closeMenu(); document.getElementById('fileInput').click(); };
+// Open / Import Model & Project Proofing Sheet Dialog
+function openOpenModelModal() {
+  closeMenu();
+  document.getElementById('openModelModal')?.classList.remove('hidden');
+}
+function closeOpenModelModal() {
+  document.getElementById('openModelModal')?.classList.add('hidden');
+}
+const triggerImport = () => { closeMenu(); closeOpenModelModal(); document.getElementById('fileInput').click(); };
 document.getElementById('emptyImportBtn').onclick = triggerImport;
-document.getElementById('menuImportBtn').onclick = triggerImport;
+document.getElementById('menuImportBtn').onclick = openOpenModelModal;
+const btnCloseOpenModel = document.getElementById('btnCloseOpenModel');
+if (btnCloseOpenModel) btnCloseOpenModel.onclick = closeOpenModelModal;
+const openModelModalEl = document.getElementById('openModelModal');
+if (openModelModalEl) {
+  openModelModalEl.onclick = (e) => { if (e.target === openModelModalEl) closeOpenModelModal(); };
+  openModelModalEl.addEventListener('dragover', (e) => { e.preventDefault(); });
+  openModelModalEl.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    closeOpenModelModal();
+    const file = e.dataTransfer?.files?.[0];
+    if (!file) return;
+    if (file.name.toLowerCase().endsWith('.json')) {
+      try {
+        const dt = new DataTransfer();
+        dt.items.add(file);
+        const inp = document.getElementById('projectLoadInput');
+        inp.files = dt.files;
+        inp.dispatchEvent(new Event('change'));
+      } catch (_) {}
+      return;
+    }
+    await handleIncomingModelFile(file);
+  });
+}
+const openModalImportBtn = document.getElementById('openModalImportBtn');
+if (openModalImportBtn) openModalImportBtn.onclick = triggerImport;
+const openModalLoadProjBtn = document.getElementById('openModalLoadProjBtn');
+if (openModalLoadProjBtn) openModalLoadProjBtn.onclick = triggerProjectLoad;
+const openModalSampleBtn = document.getElementById('openModalSampleBtn');
+if (openModalSampleBtn) {
+  openModalSampleBtn.onclick = () => {
+    closeOpenModelModal();
+    document.getElementById('emptySampleBtn')?.click();
+  };
+}
 
 // Errors Modal, Bottom Error Banner & Dedicated Bricks Library Screen Wiring
 document.getElementById('menuErrorsBtn').onclick = openErrorsModal;
@@ -13060,36 +13584,23 @@ function animateImportExplode(nextExploded) {
 })();
 
 function renderImportAssistantUI() {
-  const listEl = document.getElementById('impProposalList');
+  const selEl = document.getElementById('impProposalSelect');
+  const infoEl = document.getElementById('impProposalInfo');
   const autoBtn = document.getElementById('impBtnAuto');
+  const dupChk = document.getElementById('toggleDetectDuplicates');
+  if (dupChk) dupChk.checked = Boolean(state.detectDuplicates);
 
   syncImportPreviewControlsUI();
 
-  // Proposal cards (ranked suggestions + Single Continuous Build escape hatch)
-  const cardsHtml = impState.proposals.map((prop, idx) => {
-    const isSel = impState.selectedId === prop.id;
-    const isRec = idx === 0 && impState.assessment?.shouldPrompt;
-    return `
-      <button type="button" data-prop-id="${prop.id}" class="imp-prop-card w-full text-left p-3 rounded-lg border-2 transition ${isSel ? 'border-[var(--primary)] bg-[var(--primary-soft)]' : 'border-[var(--border)] bg-[var(--background)] hover:border-[var(--primary-border)]'}">
-        <div class="flex items-center gap-1.5 min-w-0 flex-wrap">
-          <span class="text-xs font-bold ${isSel ? 'text-[var(--primary)]' : ''}">${escHtml(prop.title)}</span>
-          ${isRec ? '<span class="text-xs font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-[var(--primary)] text-[var(--primary-foreground)]">Recommended</span>' : ''}
-        </div>
-        <div class="text-xs text-[var(--muted-foreground)] mt-0.5 leading-snug">${escHtml(prop.rationale)}</div>
-      </button>`;
-  }).join('') + `
-    <button type="button" data-prop-id="none" class="imp-prop-card w-full text-left p-3 rounded-lg border-2 transition ${impState.selectedId === 'none' ? 'border-[var(--primary)] bg-[var(--primary-soft)]' : 'border-[var(--border)] bg-[var(--background)] hover:border-[var(--primary-border)]'}">
-      <div class="flex items-center justify-between gap-2">
-        <span class="text-xs font-bold ${impState.selectedId === 'none' ? 'text-[var(--primary)]' : ''}">Keep as Single Continuous Build</span>
-        ${!impState.assessment?.shouldPrompt ? '<span class="text-xs font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-[var(--primary)] text-[var(--primary-foreground)]">Recommended</span>' : ''}
-      </div>
-      <div class="text-xs text-[var(--muted-foreground)] mt-0.5 leading-snug">Auto-generate clean zero-floating steps in one continuous chapter without splitting.</div>
-    </button>`;
-
-  listEl.innerHTML = cardsHtml;
-  listEl.querySelectorAll('.imp-prop-card').forEach((btn) => {
-    btn.onclick = () => {
-      const pid = btn.getAttribute('data-prop-id');
+  if (selEl) {
+    const optsHtml = impState.proposals.map((prop, idx) => {
+      const isRec = idx === 0 && impState.assessment?.shouldPrompt;
+      return `<option value="${escHtml(prop.id)}">${escHtml(prop.title)}${isRec ? ' (Recommended)' : ''}</option>`;
+    }).join('') + `<option value="none">Single Continuous Build${!impState.assessment?.shouldPrompt ? ' (Recommended)' : ''}</option>`;
+    selEl.innerHTML = optsHtml;
+    selEl.value = impState.selectedId || 'none';
+    selEl.onchange = () => {
+      const pid = selEl.value;
       impState.selectedId = pid;
       if (pid === 'none') {
         impState.activeProposal = null;
@@ -13101,11 +13612,36 @@ function renderImportAssistantUI() {
       renderImportAssistantUI();
       rebuildAndDrawImportPreview();
     };
-  });
+  }
 
   const active = impState.activeProposal;
+  if (infoEl) {
+    if (!active) {
+      const isRec = !impState.assessment?.shouldPrompt;
+      infoEl.innerHTML = `
+        <div class="flex items-center gap-1.5 flex-wrap">
+          <span class="font-bold text-[var(--foreground)]">Single Continuous Build</span>
+          ${isRec ? '<span class="px-1.5 py-0.5 rounded bg-[var(--primary)] text-[var(--primary-foreground)] text-[10px] font-extrabold uppercase tracking-wider">Recommended</span>' : ''}
+        </div>
+        <p class="text-[11px] text-[var(--muted-foreground)] leading-snug">Auto-generates clean, zero-floating steps in one continuous chapter without splitting the model into separate sections.</p>`;
+    } else {
+      const isRec = impState.proposals[0]?.id === active.id && impState.assessment?.shouldPrompt;
+      const secs = (active.sections || []).filter(s => s.role !== 'join');
+      infoEl.innerHTML = `
+        <div class="flex items-center gap-1.5 flex-wrap">
+          <span class="font-bold text-[var(--foreground)]">${escHtml(active.title)}</span>
+          ${isRec ? '<span class="px-1.5 py-0.5 rounded bg-[var(--primary)] text-[var(--primary-foreground)] text-[10px] font-extrabold uppercase tracking-wider">Recommended</span>' : ''}
+        </div>
+        <p class="text-[11px] text-[var(--muted-foreground)] leading-snug">${escHtml(active.rationale)}</p>
+        ${secs.length > 0 ? `
+          <div class="flex flex-wrap gap-1.5 pt-1">
+            ${secs.map((s) => `<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-[var(--border)] bg-[var(--card)] text-[10px] font-semibold"><span class="w-2 h-2 rounded-full shrink-0" style="background:${s.colorHex || 'var(--primary)'}"></span>${escHtml(s.name)} <span class="font-mono text-[var(--muted-foreground)]">${s.partIndices?.length || 0}</span></span>`).join('')}
+          </div>` : ''}`;
+    }
+  }
+
   if (!active) {
-    autoBtn.textContent = impState.isPostImport ? 'Rebuild as Single Build' : 'Generate Manual';
+    autoBtn.textContent = impState.isPostImport ? 'Regenerate & Apply Steps' : 'Generate Manual';
     return;
   }
 
@@ -13115,7 +13651,7 @@ function renderImportAssistantUI() {
   const secCountLabel = isMod
     ? `${primarySecs.length} Section${primarySecs.length === 1 ? '' : 's'}${hasJoin ? ' + Join' : ''}`
     : `${active.sections.length} Sections`;
-  autoBtn.textContent = `${impState.isPostImport ? 'Apply' : 'Generate Manual'} (${secCountLabel})`;
+  autoBtn.textContent = `${impState.isPostImport ? 'Apply & Regenerate' : 'Generate Manual'} (${secCountLabel})`;
 }
 
 function openImportAssistant(parsed, isPostImport = false) {
@@ -13132,15 +13668,24 @@ function openImportAssistant(parsed, isPostImport = false) {
   impState.assessment = assessment;
   impState.proposals = proposals;
   impState.isPostImport = isPostImport;
-  impState.isExploded = Boolean((assessment.shouldPrompt || isPostImport) && proposals.length > 0);
-  impState.explodePct = impState.isExploded ? IMP_EXPLODED_PCT : 0;
   impState.colorMode = 'sections';
   impState.controlsVisible = false;
   impState.az = 38;
   impState.el = 28;
 
-  // Pre-select the #1 ranked subdivision when triggered by size/span/post-import; otherwise single build
-  if ((assessment.shouldPrompt || isPostImport) && proposals.length > 0) {
+  // When reopened from Step Generation menu, match the currently active plan if any; otherwise pick recommended
+  const currentPlan = isPostImport ? state.model?._subdivisionPlan : null;
+  const matchedExisting = currentPlan
+    ? proposals.find(p => p.id === currentPlan.id || p.strategy === currentPlan.strategy)
+    : null;
+
+  if (matchedExisting) {
+    impState.selectedId = matchedExisting.id;
+    impState.activeProposal = JSON.parse(JSON.stringify(matchedExisting));
+  } else if (isPostImport && !currentPlan) {
+    impState.selectedId = 'none';
+    impState.activeProposal = null;
+  } else if (assessment.shouldPrompt && proposals.length > 0) {
     impState.selectedId = proposals[0].id;
     impState.activeProposal = JSON.parse(JSON.stringify(proposals[0]));
   } else {
@@ -13148,18 +13693,21 @@ function openImportAssistant(parsed, isPostImport = false) {
     impState.activeProposal = null;
   }
 
+  impState.isExploded = Boolean(impState.activeProposal);
+  impState.explodePct = impState.isExploded ? IMP_EXPLODED_PCT : 0;
+
   document.getElementById('impTitle').textContent = isPostImport
-    ? `Subdivide ${parsed.title}`
+    ? 'Step Generation'
     : assessment.shouldPrompt
-      ? `Split "${parsed.title}" for Easier Building?`
+      ? `Step Generation — ${parsed.title}`
       : `Import ${parsed.title}`;
 
   const reasonStr = assessment.reasons.length > 0
-    ? `Detected ${assessment.reasons.join(' · ')}.`
-    : `Found ${parsed.parts.length} pieces${parsed.submodelCount ? ` across ${parsed.submodelCount} submodels` : ''}.`;
+    ? `${parsed.title} · Detected ${assessment.reasons.join(' · ')}.`
+    : `${parsed.title} · ${parsed.parts.length} pieces${parsed.submodelCount ? ` across ${parsed.submodelCount} submodels` : ''}.`;
   document.getElementById('impSummary').textContent = reasonStr;
 
-  document.getElementById('impKeepWrap').classList.toggle('hidden', isPostImport || !parsed.hasSteps);
+  document.getElementById('impKeepWrap').classList.toggle('hidden', !parsed.hasSteps);
   document.getElementById('importModal').classList.remove('hidden');
   renderImportAssistantUI();
   requestAnimationFrame(() => rebuildAndDrawImportPreview());
@@ -13191,7 +13739,7 @@ function finishImport(parsed, mode, subdivisionPlan = null, isPostImport = false
   coverHeroCache.clear();
   state.model = buildManualFromParsed(parsed, mode, subdivisionPlan);
   if (!isPostImport) {
-    state.overrides = {}; state.pageInserts = {}; state.dividerAfter = {};
+    state.overrides = {}; state.stepInserts = {}; state.pageInserts = {}; state.dividerAfter = {};
     state.layoutGroups = [];
     state.coverMeta = createDefaultCoverMeta();
     state.undoStack = []; state.redoStack = [];

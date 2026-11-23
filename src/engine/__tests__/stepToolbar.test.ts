@@ -1,17 +1,24 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CAMERA_ANGLE_PRESETS,
   FOCUS_MODE_OPTIONS,
   MINIFIG_STYLE_OPTIONS,
+  PAPER_FORMAT_ORDER,
+  PAPER_FORMAT_SPECS,
+  applyCameraAngleToStepRange,
   clearStepArrangeOverride,
   clearStepCameraOverride,
+  computePaperPreviewBox,
+  getCameraAngleLabel,
   getFocusModeDescription,
   getVisibleModeTabs,
+  migratePageInsertsToSteps,
   resolveStepToolbarCapabilities,
 } from '../stepToolbar';
 
 describe('Step Toolbar & Full-Page Editor Capabilities', () => {
-  it('exposes Pan, Select, Rotate, Arrange, and Edit tabs on step pages', () => {
-    expect(getVisibleModeTabs('steps')).toEqual(['pan', 'select', 'rotate', 'arrange', 'edit']);
+  it('exposes Pan, Select, Rotate, and Edit tabs on step pages (Arrange removed)', () => {
+    expect(getVisibleModeTabs('steps')).toEqual(['pan', 'select', 'rotate', 'edit']);
   });
 
   it('exposes Pan and Edit tabs on cover, build complete, back cover, divider, and Parts List pages', () => {
@@ -32,32 +39,36 @@ describe('Step Toolbar & Full-Page Editor Capabilities', () => {
       isMinifigBuild: true,
       minifigStyle: 'exploded',
       hasSubassembly: false,
-      pageInsertCount: 0,
+      stepInsertCount: 0,
+      totalStepCount: 4,
       followingStepCount: 3,
     });
     expect(exploded.isOfficialMinifigStyle).toBe(true);
     expect(exploded.hasPartsBox).toBe(false);
     expect(exploded.hasMovableElements).toBe(false);
     expect(exploded.showMinifigSettings).toBe(true);
+    expect(exploded.canApplyAngleToRange).toBe(true);
 
     const withInsert = resolveStepToolbarCapabilities({
       isMinifigBuild: true,
       minifigStyle: 'sequential',
       hasSubassembly: false,
-      pageInsertCount: 1,
+      stepInsertCount: 1,
+      totalStepCount: 1,
       followingStepCount: 0,
     });
     expect(withInsert.hasPartsBox).toBe(false);
     expect(withInsert.hasMovableElements).toBe(true);
-    expect(withInsert.canApplyAngleToFollowing).toBe(false);
+    expect(withInsert.canApplyAngleToRange).toBe(false);
   });
 
-  it('enables Parts Box arrange controls for Classic minifigure steps and standard build steps', () => {
+  it('enables Parts Box controls for Classic minifigure steps and standard build steps', () => {
     const classicMf = resolveStepToolbarCapabilities({
       isMinifigBuild: true,
       minifigStyle: 'classic',
       hasSubassembly: false,
-      pageInsertCount: 0,
+      stepInsertCount: 0,
+      totalStepCount: 3,
       followingStepCount: 2,
     });
     expect(classicMf.isOfficialMinifigStyle).toBe(false);
@@ -70,7 +81,8 @@ describe('Step Toolbar & Full-Page Editor Capabilities', () => {
       minifigStyle: 'exploded',
       hasSubassembly: true,
       override: { calloutAsPages: false },
-      pageInsertCount: 0,
+      stepInsertCount: 0,
+      totalStepCount: 6,
       followingStepCount: 5,
     });
     expect(subCallout.hasPartsBox).toBe(false);
@@ -83,7 +95,8 @@ describe('Step Toolbar & Full-Page Editor Capabilities', () => {
       minifigStyle: 'exploded',
       hasSubassembly: true,
       override: { calloutAsPages: true },
-      pageInsertCount: 0,
+      stepInsertCount: 0,
+      totalStepCount: 6,
       followingStepCount: 5,
     });
     expect(subPages.hasPartsBox).toBe(true);
@@ -96,7 +109,8 @@ describe('Step Toolbar & Full-Page Editor Capabilities', () => {
       minifigStyle: 'exploded',
       hasSubassembly: false,
       override: { az: 145, el: 25, pliScale: 1.2 },
-      pageInsertCount: 0,
+      stepInsertCount: 0,
+      totalStepCount: 2,
       followingStepCount: 1,
     });
     expect(caps.hasCustomCameraAngle).toBe(true);
@@ -107,7 +121,8 @@ describe('Step Toolbar & Full-Page Editor Capabilities', () => {
       minifigStyle: 'exploded',
       hasSubassembly: false,
       override: { focusMode: 'focus', modelScale: 1.3, pin: true },
-      pageInsertCount: 0,
+      stepInsertCount: 0,
+      totalStepCount: 2,
       followingStepCount: 1,
     });
     expect(clean.hasCustomCameraAngle).toBe(false);
@@ -152,6 +167,85 @@ describe('Step Toolbar & Full-Page Editor Capabilities', () => {
       calloutPos: { x: 0, y: 0 },
       pin: true,
     });
+  });
+
+  it('uses neutral camera angle presets (no arbitrary Front/Back naming) while preserving legacy corner IDs', () => {
+    expect(CAMERA_ANGLE_PRESETS.map((c) => c.id)).toEqual([
+      'front_right',
+      'back_right',
+      'back_left',
+      'front_left',
+    ]);
+    for (const c of CAMERA_ANGLE_PRESETS) {
+      expect(c.label.toLowerCase()).not.toContain('front');
+      expect(c.label.toLowerCase()).not.toContain('back');
+    }
+    expect(getCameraAngleLabel('back_right')).toBe('135°');
+  });
+
+  it('applies camera angle cleanly across any inclusive step range (before and after current step)', () => {
+    const steps = [
+      { id: 's1', num: 1 },
+      { id: 's2', num: 2 },
+      { id: 's3', num: 3 },
+      { id: 's4', num: 4 },
+      { id: 's5', num: 5 },
+    ];
+    const res = applyCameraAngleToStepRange(
+      steps,
+      { s2: { modelScale: 1.2 } },
+      4,
+      2, // reversed order should still normalize cleanly
+      { side: 'bottom', corner: 'back_left', az: 218, el: -30 },
+    );
+    expect(res.appliedCount).toBe(3);
+    expect(res.overrides.s1).toBeUndefined();
+    expect(res.overrides.s2).toEqual({ modelScale: 1.2, side: 'bottom', corner: 'back_left', az: 218, el: -30 });
+    expect(res.overrides.s3).toEqual({ side: 'bottom', corner: 'back_left', az: 218, el: -30 });
+    expect(res.overrides.s4).toEqual({ side: 'bottom', corner: 'back_left', az: 218, el: -30 });
+    expect(res.overrides.s5).toBeUndefined();
+  });
+
+  it('computes accurate paper format preview box proportions for landscape, portrait, A4, A5, and square', () => {
+    expect(PAPER_FORMAT_ORDER).toContain('letter');
+    expect(PAPER_FORMAT_ORDER).toContain('a4');
+    expect(PAPER_FORMAT_ORDER).toContain('a5');
+    expect(PAPER_FORMAT_ORDER).toContain('b5');
+    expect(PAPER_FORMAT_ORDER).toContain('tabloid');
+    expect(PAPER_FORMAT_SPECS.a5.supportsOrientation).toBe(true);
+
+    const letterLand = computePaperPreviewBox({ paperFormat: 'letter', orientation: 'landscape', maxWidthPx: 80, maxHeightPx: 64 });
+    expect(letterLand.isLandscape).toBe(true);
+    expect(letterLand.widthPx).toBeGreaterThan(letterLand.heightPx);
+    expect(letterLand.widthIn).toBe(11);
+    expect(letterLand.heightIn).toBe(8.5);
+
+    const letterPort = computePaperPreviewBox({ paperFormat: 'letter', orientation: 'portrait', maxWidthPx: 80, maxHeightPx: 64 });
+    expect(letterPort.isLandscape).toBe(false);
+    expect(letterPort.heightPx).toBeGreaterThan(letterPort.widthPx);
+
+    const a4Port = computePaperPreviewBox({ paperFormat: 'a4', orientation: 'portrait', maxWidthPx: 80, maxHeightPx: 64 });
+    // A4 portrait is taller/narrower than US Letter portrait
+    expect(a4Port.widthPx / a4Port.heightPx).toBeLessThan(letterPort.widthPx / letterPort.heightPx);
+
+    const sq = computePaperPreviewBox({ paperFormat: 'square', orientation: 'landscape', maxWidthPx: 80, maxHeightPx: 64 });
+    expect(sq.widthPx).toBe(sq.heightPx);
+    expect(sq.ratioLabel).toBe('1 : 1');
+  });
+
+  it('migrates legacy page-keyed custom callouts to step-keyed custom callouts without duplicates', () => {
+    const migrated = migratePageInsertsToSteps(
+      {
+        pg_1: [{ id: 'ins1', kind: 'text', text: 'Press firmly', x: 20, y: 30, scale: 1 }],
+      },
+      {
+        s1: [{ id: 'ins0', kind: 'text', text: 'Existing step note', corner: 'top-right', scale: 1 }],
+      },
+      [{ id: 'pg_1', kind: 'steps', slots: [{ step: { id: 's1' } }, { step: { id: 's2' } }] }],
+    );
+    expect(migrated.s1).toHaveLength(2);
+    expect(migrated.s1[1].id).toBe('ins1');
+    expect(migrated.s1[1].corner).toBe('bottom-right');
   });
 
   it('provides descriptive metadata for all minifigure styles and framing modes', () => {

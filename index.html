@@ -184,17 +184,13 @@
           <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3.6 9h16.8"/><path d="M3.6 15h16.8"/><path d="M11.5 3a17 17 0 0 0 0 18"/><path d="M12.5 3a17 17 0 0 1 0 18"/></svg>
           <span>Rotate</span>
         </button>
-        <button data-mode="arrange" type="button" class="mode-btn min-h-[34px] px-2.5 sm:px-3 py-1.5 rounded-full flex items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer">
-          <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>
-          <span>Arrange</span>
-        </button>
         <button data-mode="edit" type="button" class="mode-btn min-h-[34px] px-2.5 sm:px-3 py-1.5 rounded-full flex items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer">
           <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4Z"/></svg>
           <span>Edit</span>
         </button>
       </div>
 
-      <!-- Page & Zoom Pill -->
+      <!-- Page & Desktop Zoom Pill -->
       <div class="studio-pill w-[min(94vw,420px)] max-w-full min-w-0 px-1.5 py-1 rounded-full flex items-center gap-1 text-xs font-semibold">
         <button id="prevPage" type="button" title="Previous Page" aria-label="Previous Page" class="h-8 w-8 rounded-full flex items-center justify-center hover:bg-[var(--surface-hover)] disabled:opacity-35 transition-colors shrink-0 cursor-pointer disabled:cursor-default">
           <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m15 18-6-6 6-6"/></svg>
@@ -208,15 +204,16 @@
           <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m9 18 6-6-6-6"/></svg>
         </button>
 
-        <div class="w-px h-5 bg-[var(--border)] mx-0.5 shrink-0" aria-hidden="true"></div>
-
-        <button id="btnZoomOut" type="button" title="Zoom Out" aria-label="Zoom Out" class="h-8 w-8 rounded-full flex items-center justify-center hover:bg-[var(--surface-hover)] transition-colors shrink-0 cursor-pointer">
-          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="5" x2="19" y1="12" y2="12"/></svg>
-        </button>
-        <button id="btnZoomFit" type="button" title="Reset Zoom" class="h-8 w-12 rounded-full font-mono text-xs font-semibold flex items-center justify-center hover:bg-[var(--surface-hover)] transition-colors shrink-0 cursor-pointer">100%</button>
-        <button id="btnZoomIn" type="button" title="Zoom In" aria-label="Zoom In" class="h-8 w-8 rounded-full flex items-center justify-center hover:bg-[var(--surface-hover)] transition-colors shrink-0 cursor-pointer">
-          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="12" x2="12" y1="5" y2="19"/><line x1="5" x2="19" y1="12" y2="12"/></svg>
-        </button>
+        <div id="zoomControlsBar" class="hidden md:inline-flex items-center gap-1 shrink-0">
+          <div class="w-px h-5 bg-[var(--border)] mx-0.5 shrink-0" aria-hidden="true"></div>
+          <button id="btnZoomOut" type="button" title="Zoom Out" aria-label="Zoom Out" class="h-8 w-8 rounded-full flex items-center justify-center hover:bg-[var(--surface-hover)] transition-colors shrink-0 cursor-pointer">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="5" x2="19" y1="12" y2="12"/></svg>
+          </button>
+          <button id="btnZoomFit" type="button" title="Reset Zoom" class="h-8 w-12 rounded-full font-mono text-xs font-semibold flex items-center justify-center hover:bg-[var(--surface-hover)] transition-colors shrink-0 cursor-pointer">100%</button>
+          <button id="btnZoomIn" type="button" title="Zoom In" aria-label="Zoom In" class="h-8 w-8 rounded-full flex items-center justify-center hover:bg-[var(--surface-hover)] transition-colors shrink-0 cursor-pointer">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="12" x2="12" y1="5" y2="19"/><line x1="5" x2="19" y1="12" y2="12"/></svg>
+          </button>
+        </div>
       </div>
     </div>
 
@@ -263,21 +260,15 @@
             <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Model &amp; Project</div>
             <button id="menuImportBtn" type="button" class="w-full py-2.5 px-4 rounded-lg bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] text-sm font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer">
               <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
-              <span>Import Model</span>
+              <span>Import Model or Project…</span>
             </button>
             <p class="text-xs text-[var(--muted-foreground)] leading-relaxed">
-              Supports BrickLink Studio (<strong class="font-mono whitespace-nowrap text-[var(--foreground)]">.io</strong>) and LDraw (<strong class="font-mono whitespace-nowrap text-[var(--foreground)]">.ldr / .mpd</strong>) files.
+              Open <strong class="font-mono whitespace-nowrap text-[var(--foreground)]">.io</strong>, <strong class="font-mono whitespace-nowrap text-[var(--foreground)]">.ldr / .mpd</strong>, sample models, or saved <strong class="font-mono whitespace-nowrap text-[var(--foreground)]">.bic.json</strong> projects.
             </p>
-            <div class="grid grid-cols-2 gap-2">
-              <button id="menuLoadProj" type="button" class="py-2.5 px-3 rounded-lg border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer">
-                <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
-                <span>Import Project</span>
-              </button>
-              <button id="menuSaveProj" type="button" class="hidden py-2.5 px-3 rounded-lg border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer">
-                <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
-                <span>Export Project</span>
-              </button>
-            </div>
+            <button id="menuSaveProj" type="button" class="hidden w-full py-2.5 px-3.5 rounded-lg border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer">
+              <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+              <span>Export Project (.bic.json)</span>
+            </button>
             <button id="menuErrorsBtn" type="button" class="hidden w-full py-2.5 px-3.5 rounded-lg border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold text-left flex items-center justify-between gap-2 transition-colors cursor-pointer">
               <span class="flex items-center gap-2">
                 <svg class="w-4 h-4 text-[var(--danger)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>
@@ -320,6 +311,21 @@
             </button>
           </div>
 
+          <!-- Step Generation (above Bricks Library) -->
+          <div id="menuAutoGenSection" class="hidden flex flex-col gap-2.5 pt-5 border-t border-[var(--border)]">
+            <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Step Generation</div>
+            <button id="menuStepGenBtn" type="button" class="w-full py-2.5 px-3.5 rounded-lg border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold text-left flex items-center justify-between gap-2 transition-colors cursor-pointer">
+              <span class="flex items-center gap-2 min-w-0">
+                <svg class="w-4 h-4 text-[var(--primary)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="7" height="16" rx="1.5"/><rect x="14" y="4" width="7" height="16" rx="1.5"/></svg>
+                <span>Step Generation</span>
+              </span>
+              <span class="flex items-center gap-1.5 shrink-0 max-w-[52%]">
+                <span id="menuStepGenSummary" class="font-mono text-xs text-[var(--muted-foreground)] truncate">Sections &amp; Steps</span>
+                <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+              </span>
+            </button>
+          </div>
+
           <!-- Bricks Library -->
           <div id="menuBricksLibSection" class="flex flex-col gap-2.5 pt-5 border-t border-[var(--border)] transition-all">
             <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Bricks Library</div>
@@ -336,22 +342,6 @@
             <p class="text-xs text-[var(--muted-foreground)] leading-relaxed">
               3D brick shapes needed to render parts in your models.
             </p>
-          </div>
-
-          <!-- Auto-Step Regeneration -->
-          <div id="menuAutoGenSection" class="hidden flex flex-col gap-3 pt-5 border-t border-[var(--border)]">
-            <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Auto-Generate Steps</div>
-            <label class="flex items-center justify-between gap-2 py-1 cursor-pointer">
-              <span class="font-medium">Auto-Detect Duplicate Submodels</span>
-              <input id="toggleDetectDuplicates" type="checkbox" checked class="w-4 h-4 accent-[var(--primary)] cursor-pointer" />
-            </label>
-            <button id="menuRegenBtn" type="button" class="w-full py-2.5 px-3.5 rounded-lg border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold transition-colors cursor-pointer">
-              Regenerate Steps from Model
-            </button>
-            <button id="menuSubdivideBtn" type="button" class="w-full py-2.5 px-3.5 rounded-lg border border-[var(--primary-border)] bg-[var(--primary-soft)] text-[var(--primary)] font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer">
-              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="7" height="16" rx="1.5"/><rect x="14" y="4" width="7" height="16" rx="1.5"/></svg>
-              <span>Subdivide Model into Sections…</span>
-            </button>
           </div>
 
           <!-- Extra Page Inserts -->
@@ -778,11 +768,24 @@
             </div>
           </div>
 
-          <!-- Right / Bottom Pane: Ranked Subdivision Proposals -->
+          <!-- Right / Bottom Pane: Build Organization Dropdown + Step Generation Options -->
           <div class="flex-1 min-h-0 lg:overflow-y-auto overscroll-contain p-5 space-y-4">
             <div class="space-y-2.5">
-              <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Build Organization</div>
-              <div id="impProposalList" class="space-y-2.5"></div>
+              <label for="impProposalSelect" class="block text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Build Organization</label>
+              <select id="impProposalSelect" class="w-full px-3 py-2.5 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] text-xs font-semibold outline-none focus:border-[var(--primary)] cursor-pointer"></select>
+              <div id="impProposalInfo" class="p-3 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)]/70 space-y-1.5 text-xs"></div>
+            </div>
+
+            <!-- Step Generation Options -->
+            <div class="space-y-2.5 pt-4 border-t border-[var(--border)]">
+              <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Step Options</div>
+              <label class="flex items-start justify-between gap-3 p-3 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)]/55 cursor-pointer">
+                <div class="min-w-0">
+                  <div class="font-semibold text-xs text-[var(--foreground)]">Auto-Detect Duplicate Submodels</div>
+                  <p class="text-[11px] text-[var(--muted-foreground)] mt-0.5 leading-snug">Automatically group repeated subassemblies (wheels, pillars, wings) into reusable ×N submodels.</p>
+                </div>
+                <input id="toggleDetectDuplicates" type="checkbox" checked class="mt-0.5 w-4 h-4 accent-[var(--primary)] shrink-0 cursor-pointer" />
+              </label>
             </div>
 
             <!-- Keep Existing File Steps -->
@@ -872,29 +875,30 @@
         </div>
 
         <div class="flex-1 min-h-0 overflow-y-auto overscroll-contain p-5 space-y-5">
-          <div class="space-y-2">
-            <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Page Format</div>
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <button data-format="screen" type="button" class="fmt-btn py-3 px-3.5 rounded-lg border text-left cursor-pointer">
-                <div class="font-semibold text-sm">Screen Fit</div>
-                <div class="text-xs text-[var(--muted-foreground)] mt-0.5">Adapts to current screen</div>
-              </button>
-              <button data-format="letter" type="button" class="fmt-btn py-3 px-3.5 rounded-lg border text-left cursor-pointer">
-                <div class="font-semibold text-sm">US Letter</div>
-                <div class="font-mono text-xs text-[var(--muted-foreground)] mt-0.5">8.5 × 11 in · 21.6 × 27.9 cm</div>
-              </button>
-              <button data-format="a4" type="button" class="fmt-btn py-3 px-3.5 rounded-lg border text-left cursor-pointer">
-                <div class="font-semibold text-sm">A4 Paper</div>
-                <div class="font-mono text-xs text-[var(--muted-foreground)] mt-0.5">8.27 × 11.69 in · 21.0 × 29.7 cm</div>
-              </button>
-              <button data-format="square" type="button" class="fmt-btn py-3 px-3.5 rounded-lg border text-left cursor-pointer">
-                <div class="font-semibold text-sm">Booklet Square</div>
-                <div class="font-mono text-xs text-[var(--muted-foreground)] mt-0.5">8.5 × 8.5 in · 21.6 × 21.6 cm</div>
-              </button>
-              <button data-format="custom" type="button" class="fmt-btn py-3 px-3.5 rounded-lg border text-left sm:col-span-2 cursor-pointer">
-                <div class="font-semibold text-sm">Custom Size</div>
-                <div id="customFmtSub" class="font-mono text-xs text-[var(--muted-foreground)] mt-0.5">10.0 × 8.0 in · 25.4 × 20.3 cm</div>
-              </button>
+          <!-- Page Format Dropdown + Live Proportion Preview Box -->
+          <div class="space-y-2.5">
+            <label for="paperFormatSelect" class="block text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Page Format</label>
+            <div class="flex items-center gap-3.5 p-3.5 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)]/55">
+              <div class="flex-1 min-w-0 space-y-1.5">
+                <select id="paperFormatSelect" class="w-full px-3 py-2.5 rounded-md border border-[var(--border)] bg-[var(--card)] text-xs font-semibold outline-none focus:border-[var(--primary)] cursor-pointer">
+                  <option value="screen">Screen Fit (Adapts to Screen)</option>
+                  <option value="letter">US Letter (8.5 × 11 in)</option>
+                  <option value="a4">A4 (210 × 297 mm)</option>
+                  <option value="a5">A5 Booklet (148 × 210 mm)</option>
+                  <option value="b5">B5 Booklet (176 × 250 mm)</option>
+                  <option value="half_letter">Half Letter (5.5 × 8.5 in)</option>
+                  <option value="legal">US Legal (8.5 × 14 in)</option>
+                  <option value="tabloid">Tabloid / Ledger (11 × 17 in)</option>
+                  <option value="a3">A3 Poster (297 × 420 mm)</option>
+                  <option value="square">Booklet Square (8.5 × 8.5 in)</option>
+                  <option value="custom">Custom Size…</option>
+                </select>
+                <div id="paperFormatDimsLabel" class="font-mono text-[11px] text-[var(--muted-foreground)]">Adapts to current screen</div>
+              </div>
+              <div class="shrink-0 flex flex-col items-center justify-center gap-1 min-w-[92px]">
+                <div id="paperFormatPreview" class="w-[88px] h-[72px] flex items-center justify-center" aria-hidden="true"></div>
+                <span id="paperFormatRatioLabel" class="font-mono text-[10px] font-semibold text-[var(--muted-foreground)]">1.29 : 1</span>
+              </div>
             </div>
           </div>
 
@@ -919,19 +923,49 @@
             <div id="customUnitEquiv" class="font-mono text-xs text-[var(--muted-foreground)]">25.4 × 20.3 cm</div>
           </div>
 
+          <!-- Orientation with Explicit Horizontal / Vertical Box Indicators -->
           <div id="orientationWrap" class="space-y-2">
             <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Orientation</div>
-            <div class="grid grid-cols-2 gap-2">
-              <button data-orient="landscape" type="button" class="orient-btn py-2.5 rounded-md border font-semibold cursor-pointer">Landscape</button>
-              <button data-orient="portrait" type="button" class="orient-btn py-2.5 rounded-md border font-semibold cursor-pointer">Portrait</button>
+            <div class="grid grid-cols-2 gap-2.5">
+              <button data-orient="landscape" type="button" class="orient-btn py-2.5 px-3 rounded-lg border font-semibold flex items-center justify-center gap-2.5 cursor-pointer">
+                <span class="inline-flex items-center justify-center w-8 h-6 shrink-0" aria-hidden="true">
+                  <svg class="w-7 h-5" viewBox="0 0 28 20" fill="none">
+                    <rect x="1.5" y="1.5" width="25" height="17" rx="2" stroke="currentColor" stroke-width="2" fill="currentColor" fill-opacity="0.1"/>
+                    <line x1="5" y1="6.5" x2="14" y2="6.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.6"/>
+                    <line x1="5" y1="10.5" x2="22" y2="10.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.4"/>
+                  </svg>
+                </span>
+                <span>Landscape</span>
+              </button>
+              <button data-orient="portrait" type="button" class="orient-btn py-2.5 px-3 rounded-lg border font-semibold flex items-center justify-center gap-2.5 cursor-pointer">
+                <span class="inline-flex items-center justify-center w-8 h-6 shrink-0" aria-hidden="true">
+                  <svg class="w-5 h-6" viewBox="0 0 20 26" fill="none">
+                    <rect x="1.5" y="1.5" width="17" height="23" rx="2" stroke="currentColor" stroke-width="2" fill="currentColor" fill-opacity="0.1"/>
+                    <line x1="5" y1="7" x2="13" y2="7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.6"/>
+                    <line x1="5" y1="11.5" x2="15" y2="11.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.4"/>
+                  </svg>
+                </span>
+                <span>Portrait</span>
+              </button>
             </div>
           </div>
 
+          <!-- Default Steps per Page & Grid + Live Visual Grid Preview -->
           <div class="space-y-3 pt-4 border-t border-[var(--border)]">
             <div class="flex items-center justify-between gap-2">
               <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Default Steps per Page &amp; Grid</div>
               <span id="layoutSummaryChip" class="font-mono text-xs font-semibold text-[var(--primary)]">Auto</span>
             </div>
+
+            <!-- Live Page Grid Preview -->
+            <div class="p-3 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)]/60 flex flex-col sm:flex-row items-center gap-3.5">
+              <div id="layoutGridPreview" class="shrink-0 flex items-center justify-center min-w-[144px] min-h-[100px]" aria-label="Live step grid preview"></div>
+              <div class="flex-1 min-w-0 space-y-1 text-center sm:text-left">
+                <div id="layoutGridPreviewTitle" class="font-bold text-xs text-[var(--foreground)]">Smart Auto Grid</div>
+                <p id="layoutGridPreviewDesc" class="text-[11px] text-[var(--muted-foreground)] leading-snug">Automatically fits 1–2 steps per page based on step complexity and page shape.</p>
+              </div>
+            </div>
+
             <div class="grid grid-cols-6 gap-1.5">
               <button type="button" data-layout-preset="auto" class="layout-btn py-2 rounded-md border font-semibold cursor-pointer">Auto</button>
               <button type="button" data-layout-preset="1" class="layout-btn py-2 rounded-md border font-semibold font-mono cursor-pointer">1</button>
@@ -973,18 +1007,51 @@
             <div class="space-y-1.5">
               <div class="text-xs text-[var(--muted-foreground)] font-medium">Step Order Direction</div>
               <div class="grid grid-cols-2 gap-2">
-                <button type="button" data-step-flow="row" class="step-flow-btn py-2 px-3 rounded-md border font-semibold cursor-pointer">Rows (Left to Right)</button>
-                <button type="button" data-step-flow="column" class="step-flow-btn py-2 px-3 rounded-md border font-semibold cursor-pointer">Columns (Top to Bottom)</button>
+                <button type="button" data-step-flow="row" class="step-flow-btn py-2 px-3 rounded-md border font-semibold flex items-center justify-center gap-2 cursor-pointer">
+                  <svg class="w-5 h-4 shrink-0" viewBox="0 0 24 18" fill="none" aria-hidden="true">
+                    <rect x="1" y="1" width="9" height="6.5" rx="1.2" stroke="currentColor" stroke-width="1.5"/>
+                    <rect x="14" y="1" width="9" height="6.5" rx="1.2" stroke="currentColor" stroke-width="1.5" opacity="0.7"/>
+                    <rect x="1" y="10.5" width="9" height="6.5" rx="1.2" stroke="currentColor" stroke-width="1.5" opacity="0.5"/>
+                    <rect x="14" y="10.5" width="9" height="6.5" rx="1.2" stroke="currentColor" stroke-width="1.5" opacity="0.35"/>
+                    <path d="M10.5 4.25h3m-1-1.25 1.25 1.25-1.25 1.25" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                  <span>Rows (1 → 2)</span>
+                </button>
+                <button type="button" data-step-flow="column" class="step-flow-btn py-2 px-3 rounded-md border font-semibold flex items-center justify-center gap-2 cursor-pointer">
+                  <svg class="w-5 h-4 shrink-0" viewBox="0 0 24 18" fill="none" aria-hidden="true">
+                    <rect x="1" y="1" width="9" height="6.5" rx="1.2" stroke="currentColor" stroke-width="1.5"/>
+                    <rect x="1" y="10.5" width="9" height="6.5" rx="1.2" stroke="currentColor" stroke-width="1.5" opacity="0.7"/>
+                    <rect x="14" y="1" width="9" height="6.5" rx="1.2" stroke="currentColor" stroke-width="1.5" opacity="0.5"/>
+                    <rect x="14" y="10.5" width="9" height="6.5" rx="1.2" stroke="currentColor" stroke-width="1.5" opacity="0.35"/>
+                    <path d="M5.5 7.75v2.5m-1.25-1 1.25 1.25 1.25-1.25" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                  <span>Columns (1 ↓ 2)</span>
+                </button>
               </div>
             </div>
             <div class="space-y-1.5">
               <div class="text-xs text-[var(--muted-foreground)] font-medium">Step Proportions (Mixed Layouts)</div>
               <div class="grid grid-cols-3 sm:grid-cols-5 gap-1.5">
-                <button type="button" data-mixed-layout="even" class="mixed-layout-btn py-2 px-2 rounded-md border font-semibold text-xs cursor-pointer">Even</button>
-                <button type="button" data-mixed-layout="hero_left" class="mixed-layout-btn py-2 px-2 rounded-md border font-semibold text-xs cursor-pointer">Large Left</button>
-                <button type="button" data-mixed-layout="hero_top" class="mixed-layout-btn py-2 px-2 rounded-md border font-semibold text-xs cursor-pointer">Large Top</button>
-                <button type="button" data-mixed-layout="hero_right" class="mixed-layout-btn py-2 px-2 rounded-md border font-semibold text-xs cursor-pointer">Large Right</button>
-                <button type="button" data-mixed-layout="custom_weights" class="mixed-layout-btn py-2 px-2 rounded-md border font-semibold text-xs cursor-pointer">Custom</button>
+                <button type="button" data-mixed-layout="even" class="mixed-layout-btn py-2 px-2 rounded-md border font-semibold text-xs flex flex-col items-center gap-1 cursor-pointer">
+                  <svg class="w-6 h-4" viewBox="0 0 24 16" fill="none" aria-hidden="true"><rect x="1" y="1" width="10" height="6" rx="1" stroke="currentColor" stroke-width="1.4"/><rect x="13" y="1" width="10" height="6" rx="1" stroke="currentColor" stroke-width="1.4"/><rect x="1" y="9" width="10" height="6" rx="1" stroke="currentColor" stroke-width="1.4"/><rect x="13" y="9" width="10" height="6" rx="1" stroke="currentColor" stroke-width="1.4"/></svg>
+                  <span>Even</span>
+                </button>
+                <button type="button" data-mixed-layout="hero_left" class="mixed-layout-btn py-2 px-2 rounded-md border font-semibold text-xs flex flex-col items-center gap-1 cursor-pointer">
+                  <svg class="w-6 h-4" viewBox="0 0 24 16" fill="none" aria-hidden="true"><rect x="1" y="1" width="12.5" height="14" rx="1" stroke="currentColor" stroke-width="1.5" fill="currentColor" fill-opacity="0.14"/><rect x="15.5" y="1" width="7.5" height="6" rx="1" stroke="currentColor" stroke-width="1.3"/><rect x="15.5" y="9" width="7.5" height="6" rx="1" stroke="currentColor" stroke-width="1.3"/></svg>
+                  <span>Large Left</span>
+                </button>
+                <button type="button" data-mixed-layout="hero_top" class="mixed-layout-btn py-2 px-2 rounded-md border font-semibold text-xs flex flex-col items-center gap-1 cursor-pointer">
+                  <svg class="w-6 h-4" viewBox="0 0 24 16" fill="none" aria-hidden="true"><rect x="1" y="1" width="22" height="7.5" rx="1" stroke="currentColor" stroke-width="1.5" fill="currentColor" fill-opacity="0.14"/><rect x="1" y="10.5" width="10" height="4.5" rx="1" stroke="currentColor" stroke-width="1.3"/><rect x="13" y="10.5" width="10" height="4.5" rx="1" stroke="currentColor" stroke-width="1.3"/></svg>
+                  <span>Large Top</span>
+                </button>
+                <button type="button" data-mixed-layout="hero_right" class="mixed-layout-btn py-2 px-2 rounded-md border font-semibold text-xs flex flex-col items-center gap-1 cursor-pointer">
+                  <svg class="w-6 h-4" viewBox="0 0 24 16" fill="none" aria-hidden="true"><rect x="1" y="1" width="7.5" height="6" rx="1" stroke="currentColor" stroke-width="1.3"/><rect x="1" y="9" width="7.5" height="6" rx="1" stroke="currentColor" stroke-width="1.3"/><rect x="10.5" y="1" width="12.5" height="14" rx="1" stroke="currentColor" stroke-width="1.5" fill="currentColor" fill-opacity="0.14"/></svg>
+                  <span>Large Right</span>
+                </button>
+                <button type="button" data-mixed-layout="custom_weights" class="mixed-layout-btn py-2 px-2 rounded-md border font-semibold text-xs flex flex-col items-center gap-1 cursor-pointer">
+                  <svg class="w-6 h-4" viewBox="0 0 24 16" fill="none" aria-hidden="true"><rect x="1" y="1" width="14" height="6" rx="1" stroke="currentColor" stroke-width="1.4" fill="currentColor" fill-opacity="0.14"/><rect x="17" y="1" width="6" height="6" rx="1" stroke="currentColor" stroke-width="1.3"/><rect x="1" y="9" width="8" height="6" rx="1" stroke="currentColor" stroke-width="1.3"/><rect x="11" y="9" width="12" height="6" rx="1" stroke="currentColor" stroke-width="1.4"/></svg>
+                  <span>Custom</span>
+                </button>
               </div>
               <div id="defaultSlotSizesWrap" class="hidden pt-1.5 space-y-1.5">
                 <div class="text-xs text-[var(--muted-foreground)]">Tap a slot to cycle size (S / M / L)</div>
@@ -1005,10 +1072,13 @@
             <div id="layoutGroupsList" class="space-y-2"></div>
 
             <!-- Inline Group Editor -->
-            <div id="layoutGroupEditor" class="hidden p-4 rounded-lg bg-[var(--surface-sunken)] space-y-3">
+            <div id="layoutGroupEditor" class="hidden p-4 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] space-y-3">
               <div class="flex items-center justify-between gap-2">
                 <span id="grpEditorTitle" class="font-bold text-xs text-[var(--primary)]">New Step Group</span>
                 <button id="btnGrpUseCurrentPage" type="button" class="text-xs font-semibold text-[var(--primary)] underline cursor-pointer">Use current page steps</button>
+              </div>
+              <div class="flex items-center justify-center p-2.5 rounded-md border border-[var(--border)] bg-[var(--card)]/70">
+                <div id="grpGridPreview" class="flex items-center justify-center" aria-label="Group grid preview"></div>
               </div>
               <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                 <label class="space-y-1 sm:col-span-3">
@@ -1085,22 +1155,55 @@
             </div>
           </div>
 
-          <div class="space-y-2">
+          <div class="space-y-2 pt-4 border-t border-[var(--border)]">
             <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Page Density &amp; Margins</div>
-            <div class="grid grid-cols-3 gap-1.5">
-              <button data-density="compact" type="button" class="dens-btn py-2.5 rounded-md border font-semibold cursor-pointer">Compact</button>
-              <button data-density="balanced" type="button" class="dens-btn py-2.5 rounded-md border font-semibold cursor-pointer">Balanced</button>
-              <button data-density="spacious" type="button" class="dens-btn py-2.5 rounded-md border font-semibold cursor-pointer">Spacious</button>
+            <div class="grid grid-cols-3 gap-2">
+              <button data-density="compact" type="button" class="dens-btn py-2.5 px-2 rounded-lg border font-semibold flex flex-col items-center gap-1.5 cursor-pointer">
+                <svg class="w-8 h-6" viewBox="0 0 32 24" fill="none" aria-hidden="true">
+                  <rect x="1" y="1" width="30" height="22" rx="2" stroke="currentColor" stroke-width="1.4" opacity="0.45"/>
+                  <rect x="3" y="3" width="12.2" height="18" rx="1" stroke="currentColor" stroke-width="1.4" fill="currentColor" fill-opacity="0.14"/>
+                  <rect x="16.8" y="3" width="12.2" height="18" rx="1" stroke="currentColor" stroke-width="1.4" fill="currentColor" fill-opacity="0.14"/>
+                </svg>
+                <span>Compact</span>
+              </button>
+              <button data-density="balanced" type="button" class="dens-btn py-2.5 px-2 rounded-lg border font-semibold flex flex-col items-center gap-1.5 cursor-pointer">
+                <svg class="w-8 h-6" viewBox="0 0 32 24" fill="none" aria-hidden="true">
+                  <rect x="1" y="1" width="30" height="22" rx="2" stroke="currentColor" stroke-width="1.4" opacity="0.45"/>
+                  <rect x="4.5" y="4.5" width="10.2" height="15" rx="1" stroke="currentColor" stroke-width="1.4" fill="currentColor" fill-opacity="0.14"/>
+                  <rect x="17.3" y="4.5" width="10.2" height="15" rx="1" stroke="currentColor" stroke-width="1.4" fill="currentColor" fill-opacity="0.14"/>
+                </svg>
+                <span>Balanced</span>
+              </button>
+              <button data-density="spacious" type="button" class="dens-btn py-2.5 px-2 rounded-lg border font-semibold flex flex-col items-center gap-1.5 cursor-pointer">
+                <svg class="w-8 h-6" viewBox="0 0 32 24" fill="none" aria-hidden="true">
+                  <rect x="1" y="1" width="30" height="22" rx="2" stroke="currentColor" stroke-width="1.4" opacity="0.45"/>
+                  <rect x="6.5" y="6" width="8" height="12" rx="1" stroke="currentColor" stroke-width="1.4" fill="currentColor" fill-opacity="0.14"/>
+                  <rect x="17.5" y="6" width="8" height="12" rx="1" stroke="currentColor" stroke-width="1.4" fill="currentColor" fill-opacity="0.14"/>
+                </svg>
+                <span>Spacious</span>
+              </button>
             </div>
           </div>
 
           <div class="space-y-2">
             <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Page Number Format</div>
             <div class="grid grid-cols-4 gap-1.5">
-              <button data-pgnum="number" type="button" class="pgnum-btn py-2.5 rounded-md border font-semibold font-mono cursor-pointer">1</button>
-              <button data-pgnum="page_n" type="button" class="pgnum-btn py-2.5 rounded-md border font-semibold cursor-pointer">Page 1</button>
-              <button data-pgnum="n_of_total" type="button" class="pgnum-btn py-2.5 rounded-md border font-semibold font-mono cursor-pointer">1 / N</button>
-              <button data-pgnum="none" type="button" class="pgnum-btn py-2.5 rounded-md border font-semibold cursor-pointer">Off</button>
+              <button data-pgnum="number" type="button" class="pgnum-btn py-2.5 px-1.5 rounded-lg border font-semibold flex flex-col items-center gap-1 cursor-pointer">
+                <span class="w-9 h-5 rounded border border-current/30 flex items-end justify-end px-1 pb-0.5 font-mono text-[9px] leading-none">1</span>
+                <span class="font-mono text-[11px]">1</span>
+              </button>
+              <button data-pgnum="page_n" type="button" class="pgnum-btn py-2.5 px-1.5 rounded-lg border font-semibold flex flex-col items-center gap-1 cursor-pointer">
+                <span class="w-9 h-5 rounded border border-current/30 flex items-end justify-end px-1 pb-0.5 text-[7px] leading-none whitespace-nowrap">Pg 1</span>
+                <span class="text-[11px]">Page 1</span>
+              </button>
+              <button data-pgnum="n_of_total" type="button" class="pgnum-btn py-2.5 px-1.5 rounded-lg border font-semibold flex flex-col items-center gap-1 cursor-pointer">
+                <span class="w-9 h-5 rounded border border-current/30 flex items-end justify-end px-1 pb-0.5 font-mono text-[8px] leading-none">1/8</span>
+                <span class="font-mono text-[11px]">1 / N</span>
+              </button>
+              <button data-pgnum="none" type="button" class="pgnum-btn py-2.5 px-1.5 rounded-lg border font-semibold flex flex-col items-center gap-1 cursor-pointer">
+                <span class="w-9 h-5 rounded border border-dashed border-current/30 flex items-center justify-center text-[9px] leading-none opacity-60">—</span>
+                <span class="text-[11px]">Off</span>
+              </button>
             </div>
           </div>
 
@@ -1254,6 +1357,113 @@
         <div class="px-5 py-3.5 border-t border-[var(--border)] bg-[var(--chrome)] flex items-center justify-between gap-2.5 shrink-0">
           <span id="stepEditFooterHint" class="text-xs text-[var(--muted-foreground)] truncate">Changes apply immediately to your manual.</span>
           <button id="stepEditDoneBtn" type="button" class="px-5 py-2.5 rounded-md bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] font-semibold transition-colors shrink-0 cursor-pointer">Done</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- APPLY CAMERA ANGLE TO STEP RANGE MODAL                           -->
+    <!-- ================================================================ -->
+    <div id="applyAngleModal" role="dialog" aria-modal="true" aria-labelledby="applyAngleTitle" class="no-print hidden fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+      <div class="w-full max-w-xl h-[90vh] sm:h-[84vh] rounded-t-xl sm:rounded-xl studio-sheet flex flex-col overflow-hidden text-xs">
+        <div class="px-5 py-4 border-b border-[var(--border)] bg-[var(--chrome)] flex items-center justify-between gap-3 shrink-0">
+          <div class="min-w-0">
+            <h2 id="applyAngleTitle" class="text-base font-bold tracking-tight">Apply Camera Angle to Steps</h2>
+            <p id="applyAngleSubtitle" class="text-xs text-[var(--muted-foreground)] mt-0.5 truncate">Pick a start and end step to share this 3D camera angle</p>
+          </div>
+          <button id="btnCloseApplyAngle" type="button" aria-label="Close Apply Camera Angle" class="w-9 h-9 rounded-md flex items-center justify-center hover:bg-[var(--surface-hover)] transition-colors shrink-0 cursor-pointer">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
+        </div>
+
+        <!-- Dual-Handle Range Selector Bar (Flight / Hotel Date Range Style) -->
+        <div class="px-5 py-4 border-b border-[var(--border)] bg-[var(--surface-sunken)] space-y-3 shrink-0">
+          <div class="flex items-center justify-between gap-2 flex-wrap">
+            <div class="flex items-center gap-2">
+              <span class="px-2.5 py-1 rounded-md border border-[var(--primary)]/40 bg-[var(--card)] font-mono font-bold text-xs">From <span id="angleRangeStartLbl" class="text-[var(--primary)]">Step 1</span></span>
+              <span class="text-[var(--muted-foreground)] font-bold">→</span>
+              <span class="px-2.5 py-1 rounded-md border border-[var(--primary)]/40 bg-[var(--card)] font-mono font-bold text-xs">To <span id="angleRangeEndLbl" class="text-[var(--primary)]">Step 1</span></span>
+            </div>
+            <span id="angleRangeCountBadge" class="font-mono text-xs font-bold text-[var(--primary)]">1 step</span>
+          </div>
+
+          <div class="dual-range-wrap" aria-label="Step range slider">
+            <div class="dual-range-track">
+              <div id="angleRangeFill" class="dual-range-fill" style="left:0%;width:100%"></div>
+            </div>
+            <input id="angleRangeMin" type="range" min="1" max="1" value="1" aria-label="Start step" class="dual-range-input" />
+            <input id="angleRangeMax" type="range" min="1" max="1" value="1" aria-label="End step" class="dual-range-input" />
+          </div>
+
+          <div class="flex items-center justify-between gap-2 flex-wrap">
+            <span class="text-[11px] text-[var(--muted-foreground)]">Drag either handle or tap start &amp; end steps below</span>
+            <div class="flex items-center gap-1.5 flex-wrap">
+              <button id="btnAnglePresetFollowing" type="button" class="px-2.5 py-1 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] text-[11px] font-semibold cursor-pointer">This Step Onward</button>
+              <button id="btnAnglePresetSection" type="button" class="px-2.5 py-1 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] text-[11px] font-semibold cursor-pointer">This Section</button>
+              <button id="btnAnglePresetAll" type="button" class="px-2.5 py-1 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] text-[11px] font-semibold cursor-pointer">All Steps</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Scrollable 3D Step List -->
+        <div id="angleStepList" class="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 space-y-1.5"></div>
+
+        <div class="px-5 py-3.5 border-t border-[var(--border)] bg-[var(--chrome)] flex items-center justify-between gap-2.5 shrink-0">
+          <button id="btnCancelApplyAngle" type="button" class="px-4 py-2 rounded-md font-semibold text-[var(--muted-foreground)] hover:bg-[var(--surface-hover)] transition-colors cursor-pointer">Cancel</button>
+          <button id="btnConfirmApplyAngle" type="button" class="px-5 py-2.5 rounded-md bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] font-semibold transition-colors cursor-pointer">Apply Angle</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- OPEN / IMPORT MODEL & PROJECT DIALOG (Mirrors Proofing Sheet)    -->
+    <!-- ================================================================ -->
+    <div id="openModelModal" role="dialog" aria-modal="true" aria-labelledby="openModelTitle" class="no-print hidden fixed inset-0 z-50 bg-black/55 flex items-end sm:items-center justify-center p-0 sm:p-4">
+      <div id="openModelDropZone" class="w-full max-w-2xl rounded-t-xl sm:rounded-xl studio-sheet overflow-hidden text-xs">
+        <div class="px-6 sm:px-8 py-3.5 border-b border-[var(--border)] bg-[var(--surface-sunken)] flex items-center justify-between gap-3">
+          <div class="flex items-center gap-2.5 min-w-0">
+            <span class="font-semibold text-[var(--foreground)]">Proofing Table</span>
+            <span class="font-mono text-[var(--muted-foreground)]">.io · .ldr · .mpd · .bic.json</span>
+          </div>
+          <button id="btnCloseOpenModel" type="button" aria-label="Close Open Model dialog" class="w-8 h-8 rounded-md flex items-center justify-center hover:bg-[var(--surface-hover)] shrink-0 transition-colors cursor-pointer">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
+        </div>
+
+        <div class="p-6 sm:p-8">
+          <div class="flex items-start gap-4">
+            <svg class="w-11 h-11 shrink-0 text-[var(--foreground)] mt-0.5" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+              <path d="M6 15V6h9M49 6h9v9M58 49v9h-9M15 58H6v-9" stroke="currentColor" stroke-width="2.5" stroke-linecap="square"/>
+              <rect x="14" y="14" width="36" height="36" rx="2" stroke="currentColor" stroke-width="2.5" fill="var(--card)"/>
+              <circle cx="24" cy="24" r="5" fill="var(--primary)"/>
+              <circle cx="40" cy="24" r="5" stroke="currentColor" stroke-width="2.2"/>
+              <circle cx="24" cy="40" r="5" stroke="currentColor" stroke-width="2.2"/>
+              <circle cx="40" cy="40" r="5" fill="currentColor"/>
+            </svg>
+            <div class="min-w-0 space-y-1.5">
+              <h2 id="openModelTitle" class="text-xl sm:text-2xl font-bold tracking-tight leading-tight text-[var(--foreground)]">Open a brick model or saved project.</h2>
+              <p class="text-xs sm:text-sm text-[var(--muted-foreground)] leading-relaxed">
+                Import a BrickLink Studio or LDraw file, load the built-in sample model, or resume a saved <strong class="font-mono text-[var(--foreground)]">.bic.json</strong> manual project.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="px-6 sm:px-8 py-5 border-t border-dashed border-[var(--border-strong)] bg-[var(--surface-sunken)]/45 space-y-3.5">
+          <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+            <button id="openModalImportBtn" type="button" class="sm:flex-1 shrink-0 h-11 px-5 rounded-md bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors cursor-pointer">
+              <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
+              <span>Import Model File</span>
+            </button>
+            <button id="openModalSampleBtn" type="button" class="shrink-0 h-11 px-4 rounded-md border border-[var(--border-strong)] bg-[var(--card)] hover:bg-[var(--surface-hover)] text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors cursor-pointer">
+              <svg class="w-4 h-4 text-[var(--primary)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="6 4 20 12 6 20 6 4"/></svg>
+              <span>Load Sample Model</span>
+            </button>
+          </div>
+          <div class="flex flex-wrap items-center justify-between gap-2 text-xs text-[var(--muted-foreground)]">
+            <span>Drop a <strong class="font-mono text-[var(--foreground)]">.io</strong>, <strong class="font-mono text-[var(--foreground)]">.ldr</strong>, or <strong class="font-mono text-[var(--foreground)]">.mpd</strong> file anywhere on this sheet.</span>
+            <button id="openModalLoadProjBtn" type="button" class="font-semibold text-[var(--foreground)] underline hover:text-[var(--primary)] transition-colors cursor-pointer">Open saved .bic.json project</button>
+          </div>
         </div>
       </div>
     </div>

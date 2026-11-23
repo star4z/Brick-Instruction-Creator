@@ -1,11 +1,14 @@
 # Customizable Page Layouts & Step Range Groups Design
 
 ## Purpose
-Give manual creators full control over how steps are arranged on pages—beyond fixed 1/2/4-up grids—while keeping live Studio previews and exported PDFs 100% consistent.
+Give manual creators full control over paper size, orientation, margins, and how steps are arranged on pages—beyond fixed 1/2/4-up grids—with live visual guides for every option while keeping live Studio previews and exported PDFs 100% consistent.
 
 ## Data Model
-Implemented in [`src/engine/pageLayout.ts`](../src/engine/pageLayout.ts):
+Implemented in [`src/engine/pageLayout.ts`](../src/engine/pageLayout.ts) and [`src/engine/stepToolbar.ts`](../src/engine/stepToolbar.ts):
 
+- **Expanded Paper Formats (`PAPER_FORMAT_SPECS`)**:
+  - `screen` (Screen Fit), `letter` (US Letter), `a4` (A4), `a5` (A5 Booklet), `b5` (B5 Booklet), `half_letter` (Half Letter), `legal` (US Legal), `tabloid` (Tabloid / Ledger), `a3` (A3 Poster), `square` (Booklet Square), and `custom` (Custom Size in `in` or `cm`).
+  - `computePaperPreviewBox()` computes exact scaled miniature sheet proportions in the active orientation for the live preview box beside the Page Format dropdown.
 - **`PageLayoutSpec`**:
   - `mode`: `'auto' | 'custom'`
   - `stepsPerPage`: arbitrary integer `1..24` (presets `Auto`, `1`, `2`, `3`, `4`, `6`, plus numeric input)
@@ -29,11 +32,9 @@ Implemented in [`src/engine/pageLayout.ts`](../src/engine/pageLayout.ts):
 - `renderPageToJpegBytes()` uses the exact same `computePageSlotRects` output for PDF canvas export.
 - `getThemeForPage(page)` resolves a group's `themeId` override (if set) for both live display and PDF rendering.
 
-## User Workflows
-1. **Page Setup (`#pageSetupModal`)**:
-   - Configure manual-wide defaults (steps/page, cols, rows, row/column flow, mixed layout, S/M/L weights).
-   - Manage **Step Range Groups** (create, edit, delete, or fill range from current page steps).
-2. **Pages & Steps Overview (`#overviewModal`)**:
-   - Toggle **Select Range**, tap start and end steps (or page headers), and click **Style / Layout Group…** to open the Group Editor pre-filled with that exact range.
-3. **Persistence & Undo**:
-   - `layoutConfig` and `layoutGroups` are persisted in IndexedDB session prefs, included in `.bic.json` project exports/imports (backward-compatible with legacy `layout` strings), and captured in Undo/Redo snapshots.
+## Visual Guides in Page Setup (`#pageSetupModal`)
+1. **Page Format Dropdown + Live Proportion Box**: `<select id="paperFormatSelect">` on the left paired with `#paperFormatPreview` on the right showing the exact paper aspect ratio in the active orientation.
+2. **Orientation**: Separate horizontal (`Landscape`) and vertical (`Portrait`) rectangle icons.
+3. **Default Steps per Page & Grid**: Live `#layoutGridPreview` rendered directly from `computePageSlotRects()` in the current page's aspect ratio, margins, and borders, plus inline mini-diagram icons on Step Order Direction (`Rows` / `Columns`), Mixed Layouts, Page Density & Margins, and Page Number Format.
+4. **Step Range Groups**: Create, edit, and delete per-range layout/theme rules with a live `#grpGridPreview` inside the inline editor (`populateGroupThemeOptions()` iterates `Object.values(BUILT_IN_THEMES)`).
+5. **Persistence & Undo**: `layoutConfig` and `layoutGroups` are persisted in IndexedDB session prefs, included in `.bic.json` project exports/imports, and captured in Undo/Redo snapshots.
