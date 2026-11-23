@@ -28,6 +28,8 @@ npm run dev
 - `npm run typecheck` — Strict TypeScript check
 - `npm test` — Run Vitest engine verification suite
 - `npm run build` — Typecheck, production build, and Neocities file-size/extension compliance check
+- `npm run detect:design` — Run Impeccable anti-pattern & design quality detector on `src/`
+- `npm run detect:design:dist` — Run Impeccable detector on the built `dist/index.html` bundle
 
 ## Design Documentation
 

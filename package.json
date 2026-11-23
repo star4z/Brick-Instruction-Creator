@@ -12,7 +12,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check:neocities": "node scripts/check-neocities.mjs"
+    "check:neocities": "node scripts/check-neocities.mjs",
+    "detect:design": "impeccable detect src/",
+    "detect:design:dist": "impeccable detect dist/index.html"
   },
   "dependencies": {
     "@zip.js/zip.js": "^2.25.0",
@@ -32,6 +34,7 @@
     "@types/react-dom": "^19.1.0",
     "@types/three": "^0.175.0",
     "@vitejs/plugin-react": "^4.3.4",
+    "impeccable": "^4.10.0",
     "tailwindcss": "^4.1.3",
     "typescript": "^5.8.2",
     "vite": "^6.2.5",
