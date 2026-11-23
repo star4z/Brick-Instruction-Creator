@@ -7509,7 +7509,7 @@ async function fetchMissingPartsOnline() {
     const base = k.split('/').pop();
     if (!k || queued.has(k)) return;
     // Skip standard studs/arcs/rects we already synthesize procedurally at high speed!
-    if (/^(stud|stud2|stud2a|stud3|stud4|stud4a|stud10|stud15|studp01|axlehol|npeghol|beamhol|rect|rect2p|\d+-\d+(cyli|cylo|cylc|disc|edge|ring\d+|rin\d+|chrd|ndis))$/.test(base)) return;
+    if (/^(stud|stud2|stud2a|stud3|stud3a|stud4|stud4a|studp01|rect|rect2p|\d+-\d+(cyli|cylo|cylc|disc|edge|ring\d+|rin\d+|chrd|ndis))$/.test(base)) return;
     // If already loaded as a real .dat (not a virtual synthesis), walk its nested type-1 subparts so partial shortcuts still fetch missing children!
     const existing = lookupEmbeddedDat(k, false);
     if (existing) {

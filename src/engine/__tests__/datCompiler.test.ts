@@ -251,4 +251,136 @@ describe('compileDatEntry — minifigure torso & sibling-fair budgeting', () => 
     const n2z = mesh!.norms[9 + 2];
     expect(n1z * n2z).toBeGreaterThan(0.99);
   });
+
+  it('compiles 2736 Technic Axle Towball with a continuous solid axle shaft (no floating axleend X)', () => {
+    // Reproduces the bug where SKIPPED_UNDERSIDE_RE dropped axlehol8/axlehol2/axlehol9,
+    // erasing the 17-LDU cross-axle shaft and leaving axleend.dat floating in mid-air at x=17.
+    const towball2736: DatEntrySource = {
+      key: '2736',
+      lines: [
+        '1 16 0 0 0 0 1 0 1 0 0 0 0 1 axlehol2.dat',
+        '1 16 0 0 0 0 1 0 1 0 0 0 0 1 axlehol9.dat',
+        '1 16 17 0 0 0 1 0 1 0 0 0 0 1 axlehol2.dat',
+        '1 16 17 0 0 0 1 0 1 0 0 0 0 1 axlehol9.dat',
+        '1 16 0 0 0 0 17 0 1 0 0 0 0 1 axlehol8.dat',
+        '1 16 17 0 0 0 -1 0 1 0 0 0 0 -1 axleend.dat',
+        '1 16 0 0 0 0 -2 0 8 0 0 0 0 -8 4-4cylc.dat',
+      ],
+    };
+
+    const countShaftSpanningTris = (tris: Float32Array): number => {
+      let spanning = 0;
+      for (let i = 0; i < tris.length; i += 9) {
+        const xs = [tris[i], tris[i + 3], tris[i + 6]];
+        const minX = Math.min(...xs);
+        const maxX = Math.max(...xs);
+        if (minX <= 0.1 && maxX >= 16.9) spanning++;
+      }
+      return spanning;
+    };
+
+    // Case 1: Official subfiles present in library (axlehol8 uses 4x box2-9p + 8 outer quads)
+    const db = new Map<string, DatEntrySource>([
+      [
+        'box2-9p',
+        {
+          key: 'box2-9p',
+          lines: [
+            '2 24 1 1 1 -1 1 1',
+            '2 24 1 -1 1 -1 -1 1',
+            '2 24 1 1 -1 -1 1 -1',
+            '4 16 1 1 1 1 1 -1 -1 1 -1 -1 1 1',
+            '4 16 1 1 1 -1 1 1 -1 -1 1 1 -1 1',
+          ],
+        },
+      ],
+      [
+        'axlehol8',
+        {
+          key: 'axlehol8',
+          lines: [
+            '1 16 3.80115 .5 3.80115 0 -1.80115 0 .5 0 0 0 0 -1.80115 box2-9p.dat',
+            '1 16 -3.80115 .5 3.80115 0 1.80115 0 .5 0 0 0 0 -1.80115 box2-9p.dat',
+            '1 16 -3.80115 .5 -3.80115 0 1.80115 0 .5 0 0 0 0 1.80115 box2-9p.dat',
+            '1 16 3.80115 .5 -3.80115 0 -1.80115 0 .5 0 0 0 0 1.80115 box2-9p.dat',
+            '4 16 5.6023 1 2 5.6023 0 2 6 0 0 6 1 0',
+            '4 16 2 1 5.6023 0 1 6 0 0 6 2 0 5.6023',
+            '4 16 -2 1 5.6023 -2 0 5.6023 0 0 6 0 1 6',
+            '4 16 -5.6023 1 2 -6 1 0 -6 0 0 -5.6023 0 2',
+            '4 16 -5.6023 1 -2 -5.6023 0 -2 -6 0 0 -6 1 0',
+            '4 16 2 1 -5.6023 2 0 -5.6023 0 0 -6 0 1 -6',
+            '4 16 -2 1 -5.6023 0 1 -6 0 0 -6 -2 0 -5.6023',
+            '4 16 5.6023 1 -2 6 1 0 6 0 0 5.6023 0 -2',
+          ],
+        },
+      ],
+      [
+        'axleend',
+        {
+          key: 'axleend',
+          lines: [
+            '4 16 6 0 0 5.602 0 2 2 0 2 0 0 0',
+            '4 16 -6 0 0 0 0 0 -2 0 2 -5.602 0 2',
+            '4 16 6 0 0 0 0 0 2 0 -2 5.602 0 -2',
+            '4 16 -6 0 0 -5.602 0 -2 -2 0 -2 0 0 0',
+            '4 16 0 0 6 0 0 0 2 0 2 2 0 5.602',
+            '4 16 0 0 6 -2 0 5.602 -2 0 2 0 0 0',
+            '4 16 0 0 -6 2 0 -5.602 2 0 -2 0 0 0',
+            '4 16 0 0 -6 0 0 0 -2 0 -2 -2 0 -5.602',
+          ],
+        },
+      ],
+    ]);
+
+    const meshWithLib = compileDatEntry(towball2736, (ref) => db.get(normalizeDatRef(ref)));
+    expect(meshWithLib).not.toBeNull();
+    // 16 shaft quads * 2 tris = 32 triangles spanning the full 0..17 LDU axle shaft
+    expect(countShaftSpanningTris(meshWithLib!.tris)).toBe(32);
+    expect(hasVertexNearX(meshWithLib!.edges, 17, 0.1)).toBe(true);
+
+    // Case 2: Procedural fallback when axlehol8/axlehol2/axlehol9/axleend are absent from library
+    const meshFallback = compileDatEntry(towball2736, () => null);
+    expect(meshFallback).not.toBeNull();
+    expect(countShaftSpanningTris(meshFallback!.tris)).toBe(32);
+    expect(hasVertexNearX(meshFallback!.edges, 0, 0.1)).toBe(true);
+    expect(hasVertexNearX(meshFallback!.edges, 17, 0.1)).toBe(true);
+    expect(meshFallback!.max[0]).toBeCloseTo(17, 2);
+
+    // Case 3: axlehol8 present, box2-9p missing -> box2-9p fallback fills all 8 inner shaft walls
+    const dbNoBox2 = new Map(db);
+    dbNoBox2.delete('box2-9p');
+    const meshNoBox2 = compileDatEntry(towball2736, (ref) => dbNoBox2.get(normalizeDatRef(ref)));
+    expect(meshNoBox2).not.toBeNull();
+    expect(countShaftSpanningTris(meshNoBox2!.tris)).toBe(32);
+  });
+
+  it('keeps beamhole/npeghole/stud10 visible while still skipping hidden underside stud3/stud4 tubes', () => {
+    const db = new Map<string, DatEntrySource>([
+      ['beamhole', { key: 'beamhole', lines: makeTriangles(2, 10, 0, 0) }],
+      ['npeghole', { key: 'npeghole', lines: makeTriangles(2, 20, 0, 0) }],
+      ['stud10', { key: 'stud10', lines: makeTriangles(2, 30, 0, 0) }],
+      ['stud3', { key: 'stud3', lines: makeTriangles(2, 40, 0, 0) }],
+      ['stud4', { key: 'stud4', lines: makeTriangles(2, 50, 0, 0) }],
+    ]);
+
+    const mesh = compileDatEntry(
+      {
+        key: 'skip_check',
+        lines: [
+          '1 16 0 0 0 1 0 0 0 1 0 0 0 1 beamhole.dat',
+          '1 16 0 0 0 1 0 0 0 1 0 0 0 1 npeghole.dat',
+          '1 16 0 0 0 1 0 0 0 1 0 0 0 1 stud10.dat',
+          '1 16 0 0 0 1 0 0 0 1 0 0 0 1 stud3.dat',
+          '1 16 0 0 0 1 0 0 0 1 0 0 0 1 stud4.dat',
+        ],
+      },
+      (ref) => db.get(normalizeDatRef(ref)),
+    );
+    expect(mesh).not.toBeNull();
+    expect(hasVertexNearX(mesh!.tris, 10, 1.5)).toBe(true);
+    expect(hasVertexNearX(mesh!.tris, 20, 1.5)).toBe(true);
+    expect(hasVertexNearX(mesh!.tris, 30, 1.5)).toBe(true);
+    expect(hasVertexNearX(mesh!.tris, 40, 1.5)).toBe(false);
+    expect(hasVertexNearX(mesh!.tris, 50, 1.5)).toBe(false);
+  });
 });

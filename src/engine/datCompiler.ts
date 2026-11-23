@@ -47,11 +47,34 @@ export function normalizeDatRef(raw: string): string {
     .replace(/\.dat$/i, '');
 }
 
-const SKIPPED_UNDERSIDE_RE = /^(stud3|stud4|stud4a|stud10|stud15|axlehol[2-9]|axleho10|npeghol|beamhol)/;
+// Only skip hidden underside anti-stud tubes (stud3/stud3a/stud4/stud4a).
+// Never skip axlehol* (used for visible exterior Technic cross-axle shafts in parts like
+// 2736 Technic Axle Towball, 32062, 32209 as well as axle holes), beamhol*/npeghol*
+// (visible Technic liftarm faces), or stud10/stud15 (visible top studs on 2x2 round parts).
+const SKIPPED_UNDERSIDE_RE = /^(stud3|stud3a|stud4|stud4a)$/;
 const SYNTH_ARC_RE = /^(\d+)-(\d+)(cyli|cylo|cylc|disc|edge|ring\d+|rin\d+|chrd|ndis)$/;
 const FALLBACK_TORUS_RE = /^t(\d+)([oiq])(\d{4})$/;
 const FALLBACK_CONE_RE = /^(\d+)-(\d+)con(\d+)$/;
 const FALLBACK_CYL_VAR_RE = /^(\d+)-(\d+)(?:cyli2|cylh|ccyli)$/;
+
+const AXLE_PROFILE: readonly [number, number][] = [
+  [6, 0],
+  [5.6023, 2],
+  [2, 2],
+  [2, 5.6023],
+  [0, 6],
+  [-2, 5.6023],
+  [-2, 2],
+  [-5.6023, 2],
+  [-6, 0],
+  [-5.6023, -2],
+  [-2, -2],
+  [-2, -5.6023],
+  [0, -6],
+  [2, -5.6023],
+  [2, -2],
+  [5.6023, -2],
+];
 
 function isFastStudBase(base: string): boolean {
   return base === 'stud' || base === 'stud2' || base === 'stud2a' || base === 'studp01';
@@ -73,7 +96,12 @@ function isLightweightPrimitiveBase(base: string): boolean {
     FALLBACK_CYL_VAR_RE.test(base) ||
     base === 'box' ||
     base === 'box5' ||
-    base === 'box4'
+    base === 'box4' ||
+    base === 'box2-9p' ||
+    base === 'axlehol2' ||
+    base === 'axlehol8' ||
+    base === 'axlehol9' ||
+    base === 'axleend'
   );
 }
 
@@ -408,11 +436,12 @@ export function compileDatEntry(
   };
 
   // Procedural fallback for standard LDraw primitives (torus t04o6250/t08o6250/t16o6250,
-  // cones conN, cylinder variants cyli2/cylh/ccyli, boxes box/box5/box4) when missing from library
+  // cones conN, cylinder variants cyli2/cylh/ccyli, boxes box/box5/box4/box2-9p,
+  // and Technic cross-axle primitives axlehol8/axlehol2/axlehol9/axleend) when missing from library
   const emitFallbackPrim = (
     base: string,
     circleRes: 8 | 16 | 48,
-    px: number, py: number, pz: number, pm: Mat3, colId: number,
+    px: number, py: number, pz: number, pm: Mat3, colId: number, edgeLimit: number,
   ): boolean => {
     const tp = (x: number, y: number, z: number): [number, number, number] => {
       const v = mat3Vec(pm, x, y, z);
@@ -506,6 +535,61 @@ export function compileDatEntry(
       emitQuad(p111, p101, p100, p110, colId);
       if (base === 'box5' || base === 'box') emitQuad(p011, p111, p110, p010, colId);
       if (base === 'box') emitQuad(p000, p100, p101, p001, colId);
+      return true;
+    }
+
+    if (base === 'box2-9p') {
+      const p111 = tp(1, 1, 1), p11n = tp(1, 1, -1), pn1n = tp(-1, 1, -1), pn11 = tp(-1, 1, 1);
+      const pnn1 = tp(-1, -1, 1), p1n1 = tp(1, -1, 1);
+      emitQuad(p111, p11n, pn1n, pn11, colId);
+      emitQuad(p111, pn11, pnn1, p1n1, colId);
+      if (edges.length < edgeLimit) {
+        emitEdge(p111, pn11);
+        emitEdge(p1n1, pnn1);
+        emitEdge(p11n, pn1n);
+      }
+      return true;
+    }
+
+    if (base === 'axlehol8') {
+      const n = AXLE_PROFILE.length;
+      for (let i = 0; i < n; i++) {
+        const [x0, z0] = AXLE_PROFILE[i];
+        const [x1, z1] = AXLE_PROFILE[(i + 1) % n];
+        const b0 = tp(x0, 0, z0), b1 = tp(x1, 0, z1);
+        const t0 = tp(x0, 1, z0), t1 = tp(x1, 1, z1);
+        emitQuad(b0, b1, t1, t0, colId);
+        if (i % 4 !== 0 && edges.length < edgeLimit) {
+          emitEdge(b0, t0);
+        }
+      }
+      return true;
+    }
+
+    if (base === 'axlehol2' || base === 'axlehol9') {
+      if (edges.length < edgeLimit) {
+        const n = AXLE_PROFILE.length;
+        for (let i = 0; i < n; i++) {
+          const isOuter = i % 4 === 0 || i % 4 === 3;
+          if ((base === 'axlehol2' && isOuter) || (base === 'axlehol9' && !isOuter)) {
+            const [x0, z0] = AXLE_PROFILE[i];
+            const [x1, z1] = AXLE_PROFILE[(i + 1) % n];
+            emitEdge(tp(x0, 0, z0), tp(x1, 0, z1));
+          }
+        }
+      }
+      return true;
+    }
+
+    if (base === 'axleend') {
+      const center = tp(0, 0, 0);
+      const n = AXLE_PROFILE.length;
+      for (let k = 0; k < n; k += 2) {
+        const [x0, z0] = AXLE_PROFILE[k];
+        const [x1, z1] = AXLE_PROFILE[k + 1];
+        const [x2, z2] = AXLE_PROFILE[(k + 2) % n];
+        emitQuad(center, tp(x0, 0, z0), tp(x1, 0, z1), tp(x2, 0, z2), colId);
+      }
       return true;
     }
 
@@ -663,8 +747,8 @@ export function compileDatEntry(
         if (sub) {
           walk(sub.lines, nx, ny, nz, nm, depth + 1, childCol, childTriLimit, childEdgeLimit);
         } else if (tris.length < childTriLimit) {
-          // Procedural fallback for missing torus bevels (t04o6250, t08o6250, t16o6250), cones, boxes
-          emitFallbackPrim(base, circleRes, nx, ny, nz, nm, childCol);
+          // Procedural fallback for missing torus bevels (t04o6250, t08o6250, t16o6250), cones, boxes, axles
+          emitFallbackPrim(base, circleRes, nx, ny, nz, nm, childCol, childEdgeLimit);
         }
       }
     }

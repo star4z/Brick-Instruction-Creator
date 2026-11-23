@@ -351,7 +351,7 @@ class LayeredPartsProvider {
       const k = normalizePartId(rawId);
       const base = k.split('/').pop() ?? k;
       if (!k || queued.has(k) || this.rawSources.has(k) || this.rawSources.has(base)) return;
-      if (/^(stud|stud2|stud2a|stud3|stud4|stud4a|stud10|stud15|\d+-\d+(cyli|cylo|disc|edge))$/.test(base)) return;
+      if (/^(stud|stud2|stud2a|stud3|stud3a|stud4|stud4a|\d+-\d+(cyli|cylo|disc|edge))$/.test(base)) return;
       queued.add(k);
       queue.push(k);
     };
