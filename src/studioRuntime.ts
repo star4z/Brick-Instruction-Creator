@@ -60,6 +60,14 @@ import {
   computeStudioRotationCue,
 } from './engine/minifigCamera';
 import {
+  chooseStickyStepCamera,
+  compareFrontierCandidates,
+  computeBoundsFromBoxes,
+  computeEvenRunTarget,
+  expandBoundsWithBox,
+  selectDynamicStepIndices,
+} from './engine/dynamicStepSizer';
+import {
   buildMinifigExplodedPlan,
   buildMinifigSequentialPlan,
   normalizeMinifigStepStyle,
@@ -3642,7 +3650,7 @@ function collectBasePrereqs(blockedIndices, belowMap, remaining, boxes, baseMinY
 }
 
 // Build bottom-up zero-floating steps for 1 canonical copy of a duplicate submodel or modular section
-function buildLocalSubmodelSteps(canonicalParts, perStep, groupId, repeatCount) {
+function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount) {
   const n = canonicalParts.length;
   const boxes = canonicalParts.map(p => computeWorldBox(p));
   const roles = canonicalParts.map(p => classifyPartRole(p));
@@ -3651,7 +3659,20 @@ function buildLocalSubmodelSteps(canonicalParts, perStep, groupId, repeatCount) 
   const layerY = canonicalParts.map((p, i) => computeBuildLayerY(p, boxes[i]));
   const adj = buildSpatialAdjacency(canonicalParts, boxes, roles, sideCaps);
   const { belowMap, baseMinY } = buildVerticalPrereqMap(boxes, adj, roles, claddingFlags);
-  const subPerStep = n > 20 ? perStep : Math.max(2, Math.min(perStep, n <= 4 ? 2 : 4));
+  const subDescriptors = canonicalParts.map((p, i) => ({
+    index: i,
+    partId: normId(p.p),
+    colorId: p.c,
+    sku: `${normId(p.p)}|${p.c}`,
+    role: roles[i],
+    box: boxes[i],
+    layerY: layerY[i],
+    isCladding: claddingFlags[i],
+  }));
+  const subModelBounds = computeBoundsFromBoxes(boxes);
+  let builtBounds = null;
+  const builtBoxes = [];
+  let activeCam = { ...DEFAULT_STUDIO_CAMERA };
   const placed = new Set();
   const remaining = new Set(Array.from({ length: n }, (_, i) => i));
   const steps = [];
@@ -3681,57 +3702,63 @@ function buildLocalSubmodelSteps(canonicalParts, perStep, groupId, repeatCount) 
         frontier = claddingReady.length > 0 ? claddingReady : rawFrontier;
       }
       if (frontier.length === 0) frontier = Array.from(remaining).sort((a, b) => layerY[a] - layerY[b]);
-      frontier.sort((a, b) => (roles[a] === 'wheel' ? 1 : 0) - (roles[b] === 'wheel' ? 1 : 0) || Math.round(layerY[a]/8) - Math.round(layerY[b]/8));
+      const skuCountsInBand = new Map();
+      for (const idx of frontier) {
+        const sku = subDescriptors[idx].sku;
+        skuCountsInBand.set(sku, (skuCountsInBand.get(sku) || 0) + 1);
+      }
+      const refBounds = builtBounds || subModelBounds;
+      frontier.sort((a, b) => compareFrontierCandidates(subDescriptors[a], subDescriptors[b], activeCam.corner, refBounds, skuCountsInBand));
     }
     const anchor = frontier[0];
     const anchorY = layerY[anchor];
-    const anchorC = boxes[anchor].center;
-    const stepIdx = [anchor];
-    remaining.delete(anchor); placed.add(anchor);
-
-    while (stepIdx.length < subPerStep && remaining.size > 0) {
-      // Every piece added in Step K > 1 must directly touch the already-built model from Steps 1..(K-1)
-      // AND have ALL parts directly underneath it already placed in an EARLIER step!
-      const supportSet = placedBeforeStep.size > 0 ? placedBeforeStep : placed;
-      const cands = Array.from(remaining).filter(i => {
-        if (Math.abs(layerY[i] - anchorY) > 12) return false;
-        if (isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, supportSet)) return false;
-        if (placedBeforeStep.size > 0) {
-          if (belowMap[i].some(u => !placedBeforeStep.has(u))) return false;
-          const touchesPrev = adj[i].some(nb => placedBeforeStep.has(nb));
-          const sameBaseLayer = boxes[i].min[1] <= baseMinY + 24 && Math.abs(boxes[i].min[1] - boxes[anchor].min[1]) <= 4 && belowMap[i].length === 0;
-          if (!touchesPrev && !sameBaseLayer) return false;
-        } else {
-          if (belowMap[i].length > 0) return false;
-          const touchesCur = adj[i].some(nb => placed.has(nb));
-          const sameBaseLayer = boxes[i].min[1] <= baseMinY + 24 && Math.abs(boxes[i].min[1] - boxes[anchor].min[1]) <= 4;
-          if (!touchesCur && !sameBaseLayer) return false;
-        }
-        const d = Math.hypot(boxes[i].center[0]-anchorC[0], boxes[i].center[1]-anchorC[1], boxes[i].center[2]-anchorC[2]);
-        return d <= 140;
-      });
-      if (cands.length === 0) break;
-      cands.sort((a, b) => {
-        const sc = (i) => {
-          let s = 0;
-          if (canonicalParts[i].p === canonicalParts[anchor].p && canonicalParts[i].c === canonicalParts[anchor].c) s += 80;
-          else if (canonicalParts[i].p === canonicalParts[anchor].p) s += 30;
-          s -= Math.hypot(boxes[i].center[0]-anchorC[0], boxes[i].center[2]-anchorC[2]) * 0.45;
-          s -= Math.abs(layerY[i] - anchorY) * 2.0;
-          return s;
-        };
-        return sc(b) - sc(a);
-      });
-      const next = cands[0];
-      stepIdx.push(next); remaining.delete(next); placed.add(next);
+    const stepIdx = selectDynamicStepIndices({
+      anchor,
+      parts: subDescriptors,
+      getEligibleCandidates: (placedInStep) => {
+        const supportSet = placedBeforeStep.size > 0 ? placedBeforeStep : placedInStep;
+        return Array.from(remaining).filter(i => {
+          if (placedInStep.has(i)) return false;
+          if (Math.abs(layerY[i] - anchorY) > 12) return false;
+          if (isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, supportSet)) return false;
+          if (placedBeforeStep.size > 0) {
+            if (belowMap[i].some(u => !placedBeforeStep.has(u))) return false;
+            const touchesPrev = adj[i].some(nb => placedBeforeStep.has(nb));
+            const sameBaseLayer = boxes[i].min[1] <= baseMinY + 24 && Math.abs(boxes[i].min[1] - boxes[anchor].min[1]) <= 4 && belowMap[i].length === 0;
+            if (!touchesPrev && !sameBaseLayer) return false;
+          } else {
+            if (belowMap[i].length > 0) return false;
+            const touchesCur = adj[i].some(nb => placedInStep.has(nb));
+            const sameBaseLayer = boxes[i].min[1] <= baseMinY + 24 && Math.abs(boxes[i].min[1] - boxes[anchor].min[1]) <= 4;
+            if (!touchesCur && !sameBaseLayer) return false;
+          }
+          return true;
+        });
+      },
+      modelBounds: subModelBounds,
+      builtBounds,
+      activeCam,
+      isFirstStep: sNum === 0,
+      totalPartsInScope: n,
+      isSubmodel: true,
+    });
+    for (const i of stepIdx) { remaining.delete(i); placed.add(i); }
+    const stepBoxes = stepIdx.map(i => boxes[i]);
+    const camChoice = chooseStickyStepCamera(stepBoxes, builtBoxes, builtBounds, activeCam);
+    activeCam = { side: camChoice.side, corner: camChoice.corner, az: camChoice.az, el: camChoice.el };
+    for (const b of stepBoxes) {
+      builtBounds = expandBoundsWithBox(builtBounds, b);
+      builtBoxes.push(b);
     }
     sNum++;
     steps.push({
       id: `${groupId}_s${sNum}`,
       num: sNum,
-      side: 'top',
-      corner: 'front_right',
-      cue: 'none',
+      side: camChoice.side,
+      corner: camChoice.corner,
+      az: camChoice.az,
+      el: camChoice.el,
+      cue: sNum === 1 ? 'none' : camChoice.cue,
       parts: stepIdx.map(i => canonicalParts[i]),
       isSubmodelStep: true,
     });
@@ -4050,14 +4077,23 @@ function optimizeMinifigPlacementCameras(chapters) {
   }
 }
 
-// ZERO-FLOATING CHASSIS-FIRST STEP GENERATOR (with automatic duplicate submodel & subdivision chapters!)
+// ZERO-FLOATING CHASSIS-FIRST STEP GENERATOR (with dynamic cognitive-budget step sizing, sticky camera-corner selection, duplicate submodels & subdivision chapters!)
 function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
-  const perStep = state.pacing === 'few' ? 3 : state.pacing === 'many' ? 12 : 6;
   const parts = parsed.parts;
   const boxes = parts.map(p => computeWorldBox(p));
   const roles = parts.map(p => classifyPartRole(p));
   const claddingFlags = parts.map((p, i) => isSidewaysCladdingPart(p, boxes[i]));
   const layerY = parts.map((p, i) => computeBuildLayerY(p, boxes[i]));
+  const allPartDescriptors = parts.map((p, i) => ({
+    index: i,
+    partId: normId(p.p),
+    colorId: p.c,
+    sku: `${normId(p.p)}|${p.c}`,
+    role: roles[i],
+    box: boxes[i],
+    layerY: layerY[i],
+    isCladding: claddingFlags[i],
+  }));
 
   if (mode === 'keep' && parsed.hasSteps) {
     for (const p of parts) { p._detachedGap = 0; p._floatHeight = 0; }
@@ -4242,10 +4278,18 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
   const adaptiveMaxSpread = modelHorizSpan >= 400 ? 120 : 160;
 
   // Helper: zero-floating chassis-first step generation for any subset of world part indices
-  const buildStepsForIndexList = (idxList, idPrefix, prePlacedSet = new Set(), maxSpread = adaptiveMaxSpread) => {
+  const buildStepsForIndexList = (idxList, idPrefix, prePlacedSet = new Set(), _maxSpread = adaptiveMaxSpread) => {
     const placed = new Set(prePlacedSet);
     const remaining = new Set(idxList);
     const outSteps = [];
+    const scopeIndices = Array.from(new Set([...Array.from(prePlacedSet), ...idxList]));
+    const scopeBounds = computeBoundsFromBoxes(scopeIndices.map(i => boxes[i]));
+    let builtBounds = prePlacedSet.size > 0
+      ? computeBoundsFromBoxes(Array.from(prePlacedSet).map(i => boxes[i]))
+      : null;
+    const builtBoxes = Array.from(prePlacedSet).map(i => boxes[i]);
+    let activeCam = { ...DEFAULT_STUDIO_CAMERA };
+    let localStepCount = 0;
 
     while (remaining.size > 0) {
       let frontier;
@@ -4268,54 +4312,60 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
         if (frontier.length === 0) {
           frontier = Array.from(remaining).sort((a, b) => layerY[a] - layerY[b]);
         }
-        frontier.sort((a, b) => {
-          const wa = roles[a] === 'wheel' ? 1 : 0, wb = roles[b] === 'wheel' ? 1 : 0;
-          if (wa !== wb) return wa - wb;
-          return Math.round(layerY[a] / 8) - Math.round(layerY[b] / 8) || (claddingFlags[a] ? 1 : 0) - (claddingFlags[b] ? 1 : 0) || parts[a].p.localeCompare(parts[b].p);
-        });
+        const skuCountsInBand = new Map();
+        for (const idx of frontier) {
+          const sku = allPartDescriptors[idx].sku;
+          skuCountsInBand.set(sku, (skuCountsInBand.get(sku) || 0) + 1);
+        }
+        const refBounds = builtBounds || scopeBounds;
+        frontier.sort((a, b) => compareFrontierCandidates(allPartDescriptors[a], allPartDescriptors[b], activeCam.corner, refBounds, skuCountsInBand));
       }
 
       const anchor = frontier[0];
       const anchorY = layerY[anchor];
-      const anchorC = boxes[anchor].center;
-      const stepIndices = [anchor];
-      remaining.delete(anchor);
-      placed.add(anchor);
+      const stepIndices = selectDynamicStepIndices({
+        anchor,
+        parts: allPartDescriptors,
+        getEligibleCandidates: (placedInStep) => {
+          const combinedPlaced = new Set(placed);
+          for (const pIdx of placedInStep) combinedPlaced.add(pIdx);
+          return Array.from(remaining).filter(i => {
+            if (placedInStep.has(i)) return false;
+            if (isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, combinedPlaced)) return false;
+            if (Math.abs(layerY[i] - anchorY) > 18) return false;
+            return adj[i].some(nb => combinedPlaced.has(nb));
+          });
+        },
+        modelBounds: scopeBounds,
+        builtBounds,
+        activeCam,
+        isFirstStep: localStepCount === 0 && prePlacedSet.size === 0,
+        totalPartsInScope: idxList.length,
+      });
 
-      while (stepIndices.length < perStep && remaining.size > 0) {
-        const cands = Array.from(remaining).filter(i => {
-          if (isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, placed)) return false;
-          if (Math.abs(layerY[i] - anchorY) > 18) return false;
-          if (!adj[i].some(nb => placed.has(nb))) return false;
-          const d = Math.hypot(boxes[i].center[0]-anchorC[0], boxes[i].center[1]-anchorC[1], boxes[i].center[2]-anchorC[2]);
-          return d <= maxSpread;
-        });
-        if (cands.length === 0) break;
-        cands.sort((a, b) => {
-          const score = (i) => {
-            let s = 0;
-            if (parts[i].p === parts[anchor].p && parts[i].c === parts[anchor].c) s += 85;
-            else if (parts[i].p === parts[anchor].p) s += 35;
-            if (roles[i] === roles[anchor]) s += 20;
-            s -= Math.hypot(boxes[i].center[0]-anchorC[0], boxes[i].center[2]-anchorC[2]) * 0.45;
-            s -= Math.abs(layerY[i] - anchorY) * 2.0;
-            return s;
-          };
-          return score(b) - score(a);
-        });
-        const next = cands[0];
-        stepIndices.push(next);
-        remaining.delete(next);
-        placed.add(next);
+      for (const i of stepIndices) {
+        remaining.delete(i);
+        placed.add(i);
       }
 
+      const stepBoxes = stepIndices.map(i => boxes[i]);
+      const camChoice = chooseStickyStepCamera(stepBoxes, builtBoxes, builtBounds, activeCam);
+      activeCam = { side: camChoice.side, corner: camChoice.corner, az: camChoice.az, el: camChoice.el };
+      for (const b of stepBoxes) {
+        builtBounds = expandBoundsWithBox(builtBounds, b);
+        builtBoxes.push(b);
+      }
+
+      localStepCount++;
       globalStep++;
       outSteps.push({
         id: `${idPrefix}_s${globalStep}`,
         num: globalStep,
-        side: 'top',
-        corner: 'front_right',
-        cue: 'none',
+        side: camChoice.side,
+        corner: camChoice.corner,
+        az: camChoice.az,
+        el: camChoice.el,
+        cue: localStepCount === 1 && prePlacedSet.size === 0 ? 'none' : camChoice.cue,
         parts: stepIndices.map(i => parts[i]),
       });
     }
@@ -4479,7 +4529,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
         const repeatCount = sec.cleanRepeatGroups.length;
         const subId = `mod_${mIdx + 1}_${sec.id}`;
         const canonicalParts = normalizeCanonicalSubParts(sec.cleanIndices.map(i => parts[i]), subId);
-        const subSteps = buildLocalSubmodelSteps(canonicalParts, perStep, subId, repeatCount);
+        const subSteps = buildLocalSubmodelSteps(canonicalParts, subId, repeatCount);
         // Mark as a standalone section module (uses clean "SECTION · N pcs" banner when repeatCount === 1)
         chapters.push({
           id: `subch_${++chSeq}_${subId}`,
@@ -4542,7 +4592,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
           if (cleanBogieIndices.length >= 2) {
             bogieSubId = 'mod_center_end_asm';
             bogieCanonical = normalizeCanonicalSubParts(cleanBogieIndices.map(i => parts[i]), bogieSubId);
-            const bogieSteps = buildLocalSubmodelSteps(bogieCanonical, perStep, bogieSubId, 1);
+            const bogieSteps = buildLocalSubmodelSteps(bogieCanonical, bogieSubId, 1);
             chapters.push({
               id: `subch_${++chSeq}_${bogieSubId}`,
               name: artJoin.bogieName || 'Center Assembly',
@@ -4603,7 +4653,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
         // Stage 2: Drop floating circular cross-axle pieces into the cavity/scoop before closing halves
         if (cleanCollarIndices.length > 0) {
           const sortedCollars = [...cleanCollarIndices].sort((a, b) => boxes[a].min[1] - boxes[b].min[1]);
-          const chunkSize = Math.max(4, perStep);
+          const chunkSize = Math.max(1, computeEvenRunTarget(sortedCollars.length, 8, 6));
           for (let ci = 0; ci < sortedCollars.length; ci += chunkSize) {
             const chunk = sortedCollars.slice(ci, ci + chunkSize);
             const defaultPartOffsets = {};
@@ -5086,6 +5136,12 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
       curSteps = [];
     };
 
+    const sectionBounds = computeBoundsFromBoxes(indices.map(i => boxes[i]));
+    let builtBounds = null;
+    const builtBoxes = [];
+    let activeCam = { ...DEFAULT_STUDIO_CAMERA };
+    let emittedInSection = 0;
+
     while (remaining.size > 0) {
       let frontier;
       if (placed.size === 0) {
@@ -5129,11 +5185,13 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
         if (frontier.length === 0) {
           frontier = Array.from(remaining).sort((a, b) => layerY[a] - layerY[b]);
         }
-        frontier.sort((a, b) => {
-          const wa = roles[a] === 'wheel' ? 1 : 0, wb = roles[b] === 'wheel' ? 1 : 0;
-          if (wa !== wb) return wa - wb;
-          return Math.round(layerY[a] / 8) - Math.round(layerY[b] / 8) || (claddingFlags[a] ? 1 : 0) - (claddingFlags[b] ? 1 : 0) || parts[a].p.localeCompare(parts[b].p);
-        });
+        const skuCountsInBand = new Map();
+        for (const idx of frontier) {
+          const sku = allPartDescriptors[idx].sku;
+          skuCountsInBand.set(sku, (skuCountsInBand.get(sku) || 0) + 1);
+        }
+        const refBounds = builtBounds || sectionBounds;
+        frontier.sort((a, b) => compareFrontierCandidates(allPartDescriptors[a], allPartDescriptors[b], activeCam.corner, refBounds, skuCountsInBand));
       }
 
       const anchor = frontier[0];
@@ -5158,7 +5216,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
         // Emit the submodel's own step-by-step chapter ONCE right before its first attachment!
         if (!emittedSubChapters.has(g.id)) {
           flushMainSteps();
-          const subSteps = buildLocalSubmodelSteps(g.canonicalParts, perStep, g.id, g.repeatCount);
+          const subSteps = buildLocalSubmodelSteps(g.canonicalParts, g.id, g.repeatCount);
           chapters.push({
             id: `subch_${++chSeq}_${g.id}`,
             name: g.name,
@@ -5172,13 +5230,23 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
         }
 
         for (const pi of attachIndices) { remaining.delete(pi); placed.add(pi); }
+        const attachBoxes = attachIndices.map(i => boxes[i]);
+        const camChoice = chooseStickyStepCamera(attachBoxes, builtBoxes, builtBounds, activeCam);
+        activeCam = { side: camChoice.side, corner: camChoice.corner, az: camChoice.az, el: camChoice.el };
+        for (const b of attachBoxes) {
+          builtBounds = expandBoundsWithBox(builtBounds, b);
+          builtBoxes.push(b);
+        }
+        emittedInSection++;
         globalStep++;
         curSteps.push({
           id: `ac${secIdx+1}_s${globalStep}`,
           num: globalStep,
-          side: 'top',
-          corner: 'front_right',
-          cue: 'none',
+          side: camChoice.side,
+          corner: camChoice.corner,
+          az: camChoice.az,
+          el: camChoice.el,
+          cue: emittedInSection === 1 ? 'none' : camChoice.cue,
           parts: attachIndices.map(i => parts[i]),
           attachedSubmodel: {
             id: g.id,
@@ -5195,58 +5263,63 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
       // NORMAL STEP (non-duplicate-submodel bricks)
       const placedBeforeStep = new Set(placed);
       const anchorY = layerY[anchor];
-      const anchorC = boxes[anchor].center;
-      const stepIndices = [anchor];
-      remaining.delete(anchor);
-      placed.add(anchor);
+      const stepIndices = selectDynamicStepIndices({
+        anchor,
+        parts: allPartDescriptors,
+        getEligibleCandidates: (placedInStep) => {
+          const supportSet = placedBeforeStep.size > 0 ? placedBeforeStep : placedInStep;
+          return Array.from(remaining).filter(i => {
+            if (placedInStep.has(i)) return false;
+            if (partToDup.has(i)) return false;
+            if (isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, supportSet)) return false;
+            if (Math.abs(layerY[i] - anchorY) > 12) return false;
+            if (placedBeforeStep.size > 0) {
+              if (belowMap[i].some(u => !placedBeforeStep.has(u))) return false;
+              const touchesPrev = adj[i].some(nb => placedBeforeStep.has(nb));
+              const sameBaseLayer = boxes[i].min[1] <= baseMinY + 24 && Math.abs(boxes[i].min[1] - boxes[anchor].min[1]) <= 4 && belowMap[i].length === 0;
+              if (!touchesPrev && !sameBaseLayer) return false;
+            } else {
+              if (belowMap[i].length > 0) return false;
+              const touchesCur = adj[i].some(nb => placedInStep.has(nb));
+              const sameBaseLayer = boxes[i].min[1] <= baseMinY + 24 && Math.abs(boxes[i].min[1] - boxes[anchor].min[1]) <= 4;
+              if (!touchesCur && !sameBaseLayer) return false;
+            }
+            return true;
+          });
+        },
+        modelBounds: sectionBounds,
+        builtBounds,
+        activeCam,
+        isFirstStep: placedBeforeStep.size === 0,
+        totalPartsInScope: indices.length,
+      });
 
-      while (stepIndices.length < perStep && remaining.size > 0) {
-        const supportSet = placedBeforeStep.size > 0 ? placedBeforeStep : placed;
-        const cands = Array.from(remaining).filter(i => {
-          if (partToDup.has(i)) return false;
-          if (isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, supportSet)) return false;
-          if (Math.abs(layerY[i] - anchorY) > 12) return false;
-          if (placedBeforeStep.size > 0) {
-            if (belowMap[i].some(u => !placedBeforeStep.has(u))) return false;
-            const touchesPrev = adj[i].some(nb => placedBeforeStep.has(nb));
-            const sameBaseLayer = boxes[i].min[1] <= baseMinY + 24 && Math.abs(boxes[i].min[1] - boxes[anchor].min[1]) <= 4 && belowMap[i].length === 0;
-            if (!touchesPrev && !sameBaseLayer) return false;
-          } else {
-            if (belowMap[i].length > 0) return false;
-            const touchesCur = adj[i].some(nb => placed.has(nb));
-            const sameBaseLayer = boxes[i].min[1] <= baseMinY + 24 && Math.abs(boxes[i].min[1] - boxes[anchor].min[1]) <= 4;
-            if (!touchesCur && !sameBaseLayer) return false;
-          }
-          const d = Math.hypot(boxes[i].center[0]-anchorC[0], boxes[i].center[1]-anchorC[1], boxes[i].center[2]-anchorC[2]);
-          return d <= adaptiveMaxSpread;
-        });
-        if (cands.length === 0) break;
-        cands.sort((a, b) => {
-          const score = (i) => {
-            let s = 0;
-            if (parts[i].p === parts[anchor].p && parts[i].c === parts[anchor].c) s += 85;
-            else if (parts[i].p === parts[anchor].p) s += 35;
-            if (roles[i] === roles[anchor]) s += 20;
-            s -= Math.hypot(boxes[i].center[0]-anchorC[0], boxes[i].center[2]-anchorC[2]) * 0.45;
-            s -= Math.abs(layerY[i] - anchorY) * 2.0;
-            return s;
-          };
-          return score(b) - score(a);
-        });
-        const next = cands[0];
-        stepIndices.push(next);
-        remaining.delete(next);
-        placed.add(next);
+      for (const i of stepIndices) {
+        remaining.delete(i);
+        placed.add(i);
       }
 
       // If this step places an overhead roof brick over an enclosed minifig, pose & place that minifig right BEFORE!
       flushReadyEnclosedMinifigs(stepIndices);
 
+      const stepBoxes = stepIndices.map(i => boxes[i]);
+      const camChoice = chooseStickyStepCamera(stepBoxes, builtBoxes, builtBounds, activeCam);
+      activeCam = { side: camChoice.side, corner: camChoice.corner, az: camChoice.az, el: camChoice.el };
+      for (const b of stepBoxes) {
+        builtBounds = expandBoundsWithBox(builtBounds, b);
+        builtBoxes.push(b);
+      }
+
+      emittedInSection++;
       globalStep++;
       curSteps.push({
         id: `ac${secIdx+1}_s${globalStep}`,
         num: globalStep,
-        side: 'top', corner: 'front_right', cue: 'none',
+        side: camChoice.side,
+        corner: camChoice.corner,
+        az: camChoice.az,
+        el: camChoice.el,
+        cue: emittedInSection === 1 ? 'none' : camChoice.cue,
         parts: stepIndices.map(i => parts[i]),
       });
 
@@ -5284,7 +5357,6 @@ const state = {
   layout: 'auto',          // legacy mirror ('auto' | '1-up' | '2-up' | '4-up' | 'custom')
   layoutConfig: createDefaultPageLayoutSpec(),
   layoutGroups: [],        // editable StepLayoutGroup[] for per-range layouts & styles
-  pacing: 'standard',      // few | standard | many
   detectDuplicates: true,  // auto-detect explicit + geometric duplicate submodels
   highlightNew: true,
   highlightColor: '#ff2d55',
@@ -7654,10 +7726,6 @@ function syncMenuControls() {
       : `${densNames[bc.density]} · ${bc.flow === 'columns' ? 'Columns' : 'Rows'} · By ${traitNames[bc.sortPrimary]}`;
   }
 
-  document.querySelectorAll('.pacing-btn').forEach(b => {
-    const act = b.getAttribute('data-pacing') === state.pacing;
-    b.className = `pacing-btn py-1.5 rounded-full border font-semibold transition ${act ? 'border-[#1a73e8] bg-[#1a73e8] text-white' : 'border-[var(--border)] bg-[var(--background)]'}`;
-  });
   document.querySelectorAll('.fade-chip').forEach(b => {
     const act = Math.abs(parseFloat(b.getAttribute('data-fade')) - state.fadeOpacity) < 0.05;
     b.className = `fade-chip py-1 rounded-full border font-semibold transition ${act ? 'border-[#1a73e8] bg-[#1a73e8] text-white' : 'border-[var(--border)] bg-[var(--background)]'}`;
@@ -9755,7 +9823,7 @@ function scheduleSaveSessionPrefs() {
       customWidth: state.customWidth, customHeight: state.customHeight, customUnit: state.customUnit,
       density: state.density, showPrintGuides: state.showPrintGuides, layout: state.layout,
       layoutConfig: state.layoutConfig, layoutGroups: state.layoutGroups,
-      pacing: state.pacing, detectDuplicates: state.detectDuplicates, highlightNew: state.highlightNew, highlightColor: state.highlightColor,
+      detectDuplicates: state.detectDuplicates, highlightNew: state.highlightNew, highlightColor: state.highlightColor,
       fadePrev: state.fadePrev, fadeOpacity: state.fadeOpacity, showRotCues: state.showRotCues,
       showSizeGuides: state.showSizeGuides, minifigStyle: state.minifigStyle, showMinifig1to1: state.showMinifig1to1, showStepBorders: state.showStepBorders,
       showPageTitle: state.showPageTitle, pageNumberFormat: state.pageNumberFormat,
@@ -9804,7 +9872,6 @@ async function restoreLastSessionOnStart() {
     state.layoutConfig = normalizePageLayoutSpec(prefs.layoutConfig, prefs.layout);
     state.layoutGroups = normalizeLayoutGroups(prefs.layoutGroups);
     syncLegacyLayoutFlag();
-    if (prefs.pacing) state.pacing = prefs.pacing;
     if (typeof prefs.detectDuplicates === 'boolean') state.detectDuplicates = prefs.detectDuplicates;
     if (typeof prefs.highlightNew === 'boolean') state.highlightNew = prefs.highlightNew;
     if (prefs.highlightColor) state.highlightColor = prefs.highlightColor;
@@ -11371,7 +11438,6 @@ if (btnOverviewRangeCreate) {
 
 document.querySelectorAll('.dens-btn').forEach(b => { b.onclick = () => { state.density = b.getAttribute('data-density'); renderAll(); }; });
 document.querySelectorAll('.pgnum-btn').forEach(b => { b.onclick = () => { state.pageNumberFormat = b.getAttribute('data-pgnum'); renderAll(); }; });
-document.querySelectorAll('.pacing-btn').forEach(b => { b.onclick = () => { state.pacing = b.getAttribute('data-pacing'); syncMenuControls(); }; });
 document.querySelectorAll('.fade-chip').forEach(b => { b.onclick = () => { state.fadeOpacity = parseFloat(b.getAttribute('data-fade')); renderAll(); }; });
 
 // Parts List Setup controls
