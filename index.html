@@ -186,10 +186,10 @@
         </div>
 
         <!-- Drawer Scrollable Body -->
-        <div id="menuScrollBody" class="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 space-y-5 text-xs">
+        <div id="menuScrollBody" class="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 flex flex-col gap-5 text-xs">
 
           <!-- Active Model Details Card (Full wrap, never truncated + File Type) -->
-          <div id="menuModelCard" class="p-3 rounded-2xl border border-[var(--border)] bg-[var(--background)] space-y-1.5">
+          <div id="menuModelCard" class="hidden p-3 rounded-2xl border border-[var(--border)] bg-[var(--background)] space-y-1.5">
             <div class="flex items-start justify-between gap-2">
               <div id="menuModelName" class="text-[13px] font-bold leading-snug break-words min-w-0">No model loaded</div>
               <span id="menuModelTypeBadge" class="hidden shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wide uppercase"></span>
@@ -199,7 +199,7 @@
           </div>
 
           <!-- Model & Project Files -->
-          <div class="space-y-2">
+          <div class="flex flex-col gap-2">
             <div class="text-[11px] font-bold uppercase tracking-wider text-[var(--muted-foreground)]">Model &amp; Project</div>
             <button id="menuImportBtn" class="w-full py-2.5 px-3.5 rounded-2xl bg-[#1a73e8] text-white font-semibold flex items-center gap-2.5 shadow-xs">
               <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
@@ -208,27 +208,27 @@
             <p class="text-[11px] text-[var(--muted-foreground)] leading-relaxed px-0.5">
               Import a BrickLink Studio (<b>.io</b>) or LDraw (<b>.ldr / .mpd</b>) file to generate clean, printable building instructions.
             </p>
-            <div class="grid grid-cols-2 gap-2">
-              <button id="menuSaveProj" class="py-2 px-3 rounded-xl border border-[var(--border)] bg-[var(--background)] font-semibold flex items-center justify-center gap-1.5 disabled:opacity-40">
-                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-                Save Project
+            <div class="flex gap-2">
+              <button id="menuLoadProj" class="flex-1 py-2 px-3 rounded-xl border border-[var(--border)] bg-[var(--background)] font-semibold flex items-center justify-center gap-1.5">
+                <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
+                Import Project
               </button>
-              <button id="menuLoadProj" class="py-2 px-3 rounded-xl border border-[var(--border)] bg-[var(--background)] font-semibold flex items-center justify-center gap-1.5">
-                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-                Open Project
+              <button id="menuSaveProj" class="hidden flex-1 py-2 px-3 rounded-xl border border-[var(--border)] bg-[var(--background)] font-semibold flex items-center justify-center gap-1.5">
+                <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+                Export Project
               </button>
             </div>
-            <button id="menuErrorsBtn" class="w-full py-2.5 px-3 rounded-xl border border-[var(--border)] bg-[var(--background)] font-semibold text-left flex items-center justify-between gap-2">
+            <button id="menuErrorsBtn" class="hidden w-full py-2.5 px-3 rounded-xl border border-[var(--border)] bg-[var(--background)] font-semibold text-left flex items-center justify-between gap-2">
               <span class="flex items-center gap-2">
                 <svg class="w-4 h-4 text-red-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>
-                <span>Model Errors &amp; Warnings</span>
+                <span>Model Issues</span>
               </span>
-              <span id="menuErrorCountBadge" class="px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">0</span>
+              <span id="menuErrorCountBadge" class="px-2 py-0.5 rounded-full text-[11px] font-bold bg-red-600 text-white">0</span>
             </button>
           </div>
 
           <!-- Page Setup (Dedicated Page) & Print / Export -->
-          <div class="space-y-2 pt-4 border-t border-[var(--border)]">
+          <div id="menuPagePrintSection" class="hidden flex flex-col gap-2 pt-4 border-t border-[var(--border)]">
             <div class="text-[11px] font-bold uppercase tracking-wider text-[var(--muted-foreground)]">Page &amp; Print</div>
             <button id="menuPageSetupBtn" class="w-full py-2.5 px-3 rounded-xl border border-[var(--border)] bg-[var(--background)] font-semibold text-left flex items-center justify-between gap-2">
               <span class="flex items-center gap-2 min-w-0">
@@ -250,14 +250,14 @@
                 <span class="opacity-50">→</span>
               </span>
             </button>
-            <button id="menuPrintBtn" class="w-full py-2.5 px-3.5 rounded-2xl border border-[var(--border)] bg-[var(--background)] font-semibold flex items-center justify-center gap-2">
+            <button id="menuPrintBtn" class="hidden w-full py-2.5 px-3.5 rounded-2xl border border-[var(--border)] bg-[var(--background)] font-semibold flex items-center justify-center gap-2">
               <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect width="12" height="8" x="6" y="14"/></svg>
               Print / Save PDF
             </button>
           </div>
 
           <!-- Bricks Library (Public Fetch + Local complete.zip / .dat) -->
-          <div id="menuBricksLibSection" class="space-y-2 pt-4 border-t border-[var(--border)] transition-all">
+          <div id="menuBricksLibSection" class="flex flex-col gap-2 pt-4 border-t border-[var(--border)] transition-all">
             <div class="flex items-center justify-between">
               <span class="text-[11px] font-bold uppercase tracking-wider text-[var(--muted-foreground)]">Bricks Library</span>
               <span id="libStatusText" class="text-[11px] text-[var(--muted-foreground)]">0 saved</span>
@@ -265,16 +265,18 @@
             <p class="text-[11px] text-[var(--muted-foreground)] leading-snug">
               Studio <b>.io</b> files include 3D shapes automatically. For plain <b>.ldr</b> files, fetch missing parts online or import LDraw's <b>complete.zip</b> once.
             </p>
-            <select id="libSourceSelect" class="w-full py-1.5 px-2.5 rounded-xl border border-[var(--border)] bg-[var(--background)] text-[11px] font-semibold outline-none">
-              <option value="https://raw.githubusercontent.com/gkjohnson/ldraw-parts-library/master/complete/ldraw/">Public Mirror: GitHub LDraw Library</option>
-              <option value="https://cdn.jsdelivr.net/gh/gkjohnson/ldraw-parts-library@master/complete/ldraw/">Public Mirror: jsDelivr LDraw CDN</option>
-              <option value="custom">Custom Public LDraw Base URL…</option>
-            </select>
-            <input id="libCustomUrlInput" type="url" placeholder="https://example.com/ldraw/" class="hidden w-full py-1.5 px-2.5 rounded-xl border border-[var(--border)] bg-[var(--background)] text-[11px] outline-none" />
-            <button id="menuFetchLibBtn" class="w-full py-2 px-3 rounded-xl bg-[#1a73e8]/15 border border-[#1a73e8]/40 text-[#1a73e8] font-semibold flex items-center justify-center gap-1.5">
-              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 12a9 9 0 0 1-9 9m9-9a9 9 0 0 0-9-9m9 9H3m9 9a9 9 0 0 1-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"/></svg>
-              Fetch Missing Parts Online
-            </button>
+            <div id="menuFetchLibWrap" class="hidden flex flex-col gap-2">
+              <select id="libSourceSelect" class="w-full py-1.5 px-2.5 rounded-xl border border-[var(--border)] bg-[var(--background)] text-[11px] font-semibold outline-none">
+                <option value="https://raw.githubusercontent.com/gkjohnson/ldraw-parts-library/master/complete/ldraw/">Public Mirror: GitHub LDraw Library</option>
+                <option value="https://cdn.jsdelivr.net/gh/gkjohnson/ldraw-parts-library@master/complete/ldraw/">Public Mirror: jsDelivr LDraw CDN</option>
+                <option value="custom">Custom Public LDraw Base URL…</option>
+              </select>
+              <input id="libCustomUrlInput" type="url" placeholder="https://example.com/ldraw/" class="hidden w-full py-1.5 px-2.5 rounded-xl border border-[var(--border)] bg-[var(--background)] text-[11px] outline-none" />
+              <button id="menuFetchLibBtn" class="w-full py-2 px-3 rounded-xl bg-[#1a73e8]/15 border border-[#1a73e8]/40 text-[#1a73e8] font-semibold flex items-center justify-center gap-1.5">
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 12a9 9 0 0 1-9 9m9-9a9 9 0 0 0-9-9m9 9H3m9 9a9 9 0 0 1-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"/></svg>
+                Fetch Missing Parts Online
+              </button>
+            </div>
             <div class="flex gap-2">
               <button id="menuImportLibBtn" class="flex-1 py-2 px-3 rounded-xl border border-[var(--border)] bg-[var(--background)] font-semibold flex items-center justify-center gap-1.5">
                 <svg class="w-3.5 h-3.5 text-[#1a73e8]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
@@ -294,7 +296,7 @@
           </div>
 
           <!-- Auto-Step Regeneration (Moved out of live step view to remove redundancy) -->
-          <div class="space-y-2.5 pt-4 border-t border-[var(--border)]">
+          <div id="menuAutoGenSection" class="hidden flex flex-col gap-2.5 pt-4 border-t border-[var(--border)]">
             <div class="text-[11px] font-bold uppercase tracking-wider text-[var(--muted-foreground)]">Auto-Generate Steps</div>
             <div class="grid grid-cols-3 gap-1">
               <button data-pacing="few" class="pacing-btn py-1.5 rounded-full border font-semibold">Few / Step</button>
@@ -305,17 +307,17 @@
               <span class="font-medium">Auto-Detect Duplicate Submodels</span>
               <input id="toggleDetectDuplicates" type="checkbox" checked class="w-4 h-4 accent-[#1a73e8]" />
             </label>
-            <button id="menuRegenBtn" class="w-full py-2 px-3 rounded-xl border border-[var(--border)] bg-[var(--background)] font-semibold disabled:opacity-40">
+            <button id="menuRegenBtn" class="w-full py-2 px-3 rounded-xl border border-[var(--border)] bg-[var(--background)] font-semibold">
               Regenerate Steps from Model
             </button>
-            <button id="menuSubdivideBtn" class="w-full py-2 px-3 rounded-xl bg-[#1a73e8]/12 border border-[#1a73e8]/35 text-[#1a73e8] font-semibold flex items-center justify-center gap-1.5 disabled:opacity-40">
+            <button id="menuSubdivideBtn" class="w-full py-2 px-3 rounded-xl bg-[#1a73e8]/12 border border-[#1a73e8]/35 text-[#1a73e8] font-semibold flex items-center justify-center gap-1.5">
               <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="4" width="7" height="16" rx="1.5"/><rect x="14" y="4" width="7" height="16" rx="1.5"/></svg>
               Subdivide Model into Sections…
             </button>
           </div>
 
           <!-- Extra Page Inserts -->
-          <div class="space-y-2 pt-4 border-t border-[var(--border)]">
+          <div id="menuPageInsertsSection" class="hidden flex flex-col gap-2 pt-4 border-t border-[var(--border)]">
             <div class="text-[11px] font-bold uppercase tracking-wider text-[var(--muted-foreground)]">Page Inserts</div>
             <button id="menuAddDivider" class="w-full py-2 px-3 rounded-xl border border-[var(--border)] bg-[var(--background)] font-semibold text-left flex items-center justify-between">
               <span>+ Insert Blank / Divider Page After Current</span>
@@ -942,7 +944,7 @@
       <div class="w-full max-w-xl max-h-[85vh] rounded-3xl bg-[var(--card)] border border-[var(--border)] shadow-2xl flex flex-col overflow-hidden text-xs">
         <div class="p-4 border-b border-[var(--border)] flex items-center justify-between gap-2 shrink-0">
           <div>
-            <h2 id="errModalTitle" class="text-sm font-bold">Model Errors &amp; Warnings</h2>
+            <h2 id="errModalTitle" class="text-sm font-bold">Model Issues</h2>
             <p id="errModalSubtitle" class="text-[11px] text-[var(--muted-foreground)]">Issues found during import or step generation</p>
           </div>
           <button id="btnCloseErrors" class="w-8 h-8 rounded-full flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/10">✕</button>
@@ -958,8 +960,8 @@
     <div id="errorBanner" class="no-print hidden fixed left-1/2 -translate-x-1/2 bottom-[114px] z-45 max-w-[94vw] transition-opacity duration-300">
       <div class="flex items-center gap-2.5 px-3.5 py-2 rounded-full bg-[#202124] text-white shadow-xl border border-white/10 text-xs font-semibold">
         <span class="w-2 h-2 rounded-full bg-red-500 shrink-0"></span>
-        <span id="errorBannerText" class="whitespace-nowrap">There are 0 errors.</span>
-        <button id="btnBannerSeeErrors" class="px-2.5 py-1 rounded-full bg-white/15 hover:bg-white/25 text-[#8ab4f8] font-bold whitespace-nowrap transition">See errors →</button>
+        <span id="errorBannerText" class="whitespace-nowrap">There are 0 issues.</span>
+        <button id="btnBannerSeeErrors" class="px-2.5 py-1 rounded-full bg-white/15 hover:bg-white/25 text-[#8ab4f8] font-bold whitespace-nowrap transition">See issues →</button>
         <button id="btnBannerDismiss" title="Dismiss" class="w-6 h-6 rounded-full hover:bg-white/15 flex items-center justify-center opacity-75">✕</button>
       </div>
     </div>

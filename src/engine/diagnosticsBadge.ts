@@ -2,9 +2,9 @@
  * Model diagnostics notification badge tracking.
  *
  * The floating menu icon badge (#menuBtnErrorBadge) alerts the user to unseen
- * model errors/warnings and clears once the user opens the Errors & Warnings
- * page (modal). Inside the menu drawer, the Errors & Warnings row pill
- * continues to display the full active diagnostic count.
+ * model issues and clears once the user opens the Model Issues modal. Inside
+ * the menu drawer, the Model Issues row is hidden when there are zero active
+ * issues and displays the full active issue count whenever issues exist.
  */
 
 export interface ModelDiagnosticLike {

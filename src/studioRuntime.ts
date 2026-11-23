@@ -29,6 +29,10 @@ import {
   serializeSeenDiagnosticKeys,
 } from './engine/diagnosticsBadge';
 import {
+  canInsertDividerAfterPage,
+  computeMenuVisibility,
+} from './engine/menuVisibility';
+import {
   MINIFIG_BUILD_CAMERA,
   MINIFIG_POSE_CAMERA,
   classifyMinifigGroupKind,
@@ -7193,10 +7197,41 @@ function applyMinifigStyleChange(rawStyle, anchorStepId = null) {
 // =========================================================================
 function syncMenuControls() {
   const hasModel = Boolean(state.model);
-  document.getElementById('menuSaveProj').disabled = !hasModel;
-  document.getElementById('menuRegenBtn').disabled = !hasModel || !state.model._parsed;
-  const subBtn = document.getElementById('menuSubdivideBtn');
-  if (subBtn) subBtn.disabled = !hasModel || !state.model._parsed;
+  const hasParsedModel = Boolean(state.model?._parsed);
+  const currentPage = state.pages[state.pageIdx] || null;
+  const diagCount = Array.isArray(state.diagnostics) ? state.diagnostics.length : 0;
+  const vis = computeMenuVisibility({
+    hasModel,
+    hasParsedModel,
+    pageCount: state.pages.length,
+    canInsertDividerAfterCurrentPage: canInsertDividerAfterPage(currentPage, state.dividerAfter),
+    diagnosticCount: diagCount,
+    savedLibraryCount: userLibRaw.size,
+    hasMissingPartsToFetch: hasModel ? hasMissingPartsToFetch() : false,
+    isFetchingLibrary: fetchPartsInFlight,
+  });
+
+  const setVisible = (id, show) => {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle('hidden', !show);
+  };
+
+  setVisible('menuModelCard', vis.showModelCard);
+  setVisible('menuSaveProj', vis.showExportProject);
+  setVisible('menuErrorsBtn', vis.showModelIssues);
+  setVisible('menuPagePrintSection', vis.showPagePrintSection);
+  setVisible('menuPageSetupBtn', vis.showPageSetup);
+  setVisible('menuBomSetupBtn', vis.showBomSetup);
+  setVisible('menuPrintBtn', vis.showPrintPdf);
+  setVisible('pageSetupPrintBtn', vis.showPrintPdf);
+  setVisible('bomSetupJumpBtn', vis.showBomSetup);
+  setVisible('menuFetchLibWrap', vis.showFetchLibrary);
+  setVisible('menuClearLibBtn', vis.showClearLibrary);
+  setVisible('menuAutoGenSection', vis.showAutoGenerateSection);
+  setVisible('menuRegenBtn', vis.showRegenerateSteps);
+  setVisible('menuSubdivideBtn', vis.showSubdivideModel);
+  setVisible('menuPageInsertsSection', vis.showPageInsertsSection);
+  setVisible('menuAddDivider', vis.showInsertDivider);
 
   document.querySelectorAll('.fmt-btn').forEach(b => {
     const fmtId = b.getAttribute('data-format');
@@ -7749,6 +7784,11 @@ function updateLibraryStatusUI() {
       : (embCount > 0 ? `${embCount} embedded (.io)` : 'None imported');
   }
   if (clearBtn) clearBtn.classList.toggle('hidden', libCount === 0);
+  const fetchWrap = document.getElementById('menuFetchLibWrap');
+  if (fetchWrap) {
+    const showFetch = Boolean(state.model) && (hasMissingPartsToFetch() || fetchPartsInFlight);
+    fetchWrap.classList.toggle('hidden', !showFetch);
+  }
 }
 
 async function loadSavedBricksLibrary() {
@@ -7993,23 +8033,8 @@ function scrollMenuToBricksLibrary(highlight = true) {
 }
 
 let fetchPartsInFlight = false;
-async function fetchMissingPartsOnline(fetchOpts = {}) {
-  const silent = Boolean(fetchOpts && fetchOpts.silent);
-  if (fetchPartsInFlight) return;
-  fetchPartsInFlight = true;
-  const progWrap = document.getElementById('libProgressWrap');
-  const progLabel = document.getElementById('libProgressLabel');
-  const progPct = document.getElementById('libProgressPct');
-  const progBar = document.getElementById('libProgressBar');
-  if (!silent) {
-    progWrap.classList.remove('hidden');
-    progLabel.textContent = 'Checking missing parts…';
-    progPct.textContent = '0%';
-    progBar.style.width = '0%';
-    scrollMenuToBricksLibrary(false);
-  }
 
-  // Gather missing leaf part IDs + !TEXMAP PNG filenames from current model (or starter set if no model loaded)
+function collectMissingFetchTargets() {
   const queue = [];
   const queued = new Set();
   const visitedLoaded = new Set();
@@ -8071,9 +8096,35 @@ async function fetchMissingPartsOnline(fetchOpts = {}) {
         for (const lf of leaves) enqueue(lf.p);
       }
     }
-  } else {
-    ['3001','3002','3003','3004','3005','3020','3021','3022','3023','3024','3069b','3070b','3040b','4073','4733'].forEach(enqueue);
   }
+
+  return { queue, texQueue, scanLinesForRefs };
+}
+
+function hasMissingPartsToFetch() {
+  if (!state.model) return false;
+  const { queue, texQueue } = collectMissingFetchTargets();
+  return queue.length > 0 || texQueue.length > 0;
+}
+
+async function fetchMissingPartsOnline(fetchOpts = {}) {
+  const silent = Boolean(fetchOpts && fetchOpts.silent);
+  if (fetchPartsInFlight || !state.model) return;
+  fetchPartsInFlight = true;
+  const progWrap = document.getElementById('libProgressWrap');
+  const progLabel = document.getElementById('libProgressLabel');
+  const progPct = document.getElementById('libProgressPct');
+  const progBar = document.getElementById('libProgressBar');
+  if (!silent) {
+    progWrap.classList.remove('hidden');
+    progLabel.textContent = 'Checking missing parts…';
+    progPct.textContent = '0%';
+    progBar.style.width = '0%';
+    scrollMenuToBricksLibrary(false);
+  }
+
+  // Gather missing leaf part IDs + !TEXMAP PNG filenames from current model
+  const { queue, texQueue, scanLinesForRefs } = collectMissingFetchTargets();
 
   if (queue.length === 0 && texQueue.length === 0) {
     if (!silent) {
@@ -8081,6 +8132,7 @@ async function fetchMissingPartsOnline(fetchOpts = {}) {
       showToast('All parts in this model already have 3D shapes loaded!');
     }
     fetchPartsInFlight = false;
+    syncMenuControls();
     return;
   }
 
@@ -8180,6 +8232,7 @@ async function fetchMissingPartsOnline(fetchOpts = {}) {
   } finally {
     fetchPartsInFlight = false;
     if (!silent) progWrap.classList.add('hidden');
+    syncMenuControls();
   }
 }
 
@@ -8295,16 +8348,18 @@ function updateErrorIndicators() {
   const totalCount = state.diagnostics.length;
   const badgeCount = getMenuIconErrorBadgeCount(state.diagnostics, state.seenDiagnosticKeys);
   const menuDot = document.getElementById('menuBtnErrorBadge');
+  const menuBtn = document.getElementById('menuErrorsBtn');
   const menuPill = document.getElementById('menuErrorCountBadge');
   if (menuDot) {
     menuDot.textContent = formatMenuIconErrorBadge(badgeCount);
     menuDot.classList.toggle('hidden', badgeCount === 0);
   }
+  if (menuBtn) {
+    menuBtn.classList.toggle('hidden', !state.model || totalCount === 0);
+  }
   if (menuPill) {
     menuPill.textContent = String(totalCount);
-    menuPill.className = totalCount > 0
-      ? 'px-2 py-0.5 rounded-full text-[11px] font-bold bg-red-600 text-white'
-      : 'px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300';
+    menuPill.className = 'px-2 py-0.5 rounded-full text-[11px] font-bold bg-red-600 text-white';
   }
 }
 
@@ -8330,7 +8385,7 @@ function showImportErrorBanner() {
   const n = state.diagnostics.length;
   if (n === 0) { dismissErrorBanner(true); return; }
   const txt = document.getElementById('errorBannerText');
-  if (txt) txt.textContent = n === 1 ? 'There is 1 error.' : `There are ${n} errors.`;
+  if (txt) txt.textContent = n === 1 ? 'There is 1 issue.' : `There are ${n} issues.`;
   const el = document.getElementById('errorBanner');
   clearTimeout(errorBannerTimer);
   clearTimeout(errorBannerFadeTimer);
@@ -8353,8 +8408,8 @@ function renderErrorsModal() {
   if (!Object.prototype.hasOwnProperty.call(counts, errFilter)) errFilter = 'all';
 
   document.getElementById('errModalTitle').textContent = diags.length === 0
-    ? 'No Model Errors'
-    : `Model Errors & Warnings (${diags.length})`;
+    ? 'No Model Issues'
+    : `Model Issues (${diags.length})`;
 
   const tabs = [
     { id: 'all', label: `All (${counts.all})` },
@@ -9965,7 +10020,7 @@ document.getElementById('toggleDetectDuplicates').onchange = (e) => {
 
 // Open real Print & Export PDF Modal (never silently closes!)
 function openExportModal() {
-  if (!state.model) { showToast('Import a model first.'); return; }
+  if (!state.model || state.pages.length === 0) { showToast('Import a model first.'); return; }
   closeMenu();
   document.getElementById('pageSetupModal').classList.add('hidden');
   document.getElementById('bomSetupModal').classList.add('hidden');
@@ -9973,6 +10028,8 @@ function openExportModal() {
   const [wIn, hIn] = getActivePagePhysicalInches();
   document.getElementById('expFormatSummary').textContent = `${fmt.name} (${formatPhysicalDims(wIn, hIn)}) · ${state.pages.length} pages`;
   document.getElementById('expPageCountBadge').textContent = `${state.pages.length} pages`;
+  const sysPrintBtn = document.getElementById('btnSysPrint');
+  if (sysPrintBtn) sysPrintBtn.classList.toggle('hidden', typeof window.print !== 'function');
   document.getElementById('expProgressWrap').classList.add('hidden');
   document.getElementById('expReadyWrap').classList.add('hidden');
   document.getElementById('exportModal').classList.remove('hidden');
@@ -10018,6 +10075,7 @@ document.getElementById('btnSysPrint').onclick = () => {
 document.getElementById('menuAddDivider').onclick = () => {
   if (!state.model) return;
   const pg = state.pages[state.pageIdx];
+  if (!canInsertDividerAfterPage(pg, state.dividerAfter)) return;
   pushUndo();
   state.dividerAfter[pg.id] = { title: 'Next Section', note: '' };
   closeMenu(); renderAll(); showToast('Inserted divider page after current page.');
@@ -10040,7 +10098,7 @@ if (menuSubdivideBtn) {
   };
 }
 
-// Save / Open .bic.json Project (supports iOS Share Sheet + Download!)
+// Export / Import .bic.json Project (supports iOS Share Sheet + Download!)
 document.getElementById('menuSaveProj').onclick = async () => {
   if (!state.model) return;
   const activeTheme = getActiveTheme();
@@ -10048,7 +10106,7 @@ document.getElementById('menuSaveProj').onclick = async () => {
   const payload = JSON.stringify({ version: 3, title: state.model.title, chapters: state.model.chapters, overrides: state.overrides, pageInserts: state.pageInserts, dividerAfter: state.dividerAfter, coverMeta: state.coverMeta, completeMeta: state.completeMeta, backMeta: state.backMeta, bomConfig: state.bomConfig, showStepBorders: state.showStepBorders, showPageTitle: state.showPageTitle, pageNumberFormat: state.pageNumberFormat, detectDuplicates: state.detectDuplicates, minifigStyle: state.minifigStyle, showMinifig1to1: state.showMinifig1to1, themeId: state.themeId, ...(embeddedCustomTheme ? { customTheme: embeddedCustomTheme } : {}), paperFormat: state.paperFormat, orientation: state.orientation, density: state.density, layout: state.layout }, null, 2);
   const fileName = `${state.model.title.replace(/[^a-z0-9_-]+/gi, '_')}.bic.json`;
   closeMenu();
-  await shareOrDownloadJsonFile(payload, fileName, 'Shared project file.', `Saved ${fileName}`);
+  await shareOrDownloadJsonFile(payload, fileName, 'Shared project file.', `Exported ${fileName}`);
 };
 document.getElementById('menuLoadProj').onclick = () => document.getElementById('projectLoadInput').click();
 document.getElementById('projectLoadInput').onchange = async (e) => {
@@ -10091,7 +10149,7 @@ document.getElementById('projectLoadInput').onchange = async (e) => {
     errFilter = 'all';
     lastSourceRecord = { kind: 'project', fileName: f.name };
     computeModelDiagnostics();
-    closeMenu(); renderAll(); showToast(`Opened ${state.model.title}.`);
+    closeMenu(); renderAll(); showToast(`Imported ${state.model.title}.`);
   } catch (err) { showToast('Could not read project file.'); }
 };
 
