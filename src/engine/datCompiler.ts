@@ -1,5 +1,6 @@
 import type { Mat3 } from './minifigPose';
 import { R_IDENTITY, mat3Multiply, mat3Vec } from './minifigPose';
+import { buildLocalSubBoxes, type LocalBox6 } from './partContact';
 import { hashTextureBase64 } from './textureStore';
 
 /**
@@ -46,6 +47,8 @@ export interface CompiledDatMesh {
   triCols: Int32Array | null;
   /** Textured decal batches from BrickLink Studio PE_TEX_INFO or LDraw !TEXMAP. */
   texBatches?: CompiledTexBatch[];
+  /** Compact local-space tight sub-boxes for concave parts (undefined for solid/convex bricks). */
+  subBoxes?: LocalBox6[];
   min: [number, number, number];
   max: [number, number, number];
 }
@@ -587,6 +590,7 @@ export function compileDatEntry(
 
   let minX = Infinity, minY = Infinity, minZ = Infinity;
   let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  const undersideBoxes: LocalBox6[] = [];
 
   const upd = (p: Vec3) => {
     if (p[0] < minX) minX = p[0]; if (p[0] > maxX) maxX = p[0];
@@ -1309,7 +1313,25 @@ export function compileDatEntry(
           }
           continue;
         }
-        if (SKIPPED_UNDERSIDE_RE.test(base)) continue;
+        if (SKIPPED_UNDERSIDE_RE.test(base)) {
+          // Preserve anti-stud tube occupancy for physical clutch detection without emitting render triangles
+          const r = base.startsWith('stud4') ? 8.14 : 3.2;
+          let uMinX = Infinity, uMinY = Infinity, uMinZ = Infinity;
+          let uMaxX = -Infinity, uMaxY = -Infinity, uMaxZ = -Infinity;
+          for (const lx of [-r, r]) {
+            for (const ly of [0, 1]) {
+              for (const lz of [-r, r]) {
+                const v = mat3Vec(nm, lx, ly, lz);
+                const g = ld2gl([nx + v[0], ny + v[1], nz + v[2]]);
+                if (g[0] < uMinX) uMinX = g[0]; if (g[0] > uMaxX) uMaxX = g[0];
+                if (g[1] < uMinY) uMinY = g[1]; if (g[1] > uMaxY) uMaxY = g[1];
+                if (g[2] < uMinZ) uMinZ = g[2]; if (g[2] > uMaxZ) uMaxZ = g[2];
+              }
+            }
+          }
+          undersideBoxes.push([uMinX, uMinY, uMinZ, uMaxX, uMaxY, uMaxZ]);
+          continue;
+        }
 
         // Synthesize standard circular/rect primitives at exact LDraw circle resolution
         if (canSynthesizePrim(base)) {
@@ -1379,12 +1401,22 @@ export function compileDatEntry(
     });
   }
 
+  const trisArr = new Float32Array(tris);
+  const subBoxes = buildLocalSubBoxes(
+    trisArr,
+    [minX, minY, minZ],
+    [maxX, maxY, maxZ],
+    undersideBoxes.length > 0 ? undersideBoxes : undefined,
+    texBatches.length > 0 ? texBatches : undefined,
+  );
+
   return {
-    tris: new Float32Array(tris),
+    tris: trisArr,
     norms: new Float32Array(norms),
     edges: new Float32Array(edges),
     triCols: hasSubColor ? new Int32Array(triCols) : null,
     ...(texBatches.length > 0 ? { texBatches } : {}),
+    ...(subBoxes ? { subBoxes } : {}),
     min: [minX, minY, minZ],
     max: [maxX, maxY, maxZ],
   };

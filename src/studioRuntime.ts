@@ -70,6 +70,12 @@ import {
   selectDynamicStepIndices,
 } from './engine/dynamicStepSizer';
 import {
+  buildPhysicalVerticalPrereqMap,
+  minSubBoxGap,
+  partsPhysicallyTouch,
+  transformLocalBox6ToWorld,
+} from './engine/partContact';
+import {
   buildMinifigExplodedPlan,
   buildMinifigSequentialPlan,
   normalizeMinifigStepStyle,
@@ -3241,6 +3247,28 @@ function computeWorldBox(part) {
   return computeLeafWorldBox(part);
 }
 
+function computeLeafWorldSubBoxes(leaf) {
+  const compiled = compileEmbeddedDat(leaf.p);
+  if (!compiled || !compiled.subBoxes || compiled.subBoxes.length <= 1) return null;
+  const m = leaf.m || R_ID;
+  return compiled.subBoxes.map(sb => transformLocalBox6ToWorld(sb, m, leaf.x, leaf.y, leaf.z));
+}
+
+function computeWorldSubBoxes(part) {
+  if (part.children && part.children.length > 0) {
+    const nonWheelChildren = part.children.filter(ch => classifyPartRole(ch) !== 'wheel');
+    const activeChildren = nonWheelChildren.length > 0 ? nonWheelChildren : part.children;
+    const out = [];
+    for (const ch of activeChildren) {
+      const subs = computeLeafWorldSubBoxes(ch);
+      if (subs) out.push(...subs);
+      else out.push(computeLeafWorldBox(ch));
+    }
+    return out.length > 1 ? out : null;
+  }
+  return computeLeafWorldSubBoxes(part);
+}
+
 // Identify wheels, wheel holders, axles, and loose accessories so Step 1 NEVER starts on a floating wheel!
 function classifyPartRole(part) {
   const k = normId(part.p);
@@ -3321,36 +3349,8 @@ function canConnectSideways(part, role) {
 //   NOT by grazing smooth vertical side walls (which caused floating inverted slopes & train-body bleed into bogies!).
 // - Sideways contacts require either 3-axis interlocking (SNOT studs/pins/clips engaged >= 1.5 LDU)
 //   or BOTH parts having sideways/SNOT/clip/hinge/window connection capability.
-function boxesPhysicallyTouch(a, b, roleA, roleB, sideCapA = true, sideCapB = true) {
-  const isWheelPair = (roleA === 'wheel' || roleB === 'wheel');
-  const otherIsHolder = (roleA === 'wheel_holder' || roleB === 'wheel_holder' || roleA === 'axle' || roleB === 'axle');
-  if (isWheelPair && otherIsHolder) {
-    // Wheel clips into wheel holder pin slots or mounts onto a Technic axle (up to 6 LDU clearance along axle)
-    const gx = Math.max(0, a.min[0]-b.max[0], b.min[0]-a.max[0]);
-    const gy = Math.max(0, a.min[1]-b.max[1], b.min[1]-a.max[1]);
-    const gz = Math.max(0, a.min[2]-b.max[2], b.min[2]-a.max[2]);
-    return Math.max(gx, gy, gz) <= 6.0;
-  }
-  if (isWheelPair && !otherIsHolder) return false; // Train wheels attach ONLY via their wheel holder / axle!
-  const tol = 2.8;
-  const gx = Math.max(0, a.min[0]-b.max[0], b.min[0]-a.max[0]);
-  const gy = Math.max(0, a.min[1]-b.max[1], b.min[1]-a.max[1]);
-  const gz = Math.max(0, a.min[2]-b.max[2], b.min[2]-a.max[2]);
-  if (gx > tol || gy > tol || gz > tol) return false;
-
-  const ovX = Math.min(a.max[0], b.max[0]) - Math.max(a.min[0], b.min[0]);
-  const ovY = Math.min(a.max[1], b.max[1]) - Math.max(a.min[1], b.min[1]);
-  const ovZ = Math.min(a.max[2], b.max[2]) - Math.max(a.min[2], b.min[2]);
-
-  // 1. Vertical stud/tube stacking contact (overlapping horizontal footprint)
-  if (ovX >= 3.0 && ovZ >= 3.0) return true;
-
-  // 2. Sideways / SNOT / clip / hinge / Technic pin contact
-  const goodAxes = (ovX >= 1.5 ? 1 : 0) + (ovY >= 1.5 ? 1 : 0) + (ovZ >= 1.5 ? 1 : 0);
-  if (goodAxes < 2) return false;
-  // Require real 3-axis interlocking (e.g., SNOT studs/pins engaged >= 1.5 LDU) OR both parts sideways-capable!
-  if (ovX >= 1.5 && ovY >= 1.5 && ovZ >= 1.5) return true;
-  return Boolean(sideCapA && sideCapB);
+function boxesPhysicallyTouch(a, b, roleA, roleB, sideCapA = true, sideCapB = true, subA = null, subB = null) {
+  return partsPhysicallyTouch(a, b, subA, subB, roleA, roleB, sideCapA, sideCapB);
 }
 
 function mat3Transpose(m) {
@@ -3585,60 +3585,24 @@ function detectDuplicateSubassemblies(parts, boxes, adj, roles) {
 }
 
 // Build strict bottom-up vertical prerequisite DAG:
-// belowMap[i] = parts sitting directly underneath `i` that MUST be placed in an earlier step before `i`
-// (strict inequality on min[1] & center[1] guarantees a 100% cycle-free DAG!).
-function buildVerticalPrereqMap(boxes, adj, roles, claddingFlags, activeIndices) {
-  const idxList = activeIndices || boxes.map((_, i) => i);
-  const activeSet = new Set(idxList);
-  let baseMinY = Infinity;
-  for (const i of idxList) {
-    if (roles[i] === 'wheel' || roles[i] === 'figure' || claddingFlags[i]) continue;
-    if (boxes[i].min[1] < baseMinY) baseMinY = boxes[i].min[1];
-  }
-  if (!isFinite(baseMinY)) baseMinY = 0;
-
-  const hasLowerOrBaseSupport = (u) => {
-    if (boxes[u].min[1] <= baseMinY + 20) return true;
-    const bu = boxes[u];
-    for (const w of adj[u]) {
-      if (!activeSet.has(w) || roles[w] === 'wheel' || roles[w] === 'figure') continue;
-      const bw = boxes[w];
-      if (bw.min[1] < bu.max[1] - 4.0 && bw.center[1] <= bu.center[1] + 4.0) return true;
-    }
-    return false;
-  };
-
-  const belowMap = Array.from({ length: boxes.length }, () => []);
-  for (const i of idxList) {
-    if (roles[i] === 'wheel' || roles[i] === 'figure' || claddingFlags[i]) continue;
-    const bi = boxes[i];
-    for (const u of idxList) {
-      if (u === i || roles[u] === 'wheel' || roles[u] === 'figure' || claddingFlags[u]) continue;
-      const bu = boxes[u];
-      if (bu.min[1] >= bi.min[1] - 2.0) continue;
-      if (bu.center[1] >= bi.center[1] - 2.0) continue;
-      if (bu.max[1] > bi.min[1] + 4.5) continue;
-      if (bi.min[1] - bu.max[1] > 36) continue;
-      const ovX = Math.min(bi.max[0], bu.max[0]) - Math.max(bi.min[0], bu.min[0]);
-      const ovZ = Math.min(bi.max[2], bu.max[2]) - Math.max(bi.min[2], bu.min[2]);
-      if (ovX < 3.0 || ovZ < 3.0) continue;
-      if (!hasLowerOrBaseSupport(u)) continue;
-      belowMap[i].push(u);
-    }
-  }
-  return { belowMap, baseMinY };
+// belowMap[i] = parts sitting directly underneath `i` that have lower/side support and MUST be
+// placed before `i` (pure top-hung/underside-attached pieces are excluded so they snap cleanly
+// onto the spanning upper plate after it is placed, instead of floating in mid-air before it!).
+function buildVerticalPrereqMap(boxes, adj, roles, claddingFlags, activeIndices, subBoxes = null) {
+  return buildPhysicalVerticalPrereqMap(boxes, adj, roles, claddingFlags, activeIndices, subBoxes);
 }
 
 // Build bottom-up zero-floating steps for 1 canonical copy of a duplicate submodel or modular section
 function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount) {
   const n = canonicalParts.length;
   const boxes = canonicalParts.map(p => computeWorldBox(p));
+  const subBoxes = canonicalParts.map(p => computeWorldSubBoxes(p));
   const roles = canonicalParts.map(p => classifyPartRole(p));
   const sideCaps = canonicalParts.map((p, i) => canConnectSideways(p, roles[i]));
   const claddingFlags = canonicalParts.map((p, i) => isSidewaysCladdingPart(p, boxes[i]));
   const layerY = canonicalParts.map((p, i) => computeBuildLayerY(p, boxes[i]));
-  const adj = buildSpatialAdjacency(canonicalParts, boxes, roles, sideCaps);
-  const { belowMap } = buildVerticalPrereqMap(boxes, adj, roles, claddingFlags);
+  const adj = buildSpatialAdjacency(canonicalParts, boxes, roles, sideCaps, subBoxes);
+  const { belowMap } = buildVerticalPrereqMap(boxes, adj, roles, claddingFlags, undefined, subBoxes);
   const subDescriptors = canonicalParts.map((p, i) => ({
     index: i,
     partId: normId(p.p),
@@ -3667,8 +3631,15 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount) {
     if (placed.size === 0) {
       const nonWheels = Array.from(remaining).filter(i => roles[i] !== 'wheel' && !claddingFlags[i] && !belowMap[i].some(u => remaining.has(u)));
       const pool = nonWheels.length > 0 ? nonWheels : Array.from(remaining);
-      pool.sort((a, b) => layerY[a] - layerY[b] || adj[b].length - adj[a].length);
-      frontier = pool;
+      pool.sort((a, b) => layerY[a] - layerY[b]);
+      const minY = layerY[pool[0]];
+      const lowBand = pool.filter(i => layerY[i] <= minY + 32);
+      lowBand.sort((a, b) => {
+        const sa = (roles[a] === 'structural' || roles[a] === 'wheel_holder' ? 50 : 0) + adj[a].length * 6 - (layerY[a] - minY) * 0.8;
+        const sb = (roles[b] === 'structural' || roles[b] === 'wheel_holder' ? 50 : 0) + adj[b].length * 6 - (layerY[b] - minY) * 0.8;
+        return sb - sa;
+      });
+      frontier = lowBand;
     } else {
       const rawFrontier = Array.from(remaining).filter(i => adj[i].some(nb => placedBeforeStep.has(nb)));
       const unblocked = rawFrontier.filter(i =>
@@ -3746,10 +3717,11 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount) {
   return steps;
 }
 
-// Fast 3D spatial hash broad-phase adjacency builder (wheel-aware & rejects smooth side-wall grazing!)
-function buildSpatialAdjacency(parts, boxes, roles, sideCaps = null) {
+// Fast 3D spatial hash broad-phase adjacency builder (wheel-aware & rejects smooth side-wall grazing + concave AABB cutouts!)
+function buildSpatialAdjacency(parts, boxes, roles, sideCaps = null, subBoxes = null) {
   const n = parts.length;
   const caps = sideCaps || parts.map((p, i) => canConnectSideways(p, roles[i]));
+  const subs = subBoxes || parts.map(p => computeWorldSubBoxes(p));
   const adj = Array.from({ length: n }, () => []);
   const cellSize = 80;
   const pad = 12;
@@ -3788,7 +3760,7 @@ function buildSpatialAdjacency(parts, boxes, roles, sideCaps = null) {
     const pk = lo * n + hi;
     if (tested.has(pk)) return;
     tested.add(pk);
-    if (boxesPhysicallyTouch(boxes[lo], boxes[hi], roles[lo], roles[hi], caps[lo], caps[hi])) {
+    if (boxesPhysicallyTouch(boxes[lo], boxes[hi], roles[lo], roles[hi], caps[lo], caps[hi], subs[lo], subs[hi])) {
       adj[lo].push(hi);
       adj[hi].push(lo);
     }
@@ -3814,14 +3786,17 @@ function buildSpatialAdjacency(parts, boxes, roles, sideCaps = null) {
     parts[i]._detachedGap = 0;
     parts[i]._floatHeight = 0;
     if (adj[i].length > 0) continue;
-    let bestJ = -1, bestD = 12;
+    let bestJ = -1, bestD = 12, bestVert = false;
     for (let j = 0; j < n; j++) {
       if (i === j || roles[j] === 'wheel') continue;
       const gx = Math.max(0, boxes[i].min[0]-boxes[j].max[0], boxes[j].min[0]-boxes[i].max[0]);
       const gy = Math.max(0, boxes[i].min[1]-boxes[j].max[1], boxes[j].min[1]-boxes[i].max[1]);
       const gz = Math.max(0, boxes[i].min[2]-boxes[j].max[2], boxes[j].min[2]-boxes[i].max[2]);
-      const d = Math.hypot(gx, gy, gz);
-      if (d < bestD) { bestD = d; bestJ = j; }
+      if (Math.hypot(gx, gy, gz) >= bestD + 0.01) continue;
+      const { gap: d, hasVerticalOverlap: vert } = minSubBoxGap(boxes[i], boxes[j], subs[i], subs[j]);
+      if (d < bestD - 1e-4 || (Math.abs(d - bestD) <= 1e-4 && vert && !bestVert)) {
+        bestD = d; bestJ = j; bestVert = vert;
+      }
     }
     if (bestJ >= 0) {
       adj[i].push(bestJ); adj[bestJ].push(i);
@@ -3880,7 +3855,7 @@ function buildSpatialAdjacency(parts, boxes, roles, sideCaps = null) {
     for (let cid = 1; cid < subComps.length; cid++) {
       const comp = subComps[cid];
       if (comp.length > 16) continue;
-      let bestU = -1, bestV = -1, bestD = 12;
+      let bestU = -1, bestV = -1, bestD = 12, bestVert = false;
       for (const u of comp) {
         const bu = boxes[u];
         for (let v = 0; v < n; v++) {
@@ -3889,8 +3864,11 @@ function buildSpatialAdjacency(parts, boxes, roles, sideCaps = null) {
           const gx = Math.max(0, bu.min[0] - bv.max[0], bv.min[0] - bu.max[0]);
           const gy = Math.max(0, bu.min[1] - bv.max[1], bv.min[1] - bu.max[1]);
           const gz = Math.max(0, bu.min[2] - bv.max[2], bv.min[2] - bu.max[2]);
-          const d = Math.hypot(gx, gy, gz);
-          if (d < bestD) { bestD = d; bestU = u; bestV = v; }
+          if (Math.hypot(gx, gy, gz) >= bestD + 0.01) continue;
+          const { gap: d, hasVerticalOverlap: vert } = minSubBoxGap(bu, bv, subs[u], subs[v]);
+          if (d < bestD - 1e-4 || (Math.abs(d - bestD) <= 1e-4 && vert && !bestVert)) {
+            bestD = d; bestU = u; bestV = v; bestVert = vert;
+          }
         }
       }
       if (bestU >= 0 && bestV >= 0) {
@@ -3914,9 +3892,10 @@ function hasEmbeddedAxleHole(pid) {
 function prepareSubdivisionData(parsed) {
   const parts = parsed.parts;
   const boxes = parts.map(p => computeWorldBox(p));
+  const subBoxes = parts.map(p => computeWorldSubBoxes(p));
   const roles = parts.map(p => classifyPartRole(p));
   const sideCaps = parts.map((p, i) => canConnectSideways(p, roles[i]));
-  const adjacency = buildSpatialAdjacency(parts, boxes, roles, sideCaps);
+  const adjacency = buildSpatialAdjacency(parts, boxes, roles, sideCaps, subBoxes);
   const {
     groups: minifigGroups,
     claimed: mfClaimed,
@@ -4097,9 +4076,10 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
     return { title: parsed.title, subtitle: `${parts.length} pieces · ${globalStep} steps`, chapters, _parsed: parsed, _mode: mode, _subdivisionPlan: null };
   }
 
-  // 1. Build strict physical adjacency graph via 3D spatial hash broad-phase (wheel-aware & rejects smooth side-wall grazing!)
+  // 1. Build strict physical adjacency graph via 3D spatial hash broad-phase (wheel-aware & rejects smooth side-wall grazing + concave AABB cutouts!)
+  const subBoxes = parts.map(p => computeWorldSubBoxes(p));
   const sideCaps = parts.map((p, i) => canConnectSideways(p, roles[i]));
-  const adj = buildSpatialAdjacency(parts, boxes, roles, sideCaps);
+  const adj = buildSpatialAdjacency(parts, boxes, roles, sideCaps, subBoxes);
 
   // 1a. Whole-Minifigure Assembly Grouping (NEVER build just a head — and NEVER sweep chairs/seats or furniture into figures!)
   const {
@@ -4258,6 +4238,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
     const remaining = new Set(idxList);
     const outSteps = [];
     const scopeIndices = Array.from(new Set([...Array.from(prePlacedSet), ...idxList]));
+    const { belowMap } = buildVerticalPrereqMap(boxes, adj, roles, claddingFlags, scopeIndices, subBoxes);
     const scopeBounds = computeBoundsFromBoxes(scopeIndices.map(i => boxes[i]));
     let builtBounds = prePlacedSet.size > 0
       ? computeBoundsFromBoxes(Array.from(prePlacedSet).map(i => boxes[i]))
@@ -4267,9 +4248,13 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
     let localStepCount = 0;
 
     while (remaining.size > 0) {
+      const placedBeforeStep = new Set(placed);
+      const isPrereqGrounded = placedBeforeStep.size > 0
+        ? createGroundedPrereqChecker(adj, belowMap, placedBeforeStep, remaining)
+        : null;
       let frontier;
       if (placed.size === 0) {
-        const nonWheels = Array.from(remaining).filter(i => roles[i] !== 'wheel' && !claddingFlags[i]);
+        const nonWheels = Array.from(remaining).filter(i => roles[i] !== 'wheel' && !claddingFlags[i] && !belowMap[i].some(u => remaining.has(u)));
         const pool = nonWheels.length > 0 ? nonWheels : Array.from(remaining);
         pool.sort((a, b) => layerY[a] - layerY[b]);
         const minY = layerY[pool[0]];
@@ -4281,9 +4266,17 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
         });
         frontier = lowBand;
       } else {
-        const rawFrontier = Array.from(remaining).filter(i => adj[i].some(nb => placed.has(nb)));
-        const readyFrontier = rawFrontier.filter(i => !isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, placed));
-        frontier = readyFrontier.length > 0 ? readyFrontier : rawFrontier;
+        const rawFrontier = Array.from(remaining).filter(i => adj[i].some(nb => placedBeforeStep.has(nb)));
+        const unblocked = rawFrontier.filter(i =>
+          !isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, placedBeforeStep)
+          && !belowMap[i].some(u => remaining.has(u) && isPrereqGrounded(u))
+        );
+        if (unblocked.length > 0) {
+          frontier = unblocked;
+        } else {
+          const readyFrontier = rawFrontier.filter(i => !isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, placedBeforeStep));
+          frontier = readyFrontier.length > 0 ? readyFrontier : rawFrontier;
+        }
         if (frontier.length === 0) {
           frontier = Array.from(remaining).sort((a, b) => layerY[a] - layerY[b]);
         }
@@ -4298,17 +4291,22 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
 
       const anchor = frontier[0];
       const anchorY = layerY[anchor];
+      const anchorConnectedToPrev = placedBeforeStep.size > 0 && adj[anchor].some(nb => placedBeforeStep.has(nb));
       const stepIndices = selectDynamicStepIndices({
         anchor,
         parts: allPartDescriptors,
         getEligibleCandidates: (placedInStep) => {
-          const combinedPlaced = new Set(placed);
-          for (const pIdx of placedInStep) combinedPlaced.add(pIdx);
+          const supportSet = placedBeforeStep.size > 0 ? placedBeforeStep : placedInStep;
           return Array.from(remaining).filter(i => {
             if (placedInStep.has(i)) return false;
-            if (isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, combinedPlaced)) return false;
-            if (Math.abs(layerY[i] - anchorY) > 18) return false;
-            return adj[i].some(nb => combinedPlaced.has(nb));
+            if (isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, supportSet)) return false;
+            if (Math.abs(layerY[i] - anchorY) > 12) return false;
+            if (placedBeforeStep.size > 0) {
+              if (belowMap[i].some(u => !placedBeforeStep.has(u) && isPrereqGrounded(u))) return false;
+            } else {
+              if (belowMap[i].length > 0) return false;
+            }
+            return isCandidateConnectedForStep(i, anchorConnectedToPrev, adj, placedBeforeStep, placedInStep);
           });
         },
         modelBounds: scopeBounds,
@@ -4983,7 +4981,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
     const indices = group.indices;
     const placed = new Set();
     const remaining = new Set(indices);
-    const { belowMap } = buildVerticalPrereqMap(boxes, adj, roles, claddingFlags, indices);
+    const { belowMap } = buildVerticalPrereqMap(boxes, adj, roles, claddingFlags, indices, subBoxes);
     let curSteps = [];
 
     // Analyze support & overhead enclosure for minifigures belonging to this model section

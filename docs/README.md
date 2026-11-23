@@ -16,6 +16,7 @@ All architecture specifications and feature design proposals for **Brick Instruc
 - [`INTERACTIVE_HTML_EXPORT_DESIGN.md`](./INTERACTIVE_HTML_EXPORT_DESIGN.md) — Self-contained offline Interactive 3D HTML instruction viewer export with deduplicated WebGL part meshes, embedded decals, free 360° orbit/pan/zoom on all 3D pages (including Cover & Build Complete), and direct link back to the Studio editor.
 - [`PAGE_LAYOUT_GROUPS_DESIGN.md`](./PAGE_LAYOUT_GROUPS_DESIGN.md) — Customizable steps per page (1–24), explicit column/row grids, row-first vs column-first fill order, mixed step proportions (`Large Left`, `Large Top`, `Large Right`, per-slot S/M/L weights), and reusable editable Step Range Groups.
 - [`DYNAMIC_STEP_SIZING_DESIGN.md`](./DYNAMIC_STEP_SIZING_DESIGN.md) — Cognitive-budget dynamic bricks-per-step sizing (structured rows/grids/pairs vs. scattered texture, even-chunk splitting, gentle Step 1 opening, opposite-wall guards) and sticky camera-corner selection with camera-aware frontier ordering.
+- [`CONCAVE_CONTACT_AND_SUPPORT_DESIGN.md`](./CONCAVE_CONTACT_AND_SUPPORT_DESIGN.md) — Local concave sub-box collider from compiled `.dat` geometry, two-phase physical clutch verification, top-hung-safe vertical prerequisites, and zero-floating step invariants.
 
 ## Conventions
 
