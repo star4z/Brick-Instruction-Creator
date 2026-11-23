@@ -6154,10 +6154,10 @@ function renderAll() {
           ` : ''}
         </div>
 
-        <!-- Top-Right: Optional Theming Image -->
+        <!-- Top-Right: Optional Series / Theme Logo -->
         ${cm.themeImageSrc ? `
           <div class="absolute z-10 flex items-start justify-end pointer-events-none" style="right:${layout.pad}px;top:${layout.pad}px;max-width:${layout.topRightMaxW}px;max-height:${layout.topRightMaxH}px;">
-            <img src="${cm.themeImageSrc}" alt="Theme image" class="block object-contain object-right-top pointer-events-none select-none" style="max-width:${layout.topRightMaxW}px;max-height:${layout.topRightMaxH}px;" />
+            <img src="${cm.themeImageSrc}" alt="Series / Theme logo" class="block object-contain object-right-top pointer-events-none select-none" style="max-width:${layout.topRightMaxW}px;max-height:${layout.topRightMaxH}px;" />
           </div>
         ` : ''}
 
@@ -6845,8 +6845,8 @@ function renderContextOverlay(page) {
               ${hasCreatorLogo ? `<button id="covCreatorLogoClr" title="Remove creator logo" class="pr-2 pl-1 py-1 opacity-85 hover:opacity-100">×</button>` : ''}
             </div>
             <div class="inline-flex items-center rounded-full overflow-hidden ${hasThemeImg ? 'bg-[#1a73e8] text-white' : 'bg-black/5 dark:bg-white/10'}">
-              <button id="covThemeImgBtn" class="px-2.5 py-1 font-semibold">Theme Image</button>
-              ${hasThemeImg ? `<button id="covThemeImgClr" title="Remove theme image" class="pr-2 pl-1 py-1 opacity-85 hover:opacity-100">×</button>` : ''}
+              <button id="covThemeImgBtn" title="Upload top-right series or theme logo" class="px-2.5 py-1 font-semibold">Series / Theme Logo</button>
+              ${hasThemeImg ? `<button id="covThemeImgClr" title="Remove series / theme logo" class="pr-2 pl-1 py-1 opacity-85 hover:opacity-100">×</button>` : ''}
             </div>
             <div class="inline-flex items-center rounded-full overflow-hidden ${hasBg ? 'bg-[#1a73e8] text-white' : 'bg-black/5 dark:bg-white/10'}">
               <button id="covBgBtn" class="px-2.5 py-1 font-semibold">Background Image</button>
@@ -11978,7 +11978,7 @@ document.getElementById('projectLoadInput').onchange = async (e) => {
   } catch (err) { showToast('Could not read project file.'); }
 };
 
-// Image Insert & Cover Image Uploads (Creator Logo, Theme Image, Background)
+// Image Insert & Cover Image Uploads (Creator Logo, Series / Theme Logo, Background)
 let pendingCoverImageSlot = 'bg';
 function openCoverImagePicker(slot = 'bg') {
   pendingCoverImageSlot = slot;
