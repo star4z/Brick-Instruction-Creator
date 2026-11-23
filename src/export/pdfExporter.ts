@@ -148,7 +148,7 @@ export async function exportManualToPdf(
       doc.setTextColor(...mutedRgb);
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(11);
-      doc.text(back.footerNote || 'Created with Brick Instruction Creator', widthMm / 2, heightMm - 16, {
+      doc.text(back.footerNote || 'Created with Brick Instruction Works', widthMm / 2, heightMm - 16, {
         align: 'center',
       });
       continue;

@@ -1,4 +1,4 @@
-# Brick Instruction Creator — Automatic LEGO Instruction Creator
+# Brick Instruction Works — Automatic LEGO Instruction Studio
 
 An opinionated yet fully customizable client-side TypeScript web application that converts **BrickLink Studio (`.io`)** and **LDraw (`.ldr` / `.mpd`)** models into publication-ready LEGO instruction manuals—without BrickLink Studio's cascading page-reformatting side effects.
 
@@ -31,8 +31,10 @@ npm run dev
 - `npm run detect:design` — Run Impeccable anti-pattern & design quality detector on `src/`
 - `npm run detect:design:dist` — Run Impeccable detector on the built `dist/index.html` bundle
 
-## Design Documentation
+## Product & Design Documentation
 
-All architecture specs and feature design proposals live in [`docs/`](docs/README.md) and are updated as the project evolves:
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — Core system architecture & invariants
-- [docs/SUBDIVISION_DESIGN.md](docs/SUBDIVISION_DESIGN.md) — Large & elongated model subdivision on import
+- [PRODUCT.md](PRODUCT.md) — Durable product truth, audiences, workflows, and brand commitments
+- [DESIGN.md](DESIGN.md) — Billund Print-Proofing Table visual baseline, design tokens, typography, and component rules
+- All architecture specs and feature design proposals live in [`docs/`](docs/README.md) and are updated as the project evolves:
+  - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — Core system architecture & invariants
+  - [docs/SUBDIVISION_DESIGN.md](docs/SUBDIVISION_DESIGN.md) — Large & elongated model subdivision on import

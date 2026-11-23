@@ -1,0 +1,12 @@
+{
+  "buildPath": "comp",
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [
+      "src/data/themePresets.ts",
+      "src/types/manual.ts",
+      "src/export/interactiveHtmlExporter.ts"
+    ],
+    "ignoreValues": []
+  }
+}

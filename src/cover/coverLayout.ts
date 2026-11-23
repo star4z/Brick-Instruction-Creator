@@ -1,6 +1,6 @@
 // Front cover metadata, editorial LEGO-style layout geometry, and camera-space framing helpers.
 
-export const PROGRAM_NAME = 'Brick Instruction Creator';
+export const PROGRAM_NAME = 'Brick Instruction Works';
 export const PROGRAM_URL = 'https://star4z.github.io/Brick-Instruction-Creator/';
 
 export interface CoverMeta {

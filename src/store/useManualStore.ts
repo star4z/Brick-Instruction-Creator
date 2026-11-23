@@ -134,7 +134,7 @@ function buildInitialState(demoIndex = 0) {
   const back: BackConfig = {
     enabled: true,
     headline: 'Build Complete!',
-    footerNote: 'Generated with Brick Instruction Creator — Non-Destructive LEGO Instruction Studio',
+    footerNote: 'Generated with Brick Instruction Works — Non-Destructive Instruction Studio',
     showCompletionRender: true,
     showStatsSummary: true,
   };

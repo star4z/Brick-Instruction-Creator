@@ -1,12 +1,13 @@
 // @ts-nocheck
 /* eslint-disable */
-// Brick Instruction Creator — Interactive WebGL Manual Studio Runtime
+// Brick Instruction Works — Interactive WebGL Manual Studio Runtime
 // Compiled & bundled locally by Vite for GitHub Pages and Neocities deployment.
 
 import {
   analyzeModelSubdivisions,
   classifySubdivisionPartFlags,
 } from './engine/subdivisionAnalyzer';
+import { DEMO_MODELS } from './data/demoModels';
 import {
   compileDatEntry as compileLDrawDatEntry,
   isDirectRgbColor,
@@ -156,13 +157,7 @@ import {
   parsePartIdListInput,
 } from './engine/bricksLibrary';
 
-const BRAND_LOGO_ROTATION_DEG = 12;
-const BRAND_LOGO_PATHS: ReadonlyArray<readonly [string, string]> = [
-  ['M24.8 7.8 Q17.9 12.8 13.7 20.2 L16.3 19.7 Q13.8 23.2 11.6 26.6 Q11.3 31.1 11.6 35.3 L14.9 32.7 Q13.9 38.0 13.3 42.8 Q14.6 45.2 15.8 47.2 L18.2 42.8 Q19.8 48.9 21.1 54.7 Q14.1 52.2 6.7 49.4 L13.1 48.9 Q12.0 46.5 11.1 43.7 Q7.5 38.4 3.3 32.7 L8.9 35.6 Q8.9 31.0 9.8 26.2 Q9.4 20.7 8.7 14.7 L11.7 19.3 Q17.3 12.2 24.8 7.8 Z', '#38bdf8'],
-  ['M31.7 7.1 Q34.8 10.1 37.5 15.7 L40.5 12.6 Q39.4 17.0 38.6 21.0 Q39.3 24.7 39.7 28.3 L44.0 25.1 Q41.5 30.5 39.5 35.5 Q39.5 39.0 39.4 42.1 L45.1 39.1 Q41.3 43.9 38.0 48.3 Q37.7 50.7 37.2 52.6 L43.4 51.6 Q37.7 54.5 32.1 57.0 Q31.0 52.0 30.1 46.7 L33.7 51.3 Q34.4 49.7 35.3 47.6 Q34.4 43.5 33.2 39.1 L36.2 41.6 Q36.7 38.7 37.0 35.4 Q35.0 30.9 32.5 26.0 L36.9 28.4 Q36.8 24.9 36.5 21.3 Q34.9 18.4 32.8 15.4 L35.5 16.3 Q34.0 10.5 31.7 7.1 Z', '#7c152e'],
-  ['M38.5 8.3 Q46.1 12.5 51.9 18.8 L54.4 14.1 Q54.1 19.9 54.2 25.1 Q55.2 29.4 55.5 33.5 L60.9 30.3 Q57.1 36.0 53.8 41.3 Q53.3 43.4 52.6 45.4 L58.5 45.0 Q51.8 48.7 45.4 51.9 Q46.2 46.3 47.4 40.3 L49.8 43.9 Q50.7 42.4 51.6 40.6 Q50.8 36.2 49.6 31.4 L52.8 33.4 Q52.8 29.7 52.3 25.6 Q50.1 22.7 47.5 19.6 L50.0 19.8 Q45.5 13.1 38.5 8.3 Z', '#ed7d1f'],
-];
-const BRAND_LOGO_SVG_BODY = `<g transform="rotate(${BRAND_LOGO_ROTATION_DEG} 32 32)">${BRAND_LOGO_PATHS.map(([d, col]) => `<path d="${d}" fill="${col}"/>`).join('')}</g>`;
+const BRAND_LOGO_SVG_BODY = `<path d="M6 15V6h9M49 6h9v9M58 49v9h-9M15 58H6v-9" stroke="#1B1A18" stroke-width="2.5" stroke-linecap="square"/><rect x="14" y="14" width="36" height="36" rx="2" stroke="#1B1A18" stroke-width="2.5" fill="#FAF9F6"/><circle cx="24" cy="24" r="5" fill="#C9341B"/><circle cx="40" cy="24" r="5" stroke="#1B1A18" stroke-width="2.2" fill="none"/><circle cx="24" cy="40" r="5" stroke="#1B1A18" stroke-width="2.2" fill="none"/><circle cx="40" cy="40" r="5" fill="#1B1A18"/>`;
 
 let initialized = false;
 
@@ -5334,7 +5329,7 @@ const state = {
   dividerAfter: {},        // keyed by pageId: { title, note }
   coverMeta: createDefaultCoverMeta(),
   completeMeta: { title:'Build Complete!', subtitle:'Ready for display!', az:315, el:28, bgSrc:null, showText:true, showFireworks:true },
-  backMeta:  { title:'', subtitle:'Made with Brick Instruction Creator', az:38, el:24, bgSrc:null },
+  backMeta:  { title:'', subtitle:'Made with Brick Instruction Works', az:38, el:24, bgSrc:null },
   bomConfig: {
     density: 'balanced',     // 'compact' | 'balanced' | 'spacious'
     flow: 'rows',            // 'rows' | 'columns'
@@ -5945,16 +5940,16 @@ function getModelFileTypeInfo() {
   const rawName = (rec?.fileName || '').trim();
   const lower = rawName.toLowerCase();
   if (lower.endsWith('.io') || rec?.kind === 'io') {
-    return { badge: '.IO', label: 'BrickLink Studio (.io)', cls: 'bg-[#1a73e8]/15 text-[#1a73e8]' };
+    return { badge: '.IO', label: 'BrickLink Studio (.io)', cls: 'bg-[var(--primary-soft)] text-[var(--primary)]' };
   }
   if (lower.endsWith('.mpd')) {
-    return { badge: '.MPD', label: 'LDraw Multi-Part (.mpd)', cls: 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300' };
+    return { badge: '.MPD', label: 'LDraw Multi-Part (.mpd)', cls: 'bg-[var(--info-soft)] text-[var(--info)]' };
   }
   if (lower.endsWith('.ldr') || rec?.kind === 'ldr') {
-    return { badge: '.LDR', label: 'LDraw (.ldr)', cls: 'bg-amber-500/15 text-amber-700 dark:text-amber-300' };
+    return { badge: '.LDR', label: 'LDraw (.ldr)', cls: 'bg-[var(--warning-soft)] text-[var(--warning)]' };
   }
   if (rec?.kind === 'project' || lower.endsWith('.json')) {
-    return { badge: '.JSON', label: 'Saved Project (.bic.json)', cls: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' };
+    return { badge: '.JSON', label: 'Saved Project (.bic.json)', cls: 'bg-[var(--success-soft)] text-[var(--success)]' };
   }
   return { badge: 'MODEL', label: 'Imported Model', cls: 'bg-black/10 dark:bg-white/10 text-[var(--muted-foreground)]' };
 }
@@ -5983,6 +5978,8 @@ function renderAll() {
   document.getElementById('emptyState').classList.toggle('hidden', hasModel);
   document.getElementById('stageViewport').classList.toggle('hidden', !hasModel);
   document.getElementById('topRightPills').classList.toggle('hidden', !hasModel);
+  const headerEmptyEl = document.getElementById('headerEmptyActions');
+  if (headerEmptyEl) headerEmptyEl.classList.toggle('hidden', hasModel);
   document.getElementById('bottomDock').classList.toggle('hidden', !hasModel);
 
   const typeBadgeEl = document.getElementById('menuModelTypeBadge');
@@ -5990,7 +5987,7 @@ function renderAll() {
   const statsEl = document.getElementById('menuModelStats');
 
   if (!hasModel) {
-    document.getElementById('desktopModelName').textContent = 'Brick Instruction Creator';
+    document.getElementById('desktopModelName').textContent = 'Brick Instruction Works';
     document.getElementById('desktopModelMeta').textContent = '';
     document.getElementById('menuModelName').textContent = 'No model loaded';
     if (typeBadgeEl) typeBadgeEl.classList.add('hidden');
@@ -6013,7 +6010,7 @@ function renderAll() {
   document.getElementById('menuModelName').textContent = state.model.title;
   if (typeBadgeEl) {
     typeBadgeEl.textContent = ft.badge;
-    typeBadgeEl.className = `shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wide uppercase ${ft.cls}`;
+    typeBadgeEl.className = `shrink-0 px-2 py-0.5 rounded font-mono text-xs font-semibold tracking-wide uppercase ${ft.cls}`;
   }
   if (fileTypeEl) {
     fileTypeEl.textContent = ft.label;
@@ -6021,9 +6018,9 @@ function renderAll() {
   }
   if (statsEl) {
     statsEl.innerHTML = `
-      <span class="px-2 py-0.5 rounded-full bg-[var(--card)] border border-[var(--border)]">${allParts.length} pieces</span>
-      <span class="px-2 py-0.5 rounded-full bg-[var(--card)] border border-[var(--border)]">${allSteps.length} steps</span>
-      <span class="px-2 py-0.5 rounded-full bg-[var(--card)] border border-[var(--border)]">${state.pages.length} pages</span>`;
+      <span class="px-2 py-0.5 rounded bg-[var(--card)] border border-[var(--border)]">${allParts.length} pieces</span>
+      <span class="px-2 py-0.5 rounded bg-[var(--card)] border border-[var(--border)]">${allSteps.length} steps</span>
+      <span class="px-2 py-0.5 rounded bg-[var(--card)] border border-[var(--border)]">${state.pages.length} pages</span>`;
     statsEl.classList.remove('hidden');
   }
 
@@ -6057,8 +6054,8 @@ function renderAll() {
     const active = isSimpleEdit
       ? (m === 'pan' ? state.mode === 'pan' : m === 'edit' && state.mode !== 'pan')
       : m === state.mode;
-    b.className = `mode-btn ${visible ? 'flex' : 'hidden'} px-2.5 sm:px-3 py-1.5 rounded-full items-center gap-1 whitespace-nowrap transition ${
-      active ? 'bg-[#1a73e8] text-white shadow-xs' : 'opacity-75 hover:opacity-100'
+    b.className = `mode-btn ${visible ? 'flex' : 'hidden'} min-h-[40px] sm:min-h-[34px] px-3 py-1.5 rounded-md items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer ${
+      active ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--card)]/70'
     }`;
   });
 
@@ -6166,7 +6163,7 @@ function renderAll() {
               <svg class="shrink-0" style="width:${layout.brandIconSize}px;height:${layout.brandIconSize}px;" viewBox="0 0 64 64" fill="none" aria-hidden="true">${BRAND_LOGO_SVG_BODY}</svg>
               <div class="min-w-0 leading-tight" style="color:${badgeTextColor};">
                 <div class="font-extrabold tracking-tight whitespace-nowrap" style="font-size:${layout.brandTitleFontPx}px;line-height:1.14;">Brick Instruction</div>
-                <div class="font-semibold opacity-75 whitespace-nowrap" style="font-size:${layout.brandTitleFontPx}px;line-height:1.14;">Creator</div>
+                <div class="font-semibold opacity-75 whitespace-nowrap" style="font-size:${layout.brandTitleFontPx}px;line-height:1.14;">Works</div>
               </div>
             </div>
             ${layout.qrCardRect ? `
@@ -6201,7 +6198,7 @@ function renderAll() {
   } else if (page.kind === 'back') {
     const bm = state.backMeta;
     const credit = (!bm.subtitle || bm.subtitle === 'Created with Brick Instruction Creator')
-      ? 'Made with Brick Instruction Creator'
+      ? 'Made with Brick Instruction Works'
       : bm.subtitle;
     frame.innerHTML = `
       <div class="relative w-full h-full text-center flex flex-col items-center justify-center overflow-hidden ${guideCls}" style="padding:${padPx + Math.round(typo.pt(8))}px;${bm.bgSrc ? `background-image:url(${bm.bgSrc});background-size:cover;background-position:center;` : ''}">
@@ -6492,7 +6489,7 @@ function renderAll() {
                   ${pli.slice(0, 7).map(item => {
                     const anySel = state.mode === 'select' && item.ids.some(id => state.selectedPartIds.has(id));
                     const thumb = getPliThumb(item.part);
-                    return `<button type="button" data-pli-ids="${item.ids.join(',')}" data-step="${step.id}" class="pli-chip flex flex-col items-center rounded-lg transition ${anySel ? 'ring-2 ring-[#1a73e8] bg-[#1a73e8]/15' : ''}" style="padding:${Math.round(typo.pt(1.5))}px ${Math.round(typo.pt(2))}px" title="${escHtml(resolvePart(item.part.p).name)}">
+                    return `<button type="button" data-pli-ids="${item.ids.join(',')}" data-step="${step.id}" class="pli-chip flex flex-col items-center rounded-lg transition ${anySel ? 'ring-2 ring-[var(--primary)] bg-[var(--primary-soft)]' : ''}" style="padding:${Math.round(typo.pt(1.5))}px ${Math.round(typo.pt(2))}px" title="${escHtml(resolvePart(item.part.p).name)}">
                       <div class="flex items-center font-bold" style="gap:${Math.round(typo.pt(2.5))}px;font-size:${pliQtyPx}px">
                         <img src="${thumb}" style="width:${pliThumbPx}px;height:${pliThumbPx}px" class="shrink-0 object-contain pointer-events-none" />
                         <span>${item.qty}×</span>
@@ -6519,7 +6516,7 @@ function renderAll() {
                 ${(() => {
                   const pinIconPx = Math.round(st.cueFont * 1.05);
                   const pinBadgeHtml = hasStepPageBreak(state.overrides, step.id, { step, minifigSeqSlice })
-                    ? `<span class="no-print inline-flex items-center font-bold rounded-full bg-[#1a73e8]/15 text-[#1a73e8] shrink-0 whitespace-nowrap" style="gap:${Math.round(typo.pt(2))}px;font-size:${st.cueFont}px;padding:${Math.round(typo.pt(1.5))}px ${Math.round(typo.pt(5))}px" title="Page break: Step ${step.num} always starts a new page so earlier edits won't shift later pages"><svg style="width:${pinIconPx}px;height:${pinIconPx}px" class="shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4"/><path d="M10 12h4"/><path d="M17 12h4"/><path d="M6 4v3a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V4"/><path d="M6 20v-3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v3"/></svg><span>Page Break</span></span>`
+                    ? `<span class="no-print inline-flex items-center font-bold rounded-full bg-[var(--primary-soft)] text-[var(--primary)] shrink-0 whitespace-nowrap" style="gap:${Math.round(typo.pt(2))}px;font-size:${st.cueFont}px;padding:${Math.round(typo.pt(1.5))}px ${Math.round(typo.pt(5))}px" title="Page break: Step ${step.num} always starts a new page so earlier edits won't shift later pages"><svg style="width:${pinIconPx}px;height:${pinIconPx}px" class="shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4"/><path d="M10 12h4"/><path d="M17 12h4"/><path d="M6 4v3a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V4"/><path d="M6 20v-3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v3"/></svg><span>Page Break</span></span>`
                     : '';
                   if (isOfficialMfStyle) {
                     const showMfLabel = ch.steps.length > 1 || slots.length > 1;
@@ -6790,7 +6787,7 @@ function renderContextOverlay(page) {
     if (!state.bomShortcutVisible && state.mode === 'pan') { box.classList.add('hidden'); return; }
     box.classList.remove('hidden');
     box.innerHTML = `
-      <button id="bomQuickCustomizeBtn" class="pointer-events-auto glass-pill px-4 py-2.5 rounded-full inline-flex items-center gap-2 text-xs font-bold text-[#1a73e8] hover:scale-[1.02] active:scale-95 transition">
+      <button id="bomQuickCustomizeBtn" class="pointer-events-auto studio-surface px-4 py-2.5 rounded-full inline-flex items-center gap-2 text-xs font-bold text-[var(--primary)] hover:scale-[1.02] active:scale-95 transition">
         <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
         <span>Customize Parts List</span>
       </button>`;
@@ -6811,8 +6808,17 @@ function renderContextOverlay(page) {
     const label = isCover ? 'Cover Page' : isComplete ? 'Build Complete Page' : 'Back Cover';
     const defaultTitle = isCover ? state.model.title : 'Build Complete!';
     const backCredit = (!meta.subtitle || meta.subtitle === 'Created with Brick Instruction Creator')
-      ? 'Made with Brick Instruction Creator'
+      ? 'Made with Brick Instruction Works'
       : meta.subtitle;
+
+    const icoRotL = '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>';
+    const icoRotR = '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>';
+    const icoUp = '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>';
+    const icoDown = '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>';
+    const icoMinus = '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="5" x2="19" y1="12" y2="12"/></svg>';
+    const icoPlus = '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="12" x2="12" y1="5" y2="19"/><line x1="5" x2="19" y1="12" y2="12"/></svg>';
+    const icoClose = '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
+    const icoSpark = '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg>';
 
     if (isCover) {
       const hasCreatorLogo = Boolean(meta.creatorLogoSrc);
@@ -6820,37 +6826,37 @@ function renderContextOverlay(page) {
       const hasBg = Boolean(meta.bgSrc);
       const qrOn = meta.showQrCode !== false;
       box.innerHTML = `
-        <div class="pointer-events-auto glass-pill rounded-2xl p-3 w-full space-y-2 text-xs">
-          <div class="flex items-center justify-between gap-1.5 flex-wrap font-bold">
+        <div class="pointer-events-auto studio-surface rounded-xl p-3.5 w-full space-y-2.5 text-xs">
+          <div class="flex items-center justify-between gap-2 flex-wrap font-semibold">
             <span>Edit Cover Page</span>
             <div class="flex items-center gap-1 flex-wrap">
-              <button id="covRotL" title="Rotate model left" class="px-2 py-1 rounded-full bg-black/5 dark:bg-white/10">↺</button>
-              <button id="covRotR" title="Rotate model right" class="px-2 py-1 rounded-full bg-black/5 dark:bg-white/10">↻</button>
-              <button id="covTiltU" title="Tilt camera up" class="px-2 py-1 rounded-full bg-black/5 dark:bg-white/10">↑</button>
-              <button id="covTiltD" title="Tilt camera down" class="px-2 py-1 rounded-full bg-black/5 dark:bg-white/10">↓</button>
-              <button id="covZoomOut" title="Zoom model out" class="px-2 py-1 rounded-full bg-black/5 dark:bg-white/10">−</button>
-              <button id="covZoomIn" title="Zoom model in" class="px-2 py-1 rounded-full bg-black/5 dark:bg-white/10">+</button>
-              <button id="covResetCam" title="Reset hero camera" class="px-2 py-1 rounded-full bg-black/5 dark:bg-white/10 font-medium">Reset</button>
+              <button id="covRotL" type="button" title="Rotate model left" aria-label="Rotate model left" class="h-8 w-8 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] flex items-center justify-center">${icoRotL}</button>
+              <button id="covRotR" type="button" title="Rotate model right" aria-label="Rotate model right" class="h-8 w-8 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] flex items-center justify-center">${icoRotR}</button>
+              <button id="covTiltU" type="button" title="Tilt camera up" aria-label="Tilt camera up" class="h-8 w-8 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] flex items-center justify-center">${icoUp}</button>
+              <button id="covTiltD" type="button" title="Tilt camera down" aria-label="Tilt camera down" class="h-8 w-8 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] flex items-center justify-center">${icoDown}</button>
+              <button id="covZoomOut" type="button" title="Zoom model out" aria-label="Zoom model out" class="h-8 w-8 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] flex items-center justify-center">${icoMinus}</button>
+              <button id="covZoomIn" type="button" title="Zoom model in" aria-label="Zoom model in" class="h-8 w-8 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] flex items-center justify-center">${icoPlus}</button>
+              <button id="covResetCam" type="button" title="Reset hero camera" class="h-8 px-2.5 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] font-semibold">Reset</button>
             </div>
           </div>
-          <div class="grid grid-cols-2 gap-1.5">
-            <input id="covTitleIn" value="${escHtml(meta.title || defaultTitle)}" placeholder="Model name" class="px-2.5 py-1.5 rounded-xl bg-black/5 dark:bg-white/10 outline-none" />
-            <input id="covSubIn" value="${escHtml(meta.subtitle || '')}" placeholder="Subtitle (optional)" class="px-2.5 py-1.5 rounded-xl bg-black/5 dark:bg-white/10 outline-none" />
+          <div class="grid grid-cols-2 gap-2">
+            <input id="covTitleIn" value="${escHtml(meta.title || defaultTitle)}" placeholder="Model name" class="px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] outline-none focus:border-[var(--primary)]" />
+            <input id="covSubIn" value="${escHtml(meta.subtitle || '')}" placeholder="Subtitle (optional)" class="px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] outline-none focus:border-[var(--primary)]" />
           </div>
           <div class="flex items-center gap-1.5 flex-wrap">
-            <div class="inline-flex items-center rounded-full overflow-hidden ${hasCreatorLogo ? 'bg-[#1a73e8] text-white' : 'bg-black/5 dark:bg-white/10'}">
-              <button id="covCreatorLogoBtn" class="px-2.5 py-1 font-semibold">Creator Logo</button>
-              ${hasCreatorLogo ? `<button id="covCreatorLogoClr" title="Remove creator logo" class="pr-2 pl-1 py-1 opacity-85 hover:opacity-100">×</button>` : ''}
+            <div class="inline-flex items-center rounded-md overflow-hidden ${hasCreatorLogo ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'bg-[var(--surface-sunken)]'}">
+              <button id="covCreatorLogoBtn" type="button" class="px-2.5 py-1.5 font-semibold">Creator Logo</button>
+              ${hasCreatorLogo ? `<button id="covCreatorLogoClr" type="button" title="Remove creator logo" aria-label="Remove creator logo" class="pr-2 pl-1 py-1.5 flex items-center justify-center opacity-85 hover:opacity-100">${icoClose}</button>` : ''}
             </div>
-            <div class="inline-flex items-center rounded-full overflow-hidden ${hasThemeImg ? 'bg-[#1a73e8] text-white' : 'bg-black/5 dark:bg-white/10'}">
-              <button id="covThemeImgBtn" title="Upload top-right series or theme logo" class="px-2.5 py-1 font-semibold">Series / Theme Logo</button>
-              ${hasThemeImg ? `<button id="covThemeImgClr" title="Remove series / theme logo" class="pr-2 pl-1 py-1 opacity-85 hover:opacity-100">×</button>` : ''}
+            <div class="inline-flex items-center rounded-md overflow-hidden ${hasThemeImg ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'bg-[var(--surface-sunken)]'}">
+              <button id="covThemeImgBtn" type="button" title="Upload top-right series or theme logo" class="px-2.5 py-1.5 font-semibold">Series / Theme Logo</button>
+              ${hasThemeImg ? `<button id="covThemeImgClr" type="button" title="Remove series / theme logo" aria-label="Remove series or theme logo" class="pr-2 pl-1 py-1.5 flex items-center justify-center opacity-85 hover:opacity-100">${icoClose}</button>` : ''}
             </div>
-            <div class="inline-flex items-center rounded-full overflow-hidden ${hasBg ? 'bg-[#1a73e8] text-white' : 'bg-black/5 dark:bg-white/10'}">
-              <button id="covBgBtn" class="px-2.5 py-1 font-semibold">Background Image</button>
-              ${hasBg ? `<button id="covBgClr" title="Remove background image" class="pr-2 pl-1 py-1 opacity-85 hover:opacity-100">×</button>` : ''}
+            <div class="inline-flex items-center rounded-md overflow-hidden ${hasBg ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'bg-[var(--surface-sunken)]'}">
+              <button id="covBgBtn" type="button" class="px-2.5 py-1.5 font-semibold">Background Image</button>
+              ${hasBg ? `<button id="covBgClr" type="button" title="Remove background image" aria-label="Remove background image" class="pr-2 pl-1 py-1.5 flex items-center justify-center opacity-85 hover:opacity-100">${icoClose}</button>` : ''}
             </div>
-            <button id="covQrToggle" class="px-2.5 py-1 rounded-full font-semibold ${qrOn ? 'bg-[#1a73e8] text-white' : 'bg-black/5 dark:bg-white/10'}">QR Code</button>
+            <button id="covQrToggle" type="button" class="px-2.5 py-1.5 rounded-md font-semibold ${qrOn ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'bg-[var(--surface-sunken)]'}">QR Code</button>
           </div>
         </div>`;
 
@@ -6882,27 +6888,27 @@ function renderContextOverlay(page) {
     }
 
     box.innerHTML = `
-      <div class="pointer-events-auto glass-pill rounded-2xl p-3 w-full space-y-2 text-xs">
-        <div class="flex items-center justify-between gap-1.5 flex-wrap font-bold">
+      <div class="pointer-events-auto studio-surface rounded-xl p-3.5 w-full space-y-2.5 text-xs">
+        <div class="flex items-center justify-between gap-2 flex-wrap font-semibold">
           <span>Edit ${label}</span>
-          <div class="flex items-center gap-1 flex-wrap">
+          <div class="flex items-center gap-1.5 flex-wrap">
             ${!isBack ? `
-              <button id="covRotL" class="px-2.5 py-1 rounded-full bg-black/5 dark:bg-white/10">↺ Angle</button>
-              <button id="covRotR" class="px-2.5 py-1 rounded-full bg-black/5 dark:bg-white/10">↻ Angle</button>
+              <button id="covRotL" type="button" class="px-2.5 py-1.5 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] inline-flex items-center gap-1">${icoRotL}<span>Angle</span></button>
+              <button id="covRotR" type="button" class="px-2.5 py-1.5 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] inline-flex items-center gap-1">${icoRotR}<span>Angle</span></button>
             ` : ''}
             ${isComplete ? `
-              <button id="compToggleText" class="px-2.5 py-1 rounded-full ${meta.showText !== false ? 'bg-[#1a73e8] text-white' : 'bg-black/5 dark:bg-white/10'}">Text</button>
-              <button id="compToggleFw" class="px-2.5 py-1 rounded-full ${meta.showFireworks !== false ? 'bg-[#1a73e8] text-white' : 'bg-black/5 dark:bg-white/10'}">✦ Fireworks</button>
+              <button id="compToggleText" type="button" class="px-2.5 py-1.5 rounded-md ${meta.showText !== false ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'bg-[var(--surface-sunken)]'}">Text</button>
+              <button id="compToggleFw" type="button" class="px-2.5 py-1.5 rounded-md inline-flex items-center gap-1 ${meta.showFireworks !== false ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'bg-[var(--surface-sunken)]'}">${icoSpark}<span>Fireworks</span></button>
             ` : ''}
-            <button id="covBgBtn" class="px-2.5 py-1 rounded-full bg-[#1a73e8] text-white">Background Image</button>
+            <button id="covBgBtn" type="button" class="px-2.5 py-1.5 rounded-md bg-[var(--primary)] text-[var(--primary-foreground)]">Background Image</button>
           </div>
         </div>
         ${isBack ? `
-          <input id="covSubIn" value="${escHtml(backCredit)}" placeholder="Back cover text" class="w-full px-2.5 py-1.5 rounded-xl bg-black/5 dark:bg-white/10 outline-none" />
+          <input id="covSubIn" value="${escHtml(backCredit)}" placeholder="Back cover text" class="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] outline-none focus:border-[var(--primary)]" />
         ` : `
-          <div class="grid grid-cols-2 gap-1.5">
-            <input id="covTitleIn" value="${escHtml(meta.title || defaultTitle)}" placeholder="Title" class="px-2.5 py-1.5 rounded-xl bg-black/5 dark:bg-white/10 outline-none" />
-            <input id="covSubIn" value="${escHtml(meta.subtitle || '')}" placeholder="Subtitle" class="px-2.5 py-1.5 rounded-xl bg-black/5 dark:bg-white/10 outline-none" />
+          <div class="grid grid-cols-2 gap-2">
+            <input id="covTitleIn" value="${escHtml(meta.title || defaultTitle)}" placeholder="Title" class="px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] outline-none focus:border-[var(--primary)]" />
+            <input id="covSubIn" value="${escHtml(meta.subtitle || '')}" placeholder="Subtitle" class="px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] outline-none focus:border-[var(--primary)]" />
           </div>
         `}
       </div>`;
@@ -6924,13 +6930,13 @@ function renderContextOverlay(page) {
   if (page.kind === 'divider') {
     const d = state.dividerAfter[page.sourcePgId] || { title:'Section Divider', note:'' };
     box.innerHTML = `
-      <div class="pointer-events-auto glass-pill rounded-2xl p-3 w-full space-y-2 text-xs">
-        <div class="flex justify-between items-center font-bold">
+      <div class="pointer-events-auto studio-surface rounded-xl p-3.5 w-full space-y-2.5 text-xs">
+        <div class="flex justify-between items-center font-semibold">
           <span>Edit Divider Page</span>
-          <button id="delDividerBtn" class="px-2.5 py-1 rounded-full bg-red-500/15 text-red-600 font-semibold">Delete Page</button>
+          <button id="delDividerBtn" type="button" class="px-3 py-1.5 rounded-md bg-[var(--danger-soft)] text-[var(--danger)] font-semibold">Delete Page</button>
         </div>
-        <input id="divTitleIn" value="${d.title.replace(/"/g,'&quot;')}" class="w-full px-2.5 py-1.5 rounded-xl bg-black/5 dark:bg-white/10 outline-none" placeholder="Divider Title" />
-        <input id="divNoteIn" value="${(d.note || '').replace(/"/g,'&quot;')}" class="w-full px-2.5 py-1.5 rounded-xl bg-black/5 dark:bg-white/10 outline-none" placeholder="Optional note..." />
+        <input id="divTitleIn" value="${d.title.replace(/"/g,'&quot;')}" class="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] outline-none focus:border-[var(--primary)]" placeholder="Divider Title" />
+        <input id="divNoteIn" value="${(d.note || '').replace(/"/g,'&quot;')}" class="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] outline-none focus:border-[var(--primary)]" placeholder="Optional note..." />
       </div>`;
     box.querySelector('#divTitleIn').onchange = (e) => { pushUndo(); state.dividerAfter[page.sourcePgId].title = e.target.value; renderAll(); };
     box.querySelector('#divNoteIn').onchange = (e) => { pushUndo(); state.dividerAfter[page.sourcePgId].note = e.target.value; renderAll(); };
@@ -6949,8 +6955,8 @@ function renderContextOverlay(page) {
     const selCount = state.selectedPartIds.size;
     if (selCount === 0) {
       box.innerHTML = `
-        <div class="pointer-events-auto glass-pill px-4 py-2 rounded-full text-xs font-semibold flex items-center gap-2">
-          <span class="w-2 h-2 rounded-full bg-[#1a73e8]"></span>
+        <div class="pointer-events-auto studio-surface px-4 py-2.5 rounded-lg text-xs font-semibold flex items-center gap-2">
+          <span class="w-2 h-2 rounded-full bg-[var(--primary)]"></span>
           <span>Tap pieces in the 3D step or Parts List to move or split them</span>
         </div>`;
       return;
@@ -6958,42 +6964,51 @@ function renderContextOverlay(page) {
 
     const firstId = Array.from(state.selectedPartIds)[0];
     const pOv = ov.partOffsets?.[firstId] || step.defaultPartOffsets?.[firstId] || { x:0, y:0, z:0, tilt:0, arrow:true };
+    const icoArrUp = '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>';
+    const icoArrDown = '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></svg>';
+    const icoArrLeft = '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>';
+    const icoArrRight = '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>';
+    const icoArrFwd = '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 7 7 17"/><path d="M17 17H7V7"/></svg>';
+    const icoArrBack = '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7"/><path d="M7 7h10v10"/></svg>';
+    const icoTiltL = '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>';
+    const icoTiltR = '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>';
+    const icoDismiss = '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
     box.innerHTML = `
-      <div class="pointer-events-auto glass-pill rounded-3xl p-3 w-full space-y-2.5 text-xs">
+      <div class="pointer-events-auto studio-surface rounded-xl p-3.5 w-full space-y-2.5 text-xs">
         <div class="flex items-center justify-between gap-2">
-          <span class="font-bold text-[#1a73e8]">${selCount} piece${selCount > 1 ? 's' : ''} selected · Step ${step.num}</span>
-          <div class="flex items-center gap-1">
-            <button id="btnToggleArrow" class="px-2.5 py-1 rounded-full border text-[11px] font-semibold ${pOv.arrow !== false ? 'bg-[#1a73e8]/15 border-[#1a73e8] text-[#1a73e8]' : 'border-black/15'}">Arrow ${pOv.arrow !== false ? 'On' : 'Off'}</button>
-            <button id="btnResetSelPos" class="px-2.5 py-1 rounded-full bg-black/5 dark:bg-white/10 text-[11px] font-semibold">Reset</button>
-            <button id="btnClearSel" class="w-6 h-6 rounded-full bg-black/5 dark:bg-white/10 flex items-center justify-center">✕</button>
+          <span class="font-bold text-[var(--primary)]">${selCount} piece${selCount > 1 ? 's' : ''} selected · Step ${step.num}</span>
+          <div class="flex items-center gap-1.5">
+            <button id="btnToggleArrow" type="button" class="px-2.5 py-1.5 rounded-md border text-xs font-semibold ${pOv.arrow !== false ? 'bg-[var(--primary-soft)] border-[var(--primary)] text-[var(--primary)]' : 'border-[var(--border)] bg-[var(--surface-sunken)]'}">Arrow ${pOv.arrow !== false ? 'On' : 'Off'}</button>
+            <button id="btnResetSelPos" type="button" class="px-2.5 py-1.5 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] text-xs font-semibold">Reset</button>
+            <button id="btnClearSel" type="button" aria-label="Clear selection" class="w-8 h-8 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] flex items-center justify-center">${icoDismiss}</button>
           </div>
         </div>
 
-        <!-- Floating Directional Pad (1-stud crisp nudges + Tilt — NO SLIDERS!) -->
+        <!-- Directional Pad (1-stud crisp nudges + Tilt) -->
         <div class="flex items-center justify-between gap-2 flex-wrap">
           <div class="flex items-center gap-1">
-            <span class="text-[10px] font-bold uppercase opacity-60 mr-0.5">Move</span>
-            <button data-nudge="0,20,0" class="nudge-btn h-8 px-2.5 rounded-xl bg-black/5 dark:bg-white/10 font-bold" title="Lift Up">↑</button>
-            <button data-nudge="0,-20,0" class="nudge-btn h-8 px-2.5 rounded-xl bg-black/5 dark:bg-white/10 font-bold" title="Lower">↓</button>
-            <button data-nudge="-20,0,0" class="nudge-btn h-8 px-2.5 rounded-xl bg-black/5 dark:bg-white/10 font-bold" title="Left">←</button>
-            <button data-nudge="20,0,0" class="nudge-btn h-8 px-2.5 rounded-xl bg-black/5 dark:bg-white/10 font-bold" title="Right">→</button>
-            <button data-nudge="0,0,20" class="nudge-btn h-8 px-2.5 rounded-xl bg-black/5 dark:bg-white/10 font-bold" title="Forward">↙</button>
-            <button data-nudge="0,0,-20" class="nudge-btn h-8 px-2.5 rounded-xl bg-black/5 dark:bg-white/10 font-bold" title="Back">↗</button>
+            <span class="text-xs font-semibold text-[var(--muted-foreground)] mr-1">Move</span>
+            <button data-nudge="0,20,0" type="button" class="nudge-btn h-8 w-8 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] flex items-center justify-center" title="Lift Up" aria-label="Lift Up">${icoArrUp}</button>
+            <button data-nudge="0,-20,0" type="button" class="nudge-btn h-8 w-8 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] flex items-center justify-center" title="Lower" aria-label="Lower">${icoArrDown}</button>
+            <button data-nudge="-20,0,0" type="button" class="nudge-btn h-8 w-8 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] flex items-center justify-center" title="Left" aria-label="Left">${icoArrLeft}</button>
+            <button data-nudge="20,0,0" type="button" class="nudge-btn h-8 w-8 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] flex items-center justify-center" title="Right" aria-label="Right">${icoArrRight}</button>
+            <button data-nudge="0,0,20" type="button" class="nudge-btn h-8 w-8 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] flex items-center justify-center" title="Forward" aria-label="Forward">${icoArrFwd}</button>
+            <button data-nudge="0,0,-20" type="button" class="nudge-btn h-8 w-8 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] flex items-center justify-center" title="Back" aria-label="Back">${icoArrBack}</button>
           </div>
           <div class="flex items-center gap-1">
-            <span class="text-[10px] font-bold uppercase opacity-60 mr-0.5">Tilt</span>
-            <button data-tilt="-15" class="tilt-btn h-8 px-2.5 rounded-xl bg-black/5 dark:bg-white/10 font-bold">↺</button>
-            <button data-tilt="15" class="tilt-btn h-8 px-2.5 rounded-xl bg-black/5 dark:bg-white/10 font-bold">↻</button>
+            <span class="text-xs font-semibold text-[var(--muted-foreground)] mr-1">Tilt</span>
+            <button data-tilt="-15" type="button" class="tilt-btn h-8 w-8 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] flex items-center justify-center" title="Tilt Left" aria-label="Tilt Left">${icoTiltL}</button>
+            <button data-tilt="15" type="button" class="tilt-btn h-8 w-8 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] flex items-center justify-center" title="Tilt Right" aria-label="Tilt Right">${icoTiltR}</button>
           </div>
         </div>
 
-        <!-- Direct Step Reorganization Bar (replaces blind Split!) -->
-        <div class="flex items-center gap-1.5 flex-wrap pt-2 border-t border-black/10 dark:border-white/10">
-          <button id="actNewBefore" class="px-2.5 py-1.5 rounded-full bg-[#1a73e8] text-white font-semibold">New Step Before</button>
-          <button id="actNewAfter" class="px-2.5 py-1.5 rounded-full bg-[#1a73e8] text-white font-semibold">New Step After</button>
-          <button id="actMoveStep" class="px-2.5 py-1.5 rounded-full bg-black/5 dark:bg-white/10 font-semibold">Move to Step…</button>
-          <button id="actMergePrev" class="px-2.5 py-1.5 rounded-full bg-black/5 dark:bg-white/10 font-semibold">Merge Prev</button>
-          <button id="actMakeSub" class="px-2.5 py-1.5 rounded-full bg-black/5 dark:bg-white/10 font-semibold">Make Submodel</button>
+        <!-- Direct Step Reorganization Bar -->
+        <div class="flex items-center gap-1.5 flex-wrap pt-2.5 border-t border-[var(--border)]">
+          <button id="actNewBefore" type="button" class="px-3 py-1.5 rounded-md bg-[var(--primary)] text-[var(--primary-foreground)] font-semibold">New Step Before</button>
+          <button id="actNewAfter" type="button" class="px-3 py-1.5 rounded-md bg-[var(--primary)] text-[var(--primary-foreground)] font-semibold">New Step After</button>
+          <button id="actMoveStep" type="button" class="px-3 py-1.5 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] font-semibold">Move to Step…</button>
+          <button id="actMergePrev" type="button" class="px-3 py-1.5 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] font-semibold">Merge Prev</button>
+          <button id="actMakeSub" type="button" class="px-3 py-1.5 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] font-semibold">Make Submodel</button>
         </div>
       </div>`;
 
@@ -7112,37 +7127,37 @@ function renderContextOverlay(page) {
       : MINIFIG_BUILD_CAMERA;
     const isFront34 = isMfStep && Math.abs(cam.az - mfDefaultCam.az) <= 4 && Math.abs(cam.el - mfDefaultCam.el) <= 4;
     box.innerHTML = `
-      <div class="pointer-events-auto glass-pill rounded-3xl p-3 w-full space-y-2 text-xs">
+      <div class="pointer-events-auto studio-surface rounded-xl p-3 w-full space-y-2 text-xs">
         <div class="flex items-center justify-between gap-2 flex-wrap">
           <span class="font-bold">${isMfBuild ? escHtml(step.minifigName || 'Minifigure') : `Step ${step.num}`} · Drag 3D to orbit</span>
           <div class="flex items-center gap-1 flex-wrap">
-            <button id="camTop" class="px-2 py-1 rounded-full font-semibold ${cam.side === 'top' ? 'bg-[#1a73e8] text-white' : 'bg-black/5 dark:bg-white/10'}">Top</button>
-            <button id="camBot" class="px-2 py-1 rounded-full font-semibold ${cam.side === 'bottom' ? 'bg-[#1a73e8] text-white' : 'bg-black/5 dark:bg-white/10'}">Bottom</button>
+            <button id="camTop" class="px-2 py-1 rounded-md font-semibold ${cam.side === 'top' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'bg-black/5 dark:bg-white/10'}">Top</button>
+            <button id="camBot" class="px-2 py-1 rounded-md font-semibold ${cam.side === 'bottom' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'bg-black/5 dark:bg-white/10'}">Bottom</button>
             ${isMfBuild ? `
-              <div class="inline-flex rounded-full bg-black/5 dark:bg-white/10 p-0.5 text-[10px] font-semibold">
-                <button data-mf-quick="exploded" class="mf-quick-style px-2 py-0.5 rounded-full ${curMfStyle === 'exploded' ? 'bg-[#1a73e8] text-white' : ''}">Exploded</button>
-                <button data-mf-quick="sequential" class="mf-quick-style px-2 py-0.5 rounded-full ${curMfStyle === 'sequential' ? 'bg-[#1a73e8] text-white' : ''}">Step-by-Step</button>
-                <button data-mf-quick="classic" class="mf-quick-style px-2 py-0.5 rounded-full ${curMfStyle === 'classic' ? 'bg-[#1a73e8] text-white' : ''}">Classic</button>
+              <div class="inline-flex rounded-md bg-black/5 dark:bg-white/10 p-0.5 text-xs font-semibold">
+                <button data-mf-quick="exploded" class="mf-quick-style px-2 py-0.5 rounded-md ${curMfStyle === 'exploded' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : ''}">Exploded</button>
+                <button data-mf-quick="sequential" class="mf-quick-style px-2 py-0.5 rounded-md ${curMfStyle === 'sequential' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : ''}">Step-by-Step</button>
+                <button data-mf-quick="classic" class="mf-quick-style px-2 py-0.5 rounded-md ${curMfStyle === 'classic' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : ''}">Classic</button>
               </div>
-              <button id="btnToggleMf1to1Quick" class="px-2.5 py-1 rounded-full font-semibold ${state.showMinifig1to1 ? 'bg-[#1a73e8] text-white' : 'bg-black/5 dark:bg-white/10'}">1:1 View</button>` : ''}
-            <div class="inline-flex rounded-full bg-black/5 dark:bg-white/10 p-0.5 text-[10px] font-semibold">
-              <button data-focus="auto" class="focus-btn px-2 py-0.5 rounded-full ${fMode === 'auto' ? 'bg-[#1a73e8] text-white' : ''}">Auto</button>
-              <button data-focus="focus" class="focus-btn px-2 py-0.5 rounded-full ${fMode === 'focus' ? 'bg-[#1a73e8] text-white' : ''}">Close-Up</button>
-              <button data-focus="full" class="focus-btn px-2 py-0.5 rounded-full ${fMode === 'full' ? 'bg-[#1a73e8] text-white' : ''}">Full</button>
+              <button id="btnToggleMf1to1Quick" class="px-2.5 py-1 rounded-md font-semibold ${state.showMinifig1to1 ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'bg-black/5 dark:bg-white/10'}">1:1 View</button>` : ''}
+            <div class="inline-flex rounded-md bg-black/5 dark:bg-white/10 p-0.5 text-xs font-semibold">
+              <button data-focus="auto" class="focus-btn px-2 py-0.5 rounded-md ${fMode === 'auto' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : ''}">Auto</button>
+              <button data-focus="focus" class="focus-btn px-2 py-0.5 rounded-md ${fMode === 'focus' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : ''}">Close-Up</button>
+              <button data-focus="full" class="focus-btn px-2 py-0.5 rounded-md ${fMode === 'full' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : ''}">Full</button>
             </div>
-            <div class="flex items-center gap-1 bg-black/5 dark:bg-white/10 rounded-full px-1.5 py-0.5">
+            <div class="flex items-center gap-1 bg-black/5 dark:bg-white/10 rounded-md px-1.5 py-0.5">
               <button id="modScaleDown" class="w-5 h-5 font-bold">−</button>
-              <span class="text-[10px] font-bold tabular-nums">${scalePct}%</span>
+              <span class="text-xs font-bold tabular-nums">${scalePct}%</span>
               <button id="modScaleUp" class="w-5 h-5 font-bold">+</button>
             </div>
           </div>
         </div>
         <div class="flex items-center justify-between gap-1.5 flex-wrap">
           <div class="flex gap-1 flex-wrap">
-            ${isMfStep ? `<button id="btnMfFront34" class="px-2.5 py-1 rounded-full text-[11px] font-semibold ${isFront34 ? 'bg-[#1a73e8]/15 text-[#1a73e8] ring-1 ring-[#1a73e8]' : 'bg-black/5 dark:bg-white/10'}">Front 3/4</button>` : ''}
-            ${CORNERS.map(c => `<button data-corner="${c.id}" class="corner-btn px-2.5 py-1 rounded-full text-[11px] font-semibold ${!isFront34 && cam.corner === c.id ? 'bg-[#1a73e8]/15 text-[#1a73e8] ring-1 ring-[#1a73e8]' : 'bg-black/5 dark:bg-white/10'}">${c.label}</button>`).join('')}
+            ${isMfStep ? `<button id="btnMfFront34" class="px-2.5 py-1 rounded-md text-xs font-semibold ${isFront34 ? 'bg-[var(--primary-soft)] text-[var(--primary)] ring-1 ring-[var(--primary)]' : 'bg-black/5 dark:bg-white/10'}">Front 3/4</button>` : ''}
+            ${CORNERS.map(c => `<button data-corner="${c.id}" class="corner-btn px-2.5 py-1 rounded-md text-xs font-semibold ${!isFront34 && cam.corner === c.id ? 'bg-[var(--primary-soft)] text-[var(--primary)] ring-1 ring-[var(--primary)]' : 'bg-black/5 dark:bg-white/10'}">${c.label}</button>`).join('')}
           </div>
-          <button id="btnApplyFollowing" class="px-3 py-1 rounded-full bg-[#1a73e8] text-white text-[11px] font-semibold">Apply to Following</button>
+          <button id="btnApplyFollowing" class="px-3 py-1 rounded-md bg-[var(--primary)] text-[var(--primary-foreground)] text-xs font-semibold">Apply to Following</button>
         </div>
       </div>`;
 
@@ -7216,38 +7231,38 @@ function renderContextOverlay(page) {
       slotIndex: Math.max(0, slotIdx),
     });
     const arrangeHeaderLeftHtml = slots.length > 1
-      ? `<div class="inline-flex items-center gap-0.5 rounded-full bg-black/5 dark:bg-white/10 p-0.5 text-[11px] font-bold">
-          ${slots.map(sl => `<button type="button" data-arrange-step="${sl.step.id}" class="arrange-step-btn px-2 py-0.5 rounded-full transition ${sl.step.id === step.id ? 'bg-[#1a73e8] text-white' : 'hover:bg-black/5 dark:hover:bg-white/10'}">Step ${sl.step.num}</button>`).join('')}
+      ? `<div class="inline-flex items-center gap-0.5 rounded-md bg-black/5 dark:bg-white/10 p-0.5 text-xs font-bold">
+          ${slots.map(sl => `<button type="button" data-arrange-step="${sl.step.id}" class="arrange-step-btn px-2 py-0.5 rounded-md transition ${sl.step.id === step.id ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'hover:bg-black/5 dark:hover:bg-white/10'}">Step ${sl.step.num}</button>`).join('')}
         </div>`
       : `<span class="font-bold">${isMfBuild ? escHtml(step.minifigName || `Step ${step.num}`) : `Step ${step.num}`} · Drag boxes to arrange</span>`;
     box.innerHTML = `
-      <div class="pointer-events-auto glass-pill rounded-3xl p-3 w-full space-y-2 text-xs">
+      <div class="pointer-events-auto studio-surface rounded-xl p-3 w-full space-y-2 text-xs">
         <div class="flex items-center justify-between gap-2 flex-wrap">
           ${arrangeHeaderLeftHtml}
           <div class="flex items-center gap-1 flex-wrap">
             ${isMfBuild ? `
-              <div class="inline-flex rounded-full bg-black/5 dark:bg-white/10 p-0.5 text-[10px] font-semibold mr-1">
-                <button data-mf-quick="exploded" class="mf-quick-style px-2 py-0.5 rounded-full ${curMfStyle === 'exploded' ? 'bg-[#1a73e8] text-white' : ''}">Exploded</button>
-                <button data-mf-quick="sequential" class="mf-quick-style px-2 py-0.5 rounded-full ${curMfStyle === 'sequential' ? 'bg-[#1a73e8] text-white' : ''}">Step-by-Step</button>
-                <button data-mf-quick="classic" class="mf-quick-style px-2 py-0.5 rounded-full ${curMfStyle === 'classic' ? 'bg-[#1a73e8] text-white' : ''}">Classic</button>
+              <div class="inline-flex rounded-md bg-black/5 dark:bg-white/10 p-0.5 text-xs font-semibold mr-1">
+                <button data-mf-quick="exploded" class="mf-quick-style px-2 py-0.5 rounded-md ${curMfStyle === 'exploded' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : ''}">Exploded</button>
+                <button data-mf-quick="sequential" class="mf-quick-style px-2 py-0.5 rounded-md ${curMfStyle === 'sequential' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : ''}">Step-by-Step</button>
+                <button data-mf-quick="classic" class="mf-quick-style px-2 py-0.5 rounded-md ${curMfStyle === 'classic' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : ''}">Classic</button>
               </div>` : ''}
-            <span class="text-[11px] opacity-65">Parts Box:</span>
-            <button id="pliDown" class="w-6 h-6 rounded-full bg-black/5 dark:bg-white/10 font-bold">−</button>
-            <span class="text-[11px] font-bold tabular-nums">${pliPct}%</span>
-            <button id="pliUp" class="w-6 h-6 rounded-full bg-black/5 dark:bg-white/10 font-bold">+</button>
-            <button id="btnResetArrange" class="ml-1 px-2.5 py-1 rounded-full bg-black/5 dark:bg-white/10 text-[11px] font-semibold">Reset</button>
+            <span class="text-xs opacity-65">Parts Box:</span>
+            <button id="pliDown" class="w-6 h-6 rounded-md bg-black/5 dark:bg-white/10 font-bold">−</button>
+            <span class="text-xs font-bold tabular-nums">${pliPct}%</span>
+            <button id="pliUp" class="w-6 h-6 rounded-md bg-black/5 dark:bg-white/10 font-bold">+</button>
+            <button id="btnResetArrange" class="ml-1 px-2.5 py-1 rounded-md bg-black/5 dark:bg-white/10 text-xs font-semibold">Reset</button>
           </div>
         </div>
         <div class="flex items-center gap-1.5 flex-wrap">
-          <button id="btnInsText" class="px-2.5 py-1.5 rounded-full bg-[#1a73e8] text-white font-semibold">+ Text Note</button>
-          <button id="btnInsImg" class="px-2.5 py-1.5 rounded-full bg-black/5 dark:bg-white/10 font-semibold">+ Image / Logo</button>
-          <button id="btnArrangePinBreak" title="${escHtml(pinBtnTitle)}" aria-pressed="${isPinned ? 'true' : 'false'}" class="px-2.5 py-1.5 rounded-full font-semibold inline-flex items-center gap-1 transition ${isPinned ? 'bg-[#1a73e8] text-white' : 'bg-black/5 dark:bg-white/10'}">
+          <button id="btnInsText" class="px-2.5 py-1.5 rounded-md bg-[var(--primary)] text-[var(--primary-foreground)] font-semibold">+ Text Note</button>
+          <button id="btnInsImg" class="px-2.5 py-1.5 rounded-md bg-black/5 dark:bg-white/10 font-semibold">+ Image / Logo</button>
+          <button id="btnArrangePinBreak" title="${escHtml(pinBtnTitle)}" aria-pressed="${isPinned ? 'true' : 'false'}" class="px-2.5 py-1.5 rounded-md font-semibold inline-flex items-center gap-1 transition ${isPinned ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'bg-black/5 dark:bg-white/10'}">
             <svg class="w-3 h-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4"/><path d="M10 12h4"/><path d="M17 12h4"/><path d="M6 4v3a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V4"/><path d="M6 20v-3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v3"/></svg>
             <span>Page Break · Step ${step.num}</span>
           </button>
-          ${hasSub ? `<button id="btnToggleCallout" class="px-2.5 py-1.5 rounded-full bg-black/5 dark:bg-white/10 font-semibold">${ov.calloutAsPages ? 'Convert to Callout Box' : 'Convert to Full Page'}</button>` : ''}
-          ${hasSub && !ov.calloutAsPages ? `<button id="btnCalloutDir" class="px-2.5 py-1.5 rounded-full bg-black/5 dark:bg-white/10 font-semibold">${ov.calloutDir === 'vertical' ? 'Side-by-Side' : 'Stack Vertically'}</button>` : ''}
-          ${state.selectedArrangeEl?.kind === 'insert' ? `<button id="btnDelInsert" class="px-2.5 py-1.5 rounded-full bg-red-500/15 text-red-600 font-semibold">Delete Selected</button>` : ''}
+          ${hasSub ? `<button id="btnToggleCallout" class="px-2.5 py-1.5 rounded-md bg-black/5 dark:bg-white/10 font-semibold">${ov.calloutAsPages ? 'Convert to Callout Box' : 'Convert to Full Page'}</button>` : ''}
+          ${hasSub && !ov.calloutAsPages ? `<button id="btnCalloutDir" class="px-2.5 py-1.5 rounded-md bg-black/5 dark:bg-white/10 font-semibold">${ov.calloutDir === 'vertical' ? 'Side-by-Side' : 'Stack Vertically'}</button>` : ''}
+          ${state.selectedArrangeEl?.kind === 'insert' ? `<button id="btnDelInsert" class="px-2.5 py-1.5 rounded-md bg-[var(--danger-soft)] text-[var(--danger)] font-semibold">Delete Selected</button>` : ''}
         </div>
       </div>`;
 
@@ -7378,10 +7393,10 @@ function renderSlotSizeButtons(containerEl, count, sizesArr, onChange) {
   containerEl.innerHTML = Array.from({ length: n }, (_, i) => {
     const val = sizesArr[i] === 'sm' || sizesArr[i] === 'lg' ? sizesArr[i] : 'md';
     const tone = val === 'lg'
-      ? 'border-[#1a73e8] bg-[#1a73e8] text-white'
+      ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]'
       : val === 'sm'
         ? 'border-[var(--border)] bg-[var(--card)] opacity-75'
-        : 'border-[#1a73e8]/50 bg-[#1a73e8]/12 text-[#1a73e8]';
+        : 'border-[var(--primary)]/50 bg-[var(--primary-soft)] text-[var(--primary)]';
     return `<button type="button" data-slot-idx="${i}" class="slot-size-chip px-2.5 py-1 rounded-full border text-[11px] font-bold transition ${tone}">#${i + 1} · ${nextLabel[val]}</button>`;
   }).join('');
   containerEl.querySelectorAll('.slot-size-chip').forEach((btn) => {
@@ -7419,12 +7434,12 @@ function renderLayoutGroupsList() {
         <div class="min-w-0">
           <div class="flex items-center gap-1.5 flex-wrap">
             <span class="font-bold text-xs truncate">${escHtml(grp.name)}</span>
-            <span class="px-1.5 py-0.5 rounded-full bg-[#1a73e8]/12 text-[#1a73e8] text-[10px] font-bold">${escHtml(rangeLabel)}</span>
+            <span class="px-1.5 py-0.5 rounded-full bg-[var(--primary-soft)] text-[var(--primary)] text-[10px] font-bold">${escHtml(rangeLabel)}</span>
             ${themeObj ? `<span class="px-1.5 py-0.5 rounded-full border border-[var(--border)] bg-[var(--card)] text-[10px] font-semibold">${escHtml(themeObj.name)}</span>` : ''}
           </div>
           <div class="text-[10px] text-[var(--muted-foreground)] mt-0.5">${escHtml(summary)}</div>
         </div>
-        <button type="button" data-edit-grp="${escHtml(grp.id)}" class="grp-edit-btn px-2.5 py-1 rounded-full border border-[var(--border)] bg-[var(--card)] text-[11px] font-semibold hover:border-[#1a73e8] shrink-0 transition">Edit</button>
+        <button type="button" data-edit-grp="${escHtml(grp.id)}" class="grp-edit-btn px-2.5 py-1 rounded-full border border-[var(--border)] bg-[var(--card)] text-[11px] font-semibold hover:border-[var(--primary)] shrink-0 transition">Edit</button>
       </div>`;
   }).join('');
 
@@ -7497,7 +7512,7 @@ function syncPageLayoutControlsUI() {
     const act = preset === 'auto'
       ? lc.mode === 'auto'
       : (lc.mode === 'custom' && String(lc.stepsPerPage) === preset);
-    b.className = `layout-btn py-2 rounded-full border font-semibold transition ${act ? 'border-[#1a73e8] bg-[#1a73e8] text-white' : 'border-[var(--border)] bg-[var(--background)]'}`;
+    b.className = `layout-btn py-2 rounded-full border font-semibold transition ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
   });
 
   const stepsInp = document.getElementById('layoutStepsInput');
@@ -7511,12 +7526,12 @@ function syncPageLayoutControlsUI() {
 
   document.querySelectorAll('.step-flow-btn').forEach((b) => {
     const act = b.getAttribute('data-step-flow') === lc.flow;
-    b.className = `step-flow-btn py-1.5 px-2.5 rounded-full border font-semibold transition ${act ? 'border-[#1a73e8] bg-[#1a73e8] text-white' : 'border-[var(--border)] bg-[var(--background)]'}`;
+    b.className = `step-flow-btn py-1.5 px-2.5 rounded-full border font-semibold transition ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
   });
 
   document.querySelectorAll('.mixed-layout-btn').forEach((b) => {
     const act = b.getAttribute('data-mixed-layout') === lc.mixedLayout;
-    b.className = `mixed-layout-btn py-1.5 px-2 rounded-full border font-semibold text-[11px] transition ${act ? 'border-[#1a73e8] bg-[#1a73e8] text-white' : 'border-[var(--border)] bg-[var(--background)]'}`;
+    b.className = `mixed-layout-btn py-1.5 px-2 rounded-full border font-semibold text-[11px] transition ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
   });
 
   const defWrap = document.getElementById('defaultSlotSizesWrap');
@@ -7577,7 +7592,7 @@ function syncMenuControls() {
   document.querySelectorAll('.fmt-btn').forEach(b => {
     const fmtId = b.getAttribute('data-format');
     const act = fmtId === state.paperFormat;
-    b.className = `fmt-btn py-2.5 px-3 rounded-xl border text-left transition ${fmtId === 'custom' ? 'sm:col-span-2 ' : ''}${act ? 'border-[#1a73e8] bg-[#1a73e8]/15 text-[#1a73e8]' : 'border-[var(--border)] bg-[var(--background)]'}`;
+    b.className = `fmt-btn py-2.5 px-3 rounded-xl border text-left transition ${fmtId === 'custom' ? 'sm:col-span-2 ' : ''}${act ? 'border-[var(--primary)] bg-[var(--primary-soft)] text-[var(--primary)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
   });
   document.getElementById('customSizeWrap').classList.toggle('hidden', state.paperFormat !== 'custom');
   document.getElementById('orientationWrap').classList.toggle('hidden', state.paperFormat === 'screen' || state.paperFormat === 'square' || state.paperFormat === 'custom');
@@ -7586,7 +7601,7 @@ function syncMenuControls() {
   if (hInEl && document.activeElement !== hInEl) hInEl.value = String(Number(state.customHeight.toFixed(2)));
   document.querySelectorAll('.unit-btn').forEach(b => {
     const act = b.getAttribute('data-unit') === state.customUnit;
-    b.className = `unit-btn px-2.5 py-0.5 rounded-full text-[11px] font-semibold transition ${act ? 'bg-[#1a73e8] text-white' : 'text-[var(--muted-foreground)]'}`;
+    b.className = `unit-btn px-2.5 py-1 rounded text-xs font-semibold transition ${act ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'text-[var(--muted-foreground)]'}`;
   });
   const cDiv = state.customUnit === 'cm' ? 2.54 : 1;
   const cWIn = Math.max(2, (Number(state.customWidth) || 10) / cDiv);
@@ -7618,16 +7633,16 @@ function syncMenuControls() {
   }
   document.querySelectorAll('.orient-btn').forEach(b => {
     const act = b.getAttribute('data-orient') === state.orientation;
-    b.className = `orient-btn py-2 rounded-full border font-semibold transition ${act ? 'border-[#1a73e8] bg-[#1a73e8] text-white' : 'border-[var(--border)] bg-[var(--background)]'}`;
+    b.className = `orient-btn py-2 rounded-md border font-semibold transition ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
   });
   syncPageLayoutControlsUI();
   document.querySelectorAll('.dens-btn').forEach(b => {
     const act = b.getAttribute('data-density') === state.density;
-    b.className = `dens-btn py-2 rounded-full border font-semibold transition ${act ? 'border-[#1a73e8] bg-[#1a73e8] text-white' : 'border-[var(--border)] bg-[var(--background)]'}`;
+    b.className = `dens-btn py-2 rounded-md border font-semibold transition ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
   });
   document.querySelectorAll('.pgnum-btn').forEach(b => {
     const act = b.getAttribute('data-pgnum') === state.pageNumberFormat;
-    b.className = `pgnum-btn py-2 rounded-full border font-semibold transition ${act ? 'border-[#1a73e8] bg-[#1a73e8] text-white' : 'border-[var(--border)] bg-[var(--background)]'}`;
+    b.className = `pgnum-btn py-2 rounded-md border font-semibold transition ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
   });
   const setChk = (id, val) => { const el = document.getElementById(id); if (el) el.checked = Boolean(val); };
   setChk('toggleStepBorders', state.showStepBorders);
@@ -7643,17 +7658,17 @@ function syncMenuControls() {
   const curMfStyleGlobal = normalizeMinifigStepStyle(state.minifigStyle);
   document.querySelectorAll('.mf-style-btn').forEach(b => {
     const act = b.getAttribute('data-mf-style') === curMfStyleGlobal;
-    b.className = `mf-style-btn py-1.5 px-1 rounded-full border font-semibold text-[11px] transition ${act ? 'border-[#1a73e8] bg-[#1a73e8] text-white' : 'border-[var(--border)] bg-[var(--background)]'}`;
+    b.className = `mf-style-btn py-1.5 px-2 rounded-md border font-semibold text-xs transition ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--surface-sunken)]'}`;
   });
 
   const bc = state.bomConfig;
   document.querySelectorAll('.bom-dens-btn').forEach(b => {
     const act = b.getAttribute('data-bom-dens') === bc.density;
-    b.className = `bom-dens-btn py-2 rounded-full border font-semibold transition ${act ? 'border-[#1a73e8] bg-[#1a73e8] text-white' : 'border-[var(--border)] bg-[var(--background)]'}`;
+    b.className = `bom-dens-btn py-2 rounded-md border font-semibold transition ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
   });
   document.querySelectorAll('.bom-flow-btn').forEach(b => {
     const act = b.getAttribute('data-bom-flow') === bc.flow;
-    b.className = `bom-flow-btn py-2 rounded-full border font-semibold transition ${act ? 'border-[#1a73e8] bg-[#1a73e8] text-white' : 'border-[var(--border)] bg-[var(--background)]'}`;
+    b.className = `bom-flow-btn py-2 rounded-md border font-semibold transition ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
   });
   const alignHead = document.getElementById('bomAlignHeading');
   if (alignHead) alignHead.textContent = bc.flow === 'columns' ? 'Hanging Column Alignment' : 'Hanging Row Alignment';
@@ -7664,7 +7679,7 @@ function syncMenuControls() {
     const id = b.getAttribute('data-bom-align');
     const act = id === bc.align;
     b.textContent = alignLabels[id] || id;
-    b.className = `bom-align-btn py-2 rounded-full border font-semibold transition ${act ? 'border-[#1a73e8] bg-[#1a73e8] text-white' : 'border-[var(--border)] bg-[var(--background)]'}`;
+    b.className = `bom-align-btn py-2 rounded-md border font-semibold transition ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
   });
   const spEl = document.getElementById('bomSortPrimary');
   if (spEl) spEl.value = bc.sortPrimary;
@@ -7685,9 +7700,10 @@ function syncMenuControls() {
       : `${densNames[bc.density]} · ${bc.flow === 'columns' ? 'Columns' : 'Rows'} · By ${traitNames[bc.sortPrimary]}`;
   }
 
+
   document.querySelectorAll('.fade-chip').forEach(b => {
     const act = Math.abs(parseFloat(b.getAttribute('data-fade')) - state.fadeOpacity) < 0.05;
-    b.className = `fade-chip py-1 rounded-full border font-semibold transition ${act ? 'border-[#1a73e8] bg-[#1a73e8] text-white' : 'border-[var(--border)] bg-[var(--background)]'}`;
+    b.className = `fade-chip py-1 rounded-md border font-semibold transition ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
   });
 
   const pg = document.getElementById('presetGrid');
@@ -7696,7 +7712,7 @@ function syncMenuControls() {
     const b = document.createElement('button');
     b.type = 'button';
     const act = t.id === state.themeId;
-    b.className = `p-2.5 rounded-2xl border text-left transition ${act ? 'border-[#1a73e8] ring-2 ring-[#1a73e8]/25' : 'border-[var(--border)] hover:border-[#1a73e8]/50'}`;
+    b.className = `p-2.5 rounded-lg border text-left transition ${act ? 'border-[var(--primary)] ring-2 ring-[var(--primary-border)]' : 'border-[var(--border)] hover:border-[var(--primary-border)]'}`;
     const swatch = document.createElement('div');
     swatch.className = 'h-6 rounded-lg mb-1.5 border border-black/10 relative overflow-hidden';
     applyThemeBackgroundToElement(swatch, t);
@@ -7725,7 +7741,7 @@ function syncMenuControls() {
       const act = t.id === state.themeId;
       card.setAttribute('role', 'button');
       card.tabIndex = 0;
-      card.className = `p-2.5 rounded-2xl border text-left transition cursor-pointer ${act ? 'border-[#1a73e8] ring-2 ring-[#1a73e8]/25' : 'border-[var(--border)] hover:border-[#1a73e8]/50'}`;
+      card.className = `p-2.5 rounded-lg border text-left transition cursor-pointer ${act ? 'border-[var(--primary)] ring-2 ring-[var(--primary-border)]' : 'border-[var(--border)] hover:border-[var(--primary-border)]'}`;
 
       const swatch = document.createElement('div');
       swatch.className = 'h-6 rounded-lg mb-1.5 border border-black/10 relative overflow-hidden flex items-center justify-end px-1.5';
@@ -7745,7 +7761,7 @@ function syncMenuControls() {
       editBtn.type = 'button';
       editBtn.title = `Edit ${t.name}`;
       editBtn.setAttribute('aria-label', `Edit ${t.name}`);
-      editBtn.className = 'w-5 h-5 rounded-full flex items-center justify-center shrink-0 text-[var(--muted-foreground)] hover:text-[#1a73e8] hover:bg-black/5 dark:hover:bg-white/10 transition';
+      editBtn.className = 'w-5 h-5 rounded-full flex items-center justify-center shrink-0 text-[var(--muted-foreground)] hover:text-[var(--primary)] hover:bg-black/5 dark:hover:bg-white/10 transition';
       editBtn.innerHTML = '<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4Z"/></svg>';
       editBtn.onclick = (e) => {
         e.stopPropagation();
@@ -7812,7 +7828,7 @@ function renderOverviewModal() {
 
   if (rangeModeBtn) {
     rangeModeBtn.textContent = overviewRangeState.active ? 'Done Selecting' : 'Select Range';
-    rangeModeBtn.className = `px-2.5 py-1.5 rounded-full border text-[11px] font-semibold transition ${overviewRangeState.active ? 'border-[#1a73e8] bg-[#1a73e8] text-white' : 'border-[var(--border)] bg-[var(--background)] hover:border-[#1a73e8]'}`;
+    rangeModeBtn.className = `px-2.5 py-1.5 rounded-full border text-[11px] font-semibold transition ${overviewRangeState.active ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)] hover:border-[var(--primary)]'}`;
   }
   if (ovSub) {
     ovSub.textContent = overviewRangeState.active
@@ -7878,12 +7894,12 @@ function renderOverviewModal() {
     if (slots.length === 0) {
       const row = document.createElement('div');
       if (active) row.dataset.active = 'true';
-      row.className = `flex items-center justify-between gap-2 px-3 py-2.5 rounded-2xl border cursor-pointer transition ${active ? 'border-[#1a73e8] bg-[#1a73e8]/10' : 'border-[var(--border)] bg-[var(--background)] hover:border-[#1a73e8]/45'}`;
+      row.className = `flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border cursor-pointer transition ${active ? 'border-[var(--primary)] bg-[var(--primary-soft)]' : 'border-[var(--border)] bg-[var(--background)] hover:border-[var(--primary-border)]'}`;
       const showChapterSub = Boolean(pg.chapterName && pg.chapterName !== pg.label);
       row.innerHTML = `
         <div class="min-w-0">
           <div class="font-bold truncate">${escHtml(`Page ${pg.num} · ${pg.label}`)}</div>
-          ${showChapterSub ? `<div class="text-[11px] text-[var(--muted-foreground)] truncate">${escHtml(pg.chapterName)}</div>` : ''}
+          ${showChapterSub ? `<div class="text-xs text-[var(--muted-foreground)] truncate">${escHtml(pg.chapterName)}</div>` : ''}
         </div>`;
       row.onclick = () => jumpToPageAndStep(idx, null);
       list.appendChild(row);
@@ -7896,33 +7912,33 @@ function renderOverviewModal() {
 
     if (startsWithBreak) {
       const divider = document.createElement('div');
-      divider.className = 'flex items-center gap-2 px-2 pt-1 text-[10px] font-bold text-[#1a73e8] select-none';
+      divider.className = 'flex items-center gap-2 px-2 pt-1 text-xs font-bold text-[var(--primary)] select-none';
       divider.innerHTML = `
-        <div class="flex-1 border-t border-dashed border-[#1a73e8]/55"></div>
+        <div class="flex-1 border-t border-dashed border-[var(--primary-border)]"></div>
         <span class="inline-flex items-center gap-1 whitespace-nowrap">
           ${pageBreakSvg}
           <span>Page Break · ${escHtml(getStepShortLabel(firstStep, firstSlot.ch))} starts a new page</span>
         </span>
-        <div class="flex-1 border-t border-dashed border-[#1a73e8]/55"></div>`;
+        <div class="flex-1 border-t border-dashed border-[var(--primary-border)]"></div>`;
       list.appendChild(divider);
     }
 
     const card = document.createElement('div');
-    card.className = `rounded-2xl border overflow-hidden transition ${active ? 'border-[#1a73e8] bg-[#1a73e8]/[0.04]' : 'border-[var(--border)] bg-[var(--background)]'}`;
+    card.className = `rounded-lg border overflow-hidden transition ${active ? 'border-[var(--primary)] bg-[var(--primary-soft)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
 
     const pageHeader = document.createElement('div');
-    pageHeader.className = `flex items-center justify-between gap-2 px-3 py-1.5 border-b cursor-pointer transition ${active ? 'border-[#1a73e8]/25 bg-[#1a73e8]/10' : 'border-[var(--border)]/70 bg-black/[0.02] dark:bg-white/[0.03] hover:bg-black/[0.04] dark:hover:bg-white/[0.06]'}`;
+    pageHeader.className = `flex items-center justify-between gap-2 px-3 py-1.5 border-b cursor-pointer transition ${active ? 'border-[var(--primary-border)] bg-[var(--primary-soft)]' : 'border-[var(--border)]/70 bg-black/[0.02] dark:bg-white/[0.03] hover:bg-black/[0.04] dark:hover:bg-white/[0.06]'}`;
     const showChapterName = Boolean(pg.chapterName);
     const grpBadge = pg.layoutGroup
-      ? `<span class="px-1.5 py-0.5 rounded-full bg-[#1a73e8]/15 text-[#1a73e8] text-[9px] font-bold truncate max-w-[110px]">${escHtml(pg.layoutGroup.name)}</span>`
+      ? `<span class="px-1.5 py-0.5 rounded-full bg-[var(--primary-soft)] text-[var(--primary)] text-[9px] font-bold truncate max-w-[110px]">${escHtml(pg.layoutGroup.name)}</span>`
       : '';
     pageHeader.innerHTML = `
-      <div class="flex items-center gap-1.5 min-w-0 text-[11px]">
+      <div class="flex items-center gap-1.5 min-w-0 text-xs">
         <span class="font-bold shrink-0">Page ${pg.num}</span>
         ${showChapterName ? `<span class="text-[var(--muted-foreground)] truncate">· ${escHtml(pg.chapterName)}</span>` : ''}
         ${grpBadge}
       </div>
-      <span class="text-[10px] font-semibold text-[var(--muted-foreground)] shrink-0">${slots.length === 1 ? '1 step' : `${slots.length} steps`}</span>`;
+      <span class="text-xs font-semibold text-[var(--muted-foreground)] shrink-0">${slots.length === 1 ? '1 step' : `${slots.length} steps`}</span>`;
     pageHeader.onclick = () => {
       if (overviewRangeState.active) {
         pickRangeSpan(slots[0].step.num, slots[slots.length - 1].step.num);
@@ -7963,7 +7979,7 @@ function renderOverviewModal() {
 
       const stepRow = document.createElement('div');
       if (isStepActive) stepRow.dataset.active = 'true';
-      stepRow.className = `flex items-center justify-between gap-2 px-3 py-2 cursor-pointer transition ${inSelRange ? 'bg-[#1a73e8]/18 ring-1 ring-inset ring-[#1a73e8]/40' : (isStepActive ? 'bg-[#1a73e8]/10' : 'hover:bg-black/[0.03] dark:hover:bg-white/[0.04]')}`;
+      stepRow.className = `flex items-center justify-between gap-2 px-3 py-2 cursor-pointer transition ${inSelRange ? 'bg-[var(--primary-soft)] ring-1 ring-inset ring-[var(--primary-border)]' : (isStepActive ? 'bg-[var(--primary-soft)]' : 'hover:bg-black/[0.03] dark:hover:bg-white/[0.04]')}`;
 
       const breakTitle = getStepBreakTooltip({
         stepLabel: getStepShortLabel(step, slot.ch),
@@ -7973,16 +7989,16 @@ function renderOverviewModal() {
 
       stepRow.innerHTML = `
         <div class="flex items-center gap-2 min-w-0">
-          ${inSelRange ? '<span class="w-4 h-4 rounded-full bg-[#1a73e8] text-white text-[10px] font-bold inline-flex items-center justify-center shrink-0">✓</span>' : (isStepActive ? '<span class="w-1.5 h-1.5 rounded-full bg-[#1a73e8] shrink-0" aria-hidden="true"></span>' : '')}
+          ${inSelRange ? '<span class="w-4 h-4 rounded bg-[var(--primary)] text-[var(--primary-foreground)] text-xs font-bold inline-flex items-center justify-center shrink-0">✓</span>' : (isStepActive ? '<span class="w-1.5 h-1.5 rounded-full bg-[var(--primary)] shrink-0" aria-hidden="true"></span>' : '')}
           <div class="min-w-0">
-            <div class="font-semibold truncate ${inSelRange || isStepActive ? 'text-[#1a73e8]' : ''}">${escHtml(stepTitle)}</div>
-            ${stepMeta ? `<div class="text-[11px] text-[var(--muted-foreground)] truncate">${escHtml(stepMeta)}</div>` : ''}
+            <div class="font-semibold truncate ${inSelRange || isStepActive ? 'text-[var(--primary)]' : ''}">${escHtml(stepTitle)}</div>
+            ${stepMeta ? `<div class="text-xs text-[var(--muted-foreground)] truncate">${escHtml(stepMeta)}</div>` : ''}
           </div>
         </div>
         <div class="flex items-center gap-1 shrink-0">
           ${isSeqCont
-            ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-medium text-[var(--muted-foreground)] bg-black/5 dark:bg-white/10">Continued</span>'
-            : `<button type="button" title="${escHtml(breakTitle)}" aria-label="${escHtml(`Page break before Step ${step.num}`)}" aria-pressed="${hasBreak ? 'true' : 'false'}" class="ov-step-pin px-2.5 py-1 rounded-full text-[11px] font-semibold border inline-flex items-center gap-1 transition ${hasBreak ? 'bg-[#1a73e8] text-white border-transparent' : 'border-[var(--border)] bg-[var(--card)] hover:border-[#1a73e8]/60'}">${pageBreakSvg}<span>Page Break</span></button>`}
+            ? '<span class="px-2 py-0.5 rounded-md text-xs font-medium text-[var(--muted-foreground)] bg-black/5 dark:bg-white/10">Continued</span>'
+            : `<button type="button" title="${escHtml(breakTitle)}" aria-label="${escHtml(`Page break before Step ${step.num}`)}" aria-pressed="${hasBreak ? 'true' : 'false'}" class="ov-step-pin px-2.5 py-1 rounded-md text-xs font-semibold border inline-flex items-center gap-1 transition ${hasBreak ? 'bg-[var(--primary)] text-[var(--primary-foreground)] border-transparent' : 'border-[var(--border)] bg-[var(--card)] hover:border-[var(--primary-border)]'}">${pageBreakSvg}<span>Page Break</span></button>`}
         </div>`;
 
       stepRow.onclick = () => {
@@ -8971,15 +8987,15 @@ function attachLibThumbLazyLoader(gridEl, scrollRoot) {
 
 function getSourceBadgeHtml(item) {
   if (item.isMissingInModel) {
-    return '<span class="px-1.5 py-0.5 rounded-md text-[9px] font-bold bg-red-500/15 text-red-600 dark:text-red-400">Missing</span>';
+    return '<span class="px-1.5 py-0.5 rounded-md text-xs font-bold bg-[var(--danger-soft)] text-[var(--danger)]">Missing</span>';
   }
   if (item.primarySource === 'embedded') {
-    return '<span class="px-1.5 py-0.5 rounded-md text-[9px] font-bold bg-purple-500/15 text-purple-700 dark:text-purple-300">.io</span>';
+    return '<span class="px-1.5 py-0.5 rounded-md text-xs font-bold bg-purple-500/15 text-purple-700 dark:text-purple-300">.io</span>';
   }
   if (item.primarySource === 'saved') {
-    return '<span class="px-1.5 py-0.5 rounded-md text-[9px] font-bold bg-[#1a73e8]/15 text-[#1a73e8]">LDraw</span>';
+    return '<span class="px-1.5 py-0.5 rounded-md text-xs font-bold bg-[var(--primary-soft)] text-[var(--primary)]">LDraw</span>';
   }
-  return '<span class="px-1.5 py-0.5 rounded-md text-[9px] font-semibold bg-black/6 dark:bg-white/10 text-[var(--muted-foreground)]">Built-in</span>';
+  return '<span class="px-1.5 py-0.5 rounded-md text-xs font-semibold bg-black/6 dark:bg-white/10 text-[var(--muted-foreground)]">Built-in</span>';
 }
 
 function renderLibColorSwatches() {
@@ -8988,7 +9004,7 @@ function renderLibColorSwatches() {
   wrap.innerHTML = LIB_PREVIEW_COLORS.map((sw) => {
     const col = COLORS[sw.id] || { hex: '#c91a09', name: sw.label };
     const active = libUiState.previewColor === sw.id;
-    return `<button type="button" data-lib-color="${sw.id}" title="${escHtml(sw.label)}" class="w-4 h-4 rounded-full border transition ${active ? 'ring-2 ring-[#1a73e8] ring-offset-1 ring-offset-[var(--card)] scale-110 border-white/80' : 'border-black/25 dark:border-white/25 hover:scale-110'}" style="background:${col.hex}"></button>`;
+    return `<button type="button" data-lib-color="${sw.id}" title="${escHtml(sw.label)}" class="w-4 h-4 rounded-full border transition ${active ? 'ring-2 ring-[var(--primary)] ring-offset-1 ring-offset-[var(--card)] scale-110 border-white/80' : 'border-black/25 dark:border-white/25 hover:scale-110'}" style="background:${col.hex}"></button>`;
   }).join('');
   wrap.querySelectorAll('button[data-lib-color]').forEach((btn) => {
     btn.onclick = () => {
@@ -9037,24 +9053,24 @@ function renderLibPreviewInspector() {
   document.querySelectorAll('.lib-angle-btn').forEach((btn) => {
     const az = Number(btn.getAttribute('data-lib-az'));
     const active = az === libUiState.previewAz;
-    btn.classList.toggle('bg-[#1a73e8]', active);
-    btn.classList.toggle('text-white', active);
-    btn.classList.toggle('border-[#1a73e8]', active);
+    btn.classList.toggle('bg-[var(--primary)]', active);
+    btn.classList.toggle('text-[var(--primary-foreground)]', active);
+    btn.classList.toggle('border-[var(--primary)]', active);
   });
   if (flipBtn) {
     const flipped = libUiState.previewEl < 0;
-    flipBtn.classList.toggle('bg-[#1a73e8]', flipped);
-    flipBtn.classList.toggle('text-white', flipped);
-    flipBtn.classList.toggle('border-[#1a73e8]', flipped);
+    flipBtn.classList.toggle('bg-[var(--primary)]', flipped);
+    flipBtn.classList.toggle('text-[var(--primary-foreground)]', flipped);
+    flipBtn.classList.toggle('border-[var(--primary)]', flipped);
     flipBtn.textContent = flipped ? 'Bottom' : 'Top';
   }
 
   const sourceLabels = [];
-  if (item.sources.includes('embedded')) sourceLabels.push('<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-500/15 text-purple-700 dark:text-purple-300">Embedded (.io)</span>');
-  if (item.sources.includes('saved')) sourceLabels.push('<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#1a73e8]/15 text-[#1a73e8]">Saved LDraw .dat</span>');
-  if (item.sources.includes('builtin')) sourceLabels.push('<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-black/6 dark:bg-white/10 text-[var(--muted-foreground)]">Built-in Shape</span>');
-  if (item.isMissingInModel) sourceLabels.push('<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-500/15 text-red-600 dark:text-red-400">Missing in Model</span>');
-  else if (item.inCurrentModel) sourceLabels.push('<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">In Current Model</span>');
+  if (item.sources.includes('embedded')) sourceLabels.push('<span class="px-2 py-0.5 rounded-md text-xs font-bold bg-purple-500/15 text-purple-700 dark:text-purple-300">Embedded (.io)</span>');
+  if (item.sources.includes('saved')) sourceLabels.push('<span class="px-2 py-0.5 rounded-md text-xs font-bold bg-[var(--primary-soft)] text-[var(--primary)]">Saved LDraw .dat</span>');
+  if (item.sources.includes('builtin')) sourceLabels.push('<span class="px-2 py-0.5 rounded-md text-xs font-semibold bg-black/6 dark:bg-white/10 text-[var(--muted-foreground)]">Built-in Shape</span>');
+  if (item.isMissingInModel) sourceLabels.push('<span class="px-2 py-0.5 rounded-md text-xs font-bold bg-[var(--danger-soft)] text-[var(--danger)]">Missing in Model</span>');
+  else if (item.inCurrentModel) sourceLabels.push('<span class="px-2 py-0.5 rounded-md text-xs font-bold bg-[var(--success-soft)] text-[var(--success)]">In Current Model</span>');
 
   const kindLabel = item.kind === 'part' ? 'Part' : item.kind === 'subpart' ? 'Subpart' : 'Primitive';
   const colorName = COLORS[libUiState.previewColor]?.name || `Color ${libUiState.previewColor}`;
@@ -9062,11 +9078,11 @@ function renderLibPreviewInspector() {
   metaEl.innerHTML = `
     <div class="font-bold text-[13px] leading-snug break-words">${escHtml(item.name)}</div>
     <div class="flex items-center gap-1.5 flex-wrap">
-      <span class="px-2 py-0.5 rounded-md font-mono text-[11px] font-bold bg-black/6 dark:bg-white/10">${escHtml(item.id)}.dat</span>
-      <span class="text-[11px] text-[var(--muted-foreground)] capitalize">${escHtml(kindLabel)} · ${escHtml(item.category)}</span>
+      <span class="px-2 py-0.5 rounded-md font-mono text-xs font-bold bg-black/6 dark:bg-white/10">${escHtml(item.id)}.dat</span>
+      <span class="text-xs text-[var(--muted-foreground)] capitalize">${escHtml(kindLabel)} · ${escHtml(item.category)}</span>
     </div>
     <div class="flex items-center gap-1 flex-wrap pt-0.5">${sourceLabels.join('')}</div>
-    <div class="text-[11px] text-[var(--muted-foreground)] pt-0.5">
+    <div class="text-xs text-[var(--muted-foreground)] pt-0.5">
       Preview color: <b>${escHtml(colorName)}</b>${item.subpartRefCount > 0 ? ` · ${item.subpartRefCount} subfile ref${item.subpartRefCount === 1 ? '' : 's'}` : ''}
     </div>
   `;
@@ -9074,14 +9090,14 @@ function renderLibPreviewInspector() {
   const actionButtons = [];
   if (!item.sources.includes('saved')) {
     actionButtons.push(`
-      <button id="libPreviewFetchBtn" class="w-full py-2 px-3 rounded-xl bg-[#1a73e8] text-white font-semibold hover:opacity-95 transition">
+      <button id="libPreviewFetchBtn" class="w-full py-2 px-3 rounded-xl bg-[var(--primary)] text-[var(--primary-foreground)] font-semibold hover:opacity-95 transition">
         Fetch Exact ${escHtml(item.id)}.dat Online
       </button>
     `);
   }
   if (item.sources.includes('saved')) {
     actionButtons.push(`
-      <button id="libPreviewRemoveBtn" class="w-full py-2 px-3 rounded-xl border border-red-500/35 bg-[var(--card)] text-red-600 dark:text-red-400 hover:bg-red-500/10 font-semibold transition">
+      <button id="libPreviewRemoveBtn" class="w-full py-2.5 px-3 rounded-md border border-[var(--danger)]/40 bg-[var(--danger-soft)] text-[var(--danger)] font-semibold transition-colors">
         Remove ${escHtml(item.id)}.dat from Saved Library
       </button>
     `);
@@ -9148,7 +9164,7 @@ function renderLibBrowseTab(resetLimit = false) {
 
     scopeBar.innerHTML = scopeDefs.map((s) => {
       const active = libUiState.scope === s.id;
-      return `<button type="button" data-lib-scope="${s.id}" class="px-2.5 py-1 rounded-full border text-[11px] font-semibold whitespace-nowrap transition ${active ? 'bg-[#1a73e8] text-white border-[#1a73e8]' : 'bg-[var(--background)] border-[var(--border)] hover:border-[#1a73e8]/50'}">${escHtml(s.label)}</button>`;
+      return `<button type="button" data-lib-scope="${s.id}" class="px-2.5 py-1 rounded-md border text-xs font-semibold whitespace-nowrap transition ${active ? 'bg-[var(--primary)] text-[var(--primary-foreground)] border-[var(--primary)]' : 'bg-[var(--background)] border-[var(--border)] hover:border-[var(--primary-border)]'}">${escHtml(s.label)}</button>`;
     }).join('');
     scopeBar.querySelectorAll('button[data-lib-scope]').forEach((btn) => {
       btn.onclick = () => {
@@ -9190,11 +9206,11 @@ function renderLibBrowseTab(resetLimit = false) {
     if (fetchableId && !userLibRaw.has(fetchableId)) {
       fetchBannerEl.classList.remove('hidden');
       fetchBannerEl.innerHTML = `
-        <div class="text-[11px] min-w-0">
-          <div class="font-bold text-[#1a73e8]">Fetch <span class="font-mono">${escHtml(fetchableId)}.dat</span> from online LDraw library?</div>
+        <div class="text-xs min-w-0">
+          <div class="font-bold text-[var(--primary)]">Fetch <span class="font-mono">${escHtml(fetchableId)}.dat</span> from online LDraw library?</div>
           <div class="text-[var(--muted-foreground)]">Downloads its exact 3D geometry and subparts into your saved library.</div>
         </div>
-        <button id="libQuickSearchFetchBtn" class="px-3.5 py-1.5 rounded-full bg-[#1a73e8] text-white font-semibold shrink-0 hover:opacity-95 transition">
+        <button id="libQuickSearchFetchBtn" class="px-3.5 py-1.5 rounded-md bg-[var(--primary)] text-[var(--primary-foreground)] font-semibold shrink-0 hover:opacity-95 transition">
           Fetch ${escHtml(fetchableId)} Online
         </button>
       `;
@@ -9223,7 +9239,7 @@ function renderLibBrowseTab(resetLimit = false) {
     gridEl.innerHTML = `
       <div class="col-span-full py-10 text-center space-y-2 text-[var(--muted-foreground)]">
         <div class="font-bold text-sm text-[var(--foreground)]">No parts found</div>
-        <p class="text-[11px] max-w-sm mx-auto leading-relaxed">
+        <p class="text-xs max-w-sm mx-auto leading-relaxed">
           Try a different part ID or name, switch filters above, or go to <b>Fetch &amp; Import</b> to download starter packs or import <b>complete.zip</b>.
         </p>
       </div>
@@ -9235,14 +9251,14 @@ function renderLibBrowseTab(resetLimit = false) {
   gridEl.innerHTML = shown.map((item) => {
     const selected = libUiState.selectedId === item.id;
     return `
-      <button type="button" data-lib-part="${escHtml(item.id)}" class="group text-left p-2 rounded-2xl border transition flex flex-col gap-1.5 ${selected ? 'border-[#1a73e8] ring-2 ring-[#1a73e8]/25 bg-[#1a73e8]/[0.06]' : 'border-[var(--border)] bg-[var(--background)] hover:border-[#1a73e8]/55'}">
+      <button type="button" data-lib-part="${escHtml(item.id)}" class="group text-left p-2 rounded-lg border transition flex flex-col gap-1.5 ${selected ? 'border-[var(--primary)] ring-2 ring-[var(--primary-border)] bg-[var(--primary-soft)]' : 'border-[var(--border)] bg-[var(--background)] hover:border-[var(--primary-border)]'}">
         <div class="aspect-square w-full rounded-xl bg-[var(--card)] border border-[var(--border)]/60 relative flex items-center justify-center p-1.5 overflow-hidden">
           <img data-part-id="${escHtml(item.id)}" data-color-id="${libUiState.previewColor}" alt="${escHtml(item.name)}" class="w-full h-full object-contain opacity-0 transition-opacity duration-150" />
           <div class="absolute top-1.5 right-1.5">${getSourceBadgeHtml(item)}</div>
         </div>
         <div class="px-0.5 min-w-0 space-y-0.5">
-          <div class="font-mono text-[11px] font-bold truncate">${escHtml(item.id)}</div>
-          <div class="text-[10px] text-[var(--muted-foreground)] leading-tight line-clamp-2 min-h-[26px]">${escHtml(item.name)}</div>
+          <div class="font-mono text-xs font-bold truncate">${escHtml(item.id)}</div>
+          <div class="text-xs text-[var(--muted-foreground)] leading-tight line-clamp-2 min-h-[26px]">${escHtml(item.name)}</div>
         </div>
       </button>
     `;
@@ -9255,10 +9271,10 @@ function renderLibBrowseTab(resetLimit = false) {
       // Highlight selection without rebuilding the entire grid DOM
       gridEl.querySelectorAll('button[data-lib-part]').forEach((card) => {
         const isSel = card.getAttribute('data-lib-part') === pid;
-        card.classList.toggle('border-[#1a73e8]', isSel);
+        card.classList.toggle('border-[var(--primary)]', isSel);
         card.classList.toggle('ring-2', isSel);
-        card.classList.toggle('ring-[#1a73e8]/25', isSel);
-        card.classList.toggle('bg-[#1a73e8]/[0.06]', isSel);
+        card.classList.toggle('ring-[var(--primary-border)]', isSel);
+        card.classList.toggle('bg-[var(--primary-soft)]', isSel);
         card.classList.toggle('border-[var(--border)]', !isSel);
         card.classList.toggle('bg-[var(--background)]', !isSel);
       });
@@ -9304,10 +9320,10 @@ function renderLibManageTab() {
       chipsEl.classList.remove('hidden');
       const maxChips = 10;
       const chipHtml = missingItems.slice(0, maxChips).map((it) =>
-        `<span class="px-2 py-0.5 rounded-md font-mono text-[10px] font-bold bg-red-500/12 text-red-600 dark:text-red-400 border border-red-500/25">${escHtml(it.id)}.dat</span>`,
+        `<span class="px-2 py-0.5 rounded-md font-mono text-xs font-bold bg-[var(--danger-soft)] text-[var(--danger)] border border-red-500/25">${escHtml(it.id)}.dat</span>`,
       ).join('');
       const moreHtml = missingItems.length > maxChips
-        ? `<span class="text-[10px] font-semibold text-[var(--muted-foreground)]">+${missingItems.length - maxChips} more</span>`
+        ? `<span class="text-xs font-semibold text-[var(--muted-foreground)]">+${missingItems.length - maxChips} more</span>`
         : '';
       chipsEl.innerHTML = chipHtml + moreHtml;
     } else {
@@ -9337,11 +9353,11 @@ function renderLibManageTab() {
           <div class="space-y-1">
             <div class="flex items-center justify-between gap-2">
               <span class="font-bold text-[12px]">${escHtml(pack.name)}</span>
-              <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${done ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' : 'bg-black/6 dark:bg-white/10 text-[var(--muted-foreground)]'}">${prog.savedCount} / ${prog.totalCount} saved</span>
+              <span class="px-2 py-0.5 rounded-md text-xs font-bold ${done ? 'bg-[var(--success-soft)] text-[var(--success)]' : 'bg-black/6 dark:bg-white/10 text-[var(--muted-foreground)]'}">${prog.savedCount} / ${prog.totalCount} saved</span>
             </div>
-            <p class="text-[11px] text-[var(--muted-foreground)] leading-snug">${escHtml(pack.description)}</p>
+            <p class="text-xs text-[var(--muted-foreground)] leading-snug">${escHtml(pack.description)}</p>
           </div>
-          <button type="button" data-fetch-pack="${escHtml(pack.id)}" ${done || fetchPartsInFlight ? 'disabled' : ''} class="w-full py-1.5 px-3 rounded-xl font-semibold transition ${done ? 'border border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 cursor-default' : 'border border-[#1a73e8]/40 bg-[#1a73e8]/10 text-[#1a73e8] hover:bg-[#1a73e8]/20 disabled:opacity-45'}">
+          <button type="button" data-fetch-pack="${escHtml(pack.id)}" ${done || fetchPartsInFlight ? 'disabled' : ''} class="w-full py-1.5 px-3 rounded-xl font-semibold transition ${done ? 'border border-[var(--success)]/35 bg-[var(--success-soft)] text-[var(--success)] cursor-default' : 'border border-[var(--primary-border)] bg-[var(--primary-soft)] text-[var(--primary)] hover:bg-[var(--primary-soft)] disabled:opacity-45'}">
             ${done ? 'Saved in Library ✓' : `Fetch ${prog.missingIds.length} Part${prog.missingIds.length === 1 ? '' : 's'}`}
           </button>
         </div>
@@ -9416,13 +9432,13 @@ function renderBricksLibraryModal(resetLimit = false) {
   if (statsPillsEl) {
     const pills = [];
     if (stats.savedParts > 0) {
-      pills.push(`<span class="px-2 py-0.5 rounded-full bg-[#1a73e8]/12 text-[#1a73e8] font-semibold">${stats.savedParts.toLocaleString()} saved</span>`);
+      pills.push(`<span class="px-2 py-0.5 rounded-md bg-[var(--primary-soft)] text-[var(--primary)] font-semibold">${stats.savedParts.toLocaleString()} saved</span>`);
     }
     if (stats.embeddedParts > 0) {
-      pills.push(`<span class="px-2 py-0.5 rounded-full bg-purple-500/12 text-purple-700 dark:text-purple-300 font-semibold">${stats.embeddedParts.toLocaleString()} embedded (.io)</span>`);
+      pills.push(`<span class="px-2 py-0.5 rounded-md bg-purple-500/12 text-purple-700 dark:text-purple-300 font-semibold">${stats.embeddedParts.toLocaleString()} embedded (.io)</span>`);
     }
     if (stats.modelMissingShapeCount > 0) {
-      pills.push(`<span class="px-2 py-0.5 rounded-full bg-red-500/12 text-red-600 dark:text-red-400 font-bold">${stats.modelMissingShapeCount} missing in model</span>`);
+      pills.push(`<span class="px-2 py-0.5 rounded-md bg-[var(--danger-soft)] text-[var(--danger)] font-bold">${stats.modelMissingShapeCount} missing in model</span>`);
     }
     statsPillsEl.innerHTML = pills.join('');
   }
@@ -9430,8 +9446,8 @@ function renderBricksLibraryModal(resetLimit = false) {
   // Active tab state
   document.querySelectorAll('.lib-tab-btn').forEach((btn) => {
     const active = btn.getAttribute('data-lib-tab') === libUiState.tab;
-    btn.classList.toggle('bg-[#1a73e8]', active);
-    btn.classList.toggle('text-white', active);
+    btn.classList.toggle('bg-[var(--primary)]', active);
+    btn.classList.toggle('text-[var(--primary-foreground)]', active);
     btn.classList.toggle('shadow-xs', active);
     btn.classList.toggle('text-[var(--muted-foreground)]', !active);
   });
@@ -9598,7 +9614,7 @@ function updateErrorIndicators() {
   }
   if (menuPill) {
     menuPill.textContent = String(totalCount);
-    menuPill.className = 'px-2 py-0.5 rounded-full text-[11px] font-bold bg-red-600 text-white';
+    menuPill.className = 'px-2 py-0.5 rounded-md text-xs font-bold bg-red-600 text-white';
   }
 }
 
@@ -9658,7 +9674,7 @@ function renderErrorsModal() {
   ];
   const bar = document.getElementById('errFilterBar');
   bar.innerHTML = tabs.map(t => `
-    <button data-ef="${t.id}" class="ef-btn shrink-0 px-3 py-1 rounded-full font-semibold transition ${errFilter === t.id ? 'bg-[#1a73e8] text-white' : 'bg-[var(--background)] border border-[var(--border)]'}">${t.label}</button>
+    <button data-ef="${t.id}" class="ef-btn shrink-0 px-3 py-1 rounded-md font-semibold transition ${errFilter === t.id ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'bg-[var(--background)] border border-[var(--border)]'}">${t.label}</button>
   `).join('');
   bar.querySelectorAll('.ef-btn').forEach(b => {
     b.onclick = () => {
@@ -9677,9 +9693,9 @@ function renderErrorsModal() {
   if (filtered.length === 0) {
     body.innerHTML = `
       <div class="py-10 text-center space-y-2">
-        <div class="w-11 h-11 mx-auto rounded-full bg-emerald-500/15 text-emerald-600 flex items-center justify-center text-lg font-bold">✓</div>
+        <div class="w-11 h-11 mx-auto rounded-md bg-emerald-500/15 text-emerald-600 flex items-center justify-center text-lg font-bold">✓</div>
         <div class="font-bold text-sm">Looking clean!</div>
-        <p class="text-[11px] text-[var(--muted-foreground)]">No issues in this category.</p>
+        <p class="text-xs text-[var(--muted-foreground)]">No issues in this category.</p>
       </div>`;
     body.scrollTop = 0;
     requestAnimationFrame(() => { body.scrollTop = 0; });
@@ -9689,14 +9705,14 @@ function renderErrorsModal() {
   let html = '';
   if (counts.missing_shape > 0 && (errFilter === 'all' || errFilter === 'missing_shape')) {
     html += `
-      <div class="p-3 rounded-2xl bg-[#1a73e8]/10 border border-[#1a73e8]/30 flex items-center justify-between gap-2 flex-wrap">
-        <div class="text-[11px]">
-          <div class="font-bold text-[#1a73e8]">Missing ${counts.missing_shape} piece shape${counts.missing_shape > 1 ? 's' : ''}</div>
+      <div class="p-3 rounded-2xl bg-[var(--primary-soft)] border border-[var(--primary-border)] flex items-center justify-between gap-2 flex-wrap">
+        <div class="text-xs">
+          <div class="font-bold text-[var(--primary)]">Missing ${counts.missing_shape} piece shape${counts.missing_shape > 1 ? 's' : ''}</div>
           <div class="text-[var(--muted-foreground)]">Fetch missing shapes from the public LDraw library or import <b>complete.zip</b>.</div>
         </div>
         <div class="flex items-center gap-1.5 shrink-0">
-          <button id="errFetchLibQuick" class="px-3 py-1.5 rounded-full bg-[#1a73e8] text-white font-semibold">Fetch Online</button>
-          <button id="errImportLibQuick" class="px-3 py-1.5 rounded-full border border-[#1a73e8]/40 text-[#1a73e8] bg-[var(--card)] font-semibold">Import .zip</button>
+          <button id="errFetchLibQuick" class="px-3 py-1.5 rounded-md bg-[var(--primary)] text-[var(--primary-foreground)] font-semibold">Fetch Online</button>
+          <button id="errImportLibQuick" class="px-3 py-1.5 rounded-md border border-[var(--primary-border)] text-[var(--primary)] bg-[var(--card)] font-semibold">Import .zip</button>
         </div>
       </div>`;
   }
@@ -9707,13 +9723,13 @@ function renderErrorsModal() {
       <div class="p-3 rounded-2xl border border-[var(--border)] bg-[var(--background)] flex items-start justify-between gap-2.5">
         <div class="space-y-1 min-w-0">
           <div class="flex items-center gap-1.5 flex-wrap">
-            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${isErr ? 'bg-red-500/15 text-red-600 dark:text-red-400' : 'bg-amber-500/15 text-amber-700 dark:text-amber-300'}">${isErr ? 'Error' : 'Warning'}</span>
+            <span class="px-2 py-0.5 rounded-md text-xs font-bold ${isErr ? 'bg-[var(--danger-soft)] text-[var(--danger)]' : 'bg-[var(--warning-soft)] text-[var(--warning)]'}">${isErr ? 'Error' : 'Warning'}</span>
             <span class="font-bold break-words">${escHtml(d.title)}</span>
-            ${d.partCode ? `<span class="px-1.5 py-0.5 rounded-md text-[10px] font-mono bg-black/5 dark:bg-white/10 text-[var(--muted-foreground)] break-all">${escHtml(d.partCode)}</span>` : ''}
+            ${d.partCode ? `<span class="px-1.5 py-0.5 rounded-md text-xs font-mono bg-black/5 dark:bg-white/10 text-[var(--muted-foreground)] break-all">${escHtml(d.partCode)}</span>` : ''}
           </div>
-          <p class="text-[11px] text-[var(--muted-foreground)] leading-relaxed break-words">${escHtml(d.detail)}</p>
+          <p class="text-xs text-[var(--muted-foreground)] leading-relaxed break-words">${escHtml(d.detail)}</p>
         </div>
-        ${d.stepId ? `<button data-jump-step="${escHtml(d.stepId)}" class="jump-step-btn shrink-0 px-2.5 py-1.5 rounded-full border border-[var(--border)] bg-[var(--card)] font-semibold hover:border-[#1a73e8] hover:text-[#1a73e8]">Step ${d.stepNum} →</button>` : ''}
+        ${d.stepId ? `<button data-jump-step="${escHtml(d.stepId)}" class="jump-step-btn shrink-0 px-2.5 py-1.5 rounded-md border border-[var(--border)] bg-[var(--card)] font-semibold hover:border-[var(--primary)] hover:text-[var(--primary)]">Step ${d.stepNum} →</button>` : ''}
       </div>`;
   }).join('');
 
@@ -9992,14 +10008,28 @@ function drawWrappedText(ctx, text, x, y, maxW, lineH, maxLines = 2) {
 }
 
 function drawBrandLogoCanvas(ctx, x, y, size) {
-  if (typeof Path2D === 'undefined') return;
   ctx.save();
   ctx.translate(x, y);
   ctx.scale(size / 64, size / 64);
-  ctx.translate(32, 32);
-  ctx.rotate((BRAND_LOGO_ROTATION_DEG * Math.PI) / 180);
-  ctx.translate(-32, -32);
-  for (const [d, col] of BRAND_LOGO_PATHS) { ctx.fillStyle = col; ctx.fill(new Path2D(d)); }
+  ctx.strokeStyle = '#1B1A18';
+  ctx.lineWidth = 2.5;
+  ctx.lineCap = 'square';
+  ctx.beginPath();
+  ctx.moveTo(6, 15); ctx.lineTo(6, 6); ctx.lineTo(15, 6);
+  ctx.moveTo(49, 6); ctx.lineTo(58, 6); ctx.lineTo(58, 15);
+  ctx.moveTo(58, 49); ctx.lineTo(58, 58); ctx.lineTo(49, 58);
+  ctx.moveTo(15, 58); ctx.lineTo(6, 58); ctx.lineTo(6, 49);
+  ctx.stroke();
+  ctx.fillStyle = '#FAF9F6';
+  ctx.fillRect(14, 14, 36, 36);
+  ctx.strokeRect(14, 14, 36, 36);
+  ctx.fillStyle = '#C9341B';
+  ctx.beginPath(); ctx.arc(24, 24, 5, 0, Math.PI * 2); ctx.fill();
+  ctx.lineWidth = 2.2;
+  ctx.beginPath(); ctx.arc(40, 24, 5, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(24, 40, 5, 0, Math.PI * 2); ctx.stroke();
+  ctx.fillStyle = '#1B1A18';
+  ctx.beginPath(); ctx.arc(40, 40, 5, 0, Math.PI * 2); ctx.fill();
   ctx.restore();
 }
 
@@ -10171,7 +10201,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       ctx.fillText('Brick Instruction', textX, textStartY, textMaxW);
       ctx.globalAlpha = 0.78;
       ctx.font = `600 ${layout.brandTitleFontPx}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
-      ctx.fillText('Creator', textX, textStartY + lineH, textMaxW);
+      ctx.fillText('Works', textX, textStartY + lineH, textMaxW);
       ctx.globalAlpha = 1;
 
       // QR Code square card
@@ -10230,7 +10260,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       if (bgImg) drawCoverImage(ctx, bgImg, 0, 0, pxW, pxH);
     }
     const credit = (!bm.subtitle || bm.subtitle === 'Created with Brick Instruction Creator')
-      ? 'Made with Brick Instruction Creator'
+      ? 'Made with Brick Instruction Works'
       : bm.subtitle;
     ctx.textAlign = 'center';
     const logoSz = typo.back.logoIcon;
@@ -10912,11 +10942,11 @@ function syncThemeEditorUI() {
 
   document.querySelectorAll('.theme-bgtype-btn').forEach(b => {
     const act = b.getAttribute('data-bg-type') === d.bgType;
-    b.className = `theme-bgtype-btn px-2.5 py-0.5 rounded-full text-[11px] font-semibold transition ${act ? 'bg-[#1a73e8] text-white' : 'text-[var(--muted-foreground)]'}`;
+    b.className = `theme-bgtype-btn px-2.5 py-1 rounded text-xs font-semibold transition ${act ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'text-[var(--muted-foreground)]'}`;
   });
   document.querySelectorAll('.theme-angle-btn').forEach(b => {
     const act = Number(b.getAttribute('data-bg-angle')) === Number(d.bgAngle);
-    b.className = `theme-angle-btn py-1.5 rounded-full border font-semibold transition ${act ? 'border-[#1a73e8] bg-[#1a73e8] text-white' : 'border-[var(--border)] bg-[var(--background)]'}`;
+    b.className = `theme-angle-btn py-1.5 rounded-md border font-semibold transition ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
   });
 
   // Update live preview card
@@ -12389,7 +12419,7 @@ function syncImportPreviewControlsUI() {
   }
   if (expBtn) {
     const isExp = Boolean(impState.isExploded);
-    expBtn.className = `glass-pill w-9 h-9 rounded-full flex items-center justify-center hover:scale-105 active:scale-95 transition ${isExp ? '!bg-[#1a73e8] !text-white !border-transparent' : ''}`;
+    expBtn.className = `glass-pill w-9 h-9 rounded-full flex items-center justify-center hover:scale-105 active:scale-95 transition ${isExp ? '!bg-[var(--primary)] !text-white !border-transparent' : ''}`;
     expBtn.title = isExp ? 'Collapse sections' : 'Explode sections';
     expBtn.setAttribute('aria-pressed', isExp ? 'true' : 'false');
     expBtn.innerHTML = isExp
@@ -12398,7 +12428,7 @@ function syncImportPreviewControlsUI() {
   }
   if (colBtn) {
     const isSec = impState.colorMode === 'sections';
-    colBtn.className = `glass-pill w-9 h-9 rounded-full flex items-center justify-center hover:scale-105 active:scale-95 transition ${isSec ? '!bg-[#1a73e8] !text-white !border-transparent' : ''}`;
+    colBtn.className = `glass-pill w-9 h-9 rounded-full flex items-center justify-center hover:scale-105 active:scale-95 transition ${isSec ? '!bg-[var(--primary)] !text-white !border-transparent' : ''}`;
     colBtn.title = isSec ? 'Section Colors (tap for Brick Colors)' : 'Brick Colors (tap for Section Colors)';
     colBtn.setAttribute('aria-pressed', isSec ? 'true' : 'false');
   }
@@ -12474,20 +12504,20 @@ function renderImportAssistantUI() {
     const isSel = impState.selectedId === prop.id;
     const isRec = idx === 0 && impState.assessment?.shouldPrompt;
     return `
-      <button type="button" data-prop-id="${prop.id}" class="imp-prop-card w-full text-left p-3 rounded-2xl border-2 transition ${isSel ? 'border-[#1a73e8] bg-[#1a73e8]/10' : 'border-[var(--border)] bg-[var(--background)] hover:border-[#1a73e8]/45'}">
+      <button type="button" data-prop-id="${prop.id}" class="imp-prop-card w-full text-left p-3 rounded-lg border-2 transition ${isSel ? 'border-[var(--primary)] bg-[var(--primary-soft)]' : 'border-[var(--border)] bg-[var(--background)] hover:border-[var(--primary-border)]'}">
         <div class="flex items-center gap-1.5 min-w-0 flex-wrap">
-          <span class="text-xs font-bold ${isSel ? 'text-[#1a73e8]' : ''}">${escHtml(prop.title)}</span>
-          ${isRec ? '<span class="text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-[#1a73e8] text-white">Recommended</span>' : ''}
+          <span class="text-xs font-bold ${isSel ? 'text-[var(--primary)]' : ''}">${escHtml(prop.title)}</span>
+          ${isRec ? '<span class="text-xs font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-[var(--primary)] text-[var(--primary-foreground)]">Recommended</span>' : ''}
         </div>
-        <div class="text-[11px] text-[var(--muted-foreground)] mt-0.5 leading-snug">${escHtml(prop.rationale)}</div>
+        <div class="text-xs text-[var(--muted-foreground)] mt-0.5 leading-snug">${escHtml(prop.rationale)}</div>
       </button>`;
   }).join('') + `
-    <button type="button" data-prop-id="none" class="imp-prop-card w-full text-left p-3 rounded-2xl border-2 transition ${impState.selectedId === 'none' ? 'border-[#1a73e8] bg-[#1a73e8]/10' : 'border-[var(--border)] bg-[var(--background)] hover:border-[#1a73e8]/45'}">
+    <button type="button" data-prop-id="none" class="imp-prop-card w-full text-left p-3 rounded-lg border-2 transition ${impState.selectedId === 'none' ? 'border-[var(--primary)] bg-[var(--primary-soft)]' : 'border-[var(--border)] bg-[var(--background)] hover:border-[var(--primary-border)]'}">
       <div class="flex items-center justify-between gap-2">
-        <span class="text-xs font-bold ${impState.selectedId === 'none' ? 'text-[#1a73e8]' : ''}">Keep as Single Continuous Build</span>
-        ${!impState.assessment?.shouldPrompt ? '<span class="text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-[#1a73e8] text-white">Recommended</span>' : ''}
+        <span class="text-xs font-bold ${impState.selectedId === 'none' ? 'text-[var(--primary)]' : ''}">Keep as Single Continuous Build</span>
+        ${!impState.assessment?.shouldPrompt ? '<span class="text-xs font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-[var(--primary)] text-[var(--primary-foreground)]">Recommended</span>' : ''}
       </div>
-      <div class="text-[11px] text-[var(--muted-foreground)] mt-0.5 leading-snug">Auto-generate clean zero-floating steps in one continuous chapter without splitting.</div>
+      <div class="text-xs text-[var(--muted-foreground)] mt-0.5 leading-snug">Auto-generate clean zero-floating steps in one continuous chapter without splitting.</div>
     </button>`;
 
   listEl.innerHTML = cardsHtml;
@@ -12707,8 +12737,8 @@ function renderMissingPartsPromptUI(statusMsg = null, statusTone = 'info') {
   const rows = [];
   for (const item of analysis.missingShapes) {
     const tag = item.fetchable
-      ? '<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300 shrink-0">Shape</span>'
-      : '<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-rose-500/15 text-rose-700 dark:text-rose-300 shrink-0">Custom ID</span>';
+      ? '<span class="text-xs font-bold px-1.5 py-0.5 rounded-md bg-[var(--warning-soft)] text-[var(--warning)] shrink-0">Shape</span>'
+      : '<span class="text-xs font-bold px-1.5 py-0.5 rounded-md bg-rose-500/15 text-rose-700 dark:text-rose-300 shrink-0">Custom ID</span>';
     rows.push({
       name: getHumanPartName(item.partId),
       code: `${item.partId}.dat`,
@@ -12721,7 +12751,7 @@ function renderMissingPartsPromptUI(statusMsg = null, statusTone = 'info') {
       name: getHumanPartName(item.partId),
       code: `${item.partId}.dat`,
       count: item.count,
-      tag: '<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-[#1a73e8]/15 text-[#1a73e8] shrink-0">Printed</span>',
+      tag: '<span class="text-xs font-bold px-1.5 py-0.5 rounded-md bg-[var(--primary-soft)] text-[var(--primary)] shrink-0">Printed</span>',
     });
   }
   for (const tn of analysis.missingTextures) {
@@ -12729,7 +12759,7 @@ function renderMissingPartsPromptUI(statusMsg = null, statusTone = 'info') {
       name: 'Decal Texture',
       code: tn,
       count: null,
-      tag: '<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-[#1a73e8]/15 text-[#1a73e8] shrink-0">Decal PNG</span>',
+      tag: '<span class="text-xs font-bold px-1.5 py-0.5 rounded-md bg-[var(--primary-soft)] text-[var(--primary)] shrink-0">Decal PNG</span>',
     });
   }
 
@@ -12737,15 +12767,15 @@ function renderMissingPartsPromptUI(statusMsg = null, statusTone = 'info') {
   const visibleRows = rows.slice(0, MAX_VISIBLE);
   const extraCount = rows.length - visibleRows.length;
   listEl.innerHTML = visibleRows.map((r) => `
-    <div class="flex items-center justify-between gap-2 px-2 py-1.5 rounded-xl bg-[var(--card)] border border-[var(--border)]/70">
+    <div class="flex items-center justify-between gap-2 px-3 py-2 rounded-md bg-[var(--card)] border border-[var(--border)]">
       <div class="min-w-0">
-        <div class="text-[11px] font-semibold truncate">${escHtml(r.name)}${r.count ? ` <span class="text-[var(--muted-foreground)] font-normal">(${r.count}×)</span>` : ''}</div>
-        <div class="text-[10px] font-mono text-[var(--muted-foreground)] truncate">${escHtml(r.code)}</div>
+        <div class="text-xs font-semibold truncate">${escHtml(r.name)}${r.count ? ` <span class="text-[var(--muted-foreground)] font-normal">(${r.count}×)</span>` : ''}</div>
+        <div class="text-xs font-mono text-[var(--muted-foreground)] truncate">${escHtml(r.code)}</div>
       </div>
       ${r.tag}
     </div>
   `).join('') + (extraCount > 0
-    ? `<div class="text-center text-[10px] font-semibold text-[var(--muted-foreground)] py-1">+${extraCount} more missing part${extraCount === 1 ? '' : 's'}…</div>`
+    ? `<div class="text-center text-xs font-semibold text-[var(--muted-foreground)] py-1.5">+${extraCount} more missing part${extraCount === 1 ? '' : 's'}…</div>`
     : '');
 
   let effectiveStatus = statusMsg;
@@ -12757,8 +12787,8 @@ function renderMissingPartsPromptUI(statusMsg = null, statusTone = 'info') {
 
   if (effectiveStatus) {
     statusEl.className = effectiveTone === 'warn'
-      ? 'p-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-200 text-[11px] leading-snug'
-      : 'p-3 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200 text-[11px] leading-snug';
+      ? 'p-3.5 rounded-lg border border-[var(--warning)]/35 bg-[var(--warning-soft)] text-[var(--warning)] text-xs leading-relaxed'
+      : 'p-3.5 rounded-lg border border-[var(--success)]/35 bg-[var(--success-soft)] text-[var(--success)] text-xs leading-relaxed';
     statusEl.textContent = effectiveStatus;
     statusEl.classList.remove('hidden');
   } else {
@@ -12916,8 +12946,8 @@ document.getElementById('missingPartsModal').onclick = (e) => {
   if (e.target.id === 'missingPartsModal' && !mpState.fetching) closeMissingPartsPrompt(false);
 };
 
-document.getElementById('fileInput').onchange = async (e) => {
-  const file = e.target.files?.[0]; e.target.value = ''; if (!file) return;
+async function handleIncomingModelFile(file) {
+  if (!file) return;
   const lower = file.name.toLowerCase();
   if (!lower.endsWith('.io') && !lower.endsWith('.ldr') && !lower.endsWith('.mpd')) {
     showToast('Please select a BrickLink Studio (.io) or LDraw (.ldr / .mpd) file.'); return;
@@ -12948,7 +12978,66 @@ document.getElementById('fileInput').onchange = async (e) => {
   } catch (err) {
     showToast(err?.message || 'Could not import this file.');
   }
+}
+
+document.getElementById('fileInput').onchange = async (e) => {
+  const file = e.target.files?.[0]; e.target.value = '';
+  await handleIncomingModelFile(file);
 };
+
+// Top-rail Export, Bricks Library, Open Project, and Welcome Sample / Dropzone handlers
+const btnHeaderExportEl = document.getElementById('btnHeaderExport');
+if (btnHeaderExportEl) btnHeaderExportEl.onclick = openExportModal;
+const headerBricksLibBtnEl = document.getElementById('headerBricksLibBtn');
+if (headerBricksLibBtnEl) headerBricksLibBtnEl.onclick = () => openBricksLibraryModal();
+const headerLoadProjBtnEl = document.getElementById('headerLoadProjBtn');
+if (headerLoadProjBtnEl) headerLoadProjBtnEl.onclick = triggerProjectLoad;
+const emptyLoadProjBtnEl = document.getElementById('emptyLoadProjBtn');
+if (emptyLoadProjBtnEl) emptyLoadProjBtnEl.onclick = triggerProjectLoad;
+
+const emptySampleBtnEl = document.getElementById('emptySampleBtn');
+if (emptySampleBtnEl) {
+  emptySampleBtnEl.onclick = async () => {
+    const sample = DEMO_MODELS[0];
+    if (!sample) return;
+    showToast(`Loading sample: ${sample.name}…`);
+    try {
+      embeddedDatRaw.clear(); embeddedDatTitles.clear(); embeddedDatCompiled.clear(); compositePartDefs.clear(); pliThumbCache.clear(); submodelThumbCache.clear(); clearMinifigDiagramCaches();
+      textureStore.clearEmbedded();
+      const sampleFileName = `${sample.id}.ldr`;
+      pendingRawFile = { kind: 'ldr', fileName: sampleFileName, data: sample.ldrawSource };
+      const parsed = parseImportedModel(sample.ldrawSource, '', sampleFileName);
+      await textureStore.predecodeAllPending();
+      proceedAfterMissingPartsCheck(parsed, { skipAutoFetch: true });
+    } catch (err) {
+      showToast(err?.message || 'Could not load sample model.');
+    }
+  };
+}
+
+const emptyStateEl = document.getElementById('emptyState');
+const emptyDropZoneEl = document.getElementById('emptyDropZone');
+if (emptyStateEl) {
+  const setDropActive = (on) => {
+    if (!emptyDropZoneEl) return;
+    emptyDropZoneEl.classList.toggle('border-[var(--primary)]', on);
+    emptyDropZoneEl.classList.toggle('bg-[var(--primary-soft)]', on);
+  };
+  emptyStateEl.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    setDropActive(true);
+  });
+  emptyStateEl.addEventListener('dragleave', (e) => {
+    if (!emptyStateEl.contains(e.relatedTarget)) setDropActive(false);
+  });
+  emptyStateEl.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    setDropActive(false);
+    const file = e.dataTransfer?.files?.[0];
+    if (!file) return;
+    await handleIncomingModelFile(file);
+  });
+}
 
 window.addEventListener('resize', () => {
   if (state.model) renderAll();

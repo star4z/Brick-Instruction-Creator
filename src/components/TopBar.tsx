@@ -101,7 +101,7 @@ export function TopBar({ onOpenMobileSteps, onOpenMobileInspector }: Props) {
           </div>
           <div className="leading-tight min-w-0">
             <h1 className="text-[15px] font-semibold tracking-tight text-[#202124] truncate">
-              Brick Instruction Creator
+              Brick Instruction Works
             </h1>
             <p className="text-[11px] text-[#5f6368] truncate">
               {model.name} · {model.parts.length} pieces · {Object.keys(plan.steps).length} steps

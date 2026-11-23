@@ -1,0 +1,628 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-23T08:55:00Z",
+  "title": "Design System: Brick Instruction Works",
+  "extensions": {
+    "colorMeta": {
+      "registration-vermilion": {
+        "role": "primary",
+        "displayName": "Registration Vermilion",
+        "canonical": "#c9341b",
+        "tonalRamp": [
+          "oklch(22% 0.07 28)",
+          "oklch(32% 0.12 28)",
+          "oklch(42% 0.16 28)",
+          "oklch(52% 0.19 28)",
+          "oklch(62% 0.18 28)",
+          "oklch(74% 0.12 28)",
+          "oklch(86% 0.06 28)",
+          "oklch(95% 0.02 28)"
+        ]
+      },
+      "registration-vermilion-hover": {
+        "role": "primary",
+        "displayName": "Registration Vermilion Hover",
+        "canonical": "#b02b14",
+        "tonalRamp": [
+          "oklch(20% 0.07 28)",
+          "oklch(30% 0.12 28)",
+          "oklch(40% 0.16 28)",
+          "oklch(48% 0.18 28)",
+          "oklch(58% 0.17 28)",
+          "oklch(72% 0.11 28)",
+          "oklch(85% 0.05 28)",
+          "oklch(94% 0.02 28)"
+        ]
+      },
+      "registration-vermilion-foreground": {
+        "role": "primary",
+        "displayName": "Registration Vermilion Foreground",
+        "canonical": "#ffffff",
+        "tonalRamp": [
+          "oklch(16% 0.002 90)",
+          "oklch(28% 0.002 90)",
+          "oklch(42% 0.002 90)",
+          "oklch(56% 0.002 90)",
+          "oklch(70% 0.002 90)",
+          "oklch(82% 0.001 90)",
+          "oklch(92% 0.001 90)",
+          "oklch(100% 0 0)"
+        ]
+      },
+      "registration-vermilion-soft": {
+        "role": "primary",
+        "displayName": "Registration Vermilion Soft",
+        "canonical": "rgba(201, 52, 27, 0.11)",
+        "tonalRamp": [
+          "oklch(24% 0.04 28)",
+          "oklch(36% 0.05 28)",
+          "oklch(48% 0.06 28)",
+          "oklch(60% 0.06 28)",
+          "oklch(72% 0.05 28)",
+          "oklch(82% 0.04 28)",
+          "oklch(90% 0.03 28)",
+          "oklch(96% 0.015 28)"
+        ]
+      },
+      "registration-vermilion-border": {
+        "role": "primary",
+        "displayName": "Registration Vermilion Border",
+        "canonical": "rgba(201, 52, 27, 0.38)",
+        "tonalRamp": [
+          "oklch(24% 0.06 28)",
+          "oklch(34% 0.09 28)",
+          "oklch(46% 0.11 28)",
+          "oklch(56% 0.12 28)",
+          "oklch(68% 0.10 28)",
+          "oklch(78% 0.07 28)",
+          "oklch(88% 0.04 28)",
+          "oklch(95% 0.015 28)"
+        ]
+      },
+      "registration-vermilion-dark": {
+        "role": "primary",
+        "displayName": "Registration Vermilion (Dark Mode)",
+        "canonical": "#eb593e",
+        "tonalRamp": [
+          "oklch(22% 0.07 29)",
+          "oklch(34% 0.12 29)",
+          "oklch(46% 0.16 29)",
+          "oklch(58% 0.18 29)",
+          "oklch(65% 0.18 29)",
+          "oklch(76% 0.12 29)",
+          "oklch(87% 0.06 29)",
+          "oklch(95% 0.02 29)"
+        ]
+      },
+      "registration-vermilion-hover-dark": {
+        "role": "primary",
+        "displayName": "Registration Vermilion Hover (Dark Mode)",
+        "canonical": "#f26c52",
+        "tonalRamp": [
+          "oklch(24% 0.07 29)",
+          "oklch(36% 0.12 29)",
+          "oklch(48% 0.16 29)",
+          "oklch(60% 0.18 29)",
+          "oklch(69% 0.17 29)",
+          "oklch(79% 0.11 29)",
+          "oklch(88% 0.05 29)",
+          "oklch(96% 0.02 29)"
+        ]
+      },
+      "registration-vermilion-foreground-dark": {
+        "role": "primary",
+        "displayName": "Registration Vermilion Foreground (Dark Mode)",
+        "canonical": "#18100d",
+        "tonalRamp": [
+          "oklch(16% 0.015 29)",
+          "oklch(24% 0.018 29)",
+          "oklch(36% 0.016 29)",
+          "oklch(48% 0.014 29)",
+          "oklch(62% 0.012 29)",
+          "oklch(75% 0.008 29)",
+          "oklch(86% 0.005 29)",
+          "oklch(95% 0.003 29)"
+        ]
+      },
+      "carbon-ink-rail": {
+        "role": "neutral",
+        "displayName": "Carbon Ink Rail",
+        "canonical": "#1b1a18",
+        "tonalRamp": [
+          "oklch(16% 0.005 85)",
+          "oklch(22% 0.006 85)",
+          "oklch(30% 0.007 85)",
+          "oklch(42% 0.008 85)",
+          "oklch(56% 0.008 85)",
+          "oklch(72% 0.007 85)",
+          "oklch(86% 0.006 85)",
+          "oklch(96% 0.004 85)"
+        ]
+      },
+      "carbon-ink-rail-dark": {
+        "role": "neutral",
+        "displayName": "Carbon Ink Rail (Dark Mode)",
+        "canonical": "#111110",
+        "tonalRamp": [
+          "oklch(14% 0.003 85)",
+          "oklch(20% 0.004 85)",
+          "oklch(28% 0.005 85)",
+          "oklch(40% 0.006 85)",
+          "oklch(54% 0.006 85)",
+          "oklch(70% 0.005 85)",
+          "oklch(85% 0.004 85)",
+          "oklch(95% 0.003 85)"
+        ]
+      },
+      "carbon-ink-rail-foreground": {
+        "role": "neutral",
+        "displayName": "Rail Alabaster Ink",
+        "canonical": "#f4f2ec",
+        "tonalRamp": [
+          "oklch(18% 0.006 90)",
+          "oklch(28% 0.008 90)",
+          "oklch(40% 0.009 90)",
+          "oklch(54% 0.010 90)",
+          "oklch(68% 0.010 90)",
+          "oklch(80% 0.009 90)",
+          "oklch(90% 0.008 90)",
+          "oklch(96% 0.007 90)"
+        ]
+      },
+      "mineral-stone": {
+        "role": "neutral",
+        "displayName": "Mineral Stone Ground",
+        "canonical": "#dcdfd9",
+        "tonalRamp": [
+          "oklch(18% 0.005 125)",
+          "oklch(28% 0.006 125)",
+          "oklch(40% 0.007 125)",
+          "oklch(54% 0.008 125)",
+          "oklch(68% 0.008 125)",
+          "oklch(80% 0.008 125)",
+          "oklch(89% 0.007 125)",
+          "oklch(96% 0.004 125)"
+        ]
+      },
+      "mineral-stone-dark": {
+        "role": "neutral",
+        "displayName": "Mineral Stone Ground (Dark Mode)",
+        "canonical": "#171614",
+        "tonalRamp": [
+          "oklch(15% 0.004 85)",
+          "oklch(21% 0.005 85)",
+          "oklch(30% 0.006 85)",
+          "oklch(42% 0.007 85)",
+          "oklch(56% 0.007 85)",
+          "oklch(72% 0.006 85)",
+          "oklch(86% 0.005 85)",
+          "oklch(95% 0.003 85)"
+        ]
+      },
+      "pressroom-chrome": {
+        "role": "neutral",
+        "displayName": "Pressroom Chrome",
+        "canonical": "#f1f0eb",
+        "tonalRamp": [
+          "oklch(18% 0.005 95)",
+          "oklch(28% 0.006 95)",
+          "oklch(40% 0.007 95)",
+          "oklch(54% 0.008 95)",
+          "oklch(68% 0.008 95)",
+          "oklch(82% 0.007 95)",
+          "oklch(91% 0.006 95)",
+          "oklch(96% 0.005 95)"
+        ]
+      },
+      "archival-paper": {
+        "role": "neutral",
+        "displayName": "Archival Paper",
+        "canonical": "#faf9f6",
+        "tonalRamp": [
+          "oklch(18% 0.004 95)",
+          "oklch(28% 0.005 95)",
+          "oklch(42% 0.006 95)",
+          "oklch(56% 0.006 95)",
+          "oklch(70% 0.006 95)",
+          "oklch(84% 0.005 95)",
+          "oklch(93% 0.004 95)",
+          "oklch(98% 0.004 95)"
+        ]
+      },
+      "archival-paper-dark": {
+        "role": "neutral",
+        "displayName": "Archival Paper (Dark Mode)",
+        "canonical": "#23221f",
+        "tonalRamp": [
+          "oklch(16% 0.005 88)",
+          "oklch(24% 0.006 88)",
+          "oklch(34% 0.007 88)",
+          "oklch(46% 0.008 88)",
+          "oklch(60% 0.008 88)",
+          "oklch(74% 0.007 88)",
+          "oklch(86% 0.005 88)",
+          "oklch(95% 0.003 88)"
+        ]
+      },
+      "surface-sunken": {
+        "role": "neutral",
+        "displayName": "Sunken Surface",
+        "canonical": "#ecebe5",
+        "tonalRamp": [
+          "oklch(18% 0.006 96)",
+          "oklch(28% 0.007 96)",
+          "oklch(40% 0.008 96)",
+          "oklch(54% 0.009 96)",
+          "oklch(68% 0.009 96)",
+          "oklch(80% 0.008 96)",
+          "oklch(90% 0.007 96)",
+          "oklch(96% 0.005 96)"
+        ]
+      },
+      "surface-hover": {
+        "role": "neutral",
+        "displayName": "Interactive Hover Surface",
+        "canonical": "#e2e1da",
+        "tonalRamp": [
+          "oklch(18% 0.006 96)",
+          "oklch(28% 0.007 96)",
+          "oklch(40% 0.008 96)",
+          "oklch(54% 0.009 96)",
+          "oklch(68% 0.009 96)",
+          "oklch(80% 0.008 96)",
+          "oklch(89% 0.007 96)",
+          "oklch(96% 0.005 96)"
+        ]
+      },
+      "carbon-ink": {
+        "role": "neutral",
+        "displayName": "Carbon Ink",
+        "canonical": "#1b1a18",
+        "tonalRamp": [
+          "oklch(16% 0.005 85)",
+          "oklch(22% 0.006 85)",
+          "oklch(32% 0.007 85)",
+          "oklch(44% 0.008 85)",
+          "oklch(58% 0.008 85)",
+          "oklch(74% 0.007 85)",
+          "oklch(86% 0.006 85)",
+          "oklch(96% 0.004 85)"
+        ]
+      },
+      "graphite-muted": {
+        "role": "neutral",
+        "displayName": "Graphite Muted",
+        "canonical": "#56544d",
+        "tonalRamp": [
+          "oklch(18% 0.006 92)",
+          "oklch(28% 0.008 92)",
+          "oklch(38% 0.010 92)",
+          "oklch(46% 0.011 92)",
+          "oklch(60% 0.010 92)",
+          "oklch(74% 0.009 92)",
+          "oklch(86% 0.007 92)",
+          "oklch(95% 0.004 92)"
+        ]
+      },
+      "warm-mineral-hairline": {
+        "role": "neutral",
+        "displayName": "Warm Mineral Hairline",
+        "canonical": "#c9c8c0",
+        "tonalRamp": [
+          "oklch(18% 0.006 100)",
+          "oklch(28% 0.007 100)",
+          "oklch(40% 0.008 100)",
+          "oklch(54% 0.009 100)",
+          "oklch(68% 0.009 100)",
+          "oklch(80% 0.009 100)",
+          "oklch(89% 0.007 100)",
+          "oklch(96% 0.004 100)"
+        ]
+      },
+      "warm-mineral-hairline-strong": {
+        "role": "neutral",
+        "displayName": "Strong Mineral Hairline",
+        "canonical": "#aeada4",
+        "tonalRamp": [
+          "oklch(18% 0.006 100)",
+          "oklch(28% 0.008 100)",
+          "oklch(40% 0.009 100)",
+          "oklch(54% 0.010 100)",
+          "oklch(68% 0.010 100)",
+          "oklch(78% 0.009 100)",
+          "oklch(88% 0.007 100)",
+          "oklch(95% 0.004 100)"
+        ]
+      },
+      "status-info": {
+        "role": "semantic",
+        "displayName": "Press Info",
+        "canonical": "#255b8a",
+        "tonalRamp": [
+          "oklch(20% 0.05 248)",
+          "oklch(30% 0.08 248)",
+          "oklch(40% 0.10 248)",
+          "oklch(48% 0.10 248)",
+          "oklch(60% 0.10 248)",
+          "oklch(74% 0.08 248)",
+          "oklch(86% 0.04 248)",
+          "oklch(95% 0.015 248)"
+        ]
+      },
+      "status-success": {
+        "role": "semantic",
+        "displayName": "Press Success",
+        "canonical": "#246848",
+        "tonalRamp": [
+          "oklch(20% 0.05 156)",
+          "oklch(30% 0.07 156)",
+          "oklch(40% 0.09 156)",
+          "oklch(48% 0.09 156)",
+          "oklch(60% 0.09 156)",
+          "oklch(74% 0.08 156)",
+          "oklch(86% 0.04 156)",
+          "oklch(95% 0.015 156)"
+        ]
+      },
+      "status-warning": {
+        "role": "semantic",
+        "displayName": "Press Warning",
+        "canonical": "#8c560e",
+        "tonalRamp": [
+          "oklch(22% 0.05 72)",
+          "oklch(32% 0.08 72)",
+          "oklch(42% 0.10 72)",
+          "oklch(50% 0.11 72)",
+          "oklch(64% 0.11 72)",
+          "oklch(76% 0.09 72)",
+          "oklch(87% 0.05 72)",
+          "oklch(95% 0.02 72)"
+        ]
+      },
+      "status-danger": {
+        "role": "semantic",
+        "displayName": "Press Danger",
+        "canonical": "#b4261a",
+        "tonalRamp": [
+          "oklch(20% 0.07 26)",
+          "oklch(30% 0.12 26)",
+          "oklch(40% 0.15 26)",
+          "oklch(48% 0.17 26)",
+          "oklch(60% 0.16 26)",
+          "oklch(73% 0.11 26)",
+          "oklch(86% 0.06 26)",
+          "oklch(95% 0.02 26)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Welcome proofing-sheet headline (24px mobile, 30px sm+)."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Modal sheet titles across Page Setup, Parts List Setup, Bricks Library, Import, Overview, Issues, and Export."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Top-rail studio/model wordmark, drawer model name, primary action buttons, and section headings."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Default document prose, helper copy, and toggle labels (14px default body, 54ch max welcome measure)."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Uppercase tracked section headings and compact studio control labels at the 12px functional floor."
+      },
+      "mono": {
+        "displayName": "Mono / Telemetry",
+        "purpose": "Tabular-numeral JetBrains Mono reserved strictly for page folios, zoom readouts, part IDs, counts, dimensions, and file extensions."
+      }
+    },
+    "shadows": [
+      {
+        "name": "shadow-surface",
+        "value": "0 2px 8px rgba(27, 26, 24, 0.08), 0 1px 2px rgba(27, 26, 24, 0.06)",
+        "purpose": "Compact floating studio surfaces and contextual mode overlays in light mode."
+      },
+      {
+        "name": "shadow-sheet",
+        "value": "0 16px 38px rgba(27, 26, 24, 0.16), 0 2px 6px rgba(27, 26, 24, 0.08)",
+        "purpose": "Modal sheets, slide-out menu drawer, style popover, and ink notification bars in light mode."
+      },
+      {
+        "name": "shadow-page",
+        "value": "0 14px 34px rgba(27, 26, 24, 0.16), 0 2px 6px rgba(27, 26, 24, 0.08)",
+        "purpose": "Physical sheet artifacts on the proofing table: live #pageFrame and welcome .proof-sheet-frame in light mode."
+      },
+      {
+        "name": "shadow-surface-dark",
+        "value": "0 4px 14px rgba(0, 0, 0, 0.38), 0 1px 2px rgba(0, 0, 0, 0.28)",
+        "purpose": "Compact floating studio surfaces in system dark mode."
+      },
+      {
+        "name": "shadow-sheet-dark",
+        "value": "0 22px 52px rgba(0, 0, 0, 0.56), 0 4px 12px rgba(0, 0, 0, 0.36)",
+        "purpose": "Modal sheets, slide-out drawer, style popover, and ink bars in system dark mode."
+      },
+      {
+        "name": "shadow-page-dark",
+        "value": "0 18px 46px rgba(0, 0, 0, 0.54), 0 2px 8px rgba(0, 0, 0, 0.36)",
+        "purpose": "Live manual page frame and welcome proofing sheet in system dark mode."
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease-press",
+        "value": "cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "Authored exponential ease-out curve for crisp pressroom sheet, drawer, and popover entrances."
+      },
+      {
+        "name": "pressReveal",
+        "value": "180ms cubic-bezier(0.16, 1, 0.3, 1) (opacity 0->1, translateY -4px->0)",
+        "purpose": "Anchored top-right Style popover reveal (#stylePopover)."
+      },
+      {
+        "name": "pressDrawerIn",
+        "value": "180ms cubic-bezier(0.16, 1, 0.3, 1) (opacity 0.6->1, translateX -16px->0)",
+        "purpose": "Slide-out studio menu drawer entrance (#menuDrawer)."
+      },
+      {
+        "name": "pressSheetIn",
+        "value": "180ms cubic-bezier(0.16, 1, 0.3, 1) (opacity 0->1, translateY 8px->0)",
+        "purpose": "Modal and bottom-sheet entrances across all studio dialogs."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "0.01ms !important via @media (prefers-reduced-motion: reduce)",
+        "purpose": "Collapses all animations and transitions cleanly when the user requests reduced motion."
+      }
+    ],
+    "breakpoints": [
+      { "name": "sm", "value": "640px" },
+      { "name": "md", "value": "768px" },
+      { "name": "lg", "value": "1024px" }
+    ],
+    "browserTheming": {
+      "colorScheme": "light dark",
+      "caretColor": "var(--primary)",
+      "selection": "background-color: var(--primary-soft); color: var(--foreground)",
+      "focusVisible": "outline: 2px solid var(--primary); outline-offset: 2px",
+      "scrollbar": "7px width/height, transparent track, var(--border-strong) 999px thumb",
+      "printMedia": "Hides .no-print and .proofing-stage::before/::after registration ticks; releases viewport overflow/transforms and strips #pageFrame shadow, border, and radius."
+    }
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Primary registration-vermilion pressroom trigger for Import Model, Export, Save, and Done.",
+      "html": "<button type=\"button\" class=\"ds-btn-primary\"><svg class=\"ds-btn-icon\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4\"/><polyline points=\"17 8 12 3 7 8\"/><line x1=\"12\" x2=\"12\" y1=\"3\" y2=\"15\"/></svg><span>Import Model File</span></button>",
+      "css": ".ds-btn-primary { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 44px; padding: 0 20px; border: none; border-radius: 6px; background: var(--primary, #c9341b); color: var(--primary-foreground, #ffffff); font-family: var(--font-sans, \"Public Sans\", sans-serif); font-size: 14px; font-weight: 600; cursor: pointer; transition: background-color 150ms ease; } .ds-btn-primary:hover { background: var(--primary-hover, #b02b14); } .ds-btn-primary:focus-visible { outline: 2px solid var(--primary, #c9341b); outline-offset: 2px; } .ds-btn-icon { width: 16px; height: 16px; flex-shrink: 0; }"
+    },
+    {
+      "name": "Secondary Archival Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Archival paper secondary button framed by a crisp mineral hairline for sample loads and sheet actions.",
+      "html": "<button type=\"button\" class=\"ds-btn-secondary\"><svg class=\"ds-btn-accent-icon\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><polygon points=\"6 4 20 12 6 20 6 4\"/></svg><span>Load Sample Model</span></button>",
+      "css": ".ds-btn-secondary { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 44px; padding: 0 16px; border: 1px solid var(--border-strong, #aeada4); border-radius: 6px; background: var(--card, #faf9f6); color: var(--foreground, #1b1a18); font-family: var(--font-sans, \"Public Sans\", sans-serif); font-size: 14px; font-weight: 600; cursor: pointer; transition: background-color 150ms ease; } .ds-btn-secondary:hover { background: var(--surface-hover, #e2e1da); } .ds-btn-secondary:focus-visible { outline: 2px solid var(--primary, #c9341b); outline-offset: 2px; } .ds-btn-accent-icon { width: 16px; height: 16px; color: var(--primary, #c9341b); flex-shrink: 0; }"
+    },
+    {
+      "name": "Top Studio Rail",
+      "kind": "nav",
+      "refersTo": "top-rail",
+      "description": "Committed carbon-ink pressroom header with optical 20px emblem, wordmark, rail controls, and vermilion Export.",
+      "html": "<header class=\"ds-top-rail\"><div class=\"ds-rail-left\"><button type=\"button\" class=\"ds-rail-icon-btn\" aria-label=\"Open studio menu\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\"><line x1=\"4\" x2=\"20\" y1=\"7\" y2=\"7\"/><line x1=\"4\" x2=\"20\" y1=\"12\" y2=\"12\"/><line x1=\"4\" x2=\"20\" y1=\"17\" y2=\"17\"/></svg></button><span class=\"ds-rail-sep\"></span><div class=\"ds-rail-brand\"><svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\"><rect x=\"2\" y=\"2\" width=\"20\" height=\"20\" rx=\"2\" stroke=\"currentColor\" stroke-width=\"1.8\"/><circle cx=\"8\" cy=\"8\" r=\"2.6\" fill=\"#eb593e\"/><circle cx=\"16\" cy=\"8\" r=\"2.2\" stroke=\"currentColor\" stroke-width=\"1.6\"/><circle cx=\"8\" cy=\"16\" r=\"2.2\" stroke=\"currentColor\" stroke-width=\"1.6\"/><circle cx=\"16\" cy=\"16\" r=\"2.6\" fill=\"currentColor\"/></svg><span>Brick Instruction Works</span></div></div><div class=\"ds-rail-actions\"><button type=\"button\" class=\"ds-rail-btn\">Style</button><button type=\"button\" class=\"ds-rail-primary\">Export</button></div></header>",
+      "css": ".ds-top-rail { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 52px; padding: 0 16px; background: var(--rail, #1b1a18); color: var(--rail-foreground, #f4f2ec); border-bottom: 1px solid var(--rail-border, #32302c); font-family: var(--font-sans, \"Public Sans\", sans-serif); } .ds-rail-left, .ds-rail-actions { display: flex; align-items: center; gap: 8px; } .ds-rail-sep { width: 1px; height: 20px; background: var(--rail-border, #32302c); } .ds-rail-brand { display: inline-flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 600; letter-spacing: -0.015em; } .ds-rail-icon-btn { width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; border: 1px solid transparent; background: transparent; color: inherit; cursor: pointer; } .ds-rail-icon-btn:hover { background: var(--rail-hover, #35332e); border-color: var(--rail-border, #32302c); } .ds-rail-btn { height: 36px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--rail-border, #32302c); background: var(--rail-surface, #282623); color: var(--rail-foreground, #f4f2ec); font-size: 12px; font-weight: 600; cursor: pointer; } .ds-rail-btn:hover { background: var(--rail-hover, #35332e); } .ds-rail-primary { height: 36px; padding: 0 14px; border-radius: 6px; border: none; background: var(--primary, #c9341b); color: var(--primary-foreground, #ffffff); font-size: 12px; font-weight: 600; cursor: pointer; } .ds-rail-primary:hover { background: var(--primary-hover, #b02b14); } .ds-rail-icon-btn:focus-visible, .ds-rail-btn:focus-visible, .ds-rail-primary:focus-visible { outline: 2px solid var(--primary, #c9341b); outline-offset: 2px; }"
+    },
+    {
+      "name": "Mode Segmented Control",
+      "kind": "chip",
+      "refersTo": "mode-segment",
+      "description": "Recessed bottom-dock mode bar switching between Pan, Select, Rotate, and Arrange with vermilion active fill.",
+      "html": "<div class=\"ds-mode-track\" role=\"tablist\"><button type=\"button\" class=\"ds-mode-item ds-mode-active\">Pan</button><button type=\"button\" class=\"ds-mode-item\">Select</button><button type=\"button\" class=\"ds-mode-item\">Rotate</button><button type=\"button\" class=\"ds-mode-item\">Arrange</button></div>",
+      "css": ".ds-mode-track { display: inline-flex; align-items: center; gap: 2px; padding: 4px; border-radius: 8px; border: 1px solid var(--border, #c9c8c0); background: var(--surface-sunken, #ecebe5); font-family: var(--font-sans, \"Public Sans\", sans-serif); } .ds-mode-item { min-height: 34px; padding: 6px 12px; border: none; border-radius: 6px; background: transparent; color: var(--muted-foreground, #56544d); font-size: 12px; font-weight: 600; cursor: pointer; transition: background-color 150ms ease, color 150ms ease; } .ds-mode-item:hover { color: var(--foreground, #1b1a18); background: rgba(250, 249, 246, 0.7); } .ds-mode-active, .ds-mode-active:hover { background: var(--primary, #c9341b); color: var(--primary-foreground, #ffffff); } .ds-mode-item:focus-visible { outline: 2px solid var(--primary, #c9341b); outline-offset: 2px; }"
+    },
+    {
+      "name": "Folio Navigator & Zoom Stepper",
+      "kind": "custom",
+      "refersTo": "folio-dock",
+      "description": "Calibrated print-folio pager and tabular-monospace zoom stepper anchored in the bottom studio dock.",
+      "html": "<div class=\"ds-folio-wrap\"><div class=\"ds-folio-group\"><button type=\"button\" class=\"ds-step-btn\" aria-label=\"Previous Page\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\"><path d=\"m15 18-6-6 6-6\"/></svg></button><button type=\"button\" class=\"ds-folio-readout\"><span>Page 4</span><span class=\"ds-folio-mono\">4/18</span></button><button type=\"button\" class=\"ds-step-btn ds-step-next\" aria-label=\"Next Page\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\"><path d=\"m9 18 6-6-6-6\"/></svg></button></div><div class=\"ds-folio-group\"><button type=\"button\" class=\"ds-step-btn\" aria-label=\"Zoom Out\">−</button><button type=\"button\" class=\"ds-zoom-readout\">100%</button><button type=\"button\" class=\"ds-step-btn\" aria-label=\"Zoom In\">+</button></div></div>",
+      "css": ".ds-folio-wrap { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--chrome, #f1f0eb); font-family: var(--font-sans, \"Public Sans\", sans-serif); } .ds-folio-group { display: inline-flex; align-items: center; gap: 4px; padding: 4px; border-radius: 8px; border: 1px solid var(--border, #c9c8c0); background: var(--card, #faf9f6); } .ds-step-btn { width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; border: none; border-radius: 6px; background: transparent; color: var(--foreground, #1b1a18); font-size: 14px; font-weight: 600; cursor: pointer; } .ds-step-btn:hover { background: var(--surface-hover, #e2e1da); } .ds-step-next { background: var(--primary, #c9341b); color: var(--primary-foreground, #ffffff); } .ds-step-next:hover { background: var(--primary-hover, #b02b14); } .ds-folio-readout { height: 32px; padding: 0 10px; display: inline-flex; align-items: center; gap: 6px; border: none; border-radius: 6px; background: transparent; color: var(--foreground, #1b1a18); font-size: 12px; font-weight: 600; cursor: pointer; } .ds-folio-readout:hover, .ds-zoom-readout:hover { background: var(--surface-hover, #e2e1da); } .ds-folio-mono { font-family: var(--font-mono, \"JetBrains Mono\", monospace); font-variant-numeric: tabular-nums; color: var(--muted-foreground, #56544d); } .ds-zoom-readout { height: 32px; width: 48px; border: none; border-radius: 6px; background: transparent; color: var(--foreground, #1b1a18); font-family: var(--font-mono, \"JetBrains Mono\", monospace); font-variant-numeric: tabular-nums; font-size: 12px; font-weight: 600; cursor: pointer; }"
+    },
+    {
+      "name": "Archival Text Field",
+      "kind": "input",
+      "refersTo": "input-field",
+      "description": "Sunken pressroom text and search input with vermilion caret and crisp border shift on focus.",
+      "html": "<label class=\"ds-field\"><span class=\"ds-field-label\">Theme Name</span><input type=\"text\" class=\"ds-input\" value=\"Pressroom Cream\" placeholder=\"e.g. Pressroom Cream\" /></label>",
+      "css": ".ds-field { display: flex; flex-direction: column; gap: 6px; font-family: var(--font-sans, \"Public Sans\", sans-serif); } .ds-field-label { font-size: 12px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted-foreground, #56544d); } .ds-input { width: 100%; padding: 10px 14px; border-radius: 8px; border: 1px solid var(--border, #c9c8c0); background: var(--surface-sunken, #ecebe5); color: var(--foreground, #1b1a18); caret-color: var(--primary, #c9341b); font-family: inherit; font-size: 14px; font-weight: 500; outline: none; transition: border-color 150ms ease; } .ds-input:focus { border-color: var(--primary, #c9341b); }"
+    },
+    {
+      "name": "Welcome Proofing Sheet",
+      "kind": "card",
+      "refersTo": "proofing-sheet",
+      "description": "Architectural archival-paper welcome sheet seated on mineral stone with calibration strip, flat hairline bands, and zero nested cards.",
+      "html": "<div class=\"ds-proof-sheet\"><div class=\"ds-proof-strip\"><strong>Proofing Table</strong><span class=\"ds-proof-mono\">.io · .ldr · .mpd</span></div><div class=\"ds-proof-body\"><h2 class=\"ds-proof-title\">Set a brick model for print.</h2><p class=\"ds-proof-copy\">Every camera angle, callout, and page break stays bound to its step—so early edits never scramble downstream pages.</p></div><div class=\"ds-proof-band\">Drop a <code>.io</code>, <code>.ldr</code>, or <code>.mpd</code> file anywhere on this sheet.</div></div>",
+      "css": ".ds-proof-sheet { max-width: 460px; border-radius: 6px; border: 1px solid var(--border-strong, #aeada4); background: var(--card, #faf9f6); color: var(--foreground, #1b1a18); box-shadow: var(--shadow-page, 0 14px 34px rgba(27, 26, 24, 0.16), 0 2px 6px rgba(27, 26, 24, 0.08)); overflow: hidden; font-family: var(--font-sans, \"Public Sans\", sans-serif); } .ds-proof-strip { display: flex; justify-content: space-between; align-items: center; padding: 12px 24px; border-bottom: 1px solid var(--border, #c9c8c0); background: var(--surface-sunken, #ecebe5); font-size: 12px; } .ds-proof-mono, .ds-proof-band code { font-family: var(--font-mono, \"JetBrains Mono\", monospace); font-variant-numeric: tabular-nums; } .ds-proof-mono { color: var(--muted-foreground, #56544d); } .ds-proof-body { padding: 24px; } .ds-proof-title { margin: 0 0 8px; font-size: 24px; font-weight: 700; letter-spacing: -0.025em; line-height: 1.25; } .ds-proof-copy { margin: 0; font-size: 14px; line-height: 1.5; color: var(--muted-foreground, #56544d); } .ds-proof-band { padding: 16px 24px; border-top: 1px dashed var(--border-strong, #aeada4); background: rgba(236, 235, 229, 0.45); font-size: 12px; color: var(--muted-foreground, #56544d); }"
+    },
+    {
+      "name": "High-Contrast Ink Notification Bar",
+      "kind": "custom",
+      "refersTo": "status-bar",
+      "description": "Floating carbon-ink pressroom banner used for import issue alerts and transient toasts.",
+      "html": "<div class=\"ds-ink-bar\"><span class=\"ds-ink-dot\"></span><span>2 model issues detected.</span><button type=\"button\" class=\"ds-ink-action\">See issues</button></div>",
+      "css": ".ds-ink-bar { display: inline-flex; align-items: center; gap: 12px; padding: 10px 16px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.15); background: var(--ink-bar, #1b1a18); color: var(--ink-bar-foreground, #f4f2ec); box-shadow: var(--shadow-sheet, 0 16px 38px rgba(27, 26, 24, 0.16), 0 2px 6px rgba(27, 26, 24, 0.08)); font-family: var(--font-sans, \"Public Sans\", sans-serif); font-size: 12px; font-weight: 600; } .ds-ink-dot { width: 8px; height: 8px; border-radius: 999px; background: var(--primary, #c9341b); flex-shrink: 0; } .ds-ink-action { padding: 4px 10px; border: none; border-radius: 4px; background: rgba(255, 255, 255, 0.12); color: var(--ink-bar-accent, #ff937d); font-family: inherit; font-size: 12px; font-weight: 600; cursor: pointer; } .ds-ink-action:hover { background: rgba(255, 255, 255, 0.2); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "Billund Print-Proofing Table",
+    "overview": "Brick Instruction Works treats brick-model instruction authoring like a calibrated European print-proofing table. A committed deep carbon-ink top rail anchors the workspace above a calm mineral-stone proofing stage where either the architectural welcome sheet or the builder's live shadowed manual page sits as the undisputed hero. Every control, drawer, modal, and folio readout operates as an opaque pressroom instrument—quiet, tactile, hairline-separated, and legible on desktop monitors, tablets, and phones alike.\n\nBecause builders spend long sessions verifying piece visibility, camera angles, page breaks, and BOM layout on live instruction pages that carry their own bright LEGO brick colors and output themes, the studio chrome deliberately stays dry and achromatic outside a single registration-vermilion action accent. It rejects translucent frosted-glass pills, nested cards inside cards, generic blue CAD chrome, and decorative glow shadows in favor of flat archival paper sheets, warm-mineral hairlines, and crisp mechanical transitions.",
+    "keyCharacteristics": [
+      "Committed carbon-ink pressroom rail: Always-dark header chrome (--rail) creates immediate architectural authority and frames the lighter proofing stage without competing with manual page colors.",
+      "Mineral-stone proofing table: Neutral stone ground (--background) with subtle corner and center registration ticks (--reg-mark) gives bright archival manual sheets crisp physical contrast.",
+      "Single-accent discipline: Registration vermilion (--primary) marks only primary actions, active selections, focus rings, and key indicators.",
+      "Self-hosted institutional typography: Variable Public Sans handles all prose and controls (>= 12px functional floor), paired with tabular JetBrains Mono strictly for folios, part IDs, file extensions, dimensions, and percentages.",
+      "Opaque hairline-separated sheets: Drawers, popovers, and modals use solid archival paper (--card) divided by 1px mineral rules (--border) rather than translucent glass or nested boxes."
+    ],
+    "rules": [
+      {
+        "name": "The One-Accent Pressroom Rule",
+        "body": "Registration vermilion (--primary) is the sole studio chrome accent. Never introduce secondary brand colors into toolbars, popovers, or drawers; keep brick and theme colors isolated inside the live manual page and theme preview swatches.",
+        "section": "colors"
+      },
+      {
+        "name": "The Committed Carbon Rail Rule",
+        "body": "The top studio rail (--rail) stays deep carbon ink in both light and dark modes (#1b1a18 light, #111110 dark) so the workspace always opens with a grounded, non-glaring instrument bar above the proofing table.",
+        "section": "colors"
+      },
+      {
+        "name": "The Neutral Mineral Ground Rule",
+        "body": "The proofing stage (--background) remains low-chroma mineral stone (#dcdfd9 light, #171614 dark)—never beige parchment and never cool blue-grey—so Warm, Classic Blue, Modern White, Collector Dark, and Blueprint manual pages all retain accurate color perception.",
+        "section": "colors"
+      },
+      {
+        "name": "The 12px Functional Floor Rule",
+        "body": "Every interactive label, helper caption, badge, and monospace readout in studio chrome sits at >= 12px (0.75rem), with primary prose and body at 14px (0.875rem). Never drop studio UI labels to sub-12px micro-type.",
+        "section": "typography"
+      },
+      {
+        "name": "The Telemetry-Only Mono Rule",
+        "body": "Reserve JetBrains Mono strictly for quantitative and machine-formatted data—folios, zoom scales, dimensions, counts, part codes, and file extensions—with tabular-nums enabled so live counters never jitter horizontally.",
+        "section": "typography"
+      },
+      {
+        "name": "The Opaque Pressroom Rule",
+        "body": "Studio chrome never uses backdrop-filter blur or translucent glass fills. Every rail, dock, popover, drawer, and modal is solid ink or archival paper backed by a 1px border and neutral shadow.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Flat-Internal-Bands Rule",
+        "body": "Inside modals, drawers, and the welcome proofing sheet, separate sections with 1px --border hairlines and subtle --surface-sunken or --chrome band shifts—never stack bordered cards inside bordered cards.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do keep studio chrome strictly in the Billund mineral-stone, archival-paper, and carbon-ink palette, reserving registration vermilion (--primary) for primary actions, active selections, focus outlines, and key indicators.",
+      "Do use self-hosted Public Sans at >= 12px for all UI labels and 14px for body prose, and reserve tabular JetBrains Mono (.font-mono / .folio-num) strictly for folios, part IDs, file extensions, dimensions, counts, and percentages.",
+      "Do enforce >= 40px (h-10 / min-h-[40px]) touch targets on mobile controls and transition modals from full-width bottom sheets (rounded-t-xl) on mobile to centered 12px (rounded-xl) sheets at 640px+.",
+      "Do separate internal drawer, modal, and welcome-sheet sections using 1px solid var(--border) hairlines and subtle --surface-sunken / --chrome bands.",
+      "Do reveal popovers, drawers, and modal sheets with 180ms var(--ease-press) (cubic-bezier(0.16, 1, 0.3, 1)) and honor prefers-reduced-motion: reduce.",
+      "Do use the 20px tick-free optical emblem inside the top rail and the full 64×64 crop-ticked public/logo.svg mark at larger sizes (44px+).",
+      "Do preserve @media print suppression of .no-print chrome and .proofing-stage registration marks so printed manuals output clean edge-to-edge pages."
+    ],
+    "donts": [
+      "Don't apply backdrop-filter glass blur, translucent pill chrome, or colored accent drop-shadows anywhere in the studio interface.",
+      "Don't nest bordered cards inside bordered cards inside drawers, modals, or the welcome proofing sheet.",
+      "Don't introduce secondary brand hues (such as SaaS blue or purple) into studio controls or tint the mineral-stone proofing stage beige or blue-grey.",
+      "Don't apply .blueprint-grid to studio chrome—it exists exclusively as a user-selectable output theme inside the rendered manual page (#pageFrame).",
+      "Don't drop studio UI text below 12px or use pill-shaped (999px) radii on navigation bars, segmented controls, or action buttons.",
+      "Don't load external CDN fonts; keep all variable WOFF2 font faces self-hosted under src/assets/fonts/ for offline and static-host compliance."
+    ]
+  }
+}

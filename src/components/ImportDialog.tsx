@@ -20,7 +20,7 @@ export function ImportDialog() {
       mode: 'preserve_submodels',
       title: 'Preserve Submodels & Auto-Generate Steps',
       recommended: true,
-      desc: 'Keep explicit submodels from your file while letting Brick Instruction Creator build zero-floating steps, SNOT callouts, and optimal camera rotations.',
+      desc: 'Keep explicit submodels from your file while letting Brick Instruction Works build zero-floating steps, SNOT callouts, and optimal camera rotations.',
       icon: Layers,
     },
     {
@@ -53,7 +53,7 @@ export function ImportDialog() {
             <p className="text-xs text-[#5a5f66] mt-0.5">
               Found {pending.parts.length} parts
               {pending.hasExistingSubmodels ? ` · ${pending.explicitSubmodels.length} submodel(s)` : ''}
-              {pending.hasExistingSteps ? ' · existing STEP markers' : ''}. How should Brick Instruction Creator import it?
+              {pending.hasExistingSteps ? ' · existing STEP markers' : ''}. How should Brick Instruction Works import it?
             </p>
           </div>
           <button
