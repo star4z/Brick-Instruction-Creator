@@ -4,6 +4,8 @@ import {
   formatAbsRange,
   formatDualStepLabel,
   getAbsStepNum,
+  getChapterAbsRange,
+  getSectionAbsRange,
   migrateLegacyLayoutGroups,
 } from '../stepNumbering';
 import { findLayoutGroupForStep, normalizeLayoutGroups } from '../pageLayout';
@@ -53,5 +55,20 @@ describe('stepNumbering', () => {
     // Already-absolute groups are untouched.
     const abs = normalizeLayoutGroups([{ id: 'a', name: 'A', startStepNum: 2, endStepNum: 3, stepBasis: 'absolute', layout: {} }]);
     expect(migrateLegacyLayoutGroups(abs, refs)[0]).toBe(abs[0]);
+  });
+
+  it('computes submodel and section preset ranges in absolute numbers', () => {
+    const chapters = [
+      { id: 'mf', kind: 'minifigure', sectionId: 'sec_minifigs', steps: [{ num: 1 }, { num: 2 }] },
+      { id: 'bag1', kind: 'bag', sectionId: 'sec_bags', steps: [{ num: 1 }, { num: 2 }] },
+      { id: 'fh', kind: 'submodel', sectionId: 'subsec_fh', steps: [{ num: 1 }, { num: 2 }, { num: 3 }] },
+      { id: 'bag2', kind: 'bag', sectionId: 'sec_bags', steps: [{ num: 3 }] },
+    ] as Array<{ id: string; kind: string; sectionId: string; steps: Array<{ num: number; absNum?: number }> }>;
+    assignAbsoluteStepNumbers(chapters);
+    expect(getChapterAbsRange(chapters[2])).toEqual({ lo: 5, hi: 7 });
+    expect(getSectionAbsRange(chapters, chapters[2])).toEqual({ lo: 5, hi: 7 });
+    expect(getSectionAbsRange(chapters, chapters[1])).toEqual({ lo: 3, hi: 8 });
+    expect(getSectionAbsRange(chapters, chapters[0])).toEqual({ lo: 1, hi: 2 });
+    expect(getChapterAbsRange(null)).toBeNull();
   });
 });

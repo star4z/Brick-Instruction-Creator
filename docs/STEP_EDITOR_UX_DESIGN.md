@@ -17,7 +17,7 @@ Every mode tab owns a single, unambiguous responsibility (the redundant `Arrange
 ### 2. Apply Camera Angle to Steps Modal (`#applyAngleModal`)
 Replaces one-way "Apply Angle to Following" with a visual range-picker modal:
 - **Dual-Handle Range Slider** (`#angleRangeMin` / `#angleRangeMax` with highlighted track bar `#angleRangeFill`), styled like a flight/hotel date-range selector, allowing any contiguous range including steps *before* and *after* the current step.
-- **Quick Range Presets**: `This Step Onward`, `This Section`, `All Steps`.
+- **Quick Range Presets**: `This Step Onward`, `This Submodel` (submodel steps only), `This Section` (all chapters sharing the section; hidden when identical to the submodel), `All Steps`.
 - **Scrollable Step List with 3D Square Thumbnails**: Progressively renders a square 3D preview of each step on the left with step metadata on the right; clicking rows sets Start / End in sync with the dual-handle slider.
 - **Absolute Step Ranges**: The range is expressed in absolute step numbers (`step.absNum`, unique across the manual), never printed per-submodel numbers. Rows show `Step N` plus a `#abs` chip, chapter headers separate submodels, and the From/To chips read `Step 1 · #9`. See [`ABSOLUTE_STEP_NUMBERING_DESIGN.md`](./ABSOLUTE_STEP_NUMBERING_DESIGN.md).
 

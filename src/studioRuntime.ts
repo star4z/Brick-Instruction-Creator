@@ -188,6 +188,8 @@ import {
   formatAbsRange,
   formatDualStepLabel,
   getAbsStepNum,
+  getChapterAbsRange,
+  getSectionAbsRange,
   migrateLegacyLayoutGroups,
 } from './engine/stepNumbering';
 
@@ -7404,6 +7406,21 @@ function openApplyAngleModal(step, ch) {
     maxInp.max = String(maxNum);
   }
 
+  // Range presets: "This Submodel" only for submodel steps; hide "This Section" when it would be identical.
+  const subRange = ch?.kind === 'submodel' ? getChapterAbsRange(ch) : null;
+  const secRange = getSectionAbsRange(state.model.chapters, ch);
+  const subBtn = document.getElementById('btnAnglePresetSubmodel');
+  if (subBtn) {
+    subBtn.classList.toggle('hidden', !subRange);
+    subBtn.title = subRange ? `${ch.name} · ${formatAbsRange(subRange.lo, subRange.hi)}` : '';
+  }
+  const secBtn = document.getElementById('btnAnglePresetSection');
+  if (secBtn) {
+    const sameAsSub = Boolean(subRange && secRange && subRange.lo === secRange.lo && subRange.hi === secRange.hi);
+    secBtn.classList.toggle('hidden', !secRange || sameAsSub);
+    secBtn.title = secRange ? formatAbsRange(secRange.lo, secRange.hi) : '';
+  }
+
   document.getElementById('applyAngleModal')?.classList.remove('hidden');
   renderApplyAngleModal(true);
 }
@@ -12191,13 +12208,24 @@ if (btnAnglePresetFollowing) {
     syncApplyAngleRangeUI();
   };
 }
+const btnAnglePresetSubmodel = document.getElementById('btnAnglePresetSubmodel');
+if (btnAnglePresetSubmodel) {
+  btnAnglePresetSubmodel.onclick = () => {
+    const r = applyAngleState.sourceCh?.kind === 'submodel' ? getChapterAbsRange(applyAngleState.sourceCh) : null;
+    if (!r) return;
+    applyAngleState.startNum = r.lo;
+    applyAngleState.endNum = r.hi;
+    applyAngleState.awaitingEndClick = false;
+    syncApplyAngleRangeUI();
+  };
+}
 const btnAnglePresetSection = document.getElementById('btnAnglePresetSection');
 if (btnAnglePresetSection) {
   btnAnglePresetSection.onclick = () => {
-    const chSteps = applyAngleState.sourceCh?.steps || [];
-    if (!chSteps.length) return;
-    applyAngleState.startNum = getAbsStepNum(chSteps[0]);
-    applyAngleState.endNum = getAbsStepNum(chSteps[chSteps.length - 1]);
+    const r = getSectionAbsRange(state.model?.chapters || [], applyAngleState.sourceCh);
+    if (!r) return;
+    applyAngleState.startNum = r.lo;
+    applyAngleState.endNum = r.hi;
     applyAngleState.awaitingEndClick = false;
     syncApplyAngleRangeUI();
   };

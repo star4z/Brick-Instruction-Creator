@@ -92,3 +92,44 @@ export function migrateLegacyLayoutGroups<G extends LegacyGroupLike>(
     return { ...g, startStepNum: first.absNum, endStepNum: Math.max(first.absNum, last.absNum), stepBasis: 'absolute' };
   });
 }
+
+export interface RangeChapterLike {
+  id: string;
+  kind?: string;
+  sectionId?: string | null;
+  steps: NumberedStepLike[];
+}
+
+export interface AbsRange {
+  lo: number;
+  hi: number;
+}
+
+/** Absolute range covering every step of one chapter (e.g. a single submodel). */
+export function getChapterAbsRange(ch: RangeChapterLike | null | undefined): AbsRange | null {
+  if (!ch || !ch.steps.length) return null;
+  return { lo: getAbsStepNum(ch.steps[0]), hi: getAbsStepNum(ch.steps[ch.steps.length - 1]) };
+}
+
+/**
+ * Absolute range covering every non-submodel chapter that shares the source chapter's section
+ * (e.g. all bags of the main build). For a submodel source this is just that submodel.
+ */
+export function getSectionAbsRange(
+  chapters: ReadonlyArray<RangeChapterLike>,
+  ch: RangeChapterLike | null | undefined,
+): AbsRange | null {
+  if (!ch) return null;
+  if (ch.kind === 'submodel') return getChapterAbsRange(ch);
+  const sec = ch.sectionId || ch.id;
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const c of chapters) {
+    if (c.kind === 'submodel' || (c.sectionId || c.id) !== sec) continue;
+    const r = getChapterAbsRange(c);
+    if (!r) continue;
+    lo = Math.min(lo, r.lo);
+    hi = Math.max(hi, r.hi);
+  }
+  return Number.isFinite(lo) ? { lo, hi } : getChapterAbsRange(ch);
+}

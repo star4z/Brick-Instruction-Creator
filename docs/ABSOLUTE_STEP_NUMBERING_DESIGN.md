@@ -27,7 +27,11 @@ Pure helpers live in [`src/engine/stepNumbering.ts`](../src/engine/stepNumbering
 ## Where ranges use `absNum`
 
 - `applyCameraAngleToStepRange()` (`stepToolbar.ts`) filters by `absNum` (falls back to `num` if missing).
-- Apply Camera Angle dialog: slider bounds, presets (This Step Onward / This Section / All Steps), row taps and the count badge all use `absNum`.
+- Apply Camera Angle dialog: slider bounds, presets, row taps and the count badge all use `absNum`. Presets:
+  - **This Step Onward** — source step → last step.
+  - **This Submodel** — shown only for submodel steps; `getChapterAbsRange(ch)`.
+  - **This Section** — `getSectionAbsRange()`: all non-submodel chapters sharing the source `sectionId` (e.g. every bag). Hidden when identical to This Submodel.
+  - **All Steps**.
 - `findLayoutGroupForStep()` is called with `getAbsStepNum(step)` during pagination.
 - Step Range Group editor (`From Step #` / `To Step #`), "Use Current Page", and Overview "Select Range → Group".
 - "Move selected pieces to step" prompt asks for an absolute `#`.
