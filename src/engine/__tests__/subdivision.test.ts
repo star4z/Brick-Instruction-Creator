@@ -639,7 +639,11 @@ describe('Large & Elongated Model Subdivision Analyzer', () => {
     expect(assessment.shouldPrompt).toBe(true);
     expect(assessment.aspectRatio).toBeGreaterThanOrEqual(3.0);
 
-    const thirds = proposals.find((p) => p.id === 'prop_long_3');
+    // 3-segment longitudinal splits and random numbered bags are intentionally excluded from wizard proposals
+    expect(proposals.find((p) => p.id === 'prop_long_3')).toBeUndefined();
+    expect(proposals.find((p) => p.strategy === 'numbered_bags')).toBeUndefined();
+
+    const thirds = recomputeProposalWithCount('longitudinal_halves', parts, adjacency, 3, false);
     expect(thirds).toBeDefined();
     // Critical regression check: NO floating red 'join' debris cloud!
     expect(thirds!.sections.filter((s) => s.role === 'join')).toHaveLength(0);
@@ -648,7 +652,7 @@ describe('Large & Elongated Model Subdivision Analyzer', () => {
     const allToCheck = [
       ...proposals,
       recomputeProposalWithCount('longitudinal_halves', parts, adjacency, 2, true),
-      recomputeProposalWithCount('longitudinal_halves', parts, adjacency, 3, false),
+      thirds,
       recomputeProposalWithCount('longitudinal_halves', parts, adjacency, 4, false),
       recomputeProposalWithCount('structural_modules', parts, adjacency, 3, false),
       recomputeProposalWithCount('numbered_bags', parts, adjacency, 3, false),

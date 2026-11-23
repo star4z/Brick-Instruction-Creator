@@ -76,6 +76,21 @@ import {
   toggleStepPageBreakOverride,
 } from './engine/pageBreaks';
 import {
+  computePageSlotRects,
+  createDefaultPageLayoutSpec,
+  describePageLayoutSpec,
+  findLayoutGroupForStep,
+  getSpecStepsPerPageCap,
+  normalizeLayoutGroups,
+  normalizePageLayoutSpec,
+} from './engine/pageLayout';
+import {
+  DEFAULT_EDITOR_URL,
+  buildInteractiveHtmlFilename,
+  encodeTypedArrayBase64,
+  generateInteractiveHtmlDocument,
+} from './export/interactiveHtmlExporter';
+import {
   BUILT_IN_THEMES,
   BUILT_IN_THEME_IDS,
   applyThemeBackgroundToElement,
@@ -5266,7 +5281,9 @@ const state = {
   customUnit: 'in',        // 'in' | 'cm'
   density: 'balanced',     // compact | balanced | spacious
   showPrintGuides: false,
-  layout: 'auto',          // auto | 1-up | 2-up | 4-up
+  layout: 'auto',          // legacy mirror ('auto' | '1-up' | '2-up' | '4-up' | 'custom')
+  layoutConfig: createDefaultPageLayoutSpec(),
+  layoutGroups: [],        // editable StepLayoutGroup[] for per-range layouts & styles
   pacing: 'standard',      // few | standard | many
   detectDuplicates: true,  // auto-detect explicit + geometric duplicate submodels
   highlightNew: true,
@@ -5323,6 +5340,8 @@ function pushUndo() {
     coverMeta: state.coverMeta,
     completeMeta: state.completeMeta,
     backMeta: state.backMeta,
+    layoutConfig: state.layoutConfig,
+    layoutGroups: state.layoutGroups,
   });
   state.undoStack.push(snap);
   if (state.undoStack.length > 35) state.undoStack.shift();
@@ -5338,6 +5357,8 @@ function applyHistorySnap(json) {
   state.coverMeta = normalizeCoverMeta(s.coverMeta);
   if (s.completeMeta) state.completeMeta = s.completeMeta;
   state.backMeta = s.backMeta;
+  if (s.layoutConfig) state.layoutConfig = normalizePageLayoutSpec(s.layoutConfig);
+  if (Array.isArray(s.layoutGroups)) state.layoutGroups = normalizeLayoutGroups(s.layoutGroups);
   state.selectedPartIds.clear();
   renderAll();
   const ovModal = document.getElementById('overviewModal');
@@ -5680,23 +5701,28 @@ function rebuildPages() {
       }
       const nextStep = ch.steps[i + 1];
       const isPosePlacePair = Boolean(first.isMinifigPoseStep && nextStep?.attachedMinifig);
-      const cap = state.layout === 'auto'
-        ? (isPosePlacePair
+      const firstGroup = findLayoutGroupForStep(state.layoutGroups, first.num);
+      const pageLayoutSpec = firstGroup ? firstGroup.layout : state.layoutConfig;
+      const explicitCap = getSpecStepsPerPageCap(pageLayoutSpec);
+      const cap = explicitCap !== null
+        ? explicitCap
+        : (isPosePlacePair
           ? 2
           : (isFirstMfBuild && firstMfStyle === 'exploded'
             ? (isLandPage && first.parts.length <= 7 ? 2 : 1)
-            : (first.subassembly || first.attachedSubmodel || first.attachedMinifig || first.parts.length >= 6 ? 1 : 2)))
-        : (state.layout === '1-up' ? 1 : state.layout === '2-up' ? 2 : 4);
+            : (first.subassembly || first.attachedSubmodel || first.attachedMinifig || first.parts.length >= 6 ? 1 : 2)));
       const slots = [];
       for (let k = 0; k < cap && i < ch.steps.length; k++) {
         const s = ch.steps[i];
+        const sGroup = findLayoutGroupForStep(state.layoutGroups, s.num);
+        if (k > 0 && (sGroup?.id || null) !== (firstGroup?.id || null)) break;
         const isSMfBuild = Boolean((s.isStandaloneFigure || ch.kind === 'minifigure') && !s.isMinifigPoseStep);
         if (k > 0 && isSMfBuild && getEffectiveMinifigStyle(s) === 'sequential') break;
         if (k > 0 && state.overrides[s.id]?.pin) break;
-        if (k > 0 && (s.subassembly || s.attachedSubmodel || (s.attachedMinifig && !isPosePlacePair) || s.isMinifigPoseStep) && state.layout === 'auto') break;
+        if (k > 0 && (s.subassembly || s.attachedSubmodel || (s.attachedMinifig && !isPosePlacePair) || s.isMinifigPoseStep) && explicitCap === null) break;
         slots.push({ ch, step: s });
         i++;
-        if ((s.subassembly || s.attachedSubmodel || s.attachedMinifig) && state.layout === 'auto') break;
+        if ((s.subassembly || s.attachedSubmodel || s.attachedMinifig) && explicitCap === null) break;
       }
       const allExplodedMf = slots.every(sl =>
         Boolean((sl.step.isStandaloneFigure || sl.ch.kind === 'minifigure') && !sl.step.isMinifigPoseStep) &&
@@ -5725,6 +5751,8 @@ function rebuildPages() {
           canonicalParts: ch.canonicalParts || [],
         } : null,
         pinned: Boolean(state.overrides[slots[0].step.id]?.pin),
+        layoutSpec: pageLayoutSpec,
+        layoutGroup: firstGroup || null,
         slots,
       });
       isFirstChPage = false;
@@ -5909,6 +5937,13 @@ function isPanGestureEnabled() {
   return state.mode === 'pan' || (page?.kind !== 'steps' && !isSimpleEditPage(page));
 }
 
+function getThemeForPage(page) {
+  if (page?.layoutGroup?.themeId) {
+    return resolveThemeById(page.layoutGroup.themeId, customThemes);
+  }
+  return getActiveTheme();
+}
+
 function renderAll() {
   if (activeLiveEngine) { activeLiveEngine.dispose(); activeLiveEngine = null; }
   currentSlotRenderInfo.clear();
@@ -5936,7 +5971,8 @@ function renderAll() {
   }
 
   rebuildPages();
-  const theme = getActiveTheme();
+  const page = state.pages[state.pageIdx];
+  const theme = getThemeForPage(page);
   const allSteps = getAllSteps(state.model);
   const allParts = getAllParts(state.model);
   const ft = getModelFileTypeInfo();
@@ -5963,7 +5999,6 @@ function renderAll() {
   document.getElementById('btnUndo').disabled = state.undoStack.length === 0;
   document.getElementById('btnRedo').disabled = state.redoStack.length === 0;
 
-  const page = state.pages[state.pageIdx];
   const fullLabel = `${page.label} · ${page.num}/${state.pages.length}`;
   document.getElementById('pageLabelText').textContent = page.label;
   const pageCountEl = document.getElementById('pageCountText');
@@ -6244,18 +6279,19 @@ function renderAll() {
     // STEPS PAGE
     const activeObj = getActiveStepObj();
     const slots = page.slots;
-    const gridCls = slots.length === 1 ? 'grid-cols-1 grid-rows-1'
-      : slots.length === 2 ? (dims.isLandscape ? 'grid-cols-2 grid-rows-1' : 'grid-cols-1 grid-rows-2')
-      : 'grid-cols-2 grid-rows-2';
-
+    const pageSpec = page.layoutSpec || state.layoutConfig;
     const subIntroImg = page.submodelIntro ? getSubmodelThumb(page.submodelIntro, 240, 150) : null;
     const effectivePageHIn = dims.heightIn;
-    const slotCols = slots.length === 1 ? 1 : slots.length === 2 ? (dims.isLandscape ? 2 : 1) : 2;
-    const slotRows = Math.ceil(slots.length / slotCols);
-    const estSlotW = Math.max(140, (dims.width - padPx * 2 - gapPx * (slotCols - 1)) / slotCols);
-    const estSlotH = Math.max(140, (dims.height - padPx * 2 - footerH - gapPx * (slotRows - 1)) / slotRows);
+    const st = typo.steps;
+    const introEstH = page.submodelIntro ? Math.round(st.introThumbH + typo.pt(20)) : 0;
+    const gridW = Math.max(120, dims.width - padPx * 2);
+    const gridH = Math.max(120, dims.height - padPx * 2 - footerH - introEstH);
+    const slotRects = computePageSlotRects(slots.length, pageSpec, dims.isLandscape, gridW, gridH, gapPx);
 
-    const slotData = slots.map(({ ch, step, minifigSeqSlice }) => {
+    const slotData = slots.map(({ ch, step, minifigSeqSlice }, slotIdx) => {
+      const slotRect = slotRects[slotIdx] || { x: 0, y: 0, w: gridW, h: gridH, isFeatured: slots.length === 1, isCompact: false };
+      const estSlotW = Math.max(90, slotRect.w);
+      const estSlotH = Math.max(90, slotRect.h);
       const prev = getPreviousPartsForStep(state.model, ch, step);
       const cam = getStepCamera(step);
       const ov = state.overrides[step.id] || {};
@@ -6280,15 +6316,16 @@ function renderAll() {
           highlightOnlyPartIds: new Set(mfPrep.rotatedPartIds || []),
         } : {}),
       };
-      const rw = slots.length === 1 ? 760 : 500, rh = slots.length === 1 ? 500 : 360;
+      const rw = (slots.length === 1 || slotRect.isFeatured) ? 760 : (slotRect.isCompact ? 400 : 500);
+      const rh = (slots.length === 1 || slotRect.isFeatured) ? 500 : (slotRect.isCompact ? 300 : 360);
       const snap = renderSnapshot(prev, step.parts, cam.az, cam.el, rw, rh, modelScale, opts);
       currentSlotRenderInfo.set(step.id, { ch, step, prev, cam, ov, snap, modelScale });
 
       let mfExploded = null;
       let mfSeqStages = null;
       if (isMfExploded) {
-        const expW = slots.length === 1 ? 920 : 640;
-        const expH = slots.length === 1 ? 640 : 480;
+        const expW = (slots.length === 1 || slotRect.isFeatured) ? 920 : 640;
+        const expH = (slots.length === 1 || slotRect.isFeatured) ? 640 : 480;
         mfExploded = renderMinifigExplodedDiagram(step, cam, expW, expH, theme, modelScale);
       } else if (isMfSeq) {
         const seqPlan = getMinifigSequentialPlanForStep(step);
@@ -6334,16 +6371,11 @@ function renderAll() {
           item.qty++; item.ids.push(p.id);
         }
       }
-      return { ch, step, minifigSeqSlice, prev, cam, ov, snap, isMfBuild, isMfExploded, isMfSeq, mfExploded, mfSeqStages, subImg, attSubImg, mfPrepImg, attMfImg, mf1to1, pli: Array.from(pliMap.values()) };
+      return { ch, step, minifigSeqSlice, slotRect, estSlotW, estSlotH, prev, cam, ov, snap, isMfBuild, isMfExploded, isMfSeq, mfExploded, mfSeqStages, subImg, attSubImg, mfPrepImg, attMfImg, mf1to1, pli: Array.from(pliMap.values()) };
     });
 
     const isRotateMode = state.mode === 'rotate';
     const isArrangeMode = state.mode === 'arrange';
-    const isTightSlot = slots.length >= 4 || estSlotH < typo.pt(260);
-    const st = typo.steps;
-    const stepNumPx = slots.length === 1 ? st.stepNum1Up : (isTightSlot ? st.stepNumTight : st.stepNum2Up);
-    const pliThumbPx = isTightSlot ? st.pliThumbTight : st.pliThumb;
-    const pliQtyPx = isTightSlot ? st.pliQtyFontTight : st.pliQtyFont;
     const pgNumText = formatPageNumber(page.num, state.pages.length);
 
     frame.innerHTML = `
@@ -6359,17 +6391,26 @@ function renderAll() {
             </div>
             <span class="shrink-0 rounded-full font-black text-white shadow-xs" style="background:${theme.accent};font-size:${st.introPillFont}px;padding:${Math.round(typo.pt(3))}px ${Math.round(typo.pt(10))}px">${page.submodelIntro.repeatCount > 1 ? `×${page.submodelIntro.repeatCount}` : `${page.submodelIntro.pieceCount || page.submodelIntro.canonicalParts.length} pcs`}</span>
           </div>` : ''}
-        <div class="grid ${gridCls} flex-1 min-h-0" style="gap:${gapPx}px">
-          ${slotData.map(({ ch, step, minifigSeqSlice, ov, snap, isMfExploded, isMfSeq, mfExploded, mfSeqStages, subImg, attSubImg, mfPrepImg, attMfImg, mf1to1, pli }) => {
+        <div class="relative flex-1 min-h-0">
+          ${slotData.map(({ ch, step, minifigSeqSlice, slotRect, estSlotW, estSlotH, ov, snap, isMfExploded, isMfSeq, mfExploded, mfSeqStages, subImg, attSubImg, mfPrepImg, attMfImg, mf1to1, pli }) => {
+            const isTightSlot = slotRect.isCompact || estSlotH < typo.pt(250) || estSlotW < typo.pt(230);
+            const stepNumPx = (slots.length === 1 || slotRect.isFeatured) ? st.stepNum1Up : (isTightSlot ? st.stepNumTight : st.stepNum2Up);
+            const pliThumbPx = isTightSlot ? st.pliThumbTight : st.pliThumb;
+            const pliQtyPx = isTightSlot ? st.pliQtyFontTight : st.pliQtyFont;
+            const slotLeftPct = (slotRect.x / gridW) * 100;
+            const slotTopPct = (slotRect.y / gridH) * 100;
+            const slotWidthPct = (slotRect.w / gridW) * 100;
+            const slotHeightPct = (slotRect.h / gridH) * 100;
             const isSelStep = state.selectedStepId === step.id;
             const showLive3D = isRotateMode && isSelStep;
             const isOfficialMfStyle = isMfExploded || isMfSeq;
-            const pliScale = ov.pliScale || (isTightSlot ? 0.92 : 1.0);
+            const pliScale = ov.pliScale || (isTightSlot ? 0.9 : 1.0);
             const pliPos = ov.pliPos || { x: 0, y: 0 };
             const calloutPos = ov.calloutPos || { x: 0, y: 0 };
             const calloutSel = isArrangeMode && state.selectedArrangeEl?.stepId === step.id && state.selectedArrangeEl?.kind === 'callout';
             const pliSel = isArrangeMode && state.selectedArrangeEl?.stepId === step.id && state.selectedArrangeEl?.kind === 'pli';
-            const showSlotFrame = state.showStepBorders && !(isOfficialMfStyle && slots.length === 1);
+            const effectiveBorders = typeof page.layoutGroup?.showStepBorders === 'boolean' ? page.layoutGroup.showStepBorders : state.showStepBorders;
+            const showSlotFrame = effectiveBorders && !(isOfficialMfStyle && slots.length === 1);
             const slotBorderStyle = showSlotFrame
               ? (isSelStep && state.mode !== 'pan' ? `2px solid ${theme.accent}` : `1px solid ${theme.pliBorder}`)
               : (isSelStep && state.mode !== 'pan' && slots.length > 1 ? `1.5px dashed ${theme.accent}` : '1px solid transparent');
@@ -6442,7 +6483,7 @@ function renderAll() {
             const stackHeaderBadges = Boolean(headerBadgesHtml) && (isTightSlot || estSlotW < typo.pt(250));
 
             return `
-              <div data-step="${step.id}" class="step-slot relative flex flex-col min-h-0 overflow-hidden transition ${isArrangeMode && slots.length > 1 ? 'cursor-pointer' : ''}" style="border-radius:${typo.borderRadius}px;padding:${isOfficialMfStyle ? Math.round(st.slotPad * 0.5) : st.slotPad}px;border:${slotBorderStyle};background:${slotBgStyle}">
+              <div data-step="${step.id}" class="step-slot absolute flex flex-col min-h-0 overflow-hidden transition ${isArrangeMode && slots.length > 1 ? 'cursor-pointer' : ''}" style="left:${slotLeftPct.toFixed(4)}%;top:${slotTopPct.toFixed(4)}%;width:${slotWidthPct.toFixed(4)}%;height:${slotHeightPct.toFixed(4)}%;border-radius:${typo.borderRadius}px;padding:${isOfficialMfStyle ? Math.round(st.slotPad * 0.5) : (isTightSlot ? Math.max(4, Math.round(st.slotPad * 0.72)) : st.slotPad)}px;border:${slotBorderStyle};background:${slotBgStyle}">
                 <!-- Step Number & Draggable Parts List Box -->
                 ${(() => {
                   const pinIconPx = Math.round(st.cueFont * 1.05);
@@ -7284,8 +7325,185 @@ function applyMinifigStyleChange(rawStyle, anchorStepId = null) {
 }
 
 // =========================================================================
-// 9. MENU, STYLE POPOVER & PAGE OVERVIEW OVERLAY SYNC
+// 9. MENU, STYLE POPOVER, PAGE LAYOUT GROUPS & PAGE OVERVIEW OVERLAY SYNC
 // =========================================================================
+const overviewRangeState = { active: false, startStep: null, endStep: null };
+const layoutGroupEditorState = { editingId: null, slotSizes: [] };
+
+function syncLegacyLayoutFlag() {
+  const lc = state.layoutConfig;
+  if (lc.mode === 'auto') state.layout = 'auto';
+  else if (lc.stepsPerPage === 1 && lc.mixedLayout === 'even') state.layout = '1-up';
+  else if (lc.stepsPerPage === 2 && lc.mixedLayout === 'even') state.layout = '2-up';
+  else if (lc.stepsPerPage === 4 && lc.mixedLayout === 'even' && lc.flow === 'row') state.layout = '4-up';
+  else state.layout = 'custom';
+}
+
+function renderSlotSizeButtons(containerEl, count, sizesArr, onChange) {
+  if (!containerEl) return;
+  const n = Math.max(2, Math.min(12, Number(count) || 4));
+  const nextLabel = { sm: 'S', md: 'M', lg: 'L' };
+  const cycleOrder = { sm: 'md', md: 'lg', lg: 'sm' };
+  containerEl.innerHTML = Array.from({ length: n }, (_, i) => {
+    const val = sizesArr[i] === 'sm' || sizesArr[i] === 'lg' ? sizesArr[i] : 'md';
+    const tone = val === 'lg'
+      ? 'border-[#1a73e8] bg-[#1a73e8] text-white'
+      : val === 'sm'
+        ? 'border-[var(--border)] bg-[var(--card)] opacity-75'
+        : 'border-[#1a73e8]/50 bg-[#1a73e8]/12 text-[#1a73e8]';
+    return `<button type="button" data-slot-idx="${i}" class="slot-size-chip px-2.5 py-1 rounded-full border text-[11px] font-bold transition ${tone}">#${i + 1} · ${nextLabel[val]}</button>`;
+  }).join('');
+  containerEl.querySelectorAll('.slot-size-chip').forEach((btn) => {
+    btn.onclick = () => {
+      const idx = Number(btn.getAttribute('data-slot-idx'));
+      const next = Array.from({ length: n }, (_, i) => (sizesArr[i] === 'sm' || sizesArr[i] === 'lg' ? sizesArr[i] : 'md'));
+      next[idx] = cycleOrder[next[idx]] || 'md';
+      onChange(next);
+    };
+  });
+}
+
+function populateGroupThemeOptions(selectedThemeId = '') {
+  const sel = document.getElementById('grpThemeSelect');
+  if (!sel) return;
+  const allThemes = [...BUILT_IN_THEMES, ...customThemes];
+  sel.innerHTML = `<option value="">Use Manual Default</option>` +
+    allThemes.map((t) => `<option value="${escHtml(t.id)}">${escHtml(t.name)}</option>`).join('');
+  sel.value = selectedThemeId || '';
+}
+
+function renderLayoutGroupsList() {
+  const listEl = document.getElementById('layoutGroupsList');
+  if (!listEl) return;
+  if (!state.layoutGroups || state.layoutGroups.length === 0) {
+    listEl.innerHTML = `<div class="text-[11px] text-[var(--muted-foreground)] px-2.5 py-2 rounded-xl border border-dashed border-[var(--border)] bg-[var(--background)]/60">No step groups yet. Create one to customize layout or theme for a range of steps.</div>`;
+    return;
+  }
+  listEl.innerHTML = state.layoutGroups.map((grp) => {
+    const themeObj = grp.themeId ? resolveThemeById(grp.themeId, customThemes) : null;
+    const summary = describePageLayoutSpec(grp.layout);
+    const rangeLabel = grp.startStepNum === grp.endStepNum ? `Step ${grp.startStepNum}` : `Steps ${grp.startStepNum}–${grp.endStepNum}`;
+    return `
+      <div class="flex items-center justify-between gap-2 px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--background)]">
+        <div class="min-w-0">
+          <div class="flex items-center gap-1.5 flex-wrap">
+            <span class="font-bold text-xs truncate">${escHtml(grp.name)}</span>
+            <span class="px-1.5 py-0.5 rounded-full bg-[#1a73e8]/12 text-[#1a73e8] text-[10px] font-bold">${escHtml(rangeLabel)}</span>
+            ${themeObj ? `<span class="px-1.5 py-0.5 rounded-full border border-[var(--border)] bg-[var(--card)] text-[10px] font-semibold">${escHtml(themeObj.name)}</span>` : ''}
+          </div>
+          <div class="text-[10px] text-[var(--muted-foreground)] mt-0.5">${escHtml(summary)}</div>
+        </div>
+        <button type="button" data-edit-grp="${escHtml(grp.id)}" class="grp-edit-btn px-2.5 py-1 rounded-full border border-[var(--border)] bg-[var(--card)] text-[11px] font-semibold hover:border-[#1a73e8] shrink-0 transition">Edit</button>
+      </div>`;
+  }).join('');
+
+  listEl.querySelectorAll('.grp-edit-btn').forEach((btn) => {
+    btn.onclick = () => {
+      const id = btn.getAttribute('data-edit-grp');
+      const grp = state.layoutGroups.find((g) => g.id === id);
+      if (grp) openLayoutGroupEditor(grp);
+    };
+  });
+}
+
+function openLayoutGroupEditor(existingGroup = null, prefillRange = null) {
+  const wrap = document.getElementById('layoutGroupEditor');
+  if (!wrap) return;
+  const allSteps = getAllSteps(state.model);
+  const maxStep = Math.max(1, allSteps.length);
+  const curPage = state.pages[state.pageIdx];
+  const curSlots = curPage?.slots || [];
+  const defaultStart = prefillRange?.start ?? (curSlots[0]?.step?.num || 1);
+  const defaultEnd = prefillRange?.end ?? (curSlots[curSlots.length - 1]?.step?.num || Math.min(maxStep, defaultStart + 3));
+
+  layoutGroupEditorState.editingId = existingGroup?.id || null;
+  layoutGroupEditorState.slotSizes = existingGroup?.layout?.slotSizes ? [...existingGroup.layout.slotSizes] : [];
+
+  document.getElementById('grpEditorTitle').textContent = existingGroup ? `Edit "${existingGroup.name}"` : 'New Step Range Group';
+  document.getElementById('grpNameInput').value = existingGroup ? existingGroup.name : `Steps ${defaultStart}–${defaultEnd}`;
+  document.getElementById('grpStartStepInput').value = String(existingGroup ? existingGroup.startStepNum : defaultStart);
+  document.getElementById('grpEndStepInput').value = String(existingGroup ? existingGroup.endStepNum : defaultEnd);
+  document.getElementById('grpStepsPerPageInput').value = String(existingGroup ? existingGroup.layout.stepsPerPage : Math.max(2, Math.min(6, defaultEnd - defaultStart + 1)));
+  document.getElementById('grpColsSelect').value = existingGroup ? String(existingGroup.layout.cols) : 'auto';
+  document.getElementById('grpRowsSelect').value = existingGroup ? String(existingGroup.layout.rows) : 'auto';
+  document.getElementById('grpFlowSelect').value = existingGroup ? existingGroup.layout.flow : 'row';
+  document.getElementById('grpMixedSelect').value = existingGroup ? existingGroup.layout.mixedLayout : 'even';
+  populateGroupThemeOptions(existingGroup?.themeId || '');
+  document.getElementById('btnGrpDelete').classList.toggle('hidden', !existingGroup);
+  syncGroupEditorSlotSizesUI();
+  wrap.classList.remove('hidden');
+  wrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function closeLayoutGroupEditor() {
+  layoutGroupEditorState.editingId = null;
+  const wrap = document.getElementById('layoutGroupEditor');
+  if (wrap) wrap.classList.add('hidden');
+}
+
+function syncGroupEditorSlotSizesUI() {
+  const mixed = document.getElementById('grpMixedSelect')?.value || 'even';
+  const wrap = document.getElementById('grpSlotSizesWrap');
+  const list = document.getElementById('grpSlotSizesList');
+  if (!wrap || !list) return;
+  wrap.classList.toggle('hidden', mixed !== 'custom_weights');
+  if (mixed === 'custom_weights') {
+    const count = Math.max(2, Math.min(12, parseInt(document.getElementById('grpStepsPerPageInput')?.value, 10) || 4));
+    renderSlotSizeButtons(list, count, layoutGroupEditorState.slotSizes, (next) => {
+      layoutGroupEditorState.slotSizes = next;
+      syncGroupEditorSlotSizesUI();
+    });
+  }
+}
+
+function syncPageLayoutControlsUI() {
+  const lc = state.layoutConfig;
+  const chip = document.getElementById('layoutSummaryChip');
+  if (chip) chip.textContent = describePageLayoutSpec(lc);
+
+  document.querySelectorAll('.layout-btn').forEach((b) => {
+    const preset = b.getAttribute('data-layout-preset');
+    const act = preset === 'auto'
+      ? lc.mode === 'auto'
+      : (lc.mode === 'custom' && String(lc.stepsPerPage) === preset);
+    b.className = `layout-btn py-2 rounded-full border font-semibold transition ${act ? 'border-[#1a73e8] bg-[#1a73e8] text-white' : 'border-[var(--border)] bg-[var(--background)]'}`;
+  });
+
+  const stepsInp = document.getElementById('layoutStepsInput');
+  if (stepsInp && document.activeElement !== stepsInp) {
+    stepsInp.value = String(lc.stepsPerPage);
+  }
+  const colsSel = document.getElementById('layoutColsSelect');
+  if (colsSel) colsSel.value = String(lc.cols);
+  const rowsSel = document.getElementById('layoutRowsSelect');
+  if (rowsSel) rowsSel.value = String(lc.rows);
+
+  document.querySelectorAll('.step-flow-btn').forEach((b) => {
+    const act = b.getAttribute('data-step-flow') === lc.flow;
+    b.className = `step-flow-btn py-1.5 px-2.5 rounded-full border font-semibold transition ${act ? 'border-[#1a73e8] bg-[#1a73e8] text-white' : 'border-[var(--border)] bg-[var(--background)]'}`;
+  });
+
+  document.querySelectorAll('.mixed-layout-btn').forEach((b) => {
+    const act = b.getAttribute('data-mixed-layout') === lc.mixedLayout;
+    b.className = `mixed-layout-btn py-1.5 px-2 rounded-full border font-semibold text-[11px] transition ${act ? 'border-[#1a73e8] bg-[#1a73e8] text-white' : 'border-[var(--border)] bg-[var(--background)]'}`;
+  });
+
+  const defWrap = document.getElementById('defaultSlotSizesWrap');
+  const defList = document.getElementById('defaultSlotSizesList');
+  if (defWrap && defList) {
+    defWrap.classList.toggle('hidden', lc.mixedLayout !== 'custom_weights');
+    if (lc.mixedLayout === 'custom_weights') {
+      const slotCount = lc.mode === 'auto' ? 4 : Math.max(2, Math.min(12, lc.stepsPerPage));
+      renderSlotSizeButtons(defList, slotCount, lc.slotSizes || [], (next) => {
+        state.layoutConfig = { ...state.layoutConfig, slotSizes: next };
+        renderAll();
+      });
+    }
+  }
+
+  renderLayoutGroupsList();
+}
+
 function syncMenuControls() {
   const hasModel = Boolean(state.model);
   const hasParsedModel = Boolean(state.model?._parsed);
@@ -7314,6 +7532,7 @@ function syncMenuControls() {
   setVisible('menuPageSetupBtn', vis.showPageSetup);
   setVisible('menuBomSetupBtn', vis.showBomSetup);
   setVisible('menuPrintBtn', vis.showPrintPdf);
+  setVisible('menuExportHtmlBtn', vis.showPrintPdf);
   setVisible('pageSetupPrintBtn', vis.showPrintPdf);
   setVisible('bomSetupJumpBtn', vis.showBomSetup);
   setVisible('menuFetchLibWrap', vis.showFetchLibrary);
@@ -7363,17 +7582,14 @@ function syncMenuControls() {
   const pageSetupSub = document.getElementById('pageSetupSubtitle');
   if (pageSetupSub) {
     pageSetupSub.textContent = state.paperFormat === 'screen'
-      ? 'Adapts to current screen · Change paper size, margins & steps per page'
+      ? 'Adapts to current screen · Change paper size, grids & step groups'
       : `${activeFmt.name} · ${formatPhysicalDims(actWIn, actHIn)}`;
   }
   document.querySelectorAll('.orient-btn').forEach(b => {
     const act = b.getAttribute('data-orient') === state.orientation;
     b.className = `orient-btn py-2 rounded-full border font-semibold transition ${act ? 'border-[#1a73e8] bg-[#1a73e8] text-white' : 'border-[var(--border)] bg-[var(--background)]'}`;
   });
-  document.querySelectorAll('.layout-btn').forEach(b => {
-    const act = b.getAttribute('data-layout') === state.layout;
-    b.className = `layout-btn py-2 rounded-full border font-semibold transition ${act ? 'border-[#1a73e8] bg-[#1a73e8] text-white' : 'border-[var(--border)] bg-[var(--background)]'}`;
-  });
+  syncPageLayoutControlsUI();
   document.querySelectorAll('.dens-btn').forEach(b => {
     const act = b.getAttribute('data-density') === state.density;
     b.className = `dens-btn py-2 rounded-full border font-semibold transition ${act ? 'border-[#1a73e8] bg-[#1a73e8] text-white' : 'border-[var(--border)] bg-[var(--background)]'}`;
@@ -7561,6 +7777,63 @@ function renderOverviewModal() {
     }
   }
 
+  const rangeModeBtn = document.getElementById('btnOverviewRangeMode');
+  const rangeBar = document.getElementById('overviewRangeBar');
+  const rangeStatus = document.getElementById('overviewRangeStatus');
+  const rangeCreateBtn = document.getElementById('btnOverviewRangeCreate');
+  const ovSub = document.getElementById('overviewSubtitle');
+
+  if (rangeModeBtn) {
+    rangeModeBtn.textContent = overviewRangeState.active ? 'Done Selecting' : 'Select Range';
+    rangeModeBtn.className = `px-2.5 py-1.5 rounded-full border text-[11px] font-semibold transition ${overviewRangeState.active ? 'border-[#1a73e8] bg-[#1a73e8] text-white' : 'border-[var(--border)] bg-[var(--background)] hover:border-[#1a73e8]'}`;
+  }
+  if (ovSub) {
+    ovSub.textContent = overviewRangeState.active
+      ? 'Tap a start step and an end step (or page header) to group them'
+      : 'Tap any page or step to jump to it';
+  }
+  if (rangeBar) rangeBar.classList.toggle('hidden', !overviewRangeState.active);
+  if (rangeStatus && rangeCreateBtn) {
+    if (overviewRangeState.startStep != null && overviewRangeState.endStep != null) {
+      const lo = Math.min(overviewRangeState.startStep, overviewRangeState.endStep);
+      const hi = Math.max(overviewRangeState.startStep, overviewRangeState.endStep);
+      rangeStatus.textContent = lo === hi ? `Selected Step ${lo}` : `Selected Steps ${lo}–${hi}`;
+      rangeCreateBtn.disabled = false;
+    } else if (overviewRangeState.startStep != null) {
+      rangeStatus.textContent = `Start: Step ${overviewRangeState.startStep} · Tap an end step`;
+      rangeCreateBtn.disabled = false;
+    } else {
+      rangeStatus.textContent = 'Tap a start step, then an end step to group them';
+      rangeCreateBtn.disabled = true;
+    }
+  }
+
+  const pickRangeStep = (stepNum) => {
+    if (overviewRangeState.startStep == null || overviewRangeState.endStep != null) {
+      overviewRangeState.startStep = stepNum;
+      overviewRangeState.endStep = null;
+    } else {
+      overviewRangeState.endStep = stepNum;
+    }
+    renderOverviewModal();
+  };
+  const pickRangeSpan = (lo, hi) => {
+    if (overviewRangeState.startStep == null || overviewRangeState.endStep != null) {
+      overviewRangeState.startStep = lo;
+      overviewRangeState.endStep = hi;
+    } else {
+      overviewRangeState.startStep = Math.min(overviewRangeState.startStep, lo);
+      overviewRangeState.endStep = Math.max(overviewRangeState.startStep, hi);
+    }
+    renderOverviewModal();
+  };
+  const isStepInOverviewRange = (num) => {
+    if (!overviewRangeState.active || overviewRangeState.startStep == null) return false;
+    const lo = Math.min(overviewRangeState.startStep, overviewRangeState.endStep ?? overviewRangeState.startStep);
+    const hi = Math.max(overviewRangeState.startStep, overviewRangeState.endStep ?? overviewRangeState.startStep);
+    return num >= lo && num <= hi;
+  };
+
   const jumpToPageAndStep = (idx, stepId = null) => {
     state.pageIdx = idx;
     if (stepId) state.selectedStepId = stepId;
@@ -7613,13 +7886,23 @@ function renderOverviewModal() {
     const pageHeader = document.createElement('div');
     pageHeader.className = `flex items-center justify-between gap-2 px-3 py-1.5 border-b cursor-pointer transition ${active ? 'border-[#1a73e8]/25 bg-[#1a73e8]/10' : 'border-[var(--border)]/70 bg-black/[0.02] dark:bg-white/[0.03] hover:bg-black/[0.04] dark:hover:bg-white/[0.06]'}`;
     const showChapterName = Boolean(pg.chapterName);
+    const grpBadge = pg.layoutGroup
+      ? `<span class="px-1.5 py-0.5 rounded-full bg-[#1a73e8]/15 text-[#1a73e8] text-[9px] font-bold truncate max-w-[110px]">${escHtml(pg.layoutGroup.name)}</span>`
+      : '';
     pageHeader.innerHTML = `
       <div class="flex items-center gap-1.5 min-w-0 text-[11px]">
         <span class="font-bold shrink-0">Page ${pg.num}</span>
         ${showChapterName ? `<span class="text-[var(--muted-foreground)] truncate">· ${escHtml(pg.chapterName)}</span>` : ''}
+        ${grpBadge}
       </div>
       <span class="text-[10px] font-semibold text-[var(--muted-foreground)] shrink-0">${slots.length === 1 ? '1 step' : `${slots.length} steps`}</span>`;
-    pageHeader.onclick = () => jumpToPageAndStep(idx, firstStep.id);
+    pageHeader.onclick = () => {
+      if (overviewRangeState.active) {
+        pickRangeSpan(slots[0].step.num, slots[slots.length - 1].step.num);
+      } else {
+        jumpToPageAndStep(idx, firstStep.id);
+      }
+    };
     card.appendChild(pageHeader);
 
     const stepsWrap = document.createElement('div');
@@ -7630,6 +7913,7 @@ function renderOverviewModal() {
       const isSeqCont = isStepBreakContinuationSlice(slot);
       const hasBreak = hasStepPageBreak(state.overrides, step.id, slot);
       const isStepActive = active && (state.selectedStepId === step.id || (!state.selectedStepId && slotIdx === 0));
+      const inSelRange = isStepInOverviewRange(step.num);
       const isMfBuild = Boolean((step.isStandaloneFigure || slot.ch?.kind === 'minifigure') && !step.isMinifigPoseStep);
 
       const stepTitle = isMfBuild && step.minifigName
@@ -7652,7 +7936,7 @@ function renderOverviewModal() {
 
       const stepRow = document.createElement('div');
       if (isStepActive) stepRow.dataset.active = 'true';
-      stepRow.className = `flex items-center justify-between gap-2 px-3 py-2 cursor-pointer transition ${isStepActive ? 'bg-[#1a73e8]/10' : 'hover:bg-black/[0.03] dark:hover:bg-white/[0.04]'}`;
+      stepRow.className = `flex items-center justify-between gap-2 px-3 py-2 cursor-pointer transition ${inSelRange ? 'bg-[#1a73e8]/18 ring-1 ring-inset ring-[#1a73e8]/40' : (isStepActive ? 'bg-[#1a73e8]/10' : 'hover:bg-black/[0.03] dark:hover:bg-white/[0.04]')}`;
 
       const breakTitle = getStepBreakTooltip({
         stepLabel: getStepShortLabel(step, slot.ch),
@@ -7662,9 +7946,9 @@ function renderOverviewModal() {
 
       stepRow.innerHTML = `
         <div class="flex items-center gap-2 min-w-0">
-          ${isStepActive ? '<span class="w-1.5 h-1.5 rounded-full bg-[#1a73e8] shrink-0" aria-hidden="true"></span>' : ''}
+          ${inSelRange ? '<span class="w-4 h-4 rounded-full bg-[#1a73e8] text-white text-[10px] font-bold inline-flex items-center justify-center shrink-0">✓</span>' : (isStepActive ? '<span class="w-1.5 h-1.5 rounded-full bg-[#1a73e8] shrink-0" aria-hidden="true"></span>' : '')}
           <div class="min-w-0">
-            <div class="font-semibold truncate ${isStepActive ? 'text-[#1a73e8]' : ''}">${escHtml(stepTitle)}</div>
+            <div class="font-semibold truncate ${inSelRange || isStepActive ? 'text-[#1a73e8]' : ''}">${escHtml(stepTitle)}</div>
             ${stepMeta ? `<div class="text-[11px] text-[var(--muted-foreground)] truncate">${escHtml(stepMeta)}</div>` : ''}
           </div>
         </div>
@@ -7674,7 +7958,13 @@ function renderOverviewModal() {
             : `<button type="button" title="${escHtml(breakTitle)}" aria-label="${escHtml(`Page break before Step ${step.num}`)}" aria-pressed="${hasBreak ? 'true' : 'false'}" class="ov-step-pin px-2.5 py-1 rounded-full text-[11px] font-semibold border inline-flex items-center gap-1 transition ${hasBreak ? 'bg-[#1a73e8] text-white border-transparent' : 'border-[var(--border)] bg-[var(--card)] hover:border-[#1a73e8]/60'}">${pageBreakSvg}<span>Page Break</span></button>`}
         </div>`;
 
-      stepRow.onclick = () => jumpToPageAndStep(idx, step.id);
+      stepRow.onclick = () => {
+        if (overviewRangeState.active) {
+          pickRangeStep(step.num);
+        } else {
+          jumpToPageAndStep(idx, step.id);
+        }
+      };
 
       const pinBtn = stepRow.querySelector('.ov-step-pin');
       if (pinBtn) {
@@ -9464,6 +9754,7 @@ function scheduleSaveSessionPrefs() {
       themeId: state.themeId, paperFormat: state.paperFormat, orientation: state.orientation,
       customWidth: state.customWidth, customHeight: state.customHeight, customUnit: state.customUnit,
       density: state.density, showPrintGuides: state.showPrintGuides, layout: state.layout,
+      layoutConfig: state.layoutConfig, layoutGroups: state.layoutGroups,
       pacing: state.pacing, detectDuplicates: state.detectDuplicates, highlightNew: state.highlightNew, highlightColor: state.highlightColor,
       fadePrev: state.fadePrev, fadeOpacity: state.fadeOpacity, showRotCues: state.showRotCues,
       showSizeGuides: state.showSizeGuides, minifigStyle: state.minifigStyle, showMinifig1to1: state.showMinifig1to1, showStepBorders: state.showStepBorders,
@@ -9510,6 +9801,9 @@ async function restoreLastSessionOnStart() {
     if (prefs.density) state.density = prefs.density;
     if (typeof prefs.showPrintGuides === 'boolean') state.showPrintGuides = prefs.showPrintGuides;
     if (prefs.layout) state.layout = prefs.layout;
+    state.layoutConfig = normalizePageLayoutSpec(prefs.layoutConfig, prefs.layout);
+    state.layoutGroups = normalizeLayoutGroups(prefs.layoutGroups);
+    syncLegacyLayoutFlag();
     if (prefs.pacing) state.pacing = prefs.pacing;
     if (typeof prefs.detectDuplicates === 'boolean') state.detectDuplicates = prefs.detectDuplicates;
     if (typeof prefs.highlightNew === 'boolean') state.highlightNew = prefs.highlightNew;
@@ -9687,7 +9981,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
   const canvas = document.createElement('canvas');
   canvas.width = pxW; canvas.height = pxH;
   const ctx = canvas.getContext('2d');
-  const theme = getActiveTheme();
+  const theme = getThemeForPage(page);
   const allParts = getAllParts(state.model);
   const allSteps = getAllSteps(state.model);
   const links = [];
@@ -10055,8 +10349,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
 
     const slots = page.slots;
     const isLand = pxW >= pxH;
-    const cols = slots.length === 1 ? 1 : slots.length === 2 ? (isLand ? 2 : 1) : 2;
-    const rows = Math.ceil(slots.length / cols);
+    const pageSpec = page.layoutSpec || state.layoutConfig;
     const gap = typo.gap;
     const st = typo.steps;
 
@@ -10112,24 +10405,29 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       topY = pad + bannerH + Math.round(gap * 0.8);
     }
 
-    const slotW = (pxW - pad * 2 - gap * (cols - 1)) / cols;
-    const slotH = (pxH - topY - pad - footerH - gap * (rows - 1)) / rows;
-    const isTightSlot = slots.length >= 4 || slotH < typo.pt(260);
-    const stepNumPx = slots.length === 1 ? st.stepNum1Up : (isTightSlot ? st.stepNumTight : st.stepNum2Up);
-    const pliThumbPx = isTightSlot ? st.pliThumbTight : st.pliThumb;
-    const pliQtyPx = isTightSlot ? st.pliQtyFontTight : st.pliQtyFont;
+    const availW = Math.max(80, pxW - pad * 2);
+    const availH = Math.max(80, pxH - topY - pad - footerH);
+    const slotRects = computePageSlotRects(slots.length, pageSpec, isLand, availW, availH, gap);
+    const effectiveBorders = typeof page.layoutGroup?.showStepBorders === 'boolean' ? page.layoutGroup.showStepBorders : state.showStepBorders;
 
     for (let idx = 0; idx < slots.length; idx++) {
       const { ch, step, minifigSeqSlice } = slots[idx];
-      const sx = pad + (idx % cols) * (slotW + gap);
-      const sy = topY + Math.floor(idx / cols) * (slotH + gap);
+      const rect = slotRects[idx] || { x: 0, y: 0, w: availW, h: availH, isFeatured: slots.length === 1, isCompact: false };
+      const sx = pad + rect.x;
+      const sy = topY + rect.y;
+      const slotW = rect.w;
+      const slotH = rect.h;
+      const isTightSlot = rect.isCompact || slotH < typo.pt(250) || slotW < typo.pt(230);
+      const stepNumPx = (slots.length === 1 || rect.isFeatured) ? st.stepNum1Up : (isTightSlot ? st.stepNumTight : st.stepNum2Up);
+      const pliThumbPx = isTightSlot ? st.pliThumbTight : st.pliThumb;
+      const pliQtyPx = isTightSlot ? st.pliQtyFontTight : st.pliQtyFont;
       const isMfBuild = Boolean((step.isStandaloneFigure || ch.kind === 'minifigure') && !step.isMinifigPoseStep);
       const mfStyle = isMfBuild ? getEffectiveMinifigStyle(step) : 'classic';
       const isMfExploded = isMfBuild && mfStyle === 'exploded';
       const isMfSeq = isMfBuild && mfStyle === 'sequential';
       const isOfficialMfStyle = isMfExploded || isMfSeq;
 
-      if (state.showStepBorders && !(isOfficialMfStyle && slots.length === 1)) {
+      if (effectiveBorders && !(isOfficialMfStyle && slots.length === 1)) {
         ctx.strokeStyle = theme.pliBorder; ctx.lineWidth = 1.5;
         ctx.strokeRect(sx, sy, slotW, slotH);
       }
@@ -10848,13 +11146,13 @@ document.getElementById('overviewModal').onclick = (e) => {
 
 document.getElementById('btnUndo').onclick = () => {
   if (!state.undoStack.length) return;
-  const cur = JSON.stringify({ chapters: state.model.chapters, overrides: state.overrides, pageInserts: state.pageInserts, dividerAfter: state.dividerAfter, coverMeta: state.coverMeta, backMeta: state.backMeta });
+  const cur = JSON.stringify({ chapters: state.model.chapters, overrides: state.overrides, pageInserts: state.pageInserts, dividerAfter: state.dividerAfter, coverMeta: state.coverMeta, completeMeta: state.completeMeta, backMeta: state.backMeta, layoutConfig: state.layoutConfig, layoutGroups: state.layoutGroups });
   state.redoStack.push(cur);
   applyHistorySnap(state.undoStack.pop());
 };
 document.getElementById('btnRedo').onclick = () => {
   if (!state.redoStack.length) return;
-  const cur = JSON.stringify({ chapters: state.model.chapters, overrides: state.overrides, pageInserts: state.pageInserts, dividerAfter: state.dividerAfter, coverMeta: state.coverMeta, backMeta: state.backMeta });
+  const cur = JSON.stringify({ chapters: state.model.chapters, overrides: state.overrides, pageInserts: state.pageInserts, dividerAfter: state.dividerAfter, coverMeta: state.coverMeta, completeMeta: state.completeMeta, backMeta: state.backMeta, layoutConfig: state.layoutConfig, layoutGroups: state.layoutGroups });
   state.undoStack.push(cur);
   applyHistorySnap(state.redoStack.pop());
 };
@@ -10904,7 +11202,173 @@ const onCustomDimChange = () => {
 document.getElementById('customWidthIn').onchange = onCustomDimChange;
 document.getElementById('customHeightIn').onchange = onCustomDimChange;
 document.querySelectorAll('.orient-btn').forEach(b => { b.onclick = () => { state.orientation = b.getAttribute('data-orient'); resetZoom(); renderAll(); }; });
-document.querySelectorAll('.layout-btn').forEach(b => { b.onclick = () => { state.layout = b.getAttribute('data-layout'); renderAll(); }; });
+
+// Customizable Step Grid, Order Direction, Mixed Layouts & Step Range Groups
+document.querySelectorAll('.layout-btn').forEach(b => {
+  b.onclick = () => {
+    const preset = b.getAttribute('data-layout-preset');
+    if (preset === 'auto') {
+      state.layoutConfig = { ...state.layoutConfig, mode: 'auto' };
+    } else {
+      const n = Math.max(1, Math.min(24, parseInt(preset, 10) || 2));
+      state.layoutConfig = { ...state.layoutConfig, mode: 'custom', stepsPerPage: n };
+    }
+    syncLegacyLayoutFlag();
+    renderAll();
+  };
+});
+const layoutStepsInp = document.getElementById('layoutStepsInput');
+if (layoutStepsInp) {
+  layoutStepsInp.onchange = (e) => {
+    const n = Math.max(1, Math.min(24, parseInt(e.target.value, 10) || 1));
+    state.layoutConfig = { ...state.layoutConfig, mode: 'custom', stepsPerPage: n };
+    syncLegacyLayoutFlag();
+    renderAll();
+  };
+}
+const layoutColsSel = document.getElementById('layoutColsSelect');
+if (layoutColsSel) {
+  layoutColsSel.onchange = (e) => {
+    const v = e.target.value === 'auto' ? 'auto' : Math.max(1, Math.min(6, parseInt(e.target.value, 10) || 1));
+    state.layoutConfig = { ...state.layoutConfig, cols: v };
+    renderAll();
+  };
+}
+const layoutRowsSel = document.getElementById('layoutRowsSelect');
+if (layoutRowsSel) {
+  layoutRowsSel.onchange = (e) => {
+    const v = e.target.value === 'auto' ? 'auto' : Math.max(1, Math.min(6, parseInt(e.target.value, 10) || 1));
+    state.layoutConfig = { ...state.layoutConfig, rows: v };
+    renderAll();
+  };
+}
+document.querySelectorAll('.step-flow-btn').forEach(b => {
+  b.onclick = () => {
+    state.layoutConfig = { ...state.layoutConfig, flow: b.getAttribute('data-step-flow') === 'column' ? 'column' : 'row' };
+    syncLegacyLayoutFlag();
+    renderAll();
+  };
+});
+document.querySelectorAll('.mixed-layout-btn').forEach(b => {
+  b.onclick = () => {
+    const nextMixed = b.getAttribute('data-mixed-layout') || 'even';
+    state.layoutConfig = { ...state.layoutConfig, mixedLayout: nextMixed };
+    syncLegacyLayoutFlag();
+    renderAll();
+  };
+});
+
+// Step Range Group Editor controls
+const btnNewLayoutGroup = document.getElementById('btnNewLayoutGroup');
+if (btnNewLayoutGroup) btnNewLayoutGroup.onclick = () => openLayoutGroupEditor(null);
+const btnGrpCancel = document.getElementById('btnGrpCancel');
+if (btnGrpCancel) btnGrpCancel.onclick = closeLayoutGroupEditor;
+const btnGrpUseCur = document.getElementById('btnGrpUseCurrentPage');
+if (btnGrpUseCur) {
+  btnGrpUseCur.onclick = () => {
+    const curSlots = state.pages[state.pageIdx]?.slots || [];
+    if (curSlots.length === 0) { showToast('Navigate to a step page first.'); return; }
+    const s1 = curSlots[0].step.num;
+    const s2 = curSlots[curSlots.length - 1].step.num;
+    document.getElementById('grpStartStepInput').value = String(s1);
+    document.getElementById('grpEndStepInput').value = String(s2);
+  };
+}
+const grpMixedSel = document.getElementById('grpMixedSelect');
+if (grpMixedSel) grpMixedSel.onchange = syncGroupEditorSlotSizesUI;
+const grpStepsInp = document.getElementById('grpStepsPerPageInput');
+if (grpStepsInp) grpStepsInp.onchange = syncGroupEditorSlotSizesUI;
+const btnGrpSave = document.getElementById('btnGrpSave');
+if (btnGrpSave) {
+  btnGrpSave.onclick = () => {
+    const rawStart = Math.max(1, parseInt(document.getElementById('grpStartStepInput')?.value, 10) || 1);
+    const rawEnd = Math.max(1, parseInt(document.getElementById('grpEndStepInput')?.value, 10) || rawStart);
+    const startStepNum = Math.min(rawStart, rawEnd);
+    const endStepNum = Math.max(rawStart, rawEnd);
+    const stepsPerPage = Math.max(1, Math.min(24, parseInt(document.getElementById('grpStepsPerPageInput')?.value, 10) || 4));
+    const colsRaw = document.getElementById('grpColsSelect')?.value || 'auto';
+    const rowsRaw = document.getElementById('grpRowsSelect')?.value || 'auto';
+    const flow = document.getElementById('grpFlowSelect')?.value === 'column' ? 'column' : 'row';
+    const mixedLayout = document.getElementById('grpMixedSelect')?.value || 'even';
+    const themeId = (document.getElementById('grpThemeSelect')?.value || '').trim() || null;
+    const name = (document.getElementById('grpNameInput')?.value || '').trim() || `Steps ${startStepNum}–${endStepNum}`;
+
+    const newGroup = {
+      id: layoutGroupEditorState.editingId || `grp_${Date.now().toString(36)}`,
+      name,
+      startStepNum,
+      endStepNum,
+      layout: normalizePageLayoutSpec({
+        mode: 'custom',
+        stepsPerPage,
+        cols: colsRaw === 'auto' ? 'auto' : parseInt(colsRaw, 10),
+        rows: rowsRaw === 'auto' ? 'auto' : parseInt(rowsRaw, 10),
+        flow,
+        mixedLayout,
+        slotSizes: mixedLayout === 'custom_weights' ? [...layoutGroupEditorState.slotSizes] : [],
+      }),
+      themeId,
+    };
+
+    pushUndo();
+    const existingIdx = state.layoutGroups.findIndex((g) => g.id === newGroup.id);
+    if (existingIdx >= 0) {
+      state.layoutGroups[existingIdx] = newGroup;
+    } else {
+      state.layoutGroups = [...state.layoutGroups, newGroup];
+    }
+    closeLayoutGroupEditor();
+    renderAll();
+    showToast(`Saved step group "${newGroup.name}".`);
+  };
+}
+const btnGrpDelete = document.getElementById('btnGrpDelete');
+if (btnGrpDelete) {
+  btnGrpDelete.onclick = () => {
+    if (!layoutGroupEditorState.editingId) return;
+    pushUndo();
+    state.layoutGroups = state.layoutGroups.filter((g) => g.id !== layoutGroupEditorState.editingId);
+    closeLayoutGroupEditor();
+    renderAll();
+    showToast('Removed step group.');
+  };
+}
+
+// Pages & Steps Overview: Select Range -> Group shortcut
+const btnOverviewRangeMode = document.getElementById('btnOverviewRangeMode');
+if (btnOverviewRangeMode) {
+  btnOverviewRangeMode.onclick = () => {
+    overviewRangeState.active = !overviewRangeState.active;
+    if (!overviewRangeState.active) {
+      overviewRangeState.startStep = null;
+      overviewRangeState.endStep = null;
+    }
+    renderOverviewModal();
+  };
+}
+const btnOverviewRangeClear = document.getElementById('btnOverviewRangeClear');
+if (btnOverviewRangeClear) {
+  btnOverviewRangeClear.onclick = () => {
+    overviewRangeState.startStep = null;
+    overviewRangeState.endStep = null;
+    renderOverviewModal();
+  };
+}
+const btnOverviewRangeCreate = document.getElementById('btnOverviewRangeCreate');
+if (btnOverviewRangeCreate) {
+  btnOverviewRangeCreate.onclick = () => {
+    if (overviewRangeState.startStep == null) return;
+    const lo = Math.min(overviewRangeState.startStep, overviewRangeState.endStep ?? overviewRangeState.startStep);
+    const hi = Math.max(overviewRangeState.startStep, overviewRangeState.endStep ?? overviewRangeState.startStep);
+    overviewRangeState.active = false;
+    overviewRangeState.startStep = null;
+    overviewRangeState.endStep = null;
+    document.getElementById('overviewModal').classList.add('hidden');
+    openPageSetupModal();
+    openLayoutGroupEditor(null, { start: lo, end: hi });
+  };
+}
+
 document.querySelectorAll('.dens-btn').forEach(b => { b.onclick = () => { state.density = b.getAttribute('data-density'); renderAll(); }; });
 document.querySelectorAll('.pgnum-btn').forEach(b => { b.onclick = () => { state.pageNumberFormat = b.getAttribute('data-pgnum'); renderAll(); }; });
 document.querySelectorAll('.pacing-btn').forEach(b => { b.onclick = () => { state.pacing = b.getAttribute('data-pacing'); syncMenuControls(); }; });
@@ -10957,7 +11421,356 @@ document.getElementById('toggleDetectDuplicates').onchange = (e) => {
   }
 };
 
-// Open real Print & Export PDF Modal (never silently closes!)
+// Self-Contained Interactive 3D HTML Export (LEGO Builder-style offline shareable viewer)
+async function runInteractiveHtmlExport() {
+  if (!state.model || state.pages.length === 0) {
+    showToast('Import a model first.');
+    return;
+  }
+  closeMenu();
+  const progWrap = document.getElementById('expProgressWrap');
+  const progLbl = document.getElementById('expProgressLabel');
+  const progPct = document.getElementById('expProgressPct');
+  const progBar = document.getElementById('expProgressBar');
+  const modalOpen = !document.getElementById('exportModal').classList.contains('hidden');
+  if (modalOpen && progWrap) {
+    progWrap.classList.remove('hidden');
+    if (progLbl) progLbl.textContent = 'Building Interactive 3D Viewer…';
+    if (progPct) progPct.textContent = '15%';
+    if (progBar) progBar.style.width = '15%';
+    await new Promise((r) => setTimeout(r, 15));
+  }
+
+  try {
+    const theme = getActiveTheme();
+    const allParts = getAllParts(state.model);
+    const allSteps = getAllSteps(state.model);
+    const protoIndexByKey = new Map();
+    const prototypes = [];
+    const textures = {};
+    const partIndexById = new Map();
+    const exportedParts = [];
+
+    const ensurePrototype = (part) => {
+      const key = `${normId(part.p)}:${part.c}`;
+      if (protoIndexByKey.has(key)) return protoIndexByKey.get(key);
+      const idPart = { id: 'proto', p: part.p, c: part.c, x: 0, y: 0, z: 0, m: [1, 0, 0, 0, 1, 0, 0, 0, 1] };
+      const mesh = buildMeshBuffers([], [idPart], {
+        highlightNew: false,
+        fadePrev: false,
+        fadeOpacity: 1.0,
+        showArrows: false,
+        accent: theme.accent,
+      });
+
+      let minX = Infinity, minY = Infinity, minZ = Infinity;
+      let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+      const scanPos = (arr) => {
+        for (let i = 0; i < arr.length; i += 3) {
+          const x = arr[i], y = arr[i + 1], z = arr[i + 2];
+          if (x < minX) minX = x; if (x > maxX) maxX = x;
+          if (y < minY) minY = y; if (y > maxY) maxY = y;
+          if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+        }
+      };
+      scanPos(mesh.triPos);
+      const texDraws = [];
+      if (Array.isArray(mesh.texDraws)) {
+        for (const td of mesh.texDraws) {
+          if (!td.triPos || td.triPos.length < 9) continue;
+          scanPos(td.triPos);
+          if (!textures[td.texKey]) {
+            const rec = textureStore.getRecord(td.texKey);
+            if (rec && rec.base64Png) {
+              textures[td.texKey] = `data:${rec.mimeType || 'image/png'};base64,${rec.base64Png}`;
+            }
+          }
+          texDraws.push({
+            k: td.texKey,
+            tp: encodeTypedArrayBase64(td.triPos),
+            tn: encodeTypedArrayBase64(td.triNorm),
+            uv: encodeTypedArrayBase64(td.triUv),
+            tc: encodeTypedArrayBase64(td.triCol),
+          });
+        }
+      }
+      if (!Number.isFinite(minX)) { minX = -10; minY = -10; minZ = -10; maxX = 10; maxY = 10; maxZ = 10; }
+
+      const idx = prototypes.length;
+      prototypes.push({
+        tp: encodeTypedArrayBase64(mesh.triPos),
+        tn: encodeTypedArrayBase64(mesh.triNorm),
+        tc: encodeTypedArrayBase64(mesh.triCol),
+        oc: mesh.opaqueCount || 0,
+        xc: mesh.transCount || 0,
+        lp: encodeTypedArrayBase64(mesh.linePos),
+        lc: encodeTypedArrayBase64(mesh.lineCol),
+        ...(texDraws.length > 0 ? { td: texDraws } : {}),
+        b: [+minX.toFixed(2), +minY.toFixed(2), +minZ.toFixed(2), +maxX.toFixed(2), +maxY.toFixed(2), +maxZ.toFixed(2)],
+      });
+      protoIndexByKey.set(key, idx);
+      return idx;
+    };
+
+    const registerPart = (part, extraOffset = null) => {
+      const hasOff = extraOffset && (Math.abs(extraOffset.x || 0) > 0.01 || Math.abs(extraOffset.y || 0) > 0.01 || Math.abs(extraOffset.z || 0) > 0.01);
+      const cacheKey = hasOff ? `${part.id}@${Math.round(extraOffset.x || 0)},${Math.round(extraOffset.y || 0)},${Math.round(extraOffset.z || 0)}` : part.id;
+      if (partIndexById.has(cacheKey)) return partIndexById.get(cacheKey);
+      const k = ensurePrototype(part);
+      const m = part.m || [1, 0, 0, 0, 1, 0, 0, 0, 1];
+      const isId = Math.abs(m[0] - 1) < 1e-4 && Math.abs(m[4] - 1) < 1e-4 && Math.abs(m[8] - 1) < 1e-4 &&
+        Math.abs(m[1]) < 1e-4 && Math.abs(m[2]) < 1e-4 && Math.abs(m[3]) < 1e-4 &&
+        Math.abs(m[5]) < 1e-4 && Math.abs(m[6]) < 1e-4 && Math.abs(m[7]) < 1e-4;
+      const entry = {
+        k,
+        x: +((part.x || 0) + (extraOffset?.x || 0)).toFixed(2),
+        y: +((part.y || 0) + (extraOffset?.y || 0)).toFixed(2),
+        z: +((part.z || 0) + (extraOffset?.z || 0)).toFixed(2),
+        ...(isId ? {} : { m: m.map((v) => +Number(v).toFixed(5)) }),
+      };
+      const idx = exportedParts.length;
+      exportedParts.push(entry);
+      partIndexById.set(cacheKey, idx);
+      return idx;
+    };
+
+    const allPartIndices = allParts.map((p) => registerPart(p));
+    if (modalOpen && progPct && progBar) { progPct.textContent = '55%'; progBar.style.width = '55%'; await new Promise((r) => setTimeout(r, 10)); }
+
+    const cm = normalizeCoverMeta(state.coverMeta);
+    const exportPages = [];
+
+    for (const pg of state.pages) {
+      if (pg.kind === 'cover') {
+        exportPages.push({
+          id: pg.id,
+          kind: 'cover',
+          num: pg.num,
+          label: pg.label || 'Cover',
+          title: (cm.title || state.model.title || 'Untitled Model').trim(),
+          subtitle: (cm.subtitle || `${allParts.length} pieces · ${allSteps.length} steps`).trim(),
+          badge: cm.creatorName ? cm.creatorName.trim() : `${allParts.length} pcs`,
+          scene: {
+            prevPartIdx: [],
+            newPartIdx: allPartIndices,
+            az: cm.az ?? 38,
+            el: cm.el ?? 26,
+            zoom: cm.zoom ?? 1.0,
+            hero: true,
+          },
+        });
+      } else if (pg.kind === 'complete') {
+        exportPages.push({
+          id: pg.id,
+          kind: 'complete',
+          num: pg.num,
+          label: pg.label || 'Build Complete',
+          title: state.completeMeta?.title || 'Build Complete!',
+          subtitle: state.completeMeta?.subtitle || `${allParts.length} pieces assembled`,
+          badge: 'Complete',
+          scene: {
+            prevPartIdx: [],
+            newPartIdx: allPartIndices,
+            az: state.completeMeta?.az ?? 315,
+            el: state.completeMeta?.el ?? 28,
+            zoom: 1.0,
+            hero: true,
+          },
+        });
+      } else if (pg.kind === 'back') {
+        exportPages.push({
+          id: pg.id,
+          kind: 'back',
+          num: pg.num,
+          label: pg.label || 'Back Cover',
+          title: state.backMeta?.title || state.model.title,
+          subtitle: state.backMeta?.subtitle || 'Made with Brick Instruction Creator',
+          note: `${allParts.length} pieces · ${allSteps.length} steps`,
+          scene: {
+            prevPartIdx: [],
+            newPartIdx: allPartIndices,
+            az: state.backMeta?.az ?? 215,
+            el: state.backMeta?.el ?? 24,
+            zoom: 0.95,
+            hero: true,
+          },
+        });
+      } else if (pg.kind === 'section_divider') {
+        const previewIdx = (pg.previewParts || []).map((p) => registerPart(p));
+        exportPages.push({
+          id: pg.id,
+          kind: 'section_divider',
+          num: pg.num,
+          label: pg.label || pg.chapterName || 'Section',
+          title: pg.chapterName || pg.label,
+          subtitle: `${pg.pieceCount || previewIdx.length} pieces · ${pg.stepCount || 0} steps`,
+          badge: pg.bagNumber ? `Section ${pg.bagNumber}` : 'Section',
+          scene: previewIdx.length > 0 ? { prevPartIdx: [], newPartIdx: previewIdx, az: 38, el: 28, zoom: 1.0, hero: true } : undefined,
+        });
+      } else if (pg.kind === 'submodel_page' && pg.step?.subassembly) {
+        const subParts = (pg.step.subassembly.buildParts || []).map((p) => registerPart(p));
+        exportPages.push({
+          id: pg.id,
+          kind: 'submodel_page',
+          num: pg.num,
+          label: pg.label || pg.step.subassembly.name,
+          title: pg.step.subassembly.name || 'Submodel',
+          badge: `×${pg.step.subassembly.repeatCount || 1}`,
+          scene: { prevPartIdx: [], newPartIdx: subParts, az: 38, el: 28, zoom: 1.0, hero: false },
+        });
+      } else if (pg.kind === 'bom') {
+        const bomItems = (pg.entries || []).map((e) => ({
+          partId: e.part.p,
+          name: resolvePart(e.part.p).name,
+          colorName: COLORS[e.part.c]?.name || `Color ${e.part.c}`,
+          qty: e.qty,
+          thumb: getPliThumb(e.part),
+        }));
+        exportPages.push({
+          id: pg.id,
+          kind: 'bom',
+          num: pg.num,
+          label: pg.label || 'Parts List',
+          title: pg.bomTotal > 1 ? `Parts List (${pg.bomIdx + 1}/${pg.bomTotal})` : 'Parts List',
+          bomItems,
+        });
+      } else if (pg.kind === 'divider') {
+        const divMeta = state.dividerAfter[pg.sourcePgId] || {};
+        exportPages.push({
+          id: pg.id,
+          kind: 'divider',
+          num: pg.num,
+          label: pg.label || 'Divider',
+          title: divMeta.title || 'Next Section',
+          subtitle: divMeta.note || '',
+        });
+      } else if (pg.kind === 'steps' && pg.slots?.length > 0) {
+        const stepScenes = pg.slots.map(({ ch, step }) => {
+          const prev = getPreviousPartsForStep(state.model, ch, step);
+          const cam = getStepCamera(step);
+          const ov = state.overrides[step.id] || {};
+          const effOffsets = step.defaultPartOffsets
+            ? { ...step.defaultPartOffsets, ...(ov.partOffsets || {}) }
+            : (ov.partOffsets || {});
+          const prevPartIdx = prev.map((p) => registerPart(p));
+          const newPartIdx = (step.parts || []).map((p) => registerPart(p, effOffsets[p.id] || null));
+
+          const pliMap = new Map();
+          for (const p of step.parts || []) {
+            const k = `${p.p}:${p.c}`;
+            if (!pliMap.has(k)) {
+              pliMap.set(k, {
+                partId: p.p,
+                name: resolvePart(p.p).name,
+                colorName: COLORS[p.c]?.name || '',
+                qty: 0,
+                thumb: getPliThumb(p),
+              });
+            }
+            pliMap.get(k).qty++;
+          }
+          const cueLabel = state.showRotCues && step.cue && step.cue !== 'none'
+            ? (step.cue === 'flip_vertical' ? 'Flip Over' : step.cue === 'yaw_180' ? 'Turn 180°' : 'Rotate 90°')
+            : undefined;
+          const subLabel = step.attachedSubmodel
+            ? `Attach ${step.attachedSubmodel.name} (×${step.attachedSubmodel.repeatCount || 1})`
+            : step.subassembly
+              ? `Includes ${step.subassembly.name} (×${step.subassembly.repeatCount || 1})`
+              : step.isSubmodelFinal
+                ? `Repeat ×${step.submodelRepeat || 2}`
+                : undefined;
+
+          return {
+            stepId: step.id,
+            stepNum: step.num,
+            label: `Step ${step.num}`,
+            rotationCue: cueLabel,
+            subLabel,
+            pli: Array.from(pliMap.values()),
+            prevPartIdx,
+            newPartIdx,
+            az: cam.az,
+            el: cam.el,
+            zoom: ov.modelScale || 1.0,
+          };
+        });
+        exportPages.push({
+          id: pg.id,
+          kind: 'steps',
+          num: pg.num,
+          label: pg.label,
+          chapterName: pg.chapterName,
+          steps: stepScenes,
+        });
+      }
+    }
+
+    if (modalOpen && progPct && progBar) { progPct.textContent = '90%'; progBar.style.width = '90%'; }
+
+    const htmlDoc = generateInteractiveHtmlDocument({
+      version: 1,
+      title: cm.title || state.model.title || 'Brick Instruction Manual',
+      subtitle: cm.subtitle || '',
+      author: cm.creatorName || '',
+      editorUrl: PROGRAM_URL || DEFAULT_EDITOR_URL,
+      totalPieces: allParts.length,
+      totalSteps: allSteps.length,
+      theme: {
+        bg: theme.bg,
+        bgEnd: theme.bgEnd,
+        bgType: theme.bgType || 'solid',
+        bgAngle: theme.bgAngle ?? 180,
+        text: theme.text,
+        muted: theme.muted,
+        accent: theme.accent,
+        pliBg: theme.pliBg,
+        pliBorder: theme.pliBorder,
+        calloutBg: theme.calloutBg,
+        calloutBorder: theme.calloutBorder,
+        isDark: isDarkHexColor(theme.bg),
+      },
+      highlightNew: state.highlightNew,
+      highlightColor: state.highlightColor,
+      fadePrev: state.fadePrev,
+      fadeOpacity: state.fadeOpacity,
+      prototypes,
+      textures,
+      parts: exportedParts,
+      pages: exportPages,
+    });
+
+    const fileName = buildInteractiveHtmlFilename(state.model.title);
+    const blob = new Blob([htmlDoc], { type: 'text/html;charset=utf-8' });
+    if (modalOpen && progWrap) progWrap.classList.add('hidden');
+
+    let shared = false;
+    if (navigator.canShare && typeof File !== 'undefined') {
+      try {
+        const file = new File([blob], fileName, { type: 'text/html' });
+        if (navigator.canShare({ files: [file] })) {
+          await navigator.share({ files: [file], title: `${state.model.title} — Interactive 3D Instructions` });
+          shared = true;
+        }
+      } catch (_) {}
+    }
+    if (!shared) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+    }
+    showToast(`Exported ${fileName}`);
+  } catch (err) {
+    if (modalOpen && progWrap) progWrap.classList.add('hidden');
+    showToast('Could not export Interactive 3D HTML.');
+  }
+}
+
+// Open real Export & Print Modal (never silently closes!)
 function openExportModal() {
   if (!state.model || state.pages.length === 0) { showToast('Import a model first.'); return; }
   closeMenu();
@@ -10975,8 +11788,12 @@ function openExportModal() {
   document.getElementById('exportModal').classList.remove('hidden');
 }
 document.getElementById('menuPrintBtn').onclick = openExportModal;
+const menuExportHtmlBtn = document.getElementById('menuExportHtmlBtn');
+if (menuExportHtmlBtn) menuExportHtmlBtn.onclick = runInteractiveHtmlExport;
+const btnExpInteractiveHtml = document.getElementById('btnExpInteractiveHtml');
+if (btnExpInteractiveHtml) btnExpInteractiveHtml.onclick = runInteractiveHtmlExport;
 document.getElementById('menuPageSetupBtn').onclick = openPageSetupModal;
-const closePageSetupModal = () => document.getElementById('pageSetupModal').classList.add('hidden');
+const closePageSetupModal = () => { closeLayoutGroupEditor(); document.getElementById('pageSetupModal').classList.add('hidden'); };
 document.getElementById('btnClosePageSetup').onclick = closePageSetupModal;
 document.getElementById('pageSetupDoneBtn').onclick = closePageSetupModal;
 document.getElementById('pageSetupPrintBtn').onclick = openExportModal;
@@ -11043,12 +11860,15 @@ document.getElementById('menuSaveProj').onclick = async () => {
   if (!state.model) return;
   const activeTheme = getActiveTheme();
   const embeddedCustomTheme = activeTheme && !activeTheme.builtIn && !BUILT_IN_THEME_IDS.has(activeTheme.id) ? activeTheme : undefined;
-  const payload = JSON.stringify({ version: 3, title: state.model.title, chapters: state.model.chapters, overrides: state.overrides, pageInserts: state.pageInserts, dividerAfter: state.dividerAfter, coverMeta: state.coverMeta, completeMeta: state.completeMeta, backMeta: state.backMeta, bomConfig: state.bomConfig, showStepBorders: state.showStepBorders, showPageTitle: state.showPageTitle, pageNumberFormat: state.pageNumberFormat, detectDuplicates: state.detectDuplicates, minifigStyle: state.minifigStyle, showMinifig1to1: state.showMinifig1to1, themeId: state.themeId, ...(embeddedCustomTheme ? { customTheme: embeddedCustomTheme } : {}), paperFormat: state.paperFormat, orientation: state.orientation, density: state.density, layout: state.layout }, null, 2);
+  const payload = JSON.stringify({ version: 3, title: state.model.title, chapters: state.model.chapters, overrides: state.overrides, pageInserts: state.pageInserts, dividerAfter: state.dividerAfter, coverMeta: state.coverMeta, completeMeta: state.completeMeta, backMeta: state.backMeta, bomConfig: state.bomConfig, showStepBorders: state.showStepBorders, showPageTitle: state.showPageTitle, pageNumberFormat: state.pageNumberFormat, detectDuplicates: state.detectDuplicates, minifigStyle: state.minifigStyle, showMinifig1to1: state.showMinifig1to1, themeId: state.themeId, ...(embeddedCustomTheme ? { customTheme: embeddedCustomTheme } : {}), paperFormat: state.paperFormat, orientation: state.orientation, density: state.density, layout: state.layout, layoutConfig: state.layoutConfig, layoutGroups: state.layoutGroups }, null, 2);
   const fileName = `${state.model.title.replace(/[^a-z0-9_-]+/gi, '_')}.bic.json`;
   closeMenu();
   await shareOrDownloadJsonFile(payload, fileName, 'Shared project file.', `Exported ${fileName}`);
 };
-document.getElementById('menuLoadProj').onclick = () => document.getElementById('projectLoadInput').click();
+const triggerProjectLoad = () => document.getElementById('projectLoadInput').click();
+document.getElementById('menuLoadProj').onclick = triggerProjectLoad;
+const emptyLoadProjBtn = document.getElementById('emptyLoadProjBtn');
+if (emptyLoadProjBtn) emptyLoadProjBtn.onclick = triggerProjectLoad;
 document.getElementById('projectLoadInput').onchange = async (e) => {
   const f = e.target.files?.[0]; e.target.value = ''; if (!f) return;
   try {
@@ -11084,6 +11904,9 @@ document.getElementById('projectLoadInput').onchange = async (e) => {
     if (data.orientation) state.orientation = data.orientation;
     if (data.density) state.density = data.density;
     if (data.layout) state.layout = data.layout;
+    state.layoutConfig = normalizePageLayoutSpec(data.layoutConfig, data.layout);
+    state.layoutGroups = normalizeLayoutGroups(data.layoutGroups);
+    syncLegacyLayoutFlag();
     state.pageIdx = 0; state.undoStack = []; state.redoStack = [];
     state.seenDiagnosticKeys = new Set();
     errFilter = 'all';
@@ -11356,7 +12179,9 @@ let impState = {
   proposals: [],
   selectedId: 'none', // 'none' or proposal.id
   activeProposal: null,
-  explodePct: 45,
+  explodePct: 50,
+  isExploded: true,
+  controlsVisible: false,
   colorMode: 'sections', // 'sections' | 'bricks'
   az: 38,
   el: 28,
@@ -11365,10 +12190,15 @@ let impState = {
 };
 
 function closeImportAssistant(keepPendingRaw = false) {
+  if (impExplodeAnimRaf) {
+    cancelAnimationFrame(impExplodeAnimRaf);
+    impExplodeAnimRaf = 0;
+  }
   state.pendingImport = null;
   if (!keepPendingRaw) pendingRawFile = null;
   impState.parsed = null;
   impState.activeProposal = null;
+  impState.controlsVisible = false;
   impState.skipAutoFetch = false;
   impPreviewMesh = null;
   document.getElementById('importModal').classList.add('hidden');
@@ -11480,13 +12310,77 @@ function drawImportPreviewFrame() {
   impPreviewEngine.draw(impPreviewMesh, w, h, impState.az, impState.el, 1.0);
 }
 
-// Orbit pointer gesture for the 3D Import Preview canvas (touch + mouse)
+// Orbit + Tap-to-Reveal Controls pointer gesture for the 3D Import Preview canvas
+const IMP_EXPLODED_PCT = 50;
+let impExplodeAnimRaf = 0;
+
+function syncImportPreviewControlsUI() {
+  const wrap = document.getElementById('impPreviewControls');
+  const expBtn = document.getElementById('impExplodeToggleBtn');
+  const colBtn = document.getElementById('impColorModeToggleBtn');
+  const hasProposal = Boolean(impState.activeProposal);
+  const show = Boolean(impState.controlsVisible) && hasProposal;
+  if (wrap) {
+    wrap.classList.toggle('opacity-0', !show);
+    wrap.classList.toggle('pointer-events-none', !show);
+    wrap.classList.toggle('scale-95', !show);
+    wrap.classList.toggle('opacity-100', show);
+    wrap.classList.toggle('scale-100', show);
+  }
+  if (expBtn) {
+    const isExp = Boolean(impState.isExploded);
+    expBtn.className = `glass-pill w-9 h-9 rounded-full flex items-center justify-center hover:scale-105 active:scale-95 transition ${isExp ? '!bg-[#1a73e8] !text-white !border-transparent' : ''}`;
+    expBtn.title = isExp ? 'Collapse sections' : 'Explode sections';
+    expBtn.setAttribute('aria-pressed', isExp ? 'true' : 'false');
+    expBtn.innerHTML = isExp
+      ? `<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" x2="21" y1="10" y2="3"/><line x1="3" x2="10" y1="21" y2="14"/></svg>`
+      : `<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" x2="14" y1="3" y2="10"/><line x1="3" x2="10" y1="21" y2="14"/></svg>`;
+  }
+  if (colBtn) {
+    const isSec = impState.colorMode === 'sections';
+    colBtn.className = `glass-pill w-9 h-9 rounded-full flex items-center justify-center hover:scale-105 active:scale-95 transition ${isSec ? '!bg-[#1a73e8] !text-white !border-transparent' : ''}`;
+    colBtn.title = isSec ? 'Section Colors (tap for Brick Colors)' : 'Brick Colors (tap for Section Colors)';
+    colBtn.setAttribute('aria-pressed', isSec ? 'true' : 'false');
+  }
+}
+
+function animateImportExplode(nextExploded) {
+  if (impExplodeAnimRaf) {
+    cancelAnimationFrame(impExplodeAnimRaf);
+    impExplodeAnimRaf = 0;
+  }
+  impState.isExploded = Boolean(nextExploded);
+  syncImportPreviewControlsUI();
+  const startPct = Number(impState.explodePct) || 0;
+  const targetPct = impState.isExploded ? IMP_EXPLODED_PCT : 0;
+  if (Math.abs(targetPct - startPct) < 0.5) {
+    impState.explodePct = targetPct;
+    rebuildAndDrawImportPreview();
+    return;
+  }
+  const durationMs = 340;
+  const startTime = performance.now();
+  const stepFrame = (now) => {
+    const t = Math.min(1, (now - startTime) / durationMs);
+    const eased = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+    impState.explodePct = startPct + (targetPct - startPct) * eased;
+    rebuildAndDrawImportPreview();
+    if (t < 1) {
+      impExplodeAnimRaf = requestAnimationFrame(stepFrame);
+    } else {
+      impState.explodePct = targetPct;
+      impExplodeAnimRaf = 0;
+    }
+  };
+  impExplodeAnimRaf = requestAnimationFrame(stepFrame);
+}
+
 (function bindImportPreviewOrbit() {
   const canvas = document.getElementById('impPreviewCanvas');
   if (!canvas) return;
-  let dragging = false, lastX = 0, lastY = 0;
+  let dragging = false, lastX = 0, lastY = 0, movedDist = 0;
   canvas.addEventListener('pointerdown', (e) => {
-    dragging = true; lastX = e.clientX; lastY = e.clientY;
+    dragging = true; lastX = e.clientX; lastY = e.clientY; movedDist = 0;
     try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
   });
   canvas.addEventListener('pointermove', (e) => {
@@ -11494,25 +12388,26 @@ function drawImportPreviewFrame() {
     const dx = e.clientX - lastX;
     const dy = e.clientY - lastY;
     lastX = e.clientX; lastY = e.clientY;
+    movedDist += Math.hypot(dx, dy);
     impState.az = (impState.az - dx * 0.55 + 360) % 360;
     impState.el = Math.max(-75, Math.min(80, impState.el + dy * 0.45));
     drawImportPreviewFrame();
   });
-  const endDrag = () => { dragging = false; };
-  canvas.addEventListener('pointerup', endDrag);
-  canvas.addEventListener('pointercancel', endDrag);
+  canvas.addEventListener('pointerup', () => {
+    if (dragging && movedDist < 6 && impState.activeProposal) {
+      impState.controlsVisible = !impState.controlsVisible;
+      syncImportPreviewControlsUI();
+    }
+    dragging = false;
+  });
+  canvas.addEventListener('pointercancel', () => { dragging = false; });
 })();
 
 function renderImportAssistantUI() {
   const listEl = document.getElementById('impProposalList');
-  const zoomPill = document.getElementById('impZoomGainPill');
   const autoBtn = document.getElementById('impBtnAuto');
-  const colSecBtn = document.getElementById('impColorModeSections');
-  const colBrkBtn = document.getElementById('impColorModeBricks');
 
-  // Color mode pill styling
-  colSecBtn.className = `px-2.5 py-1 rounded-full transition ${impState.colorMode === 'sections' ? 'bg-[#1a73e8] text-white' : 'text-[var(--muted-foreground)]'}`;
-  colBrkBtn.className = `px-2.5 py-1 rounded-full transition ${impState.colorMode === 'bricks' ? 'bg-[#1a73e8] text-white' : 'text-[var(--muted-foreground)]'}`;
+  syncImportPreviewControlsUI();
 
   // Proposal cards (ranked suggestions + Single Continuous Build escape hatch)
   const cardsHtml = impState.proposals.map((prop, idx) => {
@@ -11520,12 +12415,9 @@ function renderImportAssistantUI() {
     const isRec = idx === 0 && impState.assessment?.shouldPrompt;
     return `
       <button type="button" data-prop-id="${prop.id}" class="imp-prop-card w-full text-left p-3 rounded-2xl border-2 transition ${isSel ? 'border-[#1a73e8] bg-[#1a73e8]/10' : 'border-[var(--border)] bg-[var(--background)] hover:border-[#1a73e8]/45'}">
-        <div class="flex items-center justify-between gap-2">
-          <div class="flex items-center gap-1.5 min-w-0 flex-wrap">
-            <span class="text-xs font-bold ${isSel ? 'text-[#1a73e8]' : ''}">${escHtml(prop.title)}</span>
-            ${isRec ? '<span class="text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-[#1a73e8] text-white">Recommended</span>' : ''}
-          </div>
-          ${prop.zoomGainEstimate && prop.zoomGainEstimate >= 1.3 ? `<span class="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 shrink-0">~${prop.zoomGainEstimate}× zoom</span>` : ''}
+        <div class="flex items-center gap-1.5 min-w-0 flex-wrap">
+          <span class="text-xs font-bold ${isSel ? 'text-[#1a73e8]' : ''}">${escHtml(prop.title)}</span>
+          ${isRec ? '<span class="text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-[#1a73e8] text-white">Recommended</span>' : ''}
         </div>
         <div class="text-[11px] text-[var(--muted-foreground)] mt-0.5 leading-snug">${escHtml(prop.rationale)}</div>
       </button>`;
@@ -11545,6 +12437,7 @@ function renderImportAssistantUI() {
       impState.selectedId = pid;
       if (pid === 'none') {
         impState.activeProposal = null;
+        impState.controlsVisible = false;
       } else {
         const found = impState.proposals.find(p => p.id === pid);
         impState.activeProposal = found ? JSON.parse(JSON.stringify(found)) : null;
@@ -11556,16 +12449,8 @@ function renderImportAssistantUI() {
 
   const active = impState.activeProposal;
   if (!active) {
-    zoomPill.classList.add('hidden');
     autoBtn.textContent = impState.isPostImport ? 'Rebuild as Single Build' : 'Generate Manual';
     return;
-  }
-
-  if (active.zoomGainEstimate && active.zoomGainEstimate >= 1.25 && active.outputMode === 'modular_chapters') {
-    zoomPill.textContent = `~${active.zoomGainEstimate}× larger bricks per step`;
-    zoomPill.classList.remove('hidden');
-  } else {
-    zoomPill.classList.add('hidden');
   }
 
   const isMod = active.outputMode === 'modular_chapters';
@@ -11573,11 +12458,15 @@ function renderImportAssistantUI() {
   const hasJoin = active.sections.some(s => s.role === 'join');
   const secCountLabel = isMod
     ? `${primarySecs.length} Section${primarySecs.length === 1 ? '' : 's'}${hasJoin ? ' + Join' : ''}`
-    : `${active.sections.length} Bags`;
+    : `${active.sections.length} Sections`;
   autoBtn.textContent = `${impState.isPostImport ? 'Apply' : 'Generate Manual'} (${secCountLabel})`;
 }
 
 function openImportAssistant(parsed, isPostImport = false) {
+  if (impExplodeAnimRaf) {
+    cancelAnimationFrame(impExplodeAnimRaf);
+    impExplodeAnimRaf = 0;
+  }
   const prep = prepareSubdivisionData(parsed);
   const { assessment, proposals } = analyzeModelSubdivisions(prep.inputs, prep.adjacency);
 
@@ -11587,8 +12476,10 @@ function openImportAssistant(parsed, isPostImport = false) {
   impState.assessment = assessment;
   impState.proposals = proposals;
   impState.isPostImport = isPostImport;
-  impState.explodePct = assessment.shouldPrompt || isPostImport ? 45 : 0;
+  impState.isExploded = Boolean((assessment.shouldPrompt || isPostImport) && proposals.length > 0);
+  impState.explodePct = impState.isExploded ? IMP_EXPLODED_PCT : 0;
   impState.colorMode = 'sections';
+  impState.controlsVisible = false;
   impState.az = 38;
   impState.el = 28;
 
@@ -11607,47 +12498,35 @@ function openImportAssistant(parsed, isPostImport = false) {
       ? `Split "${parsed.title}" for Easier Building?`
       : `Import ${parsed.title}`;
 
-  const badge = document.getElementById('impSizeBadge');
-  if (assessment.shouldPrompt) {
-    badge.textContent = assessment.aspectRatio >= 3.0
-      ? `${Math.round(assessment.longestSpanLdu / 20)} Studs Long`
-      : `${parsed.parts.length} Pieces`;
-    badge.classList.remove('hidden');
-  } else {
-    badge.classList.add('hidden');
-  }
-
   const reasonStr = assessment.reasons.length > 0
-    ? `Detected ${assessment.reasons.join(' · ')}. Building sections first keeps bricks larger and easier to see.`
+    ? `Detected ${assessment.reasons.join(' · ')}.`
     : `Found ${parsed.parts.length} pieces${parsed.submodelCount ? ` across ${parsed.submodelCount} submodels` : ''}.`;
   document.getElementById('impSummary').textContent = reasonStr;
 
   document.getElementById('impKeepWrap').classList.toggle('hidden', isPostImport || !parsed.hasSteps);
-  const slider = document.getElementById('impExplodeSlider');
-  slider.value = String(impState.explodePct);
-  document.getElementById('impExplodeVal').textContent = `${impState.explodePct}%`;
-
   document.getElementById('importModal').classList.remove('hidden');
   renderImportAssistantUI();
   requestAnimationFrame(() => rebuildAndDrawImportPreview());
 }
 
-// Wire Import Assistant controls
-document.getElementById('impExplodeSlider').oninput = (e) => {
-  impState.explodePct = parseInt(e.target.value, 10) || 0;
-  document.getElementById('impExplodeVal').textContent = `${impState.explodePct}%`;
-  rebuildAndDrawImportPreview();
-};
-document.getElementById('impColorModeSections').onclick = () => {
-  impState.colorMode = 'sections';
-  renderImportAssistantUI();
-  rebuildAndDrawImportPreview();
-};
-document.getElementById('impColorModeBricks').onclick = () => {
-  impState.colorMode = 'bricks';
-  renderImportAssistantUI();
-  rebuildAndDrawImportPreview();
-};
+// Wire subtle tap-to-reveal Import Preview overlay controls
+const impExplodeToggleBtn = document.getElementById('impExplodeToggleBtn');
+if (impExplodeToggleBtn) {
+  impExplodeToggleBtn.onclick = (e) => {
+    e.stopPropagation();
+    if (!impState.activeProposal) return;
+    animateImportExplode(!impState.isExploded);
+  };
+}
+const impColorModeToggleBtn = document.getElementById('impColorModeToggleBtn');
+if (impColorModeToggleBtn) {
+  impColorModeToggleBtn.onclick = (e) => {
+    e.stopPropagation();
+    impState.colorMode = impState.colorMode === 'sections' ? 'bricks' : 'sections';
+    syncImportPreviewControlsUI();
+    rebuildAndDrawImportPreview();
+  };
+}
 
 function finishImport(parsed, mode, subdivisionPlan = null, isPostImport = false, importOpts = {}) {
   if (isPostImport) pushUndo();
@@ -11657,6 +12536,7 @@ function finishImport(parsed, mode, subdivisionPlan = null, isPostImport = false
   state.model = buildManualFromParsed(parsed, mode, subdivisionPlan);
   if (!isPostImport) {
     state.overrides = {}; state.pageInserts = {}; state.dividerAfter = {};
+    state.layoutGroups = [];
     state.coverMeta = createDefaultCoverMeta();
     state.undoStack = []; state.redoStack = [];
     state.seenDiagnosticKeys = new Set();

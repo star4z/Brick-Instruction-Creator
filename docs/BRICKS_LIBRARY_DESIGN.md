@@ -14,11 +14,11 @@ Previously, Bricks Library controls were embedded directly inside the slide-out 
 ## 2. Information Architecture
 
 ### 2.1 Menu Drawer Entry
-- The slide-out menu drawer (`#menuDrawer`) now displays a single clean **`Bricks Library →`** navigation button (`#menuBricksLibBtn`) matching **Page Setup** and **Parts List Setup**.
+- The slide-out menu drawer (`#menuDrawer`) displays a clean **`Bricks Library →`** navigation button (`#menuBricksLibBtn`) matching **Page Setup** and **Parts List Setup**, with concise purpose-oriented helper copy (*"3D brick shapes needed to render parts in your models."*) rather than listing internal library-management features.
 - Its right-aligned summary (`#libStatusText`) concisely reports current state via `formatLibraryMenuSummary()`:
   - Missing model parts take priority with an amber highlight (e.g., `3 missing · 15 saved`).
   - Otherwise shows saved top-level part count (`15 parts saved`), embedded `.io` count (`42 embedded (.io)`), or built-in count (`95 built-in`).
-- Quick actions inside **Model Errors & Warnings** (`#errorsModal`) open the dedicated Bricks Library screen directly rather than scrolling the menu drawer.
+- Quick actions inside **Model Issues** (`#errorsModal`) open the dedicated Bricks Library screen directly rather than scrolling the menu drawer.
 
 ### 2.2 Dedicated Bricks Library Screen (`#bricksLibraryModal`)
 A responsive full-height modal (`max-w-4xl`) organized into two top-level tabs plus a shared live progress bar (with a working **Cancel** button during online fetches):

@@ -2553,12 +2553,12 @@ export function buildLongitudinalHalvesProposal(
     : '';
   const roofNote = capCount > 0 ? ` + ${capCount} removable tile-seam roof${capCount === 1 ? '' : 's'}` : '';
   const rationale = isIdenticalHalves
-    ? `Both halves match (${cleanSegments[0].length} pcs each${joinNote}) — build once ×2 at ~${zoomGainEstimate}× larger zoom, then connect.`
+    ? `Both halves match (${cleanSegments[0].length} pcs each${joinNote}) — build once ×2, then connect.`
     : heavySpanning
       ? `Splits along the ${Math.round(pca.majorSpan / 20)}-stud length into ${cleanSegments.length} connected stages (tightly interlocked spine).`
       : hasArticulatedJoint && articulatedDesc
-        ? `Builds both halves separately (~${zoomGainEstimate}× zoom)${roofNote}, then connects via ${articulatedDesc}.`
-        : `Builds ${cleanSegments.length} solid, connected sections first${roofNote}${joinNote} for ~${zoomGainEstimate}× larger bricks on screen before joining.`;
+        ? `Builds both halves separately${roofNote}, then connects via ${articulatedDesc}.`
+        : `Builds ${cleanSegments.length} solid, connected sections first${roofNote}${joinNote} before joining.`;
 
   return {
     id: `prop_long_${cleanSegments.length}${isIdenticalHalves ? '_x2' : ''}`,
@@ -2914,7 +2914,7 @@ export function buildStructuralModulesProposal(
           strategy: 'structural_modules',
           outputMode: 'modular_chapters',
           title: `Natural Sub-Assemblies (${sections.length} Modules)`,
-          rationale: `Splits cleanly along weak joints (clips, hinges, round-hole axles, and tile-majority seams) into ${sections.length} intact, connected modules (~${zoomGainEstimate}× zoom).`,
+          rationale: `Splits cleanly along weak joints (clips, hinges, round-hole axles, and tile-majority seams) into ${sections.length} intact, connected modules.`,
           zoomGainEstimate,
           confidence: 87,
           sections,
@@ -3419,7 +3419,7 @@ export function buildSpatialSectorsProposal(
     strategy: 'spatial_sectors',
     outputMode,
     title: `Baseplate Sectors (${segments.length} Quadrants)`,
-    rationale: `Splits the wide ${Math.round(bounds.spanX / 20)}×${Math.round(bounds.spanZ / 20)}-stud footprint into ${segments.length} connected quadrants for ~${zoomGainEstimate}× clearer detail.`,
+    rationale: `Splits the wide ${Math.round(bounds.spanX / 20)}×${Math.round(bounds.spanZ / 20)}-stud footprint into ${segments.length} connected quadrants.`,
     zoomGainEstimate,
     confidence: heavySeam ? 74 : 88,
     sections,
@@ -3442,15 +3442,6 @@ export function analyzeModelSubdivisions(
   const halves = buildLongitudinalHalvesProposal(parts, adjacency, 2, true);
   if (halves) proposals.push(halves);
 
-  // For very long models (≥ 40 studs), also offer a 3-segment option
-  if (assessment.longestSpanLdu >= 800 && assessment.aspectRatio >= 3.0) {
-    const thirds = buildLongitudinalHalvesProposal(parts, adjacency, 3, false);
-    if (thirds) {
-      thirds.confidence = Math.max(55, thirds.confidence - 6);
-      proposals.push(thirds);
-    }
-  }
-
   const floors = buildHorizontalFloorsProposal(parts, adjacency);
   if (floors) proposals.push(floors);
 
@@ -3459,9 +3450,6 @@ export function analyzeModelSubdivisions(
 
   const modules = buildStructuralModulesProposal(parts, adjacency);
   if (modules) proposals.push(modules);
-
-  const bags = buildNumberedBagsProposal(parts, adjacency);
-  if (bags) proposals.push(bags);
 
   proposals.sort((a, b) => b.confidence - a.confidence);
   return {

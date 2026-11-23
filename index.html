@@ -88,12 +88,18 @@
           </p>
         </div>
         <div class="space-y-2.5">
-          <button id="emptyImportBtn" class="w-full py-3 px-5 rounded-full bg-[#1a73e8] text-white text-sm font-semibold inline-flex items-center justify-center gap-2 shadow-sm hover:opacity-95 active:scale-[0.99] transition">
-            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
-            Import Model
-          </button>
+          <div class="flex flex-col sm:flex-row gap-2">
+            <button id="emptyImportBtn" class="flex-1 py-3 px-5 rounded-full bg-[#1a73e8] text-white text-sm font-semibold inline-flex items-center justify-center gap-2 shadow-sm hover:opacity-95 active:scale-[0.99] transition">
+              <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
+              Import Model
+            </button>
+            <button id="emptyLoadProjBtn" class="sm:flex-1 py-3 px-4 rounded-full border border-[var(--border)] bg-[var(--background)] text-sm font-semibold inline-flex items-center justify-center gap-2 hover:border-[#1a73e8] active:scale-[0.99] transition">
+              <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/></svg>
+              Import Project
+            </button>
+          </div>
           <p class="text-xs text-[var(--muted-foreground)] leading-relaxed">
-            Supports BrickLink Studio (<b>.io</b>) and LDraw (<b>.ldr / .mpd</b>) files.
+            Supports BrickLink Studio (<b class="whitespace-nowrap">.io</b>) and LDraw (<b class="whitespace-nowrap">.ldr / .mpd</b>) files.
           </p>
         </div>
       </div>
@@ -211,7 +217,7 @@
               Import Model
             </button>
             <p class="text-[11px] text-[var(--muted-foreground)] leading-relaxed px-0.5">
-              Supports BrickLink Studio (<b>.io</b>) and LDraw (<b>.ldr / .mpd</b>) files.
+              Supports BrickLink Studio (<b class="whitespace-nowrap">.io</b>) and LDraw (<b class="whitespace-nowrap">.ldr / .mpd</b>) files.
             </p>
             <div class="flex gap-2">
               <button id="menuLoadProj" class="flex-1 py-2 px-3 rounded-xl border border-[var(--border)] bg-[var(--background)] font-semibold flex items-center justify-center gap-1.5">
@@ -234,7 +240,7 @@
 
           <!-- Page Setup (Dedicated Page) & Print / Export -->
           <div id="menuPagePrintSection" class="hidden flex flex-col gap-2 pt-4 border-t border-[var(--border)]">
-            <div class="text-[11px] font-bold uppercase tracking-wider text-[var(--muted-foreground)]">Page &amp; Print</div>
+            <div class="text-[11px] font-bold uppercase tracking-wider text-[var(--muted-foreground)]">Page &amp; Export</div>
             <button id="menuPageSetupBtn" class="w-full py-2.5 px-3 rounded-xl border border-[var(--border)] bg-[var(--background)] font-semibold text-left flex items-center justify-between gap-2">
               <span class="flex items-center gap-2 min-w-0">
                 <svg class="w-4 h-4 text-[#1a73e8] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1"><rect x="4" y="3" width="16" height="18" rx="2"/><line x1="8" x2="16" y1="8" y2="8"/><line x1="8" x2="16" y1="12" y2="12"/><line x1="8" x2="12" y1="16" y2="16"/></svg>
@@ -255,9 +261,13 @@
                 <span class="opacity-50">→</span>
               </span>
             </button>
+            <button id="menuExportHtmlBtn" class="hidden w-full py-2.5 px-3.5 rounded-2xl bg-[#1a73e8]/12 border border-[#1a73e8]/35 text-[#1a73e8] font-semibold flex items-center justify-center gap-2">
+              <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 3 7.5 12 12l9-4.5L12 3Z"/><path d="M3 7.5V16.5L12 21l9-4.5V7.5"/><path d="M12 12v9"/></svg>
+              Export Interactive 3D (.html)
+            </button>
             <button id="menuPrintBtn" class="hidden w-full py-2.5 px-3.5 rounded-2xl border border-[var(--border)] bg-[var(--background)] font-semibold flex items-center justify-center gap-2">
               <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect width="12" height="8" x="6" y="14"/></svg>
-              Print / Save PDF
+              Print / Export PDF
             </button>
           </div>
 
@@ -275,7 +285,7 @@
               </span>
             </button>
             <p class="text-[11px] text-[var(--muted-foreground)] leading-snug px-0.5">
-              Preview &amp; search 3D brick shapes, download starter packs or model parts online, or import LDraw's <b>complete.zip</b>.
+              3D brick shapes needed to render parts in your models.
             </p>
           </div>
 
@@ -393,10 +403,7 @@
             <input id="toggleSizeGuides" type="checkbox" checked class="w-4 h-4 accent-[#1a73e8]" />
           </label>
           <div class="space-y-1.5 pt-1">
-            <div class="flex items-center justify-between gap-2">
-              <span class="font-medium">Minifigure Steps</span>
-              <span class="text-[10px] text-[var(--muted-foreground)]">Official Styles</span>
-            </div>
+            <div class="font-medium">Minifigure Steps</div>
             <div class="grid grid-cols-3 gap-1">
               <button type="button" data-mf-style="exploded" class="mf-style-btn py-1.5 px-1 rounded-full border font-semibold text-[11px] transition">Exploded</button>
               <button type="button" data-mf-style="sequential" class="mf-style-btn py-1.5 px-1 rounded-full border font-semibold text-[11px] transition">Step-by-Step</button>
@@ -561,9 +568,19 @@
         <div class="p-4 border-b border-[var(--border)] flex items-center justify-between gap-2 shrink-0">
           <div>
             <h2 class="text-sm font-bold">Pages &amp; Steps</h2>
-            <p class="text-[11px] text-[var(--muted-foreground)]">Tap any page or step to jump to it</p>
+            <p id="overviewSubtitle" class="text-[11px] text-[var(--muted-foreground)]">Tap any page or step to jump to it</p>
           </div>
-          <button id="btnCloseOverview" aria-label="Close Pages & Steps" class="w-8 h-8 rounded-full flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/10">✕</button>
+          <div class="flex items-center gap-1.5 shrink-0">
+            <button id="btnOverviewRangeMode" type="button" class="px-2.5 py-1.5 rounded-full border border-[var(--border)] bg-[var(--background)] text-[11px] font-semibold hover:border-[#1a73e8] transition">Select Range</button>
+            <button id="btnCloseOverview" aria-label="Close Pages & Steps" class="w-8 h-8 rounded-full flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/10">✕</button>
+          </div>
+        </div>
+        <div id="overviewRangeBar" class="hidden px-4 py-2.5 border-b border-[var(--border)] bg-[#1a73e8]/10 flex items-center justify-between gap-2 text-[11px] shrink-0">
+          <span id="overviewRangeStatus" class="font-semibold text-[#1a73e8] truncate">Tap a start step, then an end step to group them</span>
+          <div class="flex items-center gap-1.5 shrink-0">
+            <button id="btnOverviewRangeClear" type="button" class="px-2.5 py-1 rounded-full border border-[var(--border)] bg-[var(--card)] font-semibold">Reset</button>
+            <button id="btnOverviewRangeCreate" type="button" disabled class="px-3 py-1 rounded-full bg-[#1a73e8] text-white font-semibold disabled:opacity-40">Style / Layout Group…</button>
+          </div>
         </div>
         <div class="px-4 py-2.5 border-b border-[var(--border)] bg-[var(--background)]/75 flex items-start justify-between gap-2.5 text-[11px] leading-snug shrink-0">
           <div class="flex items-start gap-2 min-w-0 text-[var(--muted-foreground)]">
@@ -677,10 +694,7 @@
         <!-- Header -->
         <div class="px-4 sm:px-5 py-3.5 border-b border-[var(--border)] flex items-start justify-between gap-2 shrink-0">
           <div class="min-w-0">
-            <div class="flex items-center gap-2 flex-wrap">
-              <h3 id="impTitle" class="text-sm sm:text-base font-bold truncate">Import Model</h3>
-              <span id="impSizeBadge" class="hidden text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#1a73e8]/15 text-[#1a73e8] shrink-0">Large Model</span>
-            </div>
+            <h3 id="impTitle" class="text-sm sm:text-base font-bold truncate">Import Model</h3>
             <p id="impSummary" class="text-[11px] text-[var(--muted-foreground)] mt-0.5 leading-snug"></p>
           </div>
           <button id="impBtnCloseX" class="w-8 h-8 rounded-full flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/10 shrink-0" aria-label="Close">✕</button>
@@ -690,26 +704,26 @@
         <div class="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden">
           <!-- Left / Top Pane: Live 3D Exploded Partition Preview -->
           <div id="impPreviewPane" class="lg:w-[46%] shrink-0 bg-gradient-to-b from-[#dceeff] to-[#c4e1fb] dark:from-[#171c26] dark:to-[#10141c] border-b lg:border-b-0 lg:border-r border-[var(--border)] flex flex-col">
-            <div class="relative h-[30vh] min-h-[175px] sm:h-[240px] lg:h-auto lg:flex-1 min-h-0 w-full flex items-center justify-center overflow-hidden">
+            <div class="relative h-[32vh] min-h-[195px] sm:h-[260px] lg:h-auto lg:flex-1 min-h-0 w-full flex items-center justify-center overflow-hidden">
               <canvas id="impPreviewCanvas" class="w-full h-full touch-none cursor-grab active:cursor-grabbing"></canvas>
-              <div id="impZoomGainPill" class="hidden absolute top-2.5 left-2.5 px-2.5 py-1 rounded-full bg-[#1a73e8] text-white text-[10px] font-bold shadow-sm pointer-events-none"></div>
+              <!-- Subtle Tap-to-Reveal Overlay Icon Controls (Explode toggle + Section/Brick Colors toggle) -->
+              <div id="impPreviewControls" class="opacity-0 pointer-events-none scale-95 transition-all duration-200 absolute top-2.5 right-2.5 z-10 flex items-center gap-1.5">
+                <button id="impExplodeToggleBtn" type="button" title="Toggle exploded view" aria-label="Toggle exploded view" class="glass-pill w-9 h-9 rounded-full flex items-center justify-center hover:scale-105 active:scale-95 transition">
+                  <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/>
+                    <line x1="21" x2="14" y1="3" y2="10"/><line x1="3" x2="10" y1="21" y2="14"/>
+                  </svg>
+                </button>
+                <button id="impColorModeToggleBtn" type="button" title="Switch between Section Colors and Brick Colors" aria-label="Switch between Section Colors and Brick Colors" class="glass-pill w-9 h-9 rounded-full flex items-center justify-center hover:scale-105 active:scale-95 transition">
+                  <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="13.5" cy="6.5" r=".6" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".6" fill="currentColor"/>
+                    <circle cx="8.5" cy="7.5" r=".6" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".6" fill="currentColor"/>
+                    <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/>
+                  </svg>
+                </button>
+              </div>
               <div class="absolute bottom-2 left-1/2 -translate-x-1/2 px-2.5 py-0.5 rounded-full bg-black/35 text-white text-[10px] font-medium pointer-events-none whitespace-nowrap">
-                Drag to orbit 3D preview
-              </div>
-            </div>
-
-            <!-- 3D Preview Controls: Explode Slider & Color Mode -->
-            <div class="px-3.5 py-2.5 bg-[var(--card)]/90 backdrop-blur-xs border-t border-[var(--border)] space-y-2 shrink-0">
-              <div class="flex items-center gap-2.5">
-                <span class="text-[11px] font-semibold text-[var(--muted-foreground)] shrink-0">Explode</span>
-                <input id="impExplodeSlider" type="range" min="0" max="100" value="45" class="flex-1 accent-[#1a73e8] h-1.5" />
-                <span id="impExplodeVal" class="text-[11px] font-bold w-8 text-right shrink-0">45%</span>
-              </div>
-              <div class="flex items-center justify-between gap-2">
-                <div class="inline-flex rounded-full p-0.5 bg-[var(--background)] border border-[var(--border)] text-[10px] font-bold">
-                  <button id="impColorModeSections" type="button" class="px-2.5 py-1 rounded-full bg-[#1a73e8] text-white transition">Section Colors</button>
-                  <button id="impColorModeBricks" type="button" class="px-2.5 py-1 rounded-full text-[var(--muted-foreground)] transition">Brick Colors</button>
-                </div>
+                Drag to orbit · Tap for options
               </div>
             </div>
           </div>
@@ -751,18 +765,25 @@
       <div class="w-full max-w-md rounded-3xl bg-[var(--card)] border border-[var(--border)] p-6 space-y-4 shadow-2xl text-xs">
         <div class="flex items-start justify-between gap-2">
           <div>
-            <h3 class="text-base font-bold">Print &amp; Export PDF</h3>
+            <h3 class="text-base font-bold">Export &amp; Print</h3>
             <p id="expFormatSummary" class="text-[11px] text-[var(--muted-foreground)] mt-0.5"></p>
           </div>
           <button id="btnCloseExport" class="w-7 h-7 rounded-full flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/10">✕</button>
         </div>
 
         <div id="expActions" class="space-y-2">
-          <button id="btnExpCurrentPdf" class="w-full py-2.5 px-4 rounded-2xl bg-[#1a73e8] text-white font-semibold flex items-center justify-between">
+          <button id="btnExpInteractiveHtml" class="w-full py-2.5 px-4 rounded-2xl bg-[#1a73e8] text-white font-semibold flex items-center justify-between gap-2">
+            <span class="flex items-center gap-2">
+              <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 3 7.5 12 12l9-4.5L12 3Z"/><path d="M3 7.5V16.5L12 21l9-4.5V7.5"/><path d="M12 12v9"/></svg>
+              <span>Export Interactive 3D Viewer (.html)</span>
+            </span>
+            <span class="opacity-85 text-[10px] font-bold uppercase tracking-wide shrink-0">3D · Offline</span>
+          </button>
+          <button id="btnExpCurrentPdf" class="w-full py-2.5 px-4 rounded-2xl border border-[#1a73e8] text-[#1a73e8] bg-[#1a73e8]/10 font-semibold flex items-center justify-between">
             <span>Export Current Page as PDF</span>
             <span class="opacity-80">Instant</span>
           </button>
-          <button id="btnExpAllPdf" class="w-full py-2.5 px-4 rounded-2xl border border-[#1a73e8] text-[#1a73e8] bg-[#1a73e8]/10 font-semibold flex items-center justify-between">
+          <button id="btnExpAllPdf" class="w-full py-2.5 px-4 rounded-2xl border border-[var(--border)] bg-[var(--background)] font-semibold flex items-center justify-between">
             <span>Export Full Manual as PDF</span>
             <span id="expPageCountBadge" class="opacity-80"></span>
           </button>
@@ -862,13 +883,161 @@
             </div>
           </div>
 
-          <div class="space-y-1.5">
-            <div class="font-semibold text-[var(--muted-foreground)] uppercase tracking-wider text-[10px]">Default Steps per Page</div>
-            <div class="grid grid-cols-4 gap-1.5">
-              <button data-layout="auto" class="layout-btn py-2 rounded-full border font-semibold">Auto</button>
-              <button data-layout="1-up" class="layout-btn py-2 rounded-full border font-semibold">1</button>
-              <button data-layout="2-up" class="layout-btn py-2 rounded-full border font-semibold">2</button>
-              <button data-layout="4-up" class="layout-btn py-2 rounded-full border font-semibold">4</button>
+          <div class="space-y-2.5 pt-2 border-t border-[var(--border)]">
+            <div class="flex items-center justify-between gap-2">
+              <div class="font-semibold text-[var(--muted-foreground)] uppercase tracking-wider text-[10px]">Default Steps per Page &amp; Grid</div>
+              <span id="layoutSummaryChip" class="text-[10px] font-semibold text-[#1a73e8]">Auto</span>
+            </div>
+            <div class="grid grid-cols-6 gap-1.5">
+              <button type="button" data-layout-preset="auto" class="layout-btn py-2 rounded-full border font-semibold">Auto</button>
+              <button type="button" data-layout-preset="1" class="layout-btn py-2 rounded-full border font-semibold">1</button>
+              <button type="button" data-layout-preset="2" class="layout-btn py-2 rounded-full border font-semibold">2</button>
+              <button type="button" data-layout-preset="3" class="layout-btn py-2 rounded-full border font-semibold">3</button>
+              <button type="button" data-layout-preset="4" class="layout-btn py-2 rounded-full border font-semibold">4</button>
+              <button type="button" data-layout-preset="6" class="layout-btn py-2 rounded-full border font-semibold">6</button>
+            </div>
+            <div class="grid grid-cols-3 gap-2">
+              <label class="space-y-0.5">
+                <span class="text-[10px] text-[var(--muted-foreground)]">Steps / Page</span>
+                <input id="layoutStepsInput" type="number" min="1" max="24" value="2" class="w-full px-2.5 py-1.5 rounded-xl border border-[var(--border)] bg-[var(--background)] font-semibold outline-none focus:border-[#1a73e8]" />
+              </label>
+              <label class="space-y-0.5">
+                <span class="text-[10px] text-[var(--muted-foreground)]">Columns</span>
+                <select id="layoutColsSelect" class="w-full px-2.5 py-1.5 rounded-xl border border-[var(--border)] bg-[var(--background)] font-semibold outline-none">
+                  <option value="auto">Auto</option>
+                  <option value="1">1 col</option>
+                  <option value="2">2 cols</option>
+                  <option value="3">3 cols</option>
+                  <option value="4">4 cols</option>
+                  <option value="5">5 cols</option>
+                  <option value="6">6 cols</option>
+                </select>
+              </label>
+              <label class="space-y-0.5">
+                <span class="text-[10px] text-[var(--muted-foreground)]">Rows</span>
+                <select id="layoutRowsSelect" class="w-full px-2.5 py-1.5 rounded-xl border border-[var(--border)] bg-[var(--background)] font-semibold outline-none">
+                  <option value="auto">Auto</option>
+                  <option value="1">1 row</option>
+                  <option value="2">2 rows</option>
+                  <option value="3">3 rows</option>
+                  <option value="4">4 rows</option>
+                  <option value="5">5 rows</option>
+                  <option value="6">6 rows</option>
+                </select>
+              </label>
+            </div>
+            <div class="space-y-1">
+              <div class="text-[10px] text-[var(--muted-foreground)] font-medium">Step Order Direction</div>
+              <div class="grid grid-cols-2 gap-1.5">
+                <button type="button" data-step-flow="row" class="step-flow-btn py-1.5 px-2.5 rounded-full border font-semibold">Rows (1→2 / 3→4)</button>
+                <button type="button" data-step-flow="column" class="step-flow-btn py-1.5 px-2.5 rounded-full border font-semibold">Columns (1↓2 | 3↓4)</button>
+              </div>
+            </div>
+            <div class="space-y-1">
+              <div class="text-[10px] text-[var(--muted-foreground)] font-medium">Step Proportions (Mixed Layouts)</div>
+              <div class="grid grid-cols-3 sm:grid-cols-5 gap-1">
+                <button type="button" data-mixed-layout="even" class="mixed-layout-btn py-1.5 px-2 rounded-full border font-semibold text-[11px]">Even</button>
+                <button type="button" data-mixed-layout="hero_left" class="mixed-layout-btn py-1.5 px-2 rounded-full border font-semibold text-[11px]">Large Left</button>
+                <button type="button" data-mixed-layout="hero_top" class="mixed-layout-btn py-1.5 px-2 rounded-full border font-semibold text-[11px]">Large Top</button>
+                <button type="button" data-mixed-layout="hero_right" class="mixed-layout-btn py-1.5 px-2 rounded-full border font-semibold text-[11px]">Large Right</button>
+                <button type="button" data-mixed-layout="custom_weights" class="mixed-layout-btn py-1.5 px-2 rounded-full border font-semibold text-[11px]">Custom</button>
+              </div>
+              <div id="defaultSlotSizesWrap" class="hidden pt-1.5 space-y-1">
+                <div class="text-[10px] text-[var(--muted-foreground)]">Tap a slot to cycle size (S / M / L)</div>
+                <div id="defaultSlotSizesList" class="flex flex-wrap gap-1.5"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Step Range Groups (Per-Range Layouts & Styles) -->
+          <div class="space-y-2 pt-2.5 border-t border-[var(--border)]">
+            <div class="flex items-center justify-between gap-2">
+              <div>
+                <div class="font-semibold text-[var(--muted-foreground)] uppercase tracking-wider text-[10px]">Step Range Groups</div>
+                <p class="text-[10px] text-[var(--muted-foreground)]">Apply custom grids, mixed layouts, or styles to specific step ranges</p>
+              </div>
+              <button id="btnNewLayoutGroup" type="button" class="px-2.5 py-1 rounded-full bg-[#1a73e8]/12 border border-[#1a73e8]/35 text-[#1a73e8] font-semibold text-[11px] shrink-0">+ New Group</button>
+            </div>
+            <div id="layoutGroupsList" class="space-y-1.5"></div>
+
+            <!-- Inline Group Editor -->
+            <div id="layoutGroupEditor" class="hidden p-3 rounded-2xl border border-[#1a73e8]/35 bg-[var(--background)] space-y-2.5">
+              <div class="flex items-center justify-between gap-2">
+                <span id="grpEditorTitle" class="font-bold text-[11px] text-[#1a73e8]">New Step Group</span>
+                <button id="btnGrpUseCurrentPage" type="button" class="text-[10px] font-semibold text-[#1a73e8] underline">Use current page steps</button>
+              </div>
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <label class="space-y-0.5 sm:col-span-3">
+                  <span class="text-[10px] text-[var(--muted-foreground)]">Group Name</span>
+                  <input id="grpNameInput" type="text" maxlength="48" placeholder="e.g. Detail Steps" class="w-full px-2.5 py-1.5 rounded-xl border border-[var(--border)] bg-[var(--card)] font-semibold outline-none focus:border-[#1a73e8]" />
+                </label>
+                <label class="space-y-0.5">
+                  <span class="text-[10px] text-[var(--muted-foreground)]">From Step</span>
+                  <input id="grpStartStepInput" type="number" min="1" value="1" class="w-full px-2.5 py-1.5 rounded-xl border border-[var(--border)] bg-[var(--card)] font-semibold outline-none" />
+                </label>
+                <label class="space-y-0.5">
+                  <span class="text-[10px] text-[var(--muted-foreground)]">To Step</span>
+                  <input id="grpEndStepInput" type="number" min="1" value="4" class="w-full px-2.5 py-1.5 rounded-xl border border-[var(--border)] bg-[var(--card)] font-semibold outline-none" />
+                </label>
+                <label class="space-y-0.5">
+                  <span class="text-[10px] text-[var(--muted-foreground)]">Steps / Page</span>
+                  <input id="grpStepsPerPageInput" type="number" min="1" max="24" value="4" class="w-full px-2.5 py-1.5 rounded-xl border border-[var(--border)] bg-[var(--card)] font-semibold outline-none" />
+                </label>
+              </div>
+              <div class="grid grid-cols-3 gap-2">
+                <label class="space-y-0.5">
+                  <span class="text-[10px] text-[var(--muted-foreground)]">Columns</span>
+                  <select id="grpColsSelect" class="w-full px-2 py-1.5 rounded-xl border border-[var(--border)] bg-[var(--card)] font-semibold outline-none">
+                    <option value="auto">Auto</option>
+                    <option value="1">1</option><option value="2">2</option><option value="3">3</option>
+                    <option value="4">4</option><option value="5">5</option><option value="6">6</option>
+                  </select>
+                </label>
+                <label class="space-y-0.5">
+                  <span class="text-[10px] text-[var(--muted-foreground)]">Rows</span>
+                  <select id="grpRowsSelect" class="w-full px-2 py-1.5 rounded-xl border border-[var(--border)] bg-[var(--card)] font-semibold outline-none">
+                    <option value="auto">Auto</option>
+                    <option value="1">1</option><option value="2">2</option><option value="3">3</option>
+                    <option value="4">4</option><option value="5">5</option><option value="6">6</option>
+                  </select>
+                </label>
+                <label class="space-y-0.5">
+                  <span class="text-[10px] text-[var(--muted-foreground)]">Order</span>
+                  <select id="grpFlowSelect" class="w-full px-2 py-1.5 rounded-xl border border-[var(--border)] bg-[var(--card)] font-semibold outline-none">
+                    <option value="row">Rows (L→R)</option>
+                    <option value="column">Columns (T→B)</option>
+                  </select>
+                </label>
+              </div>
+              <div class="grid grid-cols-2 gap-2">
+                <label class="space-y-0.5">
+                  <span class="text-[10px] text-[var(--muted-foreground)]">Mixed Layout</span>
+                  <select id="grpMixedSelect" class="w-full px-2 py-1.5 rounded-xl border border-[var(--border)] bg-[var(--card)] font-semibold outline-none">
+                    <option value="even">Even Grid</option>
+                    <option value="hero_left">Large First (Left)</option>
+                    <option value="hero_top">Large First (Top)</option>
+                    <option value="hero_right">Large Last (Right)</option>
+                    <option value="custom_weights">Custom Sizes (S/M/L)</option>
+                  </select>
+                </label>
+                <label class="space-y-0.5">
+                  <span class="text-[10px] text-[var(--muted-foreground)]">Style / Theme Override</span>
+                  <select id="grpThemeSelect" class="w-full px-2 py-1.5 rounded-xl border border-[var(--border)] bg-[var(--card)] font-semibold outline-none">
+                    <option value="">Use Manual Default</option>
+                  </select>
+                </label>
+              </div>
+              <div id="grpSlotSizesWrap" class="hidden space-y-1">
+                <div class="text-[10px] text-[var(--muted-foreground)]">Tap a slot to cycle size (S / M / L)</div>
+                <div id="grpSlotSizesList" class="flex flex-wrap gap-1.5"></div>
+              </div>
+              <div class="flex items-center justify-between gap-2 pt-1">
+                <button id="btnGrpDelete" type="button" class="hidden px-3 py-1.5 rounded-full border border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-400 font-semibold">Delete</button>
+                <div class="flex items-center gap-1.5 ml-auto">
+                  <button id="btnGrpCancel" type="button" class="px-3 py-1.5 rounded-full font-semibold text-[var(--muted-foreground)]">Cancel</button>
+                  <button id="btnGrpSave" type="button" class="px-3.5 py-1.5 rounded-full bg-[#1a73e8] text-white font-semibold">Save Group</button>
+                </div>
+              </div>
             </div>
           </div>
 

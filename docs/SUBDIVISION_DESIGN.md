@@ -152,15 +152,17 @@ Rather than relying on model-specific heuristics (such as train-only rules), sub
 ## 6. Mobile-First & Desktop UX
 
 The upgraded `#importModal` in [`index.html`](../index.html) adapts automatically to screen size:
-- **Mobile Portrait (`< lg`)**: Full-height bottom sheet with a touch-orbitable 3D exploded preview (`30vh`) + Explode slider at the top, scrollable proposal cards below, and a sticky **Generate Manual** footer.
+- **Mobile Portrait (`< lg`)**: Full-height bottom sheet with a touch-orbitable 3D exploded preview (`32vh`), scrollable proposal cards below, and a sticky **Generate Manual** footer.
 - **Desktop (`lg+`)**: Responsive 2-pane modal (`max-w-4xl`) with the 3D preview on the left and ranked proposals on the right.
 
-### Live 3D Preview Controls
+### Live 3D Preview Controls & Proposal Curation
 - **Orbit**: 1-finger touch drag or mouse drag directly on the WebGL canvas (`WebGLBrickEngine`), reusing uploaded GPU buffers with zero re-uploads while orbiting.
-- **Explode Slider (`0%–100%`)**: Translates each connected section outward along its computed `explodeOffset` vector (pulling segments apart horizontally, keeping articulated bogie/rod joints centered on track level, lifting modular floors vertically, or separating quadrants diagonally). Whole-minifigure assemblies (via `extractMinifigureGroups`, including headgear/accessories while excluding seats/furniture) track their closest host section's `explodeOffset` so seated drivers and passengers ride inside their car instead of floating in empty space.
-- **Color Mode Toggle**: Switch between colorblind-safe **Section Colors** and true **Brick Colors**.
+- **Tap-to-Reveal Overlay Icons**: Tapping inside the 3D preview reveals subtle circular overlay icon buttons in the top-right corner (hidden by default so the 3D model stays unobstructed):
+  - **Animated Explode Toggle**: Binary exploded/assembled toggle that smoothly eases (`340 ms` cubic ease-in-out) each connected section outward along its computed `explodeOffset` vector (and collapses back cleanly). Whole-minifigure assemblies (via `extractMinifigureGroups`) ride with their host section.
+  - **Color Mode Toggle**: Switches between colorblind-safe **Section Colors** and true **Brick Colors**.
+- **Curated Wizard Proposals**: `analyzeModelSubdivisions()` offers **2-Half Longitudinal Splits**, **Horizontal Floors**, **Baseplate Sectors**, and **Natural Sub-Assemblies / Structural Modules** (alongside **Keep as Single Continuous Build**). Arbitrary 3-segment longitudinal splits and random Numbered Build Bags are excluded from wizard proposals, and confusing `~N× zoom` / redundant header chips are omitted.
 
-*(Note: The former "Customize Sections" inline split/merge/count-stepper panel was intentionally removed to keep the Import Assistant clean and free of vague post-hoc section editing controls.)*
+*(Note: The former "Customize Sections" inline split/merge/count-stepper panel and persistent bottom explode slider bar were intentionally removed to keep the Import Assistant clean and unobtrusive.)*
 
 ---
 
