@@ -4,6 +4,13 @@ import {
   THEME_SINGLE_FORMAT,
   assertThemeFileName,
 } from '../storage/fileFormats';
+import {
+  type BomConfig,
+  DEFAULT_BOM_CONFIG,
+  bomConfigsEqual,
+  createDefaultBomConfig,
+  normalizeBomConfig,
+} from '../engine/partsList';
 
 export type ThemeBgType = 'solid' | 'gradient';
 
@@ -155,6 +162,7 @@ export interface ThemeStyleOptions {
   showMinifig1to1: boolean;
   showStepBorders: boolean;
   showPageTitle: boolean;
+  bomConfig: BomConfig;
 }
 
 export const THEME_STYLE_OPTION_KEYS: Array<keyof ThemeStyleOptions> = [
@@ -168,6 +176,7 @@ export const THEME_STYLE_OPTION_KEYS: Array<keyof ThemeStyleOptions> = [
   'showMinifig1to1',
   'showStepBorders',
   'showPageTitle',
+  'bomConfig',
 ];
 
 export const DEFAULT_THEME_STYLE_OPTIONS: ThemeStyleOptions = {
@@ -181,6 +190,7 @@ export const DEFAULT_THEME_STYLE_OPTIONS: ThemeStyleOptions = {
   showMinifig1to1: false,
   showStepBorders: true,
   showPageTitle: true,
+  bomConfig: createDefaultBomConfig(),
 };
 
 /**
@@ -192,7 +202,11 @@ export function normalizeThemeStyleOptions(
   fallback: Partial<ThemeStyleOptions> = DEFAULT_THEME_STYLE_OPTIONS,
 ): ThemeStyleOptions {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
-  const fb = { ...DEFAULT_THEME_STYLE_OPTIONS, ...fallback };
+  const fb = {
+    ...DEFAULT_THEME_STYLE_OPTIONS,
+    ...fallback,
+    bomConfig: normalizeBomConfig(fallback.bomConfig, DEFAULT_BOM_CONFIG),
+  };
   const bool = (k: keyof ThemeStyleOptions) => (typeof r[k] === 'boolean' ? (r[k] as boolean) : (fb[k] as boolean));
   const fade = typeof r.fadeOpacity === 'number' && Number.isFinite(r.fadeOpacity)
     ? Math.max(0.2, Math.min(1, r.fadeOpacity))
@@ -211,6 +225,7 @@ export function normalizeThemeStyleOptions(
     showMinifig1to1: bool('showMinifig1to1'),
     showStepBorders: bool('showStepBorders'),
     showPageTitle: bool('showPageTitle'),
+    bomConfig: normalizeBomConfig(r.bomConfig, fb.bomConfig),
   };
 }
 
@@ -221,9 +236,11 @@ export function getThemeStyleOptions(theme: Partial<ManualTheme> | null | undefi
 
 /** True when every style option in `a` equals the matching option in `b`. */
 export function themeStyleOptionsEqual(a: ThemeStyleOptions, b: ThemeStyleOptions): boolean {
-  return THEME_STYLE_OPTION_KEYS.every((k) =>
-    k === 'fadeOpacity' ? Math.abs(a.fadeOpacity - b.fadeOpacity) < 0.001 : a[k] === b[k],
-  );
+  return THEME_STYLE_OPTION_KEYS.every((k) => {
+    if (k === 'fadeOpacity') return Math.abs(a.fadeOpacity - b.fadeOpacity) < 0.001;
+    if (k === 'bomConfig') return bomConfigsEqual(a.bomConfig, b.bomConfig);
+    return a[k] === b[k];
+  });
 }
 
 export interface ManualTheme {
@@ -247,7 +264,7 @@ export interface ManualTheme {
   headingFont?: ThemeFontId;
   /** Font for labels, part names & body text (defaults to `public-sans`). */
   bodyFont?: ThemeFontId;
-  // Step display style options (see ThemeStyleOptions)
+  // Step display & Parts List style options (see ThemeStyleOptions)
   highlightNew?: boolean;
   highlightColor?: string;
   fadePrev?: boolean;
@@ -258,6 +275,7 @@ export interface ManualTheme {
   showMinifig1to1?: boolean;
   showStepBorders?: boolean;
   showPageTitle?: boolean;
+  bomConfig?: BomConfig;
   createdAt?: string;
   updatedAt?: string;
 }

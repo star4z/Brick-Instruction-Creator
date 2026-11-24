@@ -205,4 +205,49 @@ describe('theme style options, recents & naming', () => {
     expect(makeUniqueThemeName('Classic Blue Custom', ['Classic Blue'])).toBe('Classic Blue Custom');
     expect(makeUniqueThemeName('Classic Blue Custom', ['classic blue custom', 'Classic Blue Custom 2'])).toBe('Classic Blue Custom 3');
   });
+
+  it('stores Parts List (bomConfig) settings on themes and round-trips them via .biwtheme', async () => {
+    const m = await import('../customThemes');
+    const themed = normalizeCustomTheme({
+      name: 'Dense Table Theme',
+      bomConfig: {
+        format: 'table',
+        gridMode: 'custom',
+        customCols: 12,
+        customRows: 9,
+        horizontalDir: 'rtl',
+        verticalDir: 'btt',
+        variableSizing: true,
+        tableRowsMode: 'custom',
+        tableRowsPerPage: 25,
+        fields: [
+          { id: 'partId', enabled: true },
+          { id: 'image', enabled: true },
+          { id: 'qty', enabled: true },
+          { id: 'color', enabled: true },
+          { id: 'name', enabled: false },
+        ],
+      },
+    })!;
+
+    expect(themed.bomConfig?.format).toBe('table');
+    expect(themed.bomConfig?.customCols).toBe(12);
+    expect(themed.bomConfig?.horizontalDir).toBe('rtl');
+    expect(themed.bomConfig?.verticalDir).toBe('btt');
+    expect(themed.bomConfig?.variableSizing).toBe(true);
+    expect(themed.bomConfig?.tableRowsPerPage).toBe(25);
+    expect(themed.bomConfig?.fields.map((f) => `${f.id}:${f.enabled}`)).toEqual([
+      'partId:true',
+      'image:true',
+      'qty:true',
+      'color:true',
+      'name:false',
+    ]);
+
+    const [imported] = parseImportedThemesJson(serializeThemeExport(themed));
+    expect(m.themeStyleOptionsEqual(m.getThemeStyleOptions(imported), m.getThemeStyleOptions(themed))).toBe(true);
+    const draft = createThemeDraftFromBase(themed);
+    expect(draft.bomConfig?.format).toBe('table');
+    expect(draft.bomConfig?.fields[0].id).toBe('partId');
+  });
 });

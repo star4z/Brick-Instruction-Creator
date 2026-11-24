@@ -548,6 +548,32 @@
             <input id="togglePageTitle" type="checkbox" checked class="w-4 h-4 accent-[var(--primary)] cursor-pointer" />
           </label>
         </div>
+
+        <!-- Parts List (saved with theme) -->
+        <div class="space-y-2.5 pt-3 border-t border-[var(--border)]">
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Parts List</span>
+            <span id="styleBomSummary" class="font-mono text-[11px] text-[var(--muted-foreground)] truncate">Grid · Auto</span>
+          </div>
+          <div class="grid grid-cols-2 gap-1.5">
+            <button type="button" data-style-bom-format="grid" class="style-bom-format-btn py-1.5 px-2 rounded-md border font-semibold text-xs inline-flex items-center justify-center gap-1.5 transition-colors cursor-pointer">
+              <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+              <span>Grid</span>
+            </button>
+            <button type="button" data-style-bom-format="table" class="style-bom-format-btn py-1.5 px-2 rounded-md border font-semibold text-xs inline-flex items-center justify-center gap-1.5 transition-colors cursor-pointer">
+              <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="1.5"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="9" x2="9" y2="21"/></svg>
+              <span>Table</span>
+            </button>
+          </div>
+          <label class="flex items-center justify-between gap-2 cursor-pointer">
+            <span class="font-medium">Show LEGO Part IDs</span>
+            <input id="styleToggleBomPartId" type="checkbox" checked class="w-4 h-4 accent-[var(--primary)] cursor-pointer" />
+          </label>
+          <button id="btnStyleOpenBomSetup" type="button" class="w-full py-2 px-3 rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] hover:border-[var(--primary)] hover:text-[var(--primary)] font-semibold text-xs inline-flex items-center justify-between gap-2 transition-colors cursor-pointer">
+            <span>Customize Layout, Sizing &amp; Columns…</span>
+            <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+          </button>
+        </div>
         </div>
       </div>
     </div>
@@ -1202,11 +1228,11 @@
     <!-- PARTS LIST SETUP PAGE MODAL                                      -->
     <!-- ================================================================ -->
     <div id="bomSetupModal" class="no-print hidden fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4">
-      <div class="w-full max-w-xl max-h-[86vh] rounded-t-xl sm:rounded-xl studio-sheet flex flex-col overflow-hidden text-xs">
+      <div class="w-full max-w-2xl max-h-[88vh] rounded-t-xl sm:rounded-xl studio-sheet flex flex-col overflow-hidden text-xs">
         <div class="px-5 py-4 border-b border-[var(--border)] bg-[var(--chrome)] flex items-center justify-between gap-3 shrink-0">
           <div class="min-w-0">
             <h2 class="text-base font-bold tracking-tight">Parts List Setup</h2>
-            <p id="bomSetupSubtitle" class="text-xs text-[var(--muted-foreground)] truncate mt-0.5">Grid density, flow, alignment, and sorting</p>
+            <p id="bomSetupSubtitle" class="text-xs text-[var(--muted-foreground)] truncate mt-0.5">Format, grid sizing, flow direction, columns, and sorting</p>
           </div>
           <button id="btnCloseBomSetup" type="button" aria-label="Close Parts List Setup" class="w-9 h-9 rounded-md flex items-center justify-center hover:bg-[var(--surface-hover)] shrink-0 transition-colors cursor-pointer">
             <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
@@ -1214,32 +1240,371 @@
         </div>
 
         <div class="flex-1 min-h-0 overflow-y-auto overscroll-contain p-5 space-y-5">
-          <div class="space-y-2">
-            <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Grid Density</div>
-            <div class="grid grid-cols-3 gap-1.5">
-              <button data-bom-dens="compact" type="button" class="bom-dens-btn py-2.5 rounded-md border font-semibold cursor-pointer">Compact</button>
-              <button data-bom-dens="balanced" type="button" class="bom-dens-btn py-2.5 rounded-md border font-semibold cursor-pointer">Balanced</button>
-              <button data-bom-dens="spacious" type="button" class="bom-dens-btn py-2.5 rounded-md border font-semibold cursor-pointer">Spacious</button>
+          <!-- Theme ownership banner -->
+          <div class="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)]">
+            <div class="flex items-center gap-2 min-w-0">
+              <span id="bomThemeSwatch" class="w-3.5 h-3.5 rounded-full border border-black/20 shrink-0"></span>
+              <span class="text-[11px] text-[var(--muted-foreground)] truncate">
+                Saved with theme: <strong id="bomThemeName" class="text-[var(--foreground)] font-semibold">Classic Blue</strong>
+                <span id="bomThemeBuiltInNote" class="hidden"> · Changes create a custom copy</span>
+              </span>
+            </div>
+            <span id="bomLiveMetrics" class="font-mono text-[11px] font-semibold text-[var(--primary)] shrink-0">Auto</span>
+          </div>
+
+          <!-- Live Visual Preview: Miniature Page + Item Anatomy -->
+          <div class="p-3.5 rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] space-y-2.5">
+            <div class="flex items-center justify-between gap-2">
+              <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Live Layout Preview</span>
+              <span id="bomPreviewCaption" class="font-mono text-[11px] text-[var(--muted-foreground)] truncate">Grid · Left → Right · Top → Bottom</span>
+            </div>
+            <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
+              <div id="bomLayoutPreview" class="flex items-center justify-center shrink-0" aria-label="Parts list page preview"></div>
+              <div id="bomCellAnatomyPreview" class="w-full sm:w-44 shrink-0" aria-label="Sample part item format preview"></div>
             </div>
           </div>
 
+          <!-- Format Switcher: Grid vs Table -->
           <div class="space-y-2">
-            <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Fill Direction</div>
+            <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Parts List Format</div>
             <div class="grid grid-cols-2 gap-2">
-              <button data-bom-flow="rows" type="button" class="bom-flow-btn py-2.5 rounded-md border font-semibold cursor-pointer">Rows (Left to Right)</button>
-              <button data-bom-flow="columns" type="button" class="bom-flow-btn py-2.5 rounded-md border font-semibold cursor-pointer">Columns (Top to Bottom)</button>
+              <button data-bom-format="grid" type="button" class="bom-format-btn p-2.5 rounded-lg border font-semibold flex items-center gap-3 text-left transition cursor-pointer">
+                <svg class="w-9 h-7 shrink-0" viewBox="0 0 36 28" fill="none" aria-hidden="true">
+                  <rect x="1" y="1" width="34" height="26" rx="2.5" stroke="currentColor" stroke-width="1.4" opacity="0.4"/>
+                  <rect x="4" y="4" width="8" height="9" rx="1.2" stroke="currentColor" stroke-width="1.4" fill="currentColor" fill-opacity="0.16"/>
+                  <rect x="14" y="4" width="8" height="9" rx="1.2" stroke="currentColor" stroke-width="1.4" fill="currentColor" fill-opacity="0.16"/>
+                  <rect x="24" y="4" width="8" height="9" rx="1.2" stroke="currentColor" stroke-width="1.4" fill="currentColor" fill-opacity="0.16"/>
+                  <rect x="4" y="15" width="8" height="9" rx="1.2" stroke="currentColor" stroke-width="1.4" fill="currentColor" fill-opacity="0.16"/>
+                  <rect x="14" y="15" width="8" height="9" rx="1.2" stroke="currentColor" stroke-width="1.4" fill="currentColor" fill-opacity="0.16"/>
+                  <rect x="24" y="15" width="8" height="9" rx="1.2" stroke="currentColor" stroke-width="1.4" fill="currentColor" fill-opacity="0.16"/>
+                </svg>
+                <span class="min-w-0">
+                  <span class="block text-xs font-bold">Grid</span>
+                  <span class="block text-[11px] font-normal opacity-75 truncate">Visual tile grid</span>
+                </span>
+              </button>
+              <button data-bom-format="table" type="button" class="bom-format-btn p-2.5 rounded-lg border font-semibold flex items-center gap-3 text-left transition cursor-pointer">
+                <svg class="w-9 h-7 shrink-0" viewBox="0 0 36 28" fill="none" aria-hidden="true">
+                  <rect x="1" y="1" width="34" height="26" rx="2.5" stroke="currentColor" stroke-width="1.4" opacity="0.4"/>
+                  <rect x="3" y="3.5" width="30" height="4.5" rx="1" fill="currentColor" fill-opacity="0.28"/>
+                  <line x1="3" y1="12" x2="33" y2="12" stroke="currentColor" stroke-width="1.1" opacity="0.45"/>
+                  <line x1="3" y1="16.5" x2="33" y2="16.5" stroke="currentColor" stroke-width="1.1" opacity="0.45"/>
+                  <line x1="3" y1="21" x2="33" y2="21" stroke="currentColor" stroke-width="1.1" opacity="0.45"/>
+                  <line x1="11" y1="3.5" x2="11" y2="24.5" stroke="currentColor" stroke-width="1.1" opacity="0.45"/>
+                  <line x1="25" y1="3.5" x2="25" y2="24.5" stroke="currentColor" stroke-width="1.1" opacity="0.45"/>
+                </svg>
+                <span class="min-w-0">
+                  <span class="block text-xs font-bold">Table</span>
+                  <span class="block text-[11px] font-normal opacity-75 truncate">Rows &amp; columns list</span>
+                </span>
+              </button>
             </div>
           </div>
 
-          <div class="space-y-2">
-            <div id="bomAlignHeading" class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Hanging Row Alignment</div>
-            <div class="grid grid-cols-3 gap-1.5">
-              <button data-bom-align="start" type="button" class="bom-align-btn py-2.5 rounded-md border font-semibold cursor-pointer">Left</button>
-              <button data-bom-align="center" type="button" class="bom-align-btn py-2.5 rounded-md border font-semibold cursor-pointer">Center</button>
-              <button data-bom-align="end" type="button" class="bom-align-btn py-2.5 rounded-md border font-semibold cursor-pointer">Right</button>
+          <!-- ============================================================ -->
+          <!-- GRID-ONLY SETTINGS                                           -->
+          <!-- ============================================================ -->
+          <div id="bomGridSettingsWrap" class="space-y-5">
+            <!-- Grid Sizing Mode: Auto vs Custom -->
+            <div class="space-y-2.5 pt-4 border-t border-[var(--border)]">
+              <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Grid Sizing</div>
+              <div class="grid grid-cols-2 gap-2">
+                <button data-bom-grid-mode="auto" type="button" class="bom-gridmode-btn p-2.5 rounded-lg border font-semibold flex items-center gap-2.5 text-left transition cursor-pointer">
+                  <svg class="w-8 h-6 shrink-0" viewBox="0 0 32 24" fill="none" aria-hidden="true">
+                    <rect x="1.5" y="1.5" width="29" height="21" rx="2" stroke="currentColor" stroke-width="1.4" opacity="0.45"/>
+                    <path d="M6 10V6h4M26 10V6h-4M6 14v4h4M26 14v4h-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                    <rect x="11" y="8" width="10" height="8" rx="1.2" fill="currentColor" fill-opacity="0.22" stroke="currentColor" stroke-width="1.3"/>
+                  </svg>
+                  <span class="min-w-0">
+                    <span class="block font-bold">Automatic</span>
+                    <span class="block text-[11px] font-normal opacity-75 truncate">Expands to fill pages</span>
+                  </span>
+                </button>
+                <button data-bom-grid-mode="custom" type="button" class="bom-gridmode-btn p-2.5 rounded-lg border font-semibold flex items-center gap-2.5 text-left transition cursor-pointer">
+                  <svg class="w-8 h-6 shrink-0" viewBox="0 0 32 24" fill="none" aria-hidden="true">
+                    <rect x="1.5" y="1.5" width="29" height="21" rx="2" stroke="currentColor" stroke-width="1.4" opacity="0.45"/>
+                    <line x1="9" y1="2" x2="9" y2="22" stroke="currentColor" stroke-width="1.3" opacity="0.7"/>
+                    <line x1="16" y1="2" x2="16" y2="22" stroke="currentColor" stroke-width="1.3" opacity="0.7"/>
+                    <line x1="23" y1="2" x2="23" y2="22" stroke="currentColor" stroke-width="1.3" opacity="0.7"/>
+                    <line x1="2" y1="9" x2="30" y2="9" stroke="currentColor" stroke-width="1.3" opacity="0.7"/>
+                    <line x1="2" y1="15.5" x2="30" y2="15.5" stroke="currentColor" stroke-width="1.3" opacity="0.7"/>
+                  </svg>
+                  <span class="min-w-0">
+                    <span class="block font-bold">Custom Grid</span>
+                    <span class="block text-[11px] font-normal opacity-75 truncate">Pick exact cols × rows</span>
+                  </span>
+                </button>
+              </div>
+
+              <!-- Auto mode: Min Part Cell Size -->
+              <div id="bomAutoSizeWrap" class="p-3.5 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] space-y-2.5">
+                <div class="flex items-center justify-between gap-2">
+                  <span class="font-semibold">Minimum Size per Part <span class="font-normal text-[var(--muted-foreground)]">(incl. labels)</span></span>
+                  <span id="bomMinCellReadout" class="font-mono font-bold text-[var(--primary)]">0.50 in · 12.7 mm</span>
+                </div>
+                <div class="grid grid-cols-4 gap-1.5">
+                  <button data-bom-minsize="0.5" type="button" class="bom-minsize-btn py-2 px-1.5 rounded-md border font-semibold flex flex-col items-center gap-1 transition cursor-pointer">
+                    <svg class="w-7 h-5" viewBox="0 0 28 20" fill="none" aria-hidden="true">
+                      <rect x="1" y="1" width="5" height="5" rx="0.8" fill="currentColor" fill-opacity="0.35"/><rect x="8" y="1" width="5" height="5" rx="0.8" fill="currentColor" fill-opacity="0.35"/><rect x="15" y="1" width="5" height="5" rx="0.8" fill="currentColor" fill-opacity="0.35"/><rect x="22" y="1" width="5" height="5" rx="0.8" fill="currentColor" fill-opacity="0.35"/>
+                      <rect x="1" y="7.5" width="5" height="5" rx="0.8" fill="currentColor" fill-opacity="0.35"/><rect x="8" y="7.5" width="5" height="5" rx="0.8" fill="currentColor" fill-opacity="0.35"/><rect x="15" y="7.5" width="5" height="5" rx="0.8" fill="currentColor" fill-opacity="0.35"/><rect x="22" y="7.5" width="5" height="5" rx="0.8" fill="currentColor" fill-opacity="0.35"/>
+                      <rect x="1" y="14" width="5" height="5" rx="0.8" fill="currentColor" fill-opacity="0.35"/><rect x="8" y="14" width="5" height="5" rx="0.8" fill="currentColor" fill-opacity="0.35"/><rect x="15" y="14" width="5" height="5" rx="0.8" fill="currentColor" fill-opacity="0.35"/><rect x="22" y="14" width="5" height="5" rx="0.8" fill="currentColor" fill-opacity="0.35"/>
+                    </svg>
+                    <span class="text-[11px]">0.5&Prime; Dense</span>
+                  </button>
+                  <button data-bom-minsize="0.75" type="button" class="bom-minsize-btn py-2 px-1.5 rounded-md border font-semibold flex flex-col items-center gap-1 transition cursor-pointer">
+                    <svg class="w-7 h-5" viewBox="0 0 28 20" fill="none" aria-hidden="true">
+                      <rect x="1" y="1" width="7.5" height="8" rx="1" fill="currentColor" fill-opacity="0.32"/><rect x="10.2" y="1" width="7.5" height="8" rx="1" fill="currentColor" fill-opacity="0.32"/><rect x="19.5" y="1" width="7.5" height="8" rx="1" fill="currentColor" fill-opacity="0.32"/>
+                      <rect x="1" y="11" width="7.5" height="8" rx="1" fill="currentColor" fill-opacity="0.32"/><rect x="10.2" y="11" width="7.5" height="8" rx="1" fill="currentColor" fill-opacity="0.32"/><rect x="19.5" y="11" width="7.5" height="8" rx="1" fill="currentColor" fill-opacity="0.32"/>
+                    </svg>
+                    <span class="text-[11px]">0.75&Prime; Compact</span>
+                  </button>
+                  <button data-bom-minsize="1.0" type="button" class="bom-minsize-btn py-2 px-1.5 rounded-md border font-semibold flex flex-col items-center gap-1 transition cursor-pointer">
+                    <svg class="w-7 h-5" viewBox="0 0 28 20" fill="none" aria-hidden="true">
+                      <rect x="2" y="1.5" width="10.5" height="7.5" rx="1.2" fill="currentColor" fill-opacity="0.3"/><rect x="15.5" y="1.5" width="10.5" height="7.5" rx="1.2" fill="currentColor" fill-opacity="0.3"/>
+                      <rect x="2" y="11" width="10.5" height="7.5" rx="1.2" fill="currentColor" fill-opacity="0.3"/><rect x="15.5" y="11" width="10.5" height="7.5" rx="1.2" fill="currentColor" fill-opacity="0.3"/>
+                    </svg>
+                    <span class="text-[11px]">1.0&Prime; Medium</span>
+                  </button>
+                  <button data-bom-minsize="1.4" type="button" class="bom-minsize-btn py-2 px-1.5 rounded-md border font-semibold flex flex-col items-center gap-1 transition cursor-pointer">
+                    <svg class="w-7 h-5" viewBox="0 0 28 20" fill="none" aria-hidden="true">
+                      <rect x="2" y="2" width="11" height="16" rx="1.5" fill="currentColor" fill-opacity="0.28"/><rect x="15" y="2" width="11" height="16" rx="1.5" fill="currentColor" fill-opacity="0.28"/>
+                    </svg>
+                    <span class="text-[11px]">1.4&Prime; Large</span>
+                  </button>
+                </div>
+                <input id="bomMinCellSlider" type="range" min="0.35" max="2.0" step="0.05" value="0.5" class="w-full accent-[var(--primary)] cursor-pointer" aria-label="Minimum part cell size in inches" />
+                <p class="text-[11px] text-[var(--muted-foreground)] leading-snug">Uses the fewest pages without shrinking parts below this size, then expands cells to fill any extra space on those pages.</p>
+              </div>
+
+              <!-- Custom mode: Explicit Columns × Rows -->
+              <div id="bomCustomSizeWrap" class="hidden p-3.5 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] space-y-3">
+                <div class="grid grid-cols-2 gap-3">
+                  <div class="space-y-1.5">
+                    <label for="bomCustomCols" class="text-xs font-semibold text-[var(--muted-foreground)]">Columns <span class="font-normal">(1–24)</span></label>
+                    <div class="flex items-center gap-1.5">
+                      <button id="bomColsDec" type="button" aria-label="Decrease columns" class="w-9 h-9 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-bold text-sm cursor-pointer">−</button>
+                      <input id="bomCustomCols" type="number" min="1" max="24" value="8" class="flex-1 min-w-0 h-9 px-2 rounded-md border border-[var(--border)] bg-[var(--card)] text-center font-mono font-bold outline-none focus:border-[var(--primary)]" />
+                      <button id="bomColsInc" type="button" aria-label="Increase columns" class="w-9 h-9 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-bold text-sm cursor-pointer">+</button>
+                    </div>
+                  </div>
+                  <div class="space-y-1.5">
+                    <label for="bomCustomRows" class="text-xs font-semibold text-[var(--muted-foreground)]">Rows <span class="font-normal">(1–24)</span></label>
+                    <div class="flex items-center gap-1.5">
+                      <button id="bomRowsDec" type="button" aria-label="Decrease rows" class="w-9 h-9 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-bold text-sm cursor-pointer">−</button>
+                      <input id="bomCustomRows" type="number" min="1" max="24" value="6" class="flex-1 min-w-0 h-9 px-2 rounded-md border border-[var(--border)] bg-[var(--card)] text-center font-mono font-bold outline-none focus:border-[var(--primary)]" />
+                      <button id="bomRowsInc" type="button" aria-label="Increase rows" class="w-9 h-9 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-bold text-sm cursor-pointer">+</button>
+                    </div>
+                  </div>
+                </div>
+                <div class="flex flex-wrap items-center gap-1.5">
+                  <span class="text-[11px] text-[var(--muted-foreground)] mr-1">Quick grids:</span>
+                  <button type="button" data-bom-preset="5x4" class="bom-preset-btn px-2 py-1 rounded border border-[var(--border)] bg-[var(--card)] hover:border-[var(--primary)] font-mono text-[11px] font-semibold cursor-pointer">5×4</button>
+                  <button type="button" data-bom-preset="6x5" class="bom-preset-btn px-2 py-1 rounded border border-[var(--border)] bg-[var(--card)] hover:border-[var(--primary)] font-mono text-[11px] font-semibold cursor-pointer">6×5</button>
+                  <button type="button" data-bom-preset="8x6" class="bom-preset-btn px-2 py-1 rounded border border-[var(--border)] bg-[var(--card)] hover:border-[var(--primary)] font-mono text-[11px] font-semibold cursor-pointer">8×6</button>
+                  <button type="button" data-bom-preset="10x8" class="bom-preset-btn px-2 py-1 rounded border border-[var(--border)] bg-[var(--card)] hover:border-[var(--primary)] font-mono text-[11px] font-semibold cursor-pointer">10×8</button>
+                  <button type="button" data-bom-preset="12x9" class="bom-preset-btn px-2 py-1 rounded border border-[var(--border)] bg-[var(--card)] hover:border-[var(--primary)] font-mono text-[11px] font-semibold cursor-pointer">12×9</button>
+                  <button type="button" data-bom-preset="16x12" class="bom-preset-btn px-2 py-1 rounded border border-[var(--border)] bg-[var(--card)] hover:border-[var(--primary)] font-mono text-[11px] font-semibold cursor-pointer">16×12</button>
+                </div>
+                <div id="bomCustomCellHint" class="font-mono text-[11px] text-[var(--muted-foreground)]"></div>
+              </div>
+            </div>
+
+            <!-- Variable Part Sizing (Strict Grid Multiples) -->
+            <div class="space-y-2 pt-4 border-t border-[var(--border)]">
+              <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Part Cell Scaling</div>
+              <div class="grid grid-cols-2 gap-2">
+                <button data-bom-varsize="uniform" type="button" class="bom-varsize-btn p-2.5 rounded-lg border font-semibold flex items-center gap-2.5 text-left transition cursor-pointer">
+                  <svg class="w-9 h-7 shrink-0" viewBox="0 0 36 28" fill="none" aria-hidden="true">
+                    <rect x="2" y="2" width="9" height="10.5" rx="1.2" stroke="currentColor" stroke-width="1.4" fill="currentColor" fill-opacity="0.16"/>
+                    <rect x="13.5" y="2" width="9" height="10.5" rx="1.2" stroke="currentColor" stroke-width="1.4" fill="currentColor" fill-opacity="0.16"/>
+                    <rect x="25" y="2" width="9" height="10.5" rx="1.2" stroke="currentColor" stroke-width="1.4" fill="currentColor" fill-opacity="0.16"/>
+                    <rect x="2" y="15.5" width="9" height="10.5" rx="1.2" stroke="currentColor" stroke-width="1.4" fill="currentColor" fill-opacity="0.16"/>
+                    <rect x="13.5" y="15.5" width="9" height="10.5" rx="1.2" stroke="currentColor" stroke-width="1.4" fill="currentColor" fill-opacity="0.16"/>
+                    <rect x="25" y="15.5" width="9" height="10.5" rx="1.2" stroke="currentColor" stroke-width="1.4" fill="currentColor" fill-opacity="0.16"/>
+                  </svg>
+                  <span class="min-w-0">
+                    <span class="block font-bold">Uniform (1×1)</span>
+                    <span class="block text-[11px] font-normal opacity-75 truncate">Equal cell per part</span>
+                  </span>
+                </button>
+                <button data-bom-varsize="variable" type="button" class="bom-varsize-btn p-2.5 rounded-lg border font-semibold flex items-center gap-2.5 text-left transition cursor-pointer">
+                  <svg class="w-9 h-7 shrink-0" viewBox="0 0 36 28" fill="none" aria-hidden="true">
+                    <rect x="2" y="2" width="14.5" height="14.5" rx="1.4" stroke="currentColor" stroke-width="1.5" fill="currentColor" fill-opacity="0.26"/>
+                    <rect x="19" y="2" width="15" height="6.2" rx="1.2" stroke="currentColor" stroke-width="1.4" fill="currentColor" fill-opacity="0.2"/>
+                    <rect x="19" y="10.3" width="6.5" height="6.2" rx="1" stroke="currentColor" stroke-width="1.3" fill="currentColor" fill-opacity="0.12"/>
+                    <rect x="27.5" y="10.3" width="6.5" height="15.7" rx="1.2" stroke="currentColor" stroke-width="1.4" fill="currentColor" fill-opacity="0.2"/>
+                    <rect x="2" y="19" width="6.5" height="7" rx="1" stroke="currentColor" stroke-width="1.3" fill="currentColor" fill-opacity="0.12"/>
+                    <rect x="10.5" y="19" width="15" height="7" rx="1.2" stroke="currentColor" stroke-width="1.4" fill="currentColor" fill-opacity="0.2"/>
+                  </svg>
+                  <span class="min-w-0">
+                    <span class="block font-bold">Scale by Part Size</span>
+                    <span class="block text-[11px] font-normal opacity-75 truncate">Strict 2×1, 1×2, 2×2 multiples</span>
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Fill Order & Direction (8 combinations with clear visual diagrams) -->
+            <div class="space-y-3 pt-4 border-t border-[var(--border)]">
+              <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Fill Order &amp; Direction</div>
+              <div class="grid grid-cols-2 gap-2">
+                <button data-bom-flow-axis="rows" type="button" class="bom-flowaxis-btn p-2.5 rounded-lg border font-semibold flex items-center gap-2.5 text-left transition cursor-pointer">
+                  <svg class="w-8 h-6 shrink-0" viewBox="0 0 32 24" fill="none" aria-hidden="true">
+                    <rect x="1.5" y="2" width="29" height="8.5" rx="1.5" stroke="currentColor" stroke-width="1.3" fill="currentColor" fill-opacity="0.14"/>
+                    <path d="M6 6.2h18m0 0-3-2.5m3 2.5-3 2.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                    <rect x="1.5" y="13.5" width="29" height="8.5" rx="1.5" stroke="currentColor" stroke-width="1.3" fill="currentColor" fill-opacity="0.08"/>
+                    <path d="M6 17.7h18m0 0-3-2.5m3 2.5-3 2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.7"/>
+                  </svg>
+                  <span class="min-w-0">
+                    <span class="block font-bold">Rows First</span>
+                    <span class="block text-[11px] font-normal opacity-75 truncate">Fill across each row</span>
+                  </span>
+                </button>
+                <button data-bom-flow-axis="columns" type="button" class="bom-flowaxis-btn p-2.5 rounded-lg border font-semibold flex items-center gap-2.5 text-left transition cursor-pointer">
+                  <svg class="w-8 h-6 shrink-0" viewBox="0 0 32 24" fill="none" aria-hidden="true">
+                    <rect x="2" y="1.5" width="12.5" height="21" rx="1.5" stroke="currentColor" stroke-width="1.3" fill="currentColor" fill-opacity="0.14"/>
+                    <path d="M8.2 5v14m0 0-2.5-3m2.5 3 2.5-3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                    <rect x="17.5" y="1.5" width="12.5" height="21" rx="1.5" stroke="currentColor" stroke-width="1.3" fill="currentColor" fill-opacity="0.08"/>
+                    <path d="M23.7 5v14m0 0-2.5-3m2.5 3 2.5-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.7"/>
+                  </svg>
+                  <span class="min-w-0">
+                    <span class="block font-bold">Columns First</span>
+                    <span class="block text-[11px] font-normal opacity-75 truncate">Fill along each column</span>
+                  </span>
+                </button>
+              </div>
+
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div class="space-y-1.5">
+                  <div class="text-[11px] font-semibold text-[var(--muted-foreground)]">Horizontal Direction</div>
+                  <div class="grid grid-cols-2 gap-1.5">
+                    <button data-bom-hdir="ltr" type="button" class="bom-hdir-btn py-2 px-2 rounded-lg border font-semibold flex flex-col items-center gap-1 transition cursor-pointer">
+                      <svg class="w-9 h-4" viewBox="0 0 36 16" fill="none" aria-hidden="true">
+                        <rect x="1" y="2" width="8" height="12" rx="1.2" fill="currentColor" fill-opacity="0.32" stroke="currentColor" stroke-width="1.2"/>
+                        <path d="M12 8h11m0 0-3-3m3 3-3 3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+                        <rect x="27" y="2" width="8" height="12" rx="1.2" fill="currentColor" fill-opacity="0.1" stroke="currentColor" stroke-width="1.2" opacity="0.6"/>
+                      </svg>
+                      <span class="text-[11px]">Left → Right</span>
+                    </button>
+                    <button data-bom-hdir="rtl" type="button" class="bom-hdir-btn py-2 px-2 rounded-lg border font-semibold flex flex-col items-center gap-1 transition cursor-pointer">
+                      <svg class="w-9 h-4" viewBox="0 0 36 16" fill="none" aria-hidden="true">
+                        <rect x="1" y="2" width="8" height="12" rx="1.2" fill="currentColor" fill-opacity="0.1" stroke="currentColor" stroke-width="1.2" opacity="0.6"/>
+                        <path d="M24 8H13m0 0 3-3m-3 3 3 3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+                        <rect x="27" y="2" width="8" height="12" rx="1.2" fill="currentColor" fill-opacity="0.32" stroke="currentColor" stroke-width="1.2"/>
+                      </svg>
+                      <span class="text-[11px]">Right → Left</span>
+                    </button>
+                  </div>
+                </div>
+                <div class="space-y-1.5">
+                  <div class="text-[11px] font-semibold text-[var(--muted-foreground)]">Vertical Direction</div>
+                  <div class="grid grid-cols-2 gap-1.5">
+                    <button data-bom-vdir="ttb" type="button" class="bom-vdir-btn py-2 px-2 rounded-lg border font-semibold flex flex-col items-center gap-1 transition cursor-pointer">
+                      <svg class="w-9 h-4" viewBox="0 0 36 16" fill="none" aria-hidden="true">
+                        <rect x="4" y="1" width="12" height="5" rx="1" fill="currentColor" fill-opacity="0.34" stroke="currentColor" stroke-width="1.1"/>
+                        <rect x="4" y="10" width="12" height="5" rx="1" fill="currentColor" fill-opacity="0.1" stroke="currentColor" stroke-width="1.1" opacity="0.6"/>
+                        <path d="M26 2v12m0 0-3-3m3 3 3-3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+                      </svg>
+                      <span class="text-[11px]">Top → Bottom</span>
+                    </button>
+                    <button data-bom-vdir="btt" type="button" class="bom-vdir-btn py-2 px-2 rounded-lg border font-semibold flex flex-col items-center gap-1 transition cursor-pointer">
+                      <svg class="w-9 h-4" viewBox="0 0 36 16" fill="none" aria-hidden="true">
+                        <rect x="4" y="1" width="12" height="5" rx="1" fill="currentColor" fill-opacity="0.1" stroke="currentColor" stroke-width="1.1" opacity="0.6"/>
+                        <rect x="4" y="10" width="12" height="5" rx="1" fill="currentColor" fill-opacity="0.34" stroke="currentColor" stroke-width="1.1"/>
+                        <path d="M26 14V2m0 0-3 3m3-3 3 3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+                      </svg>
+                      <span class="text-[11px]">Bottom → Top</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Hanging Row/Column Alignment with dynamic SVG diagrams -->
+            <div class="space-y-2">
+              <div id="bomAlignHeading" class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Hanging Row Alignment</div>
+              <div class="grid grid-cols-3 gap-1.5">
+                <button data-bom-align="start" type="button" class="bom-align-btn py-2 px-2 rounded-lg border font-semibold flex flex-col items-center gap-1 transition cursor-pointer">
+                  <span id="bomAlignIcon_start" class="inline-flex"></span>
+                  <span id="bomAlignLabel_start" class="text-[11px]">Left</span>
+                </button>
+                <button data-bom-align="center" type="button" class="bom-align-btn py-2 px-2 rounded-lg border font-semibold flex flex-col items-center gap-1 transition cursor-pointer">
+                  <span id="bomAlignIcon_center" class="inline-flex"></span>
+                  <span id="bomAlignLabel_center" class="text-[11px]">Center</span>
+                </button>
+                <button data-bom-align="end" type="button" class="bom-align-btn py-2 px-2 rounded-lg border font-semibold flex flex-col items-center gap-1 transition cursor-pointer">
+                  <span id="bomAlignIcon_end" class="inline-flex"></span>
+                  <span id="bomAlignLabel_end" class="text-[11px]">Right</span>
+                </button>
+              </div>
             </div>
           </div>
 
+          <!-- ============================================================ -->
+          <!-- TABLE-ONLY SETTINGS                                          -->
+          <!-- ============================================================ -->
+          <div id="bomTableSettingsWrap" class="hidden space-y-3 pt-4 border-t border-[var(--border)]">
+            <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Table Rows per Page</div>
+            <div class="grid grid-cols-2 gap-2">
+              <button data-bom-table-mode="auto" type="button" class="bom-tablemode-btn p-2.5 rounded-lg border font-semibold flex items-center gap-2.5 text-left transition cursor-pointer">
+                <svg class="w-8 h-6 shrink-0" viewBox="0 0 32 24" fill="none" aria-hidden="true">
+                  <rect x="1.5" y="1.5" width="29" height="21" rx="2" stroke="currentColor" stroke-width="1.4" opacity="0.45"/>
+                  <line x1="5" y1="6.5" x2="27" y2="6.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                  <line x1="5" y1="12" x2="27" y2="12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" opacity="0.7"/>
+                  <line x1="5" y1="17.5" x2="27" y2="17.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" opacity="0.7"/>
+                </svg>
+                <span class="min-w-0">
+                  <span class="block font-bold">Automatic</span>
+                  <span class="block text-[11px] font-normal opacity-75 truncate">Balances rows cleanly</span>
+                </span>
+              </button>
+              <button data-bom-table-mode="custom" type="button" class="bom-tablemode-btn p-2.5 rounded-lg border font-semibold flex items-center gap-2.5 text-left transition cursor-pointer">
+                <svg class="w-8 h-6 shrink-0" viewBox="0 0 32 24" fill="none" aria-hidden="true">
+                  <rect x="1.5" y="1.5" width="29" height="21" rx="2" stroke="currentColor" stroke-width="1.4" opacity="0.45"/>
+                  <text x="16" y="15.5" text-anchor="middle" fill="currentColor" font-size="9.5" font-weight="800" font-family="monospace">20</text>
+                </svg>
+                <span class="min-w-0">
+                  <span class="block font-bold">Custom Rows</span>
+                  <span class="block text-[11px] font-normal opacity-75 truncate">Fixed rows per page</span>
+                </span>
+              </button>
+            </div>
+            <div id="bomTableCustomRowsWrap" class="hidden p-3.5 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] space-y-2.5">
+              <div class="flex items-center gap-2">
+                <label for="bomTableRowsInput" class="font-semibold text-[var(--muted-foreground)] shrink-0">Rows / Page (4–60)</label>
+                <div class="flex items-center gap-1.5 ml-auto">
+                  <button id="bomTableRowsDec" type="button" aria-label="Decrease rows per page" class="w-8 h-8 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-bold cursor-pointer">−</button>
+                  <input id="bomTableRowsInput" type="number" min="4" max="60" value="20" class="w-16 h-8 px-2 rounded-md border border-[var(--border)] bg-[var(--card)] text-center font-mono font-bold outline-none focus:border-[var(--primary)]" />
+                  <button id="bomTableRowsInc" type="button" aria-label="Increase rows per page" class="w-8 h-8 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-bold cursor-pointer">+</button>
+                </div>
+              </div>
+              <div class="flex flex-wrap items-center gap-1.5">
+                <span class="text-[11px] text-[var(--muted-foreground)] mr-1">Presets:</span>
+                <button type="button" data-bom-trows="10" class="bom-trows-btn px-2 py-1 rounded border border-[var(--border)] bg-[var(--card)] hover:border-[var(--primary)] font-mono text-[11px] font-semibold cursor-pointer">10</button>
+                <button type="button" data-bom-trows="15" class="bom-trows-btn px-2 py-1 rounded border border-[var(--border)] bg-[var(--card)] hover:border-[var(--primary)] font-mono text-[11px] font-semibold cursor-pointer">15</button>
+                <button type="button" data-bom-trows="20" class="bom-trows-btn px-2 py-1 rounded border border-[var(--border)] bg-[var(--card)] hover:border-[var(--primary)] font-mono text-[11px] font-semibold cursor-pointer">20</button>
+                <button type="button" data-bom-trows="25" class="bom-trows-btn px-2 py-1 rounded border border-[var(--border)] bg-[var(--card)] hover:border-[var(--primary)] font-mono text-[11px] font-semibold cursor-pointer">25</button>
+                <button type="button" data-bom-trows="30" class="bom-trows-btn px-2 py-1 rounded border border-[var(--border)] bg-[var(--card)] hover:border-[var(--primary)] font-mono text-[11px] font-semibold cursor-pointer">30</button>
+                <button type="button" data-bom-trows="40" class="bom-trows-btn px-2 py-1 rounded border border-[var(--border)] bg-[var(--card)] hover:border-[var(--primary)] font-mono text-[11px] font-semibold cursor-pointer">40</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- ============================================================ -->
+          <!-- SHARED DRAGGABLE FIELDS & COLUMNS (GRID + TABLE)             -->
+          <!-- ============================================================ -->
+          <div class="space-y-2.5 pt-4 border-t border-[var(--border)]">
+            <div class="flex items-center justify-between gap-2">
+              <span class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Columns &amp; Displayed Fields</span>
+              <span class="text-[11px] text-[var(--muted-foreground)]">Drag or use arrows to reorder</span>
+            </div>
+            <p id="bomFieldsHint" class="text-[11px] text-[var(--muted-foreground)] leading-snug">Shared across both formats: controls left-to-right columns in Table mode and the display order of image &amp; labels inside each Grid cell.</p>
+            <div id="bomFieldsList" class="space-y-1.5" role="list" aria-label="Parts list columns and fields"></div>
+          </div>
+
+          <!-- ============================================================ -->
+          <!-- SORTING                                                      -->
+          <!-- ============================================================ -->
           <div class="space-y-3 pt-4 border-t border-[var(--border)]">
             <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Sort Parts By</div>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1251,6 +1616,7 @@
                   <option value="qty">Quantity (Most First)</option>
                   <option value="size">Part Size (Largest First)</option>
                   <option value="name">Part Name (A–Z)</option>
+                  <option value="partId">LEGO Part ID (Low to High)</option>
                 </select>
               </label>
               <label class="space-y-1.5">
@@ -1261,16 +1627,10 @@
                   <option value="qty">Quantity (Most First)</option>
                   <option value="size">Part Size (Largest First)</option>
                   <option value="name">Part Name (A–Z)</option>
+                  <option value="partId">LEGO Part ID (Low to High)</option>
                 </select>
               </label>
             </div>
-          </div>
-
-          <div class="space-y-2 pt-4 border-t border-[var(--border)]">
-            <label class="flex items-center justify-between py-1 cursor-pointer">
-              <span class="font-medium">Show Part Names in Parts List</span>
-              <input id="toggleBomNames" type="checkbox" checked class="w-4 h-4 accent-[var(--primary)] cursor-pointer" />
-            </label>
           </div>
         </div>
 

@@ -112,6 +112,29 @@ import {
   resolveOverviewPagePreviewKind,
 } from './engine/overviewPreviews';
 import {
+  BOM_FIELD_META,
+  MAX_BOM_GRID_TRACKS,
+  MAX_BOM_TABLE_ROWS,
+  MIN_BOM_GRID_TRACKS,
+  MIN_BOM_TABLE_ROWS,
+  comparePartIdsNatural,
+  computeBomCellTypography,
+  computeBomTableColumns,
+  computeBomTablePlan,
+  computeBomTableTypography,
+  createDefaultBomConfig,
+  formatDisplayPartId,
+  getEnabledBomFields,
+  isBomFieldEnabled,
+  normalizeBomConfig,
+  packBomGridPages,
+  projectPartDimensionsLdu,
+  reorderBomFields,
+  resolveBomGridPlan,
+  summarizeBomConfig,
+  toggleBomField,
+} from './engine/partsList';
+import {
   CAMERA_ANGLE_PRESETS,
   FOCUS_MODE_OPTIONS,
   MINIFIG_STYLE_OPTIONS,
@@ -202,7 +225,6 @@ import { buildPdfBinary, canvasRectToPdfLink } from './export/pdfBinary';
 import {
   computeCanonicalPageMetrics,
   computePageTypography,
-  estimateBomCellGeometry,
 } from './engine/pageTypography';
 import {
   ONLINE_STARTER_PACKS,
@@ -501,6 +523,17 @@ function patchActiveTheme(patch, { render = true } = {}) {
     applyActiveThemeStyleToState();
   }
   if (render) scheduleThemeRender();
+}
+
+/**
+ * Updates the active theme's Parts List (`bomConfig`) settings. Built-in themes
+ * are automatically forked into a custom theme on the first edit.
+ */
+function patchBomConfig(partial, { immediate = false } = {}) {
+  const cur = normalizeBomConfig(getActiveTheme().bomConfig);
+  const next = normalizeBomConfig({ ...cur, ...partial }, cur);
+  patchActiveTheme({ bomConfig: next }, { render: !immediate });
+  if (immediate) renderAll();
 }
 
 /**
@@ -2797,7 +2830,26 @@ function getPliThumb(part) {
   const mesh = buildMeshBuffers([], [samplePart], { highlightNew:false, fadePrev:false, showArrows:false, accent:'#1a73e8' });
   snapshotEngine.draw(mesh, 360, 360, 32, 22, 1.08);
   const url = snapshotCanvas.toDataURL('image/png');
-  if (pliThumbCache.size > 220) pliThumbCache.clear();
+  if (pliThumbCache.size > 360) pliThumbCache.clear();
+  pliThumbCache.set(key, url);
+  return url;
+}
+
+function getBomPartThumb(part, colSpan = 1, rowSpan = 1) {
+  const cs = Math.max(1, Math.round(colSpan || 1));
+  const rs = Math.max(1, Math.round(rowSpan || 1));
+  if (cs === 1 && rs === 1) return getPliThumb(part);
+  const key = `${part.p}:${part.c}:bom_${cs}x${rs}`;
+  if (pliThumbCache.has(key)) return pliThumbCache.get(key);
+  const maxSpan = Math.max(cs, rs);
+  const basePx = Math.min(480, Math.round(240 * Math.min(2.0, 0.85 + maxSpan * 0.45)));
+  const rw = Math.max(180, Math.round((basePx * cs) / maxSpan));
+  const rh = Math.max(180, Math.round((basePx * rs) / maxSpan));
+  const samplePart = normalizeCompositeThumbPart(part, (pid) => resolvePart(pid).name, computeWorldBox);
+  const mesh = buildMeshBuffers([], [samplePart], { highlightNew:false, fadePrev:false, showArrows:false, accent:'#1a73e8' });
+  snapshotEngine.draw(mesh, rw, rh, 32, 22, 1.04, 0, { tightFit: true });
+  const url = snapshotCanvas.toDataURL('image/png');
+  if (pliThumbCache.size > 360) pliThumbCache.clear();
   pliThumbCache.set(key, url);
   return url;
 }
@@ -6054,14 +6106,7 @@ const state = {
   coverMeta: createDefaultCoverMeta(),
   completeMeta: { title:'Build Complete!', subtitle:'Ready for display!', az:315, el:28, bgSrc:null, showText:true, showFireworks:true },
   backMeta:  { title:'', subtitle:'Made with Brick Instruction Works', az:38, el:24, bgSrc:null },
-  bomConfig: {
-    density: 'balanced',     // 'compact' | 'balanced' | 'spacious'
-    flow: 'rows',            // 'rows' | 'columns'
-    align: 'start',          // 'start' | 'center' | 'end'
-    sortPrimary: 'color',    // 'color' | 'category' | 'qty' | 'size' | 'name'
-    sortSecondary: 'category',
-    showNames: true,
-  },
+  bomConfig: createDefaultBomConfig(),
   bomShortcutVisible: false,
   pages: [],
   pageIdx: 0,
@@ -6212,11 +6257,53 @@ function formatPageNumber(num, total) {
   return `Page ${num}`;
 }
 
-function getBomGridDimensions(isLandscape) {
-  const d = state.bomConfig?.density || 'balanced';
-  if (d === 'compact') return isLandscape ? { cols: 7, rows: 6, perPage: 42 } : { cols: 5, rows: 7, perPage: 35 };
-  if (d === 'spacious') return isLandscape ? { cols: 4, rows: 4, perPage: 16 } : { cols: 3, rows: 5, perPage: 15 };
-  return isLandscape ? { cols: 6, rows: 5, perPage: 30 } : { cols: 4, rows: 6, perPage: 24 };
+function getBomUsableAreaInches() {
+  const dims = computePageFrameDimensions();
+  const cfg = normalizeBomConfig(state.bomConfig);
+  const typo = computePageTypography({
+    widthIn: dims.widthIn,
+    heightIn: dims.heightIn,
+    pxPerInch: dims.pxPerInch,
+    density: state.density,
+    bomDensity: cfg.density,
+  });
+  const contentWidthIn = Math.max(1.5, (dims.width - typo.pad * 2) / dims.pxPerInch);
+  const contentHeightIn = Math.max(1.5, (dims.height - typo.pad * 2 - typo.footerH - typo.bom.headerH) / dims.pxPerInch);
+  return { dims, typo, contentWidthIn, contentHeightIn };
+}
+
+function getPartLocalDimsLdu(part) {
+  if (part.children && part.children.length > 0) {
+    const sample = normalizeCompositeThumbPart(part, (pid) => resolvePart(pid).name, computeWorldBox);
+    const box = computeWorldBox(sample);
+    return [
+      Math.max(4, box.max[0] - box.min[0]),
+      Math.max(4, box.max[1] - box.min[1]),
+      Math.max(4, box.max[2] - box.min[2]),
+    ];
+  }
+  const compiled = compileEmbeddedDat(part.p);
+  if (compiled && compiled.min && compiled.max) {
+    return [
+      Math.max(4, compiled.max[0] - compiled.min[0]),
+      Math.max(4, compiled.max[1] - compiled.min[1]),
+      Math.max(4, compiled.max[2] - compiled.min[2]),
+    ];
+  }
+  const def = resolvePart(part.p);
+  return [
+    Math.max(4, (def.sx || 1) * 20),
+    Math.max(4, def.h || 24),
+    Math.max(4, (def.sz || 1) * 20),
+  ];
+}
+
+function getDisplayPartIdForPart(part) {
+  const raw = String(part?.p || '');
+  if (compositePartDefs.has(normId(raw)) && Array.isArray(part?.children) && part.children.length > 0) {
+    return formatDisplayPartId(part.children[0].p || raw);
+  }
+  return formatDisplayPartId(raw);
 }
 
 function classifyBomCategory(part) {
@@ -6257,14 +6344,34 @@ function getColorSortKey(colorId) {
 }
 
 function getSortedBomEntries(allParts) {
+  const cfg = normalizeBomConfig(state.bomConfig);
   const map = new Map();
   for (const p of allParts) {
     const k = `${p.p}:${p.c}`;
     if (!map.has(k)) {
       const meta = resolvePart(p.p);
       const [catIdx, catName] = classifyBomCategory(p);
-      const sizeScore = (meta.sx || 1) * (meta.sz || 1) * ((meta.h || 8) / 8);
-      map.set(k, { part: p, qty: 0, meta, catIdx, catName, colorKey: getColorSortKey(p.c), sizeScore });
+      const colInfo = resolveColorInfo(p.c) || { name: `Color ${p.c}`, hex: '#9ea3a8' };
+      const [dx, dy, dz] = getPartLocalDimsLdu(p);
+      const proj = projectPartDimensionsLdu(dx, dy, dz);
+      const partIdDisplay = getDisplayPartIdForPart(p);
+      map.set(k, {
+        part: p,
+        qty: 0,
+        meta,
+        partIdDisplay,
+        colorName: colInfo.name || `Color ${p.c}`,
+        colorHex: colInfo.hex || '#9ea3a8',
+        catIdx,
+        catName,
+        colorKey: getColorSortKey(p.c),
+        dx: proj.dx,
+        dy: proj.dy,
+        dz: proj.dz,
+        projW: proj.projW,
+        projH: proj.projH,
+        sizeScore: proj.sizeScore,
+      });
     }
     map.get(k).qty++;
   }
@@ -6274,43 +6381,18 @@ function getSortedBomEntries(allParts) {
     if (trait === 'qty') return b.qty - a.qty;
     if (trait === 'size') return b.sizeScore - a.sizeScore;
     if (trait === 'name') return a.meta.name.localeCompare(b.meta.name);
+    if (trait === 'partId') return comparePartIdsNatural(a.partIdDisplay, b.partIdDisplay);
     return 0;
   };
-  const primary = state.bomConfig?.sortPrimary || 'color';
-  const secondary = state.bomConfig?.sortSecondary || 'category';
+  const primary = cfg.sortPrimary || 'color';
+  const secondary = cfg.sortSecondary || 'category';
   return Array.from(map.values()).sort((a, b) =>
     cmpTrait(a, b, primary)
     || cmpTrait(a, b, secondary)
     || (b.qty - a.qty)
+    || comparePartIdsNatural(a.partIdDisplay, b.partIdDisplay)
     || a.meta.name.localeCompare(b.meta.name)
   );
-}
-
-// Exact fractional layout shared by live HTML & PDF Canvas so hanging rows/columns match 100%
-function computeBomGridLayout(items, cols, rows, flow, align) {
-  const n = items.length;
-  const cells = [];
-  if (n === 0) return cells;
-  if (flow === 'columns') {
-    const lastCol = Math.floor((n - 1) / rows);
-    const rem = n - lastCol * rows;
-    const shift = rem < rows ? (align === 'center' ? (rows - rem) / 2 : align === 'end' ? (rows - rem) : 0) : 0;
-    for (let i = 0; i < n; i++) {
-      const col = Math.floor(i / rows);
-      const row = (i % rows) + (col === lastCol ? shift : 0);
-      cells.push({ item: items[i], xFrac: col / cols, yFrac: row / rows, wFrac: 1 / cols, hFrac: 1 / rows });
-    }
-  } else {
-    const lastRow = Math.floor((n - 1) / cols);
-    const rem = n - lastRow * cols;
-    const shift = rem < cols ? (align === 'center' ? (cols - rem) / 2 : align === 'end' ? (cols - rem) : 0) : 0;
-    for (let i = 0; i < n; i++) {
-      const row = Math.floor(i / cols);
-      const col = (i % cols) + (row === lastRow ? shift : 0);
-      cells.push({ item: items[i], xFrac: col / cols, yFrac: row / rows, wFrac: 1 / cols, hFrac: 1 / rows });
-    }
-  }
-  return cells;
 }
 
 const FIREWORK_BURSTS = [
@@ -6525,34 +6607,78 @@ function rebuildPages() {
     // 1. Build Complete celebration page BEFORE Parts List
     pages.push({ id:'complete', kind:'complete', num:++pNum, label:'Build Complete' });
 
-    // 2. Multi-page spillover Parts List (zero cut-off!)
+    // 2. Multi-page spillover Parts List (zero cut-off!) — Grid or Table format
     const allParts = getAllParts(state.model);
     const bomEntries = getSortedBomEntries(allParts);
-    const isLand = isLandPage;
-    const gridDims = getBomGridDimensions(isLand);
-    const bomPageCount = Math.max(1, Math.ceil(bomEntries.length / gridDims.perPage));
-    for (let bi = 0; bi < bomPageCount; bi++) {
-      const slice = bomEntries.slice(bi * gridDims.perPage, (bi + 1) * gridDims.perPage);
-      pages.push({
-        id: `bom_${bi}`,
-        kind: 'bom',
-        num: ++pNum,
-        label: bomPageCount > 1 ? `Parts List (${bi + 1}/${bomPageCount})` : 'Parts List',
-        bomPageIdx: bi,
-        bomPageCount,
-        bomTotalUnique: bomEntries.length,
-        bomTotalPieces: allParts.length,
-        bomCols: gridDims.cols,
-        bomRows: gridDims.rows,
-        bomEntries: slice,
+    const bomCfg = normalizeBomConfig(state.bomConfig);
+    const { contentWidthIn, contentHeightIn } = getBomUsableAreaInches();
+
+    if (bomCfg.format === 'table') {
+      const tablePlan = computeBomTablePlan({
+        items: bomEntries,
+        config: bomCfg,
+        contentHeightIn,
       });
+      const bomPageCount = Math.max(1, tablePlan.pageCount);
+      for (let bi = 0; bi < bomPageCount; bi++) {
+        const slice = tablePlan.pages[bi] || [];
+        pages.push({
+          id: `bom_${bi}`,
+          kind: 'bom',
+          num: ++pNum,
+          label: bomPageCount > 1 ? `Parts List (${bi + 1}/${bomPageCount})` : 'Parts List',
+          bomFormat: 'table',
+          bomPageIdx: bi,
+          bomPageCount,
+          bomTotalUnique: bomEntries.length,
+          bomTotalPieces: allParts.length,
+          bomTableRowsPerPage: tablePlan.rowsPerPage,
+          bomEntries: slice,
+        });
+      }
+    } else {
+      const gridPlan = resolveBomGridPlan({
+        items: bomEntries,
+        config: bomCfg,
+        contentWidthIn,
+        contentHeightIn,
+      });
+      const bomPageCount = Math.max(1, gridPlan.pageCount);
+      for (let bi = 0; bi < bomPageCount; bi++) {
+        const pageCells = gridPlan.pages[bi] || [];
+        pages.push({
+          id: `bom_${bi}`,
+          kind: 'bom',
+          num: ++pNum,
+          label: bomPageCount > 1 ? `Parts List (${bi + 1}/${bomPageCount})` : 'Parts List',
+          bomFormat: 'grid',
+          bomPageIdx: bi,
+          bomPageCount,
+          bomTotalUnique: bomEntries.length,
+          bomTotalPieces: allParts.length,
+          bomCols: gridPlan.cols,
+          bomRows: gridPlan.rows,
+          bomCellWidthIn: gridPlan.cellWidthIn,
+          bomCellHeightIn: gridPlan.cellHeightIn,
+          bomCells: pageCells,
+          bomEntries: pageCells.map((c) => c.item),
+        });
+      }
     }
 
     // 3. Distinct Back Cover
     pages.push({ id:'back', kind:'back', num:++pNum, label:'Back Cover' });
   }
+  const wasOnBom = state.pages[state.pageIdx]?.kind === 'bom';
   state.pages = pages;
   if (state.pageIdx >= pages.length) state.pageIdx = Math.max(0, pages.length - 1);
+  if (wasOnBom && state.pages[state.pageIdx]?.kind !== 'bom') {
+    let lastBomIdx = -1;
+    for (let pi = pages.length - 1; pi >= 0; pi--) {
+      if (pages[pi].kind === 'bom') { lastBomIdx = pi; break; }
+    }
+    if (lastBomIdx >= 0) state.pageIdx = lastBomIdx;
+  }
 }
 
 function getStepCamera(step) {
@@ -7271,13 +7397,125 @@ function renderAll() {
         </div>
       </div>`;
   } else if (page.kind === 'bom') {
-    const cfg = state.bomConfig;
-    const cols = page.bomCols || 6;
-    const rows = page.bomRows || 5;
+    const cfg = normalizeBomConfig(state.bomConfig);
+    const enabledFields = getEnabledBomFields(cfg);
     const entries = page.bomEntries || [];
-    const cells = computeBomGridLayout(entries, cols, rows, cfg.flow, cfg.align);
     const pgNumText = formatPageNumber(page.num, state.pages.length);
     const bt = typo.bom;
+    const bodyW = Math.max(60, dims.width - padPx * 2);
+    const bodyH = Math.max(60, dims.height - padPx * 2 - footerH - bt.headerH);
+
+    let bomBodyHtml = '';
+    if (page.bomFormat === 'table') {
+      const rowsPerPage = page.bomTableRowsPerPage || 20;
+      const tTypo = computeBomTableTypography({
+        tableHeightPx: bodyH,
+        rowsPerPage,
+        pxPerInch: dims.pxPerInch,
+        typeScale: typo.typeScale,
+      });
+      const tCols = computeBomTableColumns(enabledFields, bodyW, tTypo.rowH);
+      const headerRowHtml = `
+        <div class="shrink-0 flex items-center border-b font-bold uppercase tracking-wider" style="height:${tTypo.headerH}px;background:${theme.pliBg};border-color:${theme.pliBorder};color:${theme.muted};font-size:${tTypo.headerFont}px;border-top-left-radius:${Math.round(typo.pt(4))}px;border-top-right-radius:${Math.round(typo.pt(4))}px">
+          ${tCols.map((c) => {
+            const ta = c.align === 'right' ? 'text-right justify-end' : c.align === 'center' ? 'text-center justify-center' : 'text-left justify-start';
+            return `<div class="h-full flex items-center overflow-hidden ${ta}" style="width:${(c.widthFrac * 100).toFixed(4)}%;padding:0 ${tTypo.cellPadX}px"><span class="truncate">${escHtml(c.label)}</span></div>`;
+          }).join('')}
+        </div>`;
+
+      const rowsHtml = entries.map((entry, idx) => {
+        const { part, qty, meta, partIdDisplay, colorName, colorHex } = entry;
+        const stripeBg = idx % 2 === 1 ? 'rgba(127,127,127,0.06)' : 'transparent';
+        const cellsHtml = tCols.map((c) => {
+          const wStyle = `width:${(c.widthFrac * 100).toFixed(4)}%;padding:0 ${tTypo.cellPadX}px`;
+          if (c.id === 'image') {
+            const thumb = getPliThumb(part);
+            return `<div class="h-full flex items-center justify-center overflow-hidden" style="${wStyle};padding:${tTypo.imgPad}px ${tTypo.cellPadX}px">
+              <img src="${thumb}" alt="${escHtml(meta.name)}" class="max-w-full max-h-full object-contain pointer-events-none" />
+            </div>`;
+          }
+          if (c.id === 'qty') {
+            return `<div class="h-full flex items-center justify-end font-extrabold tabular-nums overflow-hidden" style="${wStyle};font-size:${tTypo.qtyFont}px;color:${theme.text}"><span class="truncate">${qty}×</span></div>`;
+          }
+          if (c.id === 'partId') {
+            return `<div class="h-full flex items-center justify-start font-mono overflow-hidden" style="${wStyle};font-size:${tTypo.monoFont}px;color:${theme.muted}"><span class="truncate">${escHtml(partIdDisplay)}</span></div>`;
+          }
+          if (c.id === 'color') {
+            return `<div class="h-full flex items-center justify-start overflow-hidden" style="${wStyle};gap:${Math.max(3, Math.round(tTypo.swatchSize * 0.5))}px;font-size:${tTypo.bodyFont}px;color:${theme.text}">
+              <span class="shrink-0 rounded-full" style="width:${tTypo.swatchSize}px;height:${tTypo.swatchSize}px;background:${escHtml(colorHex)};border:1px solid rgba(127,127,127,0.45)"></span>
+              <span class="truncate">${escHtml(colorName)}</span>
+            </div>`;
+          }
+          return `<div class="h-full flex items-center justify-start font-medium overflow-hidden" style="${wStyle};font-size:${tTypo.bodyFont}px;color:${theme.text}" title="${escHtml(meta.name)}"><span class="truncate">${escHtml(meta.name)}</span></div>`;
+        }).join('');
+        return `<div class="shrink-0 flex items-center border-b overflow-hidden" style="height:${tTypo.rowH}px;background:${stripeBg};border-color:color-mix(in srgb, ${theme.pliBorder} 48%, transparent)">${cellsHtml}</div>`;
+      }).join('');
+
+      bomBodyHtml = `<div class="flex-1 min-h-0 w-full flex flex-col overflow-hidden">${headerRowHtml}<div class="flex-1 min-h-0 flex flex-col overflow-hidden">${rowsHtml}</div></div>`;
+    } else {
+      const cells = page.bomCells || [];
+      const renderTextFieldHtml = (fieldId, entry, ct, alignLeft) => {
+        const alignCls = alignLeft ? 'text-left' : 'text-center';
+        if (fieldId === 'qty') {
+          return `<div class="shrink-0 font-extrabold w-full truncate ${alignCls}" style="font-size:${ct.qtyFont}px;line-height:1.12;color:${theme.text}">${entry.qty}×</div>`;
+        }
+        if (fieldId === 'name') {
+          return `<div class="shrink-0 font-medium w-full truncate opacity-85 ${alignCls}" style="font-size:${ct.nameFont}px;line-height:1.18;color:${theme.text}" title="${escHtml(entry.meta.name)}">${escHtml(entry.meta.name)}</div>`;
+        }
+        if (fieldId === 'partId') {
+          return `<div class="shrink-0 font-mono w-full truncate opacity-75 ${alignCls}" style="font-size:${ct.partIdFont}px;line-height:1.15;color:${theme.muted}">${escHtml(entry.partIdDisplay)}</div>`;
+        }
+        if (fieldId === 'color') {
+          const jc = alignLeft ? 'justify-start' : 'justify-center';
+          return `<div class="shrink-0 w-full flex items-center ${jc} overflow-hidden" style="gap:${Math.max(2, Math.round(ct.swatchSize * 0.45))}px;font-size:${ct.colorFont}px;line-height:1.18;color:${theme.muted}">
+            <span class="shrink-0 rounded-full" style="width:${ct.swatchSize}px;height:${ct.swatchSize}px;background:${escHtml(entry.colorHex)};border:1px solid rgba(127,127,127,0.45)"></span>
+            <span class="truncate">${escHtml(entry.colorName)}</span>
+          </div>`;
+        }
+        return '';
+      };
+
+      const gridCellsHtml = cells.map(({ item, colSpan, rowSpan, xFrac, yFrac, wFrac, hFrac }) => {
+        const cellW = wFrac * bodyW;
+        const cellH = hFrac * bodyH;
+        const ct = computeBomCellTypography({
+          cellW,
+          cellH,
+          pxPerInch: dims.pxPerInch,
+          enabledFields,
+          typeScale: typo.typeScale,
+        });
+        const thumb = enabledFields.includes('image') ? getBomPartThumb(item.part, colSpan, rowSpan) : '';
+        const posStyle = `left:${(xFrac * 100).toFixed(4)}%;top:${(yFrac * 100).toFixed(4)}%;width:${(wFrac * 100).toFixed(4)}%;height:${(hFrac * 100).toFixed(4)}%;padding:${ct.padY}px ${ct.padX}px;background:transparent`;
+
+        if (ct.layoutMode === 'horizontal-img-first' || ct.layoutMode === 'horizontal-img-last') {
+          const textFields = enabledFields.filter((f) => f !== 'image');
+          const imgHtml = `<div class="relative h-full shrink-0" style="width:44%">
+            <img src="${thumb}" alt="${escHtml(item.meta.name)}" class="absolute inset-0 w-full h-full object-contain pointer-events-none" style="padding:${ct.imgPad}px" />
+          </div>`;
+          const textsHtml = `<div class="flex-1 min-w-0 h-full flex flex-col justify-center overflow-hidden" style="gap:${ct.textGap}px;padding-left:${ct.layoutMode === 'horizontal-img-first' ? Math.max(3, ct.padX) : 0}px;padding-right:${ct.layoutMode === 'horizontal-img-last' ? Math.max(3, ct.padX) : 0}px">
+            ${textFields.map((f) => renderTextFieldHtml(f, item, ct, true)).join('')}
+          </div>`;
+          return `<div class="absolute flex flex-row items-center overflow-hidden" style="${posStyle}">${
+            ct.layoutMode === 'horizontal-img-first' ? (imgHtml + textsHtml) : (textsHtml + imgHtml)
+          }</div>`;
+        }
+
+        const hasImage = enabledFields.includes('image');
+        const innerHtml = enabledFields.map((f) => {
+          if (f === 'image') {
+            return `<div class="relative flex-1 min-h-0 w-full">
+              <img src="${thumb}" alt="${escHtml(item.meta.name)}" class="absolute inset-0 w-full h-full object-contain pointer-events-none" style="padding:${ct.imgPad}px" />
+            </div>`;
+          }
+          return renderTextFieldHtml(f, item, ct, false);
+        }).join('');
+
+        return `<div class="absolute flex flex-col items-center ${hasImage ? 'justify-between' : 'justify-center'} text-center overflow-hidden" style="${posStyle};gap:${ct.textGap}px">${innerHtml}</div>`;
+      }).join('');
+
+      bomBodyHtml = `<div class="relative flex-1 min-h-0 w-full">${gridCellsHtml}</div>`;
+    }
 
     frame.innerHTML = `
       <div id="bomPageTapArea" class="relative w-full h-full flex flex-col overflow-hidden cursor-pointer ${guideCls}" style="padding:${padPx}px;padding-bottom:${padPx + footerH}px">
@@ -7288,19 +7526,7 @@ function renderAll() {
           </div>
           <span class="shrink-0 font-medium" style="color:${theme.muted};font-size:${bt.summaryFont}px">${page.bomTotalPieces} pcs · ${page.bomTotalUnique} unique</span>
         </div>
-        <div class="relative flex-1 min-h-0 w-full">
-          ${cells.map(({ item, xFrac, yFrac, wFrac, hFrac }) => {
-            const { part, qty, meta } = item;
-            const thumb = getPliThumb(part);
-            return `<div class="absolute flex flex-col items-center justify-end text-center overflow-hidden" style="left:${(xFrac*100).toFixed(4)}%;top:${(yFrac*100).toFixed(4)}%;width:${(wFrac*100).toFixed(4)}%;height:${(hFrac*100).toFixed(4)}%;padding:${bt.cellPadY}px ${bt.cellPadX}px;background:transparent">
-              <div class="relative flex-1 min-h-0 w-full">
-                <img src="${thumb}" alt="${escHtml(meta.name)}" class="absolute inset-0 w-full h-full object-contain pointer-events-none" style="padding:${bt.imgPad}px" />
-              </div>
-              <div class="shrink-0 font-extrabold" style="font-size:${bt.qtyFont}px;line-height:1.15;margin-top:${bt.textGap}px">${qty}×</div>
-              ${cfg.showNames ? `<div class="shrink-0 font-medium truncate w-full opacity-80" style="font-size:${bt.nameFont}px;line-height:1.2;margin-top:${Math.max(1, Math.round(bt.textGap * 0.6))}px;padding:0 ${Math.round(typo.pt(1.5))}px" title="${escHtml(meta.name)}">${escHtml(meta.name)}</div>` : ''}
-            </div>`;
-          }).join('')}
-        </div>
+        ${bomBodyHtml}
         <div class="absolute flex justify-between font-medium pointer-events-none" style="bottom:${footerPadBottom}px;left:${padPx}px;right:${padPx}px;font-size:${typo.footerFont}px;color:${theme.muted}">
           <span class="truncate">${state.showPageTitle ? escHtml(state.model.title) : ''}</span>
           <span style="color:${theme.text}" class="font-bold shrink-0">${escHtml(pgNumText)}</span>
@@ -9563,45 +9789,7 @@ function syncMenuControls() {
     b.className = `mf-style-btn py-1.5 px-2 rounded-md border font-semibold text-xs transition ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--surface-sunken)]'}`;
   });
 
-  const bc = state.bomConfig;
-  document.querySelectorAll('.bom-dens-btn').forEach(b => {
-    const act = b.getAttribute('data-bom-dens') === bc.density;
-    b.className = `bom-dens-btn py-2 rounded-md border font-semibold transition ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
-  });
-  document.querySelectorAll('.bom-flow-btn').forEach(b => {
-    const act = b.getAttribute('data-bom-flow') === bc.flow;
-    b.className = `bom-flow-btn py-2 rounded-md border font-semibold transition ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
-  });
-  const alignHead = document.getElementById('bomAlignHeading');
-  if (alignHead) alignHead.textContent = bc.flow === 'columns' ? 'Hanging Column Alignment' : 'Hanging Row Alignment';
-  const alignLabels = bc.flow === 'columns'
-    ? { start: 'Top', center: 'Center', end: 'Bottom' }
-    : { start: 'Left', center: 'Center', end: 'Right' };
-  document.querySelectorAll('.bom-align-btn').forEach(b => {
-    const id = b.getAttribute('data-bom-align');
-    const act = id === bc.align;
-    b.textContent = alignLabels[id] || id;
-    b.className = `bom-align-btn py-2 rounded-md border font-semibold transition ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
-  });
-  const spEl = document.getElementById('bomSortPrimary');
-  if (spEl) spEl.value = bc.sortPrimary;
-  const ssEl = document.getElementById('bomSortSecondary');
-  if (ssEl) ssEl.value = bc.sortSecondary;
-  setChk('toggleBomNames', bc.showNames !== false);
-
-  const traitNames = { color: 'Color', category: 'Category', qty: 'Quantity', size: 'Size', name: 'Name' };
-  const densNames = { compact: 'Compact', balanced: 'Balanced', spacious: 'Spacious' };
-  const bomMenuSum = document.getElementById('menuBomSetupSummary');
-  if (bomMenuSum) bomMenuSum.textContent = `${densNames[bc.density] || 'Balanced'} · ${traitNames[bc.sortPrimary] || 'Color'}`;
-  const bomSub = document.getElementById('bomSetupSubtitle');
-  if (bomSub) {
-    const bomPages = state.pages.filter(p => p.kind === 'bom');
-    const uniqueN = bomPages[0]?.bomTotalUnique || 0;
-    bomSub.textContent = bomPages.length > 0
-      ? `${uniqueN} unique parts across ${bomPages.length} page${bomPages.length === 1 ? '' : 's'} · ${traitNames[bc.sortPrimary]} → ${traitNames[bc.sortSecondary]}`
-      : `${densNames[bc.density]} · ${bc.flow === 'columns' ? 'Columns' : 'Rows'} · By ${traitNames[bc.sortPrimary]}`;
-  }
-
+  syncBomSetupUI();
 
   document.querySelectorAll('.fade-chip').forEach(b => {
     const act = Math.abs(parseFloat(b.getAttribute('data-fade')) - state.fadeOpacity) < 0.05;
@@ -9793,6 +9981,491 @@ function observeOverviewThumbs(targets, scrollRoot, jobId) {
       if (task) enqueueOverviewThumbTask(task, jobId);
     }
   }
+}
+
+let bomFieldDragIdx = -1;
+
+function buildBomAlignIconSvg(flowAxis, horizontalDir, verticalDir, align) {
+  // 4x2 grid (rows mode) or 2x4 grid (columns mode) showing 1 full track + 2-item partial track
+  const isCols = flowAxis === 'columns';
+  const cols = isCols ? 2 : 4;
+  const rows = isCols ? 4 : 2;
+  const demoItems = [1, 2, 3, 4, 5, 6];
+  const demoSpans = demoItems.map(() => ({ colSpan: 1, rowSpan: 1 }));
+  const cells = packBomGridPages(demoItems, demoSpans, cols, rows, {
+    flowAxis,
+    horizontalDir,
+    verticalDir,
+    align,
+  })[0] || [];
+
+  const w = 36, h = 20, pad = 2, gap = 1.6;
+  const cw = (w - pad * 2 - gap * (cols - 1)) / cols;
+  const ch = (h - pad * 2 - gap * (rows - 1)) / rows;
+  const rects = cells.map((c, idx) => {
+    const x = pad + c.col * (cw + gap);
+    const y = pad + c.row * (ch + gap);
+    const isHanging = idx >= 4;
+    return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${cw.toFixed(1)}" height="${ch.toFixed(1)}" rx="1" fill="currentColor" fill-opacity="${isHanging ? '0.68' : '0.22'}" stroke="currentColor" stroke-width="0.9" stroke-opacity="${isHanging ? '0.95' : '0.45'}"/>`;
+  }).join('');
+  return `<svg class="w-9 h-5" viewBox="0 0 ${w} ${h}" fill="none" aria-hidden="true"><rect x="0.6" y="0.6" width="${w - 1.2}" height="${h - 1.2}" rx="2" stroke="currentColor" stroke-width="1" opacity="0.32"/>${rects}</svg>`;
+}
+
+const BOM_FIELD_ICONS = {
+  image: '<svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>',
+  qty: '<svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" x2="20" y1="9" y2="9"/><line x1="4" x2="20" y1="15" y2="15"/><line x1="10" x2="8" y1="3" y2="21"/><line x1="16" x2="14" y1="3" y2="21"/></svg>',
+  name: '<svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 6.1H3"/><path d="M21 12.1H3"/><path d="M15.1 18H3"/></svg>',
+  partId: '<svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 9v6M11 9v6M15 9v6M17 9v6"/></svg>',
+  color: '<svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></svg>',
+};
+
+function renderBomFieldsList(bc) {
+  const listEl = document.getElementById('bomFieldsList');
+  if (!listEl) return;
+  const fields = bc.fields || [];
+  const enabledCount = fields.filter(f => f.enabled).length;
+  const sig = fields.map(f => `${f.id}:${f.enabled ? 1 : 0}`).join('|');
+  if (listEl.dataset.sig === sig && listEl.children.length === fields.length) return;
+  listEl.dataset.sig = sig;
+  listEl.innerHTML = '';
+
+  fields.forEach((f, idx) => {
+    const meta = BOM_FIELD_META[f.id] || { label: f.id, sample: '' };
+    const row = document.createElement('div');
+    row.setAttribute('role', 'listitem');
+    row.draggable = true;
+    row.dataset.fieldIdx = String(idx);
+    row.dataset.fieldId = f.id;
+    row.className = `bom-field-row flex items-center gap-2 px-2.5 py-2 rounded-lg border select-none ${
+      f.enabled
+        ? 'border-[var(--border)] bg-[var(--card)]'
+        : 'border-[var(--border)]/60 bg-[var(--surface-sunken)]/60 opacity-65'
+    }`;
+
+    const sampleBadge = f.id === 'color'
+      ? '<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-[var(--surface-sunken)] text-[10px] font-medium text-[var(--muted-foreground)]"><span class="w-2 h-2 rounded-full bg-[#c91a09] inline-block border border-black/20"></span>Red</span>'
+      : `<span class="px-1.5 py-0.5 rounded bg-[var(--surface-sunken)] text-[10px] ${f.id === 'partId' ? 'font-mono' : f.id === 'qty' ? 'font-extrabold' : 'font-medium'} text-[var(--muted-foreground)]">${escHtml(meta.sample)}</span>`;
+
+    const isLastEnabled = f.enabled && enabledCount <= 1;
+    row.innerHTML = `
+      <span class="bom-field-handle touch-none cursor-grab active:cursor-grabbing text-[var(--muted-foreground)] hover:text-[var(--foreground)] px-0.5 py-1" title="Drag to reorder" aria-hidden="true">
+        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>
+      </span>
+      <input type="checkbox" ${f.enabled ? 'checked' : ''} ${isLastEnabled ? 'disabled title="At least one field must stay enabled"' : ''} aria-label="Show ${escHtml(meta.label)}" class="bom-field-chk w-4 h-4 accent-[var(--primary)] cursor-pointer shrink-0 disabled:opacity-50" />
+      <span class="text-[var(--muted-foreground)] inline-flex shrink-0">${BOM_FIELD_ICONS[f.id] || ''}</span>
+      <span class="font-semibold flex-1 min-w-0 truncate">${escHtml(meta.label)}</span>
+      ${sampleBadge}
+      <div class="inline-flex items-center gap-0.5 shrink-0">
+        <button type="button" class="bom-field-up w-6 h-6 rounded hover:bg-[var(--surface-hover)] flex items-center justify-center text-[var(--muted-foreground)] hover:text-[var(--foreground)] disabled:opacity-30 cursor-pointer disabled:cursor-not-allowed" ${idx === 0 ? 'disabled' : ''} aria-label="Move ${escHtml(meta.label)} up" title="Move up">
+          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>
+        </button>
+        <button type="button" class="bom-field-down w-6 h-6 rounded hover:bg-[var(--surface-hover)] flex items-center justify-center text-[var(--muted-foreground)] hover:text-[var(--foreground)] disabled:opacity-30 cursor-pointer disabled:cursor-not-allowed" ${idx === fields.length - 1 ? 'disabled' : ''} aria-label="Move ${escHtml(meta.label)} down" title="Move down">
+          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+        </button>
+      </div>`;
+
+    const chk = row.querySelector('.bom-field-chk');
+    chk.onchange = (e) => {
+      const nextFields = toggleBomField(normalizeBomConfig(state.bomConfig).fields, f.id, e.target.checked);
+      patchBomConfig({ fields: nextFields }, { immediate: true });
+    };
+    const upBtn = row.querySelector('.bom-field-up');
+    upBtn.onclick = () => {
+      if (idx <= 0) return;
+      const nextFields = reorderBomFields(normalizeBomConfig(state.bomConfig).fields, idx, idx - 1);
+      patchBomConfig({ fields: nextFields }, { immediate: true });
+    };
+    const downBtn = row.querySelector('.bom-field-down');
+    downBtn.onclick = () => {
+      if (idx >= fields.length - 1) return;
+      const nextFields = reorderBomFields(normalizeBomConfig(state.bomConfig).fields, idx, idx + 1);
+      patchBomConfig({ fields: nextFields }, { immediate: true });
+    };
+
+    // Touch/Pen pointer-drag on grip handle (iOS/Android support)
+    const handleEl = row.querySelector('.bom-field-handle');
+    if (handleEl) {
+      handleEl.addEventListener('pointerdown', (e) => {
+        if (e.pointerType !== 'touch' && e.pointerType !== 'pen') return;
+        e.preventDefault();
+        const pid = e.pointerId;
+        handleEl.setPointerCapture?.(pid);
+        row.classList.add('is-dragging');
+        let targetIdx = idx;
+
+        const clearIndicators = () => {
+          listEl.querySelectorAll('.bom-field-row').forEach((el) => {
+            el.classList.remove('is-drag-over-above', 'is-drag-over-below');
+          });
+        };
+        const onMove = (ev) => {
+          if (ev.pointerId !== pid) return;
+          clearIndicators();
+          const rows = Array.from(listEl.querySelectorAll('.bom-field-row'));
+          let best = idx;
+          for (let ri = 0; ri < rows.length; ri++) {
+            const r = rows[ri].getBoundingClientRect();
+            if (ev.clientY >= r.top && ev.clientY <= r.bottom) {
+              const after = ev.clientY >= r.top + r.height / 2;
+              rows[ri].classList.toggle('is-drag-over-above', !after);
+              rows[ri].classList.toggle('is-drag-over-below', after);
+              let to = after ? ri + 1 : ri;
+              if (idx < to) to -= 1;
+              best = Math.max(0, Math.min(rows.length - 1, to));
+              break;
+            }
+          }
+          targetIdx = best;
+        };
+        const onFinish = (ev) => {
+          if (ev.pointerId !== pid) return;
+          handleEl.removeEventListener('pointermove', onMove);
+          handleEl.removeEventListener('pointerup', onFinish);
+          handleEl.removeEventListener('pointercancel', onFinish);
+          row.classList.remove('is-dragging');
+          clearIndicators();
+          if (targetIdx !== idx) {
+            const nextFields = reorderBomFields(normalizeBomConfig(state.bomConfig).fields, idx, targetIdx);
+            patchBomConfig({ fields: nextFields }, { immediate: true });
+          }
+        };
+        handleEl.addEventListener('pointermove', onMove);
+        handleEl.addEventListener('pointerup', onFinish);
+        handleEl.addEventListener('pointercancel', onFinish);
+      });
+    }
+
+    // HTML5 Drag & Drop reordering (desktop)
+    row.addEventListener('dragstart', (e) => {
+      bomFieldDragIdx = idx;
+      row.classList.add('is-dragging');
+      if (e.dataTransfer) {
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', String(idx));
+      }
+    });
+    row.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      if (bomFieldDragIdx < 0 || bomFieldDragIdx === idx) return;
+      const rect = row.getBoundingClientRect();
+      const above = e.clientY < rect.top + rect.height / 2;
+      row.classList.toggle('is-drag-over-above', above);
+      row.classList.toggle('is-drag-over-below', !above);
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+    });
+    row.addEventListener('dragleave', () => {
+      row.classList.remove('is-drag-over-above', 'is-drag-over-below');
+    });
+    row.addEventListener('drop', (e) => {
+      e.preventDefault();
+      row.classList.remove('is-drag-over-above', 'is-drag-over-below');
+      const from = bomFieldDragIdx >= 0 ? bomFieldDragIdx : parseInt(e.dataTransfer?.getData('text/plain') || '-1', 10);
+      bomFieldDragIdx = -1;
+      if (from < 0 || from === idx) return;
+      const rect = row.getBoundingClientRect();
+      const dropAfter = e.clientY >= rect.top + rect.height / 2;
+      let to = dropAfter ? idx + 1 : idx;
+      if (from < to) to -= 1;
+      to = Math.max(0, Math.min(fields.length - 1, to));
+      if (from === to) return;
+      const nextFields = reorderBomFields(normalizeBomConfig(state.bomConfig).fields, from, to);
+      patchBomConfig({ fields: nextFields }, { immediate: true });
+    });
+    row.addEventListener('dragend', () => {
+      bomFieldDragIdx = -1;
+      row.classList.remove('is-dragging');
+      listEl.querySelectorAll('.bom-field-row').forEach((el) => {
+        el.classList.remove('is-drag-over-above', 'is-drag-over-below');
+      });
+    });
+
+    listEl.appendChild(row);
+  });
+}
+
+function renderBomSetupPreview(bc) {
+  const previewEl = document.getElementById('bomLayoutPreview');
+  const anatomyEl = document.getElementById('bomCellAnatomyPreview');
+  const captionEl = document.getElementById('bomPreviewCaption');
+  const metricsEl = document.getElementById('bomLiveMetrics');
+  if (!previewEl || !anatomyEl) return;
+
+  const theme = getActiveTheme();
+  const { dims, contentWidthIn, contentHeightIn } = getBomUsableAreaInches();
+  const box = computePaperPreviewBox(dims.widthIn, dims.heightIn, 176, 122);
+  const enabledFields = getEnabledBomFields(bc);
+  const bomPages = state.pages.filter(p => p.kind === 'bom');
+  const firstBom = bomPages[0];
+
+  if (bc.format === 'table') {
+    const rowsPerPage = firstBom?.bomTableRowsPerPage || (bc.tableRowsMode === 'custom' ? bc.tableRowsPerPage : 18);
+    const visRows = Math.min(8, Math.max(4, Math.round(rowsPerPage / 3)));
+    const tCols = computeBomTableColumns(enabledFields, box.w - 14, 14);
+    if (captionEl) captionEl.textContent = `Table · ${enabledFields.length} column${enabledFields.length === 1 ? '' : 's'} · ${rowsPerPage} rows/page`;
+    if (metricsEl) {
+      metricsEl.textContent = bomPages.length > 0
+        ? `${rowsPerPage} rows/pg · ${bomPages.length} pg`
+        : `${rowsPerPage} rows/pg`;
+    }
+
+    const headCols = tCols.map(c => `<div class="truncate font-bold uppercase" style="width:${(c.widthFrac * 100).toFixed(1)}%;font-size:6px;text-align:${c.align};padding:0 2px">${escHtml(c.label)}</div>`).join('');
+    const rowHtml = Array.from({ length: visRows }, (_, ri) => {
+      const cells = tCols.map(c => {
+        if (c.id === 'image') return `<div class="flex items-center justify-center" style="width:${(c.widthFrac * 100).toFixed(1)}%"><span class="inline-block w-2.5 h-2 rounded-[1px]" style="background:${theme.accent};opacity:0.75"></span></div>`;
+        if (c.id === 'qty') return `<div class="font-mono font-bold text-right" style="width:${(c.widthFrac * 100).toFixed(1)}%;font-size:6px;padding:0 2px">${(ri + 1) * 2}×</div>`;
+        if (c.id === 'color') return `<div class="flex items-center gap-0.5" style="width:${(c.widthFrac * 100).toFixed(1)}%;padding:0 2px"><span class="w-1.5 h-1.5 rounded-full shrink-0" style="background:${ri % 2 === 0 ? '#c91a09' : '#0055bf'}"></span><span class="h-1 flex-1 rounded-full" style="background:${theme.muted};opacity:0.45"></span></div>`;
+        return `<div class="flex items-center" style="width:${(c.widthFrac * 100).toFixed(1)}%;padding:0 2px"><span class="h-1 rounded-full" style="width:${c.id === 'partId' ? '65%' : '82%'};background:${c.id === 'partId' ? theme.muted : theme.text};opacity:${c.id === 'partId' ? 0.55 : 0.45}"></span></div>`;
+      }).join('');
+      return `<div class="flex items-center flex-1 border-b" style="border-color:${theme.pliBorder};opacity:0.9;background:${ri % 2 === 1 ? 'rgba(127,127,127,0.08)' : 'transparent'}">${cells}</div>`;
+    }).join('');
+
+    previewEl.innerHTML = `<div class="rounded-md border shadow-xs flex flex-col overflow-hidden" style="width:${box.w}px;height:${box.h}px;padding:6px;border-color:${theme.pliBorder};color:${theme.text}">
+      <div class="shrink-0 flex items-center justify-between pb-1 mb-1 border-b" style="border-color:${theme.pliBorder};font-size:7px;font-weight:800"><span>Parts List</span><span style="color:${theme.muted};font-size:6px">Table</span></div>
+      <div class="flex-1 min-h-0 flex flex-col overflow-hidden">
+        <div class="shrink-0 flex items-center py-0.5 border-b" style="background:${theme.pliBg};border-color:${theme.pliBorder};color:${theme.muted}">${headCols}</div>
+        <div class="flex-1 min-h-0 flex flex-col">${rowHtml}</div>
+      </div>
+    </div>`;
+    applyThemeBackgroundToElement(previewEl.firstElementChild, theme);
+    applyThemeFontsToElement(previewEl.firstElementChild, theme);
+
+    // Sample row anatomy
+    const sampleRowCells = enabledFields.map((id) => {
+      if (id === 'image') return '<span class="px-1.5 py-1 rounded bg-[#c91a09]/15 text-[#c91a09] font-bold text-[10px]">🧱</span>';
+      if (id === 'qty') return '<span class="font-extrabold text-[11px]">4×</span>';
+      if (id === 'name') return '<span class="font-medium text-[10px] truncate">Brick 2×4</span>';
+      if (id === 'partId') return '<span class="font-mono text-[10px] text-[var(--muted-foreground)]">3001</span>';
+      return '<span class="inline-flex items-center gap-1 text-[10px]"><span class="w-2 h-2 rounded-full bg-[#c91a09] inline-block"></span>Red</span>';
+    }).join('<span class="text-[var(--border-strong)]">│</span>');
+    anatomyEl.innerHTML = `<div class="p-2.5 rounded-lg border border-[var(--border)] bg-[var(--card)] space-y-1.5">
+      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Row Column Order</div>
+      <div class="flex flex-wrap items-center gap-1.5 py-1.5 px-2 rounded border border-[var(--border)] bg-[var(--surface-sunken)]">${sampleRowCells}</div>
+      <div class="text-[10px] text-[var(--muted-foreground)] leading-snug">Left-to-right column sequence from the list below.</div>
+    </div>`;
+  } else {
+    const actualCols = firstBom?.bomCols || (bc.gridMode === 'custom' ? bc.customCols : 6);
+    const actualRows = firstBom?.bomRows || (bc.gridMode === 'custom' ? bc.customRows : 5);
+    const cellWIn = firstBom?.bomCellWidthIn || (contentWidthIn / Math.max(1, actualCols));
+    const cellHIn = firstBom?.bomCellHeightIn || (contentHeightIn / Math.max(1, actualRows));
+    const hLabel = bc.horizontalDir === 'rtl' ? 'R → L' : 'L → R';
+    const vLabel = bc.verticalDir === 'btt' ? 'Bottom → Top' : 'Top → Bottom';
+    if (captionEl) captionEl.textContent = `${bc.flowAxis === 'columns' ? 'Columns' : 'Rows'} · ${hLabel} · ${vLabel}`;
+    if (metricsEl) {
+      const modeTag = bc.gridMode === 'auto' ? 'Auto ' : '';
+      metricsEl.textContent = `${modeTag}${actualCols}×${actualRows} · ${cellWIn.toFixed(2)}"×${cellHIn.toFixed(2)}"`;
+    }
+
+    // Miniature page diagram with readable numbered cells demonstrating exact direction, alignment & variable sizing
+    const prevCols = Math.min(6, Math.max(3, Math.min(actualCols, dims.isLandscape ? 5 : 4)));
+    const prevRows = Math.min(5, Math.max(2, Math.min(actualRows, dims.isLandscape ? 3 : 4)));
+    let demoItems, demoSpans;
+    if (bc.variableSizing) {
+      demoSpans = [
+        { colSpan: Math.min(2, prevCols), rowSpan: Math.min(2, prevRows) },
+        { colSpan: Math.min(2, prevCols), rowSpan: 1 },
+        { colSpan: 1, rowSpan: 1 },
+        { colSpan: 1, rowSpan: Math.min(2, prevRows) },
+        { colSpan: 1, rowSpan: 1 },
+        { colSpan: 1, rowSpan: 1 },
+        { colSpan: 1, rowSpan: 1 },
+      ];
+      demoItems = demoSpans.map((_, i) => i + 1);
+    } else {
+      // Leave 2 cells open on the final track so hanging alignment is immediately visible!
+      const totalSlots = prevCols * prevRows;
+      const demoCount = Math.max(2, totalSlots - Math.min(2, Math.max(1, (bc.flowAxis === 'columns' ? prevRows : prevCols) - 1)));
+      demoItems = Array.from({ length: demoCount }, (_, i) => i + 1);
+      demoSpans = demoItems.map(() => ({ colSpan: 1, rowSpan: 1 }));
+    }
+    const demoCells = packBomGridPages(demoItems, demoSpans, prevCols, prevRows, {
+      flowAxis: bc.flowAxis,
+      horizontalDir: bc.horizontalDir,
+      verticalDir: bc.verticalDir,
+      align: bc.align,
+    })[0] || [];
+
+    const cellsHtml = demoCells.map((c, idx) => {
+      const isFirst = idx === 0;
+      const isSpan = c.colSpan > 1 || c.rowSpan > 1;
+      const bg = isFirst ? theme.accent : (isSpan ? theme.pliBg : 'rgba(127,127,127,0.12)');
+      const fg = isFirst ? '#ffffff' : theme.text;
+      const label = isSpan ? `${c.item} (${c.colSpan}×${c.rowSpan})` : String(c.item);
+      return `<div class="absolute flex items-center justify-center rounded-[2px] border font-mono font-bold leading-none overflow-hidden" style="left:calc(${(c.xFrac * 100).toFixed(2)}% + 1px);top:calc(${(c.yFrac * 100).toFixed(2)}% + 1px);width:calc(${(c.wFrac * 100).toFixed(2)}% - 2px);height:calc(${(c.hFrac * 100).toFixed(2)}% - 2px);background:${bg};color:${fg};border-color:${isFirst ? theme.accent : theme.pliBorder};font-size:${isSpan ? '6.5px' : '7.5px'}">${label}</div>`;
+    }).join('');
+
+    previewEl.innerHTML = `<div class="rounded-md border shadow-xs flex flex-col overflow-hidden" style="width:${box.w}px;height:${box.h}px;padding:6px;border-color:${theme.pliBorder};color:${theme.text}">
+      <div class="shrink-0 flex items-center justify-between pb-1 mb-1 border-b" style="border-color:${theme.pliBorder};font-size:7px;font-weight:800"><span>Parts List</span><span class="font-mono" style="color:${theme.muted};font-size:6.5px">${actualCols}×${actualRows}</span></div>
+      <div class="relative flex-1 min-h-0 w-full">${cellsHtml}</div>
+    </div>`;
+    applyThemeBackgroundToElement(previewEl.firstElementChild, theme);
+    applyThemeFontsToElement(previewEl.firstElementChild, theme);
+
+    // Sample Grid cell anatomy showing exact field order
+    const cellLines = enabledFields.map((id) => {
+      if (id === 'image') {
+        return `<div class="w-full h-9 rounded flex items-center justify-center border border-dashed" style="border-color:${theme.pliBorder};background:${theme.pliBg}">
+          <svg class="w-6 h-6 text-[#c91a09]" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M4 9l8-4 8 4v7l-8 4-8-4V9z" opacity="0.9"/><path d="M12 5l8 4-8 4-8-4 8-4z" fill="#ef4444"/></svg>
+        </div>`;
+      }
+      if (id === 'qty') return `<div class="font-extrabold text-[11px] leading-tight" style="color:${theme.text}">4×</div>`;
+      if (id === 'name') return `<div class="font-medium text-[10px] leading-tight truncate w-full" style="color:${theme.text}">Brick 2×4</div>`;
+      if (id === 'partId') return `<div class="font-mono text-[9.5px] leading-tight" style="color:${theme.muted}">3001</div>`;
+      return `<div class="inline-flex items-center justify-center gap-1 text-[9.5px] leading-tight" style="color:${theme.muted}"><span class="w-2 h-2 rounded-full bg-[#c91a09] inline-block border border-black/20"></span>Red</div>`;
+    }).join('');
+    anatomyEl.innerHTML = `<div class="p-2.5 rounded-lg border border-[var(--border)] bg-[var(--card)] space-y-1.5">
+      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Grid Cell Format</div>
+      <div id="bomSampleCellInner" class="rounded-md border p-2 flex flex-col items-center text-center gap-1" style="border-color:${theme.pliBorder}">${cellLines}</div>
+    </div>`;
+    const sampleInner = anatomyEl.querySelector('#bomSampleCellInner');
+    if (sampleInner) {
+      applyThemeBackgroundToElement(sampleInner, theme);
+      applyThemeFontsToElement(sampleInner, theme);
+    }
+  }
+}
+
+function syncBomSetupUI() {
+  const bc = normalizeBomConfig(state.bomConfig);
+  const theme = getActiveTheme();
+  const isBuiltIn = Boolean(theme.builtIn || BUILT_IN_THEME_IDS.has(theme.id));
+
+  const activeCls = 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]';
+  const idleCls = 'border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)]';
+
+  // Theme ownership banner
+  const themeNameEl = document.getElementById('bomThemeName');
+  if (themeNameEl) themeNameEl.textContent = theme.name;
+  const themeSwatchEl = document.getElementById('bomThemeSwatch');
+  if (themeSwatchEl) themeSwatchEl.style.background = theme.bg || theme.bgColor;
+  document.getElementById('bomThemeBuiltInNote')?.classList.toggle('hidden', !isBuiltIn);
+
+  // Format buttons
+  document.querySelectorAll('.bom-format-btn').forEach(b => {
+    const act = b.getAttribute('data-bom-format') === bc.format;
+    b.className = `bom-format-btn p-2.5 rounded-lg border font-semibold flex items-center gap-3 text-left transition cursor-pointer ${act ? activeCls : idleCls}`;
+  });
+  document.getElementById('bomGridSettingsWrap')?.classList.toggle('hidden', bc.format === 'table');
+  document.getElementById('bomTableSettingsWrap')?.classList.toggle('hidden', bc.format !== 'table');
+
+  // Grid mode (Auto vs Custom)
+  document.querySelectorAll('.bom-gridmode-btn').forEach(b => {
+    const act = b.getAttribute('data-bom-grid-mode') === bc.gridMode;
+    b.className = `bom-gridmode-btn p-2.5 rounded-lg border font-semibold flex items-center gap-2.5 text-left transition cursor-pointer ${act ? activeCls : idleCls}`;
+  });
+  document.getElementById('bomAutoSizeWrap')?.classList.toggle('hidden', bc.gridMode !== 'auto');
+  document.getElementById('bomCustomSizeWrap')?.classList.toggle('hidden', bc.gridMode !== 'custom');
+
+  // Auto min cell size controls
+  const minSlider = document.getElementById('bomMinCellSlider');
+  if (minSlider && Math.abs(parseFloat(minSlider.value) - bc.minCellSizeIn) > 0.005) {
+    minSlider.value = String(bc.minCellSizeIn);
+  }
+  const minReadout = document.getElementById('bomMinCellReadout');
+  if (minReadout) {
+    minReadout.textContent = `${bc.minCellSizeIn.toFixed(2)} in · ${(bc.minCellSizeIn * 25.4).toFixed(1)} mm`;
+  }
+  document.querySelectorAll('.bom-minsize-btn').forEach(b => {
+    const v = parseFloat(b.getAttribute('data-bom-minsize'));
+    const act = Math.abs(v - bc.minCellSizeIn) < 0.03;
+    b.className = `bom-minsize-btn py-2 px-1.5 rounded-md border font-semibold flex flex-col items-center gap-1 transition cursor-pointer ${act ? activeCls : idleCls}`;
+  });
+
+  // Custom cols × rows controls
+  const colsEl = document.getElementById('bomCustomCols');
+  if (colsEl && document.activeElement !== colsEl) colsEl.value = String(bc.customCols);
+  const rowsEl = document.getElementById('bomCustomRows');
+  if (rowsEl && document.activeElement !== rowsEl) rowsEl.value = String(bc.customRows);
+  document.querySelectorAll('.bom-preset-btn').forEach(b => {
+    const [pc, pr] = String(b.getAttribute('data-bom-preset') || '').split('x').map(Number);
+    const act = pc === bc.customCols && pr === bc.customRows;
+    b.className = `bom-preset-btn px-2 py-1 rounded border font-mono text-[11px] font-semibold transition cursor-pointer ${act ? activeCls : 'border-[var(--border)] bg-[var(--card)] hover:border-[var(--primary)]'}`;
+  });
+  const customHint = document.getElementById('bomCustomCellHint');
+  if (customHint) {
+    const { contentWidthIn, contentHeightIn } = getBomUsableAreaInches();
+    const cw = contentWidthIn / Math.max(1, bc.customCols);
+    const ch = contentHeightIn / Math.max(1, bc.customRows);
+    customHint.textContent = `${bc.customCols * bc.customRows} cells/page · ${cw.toFixed(2)}" × ${ch.toFixed(2)}" (${(cw * 25.4).toFixed(0)} × ${(ch * 25.4).toFixed(0)} mm) per 1×1 cell`;
+  }
+
+  // Variable Part Sizing buttons
+  document.querySelectorAll('.bom-varsize-btn').forEach(b => {
+    const wantVar = b.getAttribute('data-bom-varsize') === 'variable';
+    const act = wantVar === Boolean(bc.variableSizing);
+    b.className = `bom-varsize-btn p-2.5 rounded-lg border font-semibold flex items-center gap-2.5 text-left transition cursor-pointer ${act ? activeCls : idleCls}`;
+  });
+
+  // Fill order, Horizontal, Vertical buttons
+  document.querySelectorAll('.bom-flowaxis-btn').forEach(b => {
+    const act = b.getAttribute('data-bom-flow-axis') === bc.flowAxis;
+    b.className = `bom-flowaxis-btn p-2.5 rounded-lg border font-semibold flex items-center gap-2.5 text-left transition cursor-pointer ${act ? activeCls : idleCls}`;
+  });
+  document.querySelectorAll('.bom-hdir-btn').forEach(b => {
+    const act = b.getAttribute('data-bom-hdir') === bc.horizontalDir;
+    b.className = `bom-hdir-btn py-2 px-2 rounded-lg border font-semibold flex flex-col items-center gap-1 transition cursor-pointer ${act ? activeCls : idleCls}`;
+  });
+  document.querySelectorAll('.bom-vdir-btn').forEach(b => {
+    const act = b.getAttribute('data-bom-vdir') === bc.verticalDir;
+    b.className = `bom-vdir-btn py-2 px-2 rounded-lg border font-semibold flex flex-col items-center gap-1 transition cursor-pointer ${act ? activeCls : idleCls}`;
+  });
+
+  // Hanging alignment (labels & dynamic SVGs follow active flow direction)
+  const alignHead = document.getElementById('bomAlignHeading');
+  if (alignHead) alignHead.textContent = bc.flowAxis === 'columns' ? 'Hanging Column Alignment' : 'Hanging Row Alignment';
+  const alignLabels = bc.flowAxis === 'columns'
+    ? (bc.verticalDir === 'btt'
+      ? { start: 'Bottom', center: 'Center', end: 'Top' }
+      : { start: 'Top', center: 'Center', end: 'Bottom' })
+    : (bc.horizontalDir === 'rtl'
+      ? { start: 'Right', center: 'Center', end: 'Left' }
+      : { start: 'Left', center: 'Center', end: 'Right' });
+  document.querySelectorAll('.bom-align-btn').forEach(b => {
+    const id = b.getAttribute('data-bom-align');
+    const act = id === bc.align;
+    b.className = `bom-align-btn py-2 px-2 rounded-lg border font-semibold flex flex-col items-center gap-1 transition cursor-pointer ${act ? activeCls : idleCls}`;
+    const lblEl = document.getElementById(`bomAlignLabel_${id}`);
+    if (lblEl) lblEl.textContent = alignLabels[id] || id;
+    const icoEl = document.getElementById(`bomAlignIcon_${id}`);
+    if (icoEl) icoEl.innerHTML = buildBomAlignIconSvg(bc.flowAxis, bc.horizontalDir, bc.verticalDir, id);
+  });
+
+  // Table rows controls
+  document.querySelectorAll('.bom-tablemode-btn').forEach(b => {
+    const act = b.getAttribute('data-bom-table-mode') === bc.tableRowsMode;
+    b.className = `bom-tablemode-btn p-2.5 rounded-lg border font-semibold flex items-center gap-2.5 text-left transition cursor-pointer ${act ? activeCls : idleCls}`;
+  });
+  document.getElementById('bomTableCustomRowsWrap')?.classList.toggle('hidden', bc.tableRowsMode !== 'custom');
+  const tRowsInput = document.getElementById('bomTableRowsInput');
+  if (tRowsInput && document.activeElement !== tRowsInput) tRowsInput.value = String(bc.tableRowsPerPage);
+  document.querySelectorAll('.bom-trows-btn').forEach(b => {
+    const act = Number(b.getAttribute('data-bom-trows')) === bc.tableRowsPerPage;
+    b.className = `bom-trows-btn px-2 py-1 rounded border font-mono text-[11px] font-semibold transition cursor-pointer ${act ? activeCls : 'border-[var(--border)] bg-[var(--card)] hover:border-[var(--primary)]'}`;
+  });
+
+  // Draggable fields & columns list
+  renderBomFieldsList(bc);
+
+  // Sorting selects
+  const spEl = document.getElementById('bomSortPrimary');
+  if (spEl) spEl.value = bc.sortPrimary;
+  const ssEl = document.getElementById('bomSortSecondary');
+  if (ssEl) ssEl.value = bc.sortSecondary;
+
+  // Summaries in side menu, modal subtitle, and Style popover
+  const traitNames = { color: 'Color', category: 'Category', qty: 'Quantity', size: 'Size', name: 'Name', partId: 'Part ID' };
+  const bomMenuSum = document.getElementById('menuBomSetupSummary');
+  if (bomMenuSum) bomMenuSum.textContent = summarizeBomConfig(bc);
+  const bomSub = document.getElementById('bomSetupSubtitle');
+  if (bomSub) {
+    const bomPages = state.pages.filter(p => p.kind === 'bom');
+    const uniqueN = bomPages[0]?.bomTotalUnique || 0;
+    bomSub.textContent = bomPages.length > 0
+      ? `${uniqueN} unique parts across ${bomPages.length} page${bomPages.length === 1 ? '' : 's'} · ${traitNames[bc.sortPrimary] || 'Color'} → ${traitNames[bc.sortSecondary] || 'Category'}`
+      : `${summarizeBomConfig(bc)} · Then by ${traitNames[bc.sortSecondary] || 'Category'}`;
+  }
+
+  // Live preview inside modal
+  renderBomSetupPreview(bc);
 }
 
 function renderOverviewModal(opts = {}) {
@@ -12567,7 +13240,6 @@ async function restoreLastSessionOnStart() {
     adoptLegacyStyleOptions(prefs);
     if (prefs.pageNumberFormat) state.pageNumberFormat = prefs.pageNumberFormat;
     if (typeof prefs.showExtras === 'boolean') state.showExtras = prefs.showExtras;
-    if (prefs.bomConfig) state.bomConfig = { ...state.bomConfig, ...prefs.bomConfig };
 
     let effectiveRec = rec;
     if (rec.kind === 'io' && rec.data) {
@@ -13016,14 +13688,30 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
     drawContain(ctx, img, pad, imgTop, divAvailW, divAvailH);
     drawFooter(state.model.title);
   } else if (page.kind === 'bom') {
-    const cfg = state.bomConfig;
-    const cols = page.bomCols || (pxW > pxH ? 6 : 4);
-    const rows = page.bomRows || (pxW > pxH ? 5 : 6);
+    const cfg = normalizeBomConfig(state.bomConfig);
+    const enabledFields = getEnabledBomFields(cfg);
     const entries = page.bomEntries || [];
     const bt = typo.bom;
+    const monoStack = THEME_FONTS.mono.stack;
     const headerTitle = page.bomPageCount > 1
       ? `Parts List  ${page.bomPageIdx + 1} / ${page.bomPageCount}`
       : 'Parts List';
+
+    const fitText = (rawText, maxW) => {
+      const text = String(rawText || '');
+      if (!text || maxW <= 2) return '';
+      if (ctx.measureText(text).width <= maxW) return text;
+      const ell = '…';
+      const ellW = ctx.measureText(ell).width;
+      if (ellW >= maxW) return '';
+      let lo = 0, hi = text.length;
+      while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1;
+        if (ctx.measureText(text.slice(0, mid)).width + ellW <= maxW) lo = mid;
+        else hi = mid - 1;
+      }
+      return lo > 0 ? text.slice(0, lo).trimEnd() + ell : ell;
+    };
 
     ctx.fillStyle = theme.text;
     ctx.font = themeCanvasFont(theme, 700, bt.titleFont);
@@ -13038,46 +13726,220 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
     ctx.strokeStyle = theme.pliBorder; ctx.lineWidth = 1.25;
     ctx.beginPath(); ctx.moveTo(pad, pad + headerH - bt.headerMb); ctx.lineTo(pxW - pad, pad + headerH - bt.headerMb); ctx.stroke();
 
-    const gridX = pad, gridY = pad + headerH;
-    const gridW = pxW - pad * 2, gridH = pxH - gridY - pad - footerH;
-    const cells = computeBomGridLayout(entries, cols, rows, cfg.flow, cfg.align);
-    const cellGeom = estimateBomCellGeometry({
-      pageWidth: pxW,
-      pageHeight: pxH,
-      cols,
-      rows,
-      showNames: Boolean(cfg.showNames),
-      typo,
-    });
-    const qtyFontPx = bt.qtyFont;
-    const nameFontPx = bt.nameFont;
-    const textAreaH = cellGeom.textAreaH;
+    const bodyX = pad, bodyY = pad + headerH;
+    const bodyW = pxW - pad * 2, bodyH = pxH - bodyY - pad - footerH;
 
-    for (const c of cells) {
-      const { part, qty, meta } = c.item;
-      const cx = gridX + c.xFrac * gridW;
-      const cy = gridY + c.yFrac * gridH;
-      const cw = c.wFrac * gridW;
-      const ch = c.hFrac * gridH;
-      // Clear/transparent background — no opaque card boxes around BOM parts!
-      const img = await loadImgPromise(getPliThumb(part));
-      const padX = bt.cellPadX + bt.imgPad;
-      const padY = bt.cellPadY + bt.imgPad;
-      drawContain(ctx, img, cx + padX, cy + padY, cw - padX * 2, Math.max(14, ch - textAreaH - padY * 2));
-      ctx.textAlign = 'center';
-      ctx.fillStyle = theme.text;
-      ctx.font = themeCanvasFont(theme, 800, qtyFontPx);
-      const qtyY = cy + ch - bt.cellPadY - textAreaH + bt.textGap;
-      ctx.fillText(`${qty}×`, cx + cw / 2, qtyY);
-      if (cfg.showNames) {
-        ctx.fillStyle = theme.muted;
-        ctx.font = themeCanvasFont(theme, 500, nameFontPx);
-        const maxChars = Math.max(8, Math.floor((cw - bt.cellPadX * 2) / (nameFontPx * 0.56)));
-        const nm = meta.name.length > maxChars ? meta.name.slice(0, maxChars - 1) + '…' : meta.name;
-        ctx.fillText(nm, cx + cw / 2, qtyY + Math.round(qtyFontPx * 1.18) + Math.max(1, Math.round(bt.textGap * 0.6)));
+    if (page.bomFormat === 'table') {
+      const rowsPerPage = page.bomTableRowsPerPage || 20;
+      const tTypo = computeBomTableTypography({
+        tableHeightPx: bodyH,
+        rowsPerPage,
+        pxPerInch,
+        typeScale: typo.typeScale,
+      });
+      const tCols = computeBomTableColumns(enabledFields, bodyW, tTypo.rowH);
+
+      // Header row
+      ctx.fillStyle = theme.pliBg;
+      ctx.fillRect(bodyX, bodyY, bodyW, tTypo.headerH);
+      ctx.strokeStyle = theme.pliBorder;
+      ctx.lineWidth = 1.25;
+      ctx.beginPath();
+      ctx.moveTo(bodyX, bodyY + tTypo.headerH);
+      ctx.lineTo(bodyX + bodyW, bodyY + tTypo.headerH);
+      ctx.stroke();
+
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = theme.muted;
+      ctx.font = themeCanvasFont(theme, 700, tTypo.headerFont);
+      for (const col of tCols) {
+        const label = col.label.toUpperCase();
+        const maxW = Math.max(8, col.width - tTypo.cellPadX * 2);
+        const fitted = fitText(label, maxW);
+        const midY = bodyY + tTypo.headerH / 2;
+        if (col.align === 'right') {
+          ctx.textAlign = 'right';
+          ctx.fillText(fitted, bodyX + col.x + col.width - tTypo.cellPadX, midY);
+        } else if (col.align === 'center') {
+          ctx.textAlign = 'center';
+          ctx.fillText(fitted, bodyX + col.x + col.width / 2, midY);
+        } else {
+          ctx.textAlign = 'left';
+          ctx.fillText(fitted, bodyX + col.x + tTypo.cellPadX, midY);
+        }
       }
+
+      // Data rows
+      for (let ri = 0; ri < entries.length; ri++) {
+        const entry = entries[ri];
+        const ry = bodyY + tTypo.headerH + ri * tTypo.rowH;
+        const midY = ry + tTypo.rowH / 2;
+        if (ri % 2 === 1) {
+          ctx.fillStyle = 'rgba(127, 127, 127, 0.06)';
+          ctx.fillRect(bodyX, ry, bodyW, tTypo.rowH);
+        }
+        ctx.save();
+        ctx.globalAlpha = 0.48;
+        ctx.strokeStyle = theme.pliBorder;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(bodyX, ry + tTypo.rowH);
+        ctx.lineTo(bodyX + bodyW, ry + tTypo.rowH);
+        ctx.stroke();
+        ctx.restore();
+
+        for (const col of tCols) {
+          const cx = bodyX + col.x;
+          const cw = col.width;
+          const maxW = Math.max(8, cw - tTypo.cellPadX * 2);
+          if (col.id === 'image') {
+            const img = await loadImgPromise(getPliThumb(entry.part));
+            drawContain(ctx, img, cx + tTypo.cellPadX, ry + tTypo.imgPad, maxW, Math.max(8, tTypo.rowH - tTypo.imgPad * 2));
+          } else if (col.id === 'qty') {
+            ctx.textAlign = 'right';
+            ctx.fillStyle = theme.text;
+            ctx.font = themeCanvasFont(theme, 800, tTypo.qtyFont);
+            ctx.fillText(fitText(`${entry.qty}×`, maxW), cx + cw - tTypo.cellPadX, midY);
+          } else if (col.id === 'partId') {
+            ctx.textAlign = 'left';
+            ctx.fillStyle = theme.muted;
+            ctx.font = `500 ${tTypo.monoFont}px ${monoStack}`;
+            ctx.fillText(fitText(entry.partIdDisplay, maxW), cx + tTypo.cellPadX, midY);
+          } else if (col.id === 'color') {
+            const sw = tTypo.swatchSize;
+            const swGap = Math.max(3, Math.round(sw * 0.5));
+            const sx = cx + tTypo.cellPadX + sw / 2;
+            ctx.beginPath();
+            ctx.arc(sx, midY, sw / 2, 0, Math.PI * 2);
+            ctx.fillStyle = entry.colorHex || '#9ea3a8';
+            ctx.fill();
+            ctx.strokeStyle = 'rgba(127, 127, 127, 0.45)';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+            ctx.textAlign = 'left';
+            ctx.fillStyle = theme.text;
+            ctx.font = themeCanvasFont(theme, 500, tTypo.bodyFont);
+            ctx.fillText(fitText(entry.colorName, Math.max(6, maxW - sw - swGap)), cx + tTypo.cellPadX + sw + swGap, midY);
+          } else {
+            ctx.textAlign = 'left';
+            ctx.fillStyle = theme.text;
+            ctx.font = themeCanvasFont(theme, 500, tTypo.bodyFont);
+            ctx.fillText(fitText(entry.meta.name, maxW), cx + tTypo.cellPadX, midY);
+          }
+        }
+      }
+      ctx.textBaseline = 'top';
+      ctx.textAlign = 'left';
+    } else {
+      const cells = page.bomCells || [];
+      const drawGridTextField = (fieldId, entry, ct, xLeft, boxW, yTop, centered) => {
+        ctx.textBaseline = 'top';
+        if (fieldId === 'qty') {
+          ctx.fillStyle = theme.text;
+          ctx.font = themeCanvasFont(theme, 800, ct.qtyFont);
+          ctx.textAlign = centered ? 'center' : 'left';
+          ctx.fillText(fitText(`${entry.qty}×`, boxW), centered ? xLeft + boxW / 2 : xLeft, yTop);
+          return ct.qtyLineH;
+        }
+        if (fieldId === 'name') {
+          ctx.fillStyle = theme.text;
+          ctx.font = themeCanvasFont(theme, 500, ct.nameFont);
+          ctx.textAlign = centered ? 'center' : 'left';
+          ctx.fillText(fitText(entry.meta.name, boxW), centered ? xLeft + boxW / 2 : xLeft, yTop);
+          return ct.textLineH;
+        }
+        if (fieldId === 'partId') {
+          ctx.fillStyle = theme.muted;
+          ctx.font = `500 ${ct.partIdFont}px ${monoStack}`;
+          ctx.textAlign = centered ? 'center' : 'left';
+          ctx.fillText(fitText(entry.partIdDisplay, boxW), centered ? xLeft + boxW / 2 : xLeft, yTop);
+          return ct.idLineH;
+        }
+        if (fieldId === 'color') {
+          ctx.font = themeCanvasFont(theme, 500, ct.colorFont);
+          const sw = ct.swatchSize;
+          const swGap = Math.max(2, Math.round(sw * 0.45));
+          const txt = fitText(entry.colorName, Math.max(4, boxW - sw - swGap));
+          const totalW = sw + swGap + ctx.measureText(txt).width;
+          const startX = centered ? xLeft + (boxW - totalW) / 2 : xLeft;
+          const cyMid = yTop + ct.textLineH * 0.46;
+          ctx.beginPath();
+          ctx.arc(startX + sw / 2, cyMid, sw / 2, 0, Math.PI * 2);
+          ctx.fillStyle = entry.colorHex || '#9ea3a8';
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(127, 127, 127, 0.45)';
+          ctx.lineWidth = 0.85;
+          ctx.stroke();
+          ctx.fillStyle = theme.muted;
+          ctx.textAlign = 'left';
+          ctx.fillText(txt, startX + sw + swGap, yTop);
+          return ct.textLineH;
+        }
+        return 0;
+      };
+
+      for (const c of cells) {
+        const entry = c.item;
+        const cx = bodyX + c.xFrac * bodyW;
+        const cy = bodyY + c.yFrac * bodyH;
+        const cw = c.wFrac * bodyW;
+        const ch = c.hFrac * bodyH;
+        const ct = computeBomCellTypography({
+          cellW: cw,
+          cellH: ch,
+          pxPerInch,
+          enabledFields,
+          typeScale: typo.typeScale,
+        });
+
+        const hasImage = enabledFields.includes('image');
+        const img = hasImage ? await loadImgPromise(getBomPartThumb(entry.part, c.colSpan || 1, c.rowSpan || 1)) : null;
+
+        if (ct.layoutMode === 'horizontal-img-first' || ct.layoutMode === 'horizontal-img-last') {
+          const innerW = Math.max(10, cw - ct.padX * 2);
+          const innerH = Math.max(10, ch - ct.padY * 2);
+          const imgColW = innerW * 0.44;
+          const txtColW = Math.max(10, innerW - imgColW - Math.max(3, ct.padX));
+          const imgX = ct.layoutMode === 'horizontal-img-first'
+            ? cx + ct.padX + ct.imgPad
+            : cx + cw - ct.padX - imgColW + ct.imgPad;
+          const txtX = ct.layoutMode === 'horizontal-img-first'
+            ? cx + ct.padX + imgColW + Math.max(3, ct.padX)
+            : cx + ct.padX;
+          if (img) {
+            drawContain(ctx, img, imgX, cy + ct.padY + ct.imgPad, Math.max(8, imgColW - ct.imgPad * 2), Math.max(8, innerH - ct.imgPad * 2));
+          }
+          const textFields = enabledFields.filter((f) => f !== 'image');
+          let curY = cy + ct.padY + Math.max(0, (innerH - ct.totalTextH) / 2);
+          for (const f of textFields) {
+            const lh = drawGridTextField(f, entry, ct, txtX, txtColW, curY, false);
+            curY += lh + ct.textGap;
+          }
+        } else {
+          const innerX = cx + ct.padX;
+          const innerW = Math.max(10, cw - ct.padX * 2);
+          const innerH = Math.max(10, ch - ct.padY * 2);
+          const totalGap = Math.max(0, enabledFields.length - 1) * ct.textGap;
+          const imgSlotH = hasImage ? Math.max(8, innerH - ct.totalTextH - totalGap) : 0;
+          let curY = hasImage
+            ? cy + ct.padY
+            : cy + ct.padY + Math.max(0, (innerH - ct.totalTextH) / 2);
+
+          for (const f of enabledFields) {
+            if (f === 'image') {
+              if (img) {
+                drawContain(ctx, img, innerX + ct.imgPad, curY + ct.imgPad, Math.max(8, innerW - ct.imgPad * 2), Math.max(8, imgSlotH - ct.imgPad * 2));
+              }
+              curY += imgSlotH + ct.textGap;
+            } else {
+              const lh = drawGridTextField(f, entry, ct, innerX, innerW, curY, true);
+              curY += lh + ct.textGap;
+            }
+          }
+        }
+      }
+      ctx.textAlign = 'left';
     }
-    ctx.textAlign = 'left';
     drawFooter(state.model.title);
   } else if (page.kind === 'steps') {
     const drawRRect = (x, y, w, h, r) => {
@@ -13823,6 +14685,15 @@ function syncStylePanel() {
   setChk('togglePageTitleSetup', opts.showPageTitle);
   const hlEl = document.getElementById('highlightColor');
   if (hlEl && hlEl.value !== opts.highlightColor) hlEl.value = opts.highlightColor;
+
+  const bc = normalizeBomConfig(opts.bomConfig);
+  const styleBomSum = document.getElementById('styleBomSummary');
+  if (styleBomSum) styleBomSum.textContent = summarizeBomConfig(bc);
+  document.querySelectorAll('.style-bom-format-btn').forEach(b => {
+    const act = b.getAttribute('data-style-bom-format') === bc.format;
+    b.className = `style-bom-format-btn py-1.5 px-2 rounded-md border font-semibold text-xs inline-flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--surface-sunken)] hover:border-[var(--primary)]'}`;
+  });
+  setChk('styleToggleBomPartId', isBomFieldEnabled(bc, 'partId'));
 }
 
 function populateThemeFontSelect(elId) {
@@ -14281,13 +15152,127 @@ document.querySelectorAll('.dens-btn').forEach(b => { b.onclick = () => { state.
 document.querySelectorAll('.pgnum-btn').forEach(b => { b.onclick = () => { state.pageNumberFormat = b.getAttribute('data-pgnum'); renderAll(); }; });
 document.querySelectorAll('.fade-chip').forEach(b => { b.onclick = () => patchActiveTheme({ fadeOpacity: parseFloat(b.getAttribute('data-fade')) }); });
 
-// Parts List Setup controls
-document.querySelectorAll('.bom-dens-btn').forEach(b => { b.onclick = () => { state.bomConfig.density = b.getAttribute('data-bom-dens'); renderAll(); }; });
-document.querySelectorAll('.bom-flow-btn').forEach(b => { b.onclick = () => { state.bomConfig.flow = b.getAttribute('data-bom-flow'); renderAll(); }; });
-document.querySelectorAll('.bom-align-btn').forEach(b => { b.onclick = () => { state.bomConfig.align = b.getAttribute('data-bom-align'); renderAll(); }; });
-document.getElementById('bomSortPrimary').onchange = (e) => { state.bomConfig.sortPrimary = e.target.value; renderAll(); };
-document.getElementById('bomSortSecondary').onchange = (e) => { state.bomConfig.sortSecondary = e.target.value; renderAll(); };
-document.getElementById('toggleBomNames').onchange = (e) => { state.bomConfig.showNames = e.target.checked; renderAll(); };
+// Parts List Setup controls (saved with active theme; built-ins auto-fork on edit)
+document.querySelectorAll('.bom-format-btn').forEach(b => {
+  b.onclick = () => patchBomConfig({ format: b.getAttribute('data-bom-format') === 'table' ? 'table' : 'grid' }, { immediate: true });
+});
+document.querySelectorAll('.style-bom-format-btn').forEach(b => {
+  b.onclick = () => patchBomConfig({ format: b.getAttribute('data-style-bom-format') === 'table' ? 'table' : 'grid' }, { immediate: true });
+});
+const styleBomPartIdEl = document.getElementById('styleToggleBomPartId');
+if (styleBomPartIdEl) {
+  styleBomPartIdEl.onchange = (e) => {
+    const nextFields = toggleBomField(normalizeBomConfig(state.bomConfig).fields, 'partId', e.target.checked);
+    patchBomConfig({ fields: nextFields }, { immediate: true });
+  };
+}
+const btnStyleOpenBomSetup = document.getElementById('btnStyleOpenBomSetup');
+if (btnStyleOpenBomSetup) {
+  btnStyleOpenBomSetup.onclick = () => {
+    setStylePopoverOpen(false);
+    openBomSetupModal();
+  };
+}
+
+document.querySelectorAll('.bom-gridmode-btn').forEach(b => {
+  b.onclick = () => patchBomConfig({ gridMode: b.getAttribute('data-bom-grid-mode') === 'custom' ? 'custom' : 'auto' }, { immediate: true });
+});
+document.querySelectorAll('.bom-minsize-btn').forEach(b => {
+  b.onclick = () => {
+    const val = parseFloat(b.getAttribute('data-bom-minsize'));
+    if (Number.isFinite(val)) patchBomConfig({ gridMode: 'auto', minCellSizeIn: val }, { immediate: true });
+  };
+});
+const bomMinCellSliderEl = document.getElementById('bomMinCellSlider');
+if (bomMinCellSliderEl) {
+  bomMinCellSliderEl.oninput = (e) => {
+    const val = parseFloat(e.target.value);
+    if (Number.isFinite(val)) patchBomConfig({ gridMode: 'auto', minCellSizeIn: val });
+  };
+}
+
+const setBomCustomTrack = (field, rawVal) => {
+  const n = Math.max(MIN_BOM_GRID_TRACKS, Math.min(MAX_BOM_GRID_TRACKS, Math.round(Number(rawVal) || 1)));
+  patchBomConfig({ gridMode: 'custom', [field]: n }, { immediate: true });
+};
+const bomColsInput = document.getElementById('bomCustomCols');
+const bomRowsInput = document.getElementById('bomCustomRows');
+if (bomColsInput) {
+  bomColsInput.onchange = (e) => setBomCustomTrack('customCols', e.target.value);
+  bomColsInput.oninput = (e) => {
+    const v = parseInt(e.target.value, 10);
+    if (Number.isFinite(v) && v >= MIN_BOM_GRID_TRACKS && v <= MAX_BOM_GRID_TRACKS) {
+      patchBomConfig({ gridMode: 'custom', customCols: v });
+    }
+  };
+}
+if (bomRowsInput) {
+  bomRowsInput.onchange = (e) => setBomCustomTrack('customRows', e.target.value);
+  bomRowsInput.oninput = (e) => {
+    const v = parseInt(e.target.value, 10);
+    if (Number.isFinite(v) && v >= MIN_BOM_GRID_TRACKS && v <= MAX_BOM_GRID_TRACKS) {
+      patchBomConfig({ gridMode: 'custom', customRows: v });
+    }
+  };
+}
+const bomColsDec = document.getElementById('bomColsDec');
+const bomColsInc = document.getElementById('bomColsInc');
+const bomRowsDec = document.getElementById('bomRowsDec');
+const bomRowsInc = document.getElementById('bomRowsInc');
+if (bomColsDec) bomColsDec.onclick = () => setBomCustomTrack('customCols', normalizeBomConfig(state.bomConfig).customCols - 1);
+if (bomColsInc) bomColsInc.onclick = () => setBomCustomTrack('customCols', normalizeBomConfig(state.bomConfig).customCols + 1);
+if (bomRowsDec) bomRowsDec.onclick = () => setBomCustomTrack('customRows', normalizeBomConfig(state.bomConfig).customRows - 1);
+if (bomRowsInc) bomRowsInc.onclick = () => setBomCustomTrack('customRows', normalizeBomConfig(state.bomConfig).customRows + 1);
+document.querySelectorAll('.bom-preset-btn').forEach(b => {
+  b.onclick = () => {
+    const [pc, pr] = String(b.getAttribute('data-bom-preset') || '').split('x').map(Number);
+    if (pc >= 1 && pr >= 1) patchBomConfig({ gridMode: 'custom', customCols: pc, customRows: pr }, { immediate: true });
+  };
+});
+
+document.querySelectorAll('.bom-varsize-btn').forEach(b => {
+  b.onclick = () => patchBomConfig({ variableSizing: b.getAttribute('data-bom-varsize') === 'variable' }, { immediate: true });
+});
+document.querySelectorAll('.bom-flowaxis-btn').forEach(b => {
+  b.onclick = () => patchBomConfig({ flowAxis: b.getAttribute('data-bom-flow-axis') === 'columns' ? 'columns' : 'rows' }, { immediate: true });
+});
+document.querySelectorAll('.bom-hdir-btn').forEach(b => {
+  b.onclick = () => patchBomConfig({ horizontalDir: b.getAttribute('data-bom-hdir') === 'rtl' ? 'rtl' : 'ltr' }, { immediate: true });
+});
+document.querySelectorAll('.bom-vdir-btn').forEach(b => {
+  b.onclick = () => patchBomConfig({ verticalDir: b.getAttribute('data-bom-vdir') === 'btt' ? 'btt' : 'ttb' }, { immediate: true });
+});
+document.querySelectorAll('.bom-align-btn').forEach(b => {
+  b.onclick = () => patchBomConfig({ align: b.getAttribute('data-bom-align') }, { immediate: true });
+});
+
+document.querySelectorAll('.bom-tablemode-btn').forEach(b => {
+  b.onclick = () => patchBomConfig({ tableRowsMode: b.getAttribute('data-bom-table-mode') === 'custom' ? 'custom' : 'auto' }, { immediate: true });
+});
+const setBomTableRows = (rawVal) => {
+  const n = Math.max(MIN_BOM_TABLE_ROWS, Math.min(MAX_BOM_TABLE_ROWS, Math.round(Number(rawVal) || 20)));
+  patchBomConfig({ tableRowsMode: 'custom', tableRowsPerPage: n }, { immediate: true });
+};
+const bomTableRowsInputEl = document.getElementById('bomTableRowsInput');
+if (bomTableRowsInputEl) {
+  bomTableRowsInputEl.onchange = (e) => setBomTableRows(e.target.value);
+  bomTableRowsInputEl.oninput = (e) => {
+    const v = parseInt(e.target.value, 10);
+    if (Number.isFinite(v) && v >= MIN_BOM_TABLE_ROWS && v <= MAX_BOM_TABLE_ROWS) {
+      patchBomConfig({ tableRowsMode: 'custom', tableRowsPerPage: v });
+    }
+  };
+}
+const bomTableRowsDec = document.getElementById('bomTableRowsDec');
+const bomTableRowsInc = document.getElementById('bomTableRowsInc');
+if (bomTableRowsDec) bomTableRowsDec.onclick = () => setBomTableRows(normalizeBomConfig(state.bomConfig).tableRowsPerPage - 1);
+if (bomTableRowsInc) bomTableRowsInc.onclick = () => setBomTableRows(normalizeBomConfig(state.bomConfig).tableRowsPerPage + 1);
+document.querySelectorAll('.bom-trows-btn').forEach(b => {
+  b.onclick = () => setBomTableRows(b.getAttribute('data-bom-trows'));
+});
+
+document.getElementById('bomSortPrimary').onchange = (e) => patchBomConfig({ sortPrimary: e.target.value }, { immediate: true });
+document.getElementById('bomSortSecondary').onchange = (e) => patchBomConfig({ sortSecondary: e.target.value }, { immediate: true });
 
 document.getElementById('togglePrintGuides').onchange = (e) => { state.showPrintGuides = e.target.checked; renderAll(); };
 document.getElementById('toggleExtras').onchange = (e) => { state.showExtras = e.target.checked; renderAll(); };
@@ -14551,19 +15536,29 @@ async function runInteractiveHtmlExport() {
           scene: { prevPartIdx: [], newPartIdx: subParts, az: 38, el: 28, zoom: 1.0, hero: false },
         });
       } else if (pg.kind === 'bom') {
-        const bomItems = (pg.entries || []).map((e) => ({
-          partId: e.part.p,
-          name: resolvePart(e.part.p).name,
-          colorName: COLORS[e.part.c]?.name || `Color ${e.part.c}`,
-          qty: e.qty,
-          thumb: getPliThumb(e.part),
-        }));
+        const bomCfg = normalizeBomConfig(state.bomConfig);
+        const rawEntries = pg.bomEntries || pg.entries || [];
+        const bomItems = rawEntries.map((e) => {
+          const colInfo = resolveColorInfo(e.part.c);
+          return {
+            partId: e.partIdDisplay || getDisplayPartIdForPart(e.part),
+            name: e.meta?.name || resolvePart(e.part.p).name,
+            colorName: e.colorName || colInfo?.name || `Color ${e.part.c}`,
+            colorHex: e.colorHex || colInfo?.hex || '#9ea3a8',
+            qty: e.qty,
+            thumb: getPliThumb(e.part),
+          };
+        });
+        const pageCount = pg.bomPageCount || pg.bomTotal || 1;
+        const pageIdx = pg.bomPageIdx ?? pg.bomIdx ?? 0;
         exportPages.push({
           id: pg.id,
           kind: 'bom',
           num: pg.num,
           label: pg.label || 'Parts List',
-          title: pg.bomTotal > 1 ? `Parts List (${pg.bomIdx + 1}/${pg.bomTotal})` : 'Parts List',
+          title: pageCount > 1 ? `Parts List (${pageIdx + 1}/${pageCount})` : 'Parts List',
+          bomFormat: pg.bomFormat || bomCfg.format,
+          bomFields: getEnabledBomFields(bomCfg),
           bomItems,
         });
       } else if (pg.kind === 'divider') {
@@ -14904,11 +15899,13 @@ async function handleIncomingProjectFile(f) {
     state.coverMeta = normalizeCoverMeta(data.coverMeta);
     if (data.completeMeta) state.completeMeta = { ...state.completeMeta, ...data.completeMeta };
     if (data.backMeta) state.backMeta = { ...state.backMeta, ...data.backMeta };
-    if (data.bomConfig) state.bomConfig = { ...state.bomConfig, ...data.bomConfig };
     if (data.pageNumberFormat) state.pageNumberFormat = data.pageNumberFormat;
     if (typeof data.detectDuplicates === 'boolean') state.detectDuplicates = data.detectDuplicates;
     if (data.customTheme) {
-      const normalized = normalizeCustomTheme(data.customTheme);
+      const incomingTheme = (data.customTheme.bomConfig === undefined && data.bomConfig)
+        ? { ...data.customTheme, bomConfig: data.bomConfig }
+        : data.customTheme;
+      const normalized = normalizeCustomTheme(incomingTheme);
       if (normalized) {
         const { merged, importedIds } = mergeImportedThemes(customThemes, [normalized]);
         customThemes = merged;
@@ -14918,7 +15915,7 @@ async function handleIncomingProjectFile(f) {
     } else if (data.themeId) {
       state.themeId = resolveThemeById(data.themeId, customThemes).id;
     }
-    // Pre-theme projects stored step display options at the top level.
+    // Pre-theme projects stored step display & parts list options at the top level.
     if (!data.customTheme) adoptLegacyStyleOptions(data);
     if (data.paperFormat) state.paperFormat = data.paperFormat;
     if (data.orientation) state.orientation = data.orientation;

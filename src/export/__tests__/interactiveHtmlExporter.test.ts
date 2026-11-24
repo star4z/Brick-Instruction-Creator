@@ -148,4 +148,56 @@ describe('interactiveHtmlExporter font stacks', () => {
     expect(sanitizeFontStack('x; } </style><script>alert(1)</script>')).not.toMatch(/[;{}<>()/]/);
     expect(sanitizeFontStack(undefined)).toContain('sans-serif');
   });
+
+  it('renders Table format Parts List pages with ordered columns and color swatches in fallback & viewer script', () => {
+    const html = generateInteractiveHtmlDocument({
+      version: 1,
+      title: 'BOM Test',
+      subtitle: '',
+      author: '',
+      editorUrl: DEFAULT_EDITOR_URL,
+      totalPieces: 4,
+      totalSteps: 1,
+      theme: {
+        bg: '#ffffff',
+        text: '#111111',
+        muted: '#666666',
+        accent: '#1a73e8',
+        pliBg: '#f5f5f5',
+        pliBorder: '#cccccc',
+        calloutBg: '#fffbe6',
+        calloutBorder: '#eab308',
+        isDark: false,
+      },
+      highlightNew: true,
+      highlightColor: '#ff2d55',
+      fadePrev: false,
+      fadeOpacity: 1,
+      prototypes: [],
+      textures: {},
+      parts: [],
+      pages: [
+        {
+          id: 'bom_0',
+          kind: 'bom',
+          num: 1,
+          label: 'Parts List',
+          title: 'Parts List',
+          bomFormat: 'table',
+          bomFields: ['partId', 'qty', 'color', 'name'],
+          bomItems: [
+            { partId: '3001', name: 'Brick 2×4', qty: 4, thumb: '', colorName: 'Red', colorHex: '#c91a09' },
+          ],
+        },
+      ],
+    });
+
+    expect(html).toContain('class="sf-bom-table"');
+    expect(html).toContain('<th class="col-partId">Part ID</th><th class="col-qty">Qty</th><th class="col-color">Color</th><th class="col-name">Part Name</th>');
+    expect(html).toContain('#c91a09');
+    expect(html).toContain('3001');
+    const scriptMatch = html.match(/<script>([\s\S]*?)<\/script>/);
+    expect(scriptMatch).toBeTruthy();
+    expect(() => new Function(scriptMatch![1])).not.toThrow();
+  });
 });

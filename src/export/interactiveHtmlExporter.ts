@@ -52,6 +52,7 @@ export interface InteractivePliEntry {
   qty: number;
   thumb: string;
   colorName?: string;
+  colorHex?: string;
 }
 
 export interface InteractiveSceneSpec {
@@ -87,6 +88,8 @@ export interface InteractiveViewerPage {
   scene?: InteractiveSceneSpec;
   steps?: InteractiveStepScene[];
   bomItems?: InteractivePliEntry[];
+  bomFormat?: 'grid' | 'table';
+  bomFields?: Array<'image' | 'qty' | 'name' | 'partId' | 'color'>;
 }
 
 export interface InteractiveViewerTheme {
@@ -238,24 +241,60 @@ function buildStaticFallbackHtml(payload: InteractiveHtmlPayload, safeEditorUrl:
           </section>`);
       }
     } else if (pg.kind === 'bom' && pg.bomItems && pg.bomItems.length > 0) {
+      const fields = (pg.bomFields && pg.bomFields.length > 0)
+        ? pg.bomFields
+        : (['image', 'qty', 'name', 'partId'] as const);
+      const colHeaders: Record<string, string> = {
+        image: 'Part',
+        qty: 'Qty',
+        name: 'Part Name',
+        partId: 'Part ID',
+        color: 'Color',
+      };
+      const renderColorChip = (b: InteractivePliEntry) => {
+        const sw = b.colorHex
+          ? `<span class="bom-swatch" style="background:${escapeHtmlText(b.colorHex)}"></span>`
+          : '';
+        return `<span class="bom-color-cell">${sw}<span>${escapeHtmlText(b.colorName || '')}</span></span>`;
+      };
+      const bodyHtml = pg.bomFormat === 'table'
+        ? `<table class="sf-bom-table"><thead><tr>${fields
+            .map((f) => `<th class="col-${f}">${escapeHtmlText(colHeaders[f] || f)}</th>`)
+            .join('')}</tr></thead><tbody>${pg.bomItems
+            .map(
+              (b) =>
+                `<tr>${fields
+                  .map((f) => {
+                    if (f === 'image') return `<td class="col-image">${b.thumb ? `<img src="${b.thumb}" alt="${escapeHtmlText(b.name)}" />` : ''}</td>`;
+                    if (f === 'qty') return `<td class="col-qty"><strong>${b.qty}×</strong></td>`;
+                    if (f === 'name') return `<td class="col-name">${escapeHtmlText(b.name)}</td>`;
+                    if (f === 'partId') return `<td class="col-partId"><code>${escapeHtmlText(b.partId)}</code></td>`;
+                    return `<td class="col-color">${renderColorChip(b)}</td>`;
+                  })
+                  .join('')}</tr>`,
+            )
+            .join('')}</tbody></table>`
+        : `<div class="sf-bom-grid">${pg.bomItems
+            .map(
+              (b) =>
+                `<div class="sf-bom-item">${fields
+                  .map((f) => {
+                    if (f === 'image') return b.thumb ? `<img src="${b.thumb}" alt="${escapeHtmlText(b.name)}" />` : '';
+                    if (f === 'qty') return `<strong>${b.qty}×</strong>`;
+                    if (f === 'name') return `<span>${escapeHtmlText(b.name)}</span>`;
+                    if (f === 'partId') return `<small class="bom-mono">${escapeHtmlText(b.partId)}</small>`;
+                    return `<small>${renderColorChip(b)}</small>`;
+                  })
+                  .join('')}</div>`,
+            )
+            .join('')}</div>`;
       cards.push(`
         <section class="sf-card">
           <div class="sf-card-head">
             <div class="sf-meta"><h2 class="sf-h2">${escapeHtmlText(pg.title || 'Parts List')}</h2></div>
             <span class="sf-pg-num">Page ${pg.num}</span>
           </div>
-          <div class="sf-bom-grid">
-            ${pg.bomItems
-              .map(
-                (b) =>
-                  `<div class="sf-bom-item">${
-                    b.thumb ? `<img src="${b.thumb}" alt="${escapeHtmlText(b.name)}" />` : ''
-                  }<strong>${b.qty}×</strong><span>${escapeHtmlText(b.name)}</span><small>${escapeHtmlText(
-                    (b.colorName ? `${b.colorName} · ` : '') + b.partId.toUpperCase(),
-                  )}</small></div>`,
-              )
-              .join('')}
-          </div>
+          ${bodyHtml}
         </section>`);
     } else {
       cards.push(`
@@ -439,6 +478,19 @@ export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload)
   }
   .sf-bom-item img { width: 48px; height: 48px; object-fit: contain; }
   .sf-bom-item small { font-size: 10px; color: var(--muted); }
+  .bom-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .bom-color-cell { display: inline-flex; align-items: center; gap: 5px; justify-content: center; }
+  .bom-swatch { display: inline-block; width: 10px; height: 10px; border-radius: 999px; border: 1px solid rgba(127,127,127,0.45); flex-shrink: 0; }
+  .sf-bom-table, .bom-table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 12px; }
+  .sf-bom-table th, .bom-table th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); padding: 7px 8px; border-bottom: 1.5px solid var(--pli-border); background: var(--pli-bg); }
+  .sf-bom-table td, .bom-table td { padding: 6px 8px; border-bottom: 1px solid var(--pli-border); vertical-align: middle; }
+  .sf-bom-table tr:nth-child(even) td, .bom-table tr:nth-child(even) td { background: rgba(127,127,127,0.05); }
+  .sf-bom-table td.col-image, .bom-table td.col-image, .sf-bom-table th.col-image, .bom-table th.col-image { text-align: center; width: 54px; }
+  .sf-bom-table td.col-image img, .bom-table td.col-image img { width: 34px; height: 34px; object-fit: contain; display: block; margin: 0 auto; }
+  .sf-bom-table td.col-qty, .bom-table td.col-qty, .sf-bom-table th.col-qty, .bom-table th.col-qty { text-align: right; white-space: nowrap; }
+  .sf-bom-table td.col-partId code, .bom-table td.col-partId code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: var(--muted); }
+  .bom-table tbody tr { cursor: pointer; transition: opacity 150ms ease; }
+  .bom-table tbody tr.checked { opacity: 0.42; text-decoration: line-through; }
 
   /* Interactive 3D App Styles */
   .app {
@@ -1434,21 +1486,46 @@ ${staticFallbackHtml}
       if (startBtn) startBtn.onclick = () => { curIdx = Math.min(viewerItems.length - 1, curIdx + 1); renderView(); };
     } else if (pg.kind === 'bom') {
       const items = pg.bomItems || [];
+      const fields = (pg.bomFields && pg.bomFields.length > 0) ? pg.bomFields : ['image', 'qty', 'name', 'partId'];
+      const headers = { image: 'Part', qty: 'Qty', name: 'Part Name', partId: 'Part ID', color: 'Color' };
+      const colorHtml = (b) => '<span class="bom-color-cell">' +
+        (b.colorHex ? '<span class="bom-swatch" style="background:' + esc(b.colorHex) + '"></span>' : '') +
+        '<span>' + esc(b.colorName || '') + '</span></span>';
+      const bodyHtml = pg.bomFormat === 'table'
+        ? '<table class="bom-table"><thead><tr>' +
+            fields.map((f) => '<th class="col-' + f + '">' + esc(headers[f] || f) + '</th>').join('') +
+          '</tr></thead><tbody>' +
+            items.map((b, bi) => {
+              const key = pg.id + ':' + bi;
+              return '<tr class="' + (checkedBom.has(key) ? 'checked' : '') + '" data-bom="' + key + '">' +
+                fields.map((f) => {
+                  if (f === 'image') return '<td class="col-image">' + (b.thumb ? '<img src="' + b.thumb + '" alt="' + esc(b.name) + '" />' : '') + '</td>';
+                  if (f === 'qty') return '<td class="col-qty"><span class="bom-qty">' + b.qty + '×</span></td>';
+                  if (f === 'name') return '<td class="col-name">' + esc(b.name) + '</td>';
+                  if (f === 'partId') return '<td class="col-partId"><code>' + esc(b.partId) + '</code></td>';
+                  return '<td class="col-color">' + colorHtml(b) + '</td>';
+                }).join('') + '</tr>';
+            }).join('') +
+          '</tbody></table>'
+        : '<div class="bom-grid">' + items.map((b, bi) => {
+            const key = pg.id + ':' + bi;
+            return '<div class="bom-card ' + (checkedBom.has(key) ? 'checked' : '') + '" data-bom="' + key + '">' +
+              fields.map((f) => {
+                if (f === 'image') return b.thumb ? '<img src="' + b.thumb + '" alt="' + esc(b.name) + '" />' : '';
+                if (f === 'qty') return '<div class="bom-qty">' + b.qty + '×</div>';
+                if (f === 'name') return '<div class="bom-name">' + esc(b.name) + '</div>';
+                if (f === 'partId') return '<div class="bom-sub bom-mono">' + esc(b.partId) + '</div>';
+                return '<div class="bom-sub">' + colorHtml(b) + '</div>';
+              }).join('') +
+            '</div>';
+          }).join('') + '</div>';
       flatEl.innerHTML =
         '<div class="flat-inner">' +
           '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap">' +
             '<h2 style="margin:0;font-size:22px;font-weight:900">' + esc(pg.title || 'Parts List') + '</h2>' +
             '<span style="font-size:12px;color:var(--muted);font-weight:600">Tap parts to check them off · ' + DATA.totalPieces + ' total pcs</span>' +
           '</div>' +
-          '<div class="bom-grid">' + items.map((b, bi) => {
-            const key = pg.id + ':' + bi;
-            return '<div class="bom-card ' + (checkedBom.has(key) ? 'checked' : '') + '" data-bom="' + key + '">' +
-              (b.thumb ? '<img src="' + b.thumb + '" alt="' + esc(b.name) + '" />' : '') +
-              '<div class="bom-qty">' + b.qty + '×</div>' +
-              '<div class="bom-name">' + esc(b.name) + '</div>' +
-              '<div class="bom-sub">' + esc((b.colorName ? b.colorName + ' · ' : '') + b.partId.toUpperCase()) + '</div>' +
-            '</div>';
-          }).join('') + '</div>' +
+          bodyHtml +
         '</div>';
       flatEl.classList.add('open');
       flatEl.querySelectorAll('[data-bom]').forEach((card) => {

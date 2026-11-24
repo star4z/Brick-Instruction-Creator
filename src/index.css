@@ -558,3 +558,18 @@ body {
 .theme-strip::-webkit-scrollbar {
   display: none;
 }
+
+/* Draggable Parts List column/field list */
+.bom-field-row {
+  transition: border-color 140ms var(--ease-press), background-color 140ms var(--ease-press), opacity 140ms var(--ease-press);
+}
+.bom-field-row.is-dragging {
+  opacity: 0.45;
+}
+.bom-field-row.is-drag-over-above {
+  box-shadow: 0 -2px 0 0 var(--primary);
+}
+.bom-field-row.is-drag-over-below {
+  box-shadow: 0 2px 0 0 var(--primary);
+}
+
