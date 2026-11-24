@@ -13818,7 +13818,7 @@ function animateImportExplode(nextExploded) {
   canvas.addEventListener('pointercancel', () => { dragging = false; });
 })();
 
-const SINGLE_BUILD_DESCRIPTION = 'Generates clean, zero-floating steps in one continuous chapter without splitting the model into sections.';
+const SINGLE_BUILD_DESCRIPTION = 'Generates clean, buildable steps in one continuous chapter without splitting the model into sections.';
 
 function formatPartCount(n) {
   const v = Number(n) || 0;

@@ -105,20 +105,17 @@
     <!-- ================================================================ -->
     <section id="emptyState" class="proofing-stage flex-1 min-h-0 flex items-center justify-center pt-16 pb-6 px-4 sm:p-8 overflow-y-auto">
       <div class="relative z-10 w-full max-w-2xl rounded-xl proof-sheet-frame overflow-hidden">
-        <!-- Sheet Calibration Strip -->
+        <!-- Sheet Header Strip -->
         <div class="px-6 sm:px-8 py-3 border-b border-[var(--border)] bg-[var(--surface-sunken)] flex items-center justify-between gap-3 text-xs text-[var(--muted-foreground)]">
-          <div class="flex items-center gap-2">
-            <span class="inline-flex items-center gap-1" aria-hidden="true">
-              <span class="w-2 h-2 rounded-full bg-[var(--brand-sky)]"></span>
-              <span class="w-2 h-2 rounded-full bg-[var(--brand-maroon)]"></span>
-              <span class="w-2 h-2 rounded-full bg-[var(--brand-orange)]"></span>
-            </span>
-            <span class="font-semibold text-[var(--foreground)]">Proofing Table</span>
-          </div>
+          <span class="inline-flex items-center gap-1" aria-hidden="true">
+            <span class="w-2 h-2 rounded-full bg-[var(--brand-sky)]"></span>
+            <span class="w-2 h-2 rounded-full bg-[var(--brand-maroon)]"></span>
+            <span class="w-2 h-2 rounded-full bg-[var(--brand-orange)]"></span>
+          </span>
           <span class="font-mono">.io · .ldr · .mpd · .biw</span>
         </div>
 
-        <!-- Primary Proofing Sheet Body (Logo + App Name visible on Mobile & Desktop) -->
+        <!-- Primary Welcome Sheet Body (Logo + App Name visible on Mobile & Desktop) -->
         <div class="p-6 sm:p-8 space-y-4">
           <div class="flex items-center gap-3.5 sm:gap-4">
             <svg class="w-12 h-12 sm:w-14 sm:h-14 shrink-0" viewBox="0 0 64 64" fill="none" role="img" aria-label="Brick Instruction Works logo">
@@ -134,7 +131,7 @@
             </div>
           </div>
           <p class="text-sm text-[var(--muted-foreground)] leading-relaxed max-w-[56ch]">
-            Convert BrickLink Studio and LDraw files into buildable, zero-floating manuals. Every camera angle, callout, and page break stays bound to its step—so early edits never scramble downstream pages.
+            Convert BrickLink Studio and LDraw files into clean, buildable manuals. Every camera angle, callout, and page break stays bound to its step—so early edits never scramble downstream pages.
           </p>
         </div>
 
@@ -1400,7 +1397,12 @@
       <div id="openModelDropZone" class="w-full max-w-2xl rounded-t-xl sm:rounded-xl studio-sheet overflow-hidden text-xs">
         <div class="px-6 sm:px-8 py-3.5 border-b border-[var(--border)] bg-[var(--surface-sunken)] flex items-center justify-between gap-3">
           <div class="flex items-center gap-2.5 min-w-0">
-            <span class="font-semibold text-[var(--foreground)]">Proofing Table</span>
+            <span class="inline-flex items-center gap-1" aria-hidden="true">
+              <span class="w-2 h-2 rounded-full bg-[var(--brand-sky)]"></span>
+              <span class="w-2 h-2 rounded-full bg-[var(--brand-maroon)]"></span>
+              <span class="w-2 h-2 rounded-full bg-[var(--brand-orange)]"></span>
+            </span>
+            <span class="font-semibold text-[var(--foreground)]">Open Model</span>
             <span class="font-mono text-[var(--muted-foreground)]">.io · .ldr · .mpd · .biw</span>
           </div>
           <button id="btnCloseOpenModel" type="button" aria-label="Close Open Model dialog" class="w-8 h-8 rounded-md flex items-center justify-center hover:bg-[var(--surface-hover)] shrink-0 transition-colors cursor-pointer">

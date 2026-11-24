@@ -20,7 +20,7 @@ export function ImportDialog() {
       mode: 'preserve_submodels',
       title: 'Preserve Submodels & Auto-Generate Steps',
       recommended: true,
-      desc: 'Keep explicit submodels from your file while letting Brick Instruction Works build zero-floating steps, SNOT callouts, and optimal camera rotations.',
+      desc: 'Keep explicit submodels from your file while letting Brick Instruction Works build clean, buildable steps, SNOT callouts, and optimal camera rotations.',
       icon: Layers,
     },
     {

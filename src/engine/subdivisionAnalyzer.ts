@@ -3318,7 +3318,7 @@ export function buildNumberedBagsProposal(
     strategy: 'numbered_bags',
     outputMode: 'numbered_bags',
     title: `Numbered Build Bags (${sections.length} Bags)`,
-    rationale: `Keeps one continuous zero-floating build divided into ${sections.length} connected numbered bags (~${avgBag} parts per bag).`,
+    rationale: `Keeps one continuous build divided into ${sections.length} connected numbered bags (~${avgBag} parts per bag).`,
     confidence,
     sections,
     estimatedStepCount,
