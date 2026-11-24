@@ -2,7 +2,8 @@
  * Pure Page Layout & Step Range Group Engine
  *
  * Supports:
- * - Arbitrary steps per page (1..24) and Auto smart pagination
+ * - Steps per page DERIVED from the layout (columns × rows / mixed layout slots)
+ *   and split by page breaks — Auto smart pagination when the grid is Auto
  * - Explicit grid dimensions (columns × rows, or Auto)
  * - Fill direction: Row-first (L→R, then T→B) vs Column-first (T→B, then L→R)
  * - Mixed layouts where featured steps are rendered larger than companion steps
@@ -24,7 +25,9 @@ export type MixedLayoutStyle =
 export type SlotSizeWeight = 'sm' | 'md' | 'lg';
 
 export interface PageLayoutSpec {
+  /** Derived: 'custom' when the layout fixes a slot count, 'auto' for smart pagination. */
   mode: 'auto' | 'custom';
+  /** Derived (read-only): slots per page implied by the layout. Not user-editable. */
   stepsPerPage: number;
   cols: number | 'auto';
   rows: number | 'auto';
@@ -81,9 +84,52 @@ export function createDefaultPageLayoutSpec(): PageLayoutSpec {
   };
 }
 
+/** Default slot count for mixed layouts when the grid is left on Auto. */
+const MIXED_HERO_DEFAULT_SLOTS = 3;
+const CUSTOM_WEIGHTS_DEFAULT_SLOTS = 4;
+
+/**
+ * Derives how many steps fit on a page purely from the layout:
+ * - explicit columns × rows → cols * rows
+ * - mixed "Large Left / Top / Right" with an Auto grid → hero + 2 companions (3)
+ * - custom S/M/L weights with an Auto grid → 4 slots
+ * - only columns (or only rows) set → a single row (or column) of that many steps
+ * - everything Auto → `null` (smart auto pagination by step complexity)
+ *
+ * Page breaks then split pages further; the count is never edited directly.
+ */
+export function deriveStepsPerPageFromLayout(
+  spec: Pick<PageLayoutSpec, 'cols' | 'rows' | 'mixedLayout'>,
+): number | null {
+  const c = typeof spec.cols === 'number' && spec.cols >= 1 ? Math.round(spec.cols) : null;
+  const r = typeof spec.rows === 'number' && spec.rows >= 1 ? Math.round(spec.rows) : null;
+  let n: number | null;
+  if (c && r) n = c * r;
+  else if (spec.mixedLayout === 'hero_left' || spec.mixedLayout === 'hero_top' || spec.mixedLayout === 'hero_right') {
+    n = MIXED_HERO_DEFAULT_SLOTS;
+  } else if (spec.mixedLayout === 'custom_weights') n = CUSTOM_WEIGHTS_DEFAULT_SLOTS;
+  else if (c) n = c;
+  else if (r) n = r;
+  else n = null;
+  return n === null ? null : Math.max(MIN_STEPS_PER_PAGE, Math.min(MAX_STEPS_PER_PAGE, n));
+}
+
+/**
+ * Recomputes the derived `mode` / `stepsPerPage` fields from the layout.
+ * Call after changing cols, rows or mixedLayout.
+ */
+export function withDerivedStepsPerPage<T extends PageLayoutSpec>(spec: T): T {
+  const n = deriveStepsPerPageFromLayout(spec);
+  return { ...spec, mode: n === null ? 'auto' : 'custom', stepsPerPage: n ?? 2 };
+}
+
 /**
  * Converts legacy string layout values ('auto' | '1-up' | '2-up' | '4-up')
  * or partial saved objects into a fully normalized PageLayoutSpec.
+ *
+ * Saved explicit step counts (from the removed "Steps per Page" control) are
+ * ignored — the count is always derived from the grid. Legacy '1-up' / '4-up'
+ * map to their orientation-independent grids (1×1 / 2×2); others become Auto.
  */
 export function normalizePageLayoutSpec(
   raw: unknown,
@@ -92,18 +138,12 @@ export function normalizePageLayoutSpec(
   const base = createDefaultPageLayoutSpec();
 
   if (!raw || typeof raw !== 'object') {
-    if (legacyLayout === '1-up') return { ...base, mode: 'custom', stepsPerPage: 1 };
-    if (legacyLayout === '2-up') return { ...base, mode: 'custom', stepsPerPage: 2 };
-    if (legacyLayout === '4-up') return { ...base, mode: 'custom', stepsPerPage: 4 };
+    if (legacyLayout === '1-up') return withDerivedStepsPerPage({ ...base, cols: 1, rows: 1 });
+    if (legacyLayout === '4-up') return withDerivedStepsPerPage({ ...base, cols: 2, rows: 2 });
     return base;
   }
 
   const obj = raw as Partial<PageLayoutSpec>;
-  const mode: 'auto' | 'custom' = obj.mode === 'custom' ? 'custom' : 'auto';
-  const rawSteps = Number(obj.stepsPerPage);
-  const stepsPerPage = Number.isFinite(rawSteps)
-    ? Math.max(MIN_STEPS_PER_PAGE, Math.min(MAX_STEPS_PER_PAGE, Math.round(rawSteps)))
-    : base.stepsPerPage;
 
   const parseTrack = (v: unknown): number | 'auto' => {
     if (v === 'auto' || v == null || v === '') return 'auto';
@@ -130,25 +170,23 @@ export function normalizePageLayoutSpec(
       )
     : [];
 
-  return {
-    mode,
-    stepsPerPage,
+  return withDerivedStepsPerPage({
+    mode: 'auto',
+    stepsPerPage: base.stepsPerPage,
     cols: parseTrack(obj.cols),
     rows: parseTrack(obj.rows),
     flow,
     mixedLayout,
     slotSizes,
-  };
+  });
 }
 
 /**
- * Computes effective steps per page when a spec has explicit cols & rows
- * or a custom stepsPerPage count.
+ * Effective steps-per-page cap for pagination, derived from the layout.
+ * `null` means smart auto pagination.
  */
 export function getSpecStepsPerPageCap(spec: PageLayoutSpec): number | null {
-  if (spec.mode === 'auto') return null;
-  const clamped = Math.max(MIN_STEPS_PER_PAGE, Math.min(MAX_STEPS_PER_PAGE, Math.round(spec.stepsPerPage || 1)));
-  return clamped;
+  return deriveStepsPerPageFromLayout(spec);
 }
 
 /**
@@ -518,10 +556,11 @@ export function normalizeLayoutGroups(raw: unknown): StepLayoutGroup[] {
  */
 export function describePageLayoutSpec(spec: PageLayoutSpec): string {
   const parts: string[] = [];
-  if (spec.mode === 'auto') {
+  const derived = deriveStepsPerPageFromLayout(spec);
+  if (derived === null) {
     parts.push('Auto');
   } else {
-    parts.push(`${spec.stepsPerPage}/page`);
+    parts.push(`${derived}/page`);
   }
 
   if (spec.cols !== 'auto' || spec.rows !== 'auto') {

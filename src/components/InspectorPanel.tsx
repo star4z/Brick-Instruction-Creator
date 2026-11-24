@@ -19,7 +19,6 @@ import type {
   BackgroundMode,
   BomSortMode,
   CanonicalViewId,
-  PageLayoutTemplate,
   PageOrientation,
   PageSizeId,
   ThemePresetId,
@@ -222,34 +221,6 @@ export function InspectorPanel() {
                     <option value="portrait">Portrait</option>
                   </select>
                 </label>
-              </div>
-
-              <div className="space-y-1.5">
-                <span className="text-[11px] font-medium text-[#5f6368]">Steps per Page</span>
-                <div className="grid grid-cols-5 gap-1">
-                  {(
-                    [
-                      { id: 'auto', label: 'Auto' },
-                      { id: '1-up', label: '1' },
-                      { id: '2-up', label: '2' },
-                      { id: '3-up', label: '3' },
-                      { id: '4-up', label: '4' },
-                    ] as Array<{ id: PageLayoutTemplate; label: string }>
-                  ).map((tpl) => (
-                    <button
-                      key={tpl.id}
-                      type="button"
-                      onClick={() => updateTheme({ defaultLayout: tpl.id })}
-                      className={`py-1.5 rounded-full border text-xs font-semibold cursor-pointer transition ${
-                        theme.defaultLayout === tpl.id
-                          ? 'bg-[#1a73e8] text-white border-[#1a73e8]'
-                          : 'bg-white text-[#5f6368] border-[#dadce0] hover:bg-[#f1f3f4]'
-                      }`}
-                    >
-                      {tpl.label}
-                    </button>
-                  ))}
-                </div>
               </div>
             </section>
 

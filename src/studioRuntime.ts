@@ -99,6 +99,7 @@ import {
   getSpecStepsPerPageCap,
   normalizeLayoutGroups,
   normalizePageLayoutSpec,
+  withDerivedStepsPerPage,
 } from './engine/pageLayout';
 import {
   CAMERA_ANGLE_PRESETS,
@@ -8145,7 +8146,7 @@ function renderStepEditModal() {
         </button>
       </div>
       <div class="pt-3 border-t border-[var(--border)] flex items-center justify-between gap-2 flex-wrap">
-        <span class="text-[11px] text-[var(--muted-foreground)]">Want to change steps per page, grid layout, or paper size?</span>
+        <span class="text-[11px] text-[var(--muted-foreground)]">Want to change the page grid, step order, or paper size?</span>
         <button type="button" id="stepEditOpenPageSetup" class="px-3 py-1.5 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold shrink-0 cursor-pointer">Open Page Setup…</button>
       </div>
     </section>
@@ -8517,9 +8518,8 @@ function renderGridPreviewInto(containerEl, spec, maxW = 136, maxH = 92) {
   const gapPx = state.density === 'compact' ? 2 : state.density === 'spacious' ? 4 : 3;
   const innerW = Math.max(24, pageBox.widthPx - padPx * 2);
   const innerH = Math.max(20, pageBox.heightPx - padPx * 2 - 6);
-  const sampleCount = spec.mode === 'auto'
-    ? (spec.mixedLayout !== 'even' ? 3 : 2)
-    : Math.max(1, Math.min(12, spec.stepsPerPage || 2));
+  const derivedCap = getSpecStepsPerPageCap(spec);
+  const sampleCount = derivedCap === null ? 2 : Math.max(1, Math.min(12, derivedCap));
   const rects = computePageSlotRects(sampleCount, spec, pageBox.isLandscape, innerW, innerH, gapPx);
   const showBorders = state.showStepBorders !== false;
   containerEl.innerHTML = `
@@ -8539,24 +8539,24 @@ function renderGridPreviewInto(containerEl, spec, maxW = 136, maxH = 92) {
     </div>`;
 }
 
-function renderGroupGridPreviewUI() {
-  const el = document.getElementById('grpGridPreview');
-  if (!el) return;
-  const stepsPerPage = Math.max(1, Math.min(24, parseInt(document.getElementById('grpStepsPerPageInput')?.value, 10) || 4));
+function readGroupEditorDraftSpec() {
   const colsRaw = document.getElementById('grpColsSelect')?.value || 'auto';
   const rowsRaw = document.getElementById('grpRowsSelect')?.value || 'auto';
   const flow = document.getElementById('grpFlowSelect')?.value === 'column' ? 'column' : 'row';
   const mixedLayout = document.getElementById('grpMixedSelect')?.value || 'even';
-  const draftSpec = normalizePageLayoutSpec({
-    mode: 'custom',
-    stepsPerPage,
+  return normalizePageLayoutSpec({
     cols: colsRaw === 'auto' ? 'auto' : parseInt(colsRaw, 10),
     rows: rowsRaw === 'auto' ? 'auto' : parseInt(rowsRaw, 10),
     flow,
     mixedLayout,
     slotSizes: mixedLayout === 'custom_weights' ? [...layoutGroupEditorState.slotSizes] : [],
   });
-  renderGridPreviewInto(el, draftSpec, 128, 78);
+}
+
+function renderGroupGridPreviewUI() {
+  const el = document.getElementById('grpGridPreview');
+  if (!el) return;
+  renderGridPreviewInto(el, readGroupEditorDraftSpec(), 128, 78);
 }
 
 function renderLayoutGroupsList() {
@@ -8640,7 +8640,6 @@ function openLayoutGroupEditor(existingGroup = null, prefillRange = null) {
     if (inp) { inp.max = String(maxStep); inp.oninput = syncGroupRangeHintUI; }
   }
   syncGroupRangeHintUI();
-  document.getElementById('grpStepsPerPageInput').value = String(existingGroup ? existingGroup.layout.stepsPerPage : Math.max(2, Math.min(6, defaultEnd - defaultStart + 1)));
   document.getElementById('grpColsSelect').value = existingGroup ? String(existingGroup.layout.cols) : 'auto';
   document.getElementById('grpRowsSelect').value = existingGroup ? String(existingGroup.layout.rows) : 'auto';
   document.getElementById('grpFlowSelect').value = existingGroup ? existingGroup.layout.flow : 'row';
@@ -8666,7 +8665,7 @@ function syncGroupEditorSlotSizesUI() {
   if (!wrap || !list) return;
   wrap.classList.toggle('hidden', mixed !== 'custom_weights');
   if (mixed === 'custom_weights') {
-    const count = Math.max(2, Math.min(12, parseInt(document.getElementById('grpStepsPerPageInput')?.value, 10) || 4));
+    const count = Math.max(2, Math.min(12, getSpecStepsPerPageCap(readGroupEditorDraftSpec()) ?? 4));
     renderSlotSizeButtons(list, count, layoutGroupEditorState.slotSizes, (next) => {
       layoutGroupEditorState.slotSizes = next;
       syncGroupEditorSlotSizesUI();
@@ -8677,6 +8676,7 @@ function syncGroupEditorSlotSizesUI() {
 
 function syncPageLayoutControlsUI() {
   const lc = state.layoutConfig;
+  const derivedCap = getSpecStepsPerPageCap(lc);
   const chip = document.getElementById('layoutSummaryChip');
   if (chip) chip.textContent = describePageLayoutSpec(lc);
 
@@ -8685,9 +8685,9 @@ function syncPageLayoutControlsUI() {
   const gridTitle = document.getElementById('layoutGridPreviewTitle');
   const gridDesc = document.getElementById('layoutGridPreviewDesc');
   if (gridTitle && gridDesc) {
-    if (lc.mode === 'auto') {
+    if (derivedCap === null) {
       gridTitle.textContent = 'Smart Auto Grid';
-      gridDesc.textContent = 'Automatically chooses 1–2 steps per page based on each step’s complexity and your paper orientation.';
+      gridDesc.textContent = 'Automatically chooses 1–2 steps per page based on each step’s complexity and your paper orientation. Page breaks always start a new page.';
     } else {
       const flowTxt = lc.flow === 'column' ? 'top-to-bottom columns' : 'left-to-right rows';
       const mixedTxt = lc.mixedLayout === 'hero_left' ? 'with Step 1 featured large on the left'
@@ -8695,23 +8695,11 @@ function syncPageLayoutControlsUI() {
         : lc.mixedLayout === 'hero_right' ? 'with the final step featured large on the right'
         : lc.mixedLayout === 'custom_weights' ? 'using custom S / M / L slot sizes'
         : 'in evenly sized step cells';
-      gridTitle.textContent = `${lc.stepsPerPage} Step${lc.stepsPerPage === 1 ? '' : 's'} per Page · ${describePageLayoutSpec(lc)}`;
-      gridDesc.textContent = `Fills ${flowTxt}, ${mixedTxt}.`;
+      gridTitle.textContent = `Up to ${derivedCap} Step${derivedCap === 1 ? '' : 's'} per Page · ${describePageLayoutSpec(lc)}`;
+      gridDesc.textContent = `Fills ${flowTxt}, ${mixedTxt}. Page breaks end a page early.`;
     }
   }
 
-  document.querySelectorAll('.layout-btn').forEach((b) => {
-    const preset = b.getAttribute('data-layout-preset');
-    const act = preset === 'auto'
-      ? lc.mode === 'auto'
-      : (lc.mode === 'custom' && String(lc.stepsPerPage) === preset);
-    b.className = `layout-btn py-2 rounded-md border font-semibold transition cursor-pointer ${preset !== 'auto' ? 'font-mono ' : ''}${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)]'}`;
-  });
-
-  const stepsInp = document.getElementById('layoutStepsInput');
-  if (stepsInp && document.activeElement !== stepsInp) {
-    stepsInp.value = String(lc.stepsPerPage);
-  }
   const colsSel = document.getElementById('layoutColsSelect');
   if (colsSel) colsSel.value = String(lc.cols);
   const rowsSel = document.getElementById('layoutRowsSelect');
@@ -8732,7 +8720,7 @@ function syncPageLayoutControlsUI() {
   if (defWrap && defList) {
     defWrap.classList.toggle('hidden', lc.mixedLayout !== 'custom_weights');
     if (lc.mixedLayout === 'custom_weights') {
-      const slotCount = lc.mode === 'auto' ? 4 : Math.max(2, Math.min(12, lc.stepsPerPage));
+      const slotCount = Math.max(2, Math.min(12, derivedCap ?? 4));
       renderSlotSizeButtons(defList, slotCount, lc.slotSizes || [], (next) => {
         state.layoutConfig = { ...state.layoutConfig, slotSizes: next };
         renderAll();
@@ -12496,57 +12484,34 @@ document.getElementById('customHeightIn').onchange = onCustomDimChange;
 document.querySelectorAll('.orient-btn').forEach(b => { b.onclick = () => { state.orientation = b.getAttribute('data-orient'); resetZoom(); renderAll(); }; });
 
 // Customizable Step Grid, Order Direction, Mixed Layouts & Step Range Groups
-document.querySelectorAll('.layout-btn').forEach(b => {
-  b.onclick = () => {
-    const preset = b.getAttribute('data-layout-preset');
-    if (preset === 'auto') {
-      state.layoutConfig = { ...state.layoutConfig, mode: 'auto' };
-    } else {
-      const n = Math.max(1, Math.min(24, parseInt(preset, 10) || 2));
-      state.layoutConfig = { ...state.layoutConfig, mode: 'custom', stepsPerPage: n };
-    }
-    syncLegacyLayoutFlag();
-    renderAll();
-  };
-});
-const layoutStepsInp = document.getElementById('layoutStepsInput');
-if (layoutStepsInp) {
-  layoutStepsInp.onchange = (e) => {
-    const n = Math.max(1, Math.min(24, parseInt(e.target.value, 10) || 1));
-    state.layoutConfig = { ...state.layoutConfig, mode: 'custom', stepsPerPage: n };
-    syncLegacyLayoutFlag();
-    renderAll();
-  };
-}
+// (steps per page is derived from the grid / mixed layout and page breaks — not edited directly)
+const setLayoutConfig = (patch) => {
+  state.layoutConfig = withDerivedStepsPerPage({ ...state.layoutConfig, ...patch });
+  syncLegacyLayoutFlag();
+  renderAll();
+};
 const layoutColsSel = document.getElementById('layoutColsSelect');
 if (layoutColsSel) {
   layoutColsSel.onchange = (e) => {
     const v = e.target.value === 'auto' ? 'auto' : Math.max(1, Math.min(6, parseInt(e.target.value, 10) || 1));
-    state.layoutConfig = { ...state.layoutConfig, cols: v };
-    renderAll();
+    setLayoutConfig({ cols: v });
   };
 }
 const layoutRowsSel = document.getElementById('layoutRowsSelect');
 if (layoutRowsSel) {
   layoutRowsSel.onchange = (e) => {
     const v = e.target.value === 'auto' ? 'auto' : Math.max(1, Math.min(6, parseInt(e.target.value, 10) || 1));
-    state.layoutConfig = { ...state.layoutConfig, rows: v };
-    renderAll();
+    setLayoutConfig({ rows: v });
   };
 }
 document.querySelectorAll('.step-flow-btn').forEach(b => {
   b.onclick = () => {
-    state.layoutConfig = { ...state.layoutConfig, flow: b.getAttribute('data-step-flow') === 'column' ? 'column' : 'row' };
-    syncLegacyLayoutFlag();
-    renderAll();
+    setLayoutConfig({ flow: b.getAttribute('data-step-flow') === 'column' ? 'column' : 'row' });
   };
 });
 document.querySelectorAll('.mixed-layout-btn').forEach(b => {
   b.onclick = () => {
-    const nextMixed = b.getAttribute('data-mixed-layout') || 'even';
-    state.layoutConfig = { ...state.layoutConfig, mixedLayout: nextMixed };
-    syncLegacyLayoutFlag();
-    renderAll();
+    setLayoutConfig({ mixedLayout: b.getAttribute('data-mixed-layout') || 'even' });
   };
 });
 
@@ -12569,12 +12534,10 @@ if (btnGrpUseCur) {
 }
 const grpMixedSel = document.getElementById('grpMixedSelect');
 if (grpMixedSel) grpMixedSel.onchange = syncGroupEditorSlotSizesUI;
-const grpStepsInp = document.getElementById('grpStepsPerPageInput');
-if (grpStepsInp) { grpStepsInp.onchange = syncGroupEditorSlotSizesUI; grpStepsInp.oninput = renderGroupGridPreviewUI; }
 const grpColsSel = document.getElementById('grpColsSelect');
-if (grpColsSel) grpColsSel.onchange = renderGroupGridPreviewUI;
+if (grpColsSel) grpColsSel.onchange = syncGroupEditorSlotSizesUI;
 const grpRowsSel = document.getElementById('grpRowsSelect');
-if (grpRowsSel) grpRowsSel.onchange = renderGroupGridPreviewUI;
+if (grpRowsSel) grpRowsSel.onchange = syncGroupEditorSlotSizesUI;
 const grpFlowSel = document.getElementById('grpFlowSelect');
 if (grpFlowSel) grpFlowSel.onchange = renderGroupGridPreviewUI;
 const btnGrpSave = document.getElementById('btnGrpSave');
@@ -12584,7 +12547,6 @@ if (btnGrpSave) {
     const rawEnd = Math.max(1, parseInt(document.getElementById('grpEndStepInput')?.value, 10) || rawStart);
     const startStepNum = Math.min(rawStart, rawEnd);
     const endStepNum = Math.max(rawStart, rawEnd);
-    const stepsPerPage = Math.max(1, Math.min(24, parseInt(document.getElementById('grpStepsPerPageInput')?.value, 10) || 4));
     const colsRaw = document.getElementById('grpColsSelect')?.value || 'auto';
     const rowsRaw = document.getElementById('grpRowsSelect')?.value || 'auto';
     const flow = document.getElementById('grpFlowSelect')?.value === 'column' ? 'column' : 'row';
@@ -12599,8 +12561,6 @@ if (btnGrpSave) {
       endStepNum,
       stepBasis: 'absolute',
       layout: normalizePageLayoutSpec({
-        mode: 'custom',
-        stepsPerPage,
         cols: colsRaw === 'auto' ? 'auto' : parseInt(colsRaw, 10),
         rows: rowsRaw === 'auto' ? 'auto' : parseInt(rowsRaw, 10),
         flow,

@@ -10,8 +10,15 @@ Implemented in [`src/engine/pageLayout.ts`](../src/engine/pageLayout.ts) and [`s
   - `screen` (Screen Fit), `letter` (US Letter), `a4` (A4), `a5` (A5 Booklet), `b5` (B5 Booklet), `half_letter` (Half Letter), `legal` (US Legal), `tabloid` (Tabloid / Ledger), `a3` (A3 Poster), `square` (Booklet Square), and `custom` (Custom Size in `in` or `cm`).
   - `computePaperPreviewBox()` computes exact scaled miniature sheet proportions in the active orientation for the live preview box beside the Page Format dropdown.
 - **`PageLayoutSpec`**:
-  - `mode`: `'auto' | 'custom'`
-  - `stepsPerPage`: arbitrary integer `1..24` (presets `Auto`, `1`, `2`, `3`, `4`, `6`, plus numeric input)
+  - `mode`: `'auto' | 'custom'` — **derived**, never user-set
+  - `stepsPerPage`: **derived, read-only** — there is no "Steps per Page" control. `deriveStepsPerPageFromLayout()` computes it from the layout:
+    - explicit `cols × rows` → `cols * rows`
+    - `hero_left` / `hero_top` / `hero_right` with an Auto grid → `3` (hero + 2 companions)
+    - `custom_weights` with an Auto grid → `4`
+    - only `cols` (or only `rows`) set → a single row (or column) of that many steps
+    - everything Auto → `null` = smart auto pagination (1–2 steps by complexity)
+    - The result is an upper bound: **page breaks** (step `pin` overrides), group boundaries, sequential minifig builds, and (in Auto) callout/submodel steps still end a page early.
+    - `normalizePageLayoutSpec()` ignores saved `stepsPerPage` values from older projects; legacy `'1-up'` / `'4-up'` map to `1×1` / `2×2` grids, other legacy counts fall back to Auto. `withDerivedStepsPerPage()` re-syncs the derived fields after edits.
   - `cols`: `'auto' | 1..6`
   - `rows`: `'auto' | 1..6`
   - `flow`: `'row'` (Left → Right, then Top → Bottom, e.g. `12 13 / 14 15`) or `'column'` (Top → Bottom, then Left → Right, e.g. `12 14 / 13 15`)
@@ -35,6 +42,6 @@ Implemented in [`src/engine/pageLayout.ts`](../src/engine/pageLayout.ts) and [`s
 ## Visual Guides in Page Setup (`#pageSetupModal`)
 1. **Page Format Dropdown + Live Proportion Box**: `<select id="paperFormatSelect">` on the left paired with `#paperFormatPreview` on the right showing the exact paper aspect ratio in the active orientation.
 2. **Orientation**: Separate horizontal (`Landscape`) and vertical (`Portrait`) rectangle icons.
-3. **Default Steps per Page & Grid**: Live `#layoutGridPreview` rendered directly from `computePageSlotRects()` in the current page's aspect ratio, margins, and borders, plus inline mini-diagram icons on Step Order Direction (`Rows` / `Columns`), Mixed Layouts, Page Density & Margins, and Page Number Format.
+3. **Default Page Grid**: Live `#layoutGridPreview` rendered directly from `computePageSlotRects()` in the current page's aspect ratio, margins, and borders, plus Columns / Rows selects and inline mini-diagram icons on Step Order Direction (`Rows` / `Columns`), Mixed Layouts, Page Density & Margins, and Page Number Format. The summary chip and preview title show the derived "Up to N steps per page"; there are no step-count presets or numeric input (the Step Range Group editor likewise has no Steps / Page field).
 4. **Step Range Groups**: Create, edit, and delete per-range layout/theme rules with a live `#grpGridPreview` inside the inline editor (`populateGroupThemeOptions()` iterates `Object.values(BUILT_IN_THEMES)`).
 5. **Persistence & Undo**: `layoutConfig` and `layoutGroups` are persisted in IndexedDB session prefs, included in `.biw` project exports/imports, and captured in Undo/Redo snapshots.

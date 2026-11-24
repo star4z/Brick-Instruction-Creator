@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   computePageSlotRects,
   createDefaultPageLayoutSpec,
+  deriveStepsPerPageFromLayout,
   describePageLayoutSpec,
   findLayoutGroupForStep,
+  getSpecStepsPerPageCap,
   normalizeLayoutGroups,
   normalizePageLayoutSpec,
   resolveGridDimensions,
@@ -12,18 +14,24 @@ import {
 } from '../pageLayout';
 
 describe('pageLayout engine', () => {
-  it('supports legacy string layouts and clamps arbitrary stepsPerPage', () => {
-    expect(normalizePageLayoutSpec(null, '1-up')).toMatchObject({ mode: 'custom', stepsPerPage: 1 });
-    expect(normalizePageLayoutSpec(null, '2-up')).toMatchObject({ mode: 'custom', stepsPerPage: 2 });
-    expect(normalizePageLayoutSpec(null, '4-up')).toMatchObject({ mode: 'custom', stepsPerPage: 4 });
+  it('derives steps per page from the layout (grid / mixed layout), ignoring saved counts', () => {
+    expect(normalizePageLayoutSpec(null, '1-up')).toMatchObject({ mode: 'custom', stepsPerPage: 1, cols: 1, rows: 1 });
+    expect(normalizePageLayoutSpec(null, '2-up')).toMatchObject({ mode: 'auto' });
+    expect(normalizePageLayoutSpec(null, '4-up')).toMatchObject({ mode: 'custom', stepsPerPage: 4, cols: 2, rows: 2 });
+    // Legacy explicit counts with an Auto grid fall back to smart pagination
     expect(normalizePageLayoutSpec({ mode: 'custom', stepsPerPage: 9, flow: 'column' })).toMatchObject({
-      mode: 'custom',
-      stepsPerPage: 9,
+      mode: 'auto',
       flow: 'column',
     });
-    expect(normalizePageLayoutSpec({ mode: 'custom', stepsPerPage: 99 })).toMatchObject({
-      stepsPerPage: 24,
-    });
+    expect(normalizePageLayoutSpec({ cols: 3, rows: 2 })).toMatchObject({ mode: 'custom', stepsPerPage: 6 });
+    expect(deriveStepsPerPageFromLayout({ cols: 'auto', rows: 'auto', mixedLayout: 'even' })).toBeNull();
+    expect(deriveStepsPerPageFromLayout({ cols: 3, rows: 'auto', mixedLayout: 'even' })).toBe(3);
+    expect(deriveStepsPerPageFromLayout({ cols: 'auto', rows: 2, mixedLayout: 'even' })).toBe(2);
+    expect(deriveStepsPerPageFromLayout({ cols: 'auto', rows: 'auto', mixedLayout: 'hero_left' })).toBe(3);
+    expect(deriveStepsPerPageFromLayout({ cols: 'auto', rows: 'auto', mixedLayout: 'custom_weights' })).toBe(4);
+    expect(deriveStepsPerPageFromLayout({ cols: 2, rows: 3, mixedLayout: 'hero_top' })).toBe(6);
+    expect(getSpecStepsPerPageCap(normalizePageLayoutSpec({ cols: 2, rows: 2 }))).toBe(4);
+    expect(getSpecStepsPerPageCap(createDefaultPageLayoutSpec())).toBeNull();
   });
 
   it('orders 2×2 grid row-first vs column-first accurately (12,13,14,15 example)', () => {
@@ -131,7 +139,7 @@ describe('pageLayout engine', () => {
         name: 'Early Steps',
         startStepNum: 1,
         endStepNum: 10,
-        layout: { mode: 'custom', stepsPerPage: 4, flow: 'column' },
+        layout: { cols: 2, rows: 2, flow: 'column' },
       },
       {
         id: 'g2',
