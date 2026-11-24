@@ -68,9 +68,27 @@ const STANDARD_NUMERIC_PART_RE = /^\d{3,}[a-z0-9_-]*$/;
 /** BrickLink Studio custom / assembly part IDs (e.g. bl_76925, bb892c01, 1234-bl) hosted in UnOfficial libraries. */
 const STUDIO_CUSTOM_PART_RE = /^(?:bl_|.*-bl$|bb\d+)/i;
 
+/**
+ * BrickLink-numbered printed/decorated IDs (`*pb####`, `*ps####`, `*pat####`, `*pr####` with 3+ digits,
+ * `*_torso`). These never exist in the official LDraw library (0 of ~25k official parts match), but
+ * many are hosted as Studio `PE_TEX_INFO` printed parts (e.g. `3626cpb1965`, `bl_3626cpb1211`) on
+ * UnOfficial mirrors.
+ */
+const STUDIO_PRINTED_PART_RE = /(?:(?:pb|ps|pat|pr)\d{3,}|_torso$)/i;
+
 export function isStudioCustomPartId(cleanKey: string): boolean {
   const clean = normalizeDatRef(cleanKey);
   return Boolean(clean && !clean.includes('/') && STUDIO_CUSTOM_PART_RE.test(clean));
+}
+
+export function isStudioPrintedPartId(cleanKey: string): boolean {
+  const clean = normalizeDatRef(cleanKey);
+  return Boolean(clean && !clean.includes('/') && STUDIO_PRINTED_PART_RE.test(clean));
+}
+
+/** IDs that only live on UnOfficial / custom mirrors (Studio custom shapes + BrickLink-numbered prints). */
+export function isUnofficialOnlyPartId(cleanKey: string): boolean {
+  return isStudioCustomPartId(cleanKey) || isStudioPrintedPartId(cleanKey);
 }
 
 export function isSynthesizedPrimitiveBase(base: string): boolean {
@@ -181,7 +199,7 @@ export function buildLDrawCandidatePaths(cleanKey: string): string[] {
   if (clean.startsWith('48/') || clean.startsWith('8/')) {
     return [`p/${clean}.dat`];
   }
-  if (isStudioCustomPartId(clean)) {
+  if (isUnofficialOnlyPartId(clean)) {
     return [`parts/${clean}.dat`];
   }
   if (PRIMITIVE_FIRST_RE.test(clean)) {
@@ -335,10 +353,10 @@ export async function fetchDatFromMirrors(
     const paths = buildLDrawCandidatePaths(clean);
     if (paths.length === 0) continue;
 
-    // Studio custom IDs (bl_*, *-bl, bb####) only live in UnOfficial / custom mirrors —
-    // probe those directly without wasting 404s against official LDraw mirrors!
+    // Studio custom IDs (bl_*, *-bl, bb####) and BrickLink-numbered prints (*pb####) only live in
+    // UnOfficial / custom mirrors — probe those directly without wasting 404s against official LDraw mirrors!
     const keyMirrors =
-      isStudioCustomPartId(clean) && hasScopedUnofficial
+      isUnofficialOnlyPartId(clean) && hasScopedUnofficial
         ? mirrors.filter((m) => m.scope === 'unofficial' || m.scope === 'custom')
         : mirrors;
 
@@ -520,22 +538,32 @@ export async function fetchLDrawDependencyGraph(
       return;
     }
 
-    // BrickLink-proprietary printed/decorated IDs (*pb####* with 3+ digits, *_torso) never exist
-    // verbatim in public LDraw mirrors — enqueue their canonical unprinted base LDraw ID directly,
-    // while keeping unprinted Studio custom shapes (bl_76925, bb892c01) and 1-2 digit official LDraw
-    // pattern codes (3626cpb6, 3626cp01) eligible for direct fetch from UnOfficial / Official mirrors!
-    if (!k.includes('/') && /(?:(?:pb|ps|pat|pr)\d{3,}|_torso$)/i.test(k)) {
-      const fbs = getFallbacks(k);
-      if (fbs.length > 0) {
-        enqueue(fbs[0]);
-        return;
+    // BrickLink-numbered printed/decorated IDs (*pb####* with 3+ digits, *_torso) never exist in the
+    // official LDraw library, but many are hosted as Studio PE_TEX_INFO prints on UnOfficial mirrors
+    // (e.g. 3626cpb1965, bl_3626cpb1211). Always try the exact printed ID first — fetchDatFromMirrors
+    // routes it to UnOfficial mirrors only and falls back to the unprinted base mold if it's absent.
+    // Once the exact print has 404'd this session, go straight to the base mold.
+    if (notFoundCache?.has(k)) {
+      if (isStudioPrintedPartId(k)) {
+        const fbs = getFallbacks(k);
+        if (fbs.length > 0) enqueue(fbs[0]);
       }
+      return;
     }
-
-    if (notFoundCache?.has(k)) return;
 
     queued.add(k);
     queue.push(k);
+  };
+
+  // Fallback chain used while fetching: stop at the first fallback that is already loaded so a missing
+  // printed variant never re-downloads (or overwrites) an unprinted base mold that's already cached.
+  const getFetchFallbacks = (key: string): string[] => {
+    const out: string[] = [];
+    for (const fb of getFallbacks(key)) {
+      if (getDirectLoadedLines(normalizeDatRef(fb))) break;
+      out.push(fb);
+    }
+    return out;
   };
 
   for (const id of rootPartIds) enqueue(id);
@@ -568,7 +596,7 @@ export async function fetchLDrawDependencyGraph(
 
     const results = await Promise.all(
       batch.map(async (k) => {
-        const res = await fetchDatFromMirrors(k, mirrors, getFallbacks, fetchImpl, timeoutMs, signal);
+        const res = await fetchDatFromMirrors(k, mirrors, getFetchFallbacks, fetchImpl, timeoutMs, signal);
         return { k, ...res };
       }),
     );
@@ -580,6 +608,8 @@ export async function fetchLDrawDependencyGraph(
         onDatLoaded(storeKey, r.k, r.text);
         datBatch.push([storeKey, r.text]);
         fetched++;
+        // Requested exact ID wasn't hosted (resolved to a base-mold fallback): remember the miss.
+        if (storeKey !== r.k) notFoundCache?.add(r.k);
         const deps = extractDatDependencies(r.text);
         for (const sub of deps.subfiles) enqueue(sub);
         for (const tex of deps.textures) enqueueTexture(tex);

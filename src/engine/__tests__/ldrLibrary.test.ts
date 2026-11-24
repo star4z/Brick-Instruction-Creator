@@ -305,4 +305,48 @@ describe('ldrLibrary mirror fetching and dependency graph BFS', () => {
     expect(requested).not.toContain('https://official.test/ldraw/parts/bl_76925.dat');
     expect(requested).not.toContain('https://official.test/ldraw/parts/bb892c01.dat');
   });
+
+  it('fetches BrickLink-numbered printed heads (3626cpb1965, bl_3626cpb1211) from UnOfficial mirrors even when the blank 3626c is cached', async () => {
+    const scopedMirrors: LDrawMirrorConfig[] = [
+      { url: 'https://official.test/ldraw/', label: 'Official', repoGroup: 'off', scope: 'official' },
+      { url: 'https://unofficial.test/UnOfficial/', label: 'UnOfficial', repoGroup: 'unoff', scope: 'unofficial' },
+    ];
+    const requested: string[] = [];
+    const store = new Map<string, string[]>([['3626c', ['0 Minifig Head', '4 16 0 0 0 1 0 0 1 0 1 0 0 1']]]);
+    const notFound = new Set<string>();
+    const printedHead = (name: string) =>
+      `0 FILE ${name}.dat\n0 PE_TEX_PATH 0\n0 PE_TEX_INFO iVBORw0KGgo=\n1 16 0 0 0 1 0 0 0 1 0 0 0 1 3626tex.dat\n`;
+
+    const fakeFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      requested.push(url);
+      if (url === 'https://unofficial.test/UnOfficial/parts/3626cpb1965.dat') return mockResponse(200, printedHead('3626cpb1965'));
+      if (url === 'https://unofficial.test/UnOfficial/parts/bl_3626cpb1211.dat') return mockResponse(200, printedHead('bl_3626cpb1211'));
+      if (url === 'https://unofficial.test/UnOfficial/parts/3626tex.dat') return mockResponse(200, '0 Head Tex\n3 16 0 0 0 1 0 0 0 1 0\n');
+      return mockResponse(404);
+    });
+
+    const fallbacks = (k: string) => (/^(?:bl_)?3626cpb\d+$/.test(k) ? ['3626c', '3626b', '3626'] : []);
+    const res = await fetchLDrawDependencyGraph({
+      rootPartIds: ['3626cpb1965', 'bl_3626cpb1211', 'bl_3626cpb9999'],
+      mirrors: scopedMirrors,
+      getDirectLoadedLines: (k) => store.get(k) ?? null,
+      getFallbacks: fallbacks,
+      notFoundCache: notFound,
+      onDatLoaded: (storeKey, _reqKey, text) => {
+        store.set(storeKey, text.split('\n'));
+      },
+      fetchImpl: fakeFetch as unknown as typeof fetch,
+    });
+
+    expect(res.fetched).toBe(3); // 3626cpb1965, bl_3626cpb1211, 3626tex
+    expect(store.has('3626cpb1965')).toBe(true);
+    expect(store.has('bl_3626cpb1211')).toBe(true);
+    expect(store.has('3626tex')).toBe(true);
+    // Unhosted print falls back to the cached blank head without re-downloading it.
+    expect(notFound.has('bl_3626cpb9999')).toBe(true);
+    expect(requested.filter((u) => u.endsWith('/3626c.dat'))).toEqual([]);
+    // BrickLink-numbered prints never waste 404 probes against the official mirror.
+    expect(requested.some((u) => u.startsWith('https://official.test/') && u.includes('3626cpb'))).toBe(false);
+  });
 });

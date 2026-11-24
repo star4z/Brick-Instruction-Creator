@@ -9746,7 +9746,9 @@ function collectMissingFetchTargets(parsedOverride = null) {
       }
       return;
     }
-    if (!k.includes('/') && /(?:(?:pb|ps|pat|pr)\d{3,}|_torso$)/i.test(k)) {
+    // BrickLink-numbered prints (3626cpb1965, bl_3626cpb1211) may be hosted on UnOfficial mirrors —
+    // only fall back to the unprinted base mold once the exact print has 404'd this session.
+    if (!k.includes('/') && /(?:(?:pb|ps|pat|pr)\d{3,}|_torso$)/i.test(k) && notFoundDatCache.has(k)) {
       const fbs = getPartIdFallbacks(k);
       if (fbs.length > 0) {
         enqueue(fbs[0]);
