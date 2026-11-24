@@ -228,8 +228,7 @@ describe('Cover Metadata & LEGO-Style Layout Geometry', () => {
   it('exposes canonical front and back cover branding copy', () => {
     expect(PROGRAM_NAME).toBe('Brick Instruction Works');
     expect(COVER_MADE_WITH_LABEL).toBe('Made with');
-    expect(COVER_QR_HINT_TEXT.toLowerCase()).toContain('scan');
-    expect(COVER_QR_HINT_TEXT.toLowerCase()).toContain('qr');
+    expect(COVER_QR_HINT_TEXT).toBe('Scan QR to visit the website');
     expect(BACK_COVER_CREDIT).toBe('Made with Brick Instruction Works');
   });
 

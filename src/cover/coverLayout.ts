@@ -3,7 +3,7 @@
 export const PROGRAM_NAME = 'Brick Instruction Works';
 export const PROGRAM_URL = 'https://star4z.github.io/Brick-Instruction-Creator/';
 export const COVER_MADE_WITH_LABEL = 'Made with';
-export const COVER_QR_HINT_TEXT = 'Scan QR to create instructions';
+export const COVER_QR_HINT_TEXT = 'Scan QR to visit the website';
 export const BACK_COVER_CREDIT = `${COVER_MADE_WITH_LABEL} ${PROGRAM_NAME}`;
 
 export interface CoverMeta {
