@@ -44,4 +44,43 @@ describe('studioRuntime safety checks', () => {
 
     expect(undeclared).toEqual([]);
   }, 30_000);
+
+  it('implements procedural geometry for every shape declared in PARTS_CATALOG', () => {
+    const runtimePath = path.resolve(process.cwd(), 'src/studioRuntime.ts');
+    const sourceText = fs.readFileSync(runtimePath, 'utf8');
+
+    const catalogMatch = sourceText.match(/const PARTS_CATALOG = \{([\s\S]*?)\n\};/);
+    expect(catalogMatch).not.toBeNull();
+    const declaredShapes = new Set<string>();
+    for (const m of catalogMatch![1].matchAll(/shape:\s*'([^']+)'/g)) {
+      declaredShapes.add(m[1]);
+    }
+    expect(declaredShapes.size).toBeGreaterThanOrEqual(20);
+
+    const emitStart = sourceText.indexOf('const emitSingleLeaf =');
+    const emitEnd = sourceText.indexOf('const emitPart =', emitStart);
+    expect(emitStart).toBeGreaterThan(-1);
+    expect(emitEnd).toBeGreaterThan(emitStart);
+    const emitBody = sourceText.slice(emitStart, emitEnd);
+
+    const unhandled = Array.from(declaredShapes).filter(
+      (shape) => !emitBody.includes(`def.shape === '${shape}'`),
+    );
+    expect(unhandled).toEqual([]);
+  });
+
+  it('renders Bricks Library previews with heroQuality, heroShading, and tightFit', () => {
+    const runtimePath = path.resolve(process.cwd(), 'src/studioRuntime.ts');
+    const sourceText = fs.readFileSync(runtimePath, 'utf8');
+
+    const fnStart = sourceText.indexOf('function renderPartPreviewDataUrl(');
+    const fnEnd = sourceText.indexOf('function stopLibThumbQueue(', fnStart);
+    expect(fnStart).toBeGreaterThan(-1);
+    expect(fnEnd).toBeGreaterThan(fnStart);
+    const fnBody = sourceText.slice(fnStart, fnEnd);
+
+    expect(fnBody).toContain('heroQuality: true');
+    expect(fnBody).toContain('heroShading: true');
+    expect(fnBody).toContain('tightFit: true');
+  });
 });

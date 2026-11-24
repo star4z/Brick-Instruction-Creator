@@ -538,15 +538,17 @@ const PARTS_CATALOG = {
   '3003':{name:'Brick 2×2',sx:2,sz:2,h:24,studs:true}, '3002':{name:'Brick 2×3',sx:3,sz:2,h:24,studs:true},
   '3001':{name:'Brick 2×4',sx:4,sz:2,h:24,studs:true}, '2456':{name:'Brick 2×6',sx:6,sz:2,h:24,studs:true},
   '3007':{name:'Brick 2×8',sx:8,sz:2,h:24,studs:true}, '3006':{name:'Brick 2×10',sx:10,sz:2,h:24,studs:true},
-  '2357':{name:'Brick 2×2 Corner',sx:2,sz:2,h:24,studs:true}, '6541':{name:'Technic Brick 1×1',sx:1,sz:1,h:24,studs:true},
-  '3700':{name:'Technic Brick 1×2',sx:2,sz:1,h:24,studs:true}, '3701':{name:'Technic Brick 1×4',sx:4,sz:1,h:24,studs:true},
-  '3894':{name:'Technic Brick 1×6',sx:6,sz:1,h:24,studs:true},
+  '2357':{name:'Brick 2×2 Corner',sx:2,sz:2,h:24,studs:true,shape:'corner',studLayout:'corner'},
+  '6541':{name:'Technic Brick 1×1',sx:1,sz:1,h:24,studs:true,shape:'technic_brick'},
+  '3700':{name:'Technic Brick 1×2',sx:2,sz:1,h:24,studs:true,shape:'technic_brick'},
+  '3701':{name:'Technic Brick 1×4',sx:4,sz:1,h:24,studs:true,shape:'technic_brick'},
+  '3894':{name:'Technic Brick 1×6',sx:6,sz:1,h:24,studs:true,shape:'technic_brick'},
   // Standard Plates
   '3024':{name:'Plate 1×1',sx:1,sz:1,h:8,studs:true}, '3023':{name:'Plate 1×2',sx:2,sz:1,h:8,studs:true},
   '3623':{name:'Plate 1×3',sx:3,sz:1,h:8,studs:true}, '3710':{name:'Plate 1×4',sx:4,sz:1,h:8,studs:true},
   '3666':{name:'Plate 1×6',sx:6,sz:1,h:8,studs:true}, '3460':{name:'Plate 1×8',sx:8,sz:1,h:8,studs:true},
   '4477':{name:'Plate 1×10',sx:10,sz:1,h:8,studs:true}, '60479':{name:'Plate 1×12',sx:12,sz:1,h:8,studs:true},
-  '3022':{name:'Plate 2×2',sx:2,sz:2,h:8,studs:true}, '2420':{name:'Plate 2×2 Corner',sx:2,sz:2,h:8,studs:true},
+  '3022':{name:'Plate 2×2',sx:2,sz:2,h:8,studs:true}, '2420':{name:'Plate 2×2 Corner',sx:2,sz:2,h:8,studs:true,shape:'corner',studLayout:'corner'},
   '3021':{name:'Plate 2×3',sx:3,sz:2,h:8,studs:true}, '3020':{name:'Plate 2×4',sx:4,sz:2,h:8,studs:true},
   '3795':{name:'Plate 2×6',sx:6,sz:2,h:8,studs:true}, '3034':{name:'Plate 2×8',sx:8,sz:2,h:8,studs:true},
   '3832':{name:'Plate 2×10',sx:10,sz:2,h:8,studs:true}, '2445':{name:'Plate 2×12',sx:12,sz:2,h:8,studs:true},
@@ -555,46 +557,50 @@ const PARTS_CATALOG = {
   '3029':{name:'Plate 4×12',sx:12,sz:4,h:8,studs:true},
   '3958':{name:'Plate 6×6',sx:6,sz:6,h:8,studs:true}, '3036':{name:'Plate 6×8',sx:8,sz:6,h:8,studs:true},
   '3033':{name:'Plate 6×10',sx:10,sz:6,h:8,studs:true}, '3028':{name:'Plate 6×12',sx:12,sz:6,h:8,studs:true},
-  '35480':{name:'Rounded Plate 1×2',sx:2,sz:1,h:8,studs:true}, '3794':{name:'Jumper Plate 1×2',sx:2,sz:1,h:8,studs:true},
-  '15573':{name:'Jumper Plate 1×2',sx:2,sz:1,h:8,studs:true}, '87580':{name:'Jumper Plate 2×2',sx:2,sz:2,h:8,studs:true},
-  '92593':{name:'Plate 1×4 (2 Studs)',sx:4,sz:1,h:8,studs:true}, '41740':{name:'Plate 1×4 (2 Studs)',sx:4,sz:1,h:8,studs:true},
-  '32001':{name:'Technic Plate 2×6',sx:6,sz:2,h:8,studs:true},
+  '35480':{name:'Rounded Plate 1×2',sx:2,sz:1,h:8,studs:true,shape:'rounded_plate'},
+  '3794':{name:'Jumper Plate 1×2',sx:2,sz:1,h:8,studs:true,studLayout:'center'},
+  '15573':{name:'Jumper Plate 1×2',sx:2,sz:1,h:8,studs:true,studLayout:'center'},
+  '87580':{name:'Jumper Plate 2×2',sx:2,sz:2,h:8,studs:true,studLayout:'center'},
+  '92593':{name:'Plate 1×4 (2 Studs)',sx:4,sz:1,h:8,studs:true,studLayout:'ends'},
+  '41740':{name:'Plate 1×4 (2 Studs)',sx:4,sz:1,h:8,studs:true,studLayout:'ends'},
+  '32001':{name:'Technic Plate 2×6',sx:6,sz:2,h:8,studs:true,shape:'technic_plate'},
   // Tiles & Grilles
   '3070b':{name:'Tile 1×1',sx:1,sz:1,h:8,studs:false}, '3069b':{name:'Tile 1×2',sx:2,sz:1,h:8,studs:false},
   '63864':{name:'Tile 1×3',sx:3,sz:1,h:8,studs:false}, '2431':{name:'Tile 1×4',sx:4,sz:1,h:8,studs:false},
   '6636':{name:'Tile 1×6',sx:6,sz:1,h:8,studs:false}, '4162':{name:'Tile 1×8',sx:8,sz:1,h:8,studs:false},
   '3068b':{name:'Tile 2×2',sx:2,sz:2,h:8,studs:false}, '26603':{name:'Tile 2×3',sx:3,sz:2,h:8,studs:false},
   '87079':{name:'Tile 2×4',sx:4,sz:2,h:8,studs:false}, '69729':{name:'Tile 2×6',sx:6,sz:2,h:8,studs:false},
-  '2412b':{name:'Grille Tile 1×2',sx:2,sz:1,h:8,studs:false}, '25269':{name:'Quarter Round Tile 1×1',sx:1,sz:1,h:8,studs:false},
+  '2412b':{name:'Grille Tile 1×2',sx:2,sz:1,h:8,studs:false,shape:'grille'},
+  '25269':{name:'Quarter Round Tile 1×1',sx:1,sz:1,h:8,studs:false,shape:'quarter_round'},
   '98138':{name:'Round Tile 1×1',sx:1,sz:1,h:8,studs:false,shape:'round'}, '14769':{name:'Round Tile 2×2',sx:2,sz:2,h:8,studs:false,shape:'round'},
-  '15535':{name:'Round Tile 2×2 w/ Hole',sx:2,sz:2,h:8,studs:false,shape:'round'},
+  '15535':{name:'Round Tile 2×2 w/ Hole',sx:2,sz:2,h:8,studs:false,shape:'round_hole'},
   // Round Bricks & Plates
   '4073':{name:'Round Plate 1×1',sx:1,sz:1,h:8,studs:true,shape:'round'}, '4032':{name:'Round Plate 2×2',sx:2,sz:2,h:8,studs:true,shape:'round'},
   '60474':{name:'Round Plate 4×4',sx:4,sz:4,h:8,studs:true,shape:'round'}, '3062b':{name:'Round Brick 1×1',sx:1,sz:1,h:24,studs:true,shape:'round'},
   '3941':{name:'Round Brick 2×2',sx:2,sz:2,h:24,studs:true,shape:'round'},
   // Slopes, Brackets, Windows, Clips & Modified
   '54200':{name:'Cheese Slope 1×1',sx:1,sz:1,h:16,studs:false,shape:'slope'}, '85984':{name:'Slope 30° 1×2×2/3',sx:2,sz:1,h:16,studs:false,shape:'slope'},
-  '3040b':{name:'Slope 45° 2×1',sx:2,sz:1,h:24,studs:true,shape:'slope',topStudsX:1}, '3665':{name:'Inverted Slope 45° 2×1',sx:2,sz:1,h:24,studs:true},
-  '3039':{name:'Slope 45° 2×2',sx:2,sz:2,h:24,studs:true,shape:'slope',topStudsX:1}, '49307':{name:'Curved Slope 1×1×2/3',sx:1,sz:1,h:16,studs:false,shape:'slope'},
+  '3040b':{name:'Slope 45° 2×1',sx:2,sz:1,h:24,studs:true,shape:'slope',topStudsX:1}, '3665':{name:'Inverted Slope 45° 2×1',sx:2,sz:1,h:24,studs:true,shape:'slope_inv'},
+  '3039':{name:'Slope 45° 2×2',sx:2,sz:2,h:24,studs:true,shape:'slope',topStudsX:1}, '49307':{name:'Curved Slope 1×1×2/3',sx:1,sz:1,h:16,studs:false,shape:'curved_slope'},
   '4733':{name:'SNOT Brick 1×1 (4 Sides)',sx:1,sz:1,h:24,studs:true,shape:'snot4'}, '87087':{name:'SNOT Brick 1×1 (1 Side)',sx:1,sz:1,h:24,studs:true,shape:'snot1'},
-  '99206':{name:'Plate 2×2×2/3 Bracket',sx:2,sz:2,h:16,studs:true}, '44728':{name:'Bracket 1×2 - 2×2',sx:2,sz:2,h:24,studs:true},
-  '99780':{name:'Bracket 1×2 - 1×2 Inverted',sx:2,sz:1,h:24,studs:true}, '99781':{name:'Bracket 1×2 - 1×2',sx:2,sz:1,h:24,studs:true},
+  '99206':{name:'Plate 2×2×2/3 Bracket',sx:2,sz:2,h:16,studs:true,shape:'bracket'}, '44728':{name:'Bracket 1×2 - 2×2',sx:2,sz:2,h:24,studs:true,shape:'bracket'},
+  '99780':{name:'Bracket 1×2 - 1×2 Inverted',sx:2,sz:1,h:24,studs:true,shape:'bracket_inv'}, '99781':{name:'Bracket 1×2 - 1×2',sx:2,sz:1,h:24,studs:true,shape:'bracket'},
   '60475b':{name:'Brick 1×1 w/ Vertical Clip',sx:1,sz:1,h:24,studs:true,shape:'clip_h'}, '15712':{name:'Tile 1×1 w/ Clip',sx:1,sz:1,h:8,studs:false,shape:'clip_v'},
   '60470b':{name:'Plate 1×2 with Clips',sx:2,sz:1,h:8,studs:true,shape:'clip_h'}, '6019':{name:'Plate 1×1 with Clip',sx:1,sz:1,h:8,studs:true,shape:'clip_h'},
   '4085d':{name:'Plate 1×1 Vertical Clip',sx:1,sz:1,h:8,studs:false,shape:'clip_v'},
-  '60594':{name:'Window Frame 1×4×3',sx:4,sz:1,h:72,studs:true}, '60593':{name:'Window Frame 1×2×3',sx:2,sz:1,h:72,studs:true},
+  '60594':{name:'Window Frame 1×4×3',sx:4,sz:1,h:72,studs:true,shape:'window_frame'}, '60593':{name:'Window Frame 1×2×3',sx:2,sz:1,h:72,studs:true,shape:'window_frame'},
   '60603':{name:'Window Glass 1×4×3',sx:4,sz:0.3,h:64,studs:false}, '60601':{name:'Window Glass 1×2×2',sx:2,sz:0.3,h:48,studs:false},
-  '4079':{name:'Minifigure Seat 2×2',sx:2,sz:2,h:24,studs:false}, '38339':{name:'Train Wheel Holder',sx:2,sz:6,h:24,studs:true},
-  '38340':{name:'Train Wheel RC',sx:1,sz:2,h:32,studs:false,shape:'round'},
+  '4079':{name:'Minifigure Seat 2×2',sx:2,sz:2,h:24,studs:false,shape:'seat'}, '38339':{name:'Train Wheel Holder',sx:2,sz:6,h:24,studs:true,shape:'wheel_holder'},
+  '38340':{name:'Train Wheel RC',sx:1,sz:2,h:32,studs:false,shape:'wheel'},
   // Bars & Technic Axles (1:1 Size Guides)
   '30374':{name:'Bar 4L',sx:0.4,sz:0.4,h:80,studs:false,shape:'bar',lengthL:4},
   '63965':{name:'Bar 6L',sx:0.4,sz:0.4,h:120,studs:false,shape:'bar',lengthL:6},
-  '3707':{name:'Technic Axle 8L',sx:0.4,sz:0.4,h:160,studs:false,shape:'bar',centered:true,lengthL:8},
-  '4519':{name:'Technic Axle 3L',sx:0.4,sz:0.4,h:60,studs:false,shape:'bar',centered:true,lengthL:3},
-  '32062':{name:'Technic Axle 2L',sx:0.4,sz:0.4,h:40,studs:false,shape:'bar',centered:true,lengthL:2},
-  '3705':{name:'Technic Axle 4L',sx:0.4,sz:0.4,h:80,studs:false,shape:'bar',centered:true,lengthL:4},
-  '32073':{name:'Technic Axle 5L',sx:0.4,sz:0.4,h:100,studs:false,shape:'bar',centered:true,lengthL:5},
-  '3706':{name:'Technic Axle 6L',sx:0.4,sz:0.4,h:120,studs:false,shape:'bar',centered:true,lengthL:6},
+  '3707':{name:'Technic Axle 8L',sx:0.4,sz:0.4,h:160,studs:false,shape:'axle',centered:true,lengthL:8},
+  '4519':{name:'Technic Axle 3L',sx:0.4,sz:0.4,h:60,studs:false,shape:'axle',centered:true,lengthL:3},
+  '32062':{name:'Technic Axle 2L',sx:0.4,sz:0.4,h:40,studs:false,shape:'axle',centered:true,lengthL:2},
+  '3705':{name:'Technic Axle 4L',sx:0.4,sz:0.4,h:80,studs:false,shape:'axle',centered:true,lengthL:4},
+  '32073':{name:'Technic Axle 5L',sx:0.4,sz:0.4,h:100,studs:false,shape:'axle',centered:true,lengthL:5},
+  '3706':{name:'Technic Axle 6L',sx:0.4,sz:0.4,h:120,studs:false,shape:'axle',centered:true,lengthL:6},
   '3815c01':{name:'Minifigure Hips & Legs',sx:1.6,sz:0.8,h:28,studs:false,shape:'mf_legs'},
   '970c00':{name:'Minifigure Hips & Legs',sx:1.6,sz:0.8,h:28,studs:false,shape:'mf_legs'},
   '973':{name:'Minifigure Torso',sx:1.5,sz:0.75,h:32,studs:false,shape:'mf_torso_body'},
@@ -1186,10 +1192,10 @@ function buildMeshBuffers(prevParts, newParts, opts) {
 
   const addBox = (cx, cy, cz, w, h, d, m, ox, oy, oz, hinge, col, eCol, aByte, eAlpha = aByte) => {
     const hw=w/2, hh=h/2, hd=d/2;
-    if (heroQuality && hw > 1.2 && hh > 1.2 && hd > 1.2) {
+    if (heroQuality && hw > 0.6 && hh > 0.6 && hd > 0.6) {
       // Micro-beveled LEGO ABS brick: inset main faces + 12 chamfered 45° edges + 8 corner facets
       // catches realistic glossy studio softbox highlights along every brick seam!
-      const b = Math.min(0.48, hw * 0.14, hh * 0.14, hd * 0.14);
+      const b = Math.min(0.48, hw * 0.16, hh * 0.16, hd * 0.16);
       const iw = hw - b, ih = hh - b, id = hd - b;
       const pt = (x, y, z) => xformPt([cx + x, cy + y, cz + z], m, ox, oy, oz, hinge);
       const qFace = (p0, p1, p2, p3, nLocal) => {
@@ -1263,7 +1269,7 @@ function buildMeshBuffers(prevParts, newParts, opts) {
   };
 
   const addCyl = (cx, cy, cz, rTop, rBot, h, axis, segs, m, ox, oy, oz, hinge, col, eCol, aByte, bevelTop = false) => {
-    const effSegs = heroQuality ? Math.max(segs, 16) : segs;
+    const effSegs = heroQuality ? Math.max(segs, 20) : segs;
     const hh = h / 2;
     const mk = (u, v, t) => axis === 'y' ? [cx+u,cy+t,cz+v] : axis === 'x' ? [cx+t,cy+u,cz+v] : [cx+u,cy+v,cz+t];
     const mkN = (u, v, t) => xformNorm(axis === 'y' ? [u, t, v] : axis === 'x' ? [t, u, v] : [u, v, t], m, hinge);
@@ -1305,6 +1311,98 @@ function buildMeshBuffers(prevParts, newParts, opts) {
       }
       if (rBot > 0.05) pushTri(botC, b1, b0, nBot, col, aByte);
       if (!heroQuality && includeEdges && rTop > 0.05) pushEdge(t0, t1, eCol, aByte);
+    }
+  };
+
+  // Hollow cylindrical ring / annulus (for round tiles with holes, Technic hole collars, and clips)
+  const addAnnulus = (cx, cy, cz, rOut, rIn, h, axis, segs, m, ox, oy, oz, hinge, col, eCol, aByte, startAng = 0, endAng = Math.PI * 2) => {
+    const isFull = Math.abs((endAng - startAng) - Math.PI * 2) < 1e-4;
+    const effSegs = heroQuality ? Math.max(segs, isFull ? 24 : 16) : segs;
+    const hh = h / 2;
+    const mk = (u, v, t) => axis === 'y' ? [cx+u,cy+t,cz+v] : axis === 'x' ? [cx+t,cy+u,cz+v] : [cx+u,cy+v,cz+t];
+    const mkN = (u, v, t) => xformNorm(axis === 'y' ? [u, t, v] : axis === 'x' ? [t, u, v] : [u, v, t], m, hinge);
+    const nTop = xformNorm(axis==='y'?[0,1,0]:axis==='x'?[1,0,0]:[0,0,1], m, hinge);
+    const nBot = [-nTop[0], -nTop[1], -nTop[2]];
+    for (let i = 0; i < effSegs; i++) {
+      const a0 = startAng + (i / effSegs) * (endAng - startAng);
+      const a1 = startAng + ((i + 1) / effSegs) * (endAng - startAng);
+      const c0 = Math.cos(a0), s0 = Math.sin(a0), c1 = Math.cos(a1), s1 = Math.sin(a1);
+      const ot0 = xformPt(mk(c0*rOut, s0*rOut, hh), m, ox, oy, oz, hinge);
+      const ot1 = xformPt(mk(c1*rOut, s1*rOut, hh), m, ox, oy, oz, hinge);
+      const ob0 = xformPt(mk(c0*rOut, s0*rOut, -hh), m, ox, oy, oz, hinge);
+      const ob1 = xformPt(mk(c1*rOut, s1*rOut, -hh), m, ox, oy, oz, hinge);
+      const it0 = xformPt(mk(c0*rIn, s0*rIn, hh), m, ox, oy, oz, hinge);
+      const it1 = xformPt(mk(c1*rIn, s1*rIn, hh), m, ox, oy, oz, hinge);
+      const ib0 = xformPt(mk(c0*rIn, s0*rIn, -hh), m, ox, oy, oz, hinge);
+      const ib1 = xformPt(mk(c1*rIn, s1*rIn, -hh), m, ox, oy, oz, hinge);
+      if (heroQuality) {
+        const on0 = mkN(c0, s0, 0), on1 = mkN(c1, s1, 0);
+        const in0 = mkN(-c0, -s0, 0), in1 = mkN(-c1, -s1, 0);
+        pushTriSmooth(ob0, ob1, ot1, on0, on1, on1, col, aByte);
+        pushTriSmooth(ob0, ot1, ot0, on0, on1, on0, col, aByte);
+        pushTriSmooth(it0, it1, ib1, in0, in1, in1, col, aByte);
+        pushTriSmooth(it0, ib1, ib0, in0, in1, in0, col, aByte);
+      } else {
+        const am = (a0 + a1) / 2;
+        const on = mkN(Math.cos(am), Math.sin(am), 0);
+        const inn = mkN(-Math.cos(am), -Math.sin(am), 0);
+        pushTri(ob0, ob1, ot1, on, col, aByte); pushTri(ob0, ot1, ot0, on, col, aByte);
+        pushTri(it0, it1, ib1, inn, col, aByte); pushTri(it0, ib1, ib0, inn, col, aByte);
+      }
+      pushTri(it0, ot0, ot1, nTop, col, aByte); pushTri(it0, ot1, it1, nTop, col, aByte);
+      pushTri(ob0, ib0, ib1, nBot, col, aByte); pushTri(ob0, ib1, ob1, nBot, col, aByte);
+      if (!heroQuality && includeEdges) {
+        pushEdge(ot0, ot1, eCol, aByte);
+        pushEdge(it0, it1, eCol, aByte);
+      }
+      if (!isFull && i === 0) {
+        const capN = mkN(s0, -c0, 0);
+        pushTri(ib0, ob0, ot0, capN, col, aByte); pushTri(ib0, ot0, it0, capN, col, aByte);
+      }
+      if (!isFull && i === effSegs - 1) {
+        const capN = mkN(-s1, c1, 0);
+        pushTri(ob1, ib1, it1, capN, col, aByte); pushTri(ob1, it1, ot1, capN, col, aByte);
+      }
+    }
+  };
+
+  // Extrude a CCW 2D polygon in the XY plane along Z from z0 to z1 (slopes, curved slopes, wedges)
+  const addExtrudedProfile = (pts2D, z0, z1, m, ox, oy, oz, hinge, col, eCol, aByte, eAlpha = aByte, smoothNorms = null) => {
+    const nPts = pts2D.length;
+    if (nPts < 3) return;
+    let cx2 = 0, cy2 = 0;
+    for (let i = 0; i < nPts; i++) { cx2 += pts2D[i][0]; cy2 += pts2D[i][1]; }
+    cx2 /= nPts; cy2 /= nPts;
+    const fCenter = xformPt([cx2, cy2, z1], m, ox, oy, oz, hinge);
+    const bCenter = xformPt([cx2, cy2, z0], m, ox, oy, oz, hinge);
+    const nFront = xformNorm([0, 0, 1], m, hinge);
+    const nBack = xformNorm([0, 0, -1], m, hinge);
+    const fPts = pts2D.map(([x, y]) => xformPt([x, y, z1], m, ox, oy, oz, hinge));
+    const bPts = pts2D.map(([x, y]) => xformPt([x, y, z0], m, ox, oy, oz, hinge));
+    for (let i = 0; i < nPts; i++) {
+      const j = (i + 1) % nPts;
+      pushTri(fCenter, fPts[i], fPts[j], nFront, col, aByte);
+      pushTri(bCenter, bPts[j], bPts[i], nBack, col, aByte);
+      const dx = pts2D[j][0] - pts2D[i][0];
+      const dy = pts2D[j][1] - pts2D[i][1];
+      const len = Math.hypot(dx, dy) || 1;
+      const flatN = xformNorm([dy / len, -dx / len, 0], m, hinge);
+      if (heroQuality && smoothNorms && smoothNorms[i] && smoothNorms[j]) {
+        const sn0 = xformNorm([smoothNorms[i][0], smoothNorms[i][1], 0], m, hinge);
+        const sn1 = xformNorm([smoothNorms[j][0], smoothNorms[j][1], 0], m, hinge);
+        pushTriSmooth(fPts[i], bPts[i], bPts[j], sn0, sn0, sn1, col, aByte);
+        pushTriSmooth(fPts[i], bPts[j], fPts[j], sn0, sn1, sn1, col, aByte);
+      } else {
+        pushTri(fPts[i], bPts[i], bPts[j], flatN, col, aByte);
+        pushTri(fPts[i], bPts[j], fPts[j], flatN, col, aByte);
+      }
+      if (!heroQuality && includeEdges) {
+        pushEdge(fPts[i], fPts[j], eCol, eAlpha);
+        pushEdge(bPts[i], bPts[j], eCol, eAlpha);
+        if (!smoothNorms || !smoothNorms[i]) {
+          pushEdge(fPts[i], bPts[i], eCol, eAlpha);
+        }
+      }
     }
   };
 
@@ -1489,16 +1587,37 @@ function buildMeshBuffers(prevParts, newParts, opts) {
 
   const addTopStuds = (def, m, ox, oy, oz, hinge, col, eCol, aByte) => {
     if (!def.studs) return;
+    const studSegs = heroQuality ? 18 : 8;
+    const emitStud = (x, z) => {
+      addCyl(x, 1.8, z, 5.8, 5.8, 4.4, 'y', studSegs, m, ox, oy, oz, hinge, col, eCol, aByte, true);
+    };
+    if (def.studLayout === 'center') {
+      emitStud(0, 0);
+      return;
+    }
     const topX = def.topStudsX || Math.round(def.sx);
     const sx = Math.round(def.sx), sz = Math.round(def.sz);
     const startX = -((sx - 1) * 20) / 2, startZ = -((sz - 1) * 20) / 2;
-    for (let ix = 0; ix < topX; ix++)
-      for (let iz = 0; iz < sz; iz++)
-        addCyl(startX + ix*20, 1.8, startZ + iz*20, 5.8, 5.8, 4.4, 'y', heroQuality ? 16 : 8, m, ox, oy, oz, hinge, col, eCol, aByte, true);
+    if (def.studLayout === 'ends') {
+      emitStud(startX, 0);
+      if (sx > 1) emitStud(startX + (sx - 1) * 20, 0);
+      return;
+    }
+    const roundR = def.shape === 'round' ? (def.sx * 20) / 2 - 2.5 : Infinity;
+    for (let ix = 0; ix < topX; ix++) {
+      for (let iz = 0; iz < sz; iz++) {
+        if (def.studLayout === 'corner' && ix === sx - 1 && iz === sz - 1) continue;
+        const px = startX + ix * 20;
+        const pz = startZ + iz * 20;
+        if (def.shape === 'round' && sx >= 4 && Math.hypot(px, pz) + 4.5 > roundR) continue;
+        emitStud(px, pz);
+      }
+    }
   };
 
   // Tapered arbitrary-axis limb segment (for sculpted minifigure arms & wrists)
   const addLimb = (p0, p1, r0, r1, segs, m, ox, oy, oz, hinge, col, eCol, aByte, capEdges = false) => {
+    const effSegs = heroQuality ? Math.max(segs, 14) : segs;
     const dx = p1[0]-p0[0], dy = p1[1]-p0[1], dz = p1[2]-p0[2];
     const len = Math.hypot(dx, dy, dz);
     if (len < 0.1) return;
@@ -1516,20 +1635,27 @@ function buildMeshBuffers(prevParts, newParts, opts) {
       center[1] + (Math.cos(ang)*by + Math.sin(ang)*cy)*r,
       center[2] + (Math.cos(ang)*bz + Math.sin(ang)*cz)*r,
     ], m, ox, oy, oz, hinge);
-    for (let i = 0; i < segs; i++) {
-      const a0 = (i/segs)*Math.PI*2, a1 = ((i+1)/segs)*Math.PI*2, am = (a0+a1)/2;
-      const sn = xformNorm([
-        Math.cos(am)*bx + Math.sin(am)*cx,
-        Math.cos(am)*by + Math.sin(am)*cy,
-        Math.cos(am)*bz + Math.sin(am)*cz,
-      ], m, hinge);
+    const ringNorm = (ang) => xformNorm([
+      Math.cos(ang)*bx + Math.sin(ang)*cx,
+      Math.cos(ang)*by + Math.sin(ang)*cy,
+      Math.cos(ang)*bz + Math.sin(ang)*cz,
+    ], m, hinge);
+    for (let i = 0; i < effSegs; i++) {
+      const a0 = (i/effSegs)*Math.PI*2, a1 = ((i+1)/effSegs)*Math.PI*2, am = (a0+a1)/2;
       const v00 = ringPt(p0, r0, a0), v01 = ringPt(p0, r0, a1);
       const v10 = ringPt(p1, r1, a0), v11 = ringPt(p1, r1, a1);
-      pushTri(v00, v01, v11, sn, col, aByte);
-      pushTri(v00, v11, v10, sn, col, aByte);
+      if (heroQuality) {
+        const sn0 = ringNorm(a0), sn1 = ringNorm(a1);
+        pushTriSmooth(v00, v01, v11, sn0, sn1, sn1, col, aByte);
+        pushTriSmooth(v00, v11, v10, sn0, sn1, sn0, col, aByte);
+      } else {
+        const sn = ringNorm(am);
+        pushTri(v00, v01, v11, sn, col, aByte);
+        pushTri(v00, v11, v10, sn, col, aByte);
+      }
       if (r0 > 0.1) pushTri(c0, v01, v00, n0, col, aByte);
       if (r1 > 0.1) pushTri(c1, v10, v11, n1, col, aByte);
-      if (capEdges && includeEdges) {
+      if (!heroQuality && capEdges && includeEdges) {
         pushEdge(v10, v11, eCol, aByte);
       }
     }
@@ -1770,21 +1896,244 @@ function buildMeshBuffers(prevParts, newParts, opts) {
     }
 
     const w = def.sx * 20 - 0.5, d = def.sz * 20 - 0.5, h = def.h;
-    if (def.shape === 'bar') addCyl(0, def.centered ? 0 : -h/2, 0, 3.8,3.8,h,'y',10, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
-    else if (def.shape === 'round') { addCyl(0,-h/2,0, (def.sx*20)/2-0.3,(def.sx*20)/2-0.3,h,'y',12, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte); addTopStuds(def, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte); }
-    else if (def.shape === 'snot4' || def.shape === 'snot1') {
+    const holeCol = [
+      Math.max(12, Math.round(baseCol[0] * 0.28)),
+      Math.max(12, Math.round(baseCol[1] * 0.28)),
+      Math.max(12, Math.round(baseCol[2] * 0.28)),
+    ];
+    if (def.shape === 'bar') {
+      addCyl(0, def.centered ? 0 : -h/2, 0, 3.8, 3.8, h, 'y', heroQuality ? 20 : 10, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte, true);
+    } else if (def.shape === 'axle') {
+      const cy = def.centered ? 0 : -h/2;
+      addBox(0, cy, 0, 7.6, h, 2.5, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha);
+      addBox(0, cy, 0, 2.5, h, 7.6, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha);
+    } else if (def.shape === 'round') {
+      addCyl(0, -h/2, 0, (def.sx*20)/2-0.3, (def.sx*20)/2-0.3, h, 'y', heroQuality ? 24 : 14, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte, true);
+      addTopStuds(def, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
+    } else if (def.shape === 'round_hole') {
+      const rOut = (def.sx * 20) / 2 - 0.3;
+      addAnnulus(0, -h/2, 0, rOut, 4.8, h, 'y', heroQuality ? 24 : 14, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
+    } else if (def.shape === 'rounded_plate') {
+      const rEnd = d / 2;
+      const midW = Math.max(2, w - d);
+      addBox(0, -h/2, 0, midW, h, d, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha);
+      addCyl(-midW/2, -h/2, 0, rEnd, rEnd, h, 'y', heroQuality ? 20 : 12, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte, true);
+      addCyl(midW/2, -h/2, 0, rEnd, rEnd, h, 'y', heroQuality ? 20 : 12, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte, true);
+      addTopStuds(def, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
+    } else if (def.shape === 'quarter_round') {
+      // True 90° quarter-circle tile extrusion in XZ plane (center at back-left corner)
+      const segs = heroQuality ? 14 : 8;
+      const ox0 = -w / 2, oz0 = -d / 2, r = Math.min(w, d);
+      const nTop = xformNorm([0, 1, 0], m, hingeRad);
+      const nBot = xformNorm([0, -1, 0], m, hingeRad);
+      const cTop = xformPt([ox0, 0, oz0], m, ox, oy, oz, hingeRad);
+      const cBot = xformPt([ox0, -h, oz0], m, ox, oy, oz, hingeRad);
+      const pTop = (ang) => xformPt([ox0 + Math.cos(ang)*r, 0, oz0 + Math.sin(ang)*r], m, ox, oy, oz, hingeRad);
+      const pBot = (ang) => xformPt([ox0 + Math.cos(ang)*r, -h, oz0 + Math.sin(ang)*r], m, ox, oy, oz, hingeRad);
+      for (let i = 0; i < segs; i++) {
+        const a0 = (i / segs) * (Math.PI / 2), a1 = ((i + 1) / segs) * (Math.PI / 2);
+        const t0 = pTop(a0), t1 = pTop(a1), b0 = pBot(a0), b1 = pBot(a1);
+        pushTri(cTop, t1, t0, nTop, baseCol, aByte);
+        pushTri(cBot, b0, b1, nBot, baseCol, aByte);
+        if (heroQuality) {
+          const sn0 = xformNorm([Math.cos(a0), 0, Math.sin(a0)], m, hingeRad);
+          const sn1 = xformNorm([Math.cos(a1), 0, Math.sin(a1)], m, hingeRad);
+          pushTriSmooth(b0, b1, t1, sn0, sn1, sn1, baseCol, aByte);
+          pushTriSmooth(b0, t1, t0, sn0, sn1, sn0, baseCol, aByte);
+        } else {
+          const am = (a0 + a1) / 2;
+          const sn = xformNorm([Math.cos(am), 0, Math.sin(am)], m, hingeRad);
+          pushTri(b0, b1, t1, sn, baseCol, aByte);
+          pushTri(b0, t1, t0, sn, baseCol, aByte);
+          if (includeEdges) { pushEdge(t0, t1, edgeCol, edgeAlpha); pushEdge(b0, b1, edgeCol, edgeAlpha); }
+        }
+      }
+      // Two straight radial walls along -Z and -X
+      const tStart = pTop(0), bStart = pBot(0), tEnd = pTop(Math.PI / 2), bEnd = pBot(Math.PI / 2);
+      const nBackZ = xformNorm([0, 0, -1], m, hingeRad);
+      const nBackX = xformNorm([-1, 0, 0], m, hingeRad);
+      pushTri(cBot, bStart, tStart, nBackZ, baseCol, aByte); pushTri(cBot, tStart, cTop, nBackZ, baseCol, aByte);
+      pushTri(cBot, cTop, tEnd, nBackX, baseCol, aByte); pushTri(cBot, tEnd, bEnd, nBackX, baseCol, aByte);
+      if (!heroQuality && includeEdges) {
+        pushEdge(cTop, tStart, edgeCol, edgeAlpha); pushEdge(cTop, tEnd, edgeCol, edgeAlpha);
+        pushEdge(cBot, bStart, edgeCol, edgeAlpha); pushEdge(cBot, bEnd, edgeCol, edgeAlpha);
+        pushEdge(cBot, cTop, edgeCol, edgeAlpha); pushEdge(bStart, tStart, edgeCol, edgeAlpha); pushEdge(bEnd, tEnd, edgeCol, edgeAlpha);
+      }
+    } else if (def.shape === 'corner') {
+      // Authentic L-shaped 2×2 corner brick/plate (3 quadrants)
+      const armW = w / 2 - 0.1, armD = d / 2 - 0.1;
+      addBox(0, -h/2, -d/4, w, h, d/2, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha);
+      addBox(-w/4, -h/2, d/4, armW, h, armD, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha);
+      addTopStuds(def, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
+    } else if (def.shape === 'grille') {
+      // Base rim + 4 parallel raised grille slats with open air gaps
+      addBox(0, -h + 1.5, 0, w, 3.0, d, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha);
+      addBox(0, -h/2, -d/2 + 2.2, w, h, 4.4, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha);
+      addBox(0, -h/2,  d/2 - 2.2, w, h, 4.4, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha);
+      const slats = 4;
+      const span = w - 8;
+      for (let i = 0; i < slats; i++) {
+        const sxPos = -span / 2 + (i / (slats - 1)) * span;
+        addBox(sxPos, -h/2, 0, 4.2, h, d - 2.0, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha);
+      }
+    } else if (def.shape === 'technic_brick') {
+      addBox(0, -h/2, 0, w, h, d, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha);
+      addTopStuds(def, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
+      const sxCount = Math.round(def.sx);
+      const holeCount = sxCount <= 1 ? 1 : sxCount - 1;
+      const holeY = -13.6;
+      const startHX = holeCount <= 1 ? 0 : -((holeCount - 1) * 20) / 2;
+      for (let i = 0; i < holeCount; i++) {
+        const hx = startHX + i * 20;
+        for (const zs of [-1, 1]) {
+          addAnnulus(hx, holeY, zs * (d/2 + 0.12), 6.2, 4.6, 0.9, 'z', heroQuality ? 18 : 10, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
+          addCyl(hx, holeY, zs * (d/2 + 0.04), 4.6, 4.6, 0.4, 'z', heroQuality ? 16 : 10, m,ox,oy,oz,hingeRad,holeCol,edgeCol,aByte);
+        }
+      }
+    } else if (def.shape === 'technic_plate') {
+      addBox(0, -h/2, 0, w, h, d, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha);
+      addTopStuds(def, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
+      const holeCount = Math.max(1, Math.round(def.sx) - 1);
+      const startHX = -((holeCount - 1) * 20) / 2;
+      for (let i = 0; i < holeCount; i++) {
+        const hx = startHX + i * 20;
+        addAnnulus(hx, 0.15, 0, 5.6, 4.3, 0.7, 'y', heroQuality ? 16 : 10, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
+        addCyl(hx, 0.08, 0, 4.3, 4.3, 0.4, 'y', heroQuality ? 16 : 10, m,ox,oy,oz,hingeRad,holeCol,edgeCol,aByte);
+      }
+    } else if (def.shape === 'slope') {
+      const lipH = h <= 16 ? 3.2 : 4.2;
+      const flatEnd = def.topStudsX ? (-w/2 + def.topStudsX * 20 - 0.5) : (-w/2 + 3.2);
+      const pts = [
+        [-w/2, -h],
+        [ w/2, -h],
+        [ w/2, -h + lipH],
+        [flatEnd, 0],
+        [-w/2, 0],
+      ];
+      addExtrudedProfile(pts, -d/2, d/2, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha);
+      addTopStuds(def, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
+    } else if (def.shape === 'slope_inv') {
+      const baseEnd = -w/2 + 19.5;
+      const pts = [
+        [-w/2, -h],
+        [baseEnd, -h],
+        [ w/2, -4.5],
+        [ w/2, 0],
+        [-w/2, 0],
+      ];
+      addExtrudedProfile(pts, -d/2, d/2, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha);
+      addTopStuds(def, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
+    } else if (def.shape === 'curved_slope') {
+      // Smooth curved arch slope with interpolated top normals
+      const steps = heroQuality ? 10 : 6;
+      const lipH = 3.2;
+      const pts = [[-w/2, -h], [w/2, -h], [w/2, -h + lipH]];
+      const norms = [null, null, null];
+      for (let i = 0; i <= steps; i++) {
+        const t = i / steps; // 0 at front (+w/2), 1 at back (-w/2)
+        const ang = t * (Math.PI / 2);
+        const px = -w/2 + Math.cos(ang) * w;
+        const py = (-h + lipH) + Math.sin(ang) * (h - lipH);
+        pts.push([px, py]);
+        const nx = Math.cos(ang) * (h - lipH);
+        const ny = Math.sin(ang) * w;
+        const nl = Math.hypot(nx, ny) || 1;
+        norms.push([nx / nl, ny / nl]);
+      }
+      addExtrudedProfile(pts, -d/2, d/2, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha, norms);
+    } else if (def.shape === 'snot4' || def.shape === 'snot1') {
       addBox(0,-h/2,0, w,h,d, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha);
       addTopStuds(def, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
-      addCyl(w/2+1.9,-h/2,0, 5.8,5.8,4.6,'x',10, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
+      addCyl(w/2+1.9,-h/2,0, 5.8,5.8,4.6,'x', heroQuality ? 18 : 10, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte, true);
       if (def.shape === 'snot4') {
-        addCyl(-w/2-1.9,-h/2,0, 5.8,5.8,4.6,'x',10, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
-        addCyl(0,-h/2,d/2+1.9, 5.8,5.8,4.6,'z',10, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
-        addCyl(0,-h/2,-d/2-1.9, 5.8,5.8,4.6,'z',10, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
+        addCyl(-w/2-1.9,-h/2,0, 5.8,5.8,4.6,'x', heroQuality ? 18 : 10, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte, true);
+        addCyl(0,-h/2,d/2+1.9, 5.8,5.8,4.6,'z', heroQuality ? 18 : 10, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte, true);
+        addCyl(0,-h/2,-d/2-1.9, 5.8,5.8,4.6,'z', heroQuality ? 18 : 10, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte, true);
       }
+    } else if (def.shape === 'bracket' || def.shape === 'bracket_inv') {
+      const plateH = 8;
+      const flangeT = 4.2;
+      const inv = def.shape === 'bracket_inv';
+      if (!inv) {
+        addBox(0, -plateH/2, 0, w, plateH, d, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha);
+        addTopStuds(def, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
+        const flH = Math.max(12, h);
+        addBox(0, -flH/2, d/2 - flangeT/2, w, flH, flangeT, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha);
+        const sxC = Math.round(def.sx);
+        const startX = -((sxC - 1) * 20) / 2;
+        const rows = flH >= 22 ? 2 : 1;
+        for (let ix = 0; ix < sxC; ix++) {
+          for (let ry = 0; ry < rows; ry++) {
+            const syPos = rows === 2 ? (-6 - ry * 12) : (-flH / 2);
+            addCyl(startX + ix*20, syPos, d/2 + 2.0, 5.8, 5.8, 4.4, 'z', heroQuality ? 16 : 8, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte, true);
+          }
+        }
+      } else {
+        addBox(0, -h + plateH/2, 0, w, plateH, d, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha);
+        addBox(0, -h/2, d/2 - flangeT/2, w, h, flangeT, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha);
+        const sxC = Math.round(def.sx);
+        const startX = -((sxC - 1) * 20) / 2;
+        for (let ix = 0; ix < sxC; ix++) {
+          addCyl(startX + ix*20, -h + plateH + 1.8, 0, 5.8, 5.8, 4.4, 'y', heroQuality ? 16 : 8, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte, true);
+          addCyl(startX + ix*20, -h/2 + 4, d/2 + 2.0, 5.8, 5.8, 4.4, 'z', heroQuality ? 16 : 8, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte, true);
+        }
+      }
+    } else if (def.shape === 'clip_h') {
+      addBox(0, -h/2, 0, w, h, d, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha);
+      addTopStuds(def, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
+      const clips = Math.round(def.sx);
+      const startX = -((clips - 1) * 20) / 2;
+      const clipY = h > 12 ? -h/2 : -4;
+      for (let i = 0; i < clips; i++) {
+        const cx = startX + i * 20;
+        addBox(cx, clipY, d/2 + 3.0, 6.2, 5.2, 6.0, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha);
+        addAnnulus(cx, clipY, d/2 + 8.8, 6.2, 3.6, 6.4, 'x', heroQuality ? 16 : 10, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte, 0.55, Math.PI * 2 - 0.55);
+      }
+    } else if (def.shape === 'clip_v') {
+      addBox(0, -h/2, 0, w, h, d, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha);
+      addBox(0, 2.5, 0, 6.4, 5.0, 7.6, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha);
+      addAnnulus(0, 9.2, 0, 6.4, 3.7, 7.6, 'z', heroQuality ? 16 : 10, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte, Math.PI * 0.5 + 0.55, Math.PI * 2.5 - 0.55);
+    } else if (def.shape === 'window_frame') {
+      // True hollow rectangular window frame: sill, lintel, left & right jambs
+      const frameT = 5.4;
+      const sillH = 6.0;
+      const innerH = Math.max(8, h - sillH * 2);
+      addBox(0, -sillH/2, 0, w, sillH, d, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha);
+      addBox(0, -h + sillH/2, 0, w, sillH, d, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha);
+      addBox(-w/2 + frameT/2, -h/2, 0, frameT, innerH, d, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha);
+      addBox( w/2 - frameT/2, -h/2, 0, frameT, innerH, d, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha);
+      addTopStuds(def, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
+    } else if (def.shape === 'seat') {
+      // Sculpted LEGO minifigure chair: seat cushion, backrest, and side armrests
+      addBox(0, -h + 4, 0, w, 8, d, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha);
+      addBox(0, -h/2, -d/2 + 4.2, w, h, 8.4, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha);
+      addBox(-w/2 + 3.2, -h + 10.5, 2, 6.4, 13, d - 6, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha);
+      addBox( w/2 - 3.2, -h + 10.5, 2, 6.4, 13, d - 6, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha);
+    } else if (def.shape === 'wheel_holder') {
+      // Train bogie plate + recessed lower wheel housing + axle bearings
+      addBox(0, -4, 0, w, 8, d, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha);
+      addTopStuds(def, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
+      addBox(0, -14, 0, w * 0.72, 14, d * 0.86, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha);
+      for (const zOff of [-d * 0.28, d * 0.28]) {
+        addCyl(0, -16, zOff, 5.2, 5.2, w + 1.5, 'x', heroQuality ? 16 : 10, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
+        addCyl(0, -16, zOff, 2.4, 2.4, w + 2.1, 'x', heroQuality ? 12 : 8, m,ox,oy,oz,hingeRad,holeCol,edgeCol,aByte);
+      }
+    } else if (def.shape === 'wheel') {
+      // Flanged horizontal train wheel oriented along X axis
+      const treadR = 13.5, flangeR = 16.5;
+      addCyl(-3.6, -treadR, 0, flangeR, flangeR, 2.6, 'x', heroQuality ? 24 : 14, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte, true);
+      addCyl(0.8, -treadR, 0, treadR, treadR, 8.2, 'x', heroQuality ? 24 : 14, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte, true);
+      addCyl(5.0, -treadR, 0, 5.4, 5.4, 2.8, 'x', heroQuality ? 18 : 10, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte, true);
+      addCyl(5.6, -treadR, 0, 2.8, 2.8, 2.0, 'x', heroQuality ? 14 : 8, m,ox,oy,oz,hingeRad,holeCol,edgeCol,aByte);
     } else if (def.shape === 'mf_legs') {
-      addBox(0,-3,0, 32,6,16, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha);
-      addBox(-8.5,-17,0, 14,22,14, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha);
-      addBox(8.5,-17,0, 14,22,14, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha);
+      // Sculpted minifigure hips + cylindrical hip joint + legs with foot toes
+      addBox(0, -2.8, 0, 32, 5.6, 16, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha);
+      addBox(0, -8.5, 0, 3.6, 9.5, 14, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha);
+      addCyl(0, -9.2, 0, 6.8, 6.8, 30.5, 'x', heroQuality ? 18 : 10, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
+      for (const sx of [-8.6, 8.6]) {
+        addBox(sx, -18.5, -0.5, 13.6, 19, 13.5, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha);
+        addBox(sx, -25.8, 1.8, 13.6, 5.2, 16.5, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha);
+      }
     } else if (def.shape === 'mf_torso_body') {
       // Bare minifigure torso (exact LDraw 973.dat proportions: y=0 shoulders, y=-32 waist, neck +0..+11.2)
       addMinifigTorso([0, 0, 0], false, m, ox, oy, oz, hingeRad, baseCol, edgeCol, baseCol, edgeCol, aByte);
@@ -1798,14 +2147,20 @@ function buildMeshBuffers(prevParts, newParts, opts) {
       addMinifigTorso(sh, true, m, ox, oy, oz, hingeRad, baseCol, edgeCol, handCol, handEdge, aByte);
     } else if (def.shape === 'mf_head') {
       // Authentic LEGO minifigure head proportions (matches LDraw 3626c / 28621: crown y=0, neck bottom y=-24)
-      addCyl(0, 2.0, 0, 5.8, 5.8, 4.4, 'y', 10, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
-      addCyl(0, -1.8, 0, 8.6, 12.6, 3.6, 'y', 14, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
-      addCyl(0, -10.5, 0, 12.6, 12.6, 13.8, 'y', 14, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
-      addCyl(0, -19.2, 0, 12.6, 8.6, 3.6, 'y', 14, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
-      addCyl(0, -22.5, 0, 8.0, 8.0, 3.2, 'y', 12, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
+      addCyl(0, 2.0, 0, 5.8, 5.8, 4.4, 'y', heroQuality ? 18 : 10, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte, true);
+      addCyl(0, -1.8, 0, 8.6, 12.6, 3.6, 'y', heroQuality ? 22 : 14, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
+      addCyl(0, -10.5, 0, 12.6, 12.6, 13.8, 'y', heroQuality ? 22 : 14, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
+      addCyl(0, -19.2, 0, 12.6, 8.6, 3.6, 'y', heroQuality ? 22 : 14, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
+      addCyl(0, -22.5, 0, 8.0, 8.0, 3.2, 'y', heroQuality ? 18 : 12, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
     } else if (def.shape === 'mf_helmet') {
-      addCyl(0,-12,0, 11.5,12.2,20,'y',12, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
-      addBox(0,-11,10, 16,8,5, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha);
+      // Smooth domed helmet shell + open face visor guard
+      const hSegs = heroQuality ? 22 : 12;
+      addCyl(0, -1.2, 0, 4.5, 9.2, 2.4, 'y', hSegs, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte, true);
+      addCyl(0, -4.4, 0, 9.2, 13.0, 4.0, 'y', hSegs, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
+      addCyl(0, -8.2, 0, 13.0, 13.6, 3.8, 'y', hSegs, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
+      addAnnulus(0, -16.2, 0, 13.6, 11.2, 12.4, 'y', hSegs, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte, Math.PI * 0.28, Math.PI * 1.72);
+      // Curved front brow brim
+      addAnnulus(0, -9.8, 0, 15.2, 12.2, 2.4, 'y', hSegs, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte, -Math.PI * 0.34, Math.PI * 0.34);
     } else {
       addBox(0,-h/2,0, w,h,d, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha);
       addTopStuds(def, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
@@ -3467,7 +3822,7 @@ function canConnectSideways(part, role) {
   const k = normId(part.p);
   const def = resolvePart(part.p);
   const name = (def.name || '').toLowerCase();
-  if (def.shape === 'snot1' || def.shape === 'snot4' || def.shape === 'clip_h' || def.shape === 'clip_v' || def.shape === 'bar') return true;
+  if (def.shape === 'snot1' || def.shape === 'snot4' || def.shape === 'clip_h' || def.shape === 'clip_v' || def.shape === 'bar' || def.shape === 'axle' || def.shape === 'bracket' || def.shape === 'bracket_inv' || def.shape === 'technic_brick' || def.shape === 'window_frame') return true;
   if (/snot|bracket|clip|hinge|bar|axle|pin|technic|liftarm|beam|turntable|handle|hook|grab|magnet|coupler|buffer|ball|socket|window|glass|door|fence|rail|ladder|hose|antenna|lever/.test(name)) return true;
   if (/^(3937|3938|44302|63868|37494|92582|2429|2430|3700|3701|3702|3894|32000|32018|6541|4070|87087|4733|47905|22885|99206|99207|99780|99781|44728|60475|15712|60470|6019|4085|36840|36841|29085|bb892)/.test(k)) return true;
   return false;
@@ -10005,13 +10360,28 @@ async function fetchMissingPartsOnline(fetchOpts = {}) {
 }
 
 // ---- DEDICATED BRICKS LIBRARY SCREEN (BROWSE, SEARCH, 3D PREVIEW, FETCH & MANAGE) ----
-function renderPartPreviewDataUrl(partId, colorId, size = 144, az = 38, el = 24) {
+const LIB_THUMB_SIZE = 220;
+const LIB_THUMB_AZ = 34;
+const LIB_THUMB_EL = 22;
+const LIB_INSPECTOR_SIZE = 440;
+
+function renderPartPreviewDataUrl(partId, colorId, size = LIB_THUMB_SIZE, az = 38, el = 24) {
   const cacheKey = `${partId}:${colorId}:${size}:${az}:${el}`;
   if (libThumbCache.has(cacheKey)) return libThumbCache.get(cacheKey);
   const rawPart = { id: `lib_${partId}`, p: partId, c: colorId, x: 0, y: 0, z: 0, r: R_ID };
   const samplePart = normalizeCompositeThumbPart(rawPart, (pid) => resolvePart(pid).name, computeWorldBox);
-  const mesh = buildMeshBuffers([], [samplePart], { highlightNew: false, fadePrev: false, showArrows: false, accent: '#1a73e8' });
-  snapshotEngine.draw(mesh, size, size, az, el, 1.08);
+  const mesh = buildMeshBuffers([], [samplePart], {
+    highlightNew: false,
+    fadePrev: false,
+    showArrows: false,
+    heroQuality: true,
+    accent: '#1a73e8',
+  });
+  snapshotEngine.draw(mesh, size, size, az, el, 1.0, 0, {
+    tightFit: true,
+    heroShading: true,
+    lineAlpha: 0.24,
+  });
   const url = snapshotCanvas.toDataURL('image/png');
   if (libThumbCache.size > 320) {
     const oldestKey = libThumbCache.keys().next().value;
@@ -10048,7 +10418,7 @@ function flushLibThumbQueue() {
     const col = Number(imgEl.dataset.colorId || libUiState.previewColor);
     if (!pid) continue;
     try {
-      imgEl.src = renderPartPreviewDataUrl(pid, col, 144, 34, 22);
+      imgEl.src = renderPartPreviewDataUrl(pid, col, LIB_THUMB_SIZE, LIB_THUMB_AZ, LIB_THUMB_EL);
       imgEl.dataset.loaded = '1';
       imgEl.classList.remove('opacity-0');
     } catch (_) {}
@@ -10063,7 +10433,7 @@ function enqueueLibThumbImg(imgEl) {
   if (!imgEl || imgEl.dataset.loaded === '1') return;
   const pid = imgEl.dataset.partId;
   const col = Number(imgEl.dataset.colorId || libUiState.previewColor);
-  const cacheKey = `${pid}:${col}:144:34:22`;
+  const cacheKey = `${pid}:${col}:${LIB_THUMB_SIZE}:${LIB_THUMB_AZ}:${LIB_THUMB_EL}`;
   if (libThumbCache.has(cacheKey)) {
     imgEl.src = libThumbCache.get(cacheKey);
     imgEl.dataset.loaded = '1';
@@ -10157,7 +10527,7 @@ function renderLibPreviewInspector() {
   detailEl.classList.remove('hidden');
 
   try {
-    imgEl.src = renderPartPreviewDataUrl(item.id, libUiState.previewColor, 260, libUiState.previewAz, libUiState.previewEl);
+    imgEl.src = renderPartPreviewDataUrl(item.id, libUiState.previewColor, LIB_INSPECTOR_SIZE, libUiState.previewAz, libUiState.previewEl);
   } catch (_) {}
 
   document.querySelectorAll('.lib-angle-btn').forEach((btn) => {
@@ -10362,8 +10732,8 @@ function renderLibBrowseTab(resetLimit = false) {
     const selected = libUiState.selectedId === item.id;
     return `
       <button type="button" data-lib-part="${escHtml(item.id)}" class="group text-left p-2 rounded-lg border transition flex flex-col gap-1.5 ${selected ? 'border-[var(--primary)] ring-2 ring-[var(--primary-border)] bg-[var(--primary-soft)]' : 'border-[var(--border)] bg-[var(--background)] hover:border-[var(--primary-border)]'}">
-        <div class="aspect-square w-full rounded-xl bg-[var(--card)] border border-[var(--border)]/60 relative flex items-center justify-center p-1.5 overflow-hidden">
-          <img data-part-id="${escHtml(item.id)}" data-color-id="${libUiState.previewColor}" alt="${escHtml(item.name)}" class="w-full h-full object-contain opacity-0 transition-opacity duration-150" />
+        <div class="aspect-square w-full rounded-xl bg-[radial-gradient(circle_at_50%_40%,var(--card)_0%,var(--surface-sunken)_100%)] border border-[var(--border)]/60 relative flex items-center justify-center p-2 overflow-hidden">
+          <img data-part-id="${escHtml(item.id)}" data-color-id="${libUiState.previewColor}" alt="${escHtml(item.name)}" class="w-full h-full object-contain opacity-0 transition-opacity duration-150 drop-shadow-[0_3px_6px_rgba(15,23,42,0.12)]" />
           <div class="absolute top-1.5 right-1.5">${getSourceBadgeHtml(item)}</div>
         </div>
         <div class="px-0.5 min-w-0 space-y-0.5">

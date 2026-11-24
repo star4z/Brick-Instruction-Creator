@@ -33,8 +33,10 @@ A responsive full-height modal (`max-w-4xl`) organized into two top-level tabs p
 - **Lazy 3D Thumbnail Grid**:
   - Paginated (48 items per batch + *"Load more parts"* button) so even a full 20,000-part `complete.zip` import stays responsive.
   - Uses `IntersectionObserver` + a 4-per-frame `requestAnimationFrame` WebGL snapshot queue (`libThumbCache`, bounded LRU up to 320 entries) with 10 selectable LEGO color swatches.
+  - Renders crisp HiDPI 220×220 thumbnails using `heroQuality: true` (micro-beveled ABS brick edges, 18–24 segment smooth studs & curves) and `heroShading: true` (3-point studio softbox lighting + glossy ABS specular highlights + tight camera framing + subtle edge seams) over a soft radial studio backdrop.
+  - Built-in catalog shapes render authentic procedural geometry rather than box placeholders (slopes, inverted slopes, smooth curved slopes, L-shaped corners, centered/end-stud jumpers, slotted grilles, rounded/quarter-round/holed tiles, Technic pin holes & `+`-section axles, open hollow window frames, SNOT brackets, horizontal/vertical C-clips, contoured seats, flanged train wheels/holders, and sculpted minifigure limbs & domed helmets).
 - **Interactive 3D Part Preview Inspector (`#libPreviewPane`)**:
-  - Displays a 260×260 WebGL render with 4 yaw angles (`Front`, `Right`, `Back`, `Left`) and a `Top`/`Bottom` flip toggle.
+  - Displays a HiDPI 440×440 studio-lit WebGL render with 4 yaw angles (`Front`, `Right`, `Back`, `Left`) and a `Top`/`Bottom` flip toggle.
   - Shows part ID, human name, kind (`Part`/`Subpart`/`Primitive`), category, subfile reference count, and all source badges (`Embedded (.io)`, `Saved LDraw .dat`, `Built-in Shape`, `In Current Model` / `Missing in Model`).
   - Offers single-part actions: **Fetch Exact `<id>.dat` Online** (when not saved) or **Remove `<id>.dat` from Saved Library** (when saved).
 
