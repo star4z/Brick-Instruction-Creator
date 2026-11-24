@@ -153,6 +153,7 @@ import {
 } from './engine/stepToolbar';
 import {
   clampRenderDimensions,
+  computeCoverHeroRenderSize,
   computeMinifigDiagramRenderSize,
   computePdfPagePixelDimensions,
   computePreviewResolutionScale,
@@ -2945,10 +2946,18 @@ function drawSupersampledMeshToCtx(ctx, mesh, dstX, dstY, dstW, dstH, az, el, zo
   return mvp;
 }
 
+function getCoverHeroGpuMaxDim() {
+  const photo = getStudioPhotoEngine();
+  if (photo && photo.isAvailable()) return photo.getMaxDimension();
+  return snapshotEngine?.maxDim || 4096;
+}
+
 function renderCoverHeroSnapshot(parts, az, el, zoom, targetW, targetH, theme) {
   const safeZoom = clampCoverZoom(zoom ?? 1.0);
-  const rw = Math.max(480, Math.min(2000, Math.round(targetW)));
-  const rh = Math.max(320, Math.min(2000, Math.round(targetH)));
+  const photo = getStudioPhotoEngine();
+  const maxDim = Math.max(1024, Math.min(4096, (photo && photo.isAvailable() ? photo.getMaxDimension() : snapshotEngine?.maxDim) || 4096));
+  const rw = Math.max(480, Math.min(maxDim, Math.round(targetW)));
+  const rh = Math.max(320, Math.min(maxDim, Math.round(targetH)));
   const darkTheme = isDarkHexColor(toHexColor(theme?.bgColor || '#ffffff', '#ffffff'));
   const cacheKey = `${parts.length}|${Math.round(az * 10)}|${Math.round(el * 10)}|${safeZoom}|${rw}x${rh}|${darkTheme ? 'd' : 'l'}`;
   if (coverHeroCache.has(cacheKey)) return coverHeroCache.get(cacheKey);
@@ -2969,7 +2978,6 @@ function renderCoverHeroSnapshot(parts, az, el, zoom, targetW, targetH, theme) {
 
   // Primary path: Photorealistic multi-pass WebGL Studio Renderer (triple softbox shadow maps,
   // linear-space GGX ABS plastic PBR, Fresnel softbox reflections, 3D shadow-catcher floor, SSAO)
-  const photo = getStudioPhotoEngine();
   if (photo && photo.isAvailable()) {
     const rendered = photo.render(mesh, {
       azDeg: az,
@@ -2982,7 +2990,7 @@ function renderCoverHeroSnapshot(parts, az, el, zoom, targetW, targetH, theme) {
     });
     if (rendered) {
       const out = { url: rendered.url, mesh, mvp: null, w: rendered.width, h: rendered.height };
-      if (coverHeroCache.size > 18) {
+      if (coverHeroCache.size > 6) {
         const keepMesh = coverHeroCache.get(meshCacheKey);
         coverHeroCache.clear();
         if (keepMesh) coverHeroCache.set(meshCacheKey, keepMesh);
@@ -6781,15 +6789,45 @@ let zoomHiResTimer = 0, lastZoomRendered = 1;
 function getEffectiveStageScale() {
   return Math.max(0.1, currentPageFitScale * state.zoom);
 }
+let currentCoverHeroInfo = null;
 function refreshStepModelsForZoom() {
   zoomHiResTimer = 0;
-  if (!state.model || currentSlotRenderInfo.size === 0) return;
+  if (!state.model) return;
   const pg = state.pages[state.pageIdx];
-  if (!pg || pg.kind !== 'steps') return;
   const frame = document.getElementById('pageFrame');
-  if (!frame) return;
+  if (!pg || !frame) return;
   const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) ? window.devicePixelRatio : 1;
   lastZoomRendered = state.zoom;
+
+  if ((pg.kind === 'cover' || pg.kind === 'complete') && currentCoverHeroInfo) {
+    const target = computeCoverHeroRenderSize({
+      heroWidth: currentCoverHeroInfo.heroW,
+      heroHeight: currentCoverHeroInfo.heroH,
+      dpr,
+      zoom: state.zoom,
+      stageFitScale: currentPageFitScale,
+      mode: 'screen',
+      gpuMaxDim: getCoverHeroGpuMaxDim(),
+    });
+    if (shouldUpgradeStepRenderForZoom(currentCoverHeroInfo.w, currentCoverHeroInfo.h, target.width, target.height)) {
+      const upgraded = renderCoverHeroSnapshot(
+        currentCoverHeroInfo.parts,
+        currentCoverHeroInfo.az,
+        currentCoverHeroInfo.el,
+        currentCoverHeroInfo.zoom,
+        target.width,
+        target.height,
+        currentCoverHeroInfo.theme,
+      );
+      currentCoverHeroInfo.w = upgraded.w;
+      currentCoverHeroInfo.h = upgraded.h;
+      const img = frame.querySelector('img[data-cover-hero-img="true"]');
+      if (img && upgraded.url) img.src = upgraded.url;
+    }
+    return;
+  }
+
+  if (pg.kind !== 'steps' || currentSlotRenderInfo.size === 0) return;
 
   for (const [stepId, info] of currentSlotRenderInfo.entries()) {
     if (state.mode === 'rotate' && state.selectedStepId === stepId) continue;
@@ -7285,16 +7323,36 @@ function renderAll() {
       hasThemeImage: Boolean(cm.themeImageSrc),
       densityPadFactor: dens.pad / 20,
     });
-    const heroScale = Math.min(2.2, 1600 / Math.max(layout.heroRect.w, layout.heroRect.h, 1));
+    const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) ? window.devicePixelRatio : 1;
+    const heroSize = computeCoverHeroRenderSize({
+      heroWidth: layout.heroRect.w,
+      heroHeight: layout.heroRect.h,
+      dpr,
+      zoom: state.zoom,
+      stageFitScale: currentPageFitScale,
+      mode: 'screen',
+      gpuMaxDim: getCoverHeroGpuMaxDim(),
+    });
     const snap = renderCoverHeroSnapshot(
       allParts,
       cm.az,
       cm.el,
       cm.zoom,
-      Math.round(layout.heroRect.w * heroScale),
-      Math.round(layout.heroRect.h * heroScale),
+      heroSize.width,
+      heroSize.height,
       theme,
     );
+    currentCoverHeroInfo = {
+      parts: allParts,
+      az: cm.az,
+      el: cm.el,
+      zoom: cm.zoom,
+      heroW: layout.heroRect.w,
+      heroH: layout.heroRect.h,
+      w: snap.w,
+      h: snap.h,
+      theme,
+    };
     const darkBg = isDarkHexColor(toHexColor(theme.bgColor || '#ffffff', '#ffffff'));
     const badgeSurface = darkBg ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.92)';
     const badgeBorder = darkBg ? 'rgba(255,255,255,0.20)' : 'rgba(15,23,42,0.14)';
@@ -7317,7 +7375,7 @@ function renderAll() {
       <div class="relative w-full h-full overflow-hidden ${guideCls}" style="${cm.bgSrc ? `background-image:url(${cm.bgSrc});background-size:cover;background-position:center;` : ''}">
         <!-- High-Quality Page-Filling Hero Render -->
         <div class="absolute z-0 flex items-center justify-center pointer-events-none" style="left:${layout.heroRect.x}px;top:${layout.heroRect.y}px;width:${layout.heroRect.w}px;height:${layout.heroRect.h}px;">
-          <img src="${snap.url}" alt="${escHtml(title)}" class="w-full h-full object-contain pointer-events-none select-none" />
+          <img data-cover-hero-img="true" src="${snap.url}" alt="${escHtml(title)}" class="w-full h-full object-contain pointer-events-none select-none" />
         </div>
 
         <!-- Top-Left: Optional Creator Logo + Model Name + Optional Subtitle -->
@@ -7358,7 +7416,30 @@ function renderAll() {
       </div>`;
   } else if (page.kind === 'complete') {
     const cm = state.completeMeta;
-    const snap = renderCoverHeroSnapshot(allParts, cm.az, cm.el, 1.0, Math.round(dims.width * 1.6), Math.round(dims.height * 1.15), theme);
+    const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) ? window.devicePixelRatio : 1;
+    const compW = Math.max(240, dims.width - padPx * 2);
+    const compH = Math.max(200, Math.round(dims.height * 0.72));
+    const heroSize = computeCoverHeroRenderSize({
+      heroWidth: compW,
+      heroHeight: compH,
+      dpr,
+      zoom: state.zoom,
+      stageFitScale: currentPageFitScale,
+      mode: 'screen',
+      gpuMaxDim: getCoverHeroGpuMaxDim(),
+    });
+    const snap = renderCoverHeroSnapshot(allParts, cm.az, cm.el, 1.0, heroSize.width, heroSize.height, theme);
+    currentCoverHeroInfo = {
+      parts: allParts,
+      az: cm.az,
+      el: cm.el,
+      zoom: 1.0,
+      heroW: compW,
+      heroH: compH,
+      w: snap.w,
+      h: snap.h,
+      theme,
+    };
     const pgNumText = formatPageNumber(page.num, state.pages.length);
     const showText = cm.showText !== false;
     const showFw = cm.showFireworks !== false;
@@ -7370,7 +7451,7 @@ function renderAll() {
           ${cm.subtitle ? `<p style="color:${theme.muted};font-size:${typo.complete.subtitleFont}px;margin-top:${Math.round(typo.pt(2.5))}px">${escHtml(cm.subtitle)}</p>` : ''}
         </div>
         <div class="relative z-10 flex-1 min-h-0 w-full overflow-hidden" style="margin:${Math.round(typo.pt(8))}px 0">
-          <img src="${snap.url}" alt="Completed build" class="absolute inset-0 w-full h-full object-contain pointer-events-none" />
+          <img data-cover-hero-img="true" src="${snap.url}" alt="Completed build" class="absolute inset-0 w-full h-full object-contain pointer-events-none" />
         </div>
         <div class="absolute z-10 flex justify-between font-medium pointer-events-none" style="bottom:${footerPadBottom}px;left:${padPx}px;right:${padPx}px;font-size:${typo.footerFont}px;color:${theme.muted}">
           <span class="truncate">${state.showPageTitle ? escHtml(state.model.title) : ''}</span>
@@ -13517,15 +13598,20 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       if (bgImg) drawCoverImage(ctx, bgImg, 0, 0, pxW, pxH);
     }
 
-    // 1. High-Quality Page-Filling Hero Model Render
-    const heroScale = Math.min(1.45, 2000 / Math.max(layout.heroRect.w, layout.heroRect.h, 1));
+    // 1. High-Quality Page-Filling Hero Model Render (300 DPI print quality)
+    const heroSize = computeCoverHeroRenderSize({
+      heroWidth: layout.heroRect.w,
+      heroHeight: layout.heroRect.h,
+      mode: 'pdf',
+      gpuMaxDim: getCoverHeroGpuMaxDim(),
+    });
     const snap = renderCoverHeroSnapshot(
       allParts,
       cm.az,
       cm.el,
       cm.zoom,
-      Math.round(layout.heroRect.w * heroScale),
-      Math.round(layout.heroRect.h * heroScale),
+      heroSize.width,
+      heroSize.height,
       theme,
     );
     const heroImg = await loadImgPromise(snap.url);
@@ -13735,7 +13821,13 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       ctx.textAlign = 'left';
     }
     const availH = pxH - topOff - pad - footerH;
-    const snap = renderCoverHeroSnapshot(allParts, cm.az, cm.el, 1.0, Math.min(1800, Math.round((pxW - pad * 2) * 1.35)), Math.min(1600, Math.round(availH * 1.35)), theme);
+    const heroSize = computeCoverHeroRenderSize({
+      heroWidth: pxW - pad * 2,
+      heroHeight: availH,
+      mode: 'pdf',
+      gpuMaxDim: getCoverHeroGpuMaxDim(),
+    });
+    const snap = renderCoverHeroSnapshot(allParts, cm.az, cm.el, 1.0, heroSize.width, heroSize.height, theme);
     const img = await loadImgPromise(snap.url);
     drawContain(ctx, img, pad, topOff, pxW - pad * 2, availH);
     drawFooter(state.model.title);

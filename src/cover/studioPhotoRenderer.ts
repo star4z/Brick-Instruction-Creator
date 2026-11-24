@@ -738,10 +738,11 @@ void main() {
   float sa = sin(rotAng);
   mat2 rot = mat2(ca, -sa, sa, ca);
 
-  // Dual-ring screen-space crevice & contact occlusion (sharp stud rings + soft inner corners)
+  // Dual-ring screen-space crevice & contact occlusion (scaled to render resolution)
   float occ = 0.0;
   float weightSum = 0.0;
-  float maxRadiusPx = 11.0;
+  float resFactor = clamp(1.0 / max(0.0001, 1600.0 * min(uTexel.x, uTexel.y)), 0.85, 2.6);
+  float maxRadiusPx = 11.0 * resFactor;
   for (int i = 0; i < 16; i++) {
     float fi = float(i);
     float r = mix(1.6, maxRadiusPx, (fi + 0.5) / 16.0);
@@ -879,6 +880,9 @@ export class StudioPhotoRenderer {
   private viewDepthFbo: FboTarget | null = null;
 
   private uploadedMesh: StudioMeshData | null = null;
+  private maxDim = 2048;
+  private anisoExt: EXT_texture_filter_anisotropic | null = null;
+  private maxAniso = 1;
 
   constructor(canvas?: HTMLCanvasElement) {
     this.canvas = canvas ?? document.createElement('canvas');
@@ -891,6 +895,20 @@ export class StudioPhotoRenderer {
     });
     this.gl = gl;
     if (!gl) return;
+
+    try {
+      const vp = gl.getParameter(gl.MAX_VIEWPORT_DIMS);
+      const rb = gl.getParameter(gl.MAX_RENDERBUFFER_SIZE) || 2048;
+      const texMax = gl.getParameter(gl.MAX_TEXTURE_SIZE) || 2048;
+      const vpMin = vp && vp.length >= 2 ? Math.min(vp[0], vp[1]) : 2048;
+      this.maxDim = Math.max(1024, Math.min(vpMin, rb, texMax, 4096));
+      this.anisoExt = gl.getExtension('EXT_texture_filter_anisotropic')
+        || gl.getExtension('WEBKIT_EXT_TEXTURE_FILTER_ANISOTROPIC')
+        || gl.getExtension('MOZ_EXT_TEXTURE_FILTER_ANISOTROPIC');
+      if (this.anisoExt) {
+        this.maxAniso = Math.min(8, gl.getParameter(this.anisoExt.MAX_TEXTURE_MAX_ANISOTROPY_EXT) || 1);
+      }
+    } catch (_) {}
 
     this.depthProg = linkProgram(gl, VS_DEPTH, FS_DEPTH);
     this.viewDepthProg = linkProgram(gl, VS_VIEW_DEPTH, FS_VIEW_DEPTH);
@@ -933,12 +951,18 @@ export class StudioPhotoRenderer {
       gl.STATIC_DRAW,
     );
 
-    // Shadow maps (nearest filtering because 24-bit depth is packed in RGBA!)
-    this.keyFbo = createFboTarget(gl, 1024, 1024, false);
-    this.fillFbo = createFboTarget(gl, 768, 768, false);
-    this.overFbo = createFboTarget(gl, 768, 768, false);
+    // High-res shadow maps (nearest filtering because 24-bit depth is packed in RGBA!)
+    const keyShadowDim = Math.min(2048, this.maxDim);
+    const auxShadowDim = Math.min(1024, this.maxDim);
+    this.keyFbo = createFboTarget(gl, keyShadowDim, keyShadowDim, false);
+    this.fillFbo = createFboTarget(gl, auxShadowDim, auxShadowDim, false);
+    this.overFbo = createFboTarget(gl, auxShadowDim, auxShadowDim, false);
 
     this.ready = Boolean(this.keyFbo && this.fillFbo && this.overFbo);
+  }
+
+  getMaxDimension(): number {
+    return this.maxDim;
   }
 
   private getOrCreateDecalTexture(
@@ -959,6 +983,9 @@ export class StudioPhotoRenderer {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    if (this.anisoExt && this.maxAniso > 1) {
+      gl.texParameterf(gl.TEXTURE_2D, this.anisoExt.TEXTURE_MAX_ANISOTROPY_EXT, this.maxAniso);
+    }
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 0);
     this.glTextures.set(texKey, tex);
@@ -1038,8 +1065,8 @@ export class StudioPhotoRenderer {
     const hasTexDraws = Boolean(mesh.texDraws && mesh.texDraws.length > 0);
     if (!gl || !this.ready || (mesh.triPos.length < 9 && !hasTexDraws)) return null;
 
-    const w = Math.max(320, Math.min(2048, Math.round(options.width)));
-    const h = Math.max(240, Math.min(2048, Math.round(options.height)));
+    const w = Math.max(320, Math.min(this.maxDim, Math.round(options.width)));
+    const h = Math.max(240, Math.min(this.maxDim, Math.round(options.height)));
     if (this.canvas.width !== w || this.canvas.height !== h) {
       this.canvas.width = w;
       this.canvas.height = h;

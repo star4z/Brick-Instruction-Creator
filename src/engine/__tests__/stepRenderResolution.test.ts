@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  COVER_HERO_MAX_EDGE,
   DEFAULT_PDF_MAX_EDGE,
   DEFAULT_SCREEN_MAX_EDGE,
   DEFAULT_SCREEN_MAX_PIXELS,
   clampRenderDimensions,
+  computeCoverHeroRenderSize,
   computeMinifigDiagramRenderSize,
   computePdfPagePixelDimensions,
   computePreviewResolutionScale,
@@ -171,5 +173,56 @@ describe('stepRenderResolution', () => {
     expect(shouldUpgradeStepRenderForZoom(1200, 800, 1260, 840)).toBe(false);
     expect(shouldUpgradeStepRenderForZoom(1200, 800, 1500, 1000)).toBe(true);
     expect(shouldUpgradeStepRenderForZoom(0, 0, 800, 600)).toBe(true);
+  });
+
+  it('scales cover hero renders to 4K monitors and 300 DPI print quality while respecting GPU limits', () => {
+    // 4K monitor (dpr=2, large stageFitScale=1.6)
+    const cover4k = computeCoverHeroRenderSize({
+      heroWidth: 960,
+      heroHeight: 620,
+      dpr: 2,
+      zoom: 1,
+      stageFitScale: 1.6,
+      mode: 'screen',
+      gpuMaxDim: 4096,
+    });
+    expect(cover4k.width).toBeGreaterThanOrEqual(3200);
+    expect(cover4k.width).toBeLessThanOrEqual(COVER_HERO_MAX_EDGE);
+
+    // 1x desktop monitor still gets print-grade floor (>= 2400px long edge)
+    const cover1x = computeCoverHeroRenderSize({
+      heroWidth: 960,
+      heroHeight: 620,
+      dpr: 1,
+      zoom: 1,
+      stageFitScale: 1.0,
+      mode: 'screen',
+      gpuMaxDim: 4096,
+    });
+    expect(cover1x.width).toBeGreaterThanOrEqual(2400);
+
+    // 300 DPI US Letter cover PDF
+    const pdfCoverPage = computePdfPagePixelDimensions(792, 612, 'cover');
+    expect(pdfCoverPage.width).toBeGreaterThanOrEqual(3200);
+    const pdfCoverHero = computeCoverHeroRenderSize({
+      heroWidth: pdfCoverPage.width * 0.9,
+      heroHeight: pdfCoverPage.height * 0.85,
+      mode: 'pdf',
+      gpuMaxDim: 4096,
+    });
+    expect(pdfCoverHero.width).toBeGreaterThanOrEqual(3200);
+    expect(pdfCoverHero.width).toBeLessThanOrEqual(COVER_HERO_MAX_EDGE);
+
+    // Respects smaller GPU hardware limit
+    const capped = computeCoverHeroRenderSize({
+      heroWidth: 960,
+      heroHeight: 620,
+      dpr: 2,
+      zoom: 2,
+      stageFitScale: 1.6,
+      mode: 'screen',
+      gpuMaxDim: 2048,
+    });
+    expect(Math.max(capped.width, capped.height)).toBeLessThanOrEqual(2048);
   });
 });

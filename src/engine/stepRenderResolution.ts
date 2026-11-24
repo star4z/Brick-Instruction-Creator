@@ -10,9 +10,11 @@ export const DEFAULT_PDF_MAX_PIXELS = 5_800_000;
 export const DEFAULT_GPU_MAX_DIM = 4096;
 
 export const STEP_PDF_PT_SCALE = 2.5; // ~180 DPI (72 pt/in * 2.5)
-export const COVER_PDF_PT_SCALE = 2.8; // ~202 DPI for cover / completion hero pages
+export const COVER_PDF_PT_SCALE = 4.167; // 300 DPI (72 pt/in * 4.167 = 300 px/in) for print-quality covers
 export const STEP_PDF_MAX_EDGE = 2500;
-export const COVER_PDF_MAX_EDGE = 2800;
+export const COVER_PDF_MAX_EDGE = 3600;
+export const COVER_HERO_MAX_EDGE = 3840; // True 4K / 300 DPI print cover hero ceiling
+export const COVER_HERO_MAX_PIXELS = 11_000_000;
 
 export interface RenderDimensions {
   width: number;
@@ -209,8 +211,66 @@ export function computePdfPagePixelDimensions(
   const isHero = pageKind === 'cover' || pageKind === 'complete';
   const scale = isHero ? COVER_PDF_PT_SCALE : STEP_PDF_PT_SCALE;
   const maxEdge = isHero ? COVER_PDF_MAX_EDGE : STEP_PDF_MAX_EDGE;
-  const maxPixels = isHero ? 6_400_000 : 5_200_000;
+  const maxPixels = isHero ? COVER_HERO_MAX_PIXELS : 5_200_000;
   return clampRenderDimensions(safeW * scale, safeH * scale, maxEdge, maxPixels, 360);
+}
+
+export interface CoverHeroRenderSizeInput {
+  /** Cover hero container width (CSS px on screen, or canvas px in PDF). */
+  heroWidth: number;
+  /** Cover hero container height (CSS px on screen, or canvas px in PDF). */
+  heroHeight: number;
+  /** Display devicePixelRatio (screen mode). */
+  dpr?: number;
+  /** Current stage page zoom factor (screen mode, 1 = fit). */
+  zoom?: number;
+  /** Page fit scale on the viewport at zoom = 1 (screen mode). */
+  stageFitScale?: number;
+  /** Target rendering mode. */
+  mode?: 'screen' | 'pdf';
+  /** WebGL hardware max viewport/renderbuffer/texture edge. */
+  gpuMaxDim?: number;
+}
+
+/**
+ * Compute 4K-ready & print-quality WebGL render dimensions for the front cover
+ * and completion hero renders.
+ * - Scales dynamically to physical display pixels (stageFitScale * zoom * dpr) with
+ *   1.5× supersampling to eliminate offscreen WebGL1 FBO aliasing on 4K/Retina monitors.
+ * - Enforces a print-grade minimum floor (>= 2400px long edge) so even 1× monitors get
+ *   razor-sharp covers, scaling up to 3840px (or the GPU's hardware max dimension).
+ */
+export function computeCoverHeroRenderSize(input: CoverHeroRenderSizeInput): RenderDimensions {
+  const mode = input.mode ?? 'screen';
+  const gpuLimit = Math.max(1024, Math.floor(input.gpuMaxDim || DEFAULT_GPU_MAX_DIM));
+  const maxEdge = Math.min(COVER_HERO_MAX_EDGE, gpuLimit);
+
+  const rawW = Math.max(120, Number.isFinite(input.heroWidth) ? input.heroWidth : 800);
+  const rawH = Math.max(120, Number.isFinite(input.heroHeight) ? input.heroHeight : 600);
+  const aspect = rawW / Math.max(1, rawH);
+
+  if (mode === 'pdf') {
+    const targetLong = Math.max(2800, Math.round(Math.max(rawW, rawH) * 1.35));
+    const targetW = aspect >= 1 ? targetLong : Math.round(targetLong * aspect);
+    const targetH = aspect >= 1 ? Math.round(targetLong / aspect) : targetLong;
+    return clampRenderDimensions(targetW, targetH, maxEdge, COVER_HERO_MAX_PIXELS, 480);
+  }
+
+  const dpr = Number.isFinite(input.dpr) && (input.dpr as number) > 0 ? (input.dpr as number) : 1;
+  const zoom = Number.isFinite(input.zoom) && (input.zoom as number) > 0 ? (input.zoom as number) : 1;
+  const fitScale = Number.isFinite(input.stageFitScale) && (input.stageFitScale as number) > 0
+    ? (input.stageFitScale as number)
+    : 1;
+
+  // Physical on-screen pixels of the cover hero * 1.5x supersampling (compensates for non-MSAA FBO)
+  const physicalLong = Math.max(rawW, rawH) * fitScale * zoom * Math.max(1, dpr) * 1.5;
+  // Print-grade floor: >= 2400px on 1x displays, >= 2880px on 2x+ HiDPI/4K monitors
+  const floorLong = dpr >= 1.5 ? 2880 : 2400;
+  const desiredLong = Math.max(floorLong, Math.round(physicalLong));
+
+  const targetW = aspect >= 1 ? desiredLong : Math.round(desiredLong * aspect);
+  const targetH = aspect >= 1 ? Math.round(desiredLong / aspect) : desiredLong;
+  return clampRenderDimensions(targetW, targetH, maxEdge, COVER_HERO_MAX_PIXELS, 480);
 }
 
 /**
