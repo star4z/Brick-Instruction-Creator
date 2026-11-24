@@ -419,9 +419,9 @@
     <!-- ================================================================ -->
     <div id="stylePopover" role="dialog" aria-label="Style options" class="no-print hidden fixed top-[60px] right-3 z-45 w-[min(94vw,372px)]">
       <div class="style-popover-tail" aria-hidden="true"></div>
-      <div class="style-popover-body rounded-xl studio-sheet p-4 space-y-4 text-xs max-h-[78vh] overflow-y-auto overscroll-contain">
-        <!-- Theme strip: current theme first, then by last use -->
-        <div class="space-y-2">
+      <div class="style-popover-body rounded-xl studio-sheet text-xs max-h-[78vh] flex flex-col overflow-hidden">
+        <!-- Sticky theme header: stays visible while scrolling style options -->
+        <div id="stylePopoverThemeHeader" class="shrink-0 p-4 pb-3 space-y-2 bg-[var(--card)] border-b border-[var(--border)]">
           <div class="flex items-center justify-between gap-2">
             <span class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Themes</span>
             <button id="btnNewCustomTheme" type="button" title="New theme from current" class="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] hover:border-[var(--primary)] hover:text-[var(--primary)] text-xs font-semibold transition-colors cursor-pointer">
@@ -429,11 +429,13 @@
               <span>New from Current</span>
             </button>
           </div>
-          <div id="themeStrip" role="listbox" aria-label="Themes" class="theme-strip flex gap-2 overflow-x-auto overscroll-x-contain snap-x snap-mandatory -mx-4 px-4 pb-1.5"></div>
+          <div id="themeStrip" role="listbox" aria-label="Themes" class="theme-strip flex gap-2 overflow-x-auto overscroll-x-contain snap-x snap-mandatory -mx-4 px-4 py-1"></div>
         </div>
 
+        <!-- Scrollable style options -->
+        <div id="stylePopoverScroll" class="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 pt-3 space-y-4">
         <!-- Current theme identity + file actions -->
-        <div class="space-y-2 pt-3 border-t border-[var(--border)]">
+        <div class="space-y-2">
           <label class="block space-y-1.5">
             <span class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Theme Name</span>
             <input id="themeNameInput" type="text" maxlength="40" placeholder="e.g. Pressroom Cream" class="w-full px-3 py-2 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] text-sm font-medium outline-none focus:border-[var(--primary)]" />
@@ -581,6 +583,7 @@
             <span class="font-medium">Model Title on Pages</span>
             <input id="togglePageTitle" type="checkbox" checked class="w-4 h-4 accent-[var(--primary)] cursor-pointer" />
           </label>
+        </div>
         </div>
       </div>
     </div>

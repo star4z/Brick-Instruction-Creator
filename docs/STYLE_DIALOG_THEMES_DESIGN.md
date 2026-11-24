@@ -4,10 +4,10 @@ The Style dialog (`#stylePopover`) is now the only place to choose and edit them
 
 ## Layout
 
-1. **Theme strip** (`#themeStrip`): one horizontally scrollable row containing every theme, built-in and custom. Each card shows a mini page preview: background, step number "1" in the theme's heading font, a parts box, muted text in the body font, and an accent dot. Custom themes have a small pencil marker.
+1. **Sticky theme header** (`#stylePopoverThemeHeader` + `#themeStrip`): pinned at the top of the popover (`shrink-0` above the `#stylePopoverScroll` pane) so the active theme and strip stay visible while scrolling the style options below. One horizontally scrollable row contains every theme, built-in and custom. Each card shows a mini page preview: background, step number "1" in the theme's heading font, a parts box, muted text in the body font, and an accent dot. Custom themes have a small pencil marker.
    - **Order:** the current theme always comes first, then other themes by most recent use, then themes never used in their default order (built-ins, then custom themes in creation order). This comes from `orderThemesByRecent()`, with recents kept in `localStorage` (`bic_theme_recents_v1`) via `touchThemeRecent()`. The renderAll wrapper calls `noteThemeUsed()`, so every way of changing the theme (strip, import, project load, delete) updates the order.
    - **New from Current** (`#btnNewCustomTheme`) copies the current theme into a new custom theme, selects it, and focuses the name field.
-2. **Theme name** plus **Import / Export / Delete**. Delete is disabled for built-ins. A hint explains that changing a built-in creates a custom copy.
+2. **Theme name** plus **Import / Export / Delete** (first section inside `#stylePopoverScroll`). Delete is disabled for built-ins. A hint explains that changing a built-in creates a custom copy.
 3. **Page Background**, **Text, Boxes & Accents**, **Typography**: the former editor controls. They apply live.
 4. **Step Display**: the former loose style toggles, now stored on the theme.
 
