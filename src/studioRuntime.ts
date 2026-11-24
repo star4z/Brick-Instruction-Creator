@@ -9833,6 +9833,7 @@ let libRenderedCount = 0;
 let libThumbQueue = [];
 let libThumbRafId = 0;
 let libSearchDebounceTimer = null;
+let libPreviewMeshCache = { key: '', mesh: null };
 /** Catalog-only parts already auto-downloaded on selection this session (avoids refetch loops on 404). */
 const libAutoFetchAttempted = new Set();
 
@@ -9843,6 +9844,7 @@ function invalidateLibraryRenderCaches() {
   clearMinifigDiagramCaches();
   coverHeroCache.clear();
   libThumbCache.clear();
+  libPreviewMeshCache = { key: '', mesh: null };
   libCachedSnapshot = null;
 }
 
@@ -10535,6 +10537,44 @@ function renderPartPreviewDataUrl(partId, colorId, size = LIB_THUMB_SIZE, az = 3
   return url;
 }
 
+function getOrBuildLibPreviewMesh(partId, colorId) {
+  const key = `${partId}:${colorId}`;
+  if (libPreviewMeshCache.key === key && libPreviewMeshCache.mesh) {
+    return libPreviewMeshCache.mesh;
+  }
+  const rawPart = { id: `lib_${partId}`, p: partId, c: colorId, x: 0, y: 0, z: 0, r: R_ID };
+  const samplePart = normalizeCompositeThumbPart(rawPart, (pid) => resolvePart(pid).name, computeWorldBox);
+  const mesh = buildMeshBuffers([], [samplePart], {
+    highlightNew: false,
+    fadePrev: false,
+    showArrows: false,
+    heroQuality: true,
+    accent: '#1a73e8',
+  });
+  libPreviewMeshCache = { key, mesh };
+  return mesh;
+}
+
+function drawLibPreviewCanvas(partId, colorId, hiRes = true) {
+  const canvas = document.getElementById('libPreviewCanvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  const renderSize = hiRes ? LIB_INSPECTOR_SIZE : 440;
+  const mesh = getOrBuildLibPreviewMesh(partId, colorId);
+  snapshotEngine.draw(mesh, renderSize, renderSize, libUiState.previewAz, libUiState.previewEl, 1.0, 0, {
+    tightFit: true,
+    heroShading: true,
+    lineAlpha: 0.24,
+  });
+  if (canvas.width !== renderSize || canvas.height !== renderSize) {
+    canvas.width = renderSize;
+    canvas.height = renderSize;
+  }
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(snapshotCanvas, 0, 0, renderSize, renderSize, 0, 0, canvas.width, canvas.height);
+}
+
 function stopLibThumbQueue() {
   libThumbQueue = [];
   if (libThumbRafId) {
@@ -10778,11 +10818,12 @@ function renderLibPreviewInspector() {
   const pane = document.getElementById('libPreviewPane');
   const emptyEl = document.getElementById('libPreviewEmpty');
   const detailEl = document.getElementById('libPreviewDetail');
-  const imgEl = document.getElementById('libPreviewImg');
+  const canvasEl = document.getElementById('libPreviewCanvas');
+  const loadingEl = document.getElementById('libPreviewLoading');
+  const hintEl = document.getElementById('libPreviewOrbitHint');
   const metaEl = document.getElementById('libPreviewMeta');
   const actionsEl = document.getElementById('libPreviewActions');
-  const flipBtn = document.getElementById('libPreviewFlipBtn');
-  if (!pane || !emptyEl || !detailEl || !imgEl || !metaEl || !actionsEl) return;
+  if (!pane || !emptyEl || !detailEl || !canvasEl || !metaEl || !actionsEl) return;
 
   const { items } = getLibrarySnapshot();
   const item = libUiState.selectedId ? items.find((x) => x.id === libUiState.selectedId) : null;
@@ -10804,8 +10845,10 @@ function renderLibPreviewInspector() {
   const effectiveColor = getEffectivePreviewColorForPart(item.id);
   const onlineOnly = isOnlineOnlyItem(item);
   if (onlineOnly) {
-    imgEl.removeAttribute('src');
-    imgEl.alt = 'Downloading exact 3D shape…';
+    const ctx = canvasEl.getContext('2d');
+    if (ctx) ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
+    if (loadingEl) loadingEl.classList.remove('hidden');
+    if (hintEl) hintEl.classList.add('hidden');
     // Selecting a catalog-only part downloads its exact geometry (once) and re-renders the preview.
     if (!fetchPartsInFlight && !libAutoFetchAttempted.has(item.id)) {
       libAutoFetchAttempted.add(item.id);
@@ -10814,24 +10857,11 @@ function renderLibPreviewInspector() {
       });
     }
   } else {
+    if (loadingEl) loadingEl.classList.add('hidden');
+    if (hintEl) hintEl.classList.remove('hidden');
     try {
-      imgEl.src = renderPartPreviewDataUrl(item.id, effectiveColor, LIB_INSPECTOR_SIZE, libUiState.previewAz, libUiState.previewEl);
+      drawLibPreviewCanvas(item.id, effectiveColor, true);
     } catch (_) {}
-  }
-
-  document.querySelectorAll('.lib-angle-btn').forEach((btn) => {
-    const az = Number(btn.getAttribute('data-lib-az'));
-    const active = az === libUiState.previewAz;
-    btn.classList.toggle('bg-[var(--primary)]', active);
-    btn.classList.toggle('text-[var(--primary-foreground)]', active);
-    btn.classList.toggle('border-[var(--primary)]', active);
-  });
-  if (flipBtn) {
-    const flipped = libUiState.previewEl < 0;
-    flipBtn.classList.toggle('bg-[var(--primary)]', flipped);
-    flipBtn.classList.toggle('text-[var(--primary-foreground)]', flipped);
-    flipBtn.classList.toggle('border-[var(--primary)]', flipped);
-    flipBtn.textContent = flipped ? 'Bottom' : 'Top';
   }
 
   const sourceLabels = [];
@@ -14241,22 +14271,73 @@ if (btnCloseLibPreviewEl) {
   };
 }
 
-document.querySelectorAll('.lib-angle-btn').forEach((btn) => {
-  btn.onclick = () => {
-    const az = Number(btn.getAttribute('data-lib-az'));
-    if (Number.isFinite(az)) {
-      libUiState.previewAz = az;
-      renderLibPreviewInspector();
-    }
-  };
-});
+const libPreviewStageEl = document.getElementById('libPreviewStage');
+if (libPreviewStageEl) {
+  let orbitActive = false;
+  let orbitPointerId = null;
+  let orbitStartX = 0;
+  let orbitStartY = 0;
+  let orbitStartAz = 38;
+  let orbitStartEl = 24;
+  let orbitRaf = 0;
 
-const libPreviewFlipBtnEl = document.getElementById('libPreviewFlipBtn');
-if (libPreviewFlipBtnEl) {
-  libPreviewFlipBtnEl.onclick = () => {
-    libUiState.previewEl = libUiState.previewEl > 0 ? -24 : 24;
-    renderLibPreviewInspector();
+  const scheduleOrbitDraw = (hiRes) => {
+    if (orbitRaf) cancelAnimationFrame(orbitRaf);
+    orbitRaf = requestAnimationFrame(() => {
+      orbitRaf = 0;
+      const pid = libUiState.selectedId;
+      if (!pid) return;
+      const { items } = getLibrarySnapshot();
+      const item = items.find((x) => x.id === pid);
+      if (!item || isOnlineOnlyItem(item)) return;
+      try {
+        drawLibPreviewCanvas(pid, getEffectivePreviewColorForPart(pid), hiRes);
+      } catch (_) {}
+    });
   };
+
+  libPreviewStageEl.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 && e.pointerType === 'mouse') return;
+    const pid = libUiState.selectedId;
+    if (!pid) return;
+    orbitActive = true;
+    orbitPointerId = e.pointerId;
+    orbitStartX = e.clientX;
+    orbitStartY = e.clientY;
+    orbitStartAz = libUiState.previewAz;
+    orbitStartEl = libUiState.previewEl;
+    const hintEl = document.getElementById('libPreviewOrbitHint');
+    if (hintEl) hintEl.classList.add('opacity-0');
+    try { libPreviewStageEl.setPointerCapture(e.pointerId); } catch (_) {}
+    e.preventDefault();
+  });
+
+  libPreviewStageEl.addEventListener('pointermove', (e) => {
+    if (!orbitActive || e.pointerId !== orbitPointerId) return;
+    const dx = e.clientX - orbitStartX;
+    const dy = e.clientY - orbitStartY;
+    libUiState.previewAz = ((orbitStartAz - dx * 0.7) % 360 + 360) % 360;
+    libUiState.previewEl = Math.max(-85, Math.min(85, orbitStartEl + dy * 0.55));
+    scheduleOrbitDraw(false);
+  });
+
+  const endOrbit = (e) => {
+    if (!orbitActive || (orbitPointerId !== null && e.pointerId !== orbitPointerId)) return;
+    orbitActive = false;
+    orbitPointerId = null;
+    const hintEl = document.getElementById('libPreviewOrbitHint');
+    if (hintEl) hintEl.classList.remove('opacity-0');
+    try { libPreviewStageEl.releasePointerCapture(e.pointerId); } catch (_) {}
+    scheduleOrbitDraw(true);
+  };
+
+  libPreviewStageEl.addEventListener('pointerup', endOrbit);
+  libPreviewStageEl.addEventListener('pointercancel', endOrbit);
+  libPreviewStageEl.addEventListener('dblclick', () => {
+    libUiState.previewAz = 38;
+    libUiState.previewEl = 24;
+    scheduleOrbitDraw(true);
+  });
 }
 
 document.getElementById('libSourceSelect').onchange = (e) => {

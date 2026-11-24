@@ -1568,18 +1568,16 @@
               </div>
               <div id="libPreviewEmpty" class="py-12 text-center space-y-3 text-[var(--muted-foreground)]">
                 <svg class="w-7 h-7 mx-auto opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3 3 7.5 12 12l9-4.5L12 3Z"/><path d="m3 12 9 4.5 9-4.5"/><path d="m3 16.5 9 4.5 9-4.5"/></svg>
-                <p class="text-xs leading-relaxed">Select any part from the list to inspect its 3D shape, angle views, and library source.</p>
+                <p class="text-xs leading-relaxed">Select any part from the list to inspect its 3D shape, drag to orbit, and view library details.</p>
               </div>
               <div id="libPreviewDetail" class="hidden space-y-3.5">
-                <div class="aspect-square w-full max-w-[230px] mx-auto rounded-lg border border-[var(--border)] bg-[radial-gradient(circle_at_50%_40%,var(--card)_0%,var(--surface-sunken)_100%)] flex items-center justify-center p-3.5 overflow-hidden relative">
-                  <img id="libPreviewImg" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1' height='1'/%3E" alt="3D part preview" class="w-full h-full object-contain drop-shadow-[0_6px_12px_rgba(15,23,42,0.14)]" />
-                </div>
-                <div id="libPreviewAngles" class="flex items-center justify-center gap-1.5 flex-wrap">
-                  <button data-lib-az="38" type="button" class="lib-angle-btn px-2.5 py-1 rounded-md border border-[var(--border)] bg-[var(--card)] text-xs font-semibold cursor-pointer">Front</button>
-                  <button data-lib-az="142" type="button" class="lib-angle-btn px-2.5 py-1 rounded-md border border-[var(--border)] bg-[var(--card)] text-xs font-semibold cursor-pointer">Right</button>
-                  <button data-lib-az="218" type="button" class="lib-angle-btn px-2.5 py-1 rounded-md border border-[var(--border)] bg-[var(--card)] text-xs font-semibold cursor-pointer">Back</button>
-                  <button data-lib-az="322" type="button" class="lib-angle-btn px-2.5 py-1 rounded-md border border-[var(--border)] bg-[var(--card)] text-xs font-semibold cursor-pointer">Left</button>
-                  <button id="libPreviewFlipBtn" type="button" title="Toggle top/bottom view" class="px-2.5 py-1 rounded-md border border-[var(--border)] bg-[var(--card)] text-xs font-semibold cursor-pointer">Flip</button>
+                <div id="libPreviewStage" title="Drag to orbit · Double-click to reset view" class="aspect-square w-full max-w-[240px] mx-auto rounded-lg border border-[var(--border)] bg-[radial-gradient(circle_at_50%_40%,var(--card)_0%,var(--surface-sunken)_100%)] flex items-center justify-center p-3 overflow-hidden relative cursor-grab active:cursor-grabbing select-none touch-none">
+                  <canvas id="libPreviewCanvas" width="480" height="480" aria-label="Interactive 3D part preview (drag to orbit)" class="w-full h-full object-contain drop-shadow-[0_6px_12px_rgba(15,23,42,0.14)] pointer-events-none"></canvas>
+                  <div id="libPreviewLoading" class="hidden absolute inset-0 flex flex-col items-center justify-center gap-1.5 text-xs text-[var(--muted-foreground)] pointer-events-none">
+                    <svg viewBox="0 0 24 24" class="w-7 h-7 opacity-60 animate-pulse" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 8.5a4 4 0 0 1-.5 7.97"/><path d="M12 12v8"/><path d="m9 17 3 3 3-3"/></svg>
+                    <span>Downloading 3D shape…</span>
+                  </div>
+                  <div id="libPreviewOrbitHint" class="absolute bottom-1.5 inset-x-0 text-center text-[10px] font-medium text-[var(--muted-foreground)]/75 pointer-events-none transition-opacity">Drag to orbit</div>
                 </div>
                 <div id="libPreviewMeta" class="space-y-2"></div>
                 <div id="libPreviewActions" class="space-y-2 pt-3 border-t border-[var(--border)]"></div>
