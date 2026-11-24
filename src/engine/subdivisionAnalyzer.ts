@@ -1097,6 +1097,57 @@ function placeSecondaryGlobalComponents(
   });
 }
 
+/**
+ * Computes proportional radial explode offsets from the mean centroid of a set of section centers.
+ * Dividing all deltas by a single shared max radius produces a homothetic expansion so collinear
+ * sections (e.g. 3+ baseplates or modules in a row) all separate evenly from each other rather
+ * than two sections on the same side of the centroid collapsing onto the same unit vector.
+ */
+export function computeRadialExplodeOffsets(
+  centers: Vec3[],
+  opts: { horizontalOnly?: boolean; scale?: number; yScale?: number; clampYNonNegative?: boolean } = {},
+): Vec3[] {
+  const n = centers.length;
+  if (n === 0) return [];
+  const horizontalOnly = Boolean(opts.horizontalOnly);
+  const scale = opts.scale ?? 1.0;
+  const yScale = opts.yScale ?? 0.5;
+  const clampYNonNegative = Boolean(opts.clampYNonNegative);
+
+  let cx = 0;
+  let cy = 0;
+  let cz = 0;
+  for (const c of centers) {
+    cx += c[0];
+    cy += c[1];
+    cz += c[2];
+  }
+  cx /= n;
+  cy /= n;
+  cz /= n;
+
+  const deltas = centers.map(
+    (c) => [c[0] - cx, horizontalOnly ? 0 : c[1] - cy, c[2] - cz] as Vec3,
+  );
+
+  let maxR = 0;
+  for (const d of deltas) {
+    const r = horizontalOnly ? Math.hypot(d[0], d[2]) : Math.hypot(d[0], d[1], d[2]);
+    if (r > maxR) maxR = r;
+  }
+  if (maxR < 1e-4) {
+    return centers.map(() => [0, 0, 0] as Vec3);
+  }
+
+  return deltas.map((d) => {
+    const ox = (d[0] / maxR) * scale;
+    const rawY = horizontalOnly ? 0 : (d[1] / maxR) * scale * yScale;
+    const oy = clampYNonNegative ? Math.max(0, rawY) : rawY;
+    const oz = (d[2] / maxR) * scale;
+    return [ox, oy, oz] as Vec3;
+  });
+}
+
 function countCutEdges(indices: number[], adjacency: number[][]): number {
   const set = new Set(indices);
   let cut = 0;
@@ -2869,12 +2920,16 @@ export function buildStructuralModulesProposal(
           allParts,
           adjacency,
         );
+        const sectionBounds = orderedLists.map((indices) =>
+          computeModelBounds(indices.map((i) => allParts[i])),
+        );
+        const radialOffsets = computeRadialExplodeOffsets(
+          sectionBounds.map((sb) => sb.center),
+          { scale: orderedLists.length >= 3 ? 1.1 : 1.0, yScale: 0.5, clampYNonNegative: true },
+        );
         const sections: ProposedSection[] = orderedLists.map((indices, idx) => {
-          const sb = computeModelBounds(indices.map((i) => allParts[i]));
-          const dx = sb.center[0] - bounds.center[0];
-          const dy = sb.center[1] - bounds.center[1];
-          const dz = sb.center[2] - bounds.center[2];
-          const len = Math.hypot(dx, dy, dz) || 1;
+          const sb = sectionBounds[idx];
+          const baseOff = radialOffsets[idx];
           const isCap = Boolean(capTagByFirstNode.get(indices[0]));
           const isTopCap = isCap && sb.max[1] >= bounds.max[1] - 16;
           return {
@@ -2886,8 +2941,8 @@ export function buildStructuralModulesProposal(
             isDetachableCap: isCap,
             cutEdgeCount: countCutEdges(indices, adjacency),
             explodeOffset: isCap
-              ? [(dx / len) * 0.4, 0.9, (dz / len) * 0.4]
-              : [dx / len, Math.max(0, (dy / len) * 0.5), dz / len],
+              ? [baseOff[0] * 0.4, 0.9, baseOff[2] * 0.4]
+              : baseOff,
             previewColor: SECTION_PREVIEW_PALETTE[idx % SECTION_PREVIEW_PALETTE.length],
           };
         });
@@ -3092,23 +3147,23 @@ export function buildStructuralModulesProposal(
   const cutRatio = totalCut / Math.max(1, totalInternal + totalCut);
   const outputMode: SubdivisionOutputMode = cutRatio <= 0.22 ? 'modular_chapters' : 'numbered_bags';
 
-  const sections: ProposedSection[] = validGroups.map((indices, idx) => {
-    const sb = computeModelBounds(indices.map((i) => allParts[i]));
-    const dx = sb.center[0] - bounds.center[0];
-    const dy = sb.center[1] - bounds.center[1];
-    const dz = sb.center[2] - bounds.center[2];
-    const len = Math.hypot(dx, dy, dz) || 1;
-    return {
-      id: `sec_mod_${idx + 1}`,
-      name: `Module ${idx + 1}`,
-      partIndices: indices,
-      partIds: indices.map((i) => allParts[i].id),
-      role: outputMode === 'modular_chapters' ? 'module' : 'bag',
-      cutEdgeCount: countCutEdges(indices, adjacency),
-      explodeOffset: [dx / len, Math.max(0, (dy / len) * 0.5), dz / len],
-      previewColor: SECTION_PREVIEW_PALETTE[idx % SECTION_PREVIEW_PALETTE.length],
-    };
-  });
+  const groupBounds = validGroups.map((indices) =>
+    computeModelBounds(indices.map((i) => allParts[i])),
+  );
+  const radialOffsets = computeRadialExplodeOffsets(
+    groupBounds.map((sb) => sb.center),
+    { scale: validGroups.length >= 3 ? 1.1 : 1.0, yScale: 0.5, clampYNonNegative: true },
+  );
+  const sections: ProposedSection[] = validGroups.map((indices, idx) => ({
+    id: `sec_mod_${idx + 1}`,
+    name: `Module ${idx + 1}`,
+    partIndices: indices,
+    partIds: indices.map((i) => allParts[i].id),
+    role: outputMode === 'modular_chapters' ? 'module' : 'bag',
+    cutEdgeCount: countCutEdges(indices, adjacency),
+    explodeOffset: radialOffsets[idx],
+    previewColor: SECTION_PREVIEW_PALETTE[idx % SECTION_PREVIEW_PALETTE.length],
+  }));
 
   placeSecondaryGlobalComponents(
     sections,
@@ -3272,29 +3327,28 @@ export function buildNumberedBagsProposal(
 
   const orderedBags = orderConnectedSections(segments, allParts, adjacency);
 
-  const bounds = computeModelBounds(primaryParts);
   const allBounds = computeModelBounds(active);
-  const sections: ProposedSection[] = orderedBags.map((slice, b) => {
-    const sb = computeModelBounds(slice.map((i) => allParts[i]));
-    const dx = sb.center[0] - bounds.center[0];
-    const dy = sb.center[1] - bounds.center[1];
-    const dz = sb.center[2] - bounds.center[2];
-    const len = Math.hypot(dx, dy, dz) || 1;
-    return {
-      id: `sec_bag_${b + 1}`,
-      name: `Bag ${b + 1}`,
-      partIndices: slice,
-      partIds: slice.map((i) => allParts[i].id),
-      role: 'bag',
-      cutEdgeCount: countCutEdges(slice, adjacency),
-      explodeOffset: [
-        (dx / len) * 0.65,
-        (b / Math.max(1, orderedBags.length - 1)) * 0.6,
-        (dz / len) * 0.65,
-      ],
-      previewColor: SECTION_PREVIEW_PALETTE[b % SECTION_PREVIEW_PALETTE.length],
-    };
-  });
+  const bagBounds = orderedBags.map((slice) =>
+    computeModelBounds(slice.map((i) => allParts[i])),
+  );
+  const radialOffsets = computeRadialExplodeOffsets(
+    bagBounds.map((sb) => sb.center),
+    { horizontalOnly: true, scale: 0.65 },
+  );
+  const sections: ProposedSection[] = orderedBags.map((slice, b) => ({
+    id: `sec_bag_${b + 1}`,
+    name: `Bag ${b + 1}`,
+    partIndices: slice,
+    partIds: slice.map((i) => allParts[i].id),
+    role: 'bag',
+    cutEdgeCount: countCutEdges(slice, adjacency),
+    explodeOffset: [
+      radialOffsets[b][0],
+      (b / Math.max(1, orderedBags.length - 1)) * 0.6,
+      radialOffsets[b][2],
+    ],
+    previewColor: SECTION_PREVIEW_PALETTE[b % SECTION_PREVIEW_PALETTE.length],
+  }));
 
   placeSecondaryGlobalComponents(
     sections,
@@ -3621,14 +3675,15 @@ export function buildBaseplateSplitProposal(
   }
 
   const center = allBounds.center;
+  const radialOffsets = computeRadialExplodeOffsets(
+    orderedPlates.map((plate) => plate.box.center),
+    { horizontalOnly: true, scale: orderedPlates.length >= 3 ? 1.1 : 0.85 },
+  );
   const sections: ProposedSection[] = orderedPlates.map((plate, slot) => {
     const indices = members[slot];
     const spanA = Math.round((plate.box.max[0] - plate.box.min[0]) / 20);
     const spanB = Math.round((plate.box.max[2] - plate.box.min[2]) / 20);
     const dims = `${Math.min(spanA, spanB)}×${Math.max(spanA, spanB)}`;
-    const dx = plate.box.center[0] - center[0];
-    const dz = plate.box.center[2] - center[2];
-    const hLen = Math.hypot(dx, dz) || 1;
     return {
       id: `sec_baseplate_${slot + 1}`,
       name: `Baseplate ${slot + 1} (${dims})`,
@@ -3636,7 +3691,7 @@ export function buildBaseplateSplitProposal(
       partIds: indices.map((i) => allParts[i].id),
       role: 'module',
       cutEdgeCount: countCutEdges(indices, adjacency),
-      explodeOffset: [(dx / hLen) * 0.8, 0, (dz / hLen) * 0.8],
+      explodeOffset: radialOffsets[slot],
       previewColor: SECTION_PREVIEW_PALETTE[slot % SECTION_PREVIEW_PALETTE.length],
     };
   });

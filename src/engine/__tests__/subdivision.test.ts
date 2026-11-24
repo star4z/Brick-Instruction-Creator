@@ -12,6 +12,7 @@ import {
   classifyConnectionEdge,
   classifySubdivisionPartFlags,
   computeHorizontalPrincipalAxis,
+  computeRadialExplodeOffsets,
   isConnectedSubgraph,
   mergeProposedSections,
   recomputeProposalWithCount,
@@ -1121,5 +1122,67 @@ describe('Large & Elongated Model Subdivision Analyzer', () => {
       const { parts, adjacency } = prep(lines.join('\n'));
       expect(buildBaseplateSplitProposal(parts, adjacency)).toBeNull();
     });
+
+    it('separates all three collinear baseplates evenly instead of sticking two together', () => {
+      // Three 16x32 baseplates in a row, with slightly uneven spacing so the middle plate is
+      // not at the exact overall bounding-box center (the case that broke unit-vector explode).
+      const lines: string[] = ['0 Three Baseplates In A Row'];
+      const centersX = [-360, 20, 380];
+      for (const cx of centersX) {
+        lines.push(`1 2 ${cx} 0 0 1 0 0 0 1 0 0 0 1 3857.dat`);
+        for (const layerY of [-24, -48]) {
+          for (const dz of [-80, 0, 80]) {
+            lines.push(`1 4 ${cx - 40} ${layerY} ${dz} 1 0 0 0 1 0 0 0 1 3001.dat`);
+            lines.push(`1 4 ${cx + 40} ${layerY} ${dz} 1 0 0 0 1 0 0 0 1 3001.dat`);
+          }
+        }
+      }
+      const { parts, adjacency } = prep(lines.join('\n'));
+      const prop = buildBaseplateSplitProposal(parts, adjacency);
+      expect(prop).not.toBeNull();
+      const plateSecs = prop!.sections.filter((s) => s.id.startsWith('sec_baseplate_'));
+      expect(plateSecs).toHaveLength(3);
+
+      const xs = plateSecs.map((s) => s.explodeOffset[0]).sort((a, b) => a - b);
+      // Every adjacent pair must have a substantial positive separation (no two sections stuck together)
+      expect(xs[1] - xs[0]).toBeGreaterThan(0.7);
+      expect(xs[2] - xs[1]).toBeGreaterThan(0.7);
+      // Leftmost goes negative, rightmost goes positive, middle stays near center
+      expect(xs[0]).toBeLessThan(-0.8);
+      expect(Math.abs(xs[1])).toBeLessThan(0.25);
+      expect(xs[2]).toBeGreaterThan(0.8);
+    });
+  });
+
+  it('computeRadialExplodeOffsets expands collinear, grid, and L-shaped layouts proportionally', () => {
+    // 3 collinear sections (even off-center)
+    const row = computeRadialExplodeOffsets(
+      [
+        [-300, 0, 0],
+        [40, 0, 0],
+        [340, 0, 0],
+      ],
+      { horizontalOnly: true, scale: 1.0 },
+    );
+    expect(row[0][0]).toBeCloseTo(-1.0, 2);
+    expect(row[1][0]).toBeGreaterThan(row[0][0] + 0.5);
+    expect(row[2][0]).toBeGreaterThan(row[1][0] + 0.5);
+
+    // 2x2 grid expands symmetrically
+    const grid = computeRadialExplodeOffsets(
+      [
+        [-100, 0, -100],
+        [100, 0, -100],
+        [-100, 0, 100],
+        [100, 0, 100],
+      ],
+      { horizontalOnly: true, scale: 1.0 },
+    );
+    for (let i = 0; i < grid.length; i++) {
+      for (let j = i + 1; j < grid.length; j++) {
+        const sep = Math.hypot(grid[i][0] - grid[j][0], grid[i][2] - grid[j][2]);
+        expect(sep).toBeGreaterThan(1.3);
+      }
+    }
   });
 });
