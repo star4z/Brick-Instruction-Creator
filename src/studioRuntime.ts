@@ -196,8 +196,10 @@ import {
   formatLibraryMenuSummary,
   getAllStarterPackPartIds,
   getModelFetchCopy,
+  isOnlineOnlyItem,
   parsePartIdListInput,
 } from './engine/bricksLibrary';
+import { loadPartsCatalog } from './engine/partsCatalog';
 import {
   assignAbsoluteStepNumbers,
   formatAbsRange,
@@ -733,6 +735,11 @@ const KNOWN_EXTRA_PART_NAMES = {
   '983': 'Minifigure Hand',
 };
 
+// Bundled Online Parts Catalog (official + unofficial/Studio IDs & titles), loaded lazily on first
+// Bricks Library open. Declared here (above getHumanPartName) to avoid TDZ issues during startup.
+let onlinePartsCatalog = null;
+let onlinePartsCatalogPromise = null;
+
 function getHumanPartName(pid) {
   let k = normId(pid);
   // Follow LDraw `~Moved to <target>` redirect chains (up to 4 hops) for clean official titles
@@ -744,6 +751,10 @@ function getHumanPartName(pid) {
   const isMeaningfulTitle = (t, id) => Boolean(t && !/^~?Moved\s+to\s+/i.test(t) && normId(t) !== normId(id));
   const directTitle = embeddedDatTitles.get(k) || userLibTitles.get(k);
   if (isMeaningfulTitle(directTitle, k)) return directTitle;
+  const directCatalog = onlinePartsCatalog?.entries.get(k);
+  if (directCatalog && isMeaningfulTitle(directCatalog.name, k) && !/^(?:Part |Printed Part$|Printed BrickLink Studio Part$|BrickLink )/.test(directCatalog.name)) {
+    return directCatalog.name;
+  }
 
   const isPrinted = /(?:pb|ps|pat|pr)\d+/i.test(k) || /^\d{3,}[a-z]?p[0-9a-z]{2,}/i.test(k);
   const lookupName = (id) => {
@@ -757,6 +768,8 @@ function getHumanPartName(pid) {
     if (isMeaningfulTitle(t, cur)) return t;
     if (KNOWN_EXTRA_PART_NAMES[cur]) return KNOWN_EXTRA_PART_NAMES[cur];
     if (PARTS_CATALOG[cur]?.name) return PARTS_CATALOG[cur].name;
+    const cat = onlinePartsCatalog?.entries.get(cur);
+    if (cat && isMeaningfulTitle(cat.name, cur) && !/^(?:Part |Printed Part$|Printed BrickLink Studio Part$|BrickLink )/.test(cat.name)) return cat.name;
     return null;
   };
 
@@ -790,7 +803,7 @@ function explainMissingPartReason(pid) {
 
   if (isPrinted || isBlCustom) {
     if (fbs.length > 0) {
-      return `BrickLink Studio ${isPrinted ? 'printed/decorated' : 'custom'} part ID (not in official LDraw). Tap Fetch Online to load its unprinted base shape (${fbs[0]}.dat), or open the original .io file.`;
+      return `BrickLink Studio ${isPrinted ? 'printed/decorated' : 'custom'} part ID (not in official LDraw). Tap Fetch Online to load it from the LDraw Unofficial & Studio parts mirror (falls back to its unprinted base shape ${fbs[0]}.dat if it isn't hosted), or open the original .io file.`;
     }
     return `BrickLink Studio custom part ID not distributed in standard LDraw mirrors. Open the original Studio .io file to include its exact 3D geometry.`;
   }
@@ -9753,6 +9766,8 @@ let libThumbObserver = null;
 let libThumbQueue = [];
 let libThumbRafId = 0;
 let libSearchDebounceTimer = null;
+/** Catalog-only parts already auto-downloaded on selection this session (avoids refetch loops on 404). */
+const libAutoFetchAttempted = new Set();
 
 function invalidateLibraryRenderCaches() {
   embeddedDatCompiled.clear();
@@ -9799,8 +9814,30 @@ function getLibrarySnapshot(forceRebuild = false) {
     missingExactDatPartIds,
     resolveName: (id) => getHumanPartName(id),
     savedTextureCount: textureStore.getLibraryCount(),
+    onlineCatalog: onlinePartsCatalog?.entries || null,
   });
   return libCachedSnapshot;
+}
+
+/** Lazily loads the bundled Online Parts Catalog (once per session) and refreshes the library UI. */
+function ensureOnlinePartsCatalog() {
+  if (onlinePartsCatalog || onlinePartsCatalogPromise) return onlinePartsCatalogPromise;
+  onlinePartsCatalogPromise = loadPartsCatalog('', fetch)
+    .then((catalog) => {
+      if (catalog.entries.size === 0) {
+        onlinePartsCatalogPromise = null; // allow retry (e.g. offline) on next open
+        return null;
+      }
+      onlinePartsCatalog = catalog;
+      libCachedSnapshot = null;
+      if (isBricksLibraryModalOpen()) renderBricksLibraryModal(false);
+      return catalog;
+    })
+    .catch(() => {
+      onlinePartsCatalogPromise = null;
+      return null;
+    });
+  return onlinePartsCatalogPromise;
 }
 
 function isBricksLibraryModalOpen() {
@@ -10475,6 +10512,12 @@ function getSourceBadgeHtml(item) {
   if (item.primarySource === 'saved') {
     return '<span class="px-1.5 py-0.5 rounded-md text-xs font-bold bg-[var(--primary-soft)] text-[var(--primary)]">LDraw</span>';
   }
+  if (item.primarySource === 'official') {
+    return '<span class="px-1.5 py-0.5 rounded-md text-xs font-semibold bg-sky-500/12 text-sky-700 dark:text-sky-300">Online</span>';
+  }
+  if (item.primarySource === 'unofficial') {
+    return '<span class="px-1.5 py-0.5 rounded-md text-xs font-semibold bg-amber-500/15 text-amber-700 dark:text-amber-300">Unofficial</span>';
+  }
   return '<span class="px-1.5 py-0.5 rounded-md text-xs font-semibold bg-black/6 dark:bg-white/10 text-[var(--muted-foreground)]">Built-in</span>';
 }
 
@@ -10526,9 +10569,22 @@ function renderLibPreviewInspector() {
   emptyEl.classList.add('hidden');
   detailEl.classList.remove('hidden');
 
-  try {
-    imgEl.src = renderPartPreviewDataUrl(item.id, libUiState.previewColor, LIB_INSPECTOR_SIZE, libUiState.previewAz, libUiState.previewEl);
-  } catch (_) {}
+  const onlineOnly = isOnlineOnlyItem(item);
+  if (onlineOnly) {
+    imgEl.removeAttribute('src');
+    imgEl.alt = 'Downloading exact 3D shape…';
+    // Selecting a catalog-only part downloads its exact geometry (once) and re-renders the preview.
+    if (!fetchPartsInFlight && !libAutoFetchAttempted.has(item.id)) {
+      libAutoFetchAttempted.add(item.id);
+      void fetchPartsOnline({ mode: 'custom_ids', partIds: [item.id], label: `part ${item.id}` }).then(() => {
+        if (isBricksLibraryModalOpen()) renderBricksLibraryModal(false);
+      });
+    }
+  } else {
+    try {
+      imgEl.src = renderPartPreviewDataUrl(item.id, libUiState.previewColor, LIB_INSPECTOR_SIZE, libUiState.previewAz, libUiState.previewEl);
+    } catch (_) {}
+  }
 
   document.querySelectorAll('.lib-angle-btn').forEach((btn) => {
     const az = Number(btn.getAttribute('data-lib-az'));
@@ -10549,11 +10605,16 @@ function renderLibPreviewInspector() {
   if (item.sources.includes('embedded')) sourceLabels.push('<span class="px-2 py-0.5 rounded-md text-xs font-bold bg-purple-500/15 text-purple-700 dark:text-purple-300">Embedded (.io)</span>');
   if (item.sources.includes('saved')) sourceLabels.push('<span class="px-2 py-0.5 rounded-md text-xs font-bold bg-[var(--primary-soft)] text-[var(--primary)]">Saved LDraw .dat</span>');
   if (item.sources.includes('builtin')) sourceLabels.push('<span class="px-2 py-0.5 rounded-md text-xs font-semibold bg-black/6 dark:bg-white/10 text-[var(--muted-foreground)]">Built-in Shape</span>');
+  if (item.sources.includes('official')) sourceLabels.push('<span class="px-2 py-0.5 rounded-md text-xs font-semibold bg-sky-500/12 text-sky-700 dark:text-sky-300">Official LDraw Library</span>');
+  if (item.sources.includes('unofficial')) sourceLabels.push('<span class="px-2 py-0.5 rounded-md text-xs font-semibold bg-amber-500/15 text-amber-700 dark:text-amber-300">LDraw Unofficial &amp; Studio</span>');
   if (item.isMissingInModel) sourceLabels.push('<span class="px-2 py-0.5 rounded-md text-xs font-bold bg-[var(--danger-soft)] text-[var(--danger)]">Missing in Model</span>');
   else if (item.inCurrentModel) sourceLabels.push('<span class="px-2 py-0.5 rounded-md text-xs font-bold bg-[var(--success-soft)] text-[var(--success)]">In Current Model</span>');
 
   const kindLabel = item.kind === 'part' ? 'Part' : item.kind === 'subpart' ? 'Subpart' : 'Primitive';
   const colorName = COLORS[libUiState.previewColor]?.name || `Color ${libUiState.previewColor}`;
+  const onlineHint = onlineOnly
+    ? `<div class="text-xs text-[var(--muted-foreground)] pt-0.5">${fetchPartsInFlight ? 'Downloading exact 3D shape…' : 'Exact 3D shape not downloaded yet — it\u2019s fetched on demand from the online library.'}</div>`
+    : '';
 
   metaEl.innerHTML = `
     <div class="font-bold text-[13px] leading-snug break-words">${escHtml(item.name)}</div>
@@ -10562,6 +10623,7 @@ function renderLibPreviewInspector() {
       <span class="text-xs text-[var(--muted-foreground)] capitalize">${escHtml(kindLabel)} · ${escHtml(item.category)}</span>
     </div>
     <div class="flex items-center gap-1 flex-wrap pt-0.5">${sourceLabels.join('')}</div>
+    ${onlineHint}
     <div class="text-xs text-[var(--muted-foreground)] pt-0.5">
       Preview color: <b>${escHtml(colorName)}</b>${item.subpartRefCount > 0 ? ` · ${item.subpartRefCount} subfile ref${item.subpartRefCount === 1 ? '' : 's'}` : ''}
     </div>
@@ -10634,6 +10696,8 @@ function renderLibBrowseTab(resetLimit = false) {
       { id: 'saved', label: `Saved (${stats.savedParts.toLocaleString()})`, show: true },
       { id: 'embedded', label: `Embedded .io (${stats.embeddedParts.toLocaleString()})`, show: stats.embeddedParts > 0 },
       { id: 'builtin', label: `Built-in (${stats.builtInParts})`, show: true },
+      { id: 'official', label: `Official LDraw (${stats.catalogOfficialParts.toLocaleString()})`, show: stats.catalogOfficialParts > 0 },
+      { id: 'unofficial', label: `Unofficial & Studio (${stats.catalogUnofficialParts.toLocaleString()})`, show: stats.catalogUnofficialParts > 0 },
       { id: 'model', label: `In Model (${stats.modelUniqueParts})`, show: Boolean(state.model) },
       { id: 'missing', label: `Missing (${stats.modelMissingShapeCount})`, show: stats.modelMissingShapeCount > 0 },
     ].filter((s) => s.show);
@@ -10730,10 +10794,18 @@ function renderLibBrowseTab(resetLimit = false) {
 
   gridEl.innerHTML = shown.map((item) => {
     const selected = libUiState.selectedId === item.id;
+    // Catalog-only parts have no local geometry yet — show a download placeholder instead of
+    // rendering an approximate box; tapping the card downloads & previews the exact shape.
+    const thumbHtml = isOnlineOnlyItem(item)
+      ? `<div class="flex flex-col items-center justify-center gap-1 text-[var(--muted-foreground)]" title="Tap to download & preview">
+           <svg viewBox="0 0 24 24" class="w-8 h-8 opacity-60" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 8.5a4 4 0 0 1-.5 7.97"/><path d="M12 12v8"/><path d="m9 17 3 3 3-3"/></svg>
+           <span class="text-[10px] font-semibold">Tap to preview</span>
+         </div>`
+      : `<img data-part-id="${escHtml(item.id)}" data-color-id="${libUiState.previewColor}" alt="${escHtml(item.name)}" class="w-full h-full object-contain opacity-0 transition-opacity duration-150 drop-shadow-[0_3px_6px_rgba(15,23,42,0.12)]" />`;
     return `
       <button type="button" data-lib-part="${escHtml(item.id)}" class="group text-left p-2 rounded-lg border transition flex flex-col gap-1.5 ${selected ? 'border-[var(--primary)] ring-2 ring-[var(--primary-border)] bg-[var(--primary-soft)]' : 'border-[var(--border)] bg-[var(--background)] hover:border-[var(--primary-border)]'}">
         <div class="aspect-square w-full rounded-xl bg-[radial-gradient(circle_at_50%_40%,var(--card)_0%,var(--surface-sunken)_100%)] border border-[var(--border)]/60 relative flex items-center justify-center p-2 overflow-hidden">
-          <img data-part-id="${escHtml(item.id)}" data-color-id="${libUiState.previewColor}" alt="${escHtml(item.name)}" class="w-full h-full object-contain opacity-0 transition-opacity duration-150 drop-shadow-[0_3px_6px_rgba(15,23,42,0.12)]" />
+          ${thumbHtml}
           <div class="absolute top-1.5 right-1.5">${getSourceBadgeHtml(item)}</div>
         </div>
         <div class="px-0.5 min-w-0 space-y-0.5">
@@ -10893,7 +10965,11 @@ function renderBricksLibraryModal(resetLimit = false) {
     const partsBreakdown = stats.savedParts > 0
       ? `${stats.savedParts.toLocaleString()} saved part${stats.savedParts === 1 ? '' : 's'}${stats.savedHelpers > 0 ? ` (+${stats.savedHelpers.toLocaleString()} subparts/primitives)` : ''}`
       : 'No saved LDraw parts yet';
-    subtitleEl.textContent = `${partsBreakdown} · ${stats.builtInParts} built-in shapes${stats.embeddedParts > 0 ? ` · ${stats.embeddedParts.toLocaleString()} embedded (.io)` : ''}`;
+    const catalogTotal = stats.catalogOfficialParts + stats.catalogUnofficialParts;
+    const catalogNote = catalogTotal > 0
+      ? ` · ${catalogTotal.toLocaleString()} in online catalog`
+      : onlinePartsCatalogPromise ? ' · loading online catalog…' : '';
+    subtitleEl.textContent = `${partsBreakdown} · ${stats.builtInParts} built-in shapes${stats.embeddedParts > 0 ? ` · ${stats.embeddedParts.toLocaleString()} embedded (.io)` : ''}${catalogNote}`;
   }
 
   const browseCountEl = document.getElementById('libTabBrowseCount');
@@ -10959,6 +11035,7 @@ function openBricksLibraryModal(preferredTab = null) {
   }
   const modal = document.getElementById('bricksLibraryModal');
   if (modal) modal.classList.remove('hidden');
+  void ensureOnlinePartsCatalog();
   renderBricksLibraryModal(true);
 }
 

@@ -253,6 +253,8 @@ describe('bricksLibrary engine', () => {
           modelUniqueParts: 0,
           modelMissingShapeCount: 0,
           modelMissingExactDatCount: 0,
+          catalogOfficialParts: 0,
+          catalogUnofficialParts: 0,
         }),
       ).toBe('95 built-in');
 
@@ -268,6 +270,8 @@ describe('bricksLibrary engine', () => {
           modelUniqueParts: 20,
           modelMissingShapeCount: 3,
           modelMissingExactDatCount: 3,
+          catalogOfficialParts: 0,
+          catalogUnofficialParts: 0,
         }),
       ).toBe('3 missing · 15 saved');
     });

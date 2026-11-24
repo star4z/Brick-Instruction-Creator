@@ -13,9 +13,20 @@ export type LibraryCategory =
   | 'windows'
   | 'other';
 
-export type LibraryPartSource = 'embedded' | 'saved' | 'builtin';
+/**
+ * `official` / `unofficial` = listed in the bundled Online Parts Catalog (geometry downloaded on demand).
+ */
+export type LibraryPartSource = 'embedded' | 'saved' | 'builtin' | 'official' | 'unofficial';
 
-export type LibraryScopeFilter = 'all' | 'saved' | 'embedded' | 'builtin' | 'model' | 'missing';
+export type LibraryScopeFilter =
+  | 'all'
+  | 'saved'
+  | 'embedded'
+  | 'builtin'
+  | 'official'
+  | 'unofficial'
+  | 'model'
+  | 'missing';
 
 export interface LibraryPartItem {
   id: string;
@@ -28,6 +39,22 @@ export interface LibraryPartItem {
   isMissingInModel: boolean;
   hasExactDat: boolean;
   subpartRefCount: number;
+  /** Precomputed normalized search haystack (memoized by `filterLibraryItems`). */
+  searchText?: string;
+}
+
+/** Minimal catalog entry shape consumed by `buildLibraryIndex` (see `partsCatalog.ts`). */
+export interface LibraryCatalogEntry {
+  name: string;
+  origin: 'official' | 'unofficial';
+  helper: boolean;
+  category: LibraryCategory;
+  searchText: string;
+}
+
+/** True when the part's geometry is only available online (listed in the catalog, not loaded locally). */
+export function isOnlineOnlyItem(item: LibraryPartItem): boolean {
+  return item.primarySource === 'official' || item.primarySource === 'unofficial';
 }
 
 export interface LibraryStats {
@@ -41,6 +68,9 @@ export interface LibraryStats {
   modelUniqueParts: number;
   modelMissingShapeCount: number;
   modelMissingExactDatCount: number;
+  /** Top-level parts listed in the bundled Online Parts Catalog, by origin (0 until it loads). */
+  catalogOfficialParts: number;
+  catalogUnofficialParts: number;
 }
 
 export interface StarterPack {
@@ -285,6 +315,8 @@ export interface BuildLibraryIndexInput {
   missingExactDatPartIds: ReadonlySet<string>;
   resolveName: (id: string) => string;
   savedTextureCount?: number;
+  /** Bundled Online Parts Catalog entries keyed by normalized part ID (optional; loads lazily). */
+  onlineCatalog?: ReadonlyMap<string, LibraryCatalogEntry> | null;
 }
 
 export interface BuildLibraryIndexResult {
@@ -318,6 +350,7 @@ export function buildLibraryIndex(input: BuildLibraryIndexInput): BuildLibraryIn
     missingExactDatPartIds,
     resolveName,
     savedTextureCount = 0,
+    onlineCatalog = null,
   } = input;
 
   const savedCanonical = collectCanonicalMapKeys(userLibRaw);
@@ -365,10 +398,12 @@ export function buildLibraryIndex(input: BuildLibraryIndexInput): BuildLibraryIn
       if (source && !existing.sources.includes(source)) {
         existing.sources.push(source);
       }
-      // Priority order: embedded > saved > builtin > missing
+      // Priority order: embedded > saved > builtin > catalog (official / unofficial) > missing
       if (existing.sources.includes('embedded')) existing.primarySource = 'embedded';
       else if (existing.sources.includes('saved')) existing.primarySource = 'saved';
       else if (existing.sources.includes('builtin')) existing.primarySource = 'builtin';
+      else if (existing.sources.includes('official')) existing.primarySource = 'official';
+      else if (existing.sources.includes('unofficial')) existing.primarySource = 'unofficial';
       else existing.primarySource = 'missing';
 
       if (lines) {
@@ -406,6 +441,37 @@ export function buildLibraryIndex(input: BuildLibraryIndexInput): BuildLibraryIn
     upsert(k, 'builtin', null, builtInCatalog[k]?.name ?? null);
   }
 
+  // Bundled Online Parts Catalog (~46k IDs + titles). Catalog-only rows are created directly from the
+  // precomputed entry (no per-row name resolution) so rebuilding the index stays fast.
+  let catalogOfficialParts = 0;
+  let catalogUnofficialParts = 0;
+  if (onlineCatalog) {
+    for (const [id, entry] of onlineCatalog) {
+      if (!entry.helper) {
+        if (entry.origin === 'official') catalogOfficialParts++;
+        else catalogUnofficialParts++;
+      }
+      const existing = byId.get(id);
+      if (existing) {
+        upsert(id, entry.origin, null, null);
+        continue;
+      }
+      byId.set(id, {
+        id,
+        name: entry.name,
+        kind: entry.helper ? 'subpart' : 'part',
+        category: entry.category,
+        sources: [entry.origin],
+        primarySource: entry.origin,
+        inCurrentModel: modelPartIds.has(id),
+        isMissingInModel: missingShapePartIds.has(id),
+        hasExactDat: false,
+        subpartRefCount: 0,
+        searchText: entry.searchText,
+      });
+    }
+  }
+
   for (const k of modelPartIds) {
     if (!byId.has(k)) {
       upsert(k, null, null, null);
@@ -427,6 +493,8 @@ export function buildLibraryIndex(input: BuildLibraryIndexInput): BuildLibraryIn
       modelUniqueParts: modelPartIds.size,
       modelMissingShapeCount: missingShapePartIds.size,
       modelMissingExactDatCount: missingExactDatPartIds.size,
+      catalogOfficialParts,
+      catalogUnofficialParts,
     },
   };
 }
@@ -461,6 +529,8 @@ export function filterLibraryItems(
     if (scope === 'saved' && !item.sources.includes('saved')) continue;
     if (scope === 'embedded' && !item.sources.includes('embedded')) continue;
     if (scope === 'builtin' && !item.sources.includes('builtin')) continue;
+    if (scope === 'official' && !item.sources.includes('official')) continue;
+    if (scope === 'unofficial' && !item.sources.includes('unofficial')) continue;
     if (scope === 'model' && !item.inCurrentModel) continue;
     if (scope === 'missing' && !item.isMissingInModel) continue;
 
@@ -468,7 +538,10 @@ export function filterLibraryItems(
 
     let score = 0;
     if (queryTokens.length > 0) {
-      const haystack = normalizeLibrarySearchText(`${item.id} ${item.name} ${item.category}`);
+      if (item.searchText === undefined) {
+        item.searchText = normalizeLibrarySearchText(`${item.id} ${item.name} ${item.category}`);
+      }
+      const haystack = item.searchText;
       let allMatch = true;
       for (const tok of queryTokens) {
         if (!haystack.includes(tok)) {

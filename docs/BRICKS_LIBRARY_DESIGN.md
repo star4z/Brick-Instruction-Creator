@@ -27,17 +27,22 @@ A responsive full-height modal (`max-w-4xl`) organized into two top-level tabs p
 - **Search Bar**: Real-time debounced search (`#libSearchInput`) matching part ID, human-readable name, and category. Search normalization (`normalizeLibrarySearchText`) unifies spacing and multiplication signs (`2 x 4`, `2×4`, `2x4`) so official LDraw names match naturally.
 - **Direct Search-to-Fetch Shortcut**: When a user types a specific LDraw part ID (e.g., `3010` or `3626cp01`) that is not yet in the saved library, an inline banner offers one-click **Fetch `<id>` Online**.
 - **Filters**:
-  - **Scope pills**: `All`, `Saved`, `Embedded .io` (when present), `Built-in`, `In Model` (when a model is loaded), and `Missing` (when the loaded model has missing shapes).
+  - **Scope pills**: `All`, `Saved`, `Embedded .io` (when present), `Built-in`, `Official LDraw` (bundled catalog), `Unofficial & Studio` (bundled catalog), `In Model` (when a model is loaded), and `Missing` (when the loaded model has missing shapes).
   - **Category selector**: `All Categories`, `Bricks`, `Plates`, `Tiles`, `Slopes & Curves`, `Technic & Bars`, `Minifigures`, `Windows & Panels`, `Other Parts`.
   - **Helpers toggle**: `Show subparts & primitives` (off by default so internal `s/...` subparts and geometric primitives like `box5` or `4-4edge` don't clutter the browse grid).
+- **Bundled Online Parts Catalog (`public/parts-catalog/*.json` + `src/engine/partsCatalog.ts`)**:
+  - Generated from the public mirrors by `scripts/build-parts-catalog.mjs` (`official.json`: ~23.8k official LDraw parts, ~337 KB gzipped; `unofficial.json`: ~5.9k additional LDraw Unofficial & BrickLink Studio parts not in official, ~101 KB gzipped).
+  - Contains IDs, clean titles, and helper/alias flags only — no 3D `.dat` geometry — and is fetched lazily the first time the Bricks Library opens, keeping initial app load untouched.
+  - Catalog-only parts render with a lightweight download placeholder in the browse grid (avoiding approximate placeholder boxes) and automatically fetch & cache their exact `.dat` geometry (plus subparts/textures) the first time they are selected in the preview inspector.
+  - Once loaded, catalog titles also enrich `getHumanPartName()` across the app.
 - **Lazy 3D Thumbnail Grid**:
-  - Paginated (48 items per batch + *"Load more parts"* button) so even a full 20,000-part `complete.zip` import stays responsive.
+  - Paginated (48 items per batch + *"Load more parts"* button) so browsing ~30,000 parts or a full `complete.zip` import stays responsive.
   - Uses `IntersectionObserver` + a 4-per-frame `requestAnimationFrame` WebGL snapshot queue (`libThumbCache`, bounded LRU up to 320 entries) with 10 selectable LEGO color swatches.
   - Renders crisp HiDPI 220×220 thumbnails using `heroQuality: true` (micro-beveled ABS brick edges, 18–24 segment smooth studs & curves) and `heroShading: true` (3-point studio softbox lighting + glossy ABS specular highlights + tight camera framing + subtle edge seams) over a soft radial studio backdrop.
   - Built-in catalog shapes render authentic procedural geometry rather than box placeholders (slopes, inverted slopes, smooth curved slopes, L-shaped corners, centered/end-stud jumpers, slotted grilles, rounded/quarter-round/holed tiles, Technic pin holes & `+`-section axles, open hollow window frames, SNOT brackets, horizontal/vertical C-clips, contoured seats, flanged train wheels/holders, and sculpted minifigure limbs & domed helmets).
 - **Interactive 3D Part Preview Inspector (`#libPreviewPane`)**:
   - Displays a HiDPI 440×440 studio-lit WebGL render with 4 yaw angles (`Front`, `Right`, `Back`, `Left`) and a `Top`/`Bottom` flip toggle.
-  - Shows part ID, human name, kind (`Part`/`Subpart`/`Primitive`), category, subfile reference count, and all source badges (`Embedded (.io)`, `Saved LDraw .dat`, `Built-in Shape`, `In Current Model` / `Missing in Model`).
+  - Shows part ID, human name, kind (`Part`/`Subpart`/`Primitive`), category, subfile reference count, and all source badges (`Embedded (.io)`, `Saved LDraw .dat`, `Built-in Shape`, `Official LDraw Library`, `LDraw Unofficial & Studio`, `In Current Model` / `Missing in Model`).
   - Offers single-part actions: **Fetch Exact `<id>.dat` Online** (when not saved) or **Remove `<id>.dat` from Saved Library** (when saved).
 
 #### Tab 2: **Fetch & Import** (`#libTabManage`)
@@ -49,7 +54,7 @@ Organized into four clearly separated cards:
    - **Model loaded with built-in approximations only**: Offers an optional **`Fetch N Exact LDraw Shapes for Model`** upgrade.
    - **Model complete**: Displays **`All Model Parts Loaded ✓`** (disabled).
 2. **Download Starter Packs or Specific Parts Online**:
-   - Mirror selector (`GitHub LDraw Library`, `jsDelivr LDraw CDN`, or custom base URL).
+   - Mirror selector covering every public source (`Official LDraw Library (Daily Sync · GitHub)`, `Official LDraw Library (GitHub Pages Mirror)`, `Classic LDraw Mirror (GitHub)`, `Official LDraw Library (jsDelivr CDN)`, `LDraw Unofficial & Studio Parts (GitHub)`, or custom base URL). The selected source is tried first and all remaining sources stay in the automatic fallback chain.
    - Four transparent **Curated Starter Packs** (`ONLINE_STARTER_PACKS`, 102 unique official parts total):
      - *Bricks & Plates* (34 parts)
      - *Tiles, Slopes & SNOT* (28 parts)
@@ -67,11 +72,12 @@ Organized into four clearly separated cards:
 
 ---
 
-## 3. Data Classification & Pure Engine Module (`src/engine/bricksLibrary.ts`)
+## 3. Data Classification & Pure Engine Modules (`src/engine/bricksLibrary.ts`, `src/engine/partsCatalog.ts`)
 
-All pure classification, indexing, search, and UI copy rules live in `src/engine/bricksLibrary.ts` (covered by unit tests in `src/engine/__tests__/bricksLibrary.test.ts`):
+All pure classification, indexing, catalog loading, search, and UI copy rules live in `src/engine/bricksLibrary.ts` and `src/engine/partsCatalog.ts` (covered by unit tests in `src/engine/__tests__/bricksLibrary.test.ts` and `src/engine/__tests__/partsCatalog.test.ts`):
 
 - **`classifyDatEntryKind(key, lines, title)`**: Inspects `0 !LDRAW_ORG` headers first (`Part`/`Shortcut`, `Subpart`, `Primitive`/`48_Primitive`/`8_Primitive`), falling back to path prefixes (`s/`, `48/`, `8/`), `~`-prefixed helper titles, and standard LDraw primitive naming patterns.
-- **`buildLibraryIndex(input)`**: Deduplicates `BL_Item_No` aliases sharing the same line-array reference, merges `embeddedDatRaw`, `userLibRaw`, `PARTS_CATALOG`, and current model part sets, and produces accurate `LibraryStats` separating top-level `savedParts` from `savedHelpers` (subparts + primitives).
-- **`filterLibraryItems(items, options)`**: Filters by scope, category, helper visibility, and normalized multi-token search query, ranking exact ID matches first.
+- **`loadPartsCatalog()` / `parseCatalogPayload()` / `mergeCatalogEntries()`**: Lazily fetches `public/parts-catalog/official.json` and `unofficial.json`, validates the format, precomputes normalized search haystacks, and merges them with official entries taking priority over duplicate unofficial IDs.
+- **`buildLibraryIndex(input)`**: Deduplicates `BL_Item_No` aliases sharing the same line-array reference, merges `embeddedDatRaw`, `userLibRaw`, `PARTS_CATALOG`, `onlineCatalog`, and current model part sets, and produces accurate `LibraryStats` separating top-level `savedParts` from `savedHelpers` (subparts + primitives) alongside `catalogOfficialParts` and `catalogUnofficialParts`.
+- **`filterLibraryItems(items, options)`**: Filters by scope, category, helper visibility, and normalized multi-token search query (reusing precomputed `searchText` haystacks), ranking exact ID matches and locally loaded parts first.
 - **`textureStore.clearLibrary()`**: Added to `src/engine/textureStore.ts` so clearing the saved library also evicts library-sourced decal textures without touching `.io`-embedded textures.
