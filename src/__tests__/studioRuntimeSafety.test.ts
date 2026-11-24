@@ -152,4 +152,18 @@ describe('studioRuntime safety checks', () => {
     expect(runtime).toContain('function syncOverviewScrollButtons()');
     expect(runtime).toContain('function scrollOverviewListTo(');
   });
+
+  it('tints the entire model one color for Single Continuous Build in Section Colors mode', () => {
+    const runtimePath = path.resolve(process.cwd(), 'src/studioRuntime.ts');
+    const sourceText = fs.readFileSync(runtimePath, 'utf8');
+
+    const fnStart = sourceText.indexOf('function getPreviewPartMaps()');
+    const fnEnd = sourceText.indexOf('function rebuildAndDrawImportPreview()', fnStart);
+    expect(fnStart).toBeGreaterThan(-1);
+    expect(fnEnd).toBeGreaterThan(fnStart);
+    const fnBody = sourceText.slice(fnStart, fnEnd);
+
+    expect(fnBody).toContain("const partColorOverrides = impState.colorMode === 'sections' ? {} : null;");
+    expect(fnBody).toContain('SECTION_PREVIEW_PALETTE[0]');
+  });
 });

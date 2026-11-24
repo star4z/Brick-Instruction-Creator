@@ -6,6 +6,7 @@
 import {
   analyzeModelSubdivisions,
   classifySubdivisionPartFlags,
+  SECTION_PREVIEW_PALETTE,
 } from './engine/subdivisionAnalyzer';
 import {
   compileDatEntry as compileLDrawDatEntry,
@@ -16385,7 +16386,7 @@ function getPreviewPartMaps() {
   const parts = impState.parsed?.parts || [];
   const prop = impState.activeProposal;
   const partOffsets = {};
-  const partColorOverrides = impState.colorMode === 'sections' && prop ? {} : null;
+  const partColorOverrides = impState.colorMode === 'sections' ? {} : null;
 
   if (prop && prop.sections?.length) {
     const spanRef = Math.max(160, impState.assessment?.longestSpanLdu || 320);
@@ -16455,6 +16456,12 @@ function getPreviewPartMaps() {
         }
       }
     }
+  } else if (partColorOverrides) {
+    // Single Continuous Build: tint the entire model in one unified section color
+    const singleColor = SECTION_PREVIEW_PALETTE[0] || '#2563eb';
+    for (const p of parts) {
+      if (p) partColorOverrides[p.id] = singleColor;
+    }
   }
   return { parts, partOffsets, partColorOverrides };
 }
@@ -16498,7 +16505,8 @@ function syncImportPreviewControlsUI() {
   const wrap = document.getElementById('impPreviewControls');
   const expBtn = document.getElementById('impExplodeToggleBtn');
   const colBtn = document.getElementById('impColorModeToggleBtn');
-  const show = Boolean(impState.activeProposal);
+  const hasProposal = Boolean(impState.activeProposal);
+  const show = Boolean(impState.parsed);
   if (wrap) {
     wrap.classList.toggle('opacity-0', !show);
     wrap.classList.toggle('pointer-events-none', !show);
@@ -16508,7 +16516,7 @@ function syncImportPreviewControlsUI() {
   }
   if (expBtn) {
     const isExp = Boolean(impState.isExploded);
-    expBtn.className = `glass-pill w-9 h-9 rounded-full flex items-center justify-center hover:scale-105 active:scale-95 transition ${isExp ? '!bg-[var(--primary)] !text-white !border-transparent' : ''}`;
+    expBtn.className = `glass-pill w-9 h-9 rounded-full flex items-center justify-center hover:scale-105 active:scale-95 transition ${isExp ? '!bg-[var(--primary)] !text-white !border-transparent' : ''} ${hasProposal ? '' : 'hidden'}`;
     expBtn.title = isExp ? 'Collapse sections' : 'Explode sections';
     expBtn.setAttribute('aria-pressed', isExp ? 'true' : 'false');
     expBtn.innerHTML = isExp
