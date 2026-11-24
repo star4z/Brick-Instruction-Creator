@@ -210,6 +210,9 @@ import {
   parseStudioProjectJson,
 } from './storage/fileFormats';
 import {
+  BACK_COVER_CREDIT,
+  COVER_MADE_WITH_LABEL,
+  COVER_QR_HINT_TEXT,
   PROGRAM_NAME,
   PROGRAM_URL,
   clampCoverElevation,
@@ -217,7 +220,9 @@ import {
   computeCameraBasis,
   computeCoverLayout,
   computeTightCameraBounds,
+  createDefaultBackMeta,
   createDefaultCoverMeta,
+  normalizeBackMeta,
   normalizeCoverMeta,
 } from './cover/coverLayout';
 import { buildQrSvg, drawQrCanvas } from './cover/qrCode';
@@ -6152,7 +6157,7 @@ const state = {
   dividerAfter: {},        // keyed by pageId: { title, note }
   coverMeta: createDefaultCoverMeta(),
   completeMeta: { title:'Build Complete!', subtitle:'Ready for display!', az:315, el:28, bgSrc:null, showText:true, showFireworks:true },
-  backMeta:  { title:'', subtitle:'Made with Brick Instruction Works', az:38, el:24, bgSrc:null },
+  backMeta:  createDefaultBackMeta(),
   bomConfig: createDefaultBomConfig(),
   bomShortcutVisible: false,
   pages: [],
@@ -6200,7 +6205,7 @@ function applyHistorySnap(json) {
   state.dividerAfter = s.dividerAfter;
   state.coverMeta = normalizeCoverMeta(s.coverMeta);
   if (s.completeMeta) state.completeMeta = s.completeMeta;
-  state.backMeta = s.backMeta;
+  state.backMeta = normalizeBackMeta(s.backMeta);
   if (s.layoutConfig) state.layoutConfig = normalizePageLayoutSpec(s.layoutConfig);
   if (Array.isArray(s.layoutGroups)) state.layoutGroups = normalizeLayoutGroups(s.layoutGroups);
   state.selectedPartIds.clear();
@@ -7269,8 +7274,6 @@ function renderAll() {
       hasCreatorLogo: Boolean(cm.creatorLogoSrc),
       hasSubtitle: sub.length > 0,
       hasThemeImage: Boolean(cm.themeImageSrc),
-      showQrCode: cm.showQrCode !== false,
-      showProgramBadge: cm.showProgramBadge !== false,
       densityPadFactor: dens.pad / 20,
     });
     const heroScale = Math.min(2.2, 1600 / Math.max(layout.heroRect.w, layout.heroRect.h, 1));
@@ -7287,17 +7290,19 @@ function renderAll() {
     const badgeSurface = darkBg ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.92)';
     const badgeBorder = darkBg ? 'rgba(255,255,255,0.20)' : 'rgba(15,23,42,0.14)';
     const badgeTextColor = darkBg ? '#f8fafc' : '#1e293b';
-    const qrSvg = layout.qrCardRect
-      ? buildQrSvg(PROGRAM_URL, {
-          fg: '#111827',
-          bg: '#ffffff',
-          quietZone: 1,
-          ariaLabel: `QR code for ${PROGRAM_NAME}`,
-        })
-      : '';
+    const qrSvg = buildQrSvg(PROGRAM_URL, {
+      fg: '#111827',
+      bg: '#ffffff',
+      quietZone: 1,
+      ariaLabel: `${COVER_QR_HINT_TEXT} — ${PROGRAM_NAME}`,
+    });
     const titleShadow = cm.bgSrc ? 'text-shadow:0 1px 8px rgba(0,0,0,0.28);' : '';
-    const brandPadX = Math.max(6, Math.round(layout.brandCardRect.h * 0.18));
-    const brandInnerGap = Math.max(5, Math.round(layout.brandCardRect.h * 0.14));
+    const maxBrandCardDomW = Math.max(
+      layout.brandCardRect.w,
+      dims.width - layout.pad * 2 - layout.qrCardRect.w - layout.brandGap,
+    );
+    const qrHintArrowGap = Math.max(3, Math.round(layout.brandQrHintFontPx * 0.35));
+    const qrHintArrowSize = Math.max(7, Math.round(layout.brandQrHintFontPx * 1.05));
 
     frame.innerHTML = `
       <div class="relative w-full h-full overflow-hidden ${guideCls}" style="${cm.bgSrc ? `background-image:url(${cm.bgSrc});background-size:cover;background-position:center;` : ''}">
@@ -7324,23 +7329,23 @@ function renderAll() {
           </div>
         ` : ''}
 
-        <!-- Bottom-Right: Clickable Program Icon + Name + Optional QR Code -->
-        ${layout.brandGroupRect.w > 0 ? `
-          <a href="${PROGRAM_URL}" target="_blank" rel="noopener noreferrer" data-cover-link="true" title="Open ${PROGRAM_NAME}" class="absolute z-10 flex items-stretch hover:opacity-90 active:scale-[0.98] transition cursor-pointer" style="right:${layout.pad}px;bottom:${layout.pad}px;height:${layout.brandGroupRect.h}px;gap:${layout.brandGap}px;text-decoration:none;">
-            <div class="flex items-center shrink-0 shadow-xs overflow-hidden" style="min-width:${layout.brandCardRect.w}px;height:${layout.brandCardRect.h}px;border-radius:${layout.cardRadius}px;padding:0 ${brandPadX}px;gap:${brandInnerGap}px;background:${badgeSurface};border:1px solid ${badgeBorder};backdrop-filter:blur(6px);">
-              <svg class="shrink-0" style="width:${layout.brandIconSize}px;height:${layout.brandIconSize}px;" viewBox="0 0 64 64" fill="none" aria-hidden="true">${BRAND_LOGO_SVG_BODY}</svg>
-              <div class="min-w-0 leading-tight" style="color:${badgeTextColor};">
-                <div class="font-extrabold tracking-tight whitespace-nowrap" style="font-size:${layout.brandTitleFontPx}px;line-height:1.14;">Brick Instruction</div>
-                <div class="font-semibold opacity-75 whitespace-nowrap" style="font-size:${layout.brandTitleFontPx}px;line-height:1.14;">Works</div>
+        <!-- Bottom-Right: Non-Editable Clickable Program Attribution + QR Code -->
+        <a href="${PROGRAM_URL}" target="_blank" rel="noopener noreferrer" data-cover-link="true" title="Open ${PROGRAM_NAME}" class="absolute z-10 flex items-stretch hover:opacity-90 active:scale-[0.98] transition cursor-pointer" style="right:${layout.pad}px;bottom:${layout.pad}px;height:${layout.brandGroupRect.h}px;gap:${layout.brandGap}px;text-decoration:none;">
+          <div class="flex items-center shrink-0 shadow-xs overflow-hidden" style="min-width:${layout.brandCardRect.w}px;max-width:${maxBrandCardDomW}px;height:${layout.brandCardRect.h}px;border-radius:${layout.cardRadius}px;padding:0 ${layout.brandPadX}px;gap:${layout.brandInnerGap}px;background:${badgeSurface};border:1px solid ${badgeBorder};backdrop-filter:blur(6px);">
+            <svg class="shrink-0" style="width:${layout.brandIconSize}px;height:${layout.brandIconSize}px;" viewBox="0 0 64 64" fill="none" aria-hidden="true">${BRAND_LOGO_SVG_BODY}</svg>
+            <div class="min-w-0 flex flex-col justify-center" style="color:${badgeTextColor};">
+              <div class="font-semibold whitespace-nowrap" style="font-size:${layout.brandEyebrowFontPx}px;line-height:1.15;opacity:0.72;">${escHtml(COVER_MADE_WITH_LABEL)}</div>
+              <div class="font-extrabold tracking-tight whitespace-nowrap" style="font-size:${layout.brandTitleFontPx}px;line-height:1.16;">${escHtml(PROGRAM_NAME)}</div>
+              <div class="font-medium whitespace-nowrap flex items-center" style="font-size:${layout.brandQrHintFontPx}px;line-height:1.15;margin-top:${layout.brandQrHintGap}px;gap:${qrHintArrowGap}px;opacity:0.76;">
+                <span>${escHtml(COVER_QR_HINT_TEXT)}</span>
+                <svg class="shrink-0" style="width:${qrHintArrowSize}px;height:${qrHintArrowSize}px;" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 8h11"/><path d="M9.5 4.2 13.5 8l-4 3.8"/></svg>
               </div>
             </div>
-            ${layout.qrCardRect ? `
-              <div class="shrink-0 shadow-xs overflow-hidden flex items-center justify-center" style="width:${layout.qrCardRect.w}px;height:${layout.qrCardRect.h}px;border-radius:${layout.cardRadius}px;padding:${layout.qrInnerInset}px;background:#ffffff;border:1px solid rgba(15,23,42,0.14);">
-                <div class="w-full h-full">${qrSvg}</div>
-              </div>
-            ` : ''}
-          </a>
-        ` : ''}
+          </div>
+          <div class="shrink-0 shadow-xs overflow-hidden flex items-center justify-center" style="width:${layout.qrCardRect.w}px;height:${layout.qrCardRect.h}px;border-radius:${layout.cardRadius}px;padding:${layout.qrInnerInset}px;background:#ffffff;border:1px solid rgba(15,23,42,0.14);">
+            <div class="w-full h-full">${qrSvg}</div>
+          </div>
+        </a>
       </div>`;
   } else if (page.kind === 'complete') {
     const cm = state.completeMeta;
@@ -7364,10 +7369,8 @@ function renderAll() {
         </div>
       </div>`;
   } else if (page.kind === 'back') {
-    const bm = state.backMeta;
-    const credit = (!bm.subtitle || bm.subtitle === 'Created with Brick Instruction Creator')
-      ? 'Made with Brick Instruction Works'
-      : bm.subtitle;
+    const bm = normalizeBackMeta(state.backMeta);
+    const credit = BACK_COVER_CREDIT;
     frame.innerHTML = `
       <div class="relative w-full h-full text-center flex flex-col items-center justify-center overflow-hidden ${guideCls}" style="padding:${padPx + Math.round(typo.pt(8))}px;${bm.bgSrc ? `background-image:url(${bm.bgSrc});background-size:cover;background-position:center;` : ''}">
         <a href="${PROGRAM_URL}" target="_blank" rel="noopener noreferrer" data-cover-link="true" title="Open ${PROGRAM_NAME}" class="inline-flex flex-col items-center hover:opacity-90 transition cursor-pointer" style="gap:${Math.round(typo.pt(12))}px;text-decoration:none;">
@@ -8163,12 +8166,10 @@ function renderContextOverlay(page) {
     const isComplete = page.kind === 'complete';
     const isBack = page.kind === 'back';
     if (isCover) state.coverMeta = normalizeCoverMeta(state.coverMeta);
+    if (isBack) state.backMeta = normalizeBackMeta(state.backMeta);
     const meta = isCover ? state.coverMeta : isComplete ? state.completeMeta : state.backMeta;
     const label = isCover ? 'Cover Page' : isComplete ? 'Build Complete Page' : 'Back Cover';
     const defaultTitle = isCover ? state.model.title : 'Build Complete!';
-    const backCredit = (!meta.subtitle || meta.subtitle === 'Created with Brick Instruction Creator')
-      ? 'Made with Brick Instruction Works'
-      : meta.subtitle;
 
     const icoRotL = '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>';
     const icoRotR = '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>';
@@ -8183,7 +8184,6 @@ function renderContextOverlay(page) {
       const hasCreatorLogo = Boolean(meta.creatorLogoSrc);
       const hasThemeImg = Boolean(meta.themeImageSrc);
       const hasBg = Boolean(meta.bgSrc);
-      const qrOn = meta.showQrCode !== false;
       box.innerHTML = `
         <div class="pointer-events-auto studio-surface rounded-xl p-3.5 w-full space-y-2.5 text-xs">
           <div class="flex items-center justify-between gap-2 flex-wrap font-semibold">
@@ -8215,7 +8215,6 @@ function renderContextOverlay(page) {
               <button id="covBgBtn" type="button" class="px-2.5 py-1.5 font-semibold">Background Image</button>
               ${hasBg ? `<button id="covBgClr" type="button" title="Remove background image" aria-label="Remove background image" class="pr-2 pl-1 py-1.5 flex items-center justify-center opacity-85 hover:opacity-100">${icoClose}</button>` : ''}
             </div>
-            <button id="covQrToggle" type="button" class="px-2.5 py-1.5 rounded-md font-semibold ${qrOn ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'bg-[var(--surface-sunken)]'}">QR Code</button>
           </div>
         </div>`;
 
@@ -8242,10 +8241,10 @@ function renderContextOverlay(page) {
       box.querySelector('#covBgBtn').onclick = () => openCoverImagePicker('bg');
       const clrBg = box.querySelector('#covBgClr');
       if (clrBg) clrBg.onclick = () => { pushUndo(); meta.bgSrc = null; renderAll(); };
-      box.querySelector('#covQrToggle').onclick = () => { pushUndo(); meta.showQrCode = !(meta.showQrCode !== false); renderAll(); };
       return;
     }
 
+    const hasBg = Boolean(meta.bgSrc);
     box.innerHTML = `
       <div class="pointer-events-auto studio-surface rounded-xl p-3.5 w-full space-y-2.5 text-xs">
         <div class="flex items-center justify-between gap-2 flex-wrap font-semibold">
@@ -8259,21 +8258,23 @@ function renderContextOverlay(page) {
               <button id="compToggleText" type="button" class="px-2.5 py-1.5 rounded-md ${meta.showText !== false ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'bg-[var(--surface-sunken)]'}">Text</button>
               <button id="compToggleFw" type="button" class="px-2.5 py-1.5 rounded-md inline-flex items-center gap-1 ${meta.showFireworks !== false ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'bg-[var(--surface-sunken)]'}">${icoSpark}<span>Fireworks</span></button>
             ` : ''}
-            <button id="covBgBtn" type="button" class="px-2.5 py-1.5 rounded-md bg-[var(--primary)] text-[var(--primary-foreground)]">Background Image</button>
+            <div class="inline-flex items-center rounded-md overflow-hidden ${hasBg ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'bg-[var(--surface-sunken)]'}">
+              <button id="covBgBtn" type="button" class="px-2.5 py-1.5 font-semibold">Background Image</button>
+              ${hasBg ? `<button id="covBgClr" type="button" title="Remove background image" aria-label="Remove background image" class="pr-2 pl-1 py-1.5 flex items-center justify-center opacity-85 hover:opacity-100">${icoClose}</button>` : ''}
+            </div>
           </div>
         </div>
-        ${isBack ? `
-          <input id="covSubIn" value="${escHtml(backCredit)}" placeholder="Back cover text" class="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] outline-none focus:border-[var(--primary)]" />
-        ` : `
+        ${!isBack ? `
           <div class="grid grid-cols-2 gap-2">
             <input id="covTitleIn" value="${escHtml(meta.title || defaultTitle)}" placeholder="Title" class="px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] outline-none focus:border-[var(--primary)]" />
             <input id="covSubIn" value="${escHtml(meta.subtitle || '')}" placeholder="Subtitle" class="px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] outline-none focus:border-[var(--primary)]" />
           </div>
-        `}
+        ` : ''}
       </div>`;
     const titleIn = box.querySelector('#covTitleIn');
     if (titleIn) titleIn.onchange = (e) => { pushUndo(); meta.title = e.target.value; renderAll(); };
-    box.querySelector('#covSubIn').onchange = (e) => { pushUndo(); meta.subtitle = e.target.value; renderAll(); };
+    const subIn = box.querySelector('#covSubIn');
+    if (subIn) subIn.onchange = (e) => { pushUndo(); meta.subtitle = e.target.value; renderAll(); };
     const rotL = box.querySelector('#covRotL');
     if (rotL) rotL.onclick = () => { pushUndo(); meta.az = (meta.az - 30 + 360) % 360; renderAll(); };
     const rotR = box.querySelector('#covRotR');
@@ -8283,6 +8284,8 @@ function renderContextOverlay(page) {
     const tFw = box.querySelector('#compToggleFw');
     if (tFw) tFw.onclick = () => { pushUndo(); meta.showFireworks = !(meta.showFireworks !== false); renderAll(); };
     box.querySelector('#covBgBtn').onclick = () => openCoverImagePicker('bg');
+    const clrBg = box.querySelector('#covBgClr');
+    if (clrBg) clrBg.onclick = () => { pushUndo(); meta.bgSrc = null; renderAll(); };
     return;
   }
 
@@ -13326,7 +13329,7 @@ async function restoreLastSessionOnStart() {
     state.dividerAfter = prefs.dividerAfter || {};
     if (prefs.coverMeta) state.coverMeta = normalizeCoverMeta({ ...state.coverMeta, ...prefs.coverMeta });
     if (prefs.completeMeta) state.completeMeta = { ...state.completeMeta, ...prefs.completeMeta };
-    if (prefs.backMeta) state.backMeta = { ...state.backMeta, ...prefs.backMeta };
+    if (prefs.backMeta) state.backMeta = normalizeBackMeta({ ...state.backMeta, ...prefs.backMeta });
     state.pageIdx = Math.max(0, prefs.pageIdx || 0);
     state.seenDiagnosticKeys = deserializeSeenDiagnosticKeys(prefs.seenDiagnosticKeys);
     // Sync checkboxes in DOM
@@ -13501,8 +13504,6 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       hasCreatorLogo: Boolean(cm.creatorLogoSrc),
       hasSubtitle: sub.length > 0,
       hasThemeImage: Boolean(cm.themeImageSrc),
-      showQrCode: cm.showQrCode !== false,
-      showProgramBadge: cm.showProgramBadge !== false,
       densityPadFactor: dens.pad / 20,
     });
 
@@ -13586,13 +13587,49 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       );
     }
 
-    // 4. Bottom-Right: Clickable Program Badge (Icon + Name) + Optional QR Code
-    if (layout.brandGroupRect.w > 0) {
+    // 4. Bottom-Right: Non-Editable Clickable Program Attribution + QR Code
+    {
       const darkBg = isDarkHexColor(toHexColor(theme.bgColor || '#ffffff', '#ffffff'));
-      const bc = layout.brandCardRect;
+      const qr = layout.qrCardRect;
       const lineW = Math.max(1, Math.round(pxH * 0.0014));
+      const brandPadX = layout.brandPadX;
+      const brandInnerGap = layout.brandInnerGap;
+      const qrHintArrowGap = Math.max(3, Math.round(layout.brandQrHintFontPx * 0.35));
+      const qrHintArrowSize = Math.max(7, Math.round(layout.brandQrHintFontPx * 1.05));
 
-      // Program badge card
+      ctx.font = themeCanvasFont(theme, 600, layout.brandEyebrowFontPx);
+      const eyebrowW = Math.ceil(ctx.measureText(COVER_MADE_WITH_LABEL).width);
+      ctx.font = themeCanvasFont(theme, 800, layout.brandTitleFontPx);
+      const titleW = Math.ceil(ctx.measureText(PROGRAM_NAME).width);
+      ctx.font = themeCanvasFont(theme, 500, layout.brandQrHintFontPx);
+      const hintTextW = Math.ceil(ctx.measureText(COVER_QR_HINT_TEXT).width);
+      const hintTotalW = hintTextW + qrHintArrowGap + qrHintArrowSize;
+
+      const maxBrandCardW = Math.max(
+        layout.brandCardRect.w,
+        pxW - layout.pad * 2 - qr.w - layout.brandGap,
+      );
+      const neededBrandW =
+        brandPadX * 2 +
+        layout.brandIconSize +
+        brandInnerGap +
+        Math.max(eyebrowW, titleW, hintTotalW) +
+        2;
+      const actualBrandW = Math.min(maxBrandCardW, Math.max(layout.brandCardRect.w, neededBrandW));
+      const bc = {
+        x: qr.x - layout.brandGap - actualBrandW,
+        y: layout.brandCardRect.y,
+        w: actualBrandW,
+        h: layout.brandCardRect.h,
+      };
+      const actualGroupRect = {
+        x: bc.x,
+        y: layout.brandGroupRect.y,
+        w: qr.x + qr.w - bc.x,
+        h: layout.brandGroupRect.h,
+      };
+
+      // Program attribution card
       drawRoundedRectPath(ctx, bc.x, bc.y, bc.w, bc.h, layout.cardRadius);
       ctx.fillStyle = darkBg ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.94)';
       ctx.fill();
@@ -13600,46 +13637,74 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       ctx.lineWidth = lineW;
       ctx.stroke();
 
-      const brandPadX = Math.max(6, Math.round(bc.h * 0.18));
-      const brandInnerGap = Math.max(5, Math.round(bc.h * 0.14));
       const iconX = bc.x + brandPadX;
       const iconY = bc.y + Math.round((bc.h - layout.brandIconSize) / 2);
       drawBrandLogoCanvas(ctx, iconX, iconY, layout.brandIconSize);
 
       const textX = iconX + layout.brandIconSize + brandInnerGap;
       const textMaxW = Math.max(20, bc.x + bc.w - textX - brandPadX);
-      const lineH = Math.round(layout.brandTitleFontPx * 1.15);
-      const textStartY = bc.y + Math.round((bc.h - lineH * 2) / 2);
-      ctx.fillStyle = darkBg ? '#f8fafc' : '#1e293b';
+      const eyebrowLineH = Math.round(layout.brandEyebrowFontPx * 1.15);
+      const titleLineH = Math.round(layout.brandTitleFontPx * 1.16);
+      const hintLineH = Math.round(layout.brandQrHintFontPx * 1.15);
+      const totalTextH = eyebrowLineH + titleLineH + layout.brandQrHintGap + hintLineH;
+      const textStartY = bc.y + Math.round((bc.h - totalTextH) / 2);
+      const badgeInk = darkBg ? '#f8fafc' : '#1e293b';
+
+      ctx.fillStyle = badgeInk;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'top';
+
+      ctx.globalAlpha = 0.72;
+      ctx.font = themeCanvasFont(theme, 600, layout.brandEyebrowFontPx);
+      ctx.fillText(COVER_MADE_WITH_LABEL, textX, textStartY, textMaxW);
+
+      ctx.globalAlpha = 1;
       ctx.font = themeCanvasFont(theme, 800, layout.brandTitleFontPx);
-      ctx.fillText('Brick Instruction', textX, textStartY, textMaxW);
-      ctx.globalAlpha = 0.78;
-      ctx.font = themeCanvasFont(theme, 600, layout.brandTitleFontPx);
-      ctx.fillText('Works', textX, textStartY + lineH, textMaxW);
+      ctx.fillText(PROGRAM_NAME, textX, textStartY + eyebrowLineH, textMaxW);
+
+      const hintY = textStartY + eyebrowLineH + titleLineH + layout.brandQrHintGap;
+      const hintTextMaxW = Math.max(20, textMaxW - qrHintArrowGap - qrHintArrowSize);
+      ctx.globalAlpha = 0.76;
+      ctx.font = themeCanvasFont(theme, 500, layout.brandQrHintFontPx);
+      ctx.fillText(COVER_QR_HINT_TEXT, textX, hintY, hintTextMaxW);
+
+      const drawnHintW = Math.min(hintTextW, hintTextMaxW);
+      const arrowLeft = textX + drawnHintW + qrHintArrowGap;
+      const arrowMidY = hintY + hintLineH * 0.52;
+      const arrowRight = arrowLeft + qrHintArrowSize * 0.85;
+      const headSize = qrHintArrowSize * 0.28;
+      ctx.save();
+      ctx.strokeStyle = badgeInk;
+      ctx.lineWidth = Math.max(1, qrHintArrowSize * 0.13);
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      ctx.moveTo(arrowLeft + qrHintArrowSize * 0.1, arrowMidY);
+      ctx.lineTo(arrowRight, arrowMidY);
+      ctx.moveTo(arrowRight - headSize, arrowMidY - headSize);
+      ctx.lineTo(arrowRight, arrowMidY);
+      ctx.lineTo(arrowRight - headSize, arrowMidY + headSize);
+      ctx.stroke();
+      ctx.restore();
       ctx.globalAlpha = 1;
 
       // QR Code square card
-      if (layout.qrCardRect) {
-        const qr = layout.qrCardRect;
-        drawRoundedRectPath(ctx, qr.x, qr.y, qr.w, qr.h, layout.cardRadius);
-        ctx.fillStyle = '#ffffff';
-        ctx.fill();
-        ctx.strokeStyle = 'rgba(15,23,42,0.16)';
-        ctx.lineWidth = lineW;
-        ctx.stroke();
+      drawRoundedRectPath(ctx, qr.x, qr.y, qr.w, qr.h, layout.cardRadius);
+      ctx.fillStyle = '#ffffff';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(15,23,42,0.16)';
+      ctx.lineWidth = lineW;
+      ctx.stroke();
 
-        const inset = layout.qrInnerInset;
-        drawQrCanvas(ctx, PROGRAM_URL, qr.x + inset, qr.y + inset, qr.w - inset * 2, {
-          fg: '#111827',
-          bg: '#ffffff',
-          quietZone: 1,
-        });
-      }
+      const inset = layout.qrInnerInset;
+      drawQrCanvas(ctx, PROGRAM_URL, qr.x + inset, qr.y + inset, qr.w - inset * 2, {
+        fg: '#111827',
+        bg: '#ffffff',
+        quietZone: 1,
+      });
 
-      // Register clickable PDF hyperlink over the program badge + QR code
-      links.push(canvasRectToPdfLink(layout.brandGroupRect, pxW, pxH, pageWpt, pageHpt, PROGRAM_URL));
+      // Register clickable PDF hyperlink over the program attribution + QR code
+      links.push(canvasRectToPdfLink(actualGroupRect, pxW, pxH, pageWpt, pageHpt, PROGRAM_URL));
     }
   } else if (page.kind === 'complete') {
     const cm = state.completeMeta;
@@ -13670,14 +13735,12 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
     drawContain(ctx, img, pad, topOff, pxW - pad * 2, availH);
     drawFooter(state.model.title);
   } else if (page.kind === 'back') {
-    const bm = state.backMeta;
+    const bm = normalizeBackMeta(state.backMeta);
     if (bm.bgSrc) {
       const bgImg = await loadImgPromise(bm.bgSrc);
       if (bgImg) drawCoverImage(ctx, bgImg, 0, 0, pxW, pxH);
     }
-    const credit = (!bm.subtitle || bm.subtitle === 'Created with Brick Instruction Creator')
-      ? 'Made with Brick Instruction Works'
-      : bm.subtitle;
+    const credit = BACK_COVER_CREDIT;
     ctx.textAlign = 'center';
     const logoSz = typo.back.logoIcon;
     const logoY = Math.round(pxH * 0.5 - logoSz * 0.65);
@@ -15537,14 +15600,15 @@ async function runInteractiveHtmlExport() {
           },
         });
       } else if (pg.kind === 'back') {
-        const az = state.backMeta?.az ?? 215, el = state.backMeta?.el ?? 24;
+        const bm = normalizeBackMeta(state.backMeta);
+        const az = bm.az ?? 215, el = bm.el ?? 24;
         exportPages.push({
           id: pg.id,
           kind: 'back',
           num: pg.num,
           label: pg.label || 'Back Cover',
-          title: state.backMeta?.title || state.model.title,
-          subtitle: state.backMeta?.subtitle || 'Made with Brick Instruction Creator',
+          title: bm.title || state.model.title,
+          subtitle: BACK_COVER_CREDIT,
           note: `${allParts.length} pieces · ${allSteps.length} steps`,
           previewUrl: renderFallbackPreview([], allParts, az, el, 0.95, { highlightNew: false, fadePrev: false }),
           scene: {
@@ -15945,7 +16009,7 @@ async function handleIncomingProjectFile(f) {
     state.dividerAfter = data.dividerAfter || {};
     state.coverMeta = normalizeCoverMeta(data.coverMeta);
     if (data.completeMeta) state.completeMeta = { ...state.completeMeta, ...data.completeMeta };
-    if (data.backMeta) state.backMeta = { ...state.backMeta, ...data.backMeta };
+    state.backMeta = normalizeBackMeta(data.backMeta);
     if (data.pageNumberFormat) state.pageNumberFormat = data.pageNumberFormat;
     if (typeof data.detectDuplicates === 'boolean') state.detectDuplicates = data.detectDuplicates;
     if (data.customTheme) {
@@ -16975,6 +17039,7 @@ function finishImport(parsed, mode, subdivisionPlan = null, isPostImport = false
     state.overrides = {}; state.stepInserts = {}; state.pageInserts = {}; state.dividerAfter = {};
     state.layoutGroups = [];
     state.coverMeta = createDefaultCoverMeta();
+    state.backMeta = createDefaultBackMeta();
     state.undoStack = []; state.redoStack = [];
     state.seenDiagnosticKeys = new Set();
   }
@@ -17404,13 +17469,7 @@ async function closeCurrentModel() {
     showText: true,
     showFireworks: true,
   };
-  state.backMeta = {
-    title: '',
-    subtitle: 'Made with Brick Instruction Works',
-    az: 38,
-    el: 24,
-    bgSrc: null,
-  };
+  state.backMeta = createDefaultBackMeta();
   state.bomShortcutVisible = false;
   state.pendingImport = null;
   state.undoStack = [];

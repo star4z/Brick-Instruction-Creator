@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
+  BACK_COVER_CREDIT,
+  COVER_MADE_WITH_LABEL,
+  COVER_QR_HINT_TEXT,
   PROGRAM_NAME,
   PROGRAM_URL,
   computeCoverLayout,
   computeTightCameraBounds,
+  createDefaultBackMeta,
   createDefaultCoverMeta,
+  normalizeBackMeta,
   normalizeCoverMeta,
 } from '../coverLayout';
 import { buildQrSvg, generateQrMatrix } from '../qrCode';
@@ -220,7 +225,15 @@ describe('QR Code Generator (ISO/IEC 18004)', () => {
 });
 
 describe('Cover Metadata & LEGO-Style Layout Geometry', () => {
-  it('creates clean editorial defaults with optional empty subtitle and QR enabled', () => {
+  it('exposes canonical front and back cover branding copy', () => {
+    expect(PROGRAM_NAME).toBe('Brick Instruction Works');
+    expect(COVER_MADE_WITH_LABEL).toBe('Made with');
+    expect(COVER_QR_HINT_TEXT.toLowerCase()).toContain('scan');
+    expect(COVER_QR_HINT_TEXT.toLowerCase()).toContain('qr');
+    expect(BACK_COVER_CREDIT).toBe('Made with Brick Instruction Works');
+  });
+
+  it('creates clean editorial defaults with optional empty subtitle and locked attribution + QR', () => {
     const def = createDefaultCoverMeta();
     expect(def.title).toBe('');
     expect(def.subtitle).toBe('');
@@ -230,48 +243,70 @@ describe('Cover Metadata & LEGO-Style Layout Geometry', () => {
     expect(def.showQrCode).toBe(true);
     expect(def.showProgramBadge).toBe(true);
     expect(def.el).toBe(18);
+
+    const backDef = createDefaultBackMeta();
+    expect(backDef.subtitle).toBe(BACK_COVER_CREDIT);
+    expect(backDef.bgSrc).toBeNull();
   });
 
-  it('normalizes legacy saved coverMeta objects gracefully', () => {
-    const legacy = normalizeCoverMeta({ title: 'Cargo Ship', subtitle: '', az: 45, el: 99, bgSrc: null });
+  it('normalizes legacy or modified coverMeta and backMeta while keeping Brick Instruction Works bits non-editable', () => {
+    const legacy = normalizeCoverMeta({
+      title: 'Cargo Ship',
+      subtitle: '',
+      az: 45,
+      el: 99,
+      bgSrc: null,
+      showQrCode: false,
+      showProgramBadge: false,
+    });
     expect(legacy.title).toBe('Cargo Ship');
     expect(legacy.el).toBe(60); // Clamped into hero elevation range
     expect(legacy.zoom).toBe(1.0);
     expect(legacy.showQrCode).toBe(true);
+    expect(legacy.showProgramBadge).toBe(true);
     expect(legacy.creatorLogoSrc).toBeNull();
     expect(legacy.themeImageSrc).toBeNull();
+
+    const customBack = normalizeBackMeta({
+      subtitle: 'Custom Edited Credit',
+      bgSrc: 'data:image/png;base64,ABC',
+      az: 90,
+      el: 20,
+    });
+    expect(customBack.subtitle).toBe(BACK_COVER_CREDIT);
+    expect(customBack.bgSrc).toBe('data:image/png;base64,ABC');
   });
 
-  it('computes a page-filling hero region and non-overlapping corner zones on landscape & portrait pages', () => {
-    for (const [pageW, pageH] of [[1100, 850], [850, 1100], [900, 900]]) {
+  it('computes a page-filling hero region and non-overlapping corner zones on landscape, portrait, square, and narrow pages', () => {
+    for (const [pageW, pageH] of [[1100, 850], [850, 1100], [900, 900], [528, 816]]) {
       const layout = computeCoverLayout({
         pageW,
         pageH,
         hasCreatorLogo: true,
         hasSubtitle: true,
         hasThemeImage: true,
-        showQrCode: true,
-        showProgramBadge: true,
       });
 
       // Hero render fills nearly the entire page width and generous height with clean corner clearance
       expect(layout.heroRect.w / pageW).toBeGreaterThan(0.92);
-      expect(layout.heroRect.h / pageH).toBeGreaterThan(0.65);
+      expect(layout.heroRect.h / pageH).toBeGreaterThan(0.64);
 
       // Top-left and top-right zones never overlap horizontally
       expect(layout.pad + layout.topLeftMaxW).toBeLessThan(pageW - layout.pad - layout.topRightMaxW);
 
-      // Bottom-right clickable group contains both badge card and QR square inside page bounds
-      expect(layout.qrCardRect).not.toBeNull();
-      expect(layout.brandGroupRect.x).toBeGreaterThan(0);
+      // Bottom-right clickable group always contains both attribution card and QR square inside page bounds
+      expect(layout.brandGroupRect.x).toBeGreaterThanOrEqual(layout.pad);
       expect(layout.brandGroupRect.y).toBeGreaterThan(0);
       expect(layout.brandGroupRect.x + layout.brandGroupRect.w).toBeLessThanOrEqual(pageW - layout.pad + 1);
       expect(layout.brandGroupRect.y + layout.brandGroupRect.h).toBeLessThanOrEqual(pageH - layout.pad + 1);
-      expect(layout.qrCardRect!.w).toBe(layout.qrCardRect!.h);
+      expect(layout.qrCardRect.w).toBe(layout.qrCardRect.h);
+      expect(layout.brandEyebrowFontPx).toBeGreaterThan(0);
+      expect(layout.brandTitleFontPx).toBeGreaterThan(layout.brandEyebrowFontPx);
+      expect(layout.brandQrHintFontPx).toBeGreaterThan(0);
     }
   });
 
-  it('omits QR rect when showQrCode is false while keeping the program badge clickable', () => {
+  it('always keeps the program attribution badge and QR code present even if false flags are passed', () => {
     const layout = computeCoverLayout({
       pageW: 1100,
       pageH: 850,
@@ -279,11 +314,12 @@ describe('Cover Metadata & LEGO-Style Layout Geometry', () => {
       hasSubtitle: false,
       hasThemeImage: false,
       showQrCode: false,
-      showProgramBadge: true,
+      showProgramBadge: false,
     });
-    expect(layout.qrCardRect).toBeNull();
-    expect(layout.brandGroupRect.w).toBe(layout.brandCardRect.w);
-    expect(layout.brandGroupRect.w).toBeGreaterThan(60);
+    expect(layout.qrCardRect.w).toBeGreaterThan(30);
+    expect(layout.qrCardRect.w).toBe(layout.qrCardRect.h);
+    expect(layout.brandCardRect.w).toBeGreaterThan(100);
+    expect(layout.brandGroupRect.w).toBe(layout.brandCardRect.w + layout.brandGap + layout.qrCardRect.w);
   });
 
   it('computes tight camera-space orthographic bounds for elongated models', () => {

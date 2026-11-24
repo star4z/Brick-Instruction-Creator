@@ -166,4 +166,22 @@ describe('studioRuntime safety checks', () => {
     expect(fnBody).toContain("const partColorOverrides = impState.colorMode === 'sections' ? {} : null;");
     expect(fnBody).toContain('SECTION_PREVIEW_PALETTE[0]');
   });
+
+  it('keeps front and back cover Brick Instruction Works attribution non-editable with Made with and QR hint copy', () => {
+    const runtime = fs.readFileSync(path.resolve(process.cwd(), 'src/studioRuntime.ts'), 'utf8');
+
+    // No QR code toggle or back-cover credit editor input in overlay controls
+    expect(runtime).not.toContain('id="covQrToggle"');
+    expect(runtime).not.toContain('#covQrToggle');
+    expect(runtime).not.toContain('placeholder="Back cover text"');
+
+    // Front cover no longer splits "Brick Instruction" and "Works" across two lines
+    expect(runtime).not.toContain('>Brick Instruction<');
+    expect(runtime).not.toContain("fillText('Brick Instruction'");
+
+    // Both live DOM and PDF canvas render Made with, unified PROGRAM_NAME, QR hint, and fixed back credit
+    expect(runtime.match(/COVER_MADE_WITH_LABEL/g)?.length).toBeGreaterThanOrEqual(3);
+    expect(runtime.match(/COVER_QR_HINT_TEXT/g)?.length).toBeGreaterThanOrEqual(4);
+    expect(runtime.match(/BACK_COVER_CREDIT/g)?.length).toBeGreaterThanOrEqual(4);
+  });
 });

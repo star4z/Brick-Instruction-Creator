@@ -2,6 +2,9 @@
 
 export const PROGRAM_NAME = 'Brick Instruction Works';
 export const PROGRAM_URL = 'https://star4z.github.io/Brick-Instruction-Creator/';
+export const COVER_MADE_WITH_LABEL = 'Made with';
+export const COVER_QR_HINT_TEXT = 'Scan QR to create instructions';
+export const BACK_COVER_CREDIT = `${COVER_MADE_WITH_LABEL} ${PROGRAM_NAME}`;
 
 export interface CoverMeta {
   title: string;
@@ -12,8 +15,19 @@ export interface CoverMeta {
   bgSrc: string | null;
   creatorLogoSrc: string | null;
   themeImageSrc: string | null;
-  showQrCode: boolean;
-  showProgramBadge: boolean;
+  /** Non-editable: always true on the front cover. Kept for .biw backward compatibility. */
+  showQrCode: true;
+  /** Non-editable: always true on the front cover. Kept for .biw backward compatibility. */
+  showProgramBadge: true;
+}
+
+export interface BackCoverMeta {
+  title: string;
+  /** Non-editable: always fixed to BACK_COVER_CREDIT. */
+  subtitle: string;
+  az: number;
+  el: number;
+  bgSrc: string | null;
 }
 
 export interface RectBox {
@@ -40,9 +54,14 @@ export interface CoverLayoutMetrics {
   brandGroupRect: RectBox;
   brandCardRect: RectBox;
   brandIconSize: number;
+  brandPadX: number;
+  brandInnerGap: number;
+  brandEyebrowFontPx: number;
   brandTitleFontPx: number;
+  brandQrHintFontPx: number;
+  brandQrHintGap: number;
   brandGap: number;
-  qrCardRect: RectBox | null;
+  qrCardRect: RectBox;
   qrInnerInset: number;
   cardRadius: number;
 }
@@ -59,6 +78,16 @@ export function createDefaultCoverMeta(): CoverMeta {
     themeImageSrc: null,
     showQrCode: true,
     showProgramBadge: true,
+  };
+}
+
+export function createDefaultBackMeta(): BackCoverMeta {
+  return {
+    title: '',
+    subtitle: BACK_COVER_CREDIT,
+    az: 38,
+    el: 24,
+    bgSrc: null,
   };
 }
 
@@ -85,8 +114,23 @@ export function normalizeCoverMeta(raw: unknown): CoverMeta {
     bgSrc: typeof r.bgSrc === 'string' && r.bgSrc.length > 0 ? r.bgSrc : null,
     creatorLogoSrc: typeof r.creatorLogoSrc === 'string' && r.creatorLogoSrc.length > 0 ? r.creatorLogoSrc : null,
     themeImageSrc: typeof r.themeImageSrc === 'string' && r.themeImageSrc.length > 0 ? r.themeImageSrc : null,
-    showQrCode: typeof r.showQrCode === 'boolean' ? r.showQrCode : def.showQrCode,
-    showProgramBadge: typeof r.showProgramBadge === 'boolean' ? r.showProgramBadge : def.showProgramBadge,
+    // Program attribution and QR code on the front cover are non-editable and always shown.
+    showQrCode: true,
+    showProgramBadge: true,
+  };
+}
+
+export function normalizeBackMeta(raw: unknown): BackCoverMeta {
+  const def = createDefaultBackMeta();
+  if (!raw || typeof raw !== 'object') return def;
+  const r = raw as Record<string, unknown>;
+  return {
+    title: typeof r.title === 'string' ? r.title : def.title,
+    // Program credit on the back cover is fixed and non-editable.
+    subtitle: BACK_COVER_CREDIT,
+    az: typeof r.az === 'number' && Number.isFinite(r.az) ? ((r.az % 360) + 360) % 360 : def.az,
+    el: typeof r.el === 'number' && Number.isFinite(r.el) ? r.el : def.el,
+    bgSrc: typeof r.bgSrc === 'string' && r.bgSrc.length > 0 ? r.bgSrc : null,
   };
 }
 
@@ -96,8 +140,10 @@ export interface CoverLayoutInput {
   hasCreatorLogo: boolean;
   hasSubtitle: boolean;
   hasThemeImage: boolean;
-  showQrCode: boolean;
-  showProgramBadge: boolean;
+  /** Ignored — front-cover QR code is non-editable and always rendered. */
+  showQrCode?: boolean;
+  /** Ignored — front-cover program badge is non-editable and always rendered. */
+  showProgramBadge?: boolean;
   densityPadFactor?: number;
 }
 
@@ -127,23 +173,28 @@ export function computeCoverLayout(input: CoverLayoutInput): CoverLayoutMetrics 
   const topRightMaxW = Math.round(innerW * 0.44);
   const topRightMaxH = Math.round(shortSide * 0.112);
 
-  // Bottom-right program badge + optional QR code (proportioned like official LEGO Builder badge)
-  const badgeH = Math.round(Math.max(32, shortSide * 0.098));
+  // Bottom-right non-editable program attribution ("Made with" / "Brick Instruction Works" / QR hint) + QR code
+  const badgeH = Math.round(Math.max(36, shortSide * 0.1));
   const cardRadius = Math.round(badgeH * 0.18);
   const qrSize = badgeH;
   const qrInnerInset = Math.max(2, Math.round(qrSize * 0.06));
-  const brandGap = Math.round(badgeH * 0.16);
+  const brandGap = Math.round(badgeH * 0.14);
+  const brandPadX = Math.max(6, Math.round(badgeH * 0.18));
+  const brandInnerGap = Math.max(5, Math.round(badgeH * 0.14));
   const brandIconSize = Math.round(badgeH * 0.56);
-  const brandTitleFontPx = Math.round(Math.max(7.5, badgeH * 0.185));
+  const brandEyebrowFontPx = Math.max(7, Math.round(badgeH * 0.135));
+  const brandTitleFontPx = Math.max(8.5, Math.round(badgeH * 0.182));
+  const brandQrHintFontPx = Math.max(6.5, Math.round(badgeH * 0.125));
+  const brandQrHintGap = Math.max(2, Math.round(badgeH * 0.045));
 
-  // Cross-platform safe width for the program badge card (icon + stacked "Brick Instruction / Creator")
-  const brandCardW = Math.round(brandIconSize + badgeH * 2.05);
-  const showBadge = input.showProgramBadge !== false;
-  const showQr = input.showQrCode !== false && showBadge;
+  // Cross-platform safe width for icon + "Made with" / single-line "Brick Instruction Works" / QR hint
+  const rawBrandCardW = Math.round(
+    brandPadX * 2 + brandIconSize + brandInnerGap + brandTitleFontPx * 13.8,
+  );
+  const maxBrandCardW = Math.max(80, innerW - qrSize - brandGap);
+  const brandCardW = Math.min(rawBrandCardW, maxBrandCardW);
 
-  const totalBrandW = showBadge
-    ? (showQr ? brandCardW + brandGap + qrSize : brandCardW)
-    : 0;
+  const totalBrandW = brandCardW + brandGap + qrSize;
   const brandGroupX = pageW - pad - totalBrandW;
   const brandGroupY = pageH - pad - badgeH;
 
@@ -151,22 +202,20 @@ export function computeCoverLayout(input: CoverLayoutInput): CoverLayoutMetrics 
     x: brandGroupX,
     y: brandGroupY,
     w: totalBrandW,
-    h: showBadge ? badgeH : 0,
+    h: badgeH,
   };
   const brandCardRect: RectBox = {
     x: brandGroupX,
     y: brandGroupY,
-    w: showBadge ? brandCardW : 0,
-    h: showBadge ? badgeH : 0,
+    w: brandCardW,
+    h: badgeH,
   };
-  const qrCardRect: RectBox | null = showQr
-    ? {
-        x: pageW - pad - qrSize,
-        y: brandGroupY,
-        w: qrSize,
-        h: qrSize,
-      }
-    : null;
+  const qrCardRect: RectBox = {
+    x: pageW - pad - qrSize,
+    y: brandGroupY,
+    w: qrSize,
+    h: qrSize,
+  };
 
   // Hero 3D model render zone: page-filling edge-to-edge width with clean clearance
   // below top branding/title and above bottom-right program badge + QR code
@@ -177,7 +226,7 @@ export function computeCoverLayout(input: CoverLayoutInput): CoverLayoutMetrics 
       ? (input.hasSubtitle ? 0.175 : 0.16)
       : (input.hasSubtitle ? 0.155 : 0.13);
   const heroTop = Math.round(pageH * heroTopRatio);
-  const heroBottomMargin = Math.round(pageH * (showBadge ? 0.125 : 0.045));
+  const heroBottomMargin = Math.round(pageH * 0.128);
   const heroRect: RectBox = {
     x: heroInsetX,
     y: heroTop,
@@ -201,7 +250,12 @@ export function computeCoverLayout(input: CoverLayoutInput): CoverLayoutMetrics 
     brandGroupRect,
     brandCardRect,
     brandIconSize,
+    brandPadX,
+    brandInnerGap,
+    brandEyebrowFontPx,
     brandTitleFontPx,
+    brandQrHintFontPx,
+    brandQrHintGap,
     brandGap,
     qrCardRect,
     qrInnerInset,
