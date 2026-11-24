@@ -6767,7 +6767,6 @@ function renderAll() {
 
   const desktopSepEl = document.getElementById('desktopModelSep');
   const desktopNameEl = document.getElementById('desktopModelName');
-  const desktopMetaEl = document.getElementById('desktopModelMeta');
   const mobileModelSepEl = document.getElementById('mobileEditorModelSep');
   const mobileModelNameEl = document.getElementById('mobileEditorModelName');
 
@@ -6777,7 +6776,6 @@ function renderAll() {
   if (!hasModel) {
     if (desktopSepEl) desktopSepEl.classList.add('hidden');
     if (desktopNameEl) { desktopNameEl.textContent = ''; desktopNameEl.classList.add('hidden'); }
-    if (desktopMetaEl) desktopMetaEl.textContent = '';
     if (mobileModelSepEl) mobileModelSepEl.classList.add('hidden');
     if (mobileModelNameEl) { mobileModelNameEl.textContent = ''; mobileModelNameEl.classList.add('hidden'); }
     document.getElementById('menuModelName').textContent = 'No model loaded';
@@ -6797,7 +6795,6 @@ function renderAll() {
 
   if (desktopSepEl) desktopSepEl.classList.remove('hidden');
   if (desktopNameEl) { desktopNameEl.textContent = state.model.title; desktopNameEl.classList.remove('hidden'); }
-  if (desktopMetaEl) desktopMetaEl.textContent = `· ${formatPartCount(allParts.length)}`;
   if (mobileModelSepEl) mobileModelSepEl.classList.remove('hidden');
   if (mobileModelNameEl) { mobileModelNameEl.textContent = state.model.title; mobileModelNameEl.classList.remove('hidden'); }
   document.getElementById('menuModelName').textContent = state.model.title;
