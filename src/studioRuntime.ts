@@ -47,6 +47,10 @@ import {
 } from './engine/menuVisibility';
 import { computeScrollJumpVisibility } from './engine/scrollJump';
 import {
+  computePageNavigationState,
+  resolvePageNavigationTarget,
+} from './engine/pageNavigation';
+import {
   MINIFIG_BUILD_CAMERA,
   MINIFIG_POSE_CAMERA,
   classifyMinifigGroupKind,
@@ -7317,8 +7321,13 @@ function renderAll() {
   const pageCountEl = document.getElementById('pageCountText');
   if (pageCountEl) pageCountEl.textContent = `· ${page.num}/${state.pages.length}`;
   document.getElementById('btnPageOverview').title = fullLabel;
-  document.getElementById('prevPage').disabled = state.pageIdx <= 0;
-  document.getElementById('nextPage').disabled = state.pageIdx >= state.pages.length - 1;
+  const navState = computePageNavigationState(state.pageIdx, state.pages.length);
+  const firstPageEl = document.getElementById('firstPage');
+  if (firstPageEl) firstPageEl.disabled = !navState.canGoFirst;
+  document.getElementById('prevPage').disabled = !navState.canGoPrev;
+  document.getElementById('nextPage').disabled = !navState.canGoNext;
+  const lastPageEl = document.getElementById('lastPage');
+  if (lastPageEl) lastPageEl.disabled = !navState.canGoLast;
 
   const isSteps = page.kind === 'steps';
   if (state.mode === 'arrange') {
@@ -15462,14 +15471,22 @@ document.querySelectorAll('.mode-btn').forEach(b => {
   };
 });
 
-document.getElementById('prevPage').onclick = () => {
+function navigatePage(action) {
   dismissErrorBanner();
-  if (state.pageIdx > 0) { state.pageIdx--; state.selectedPartIds.clear(); resetZoom(); renderAll(); }
-};
-document.getElementById('nextPage').onclick = () => {
-  dismissErrorBanner();
-  if (state.pageIdx < state.pages.length - 1) { state.pageIdx++; state.selectedPartIds.clear(); resetZoom(); renderAll(); }
-};
+  const targetIdx = resolvePageNavigationTarget(state.pageIdx, state.pages.length, action);
+  if (targetIdx !== state.pageIdx) {
+    state.pageIdx = targetIdx;
+    state.selectedPartIds.clear();
+    resetZoom();
+    renderAll();
+  }
+}
+const firstPageBtn = document.getElementById('firstPage');
+if (firstPageBtn) firstPageBtn.onclick = () => navigatePage('first');
+document.getElementById('prevPage').onclick = () => navigatePage('prev');
+document.getElementById('nextPage').onclick = () => navigatePage('next');
+const lastPageBtn = document.getElementById('lastPage');
+if (lastPageBtn) lastPageBtn.onclick = () => navigatePage('last');
 document.getElementById('btnZoomIn').onclick = () => setZoom(state.zoom * 1.22);
 document.getElementById('btnZoomOut').onclick = () => setZoom(state.zoom * 0.82);
 document.getElementById('btnZoomFit').onclick = resetZoom;

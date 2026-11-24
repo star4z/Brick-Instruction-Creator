@@ -19,7 +19,7 @@ Implemented in [`src/export/interactiveHtmlExporter.ts`](../src/export/interacti
   - 2-finger pinch / mouse wheel / `+` `−` buttons: smooth zoom (`0.4×–4.8×`).
   - 2-finger drag / Shift+drag / right-mouse drag: smooth 2D pan.
   - Double-tap / `R` / Reset button: smoothly eases camera back to the step's authored angle.
-  - Keyboard `←`/`→`, scrubber slider, multi-step page switcher pills, and full Pages & Steps drawer (with scroll-aware jump-to-top and jump-to-bottom arrow buttons when the list overflows).
+  - First (`#btnFirst`) / Prev / Next / Last (`#btnLast`) dock buttons, keyboard `←`/`→`/`Home`/`End`, scrubber slider, multi-step page switcher pills, and full Pages & Steps drawer (with scroll-aware jump-to-top and jump-to-bottom arrow buttons when the list overflows).
   - Toggleable Parts Needed (PLI) tray and Highlight New Pieces toggle.
 
 ## Security, iOS Compatibility & Robustness

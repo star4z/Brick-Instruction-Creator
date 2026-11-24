@@ -187,17 +187,23 @@
       </div>
 
       <!-- Page & Desktop Zoom Pill -->
-      <div class="studio-pill w-[min(94vw,420px)] max-w-full min-w-0 px-1.5 py-1 rounded-full flex items-center gap-1 text-xs font-semibold">
-        <button id="prevPage" type="button" title="Previous Page" aria-label="Previous Page" class="h-8 w-8 rounded-full bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] flex items-center justify-center disabled:opacity-35 transition-colors shrink-0 cursor-pointer disabled:cursor-default">
-          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m15 18-6-6 6-6"/></svg>
+      <div class="studio-pill w-[min(94vw,420px)] md:w-[min(94vw,492px)] max-w-full min-w-0 px-1.5 py-1 rounded-full flex items-center gap-1 text-xs font-semibold">
+        <button id="firstPage" type="button" title="First Page" aria-label="First Page" class="h-8 w-8 rounded-full enabled:hover:bg-[var(--surface-hover)] text-[var(--foreground)] flex items-center justify-center disabled:opacity-35 transition-colors shrink-0 cursor-pointer disabled:cursor-default">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m17 18-6-6 6-6"/><path d="M7 6v12"/></svg>
+        </button>
+        <button id="prevPage" type="button" title="Previous Page" aria-label="Previous Page" class="h-8 w-8 rounded-full bg-[var(--primary)] enabled:hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] flex items-center justify-center disabled:opacity-35 transition-colors shrink-0 cursor-pointer disabled:cursor-default">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
         </button>
         <button id="btnPageOverview" type="button" class="h-8 px-2 rounded-full hover:bg-[var(--surface-hover)] flex items-center justify-center gap-1.5 min-w-0 flex-1 overflow-hidden transition-colors cursor-pointer">
           <span id="pageLabelText" class="truncate min-w-0 font-semibold">Page 1</span>
           <span id="pageCountText" class="shrink-0 font-mono text-xs text-[var(--muted-foreground)] whitespace-nowrap"></span>
           <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
         </button>
-        <button id="nextPage" type="button" title="Next Page" aria-label="Next Page" class="h-8 w-8 rounded-full bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] flex items-center justify-center disabled:opacity-35 transition-colors shrink-0 cursor-pointer disabled:cursor-default">
-          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m9 18 6-6-6-6"/></svg>
+        <button id="nextPage" type="button" title="Next Page" aria-label="Next Page" class="h-8 w-8 rounded-full bg-[var(--primary)] enabled:hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] flex items-center justify-center disabled:opacity-35 transition-colors shrink-0 cursor-pointer disabled:cursor-default">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+        </button>
+        <button id="lastPage" type="button" title="Last Page" aria-label="Last Page" class="h-8 w-8 rounded-full enabled:hover:bg-[var(--surface-hover)] text-[var(--foreground)] flex items-center justify-center disabled:opacity-35 transition-colors shrink-0 cursor-pointer disabled:cursor-default">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 18 6-6-6-6"/><path d="M17 6v12"/></svg>
         </button>
 
         <div id="zoomControlsBar" class="hidden md:inline-flex items-center gap-1 shrink-0">

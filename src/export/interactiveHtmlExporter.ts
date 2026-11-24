@@ -625,15 +625,16 @@ export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload)
 
   .bottom-dock {
     position: fixed; bottom: max(14px, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); z-index: 20;
-    width: min(94vw, 520px); border-radius: 24px; padding: 8px 10px;
+    width: min(94vw, 560px); border-radius: 24px; padding: 8px 10px;
     display: flex; flex-direction: column; gap: 6px;
   }
-  .dock-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .dock-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
   .nav-btn {
     height: 36px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--glass-border);
     background: transparent; color: var(--text); font-size: 13px; font-weight: 700; cursor: pointer;
-    display: inline-flex; align-items: center; gap: 5px;
+    display: inline-flex; align-items: center; justify-content: center; gap: 5px; flex-shrink: 0;
   }
+  .nav-btn.icon-only { width: 36px; padding: 0; }
   .nav-btn.primary { background: var(--accent); color: #fff; border-color: transparent; }
   .nav-btn:disabled { opacity: 0.32; cursor: default; }
   .page-btn {
@@ -702,6 +703,9 @@ export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload)
   @media (max-width: 600px) {
     .step-num-big { font-size: 24px; }
     .pli-panel { max-height: 24vh; }
+    .dock-row { gap: 4px; }
+    .nav-btn { height: 34px; padding: 0 10px; font-size: 12px; }
+    .nav-btn.icon-only { width: 34px; padding: 0; }
   }
 </style>
 </head>
@@ -735,9 +739,15 @@ ${staticFallbackHtml}
 
   <footer class="bottom-dock glass">
     <div class="dock-row">
+      <button id="btnFirst" class="nav-btn icon-only" type="button" title="First page" aria-label="First page">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m17 18-6-6 6-6"/><path d="M7 6v12"/></svg>
+      </button>
       <button id="btnPrev" class="nav-btn" type="button">← Prev</button>
       <button id="btnPagePicker" class="page-btn" type="button">Page 1</button>
       <button id="btnNext" class="nav-btn primary" type="button">Next →</button>
+      <button id="btnLast" class="nav-btn icon-only" type="button" title="Last page" aria-label="Last page">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 18 6-6-6-6"/><path d="M17 6v12"/></svg>
+      </button>
     </div>
     <input id="pageScrubber" class="scrubber" type="range" min="0" max="0" value="0" aria-label="Jump to step" />
   </footer>
@@ -1544,8 +1554,10 @@ ${staticFallbackHtml}
       flatEl.classList.add('open');
     }
 
+    document.getElementById('btnFirst').disabled = curIdx <= 0;
     document.getElementById('btnPrev').disabled = curIdx <= 0;
     document.getElementById('btnNext').disabled = curIdx >= viewerItems.length - 1;
+    document.getElementById('btnLast').disabled = curIdx >= viewerItems.length - 1;
     const pgPicker = document.getElementById('btnPagePicker');
     const stepText = step ? ('Step ' + step.stepNum + ' · Page ' + pg.num) : (pg.label + ' · Page ' + pg.num);
     pgPicker.textContent = stepText + ' / ' + DATA.pages.length;
@@ -1609,8 +1621,10 @@ ${staticFallbackHtml}
     requestAnimationFrame(syncDrawerScrollButtons);
   }
 
+  document.getElementById('btnFirst').onclick = () => { if (curIdx > 0) { curIdx = 0; renderView(); } };
   document.getElementById('btnPrev').onclick = () => { if (curIdx > 0) { curIdx--; renderView(); } };
   document.getElementById('btnNext').onclick = () => { if (curIdx < viewerItems.length - 1) { curIdx++; renderView(); } };
+  document.getElementById('btnLast').onclick = () => { if (curIdx < viewerItems.length - 1) { curIdx = viewerItems.length - 1; renderView(); } };
   document.getElementById('pageScrubber').oninput = (e) => { curIdx = Number(e.target.value) || 0; renderView(); };
   document.getElementById('btnPagePicker').onclick = openDrawer;
   document.getElementById('btnPagesTop').onclick = openDrawer;
@@ -1628,6 +1642,8 @@ ${staticFallbackHtml}
   window.addEventListener('keydown', (e) => {
     if (e.key === 'ArrowRight' || e.key === ' ') { if (curIdx < viewerItems.length - 1) { curIdx++; renderView(); } }
     else if (e.key === 'ArrowLeft') { if (curIdx > 0) { curIdx--; renderView(); } }
+    else if (e.key === 'Home') { if (curIdx > 0) { curIdx = 0; renderView(); } }
+    else if (e.key === 'End') { if (curIdx < viewerItems.length - 1) { curIdx = viewerItems.length - 1; renderView(); } }
     else if (e.key === 'r' || e.key === 'R') { resetCameraSmooth(); }
     else if (e.key === '+' || e.key === '=') { cam.zoom = Math.min(4.8, cam.zoom * 1.15); requestDraw(); }
     else if (e.key === '-' || e.key === '_') { cam.zoom = Math.max(0.4, cam.zoom / 1.15); requestDraw(); }

@@ -153,6 +153,18 @@ describe('studioRuntime safety checks', () => {
     expect(runtime).toContain('function scrollOverviewListTo(');
   });
 
+  it('wires jump-to-first and jump-to-last buttons in the page navigation pill', () => {
+    const html = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf8');
+    const runtime = fs.readFileSync(path.resolve(process.cwd(), 'src/studioRuntime.ts'), 'utf8');
+
+    expect(html).toContain('id="firstPage"');
+    expect(html).toContain('id="lastPage"');
+    expect(runtime).toContain('computePageNavigationState');
+    expect(runtime).toContain('resolvePageNavigationTarget');
+    expect(runtime).toContain("navigatePage('first')");
+    expect(runtime).toContain("navigatePage('last')");
+  });
+
   it('tints the entire model one color for Single Continuous Build in Section Colors mode', () => {
     const runtimePath = path.resolve(process.cwd(), 'src/studioRuntime.ts');
     const sourceText = fs.readFileSync(runtimePath, 'utf8');

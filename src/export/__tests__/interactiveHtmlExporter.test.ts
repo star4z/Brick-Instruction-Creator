@@ -128,6 +128,8 @@ describe('interactiveHtmlExporter', () => {
     expect(html).toContain('Start Building');
     expect(html).toContain('"kind":"cover"');
     expect(html).toContain('"kind":"complete"');
+    expect(html).toContain('id="btnFirst"');
+    expect(html).toContain('id="btnLast"');
     expect(html).toContain('id="btnDrawerJumpTop"');
     expect(html).toContain('id="btnDrawerJumpBottom"');
     // Zero external script tags (100% offline self-contained)
