@@ -192,6 +192,16 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* Theme fonts: the page frame's body font is set inline by
+   applyThemeFontsToElement(); heavy-weight text (step numbers, titles, counts)
+   uses the theme heading font — mirroring themeCanvasFont() for PDF export. */
+#pageFrame .font-extrabold,
+#pageFrame .font-black,
+#themePreviewCard .font-extrabold,
+#themePreviewCard .font-black {
+  font-family: var(--theme-heading-font, inherit);
+}
+
 /* Subtle pressroom scrollbars */
 * {
   scrollbar-width: thin;

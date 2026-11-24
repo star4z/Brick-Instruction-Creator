@@ -7,6 +7,136 @@ import {
 
 export type ThemeBgType = 'solid' | 'gradient';
 
+/**
+ * Curated, offline-safe font choices for printed manual pages. Bundled fonts
+ * (Public Sans, JetBrains Mono) are self-hosted via `@font-face` in
+ * `index.css`; the others are platform font stacks with safe fallbacks so pages
+ * render identically offline and on Neocities / GitHub Pages.
+ */
+export type ThemeFontId =
+  | 'system'
+  | 'public-sans'
+  | 'rounded'
+  | 'condensed'
+  | 'serif'
+  | 'slab'
+  | 'mono';
+
+export type ThemeFontRole = 'heading' | 'body';
+
+export interface ThemeFontOption {
+  id: ThemeFontId;
+  label: string;
+  /** CSS `font-family` stack (also valid inside a canvas `ctx.font` string). */
+  stack: string;
+  /** Self-hosted family that must be loaded before canvas/PDF rendering. */
+  bundledFamily?: string;
+}
+
+const SYSTEM_SANS_STACK = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+
+export const THEME_FONTS: Record<ThemeFontId, ThemeFontOption> = {
+  system: { id: 'system', label: 'System Sans', stack: SYSTEM_SANS_STACK },
+  'public-sans': {
+    id: 'public-sans',
+    label: 'Public Sans',
+    stack: `"Public Sans", ${SYSTEM_SANS_STACK}`,
+    bundledFamily: 'Public Sans',
+  },
+  rounded: {
+    id: 'rounded',
+    label: 'Rounded',
+    stack: `ui-rounded, "SF Pro Rounded", "Nunito", "Varela Round", "Arial Rounded MT Bold", ${SYSTEM_SANS_STACK}`,
+  },
+  condensed: {
+    id: 'condensed',
+    label: 'Condensed',
+    stack: `"Avenir Next Condensed", "Roboto Condensed", "Arial Narrow", "Helvetica Neue", ${SYSTEM_SANS_STACK}`,
+  },
+  serif: {
+    id: 'serif',
+    label: 'Serif',
+    stack: '"Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif',
+  },
+  slab: {
+    id: 'slab',
+    label: 'Slab Serif',
+    stack: 'Rockwell, "Roboto Slab", "Zilla Slab", "Courier New", Georgia, serif',
+  },
+  mono: {
+    id: 'mono',
+    label: 'Monospace',
+    stack: '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+    bundledFamily: 'JetBrains Mono',
+  },
+};
+
+export const THEME_FONT_IDS = Object.keys(THEME_FONTS) as ThemeFontId[];
+export const DEFAULT_THEME_FONT: ThemeFontId = 'public-sans';
+
+export function sanitizeThemeFontId(value: unknown, fallback: ThemeFontId = DEFAULT_THEME_FONT): ThemeFontId {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(THEME_FONTS, value)
+    ? (value as ThemeFontId)
+    : fallback;
+}
+
+/** Returns the CSS font stack for a theme's heading or body role. */
+export function getThemeFontStack(
+  theme: Pick<ManualTheme, 'headingFont' | 'bodyFont'> | null | undefined,
+  role: ThemeFontRole,
+): string {
+  const id = sanitizeThemeFontId(role === 'heading' ? theme?.headingFont : theme?.bodyFont);
+  return THEME_FONTS[id].stack;
+}
+
+/**
+ * Builds a canvas `ctx.font` string. Weights ≥ 800 (step numbers, titles,
+ * counts) use the heading font; lighter weights use the body font, mirroring
+ * the DOM page rule that maps `.font-extrabold` / `.font-black` to headings.
+ */
+export function themeCanvasFont(
+  theme: Pick<ManualTheme, 'headingFont' | 'bodyFont'> | null | undefined,
+  weight: number,
+  px: number,
+): string {
+  const role: ThemeFontRole = weight >= 800 ? 'heading' : 'body';
+  return `${weight} ${px}px ${getThemeFontStack(theme, role)}`;
+}
+
+/**
+ * Ensures self-hosted fonts used by a theme are loaded so canvas (PDF / image)
+ * rendering never silently falls back to a default face.
+ */
+export async function ensureThemeFontsLoaded(
+  theme: Pick<ManualTheme, 'headingFont' | 'bodyFont'> | null | undefined,
+): Promise<void> {
+  if (typeof document === 'undefined' || !document.fonts?.load) return;
+  const families = new Set<string>();
+  for (const id of [theme?.headingFont, theme?.bodyFont]) {
+    const fam = THEME_FONTS[sanitizeThemeFontId(id)].bundledFamily;
+    if (fam) families.add(fam);
+  }
+  await Promise.all(
+    [...families].flatMap((fam) =>
+      ['500', '700', '800', '900'].map((w) => document.fonts.load(`${w} 16px "${fam}"`).catch(() => [])),
+    ),
+  );
+}
+
+/**
+ * Applies a theme's fonts to a DOM page element: the body font is set as the
+ * element's `font-family`, and the heading font is exposed through the
+ * `--theme-heading-font` CSS variable (consumed by `.font-extrabold` /
+ * `.font-black` rules in `index.css`).
+ */
+export function applyThemeFontsToElement(
+  el: HTMLElement,
+  theme: Pick<ManualTheme, 'headingFont' | 'bodyFont'> | null | undefined,
+): void {
+  el.style.fontFamily = getThemeFontStack(theme, 'body');
+  el.style.setProperty('--theme-heading-font', getThemeFontStack(theme, 'heading'));
+}
+
 export interface ManualTheme {
   id: string;
   name: string;
@@ -24,6 +154,10 @@ export interface ManualTheme {
   calloutBg: string;
   calloutBorder: string;
   bp: boolean;
+  /** Font for step numbers, titles, counts & page numbers (defaults to `public-sans`). */
+  headingFont?: ThemeFontId;
+  /** Font for labels, part names & body text (defaults to `public-sans`). */
+  bodyFont?: ThemeFontId;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -151,6 +285,8 @@ export const BUILT_IN_THEMES: Record<string, ManualTheme> = {
     calloutBg: '#fffbe6',
     calloutBorder: '#eab308',
     bp: false,
+    headingFont: 'public-sans',
+    bodyFont: 'public-sans',
   },
   white: {
     id: 'white',
@@ -169,6 +305,8 @@ export const BUILT_IN_THEMES: Record<string, ManualTheme> = {
     calloutBg: '#f1f3f4',
     calloutBorder: '#bdc1c6',
     bp: false,
+    headingFont: 'public-sans',
+    bodyFont: 'public-sans',
   },
   dark: {
     id: 'dark',
@@ -187,6 +325,8 @@ export const BUILT_IN_THEMES: Record<string, ManualTheme> = {
     calloutBg: 'rgba(255,255,255,0.06)',
     calloutBorder: 'rgba(255,255,255,0.2)',
     bp: false,
+    headingFont: 'public-sans',
+    bodyFont: 'public-sans',
   },
   blueprint: {
     id: 'blueprint',
@@ -205,6 +345,8 @@ export const BUILT_IN_THEMES: Record<string, ManualTheme> = {
     calloutBg: 'rgba(8,33,58,0.9)',
     calloutBorder: '#64dfdf',
     bp: true,
+    headingFont: 'public-sans',
+    bodyFont: 'public-sans',
   },
 };
 
@@ -296,6 +438,8 @@ export function normalizeCustomTheme(
     calloutBg: sanitizeCssColor(raw.calloutBg, fallbackBase.calloutBg),
     calloutBorder: sanitizeCssColor(raw.calloutBorder, fallbackBase.calloutBorder),
     bp: typeof raw.bp === 'boolean' ? raw.bp : false,
+    headingFont: sanitizeThemeFontId(raw.headingFont, sanitizeThemeFontId(fallbackBase.headingFont)),
+    bodyFont: sanitizeThemeFontId(raw.bodyFont, sanitizeThemeFontId(fallbackBase.bodyFont)),
     createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : now,
     updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : now,
   };
@@ -322,6 +466,8 @@ export function createThemeDraftFromBase(base: ManualTheme, name?: string): Manu
     calloutBg: toHexColor(base.calloutBg, bgColor),
     calloutBorder: toHexColor(base.calloutBorder, bgColor),
     bp: Boolean(base.bp),
+    headingFont: sanitizeThemeFontId(base.headingFont),
+    bodyFont: sanitizeThemeFontId(base.bodyFont),
     createdAt: now,
     updatedAt: now,
   };

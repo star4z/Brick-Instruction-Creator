@@ -21,6 +21,7 @@ All architecture specifications and feature design proposals for **Brick Instruc
 - [`CUSTOM_FILE_EXTENSIONS_DESIGN.md`](./CUSTOM_FILE_EXTENSIONS_DESIGN.md) — Dedicated `.biw` project and `.biwtheme` custom theme file extensions, `brick-instruction-works-*` payload format headers, file/payload validation, and Safari/iOS extension preservation.
 - [`TERMINOLOGY.md`](./TERMINOLOGY.md) — UI wording convention: "parts" for elements and all counts in the editor, "pcs" only on printed manual pages, "brick" only for the category and product names.
 - [`ABSOLUTE_STEP_NUMBERING_DESIGN.md`](./ABSOLUTE_STEP_NUMBERING_DESIGN.md) — Printed (per-submodel) vs absolute (manual-wide, unique) step numbers; all step ranges (camera angle, Step Range Groups, overview selection) use absolute numbers, both shown in the UI, with legacy group migration.
+- [`THEME_FONTS_DESIGN.md`](./THEME_FONTS_DESIGN.md) — Customizable theme fonts: heading vs body font roles, curated offline-safe font catalog (bundled Public Sans / JetBrains Mono + platform stacks), sanitized `.biwtheme` fields, and consistent DOM / PDF canvas / interactive HTML rendering.
 
 ## Conventions
 

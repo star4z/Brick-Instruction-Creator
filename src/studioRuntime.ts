@@ -124,18 +124,25 @@ import {
 import {
   BUILT_IN_THEMES,
   BUILT_IN_THEME_IDS,
+  THEME_FONTS,
+  THEME_FONT_IDS,
   applyThemeBackgroundToElement,
+  applyThemeFontsToElement,
   buildThemeBgCss,
   createThemeDraftFromBase,
+  ensureThemeFontsLoaded,
   fillThemeBackgroundCanvas,
+  getThemeFontStack,
   loadCustomThemesFromStorage,
   mergeImportedThemes,
   normalizeCustomTheme,
   parseImportedThemeFile,
   resolveThemeById,
+  sanitizeThemeFontId,
   saveCustomThemesToStorage,
   serializeThemeExport,
   serializeThemesPackExport,
+  themeCanvasFont,
   toHexColor,
 } from './themes/customThemes';
 import {
@@ -6104,7 +6111,7 @@ function drawRotationCueBadgeCanvas(ctx, cue, rightX, topY, theme, typo, isTight
   const gap = Math.max(5, Math.round(typo.pt(isTightSlot ? 4.5 : 6)));
 
   ctx.save();
-  ctx.font = `800 ${cueFont}px -apple-system, BlinkMacSystemFont, sans-serif`;
+  ctx.font = themeCanvasFont(theme, 800, cueFont);
   const textW = Math.ceil(ctx.measureText(label).width);
   const cueH = medallionD + padY * 2;
   const cueW = padL + medallionD + gap + textW + padR;
@@ -6313,6 +6320,7 @@ function renderAll() {
   frame.style.borderWidth = Math.max(1, Number(invFit.toFixed(2))) + 'px';
   frame.classList.remove('blueprint-grid');
   applyThemeBackgroundToElement(frame, theme);
+  applyThemeFontsToElement(frame, theme);
   frame.style.color = theme.text;
   frame.innerHTML = '';
   // Apply stage scale immediately so there is never an unscaled flash before rAF
@@ -11110,6 +11118,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
   canvas.width = pxW; canvas.height = pxH;
   const ctx = canvas.getContext('2d');
   const theme = getThemeForPage(page);
+  await ensureThemeFontsLoaded(theme);
   const allParts = getAllParts(state.model);
   const allSteps = getAllSteps(state.model);
   const links = [];
@@ -11133,12 +11142,12 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
   const drawFooter = (leftLabel) => {
     if (state.showPageTitle && leftLabel) {
       ctx.fillStyle = theme.muted;
-      ctx.font = `600 ${typo.footerFont}px -apple-system, sans-serif`;
+      ctx.font = themeCanvasFont(theme, 600, typo.footerFont);
       ctx.fillText(leftLabel, pad, footerTextY);
     }
     if (pgNumText) {
       ctx.fillStyle = theme.text; ctx.textAlign = 'right';
-      ctx.font = `700 ${typo.footerFont}px -apple-system, sans-serif`;
+      ctx.font = themeCanvasFont(theme, 700, typo.footerFont);
       ctx.fillText(pgNumText, pxW - pad, footerTextY);
       ctx.textAlign = 'left';
     }
@@ -11209,12 +11218,12 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
     ctx.fillStyle = theme.text;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
-    ctx.font = `800 ${layout.titleFontPx}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+    ctx.font = themeCanvasFont(theme, 800, layout.titleFontPx);
     const titleH = drawWrappedText(ctx, title, layout.pad, topLeftY, layout.topLeftMaxW, layout.titleLineHeightPx, 2);
 
     if (sub) {
       ctx.fillStyle = theme.muted;
-      ctx.font = `500 ${layout.subtitleFontPx}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+      ctx.font = themeCanvasFont(theme, 500, layout.subtitleFontPx);
       drawWrappedText(
         ctx,
         sub,
@@ -11269,10 +11278,10 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       ctx.fillStyle = darkBg ? '#f8fafc' : '#1e293b';
       ctx.textAlign = 'left';
       ctx.textBaseline = 'top';
-      ctx.font = `800 ${layout.brandTitleFontPx}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+      ctx.font = themeCanvasFont(theme, 800, layout.brandTitleFontPx);
       ctx.fillText('Brick Instruction', textX, textStartY, textMaxW);
       ctx.globalAlpha = 0.78;
-      ctx.font = `600 ${layout.brandTitleFontPx}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+      ctx.font = themeCanvasFont(theme, 600, layout.brandTitleFontPx);
       ctx.fillText('Works', textX, textStartY + lineH, textMaxW);
       ctx.globalAlpha = 1;
 
@@ -11309,12 +11318,12 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
     if (showText) {
       ctx.fillStyle = theme.text;
       ctx.textAlign = 'center';
-      ctx.font = `800 ${typo.complete.titleFont}px -apple-system, sans-serif`;
+      ctx.font = themeCanvasFont(theme, 800, typo.complete.titleFont);
       ctx.fillText(cm.title || 'Build Complete!', pxW / 2, pad);
       topOff = pad + Math.round(typo.complete.titleFont * 1.3);
       if (cm.subtitle) {
         ctx.fillStyle = theme.muted;
-        ctx.font = `500 ${typo.complete.subtitleFont}px -apple-system, sans-serif`;
+        ctx.font = themeCanvasFont(theme, 500, typo.complete.subtitleFont);
         ctx.fillText(cm.subtitle, pxW / 2, topOff);
         topOff += Math.round(typo.complete.subtitleFont * 1.5);
       }
@@ -11342,7 +11351,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
     const creditFontPx = typo.back.creditFont;
     const creditY = logoY + logoSz + Math.round(typo.pt(12));
     ctx.fillStyle = theme.muted;
-    ctx.font = `600 ${creditFontPx}px -apple-system, sans-serif`;
+    ctx.font = themeCanvasFont(theme, 600, creditFontPx);
     ctx.fillText(credit, pxW / 2, creditY);
     const creditW = Math.max(logoSz, Math.round(ctx.measureText(credit).width));
     ctx.textAlign = 'left';
@@ -11366,15 +11375,15 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
     const snap = renderSnapshot([], page.previewParts || [], 38, 28, 760, 480, 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent });
     const img = await loadImgPromise(snap.url);
     ctx.fillStyle = theme.accent;
-    ctx.font = `800 ${typo.divider.badgeFont}px -apple-system, sans-serif`;
+    ctx.font = themeCanvasFont(theme, 800, typo.divider.badgeFont);
     ctx.fillText(`BUILD STAGE ${page.bagNumber || 1}`, pad, pad);
     const titleY = pad + Math.round(typo.divider.badgeFont * 1.5);
     ctx.fillStyle = theme.text;
-    ctx.font = `800 ${typo.divider.titleFont}px -apple-system, sans-serif`;
+    ctx.font = themeCanvasFont(theme, 800, typo.divider.titleFont);
     ctx.fillText(page.chapterName || page.label || 'Build Stage', pad, titleY);
     ctx.fillStyle = theme.muted;
     ctx.textAlign = 'right';
-    ctx.font = `700 ${typo.divider.metaFont}px -apple-system, sans-serif`;
+    ctx.font = themeCanvasFont(theme, 700, typo.divider.metaFont);
     ctx.fillText(`${page.pieceCount || 0} pcs · Steps ${page.firstStepNum}–${page.lastStepNum}`, pxW - pad, titleY + Math.round((typo.divider.titleFont - typo.divider.metaFont) * 0.5));
     ctx.textAlign = 'left';
     const imgTop = titleY + Math.round(typo.divider.titleFont * 1.4);
@@ -11391,11 +11400,11 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       : 'Parts List';
 
     ctx.fillStyle = theme.text;
-    ctx.font = `700 ${bt.titleFont}px -apple-system, sans-serif`;
+    ctx.font = themeCanvasFont(theme, 700, bt.titleFont);
     ctx.fillText(headerTitle, pad, pad);
     ctx.fillStyle = theme.muted;
     ctx.textAlign = 'right';
-    ctx.font = `500 ${bt.summaryFont}px -apple-system, sans-serif`;
+    ctx.font = themeCanvasFont(theme, 500, bt.summaryFont);
     ctx.fillText(`${page.bomTotalPieces || allParts.length} pcs · ${page.bomTotalUnique || entries.length} unique`, pxW - pad, pad + Math.round((bt.titleFont - bt.summaryFont) * 0.72));
     ctx.textAlign = 'left';
 
@@ -11431,12 +11440,12 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       drawContain(ctx, img, cx + padX, cy + padY, cw - padX * 2, Math.max(14, ch - textAreaH - padY * 2));
       ctx.textAlign = 'center';
       ctx.fillStyle = theme.text;
-      ctx.font = `800 ${qtyFontPx}px -apple-system, sans-serif`;
+      ctx.font = themeCanvasFont(theme, 800, qtyFontPx);
       const qtyY = cy + ch - bt.cellPadY - textAreaH + bt.textGap;
       ctx.fillText(`${qty}×`, cx + cw / 2, qtyY);
       if (cfg.showNames) {
         ctx.fillStyle = theme.muted;
-        ctx.font = `500 ${nameFontPx}px -apple-system, sans-serif`;
+        ctx.font = themeCanvasFont(theme, 500, nameFontPx);
         const maxChars = Math.max(8, Math.floor((cw - bt.cellPadX * 2) / (nameFontPx * 0.56)));
         const nm = meta.name.length > maxChars ? meta.name.slice(0, maxChars - 1) + '…' : meta.name;
         ctx.fillText(nm, cx + cw / 2, qtyY + Math.round(qtyFontPx * 1.18) + Math.max(1, Math.round(bt.textGap * 0.6)));
@@ -11495,7 +11504,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       ctx.stroke();
 
       const multLabel = sub.repeatCount > 1 ? `×${sub.repeatCount}` : `${sub.pieceCount || sub.canonicalParts?.length || 0} pcs`;
-      ctx.font = `900 ${st.introPillFont}px -apple-system, sans-serif`;
+      ctx.font = themeCanvasFont(theme, 900, st.introPillFont);
       const pillW = Math.max(Math.round(typo.pt(42)), Math.round(ctx.measureText(multLabel).width + typo.pt(20)));
       const pillH = Math.round(st.introPillFont * 1.9);
       const pillX = pad + bannerW - pillW - Math.round(typo.pt(10));
@@ -11512,17 +11521,17 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       const textX = pad + Math.round(typo.pt(10)) + st.introThumbW + Math.round(typo.pt(10));
       const introTextMaxW = Math.max(0, pillX - textX - Math.round(typo.pt(8)));
       ctx.fillStyle = theme.muted;
-      ctx.font = `700 ${st.introLabelFont}px -apple-system, sans-serif`;
+      ctx.font = themeCanvasFont(theme, 700, st.introLabelFont);
       drawTruncatedText(sub.isSectionModule ? 'BUILD SECTION' : 'SUBMODEL', textX, pad + Math.round(bannerH * 0.22), introTextMaxW);
       ctx.fillStyle = theme.text;
-      ctx.font = `800 ${st.introTitleFont}px -apple-system, sans-serif`;
+      ctx.font = themeCanvasFont(theme, 800, st.introTitleFont);
       drawTruncatedText(sub.name || 'Submodel', textX, pad + Math.round(bannerH * 0.48), introTextMaxW);
 
       drawRRect(pillX, pillY, pillW, pillH, pillH / 2);
       ctx.fillStyle = theme.accent;
       ctx.fill();
       ctx.fillStyle = '#ffffff';
-      ctx.font = `900 ${st.introPillFont}px -apple-system, sans-serif`;
+      ctx.font = themeCanvasFont(theme, 900, st.introPillFont);
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(multLabel, pillX + pillW / 2, pillY + pillH / 2 + 1);
@@ -11575,7 +11584,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
         const showMfLabel = ch.steps.length > 1 || slots.length > 1;
         if (showMfLabel) {
           ctx.fillStyle = theme.muted;
-          ctx.font = `700 ${st.pliSubNameFont}px -apple-system, sans-serif`;
+          ctx.font = themeCanvasFont(theme, 700, st.pliSubNameFont);
           ctx.fillText(step.minifigName || `Minifigure ${step.num}`, sx + st.slotPad, sy + st.slotPad);
           renderTopY = sy + st.slotPad + Math.round(st.pliSubNameFont * 1.6);
           renderAvailH = Math.max(40, slotH - st.slotPad * 2 - Math.round(st.pliSubNameFont * 1.8));
@@ -11586,7 +11595,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       } else {
         // Step number
         ctx.fillStyle = theme.text;
-        ctx.font = `800 ${stepNumPx}px -apple-system, sans-serif`;
+        ctx.font = themeCanvasFont(theme, 800, stepNumPx);
         ctx.fillText(String(step.num), sx + st.slotPad, sy + st.slotPad);
         const numWidth = Math.max(Math.round(stepNumPx * 1.15), Math.round(ctx.measureText(String(step.num)).width));
 
@@ -11613,10 +11622,10 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
           const tx = pliX + 6 + pliH * 1.25 + 8;
           const textMaxW = Math.max(0, pliX + attBoxW - tx - 8);
           ctx.fillStyle = theme.accent;
-          ctx.font = `900 ${st.pliSubCountFont}px -apple-system, sans-serif`;
+          ctx.font = themeCanvasFont(theme, 900, st.pliSubCountFont);
           drawTruncatedText(att.isSectionAttach ? (att.attachVerb || 'Connect') : `×${att.repeatCount}`, tx, pliY + Math.round(pliH * 0.16), textMaxW);
           ctx.fillStyle = theme.text;
-          ctx.font = `600 ${st.pliSubNameFont}px -apple-system, sans-serif`;
+          ctx.font = themeCanvasFont(theme, 600, st.pliSubNameFont);
           drawTruncatedText(att.name || 'Submodel', tx, pliY + Math.round(pliH * 0.56), textMaxW);
           ctx.restore();
         } else if (step.minifigPrep) {
@@ -11639,10 +11648,10 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
           const tx = pliX + 6 + pliH * 1.0 + 8;
           const textMaxW = Math.max(0, pliX + prepBoxW - tx - 8);
           ctx.fillStyle = theme.accent;
-          ctx.font = `800 ${st.pliSubCountFont}px -apple-system, sans-serif`;
+          ctx.font = themeCanvasFont(theme, 800, st.pliSubCountFont);
           drawTruncatedText(prep.label || 'Position', tx, pliY + Math.round(pliH * 0.16), textMaxW);
           ctx.fillStyle = theme.text;
-          ctx.font = `600 ${st.pliSubNameFont}px -apple-system, sans-serif`;
+          ctx.font = themeCanvasFont(theme, 600, st.pliSubNameFont);
           drawTruncatedText(prep.name || 'Minifigure', tx, pliY + Math.round(pliH * 0.56), textMaxW);
           ctx.restore();
         } else if (step.attachedMinifig) {
@@ -11672,10 +11681,10 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
           const tx = pliX + 6 + pliH * 1.0 + 8;
           const textMaxW = Math.max(0, pliX + attBoxW - tx - 8);
           ctx.fillStyle = theme.accent;
-          ctx.font = `900 ${st.pliSubCountFont}px -apple-system, sans-serif`;
+          ctx.font = themeCanvasFont(theme, 900, st.pliSubCountFont);
           drawTruncatedText(`×${att.repeatCount || 1}`, tx, pliY + Math.round(pliH * 0.16), textMaxW);
           ctx.fillStyle = theme.text;
-          ctx.font = `600 ${st.pliSubNameFont}px -apple-system, sans-serif`;
+          ctx.font = themeCanvasFont(theme, 600, st.pliSubNameFont);
           drawTruncatedText(att.name || 'Minifigure', tx, pliY + Math.round(pliH * 0.56), textMaxW);
           ctx.restore();
         } else {
@@ -11692,7 +11701,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
             for (let pi = 0; pi < pli.length; pi++) {
               const im = await loadImgPromise(getPliThumb(pli[pi].part));
               drawContain(ctx, im, pliX + 5 + pi * itemW, pliY + 4, itemW * 0.54, pliH - 8);
-              ctx.fillStyle = theme.text; ctx.font = `700 ${pliQtyPx}px -apple-system, sans-serif`;
+              ctx.fillStyle = theme.text; ctx.font = themeCanvasFont(theme, 700, pliQtyPx);
               ctx.fillText(`${pli[pi].qty}×`, pliX + 5 + pi * itemW + itemW * 0.58, pliY + Math.round((pliH - pliQtyPx) * 0.45));
             }
           }
@@ -11706,7 +11715,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       }
 
       if (step.stepHint) {
-        ctx.font = '700 11px -apple-system, sans-serif';
+        ctx.font = themeCanvasFont(theme, 700, 11);
         const hintW = Math.min(slotW * 0.42, ctx.measureText(step.stepHint).width + 18);
         const hintX = badgeRightX - hintW;
         const hintY = sy + 12;
@@ -11732,7 +11741,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
         const cardPad = Math.round(typo.pt(8));
         const headerH = Math.round(st.mf1to1Font * 1.9);
         const mfHeaderLabel = `1:1${mf1.isExact ? '' : ' Fit'} · ${Math.round(mf1.heightMm)} mm`;
-        ctx.font = `800 ${st.mf1to1Font}px -apple-system, sans-serif`;
+        ctx.font = themeCanvasFont(theme, 800, st.mf1to1Font);
         const mfHeaderW = Math.ceil(ctx.measureText(mfHeaderLabel).width);
         const cardW = Math.min(Math.round(slotW * 0.44), Math.max(Math.round(typo.pt(68)), mfHeaderW + cardPad * 2, mf1.displayPxW + cardPad * 2 + 12));
         const cardH = Math.min(renderAvailH - 4, mf1.displayPxH + headerH + cardPad * 2);
@@ -11791,7 +11800,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
         drawRRect(cardX, cardY, cardW, cardH, cardRadius);
         ctx.clip();
         ctx.fillStyle = theme.accent;
-        ctx.font = `800 ${st.mf1to1Font}px -apple-system, sans-serif`;
+        ctx.font = themeCanvasFont(theme, 800, st.mf1to1Font);
         drawTruncatedText(mfHeaderLabel, cardX + cardPad, cardY + Math.round(cardPad * 0.7), Math.max(0, cardW - cardPad * 2));
         const mf1Img = await loadImgPromise(mf1.url);
         const imgX = cardX + Math.round((cardW - 10 - mf1.displayPxW) / 2);
@@ -11815,7 +11824,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       // Color-coded rotation indicator pills at bottom of minifigure Prepare steps
       if (mfPrep && mfPrep.indicators && mfPrep.indicators.length > 0) {
         const pillFont = Math.max(9, st.cueFont);
-        ctx.font = `700 ${pillFont}px -apple-system, sans-serif`;
+        ctx.font = themeCanvasFont(theme, 700, pillFont);
         const pillH = Math.round(pillFont * 1.85), pillGap = Math.round(typo.pt(6)), dotR = Math.max(3, pillFont * 0.34);
         const pills = mfPrep.indicators.map(ind => {
           const textW = ctx.measureText(ind.label || '').width;
@@ -11849,7 +11858,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       if (step.isSubmodelFinal) {
         const badgeLabel = `×${step.submodelRepeat || 2}`;
         const badgeFont = st.subFinalFont;
-        ctx.font = `900 ${badgeFont}px -apple-system, sans-serif`;
+        ctx.font = themeCanvasFont(theme, 900, badgeFont);
         const bW = Math.max(Math.round(badgeFont * 2.1), Math.round(ctx.measureText(badgeLabel).width + typo.pt(16)));
         const bH = Math.round(badgeFont * 1.6);
         const bX = sx + slotW - bW - st.slotPad;
@@ -11875,7 +11884,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
         const stackShift = insIdx * Math.round(typo.pt(28));
         if (ins.kind === 'text' && ins.text) {
           const fontPx = Math.round(st.insertTextFont * scale);
-          ctx.font = `700 ${fontPx}px -apple-system, sans-serif`;
+          ctx.font = themeCanvasFont(theme, 700, fontPx);
           const maxBoxW = Math.min(slotW - padIn * 2, Math.round(st.insertTextMaxW * scale));
           const txtW = Math.min(maxBoxW, Math.ceil(ctx.measureText(ins.text).width));
           const boxPadX = Math.round(typo.pt(7) * scale);
@@ -12083,7 +12092,32 @@ function syncThemeEditorUI() {
   }
   const prevPageNum = document.getElementById('themePreviewPageNum');
   if (prevPageNum) prevPageNum.style.color = d.text;
+
+  // Typography pickers + preview fonts
+  d.headingFont = sanitizeThemeFontId(d.headingFont);
+  d.bodyFont = sanitizeThemeFontId(d.bodyFont);
+  const headingSel = document.getElementById('themeHeadingFont');
+  if (headingSel && headingSel.value !== d.headingFont) headingSel.value = d.headingFont;
+  const bodySel = document.getElementById('themeBodyFont');
+  if (bodySel && bodySel.value !== d.bodyFont) bodySel.value = d.bodyFont;
+  if (prevCard) applyThemeFontsToElement(prevCard, d);
 }
+
+function populateThemeFontSelect(elId) {
+  const sel = document.getElementById(elId);
+  if (!sel) return;
+  sel.innerHTML = THEME_FONT_IDS.map((id) => {
+    const f = THEME_FONTS[id];
+    return `<option value="${id}" style="font-family:${f.stack.replace(/"/g, '&quot;')}">${escHtml(f.label)}</option>`;
+  }).join('');
+  sel.onchange = (e) => {
+    if (!themeEditorDraft) return;
+    themeEditorDraft[elId === 'themeHeadingFont' ? 'headingFont' : 'bodyFont'] = sanitizeThemeFontId(e.target.value);
+    syncThemeEditorUI();
+  };
+}
+populateThemeFontSelect('themeHeadingFont');
+populateThemeFontSelect('themeBodyFont');
 
 function openThemeEditor(existingTheme = null) {
   setStylePopoverOpen(false);
@@ -12135,8 +12169,12 @@ document.querySelectorAll('.theme-base-btn').forEach(b => {
     const base = THEMES[b.getAttribute('data-theme-base')] || THEMES.blue;
     const preservedName = themeEditorDraft.name;
     const preservedId = themeEditorDraft.id;
+    const { headingFont: preservedHeading, bodyFont: preservedBody } = themeEditorDraft;
     themeEditorDraft = createThemeDraftFromBase(base, preservedName);
     themeEditorDraft.id = preservedId;
+    // Base templates swap colors/background only; keep the chosen typography.
+    themeEditorDraft.headingFont = sanitizeThemeFontId(preservedHeading);
+    themeEditorDraft.bodyFont = sanitizeThemeFontId(preservedBody);
     syncThemeEditorUI();
   };
 });
@@ -13034,6 +13072,8 @@ async function runInteractiveHtmlExport() {
         pliBorder: theme.pliBorder,
         calloutBg: theme.calloutBg,
         calloutBorder: theme.calloutBorder,
+        headingFont: getThemeFontStack(theme, 'heading'),
+        bodyFont: getThemeFontStack(theme, 'body'),
         isDark: isDarkHexColor(theme.bg),
       },
       highlightNew: state.highlightNew,

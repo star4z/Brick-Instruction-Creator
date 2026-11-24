@@ -136,3 +136,37 @@ describe('customThemes utilities', () => {
     expect(slugifyThemeFilename('My Cool Theme #1!')).toBe('my-cool-theme-1');
   });
 });
+
+describe('theme fonts', () => {
+  it('defaults built-in and legacy themes to Public Sans and sanitizes unknown font ids', async () => {
+    const { THEME_FONTS, sanitizeThemeFontId, getThemeFontStack } = await import('../customThemes');
+    expect(BUILT_IN_THEMES.blue.headingFont).toBe('public-sans');
+    const legacy = normalizeCustomTheme({ name: 'Legacy', bgColor: '#ffffff' });
+    expect(legacy?.headingFont).toBe('public-sans');
+    expect(legacy?.bodyFont).toBe('public-sans');
+    const evil = normalizeCustomTheme({ name: 'Evil', headingFont: 'Comic"; } body { x', bodyFont: 'serif' });
+    expect(evil?.headingFont).toBe('public-sans');
+    expect(evil?.bodyFont).toBe('serif');
+    expect(sanitizeThemeFontId('toString')).toBe('public-sans');
+    expect(getThemeFontStack(evil, 'body')).toBe(THEME_FONTS.serif.stack);
+    expect(getThemeFontStack(null, 'heading')).toBe(THEME_FONTS['public-sans'].stack);
+  });
+
+  it('maps heavy canvas weights to the heading font and lighter weights to the body font', async () => {
+    const { THEME_FONTS, themeCanvasFont } = await import('../customThemes');
+    const theme = { headingFont: 'slab' as const, bodyFont: 'mono' as const };
+    expect(themeCanvasFont(theme, 800, 24)).toBe(`800 24px ${THEME_FONTS.slab.stack}`);
+    expect(themeCanvasFont(theme, 900, 12)).toBe(`900 12px ${THEME_FONTS.slab.stack}`);
+    expect(themeCanvasFont(theme, 700, 11)).toBe(`700 11px ${THEME_FONTS.mono.stack}`);
+  });
+
+  it('round-trips fonts through .biwtheme export/import and drafts', () => {
+    const theme = normalizeCustomTheme({ name: 'Typeset', headingFont: 'condensed', bodyFont: 'rounded' })!;
+    const [imported] = parseImportedThemesJson(serializeThemeExport(theme));
+    expect(imported.headingFont).toBe('condensed');
+    expect(imported.bodyFont).toBe('rounded');
+    const draft = createThemeDraftFromBase(theme);
+    expect(draft.headingFont).toBe('condensed');
+    expect(draft.bodyFont).toBe('rounded');
+  });
+});

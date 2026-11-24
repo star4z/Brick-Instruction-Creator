@@ -138,3 +138,12 @@ describe('interactiveHtmlExporter', () => {
     expect(scriptMatch![1]).not.toContain('STEP1PREVIEW');
   });
 });
+
+describe('interactiveHtmlExporter font stacks', () => {
+  it('strips characters that could break out of the inline style block', async () => {
+    const { sanitizeFontStack } = await import('../interactiveHtmlExporter');
+    expect(sanitizeFontStack('"Public Sans", sans-serif')).toBe('"Public Sans", sans-serif');
+    expect(sanitizeFontStack('x; } </style><script>alert(1)</script>')).not.toMatch(/[;{}<>()/]/);
+    expect(sanitizeFontStack(undefined)).toContain('sans-serif');
+  });
+});

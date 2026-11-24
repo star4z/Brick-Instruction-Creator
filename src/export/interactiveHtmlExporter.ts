@@ -101,7 +101,23 @@ export interface InteractiveViewerTheme {
   pliBorder: string;
   calloutBg: string;
   calloutBorder: string;
+  /** CSS font stack for headings, step numbers & counts (theme heading font). */
+  headingFont?: string;
+  /** CSS font stack for body text & labels (theme body font). */
+  bodyFont?: string;
   isDark: boolean;
+}
+
+const DEFAULT_VIEWER_FONT_STACK = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+
+/**
+ * Restricts a CSS font-family stack to safe characters so it can be embedded
+ * in an inline `<style>` block without breaking out of the declaration.
+ */
+export function sanitizeFontStack(value: unknown, fallback = DEFAULT_VIEWER_FONT_STACK): string {
+  if (typeof value !== 'string') return fallback;
+  const cleaned = value.replace(/[^A-Za-z0-9 ,"'_-]/g, '').trim().slice(0, 300);
+  return cleaned || fallback;
 }
 
 export interface InteractiveHtmlPayload {
@@ -296,6 +312,8 @@ export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload)
     t.bgType === 'gradient' && t.bgEnd
       ? `linear-gradient(${t.bgAngle ?? 180}deg, ${t.bg}, ${t.bgEnd})`
       : t.bg;
+  const bodyFontStack = sanitizeFontStack(t.bodyFont);
+  const headingFontStack = sanitizeFontStack(t.headingFont, bodyFontStack);
   const glassBg = t.isDark ? 'rgba(22, 26, 34, 0.86)' : 'rgba(255, 255, 255, 0.88)';
   const glassBorder = t.isDark ? 'rgba(255, 255, 255, 0.14)' : 'rgba(15, 23, 42, 0.12)';
   const staticFallbackHtml = buildStaticFallbackHtml(payload, safeEditorUrl);
@@ -335,13 +353,18 @@ export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload)
     --callout-border: ${t.calloutBorder};
     --glass-bg: ${glassBg};
     --glass-border: ${glassBorder};
+    --font-body: ${bodyFontStack};
+    --font-heading: ${headingFontStack};
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body {
     margin: 0; padding: 0; width: 100%; min-height: 100%;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-family: var(--font-body);
     background: var(--page-bg);
     color: var(--text);
+  }
+  h1, h2, .sf-step-num, .sf-h2, .hero-title, .step-num-big, .pli-qty, .bom-qty {
+    font-family: var(--font-heading);
   }
   /* Active 3D mode (enabled only when JavaScript + WebGL boot cleanly) */
   html.js-3d-active, html.js-3d-active body {
