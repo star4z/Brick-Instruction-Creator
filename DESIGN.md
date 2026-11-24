@@ -208,7 +208,7 @@ Because builders spend long sessions verifying piece visibility, camera angles, 
 
 **Key Characteristics:**
 - **Opaque archival floating pills:** Crisp solid-paper pills (`.studio-pill`) with `1px` `--border-strong` hairlines and neutral offset shadows float at top-left, top-right, and bottom-center so the manual page occupies the full viewport without glass blur.
-- **Always-present editor identity:** On desktop (`md+`), `#desktopModelChip` keeps the 3-plume logo and `Brick Instruction Works` permanently visible beside the active model title & metadata. On mobile (`< md`), the welcome proofing sheet showcases the logo + app name before load, and `#mobileEditorBrandPill` anchors a compact centered floating pill beneath the top controls in the editor view.
+- **Always-present editor identity:** Before load, the welcome proofing sheet (`#emptyState`) showcases the 3-plume logo and `Brick Instruction Works` across desktop and mobile without a redundant floating chip. Once a model is loaded, `#desktopModelChip` (`md+`) and `#mobileEditorBrandPill` (`< md`) anchor the logo, `Brick Instruction Works`, and active model title in the editor view.
 - **Logo-harmonized proofing palette:** Cool slate-stone ground (`--background`) gives bright manual pages accurate neutral contrast while pairing cleanly with logo maroon, warm orange, and sky blue across light and dark modes.
 - **Self-hosted institutional typography:** Variable `Public Sans` handles all prose and controls (`>= 12px` functional floor), paired with tabular `JetBrains Mono` strictly for folios, part IDs, file extensions, dimensions, and percentages.
 - **Opaque hairline-separated sheets:** Drawers, popovers, and modals use solid archival paper (`--card`) divided by `1px` slate rules (`--border`) rather than translucent glass or nested boxes, paired with a deep claret-ink drawer header (`--rail`) and ink notification pills (`--ink-bar`).
@@ -248,7 +248,7 @@ A calm pressroom neutral scale—cool slate stone, crisp archival paper, and dee
 
 **The Neutral Proofing Ground Rule.** The proofing stage (`--background`) remains low-chroma cool slate (`#e4e7ec` light, `#151318` dark) so Warm, Classic Blue, Modern White, Collector Dark, and Blueprint manual pages all retain accurate color perception.
 
-**The Persistent Brand Identity Rule.** Both the restored 3-plume logo and `Brick Instruction Works` name remain visible in both welcome and editor views across desktop (`#desktopModelChip`) and mobile (`#emptyState` welcome sheet + `#mobileEditorBrandPill` in editor view).
+**The Persistent Brand Identity Rule.** Both the restored 3-plume logo and `Brick Instruction Works` name remain visible in both welcome (`#emptyState` proofing sheet) and editor views across desktop (`#desktopModelChip`) and mobile (`#mobileEditorBrandPill`).
 
 ## Typography
 
@@ -275,7 +275,7 @@ A calm pressroom neutral scale—cool slate stone, crisp archival paper, and dee
 
 Brick Instruction Works uses a locked full-viewport pressroom shell (`html`, `body`: `100% × 100%`, `overflow: hidden`, `overscroll-behavior: none`) where the proofing table fills 100% of the viewport and opaque floating pills anchor cleanly to the perimeter:
 
-1. **Floating Top-Left Pill Cluster (`fixed top-3 left-3 z-40`):** Circular `40px` `#btnOpenMenu` floating pill (`studio-pill rounded-full`) paired on desktop (`md+`) with `#desktopModelChip` (`hidden md:inline-flex`), which permanently displays the 3-plume logo + `Brick Instruction Works` and adds a vertical hairline divider + active model title when loaded.
+1. **Floating Top-Left Pill Cluster (`fixed top-3 left-3 z-40`):** Circular `40px` `#btnOpenMenu` floating pill (`studio-pill rounded-full`), paired on desktop (`md+`) with `#desktopModelChip` (`hidden`, toggled to `md:inline-flex` once a model is loaded) displaying the 3-plume logo + `Brick Instruction Works` + a vertical hairline divider + active model title.
 2. **Mobile Editor Identity Pill (`#mobileEditorBrandPill`, `fixed top-[60px] left-1/2 -translate-x-1/2 z-30 md:hidden`):** Shown on `< md` whenever a model is loaded in the editor view, displaying the 3-plume logo, `Brick Instruction Works`, and the active model title without colliding with top-right editor controls.
 3. **Floating Top-Right Pill Cluster (`fixed top-3 right-3 z-40`):** Shown when a model is loaded (`#topRightPills`: `Undo`/`Redo` pill, `Style` popover pill, and primary logo-maroon `Export` pill); omitted on the empty welcome page so Bricks Library and Import actions live in the menu and welcome sheet.
 4. **Full-Bleed Proofing Stage (`#emptyState` / `#stageViewport`):** Fills the entire viewport (`flex-1 min-h-0`). Before load, centers the `max-w-2xl` (`672px`) welcome proofing sheet with top clearance (`pt-16 pb-6 px-4 sm:p-8`) below the top floating pills. After load, hosts the touch-locked (`touch-action: none`) infinite pan/zoom viewport centering `#pageFrame` with stage clearance (`pt-[104px] md:pt-16 pb-28 px-3`).

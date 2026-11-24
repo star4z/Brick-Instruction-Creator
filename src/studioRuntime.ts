@@ -6757,6 +6757,10 @@ function renderAll() {
   document.getElementById('stageViewport').classList.toggle('hidden', !hasModel);
   document.getElementById('topRightPills').classList.toggle('hidden', !hasModel);
   document.getElementById('bottomDock').classList.toggle('hidden', !hasModel);
+  const desktopModelChip = document.getElementById('desktopModelChip');
+  if (desktopModelChip) {
+    desktopModelChip.classList.toggle('md:inline-flex', hasModel);
+  }
   const mobileBrandPill = document.getElementById('mobileEditorBrandPill');
   if (mobileBrandPill) {
     mobileBrandPill.classList.toggle('hidden', !hasModel);
