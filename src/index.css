@@ -48,102 +48,116 @@
   --font-sans: "Public Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 
-  /* Committed Pressroom Header Rail (Carbon Ink) */
-  --rail: #1b1a18;
-  --rail-foreground: #f4f2ec;
-  --rail-muted: #b5b1a7;
-  --rail-border: #32302c;
-  --rail-surface: #282623;
-  --rail-hover: #35332e;
-  --rail-accent: #eb593e;
+  /* Logo Triad Reference Tokens */
+  --brand-sky: #38bdf8;
+  --brand-maroon: #7c152e;
+  --brand-orange: #ed7d1f;
 
-  /* Proofing Table & Archival Paper Surfaces (Mineral Stone — non-beige, non-blue-grey) */
-  --background: #dcdfd9;
-  --chrome: #f1f0eb;
-  --card: #faf9f6;
-  --surface-sunken: #ecebe5;
-  --surface-hover: #e2e1da;
+  /* Committed Pressroom Header Rail (Deep Claret Ink) */
+  --rail: #23121a;
+  --rail-foreground: #f7f3f5;
+  --rail-muted: #c0aeb6;
+  --rail-border: #3d222e;
+  --rail-surface: #331c26;
+  --rail-hover: #442633;
+  --rail-accent: #f59342;
+
+  /* Proofing Table & Archival Paper Surfaces (Cool Slate-Stone — neutral backdrop for logo triad & brick pages) */
+  --background: #e4e7ec;
+  --chrome: #f2f4f7;
+  --card: #fcfcfd;
+  --surface-sunken: #eaeef3;
+  --surface-hover: #dfe4ec;
 
   /* Ink & Borders */
-  --foreground: #1b1a18;
-  --muted-foreground: #56544d;
-  --border: #c9c8c0;
-  --border-strong: #aeada4;
+  --foreground: #1e161a;
+  --muted-foreground: #5a5157;
+  --border: #cfd4dc;
+  --border-strong: #b4bcc8;
 
-  /* Primary Registration Vermilion Accent */
-  --primary: #c9341b;
-  --primary-hover: #b02b14;
+  /* Primary Logo Maroon Accent (#7c152e) */
+  --primary: #7c152e;
+  --primary-hover: #641025;
   --primary-foreground: #ffffff;
-  --primary-soft: rgba(201, 52, 27, 0.11);
-  --primary-border: rgba(201, 52, 27, 0.38);
+  --primary-soft: rgba(124, 21, 46, 0.1);
+  --primary-border: rgba(124, 21, 46, 0.36);
 
-  /* High-Contrast Notification Bar */
-  --ink-bar: #1b1a18;
-  --ink-bar-foreground: #f4f2ec;
-  --ink-bar-accent: #ff937d;
+  /* Secondary Warm Logo Orange Icon Accent */
+  --accent-warm: #c75d0c;
 
-  /* Semantic Status Tokens */
-  --info: #255b8a;
-  --info-soft: rgba(37, 91, 138, 0.12);
-  --success: #246848;
-  --success-soft: rgba(36, 104, 72, 0.12);
-  --warning: #8c560e;
-  --warning-soft: rgba(140, 86, 14, 0.13);
-  --danger: #b4261a;
-  --danger-soft: rgba(180, 38, 26, 0.1);
+  /* High-Contrast Notification Bar (Deep Claret Ink + Logo Orange Action) */
+  --ink-bar: #23121a;
+  --ink-bar-foreground: #f7f3f5;
+  --ink-bar-accent: #fb9e4f;
+
+  /* Semantic Status Tokens (Harmonized with Logo Sky Blue #38bdf8 & Orange #ed7d1f) */
+  --info: #0369a1;
+  --info-soft: rgba(56, 189, 248, 0.14);
+  --success: #1f6a4a;
+  --success-soft: rgba(31, 106, 74, 0.12);
+  --warning: #ad5107;
+  --warning-soft: rgba(237, 125, 31, 0.14);
+  --danger: #b32030;
+  --danger-soft: rgba(179, 32, 48, 0.1);
 
   /* Elevation & Motion */
-  --shadow-surface: 0 2px 8px rgba(27, 26, 24, 0.08), 0 1px 2px rgba(27, 26, 24, 0.06);
-  --shadow-sheet: 0 16px 38px rgba(27, 26, 24, 0.16), 0 2px 6px rgba(27, 26, 24, 0.08);
-  --shadow-page: 0 14px 34px rgba(27, 26, 24, 0.16), 0 2px 6px rgba(27, 26, 24, 0.08);
+  --shadow-surface: 0 2px 8px rgba(35, 18, 26, 0.08), 0 1px 2px rgba(35, 18, 26, 0.06);
+  --shadow-sheet: 0 16px 38px rgba(35, 18, 26, 0.16), 0 2px 6px rgba(35, 18, 26, 0.08);
+  --shadow-page: 0 14px 34px rgba(35, 18, 26, 0.16), 0 2px 6px rgba(35, 18, 26, 0.08);
   --ease-press: cubic-bezier(0.16, 1, 0.3, 1);
-  --reg-mark: rgba(27, 26, 24, 0.36);
+  --reg-mark: rgba(35, 18, 26, 0.34);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --rail: #111110;
-    --rail-foreground: #f4f2ec;
-    --rail-muted: #a6a298;
-    --rail-border: #282723;
-    --rail-surface: #1e1d1a;
-    --rail-hover: #2b2925;
-    --rail-accent: #eb593e;
+    --brand-sky: #38bdf8;
+    --brand-maroon: #eb6a84;
+    --brand-orange: #f59342;
 
-    --background: #171614;
-    --chrome: #1e1d1a;
-    --card: #23221f;
-    --surface-sunken: #2b2a26;
-    --surface-hover: #34322d;
+    --rail: #160c11;
+    --rail-foreground: #f7f3f5;
+    --rail-muted: #b8a5ae;
+    --rail-border: #2f1a24;
+    --rail-surface: #23141b;
+    --rail-hover: #321d26;
+    --rail-accent: #f59342;
 
-    --foreground: #f3f1ec;
-    --muted-foreground: #a8a49a;
-    --border: #3a3832;
-    --border-strong: #524f47;
+    --background: #151318;
+    --chrome: #1c1920;
+    --card: #221e26;
+    --surface-sunken: #2b2630;
+    --surface-hover: #352f3c;
 
-    --primary: #eb593e;
-    --primary-hover: #f26c52;
-    --primary-foreground: #18100d;
-    --primary-soft: rgba(235, 89, 62, 0.16);
-    --primary-border: rgba(235, 89, 62, 0.44);
+    --foreground: #f6f3f7;
+    --muted-foreground: #aba2b0;
+    --border: #3c3543;
+    --border-strong: #554c5e;
 
-    --ink-bar: #111110;
-    --ink-bar-foreground: #f4f2ec;
-    --ink-bar-accent: #ff937d;
+    --primary: #eb6a84;
+    --primary-hover: #f28096;
+    --primary-foreground: #1a0a0f;
+    --primary-soft: rgba(235, 106, 132, 0.16);
+    --primary-border: rgba(235, 106, 132, 0.44);
 
-    --info: #7ab3e6;
-    --info-soft: rgba(122, 179, 230, 0.16);
-    --success: #6bc497;
-    --success-soft: rgba(107, 196, 151, 0.16);
-    --warning: #e5b35c;
-    --warning-soft: rgba(229, 179, 92, 0.16);
-    --danger: #f6877b;
-    --danger-soft: rgba(246, 135, 123, 0.14);
+    --accent-warm: #f59342;
 
-    --shadow-surface: 0 4px 14px rgba(0, 0, 0, 0.38), 0 1px 2px rgba(0, 0, 0, 0.28);
-    --shadow-sheet: 0 22px 52px rgba(0, 0, 0, 0.56), 0 4px 12px rgba(0, 0, 0, 0.36);
-    --shadow-page: 0 18px 46px rgba(0, 0, 0, 0.54), 0 2px 8px rgba(0, 0, 0, 0.36);
-    --reg-mark: rgba(243, 241, 236, 0.26);
+    --ink-bar: #160c11;
+    --ink-bar-foreground: #f7f3f5;
+    --ink-bar-accent: #fb9e4f;
+
+    --info: #38bdf8;
+    --info-soft: rgba(56, 189, 248, 0.16);
+    --success: #5fc296;
+    --success-soft: rgba(95, 194, 150, 0.16);
+    --warning: #f59342;
+    --warning-soft: rgba(237, 125, 31, 0.16);
+    --danger: #f4798a;
+    --danger-soft: rgba(244, 121, 138, 0.14);
+
+    --shadow-surface: 0 4px 14px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-sheet: 0 22px 52px rgba(0, 0, 0, 0.58), 0 4px 12px rgba(0, 0, 0, 0.38);
+    --shadow-page: 0 18px 46px rgba(0, 0, 0, 0.56), 0 2px 8px rgba(0, 0, 0, 0.38);
+    --reg-mark: rgba(246, 243, 247, 0.26);
   }
 }
 

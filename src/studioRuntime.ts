@@ -6317,14 +6317,28 @@ function renderAll() {
   const headerEmptyEl = document.getElementById('headerEmptyActions');
   if (headerEmptyEl) headerEmptyEl.classList.toggle('hidden', hasModel);
   document.getElementById('bottomDock').classList.toggle('hidden', !hasModel);
+  const mobileBrandPill = document.getElementById('mobileEditorBrandPill');
+  if (mobileBrandPill) {
+    mobileBrandPill.classList.toggle('hidden', !hasModel);
+    mobileBrandPill.classList.toggle('flex', hasModel);
+  }
+
+  const desktopSepEl = document.getElementById('desktopModelSep');
+  const desktopNameEl = document.getElementById('desktopModelName');
+  const desktopMetaEl = document.getElementById('desktopModelMeta');
+  const mobileModelSepEl = document.getElementById('mobileEditorModelSep');
+  const mobileModelNameEl = document.getElementById('mobileEditorModelName');
 
   const typeBadgeEl = document.getElementById('menuModelTypeBadge');
   const fileTypeEl = document.getElementById('menuModelFileType');
   const statsEl = document.getElementById('menuModelStats');
 
   if (!hasModel) {
-    document.getElementById('desktopModelName').textContent = 'Brick Instruction Works';
-    document.getElementById('desktopModelMeta').textContent = '';
+    if (desktopSepEl) desktopSepEl.classList.add('hidden');
+    if (desktopNameEl) { desktopNameEl.textContent = ''; desktopNameEl.classList.add('hidden'); }
+    if (desktopMetaEl) desktopMetaEl.textContent = '';
+    if (mobileModelSepEl) mobileModelSepEl.classList.add('hidden');
+    if (mobileModelNameEl) { mobileModelNameEl.textContent = ''; mobileModelNameEl.classList.add('hidden'); }
     document.getElementById('menuModelName').textContent = 'No model loaded';
     if (typeBadgeEl) typeBadgeEl.classList.add('hidden');
     if (fileTypeEl) { fileTypeEl.textContent = 'Import a model below to get started.'; fileTypeEl.classList.remove('hidden'); }
@@ -6341,8 +6355,11 @@ function renderAll() {
   const allParts = getAllParts(state.model);
   const ft = getModelFileTypeInfo();
 
-  document.getElementById('desktopModelName').textContent = state.model.title;
-  document.getElementById('desktopModelMeta').textContent = `· ${ft.badge} · ${formatPartCount(allParts.length)}`;
+  if (desktopSepEl) desktopSepEl.classList.remove('hidden');
+  if (desktopNameEl) { desktopNameEl.textContent = state.model.title; desktopNameEl.classList.remove('hidden'); }
+  if (desktopMetaEl) desktopMetaEl.textContent = `· ${ft.badge} · ${formatPartCount(allParts.length)}`;
+  if (mobileModelSepEl) mobileModelSepEl.classList.remove('hidden');
+  if (mobileModelNameEl) { mobileModelNameEl.textContent = state.model.title; mobileModelNameEl.classList.remove('hidden'); }
   document.getElementById('menuModelName').textContent = state.model.title;
   if (typeBadgeEl) {
     typeBadgeEl.textContent = ft.badge;
@@ -11991,6 +12008,8 @@ function closeMenu() { document.getElementById('menuBackdrop').classList.add('hi
 
 document.getElementById('btnOpenMenu').onclick = openMenu;
 document.getElementById('desktopModelChip').onclick = openMenu;
+const mobileEditorBrandPillEl = document.getElementById('mobileEditorBrandPill');
+if (mobileEditorBrandPillEl) mobileEditorBrandPillEl.onclick = openMenu;
 document.getElementById('btnCloseMenu').onclick = closeMenu;
 document.getElementById('menuDismissArea').onclick = closeMenu;
 

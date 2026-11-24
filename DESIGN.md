@@ -2,65 +2,70 @@
 name: Brick Instruction Works
 description: Calibrated European print-proofing studio for converting BrickLink Studio and LDraw brick models into publication-ready instruction manuals.
 colors:
-  registration-vermilion: "#c9341b"
-  registration-vermilion-hover: "#b02b14"
-  registration-vermilion-foreground: "#ffffff"
-  registration-vermilion-soft: "rgba(201, 52, 27, 0.11)"
-  registration-vermilion-border: "rgba(201, 52, 27, 0.38)"
-  registration-vermilion-dark: "#eb593e"
-  registration-vermilion-hover-dark: "#f26c52"
-  registration-vermilion-foreground-dark: "#18100d"
-  registration-vermilion-soft-dark: "rgba(235, 89, 62, 0.16)"
-  registration-vermilion-border-dark: "rgba(235, 89, 62, 0.44)"
-  carbon-ink-rail: "#1b1a18"
-  carbon-ink-rail-foreground: "#f4f2ec"
-  carbon-ink-rail-muted: "#b5b1a7"
-  carbon-ink-rail-border: "#32302c"
-  carbon-ink-rail-surface: "#282623"
-  carbon-ink-rail-hover: "#35332e"
-  carbon-ink-rail-accent: "#eb593e"
-  carbon-ink-rail-dark: "#111110"
-  carbon-ink-rail-muted-dark: "#a6a298"
-  carbon-ink-rail-border-dark: "#282723"
-  carbon-ink-rail-surface-dark: "#1e1d1a"
-  carbon-ink-rail-hover-dark: "#2b2925"
-  mineral-stone: "#dcdfd9"
-  pressroom-chrome: "#f1f0eb"
-  archival-paper: "#faf9f6"
-  surface-sunken: "#ecebe5"
-  surface-hover: "#e2e1da"
-  carbon-ink: "#1b1a18"
-  graphite-muted: "#56544d"
-  warm-mineral-hairline: "#c9c8c0"
-  warm-mineral-hairline-strong: "#aeada4"
-  registration-mark: "rgba(27, 26, 24, 0.36)"
-  mineral-stone-dark: "#171614"
-  pressroom-chrome-dark: "#1e1d1a"
-  archival-paper-dark: "#23221f"
-  surface-sunken-dark: "#2b2a26"
-  surface-hover-dark: "#34322d"
-  carbon-ink-dark: "#f3f1ec"
-  graphite-muted-dark: "#a8a49a"
-  warm-mineral-hairline-dark: "#3a3832"
-  warm-mineral-hairline-strong-dark: "#524f47"
-  registration-mark-dark: "rgba(243, 241, 236, 0.26)"
-  ink-bar-accent: "#ff937d"
-  status-info: "#255b8a"
-  status-info-soft: "rgba(37, 91, 138, 0.12)"
-  status-success: "#246848"
-  status-success-soft: "rgba(36, 104, 72, 0.12)"
-  status-warning: "#8c560e"
-  status-warning-soft: "rgba(140, 86, 14, 0.13)"
-  status-danger: "#b4261a"
-  status-danger-soft: "rgba(180, 38, 26, 0.1)"
-  status-info-dark: "#7ab3e6"
-  status-info-soft-dark: "rgba(122, 179, 230, 0.16)"
-  status-success-dark: "#6bc497"
-  status-success-soft-dark: "rgba(107, 196, 151, 0.16)"
-  status-warning-dark: "#e5b35c"
-  status-warning-soft-dark: "rgba(229, 179, 92, 0.16)"
-  status-danger-dark: "#f6877b"
-  status-danger-soft-dark: "rgba(246, 135, 123, 0.14)"
+  brand-sky: "#38bdf8"
+  brand-maroon: "#7c152e"
+  brand-orange: "#ed7d1f"
+  logo-maroon: "#7c152e"
+  logo-maroon-hover: "#641025"
+  logo-maroon-foreground: "#ffffff"
+  logo-maroon-soft: "rgba(124, 21, 46, 0.1)"
+  logo-maroon-border: "rgba(124, 21, 46, 0.36)"
+  logo-maroon-dark: "#eb6a84"
+  logo-maroon-hover-dark: "#f28096"
+  logo-maroon-foreground-dark: "#1a0a0f"
+  logo-maroon-soft-dark: "rgba(235, 106, 132, 0.16)"
+  logo-maroon-border-dark: "rgba(235, 106, 132, 0.44)"
+  accent-warm: "#c75d0c"
+  accent-warm-dark: "#f59342"
+  claret-ink-rail: "#23121a"
+  claret-ink-rail-foreground: "#f7f3f5"
+  claret-ink-rail-muted: "#c0aeb6"
+  claret-ink-rail-border: "#3d222e"
+  claret-ink-rail-surface: "#331c26"
+  claret-ink-rail-hover: "#442633"
+  claret-ink-rail-accent: "#f59342"
+  claret-ink-rail-dark: "#160c11"
+  claret-ink-rail-muted-dark: "#b8a5ae"
+  claret-ink-rail-border-dark: "#2f1a24"
+  claret-ink-rail-surface-dark: "#23141b"
+  claret-ink-rail-hover-dark: "#321d26"
+  slate-stone: "#e4e7ec"
+  pressroom-chrome: "#f2f4f7"
+  archival-paper: "#fcfcfd"
+  surface-sunken: "#eaeef3"
+  surface-hover: "#dfe4ec"
+  claret-ink: "#1e161a"
+  muted-ink: "#5a5157"
+  slate-hairline: "#cfd4dc"
+  slate-hairline-strong: "#b4bcc8"
+  registration-mark: "rgba(35, 18, 26, 0.34)"
+  slate-stone-dark: "#151318"
+  pressroom-chrome-dark: "#1c1920"
+  archival-paper-dark: "#221e26"
+  surface-sunken-dark: "#2b2630"
+  surface-hover-dark: "#352f3c"
+  claret-ink-dark: "#f6f3f7"
+  muted-ink-dark: "#aba2b0"
+  slate-hairline-dark: "#3c3543"
+  slate-hairline-strong-dark: "#554c5e"
+  registration-mark-dark: "rgba(246, 243, 247, 0.26)"
+  ink-bar-accent: "#fb9e4f"
+  status-info: "#0369a1"
+  status-info-soft: "rgba(56, 189, 248, 0.14)"
+  status-success: "#1f6a4a"
+  status-success-soft: "rgba(31, 106, 74, 0.12)"
+  status-warning: "#ad5107"
+  status-warning-soft: "rgba(237, 125, 31, 0.14)"
+  status-danger: "#b32030"
+  status-danger-soft: "rgba(179, 32, 48, 0.1)"
+  status-info-dark: "#38bdf8"
+  status-info-soft-dark: "rgba(56, 189, 248, 0.16)"
+  status-success-dark: "#5fc296"
+  status-success-soft-dark: "rgba(95, 194, 150, 0.16)"
+  status-warning-dark: "#f59342"
+  status-warning-soft-dark: "rgba(237, 125, 31, 0.16)"
+  status-danger-dark: "#f4798a"
+  status-danger-soft-dark: "rgba(244, 121, 138, 0.14)"
 typography:
   display:
     fontFamily: '"Public Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif'
@@ -116,18 +121,18 @@ spacing:
   2xl: "32px"
 components:
   button-primary:
-    backgroundColor: "{colors.registration-vermilion}"
-    textColor: "{colors.registration-vermilion-foreground}"
+    backgroundColor: "{colors.logo-maroon}"
+    textColor: "{colors.logo-maroon-foreground}"
     typography: "{typography.title}"
     rounded: "{rounded.md}"
     padding: "10px 20px"
     height: "44px"
   button-primary-hover:
-    backgroundColor: "{colors.registration-vermilion-hover}"
-    textColor: "{colors.registration-vermilion-foreground}"
+    backgroundColor: "{colors.logo-maroon-hover}"
+    textColor: "{colors.logo-maroon-foreground}"
   button-secondary:
     backgroundColor: "{colors.archival-paper}"
-    textColor: "{colors.carbon-ink}"
+    textColor: "{colors.claret-ink}"
     typography: "{typography.title}"
     rounded: "{rounded.md}"
     padding: "10px 16px"
@@ -135,57 +140,57 @@ components:
   button-secondary-hover:
     backgroundColor: "{colors.surface-hover}"
   button-rail:
-    backgroundColor: "{colors.carbon-ink-rail-surface}"
-    textColor: "{colors.carbon-ink-rail-foreground}"
+    backgroundColor: "{colors.claret-ink-rail-surface}"
+    textColor: "{colors.claret-ink-rail-foreground}"
     typography: "{typography.label}"
     rounded: "{rounded.md}"
     padding: "0 12px"
     height: "36px"
   button-rail-hover:
-    backgroundColor: "{colors.carbon-ink-rail-hover}"
+    backgroundColor: "{colors.claret-ink-rail-hover}"
   button-ghost:
     backgroundColor: "transparent"
-    textColor: "{colors.graphite-muted}"
+    textColor: "{colors.muted-ink}"
     typography: "{typography.label}"
     rounded: "{rounded.md}"
     padding: "8px 14px"
   mode-segment:
     backgroundColor: "transparent"
-    textColor: "{colors.graphite-muted}"
+    textColor: "{colors.muted-ink}"
     typography: "{typography.label}"
     rounded: "{rounded.md}"
     padding: "6px 12px"
   mode-segment-active:
-    backgroundColor: "{colors.registration-vermilion}"
-    textColor: "{colors.registration-vermilion-foreground}"
+    backgroundColor: "{colors.logo-maroon}"
+    textColor: "{colors.logo-maroon-foreground}"
   input-field:
     backgroundColor: "{colors.surface-sunken}"
-    textColor: "{colors.carbon-ink}"
+    textColor: "{colors.claret-ink}"
     typography: "{typography.body}"
     rounded: "{rounded.lg}"
     padding: "10px 14px"
   proofing-sheet:
     backgroundColor: "{colors.archival-paper}"
-    textColor: "{colors.carbon-ink}"
+    textColor: "{colors.claret-ink}"
     rounded: "{rounded.md}"
     padding: "24px 32px"
   sheet-panel:
     backgroundColor: "{colors.archival-paper}"
-    textColor: "{colors.carbon-ink}"
+    textColor: "{colors.claret-ink}"
     rounded: "{rounded.xl}"
     padding: "20px"
   top-rail:
-    backgroundColor: "{colors.carbon-ink-rail}"
-    textColor: "{colors.carbon-ink-rail-foreground}"
+    backgroundColor: "{colors.claret-ink-rail}"
+    textColor: "{colors.claret-ink-rail-foreground}"
     padding: "0 16px"
     height: "52px"
   folio-dock:
     backgroundColor: "{colors.pressroom-chrome}"
-    textColor: "{colors.carbon-ink}"
+    textColor: "{colors.claret-ink}"
     padding: "8px 16px"
   status-bar:
-    backgroundColor: "{colors.carbon-ink-rail}"
-    textColor: "{colors.carbon-ink-rail-foreground}"
+    backgroundColor: "{colors.claret-ink-rail}"
+    textColor: "{colors.claret-ink-rail-foreground}"
     typography: "{typography.label}"
     rounded: "{rounded.lg}"
     padding: "10px 16px"
@@ -195,56 +200,55 @@ components:
 
 ## Overview
 
-**Creative North Star: "Billund Print-Proofing Table"**
+**Creative North Star: "Logo-Matched Print-Proofing Table"**
 
-Brick Instruction Works treats brick-model instruction authoring like a calibrated European print-proofing table. Opaque archival-paper floating pills (`#FAF9F6` light / `#23221F` dark) edged with strong mineral hairlines float quietly above a calm mineral-stone proofing stage where either the welcome proofing sheet or the builder's live shadowed manual page sits as the undisputed hero. Every floating control, drawer, modal, and folio readout operates as an opaque pressroom instrument—quiet, tactile, hairline-separated, and legible on desktop monitors, tablets, and phones alike.
+Brick Instruction Works treats brick-model instruction authoring like a calibrated European print-proofing table harmonized directly with its three-plume emblem (`#38bdf8` sky blue, `#7c152e` deep maroon, `#ed7d1f` warm orange). Opaque archival-paper floating pills (`#FCFCFD` light / `#221E26` dark) edged with crisp slate hairlines float above a cool slate-stone proofing stage where either the welcome proofing sheet or the builder's live shadowed manual page sits as the undisputed hero. Every floating control, drawer, modal, and folio readout operates as an opaque pressroom instrument—quiet, tactile, hairline-separated, and legible on desktop monitors, tablets, and phones alike.
 
-Because builders spend long sessions verifying piece visibility, camera angles, page breaks, and BOM layout on live instruction pages that carry their own bright LEGO brick colors and output themes, the studio chrome deliberately stays dry and achromatic outside a single registration-vermilion action accent. It rejects translucent frosted-glass blur, nested cards inside cards, generic blue CAD chrome, and decorative glow shadows in favor of solid archival paper pills and sheets, warm-mineral hairlines, and crisp mechanical transitions.
+Because builders spend long sessions verifying piece visibility, camera angles, page breaks, and BOM layout on live instruction pages that carry their own bright LEGO brick colors and output themes, the studio chrome stays calm and low-chroma across surfaces while assigning disciplined roles to the logo's three colors: deep maroon (`--primary`) for primary actions and active states, warm orange (`--accent-warm`, `--warning`, `--rail-accent`) for studio tool icons and warning/toast highlights, and sky blue (`--info`) for technical and project-file accents. It rejects translucent frosted-glass blur, nested cards inside cards, and decorative glow shadows.
 
 **Key Characteristics:**
-- **Opaque archival floating pills:** Crisp solid-paper pills (`.studio-pill`) with `1px` `--border-strong` hairlines and neutral offset shadows float at top-left, top-right, and bottom-center so the manual page occupies the full viewport without glass blur. On mobile, the identity/title pill is hidden from the main canvas and lives inside the slide-out menu drawer.
-- **Mineral-stone proofing table:** Neutral stone ground (`--background`) gives bright archival manual sheets crisp physical contrast without beige warmth or cool blue cast.
-- **Single-accent discipline:** Registration vermilion (`--primary`) marks only primary actions, active selections, focus rings, and key indicators.
+- **Opaque archival floating pills:** Crisp solid-paper pills (`.studio-pill`) with `1px` `--border-strong` hairlines and neutral offset shadows float at top-left, top-right, and bottom-center so the manual page occupies the full viewport without glass blur.
+- **Always-present editor identity:** On desktop (`md+`), `#desktopModelChip` keeps the 3-plume logo and `Brick Instruction Works` permanently visible beside the active model title & metadata. On mobile (`< md`), the welcome proofing sheet showcases the logo + app name before load, and `#mobileEditorBrandPill` anchors a compact centered floating pill beneath the top controls in the editor view.
+- **Logo-harmonized proofing palette:** Cool slate-stone ground (`--background`) gives bright manual pages accurate neutral contrast while pairing cleanly with logo maroon, warm orange, and sky blue across light and dark modes.
 - **Self-hosted institutional typography:** Variable `Public Sans` handles all prose and controls (`>= 12px` functional floor), paired with tabular `JetBrains Mono` strictly for folios, part IDs, file extensions, dimensions, and percentages.
-- **Opaque hairline-separated sheets:** Drawers, popovers, and modals use solid archival paper (`--card`) divided by `1px` mineral rules (`--border`) rather than translucent glass or nested boxes, paired with a committed carbon-ink drawer header (`--rail`) and ink notification pills (`--ink-bar`).
+- **Opaque hairline-separated sheets:** Drawers, popovers, and modals use solid archival paper (`--card`) divided by `1px` slate rules (`--border`) rather than translucent glass or nested boxes, paired with a deep claret-ink drawer header (`--rail`) and ink notification pills (`--ink-bar`).
 
 ## Colors
 
-An achromatic pressroom palette—mineral stone, archival paper, and carbon ink—punctuated by one registration-vermilion signal accent and muted semantic status tones, calibrated for both light and system dark (`@media (prefers-color-scheme: dark)`) modes.
+A calm pressroom neutral scale—cool slate stone, crisp archival paper, and deep claret-charcoal ink—paired with the logo's three signature colors calibrated for WCAG AA contrast in both light and system dark (`@media (prefers-color-scheme: dark)`) modes.
 
-### Primary
-- **Registration Vermilion** (`--primary`: `#c9341b` light / `#eb593e` dark): Primary actions (Import Model, Export pill, Export to PDF, Save, Done, Next Page), active mode pill buttons, active tabs, checkboxes/sliders (`accent-color`), caret color, and `:focus-visible` outlines.
-- **Registration Vermilion Hover** (`--primary-hover`: `#b02b14` light / `#f26c52` dark): Hover state for primary filled buttons, deepening in light mode and brightening in dark mode.
-- **Registration Vermilion Foreground** (`--primary-foreground`: `#ffffff` light / `#18100d` dark): High-contrast label and icon ink seated on primary vermilion fills.
-- **Registration Vermilion Soft** (`--primary-soft`: `rgba(201, 52, 27, 0.11)` light / `rgba(235, 89, 62, 0.16)` dark): Tinted fills for secondary-emphasis vermilion buttons (Subdivide Model, Fetch All Starter Packs), active page/step highlights, drag-over dropzone state, progress panels, and `::selection` highlights.
-- **Registration Vermilion Border** (`--primary-border`: `rgba(201, 52, 27, 0.38)` light / `rgba(235, 89, 62, 0.44)` dark): Borders for soft-vermilion actions, active preset rings, dashed section dividers, and `.print-margin-guide` outlines.
-- **Ink Bar Accent** (`--ink-bar-accent`: `#ff937d`): High-legibility coral-vermilion action text (`See issues`) inside the dark `--ink-bar` notification pill.
+### Primary & Logo Triad
+- **Logo Maroon** (`--primary`: `#7c152e` light / `#eb6a84` dark): Primary actions (Import Model, Export pill, Export to PDF, Save, Done, Next Page), active mode pill buttons, active tabs, `.IO` file badge, checkboxes/sliders, caret color, and `:focus-visible` outlines.
+- **Logo Maroon Hover** (`--primary-hover`: `#641025` light / `#f28096` dark): Hover state for primary filled buttons, deepening in light mode and brightening in dark mode.
+- **Logo Maroon Foreground** (`--primary-foreground`: `#ffffff` light / `#1a0a0f` dark): High-contrast label and icon ink seated on primary fills (`10.48:1` light / `6.33:1` dark).
+- **Logo Maroon Soft / Border** (`--primary-soft` / `--primary-border`): Tinted fills and borders for secondary-emphasis buttons, active presets, dashed section dividers, `.print-margin-guide`, and `::selection` highlights.
+- **Warm Logo Orange** (`--accent-warm`: `#c75d0c` light / `#f59342` dark; `--brand-orange`: `#ed7d1f`; `--ink-bar-accent`: `#fb9e4f`): Studio tool icon accent (`Bricks Library`, `Style`), `--rail-accent`, `.LDR` badge (`--warning`), and high-legibility action text (`See issues`) inside the dark `--ink-bar` notification pill.
+- **Logo Sky Blue** (`--info`: `#0369a1` light / `#38bdf8` dark; `--brand-sky`: `#38bdf8`): Project import icon accent, `.MPD` badge, informational diagnostics, and the first calibration dot on the proofing table strip.
 
 ### Neutral
-- **Carbon Ink Rail** (`--rail`: `#1b1a18` light / `#111110` dark): Slide-out menu drawer header and `--ink-bar` notification/toast pills.
-- **Rail Alabaster Ink** (`--rail-foreground`: `#f4f2ec`, `--ink-bar-foreground`: `#f4f2ec`): Primary text and icons inside the carbon-ink drawer header and toast/error pills.
-- **Rail Muted Ink** (`--rail-muted`: `#b5b1a7` light / `#a6a298` dark): Secondary subtitle copy inside the dark drawer header.
-- **Mineral Stone Ground** (`--background`: `#dcdfd9` light / `#171614` dark): Full-bleed proofing table canvas behind the welcome sheet and live manual page. Deliberately mineral-grey rather than warm beige or cool blue-grey so every brick manual theme reads true.
-- **Pressroom Chrome** (`--chrome`: `#f1f0eb` light / `#1e1d1a` dark): Modal headers and footers, drawer footer, and the Bricks Library 3D preview rail.
-- **Archival Paper** (`--card`: `#faf9f6` light / `#23221f` dark): Primary elevated surface for floating pills (`.studio-pill`), the welcome proofing sheet, modal bodies, style popover, drawer body, and secondary buttons.
-- **Sunken Surface** (`--surface-sunken`: `#ecebe5` light / `#2b2a26` dark): Calibration strips, capability footers, text inputs, selects, progress tracks, and info callouts.
-- **Interactive Hover Surface** (`--surface-hover`: `#e2e1da` light / `#34322d` dark): Hover fill for floating pill triggers, secondary archival buttons, and ghost icon buttons.
-- **Carbon Ink** (`--foreground`: `#1b1a18` light / `#f3f1ec` dark): Primary headings, body copy, labels, and active icons on light/dark studio surfaces.
-- **Graphite Muted** (`--muted-foreground`: `#56544d` light / `#a8a49a` dark): Helper copy, section headers, secondary descriptions, inactive mode icons, and folio counts.
-- **Warm Mineral Hairlines** (`--border`: `#c9c8c0` light / `#3a3832` dark; `--border-strong`: `#aeada4` light / `#524f47` dark): `1px` structural dividers, input outlines, modal sheet borders, floating pill edges (`--border-strong`), scrollbars (`--border-strong`), and proof-sheet/page-frame outlines (`--border-strong`).
+- **Deep Claret Ink Rail** (`--rail`: `#23121a` light / `#160c11` dark): Slide-out menu drawer header and `--ink-bar` notification/toast pills.
+- **Rail Alabaster Ink** (`--rail-foreground`: `#f7f3f5`, `--ink-bar-foreground`: `#f7f3f5`): Primary text and icons inside the claret-ink drawer header and toast/error pills.
+- **Rail Muted Ink** (`--rail-muted`: `#c0aeb6` light / `#b8a5ae` dark): Secondary subtitle copy inside the dark drawer header.
+- **Slate Stone Ground** (`--background`: `#e4e7ec` light / `#151318` dark): Full-bleed proofing table canvas behind the welcome sheet and live manual page.
+- **Pressroom Chrome** (`--chrome`: `#f2f4f7` light / `#1c1920` dark): Modal headers and footers, drawer footer, and the Bricks Library 3D preview rail.
+- **Archival Paper** (`--card`: `#fcfcfd` light / `#221e26` dark): Primary elevated surface for floating pills (`.studio-pill`), the welcome proofing sheet, modal bodies, style popover, drawer body, and secondary buttons.
+- **Sunken Surface** (`--surface-sunken`: `#eaeef3` light / `#2b2630` dark): Calibration strips, capability footers, text inputs, selects, progress tracks, and info callouts.
+- **Interactive Hover Surface** (`--surface-hover`: `#dfe4ec` light / `#352f3c` dark): Hover fill for floating pill triggers, secondary archival buttons, and ghost icon buttons.
+- **Claret Ink & Muted Ink** (`--foreground`: `#1e161a` light / `#f6f3f7` dark; `--muted-foreground`: `#5a5157` light / `#aba2b0` dark): Primary headings, body prose, helper descriptions, and folio counts.
+- **Slate Hairlines** (`--border`: `#cfd4dc` light / `#3c3543` dark; `--border-strong`: `#b4bcc8` light / `#554c5e` dark): `1px` structural dividers, input outlines, modal sheet borders, floating pill edges, scrollbars, and page-frame outlines.
 
 ### Semantic Status
-- **Press Info** (`--info`: `#255b8a` light / `#7ab3e6` dark; `--info-soft`: `rgba(37, 91, 138, 0.12)` light / `rgba(122, 179, 230, 0.16)` dark): Informational diagnostics and neutral status indicators.
-- **Press Success** (`--success`: `#246848` light / `#6bc497` dark; `--success-soft`: `rgba(36, 104, 72, 0.12)` light / `rgba(107, 196, 151, 0.16)` dark): Export completion (`PDF Ready`) and resolved import status.
-- **Press Warning** (`--warning`: `#8c560e` light / `#e5b35c` dark; `--warning-soft`: `rgba(140, 86, 14, 0.13)` light / `rgba(229, 179, 92, 0.16)` dark): Missing parts count badges (`#mpCountBadge`, `#libTabManageBadge`) and tolerance notices.
-- **Press Danger** (`--danger`: `#b4261a` light / `#f6877b` dark; `--danger-soft`: `rgba(180, 38, 26, 0.1)` light / `rgba(246, 135, 123, 0.14)` dark): Error count badges, missing-part markers, and destructive actions (Delete Theme, Clear Entire Saved Library).
+- **Info / Sky Blue** (`--info`: `#0369a1` light / `#38bdf8` dark; `--info-soft`: `rgba(56, 189, 248, 0.14)` / `0.16`): Informational diagnostics, `.MPD` badges, and project import cues.
+- **Success** (`--success`: `#1f6a4a` light / `#5fc296` dark; `--success-soft`): Export completion (`PDF Ready`) and resolved import status.
+- **Warning / Orange** (`--warning`: `#ad5107` light / `#f59342` dark; `--warning-soft`: `rgba(237, 125, 31, 0.14)` / `0.16`): Missing parts count badges (`#mpCountBadge`, `#libTabManageBadge`), `.LDR` badges, and tolerance notices.
+- **Danger** (`--danger`: `#b32030` light / `#f4798a` dark; `--danger-soft`): Error count badges, missing-part markers, and destructive actions (Delete Theme, Clear Entire Saved Library).
 
 ### Named Rules
-**The One-Accent Pressroom Rule.** Registration vermilion (`--primary`) is the sole studio chrome accent. Never introduce secondary brand colors into floating pills, popovers, or drawers; keep brick and theme colors isolated inside the live manual page and theme preview swatches.
+**The Logo-Triad Hierarchy Rule.** Logo maroon (`--primary`) owns primary filled CTAs and active state fills; warm logo orange (`--accent-warm`/`--warning`) and logo sky blue (`--info`) stay restrained to icon accents, file-type badges, status indicators, and the 3-dot proofing registration strip—never competing filled CTA buttons.
 
-**The Neutral Mineral Ground Rule.** The proofing stage (`--background`) remains low-chroma mineral stone (`#dcdfd9` light, `#171614` dark)—never beige parchment and never cool blue-grey—so Warm, Classic Blue, Modern White, Collector Dark, and Blueprint manual pages all retain accurate color perception.
+**The Neutral Proofing Ground Rule.** The proofing stage (`--background`) remains low-chroma cool slate (`#e4e7ec` light, `#151318` dark) so Warm, Classic Blue, Modern White, Collector Dark, and Blueprint manual pages all retain accurate color perception.
 
-**The Mobile Clean-Canvas Rule.** On mobile (`< 768px`), omit the main-page title/identity pill (`#desktopModelChip`) so only compact floating controls appear over the canvas; the studio and active model title live cleanly inside the slide-out menu drawer.
+**The Persistent Brand Identity Rule.** Both the restored 3-plume logo and `Brick Instruction Works` name remain visible in both welcome and editor views across desktop (`#desktopModelChip`) and mobile (`#emptyState` welcome sheet + `#mobileEditorBrandPill` in editor view).
 
 ## Typography
 
@@ -255,7 +259,7 @@ An achromatic pressroom palette—mineral stone, archival paper, and carbon ink�
 **Character:** Dry, institutional, and pressroom-calibrated. `Public Sans` delivers crisp geometric neutrality at compact studio UI sizes without quirk or warmth bias, while tabular `JetBrains Mono` locks every folio number, part ID, dimension, and zoom percentage onto an unwavering mechanical grid. All font files are self-hosted in `src/assets/fonts/` (`font-display: swap`) for offline and Neocities compliance.
 
 ### Hierarchy
-- **Display** (`700`, `1.5rem` mobile / `1.875rem` sm+ (`24px`–`30px`), line-height `1.25`, tracking `-0.025em`): Primary welcome proofing-sheet headline (`Set a brick model for print.`).
+- **Display** (`700`, `1.5rem` mobile / `1.875rem` sm+ (`24px`–`30px`), line-height `1.25`, tracking `-0.025em`): Primary welcome proofing-sheet headline (`Brick Instruction Works`).
 - **Headline** (`700`, `1rem` (`16px`), line-height `1.35`, tracking `-0.025em`): Modal sheet titles (`Page Setup`, `Parts List Setup`, `Bricks Library`, `Import Model`, `Pages & Steps`, `Model Issues`, `Export & Print`).
 - **Title** (`600`–`700`, `0.875rem` (`14px`), line-height `1.35`, tracking `-0.015em`): Desktop identity pill wordmark (`Brick Instruction Works`), drawer model title, primary action buttons, format card titles, and manage-tab section headings.
 - **Body** (`400`–`500`, `0.875rem` (`14px`) default body / `0.75rem` (`12px`) compact control copy, line-height `1.45`–`1.625`, max measure `54ch` on welcome prose): Explanatory paragraphs, toggle labels, and helper descriptions.
@@ -271,13 +275,14 @@ An achromatic pressroom palette—mineral stone, archival paper, and carbon ink�
 
 Brick Instruction Works uses a locked full-viewport pressroom shell (`html`, `body`: `100% × 100%`, `overflow: hidden`, `overscroll-behavior: none`) where the proofing table fills 100% of the viewport and opaque floating pills anchor cleanly to the perimeter:
 
-1. **Floating Top-Left Pill Cluster (`fixed top-3 left-3 z-40`):** Circular `40px` `#btnOpenMenu` floating pill (`studio-pill rounded-full`) paired on desktop (`md+`) with the `#desktopModelChip` identity/model pill (`hidden md:inline-flex`). On mobile, only the compact circular menu pill appears—no title sits on the main page.
-2. **Floating Top-Right Pill Cluster (`fixed top-3 right-3 z-40`):** Switches cleanly between empty-state quick tools (`#headerEmptyActions`: `Bricks Library` / `Bricks` pill + desktop `Import Project` pill) and loaded-model controls (`#topRightPills`: `Undo`/`Redo` pill, `Style` popover pill, and primary registration-vermilion `Export` pill).
-3. **Full-Bleed Proofing Stage (`#emptyState` / `#stageViewport`):** Fills the entire viewport (`flex-1 min-h-0`). Before load, centers the `max-w-2xl` (`672px`) welcome proofing sheet with top clearance (`pt-16 pb-6 px-4 sm:p-8`) below the top floating pills. After load, hosts the touch-locked (`touch-action: none`) infinite pan/zoom viewport centering `#pageFrame` with stage clearance (`pt-16 pb-28 px-3`).
-4. **Floating Bottom Dock (`#bottomDock`, `fixed bottom-3 left-1/2 -translate-x-1/2 z-40`):** Shown after model load as two stacked opaque floating pills: `#modePill` (`Pan` / `Edit` / `Select` / `Rotate` / `Arrange`) stacked over the combined Page Folio & Zoom pill (`Previous`, clickable `Page N · N/M` overview trigger, primary vermilion `Next`, hairline divider, `−`, `100%`, `+`). Mode-specific contextual overlays (`#contextOverlay`) and import issue banners (`#errorBanner`) float cleanly above at `bottom: 114px`.
+1. **Floating Top-Left Pill Cluster (`fixed top-3 left-3 z-40`):** Circular `40px` `#btnOpenMenu` floating pill (`studio-pill rounded-full`) paired on desktop (`md+`) with `#desktopModelChip` (`hidden md:inline-flex`), which permanently displays the 3-plume logo + `Brick Instruction Works` and adds a vertical hairline divider + active model title & metadata when loaded.
+2. **Mobile Editor Identity Pill (`#mobileEditorBrandPill`, `fixed top-[60px] left-1/2 -translate-x-1/2 z-30 md:hidden`):** Shown on `< md` whenever a model is loaded in the editor view, displaying the 3-plume logo, `Brick Instruction Works`, and the active model title without colliding with top-right editor controls.
+3. **Floating Top-Right Pill Cluster (`fixed top-3 right-3 z-40`):** Switches cleanly between empty-state quick tools (`#headerEmptyActions`: `Bricks Library` / `Bricks` pill + desktop `Import Project` pill) and loaded-model controls (`#topRightPills`: `Undo`/`Redo` pill, `Style` popover pill, and primary logo-maroon `Export` pill).
+4. **Full-Bleed Proofing Stage (`#emptyState` / `#stageViewport`):** Fills the entire viewport (`flex-1 min-h-0`). Before load, centers the `max-w-2xl` (`672px`) welcome proofing sheet with top clearance (`pt-16 pb-6 px-4 sm:p-8`) below the top floating pills. After load, hosts the touch-locked (`touch-action: none`) infinite pan/zoom viewport centering `#pageFrame` with stage clearance (`pt-[104px] md:pt-16 pb-28 px-3`).
+5. **Floating Bottom Dock (`#bottomDock`, `fixed bottom-3 left-1/2 -translate-x-1/2 z-40`):** Shown after model load as two stacked opaque floating pills: `#modePill` (`Pan` / `Edit` / `Select` / `Rotate`) stacked over the combined Page Folio & Zoom pill (`Previous`, clickable `Page N · N/M` overview trigger, primary maroon `Next`, hairline divider, `−`, `100%`, `+`). Mode-specific contextual overlays (`#contextOverlay`) and import issue banners (`#errorBanner`) float cleanly above at `bottom: 114px`.
 
 **Responsive Breakpoints & Sheet Behavior:**
-- **Mobile (`< 640px`):** Floating top pills remain `40px` (`h-10`) touch targets; `#desktopModelChip` stays hidden (`hidden md:inline-flex`) so the canvas stays uncluttered. Modals rise flush to the viewport bottom as full-width bottom sheets (`items-end p-0 rounded-t-xl`, max height `85vh`–`93vh`). The slide-out menu drawer spans `min(88vw, 356px)`.
+- **Mobile (`< 640px`):** Floating top pills remain `40px` (`h-10`) touch targets; welcome screen showcases the 3-plume logo + `Brick Instruction Works` on the proofing sheet, while the editor view anchors `#mobileEditorBrandPill` cleanly at `top-[60px]` above the manual page. Modals rise flush to the viewport bottom as full-width bottom sheets (`items-end p-0 rounded-t-xl`, max height `85vh`–`93vh`). The slide-out menu drawer spans `min(88vw, 356px)`.
 - **Tablet (`sm: 640px+` / `md: 768px+`):** Modals detach into centered floating sheets (`items-center p-4 rounded-xl`, widths `max-w-sm` to `max-w-4xl`). At `md`, `#desktopModelChip` appears beside the menu pill and the Bricks Library opens its static `300px` right-hand 3D Part Preview inspector.
 - **Desktop (`lg: 1024px+`):** The Import & Subdivision modal switches from stacked vertical panes to a 2-pane split (`46%` live 3D exploded canvas left, scrollable build organization proposals right), and the Bricks Library grid expands to 4 columns.
 

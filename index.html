@@ -27,7 +27,7 @@
     <!-- ================================================================ -->
     <!-- FLOATING TOP-LEFT PILL: Menu ☰ (+ Model Name chip on desktop)    -->
     <!-- ================================================================ -->
-    <div class="no-print fixed top-3 left-3 z-40 flex items-center gap-2 max-w-[calc(100vw-160px)]">
+    <div class="no-print fixed top-3 left-3 z-40 flex items-center gap-2 max-w-[calc(100vw-300px)]">
       <button id="btnOpenMenu" type="button" title="Open studio menu" aria-label="Open studio menu" class="relative studio-pill h-10 w-10 rounded-full flex items-center justify-center hover:bg-[var(--surface-hover)] transition-colors shrink-0 cursor-pointer">
         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
           <line x1="4" x2="20" y1="7" y2="7"/><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="17" y2="17"/>
@@ -35,8 +35,8 @@
         <span id="menuBtnErrorBadge" class="hidden absolute -top-1 -right-1 min-w-[20px] h-[20px] px-1 rounded-full bg-[var(--danger)] text-white font-mono text-xs font-semibold flex items-center justify-center">0</span>
       </button>
 
-      <!-- Model & Studio Identity Pill (Desktop only — hidden on mobile!) -->
-      <button id="desktopModelChip" type="button" class="hidden md:inline-flex studio-pill h-10 pl-3 pr-4 rounded-full items-center gap-2 text-xs font-semibold truncate max-w-[360px] hover:bg-[var(--surface-hover)] transition-colors cursor-pointer">
+      <!-- Model & Studio Identity Pill (Desktop — always keeps Logo + Brick Instruction Works visible, plus active model when loaded) -->
+      <button id="desktopModelChip" type="button" class="hidden md:inline-flex studio-pill h-10 pl-3 pr-4 rounded-full items-center gap-2 text-xs font-semibold max-w-full min-w-0 hover:bg-[var(--surface-hover)] transition-colors cursor-pointer">
         <svg class="w-5 h-5 shrink-0" viewBox="0 0 64 64" fill="none" aria-hidden="true">
           <g transform="rotate(12 32 32)">
             <path d="M24.8 7.8 Q17.9 12.8 13.7 20.2 L16.3 19.7 Q13.8 23.2 11.6 26.6 Q11.3 31.1 11.6 35.3 L14.9 32.7 Q13.9 38.0 13.3 42.8 Q14.6 45.2 15.8 47.2 L18.2 42.8 Q19.8 48.9 21.1 54.7 Q14.1 52.2 6.7 49.4 L13.1 48.9 Q12.0 46.5 11.1 43.7 Q7.5 38.4 3.3 32.7 L8.9 35.6 Q8.9 31.0 9.8 26.2 Q9.4 20.7 8.7 14.7 L11.7 19.3 Q17.3 12.2 24.8 7.8 Z" fill="#38bdf8"/>
@@ -44,22 +44,38 @@
             <path d="M38.5 8.3 Q46.1 12.5 51.9 18.8 L54.4 14.1 Q54.1 19.9 54.2 25.1 Q55.2 29.4 55.5 33.5 L60.9 30.3 Q57.1 36.0 53.8 41.3 Q53.3 43.4 52.6 45.4 L58.5 45.0 Q51.8 48.7 45.4 51.9 Q46.2 46.3 47.4 40.3 L49.8 43.9 Q50.7 42.4 51.6 40.6 Q50.8 36.2 49.6 31.4 L52.8 33.4 Q52.8 29.7 52.3 25.6 Q50.1 22.7 47.5 19.6 L50.0 19.8 Q45.5 13.1 38.5 8.3 Z" fill="#ed7d1f"/>
           </g>
         </svg>
-        <span id="desktopModelName" class="text-sm font-semibold tracking-tight truncate">Brick Instruction Works</span>
-        <span id="desktopModelMeta" class="font-mono text-xs text-[var(--muted-foreground)] shrink-0"></span>
+        <span class="text-sm font-bold tracking-tight shrink-0">Brick Instruction Works</span>
+        <span id="desktopModelSep" class="hidden w-px h-4 bg-[var(--border-strong)] shrink-0" aria-hidden="true"></span>
+        <span id="desktopModelName" class="hidden text-xs font-semibold text-[var(--foreground)] truncate min-w-0"></span>
+        <span id="desktopModelMeta" class="hidden lg:inline font-mono text-xs text-[var(--muted-foreground)] shrink-0"></span>
       </button>
     </div>
+
+    <!-- Mobile Editor Identity Pill (shown on < md when a model is loaded in the editor view) -->
+    <button id="mobileEditorBrandPill" type="button" title="Open studio menu" class="no-print hidden fixed top-[60px] left-1/2 -translate-x-1/2 z-30 md:hidden studio-pill h-9 w-max max-w-[calc(100vw-24px)] pl-2.5 pr-3.5 rounded-full items-center gap-2 hover:bg-[var(--surface-hover)] transition-colors cursor-pointer">
+      <svg class="w-4 h-4 shrink-0" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+        <g transform="rotate(12 32 32)">
+          <path d="M24.8 7.8 Q17.9 12.8 13.7 20.2 L16.3 19.7 Q13.8 23.2 11.6 26.6 Q11.3 31.1 11.6 35.3 L14.9 32.7 Q13.9 38.0 13.3 42.8 Q14.6 45.2 15.8 47.2 L18.2 42.8 Q19.8 48.9 21.1 54.7 Q14.1 52.2 6.7 49.4 L13.1 48.9 Q12.0 46.5 11.1 43.7 Q7.5 38.4 3.3 32.7 L8.9 35.6 Q8.9 31.0 9.8 26.2 Q9.4 20.7 8.7 14.7 L11.7 19.3 Q17.3 12.2 24.8 7.8 Z" fill="#38bdf8"/>
+          <path d="M31.7 7.1 Q34.8 10.1 37.5 15.7 L40.5 12.6 Q39.4 17.0 38.6 21.0 Q39.3 24.7 39.7 28.3 L44.0 25.1 Q41.5 30.5 39.5 35.5 Q39.5 39.0 39.4 42.1 L45.1 39.1 Q41.3 43.9 38.0 48.3 Q37.7 50.7 37.2 52.6 L43.4 51.6 Q37.7 54.5 32.1 57.0 Q31.0 52.0 30.1 46.7 L33.7 51.3 Q34.4 49.7 35.3 47.6 Q34.4 43.5 33.2 39.1 L36.2 41.6 Q36.7 38.7 37.0 35.4 Q35.0 30.9 32.5 26.0 L36.9 28.4 Q36.8 24.9 36.5 21.3 Q34.9 18.4 32.8 15.4 L35.5 16.3 Q34.0 10.5 31.7 7.1 Z" fill="#7c152e"/>
+          <path d="M38.5 8.3 Q46.1 12.5 51.9 18.8 L54.4 14.1 Q54.1 19.9 54.2 25.1 Q55.2 29.4 55.5 33.5 L60.9 30.3 Q57.1 36.0 53.8 41.3 Q53.3 43.4 52.6 45.4 L58.5 45.0 Q51.8 48.7 45.4 51.9 Q46.2 46.3 47.4 40.3 L49.8 43.9 Q50.7 42.4 51.6 40.6 Q50.8 36.2 49.6 31.4 L52.8 33.4 Q52.8 29.7 52.3 25.6 Q50.1 22.7 47.5 19.6 L50.0 19.8 Q45.5 13.1 38.5 8.3 Z" fill="#ed7d1f"/>
+        </g>
+      </svg>
+      <span class="text-xs font-bold tracking-tight shrink-0">Brick Instruction Works</span>
+      <span id="mobileEditorModelSep" class="hidden w-px h-3.5 bg-[var(--border-strong)] shrink-0" aria-hidden="true"></span>
+      <span id="mobileEditorModelName" class="hidden text-xs text-[var(--muted-foreground)] truncate min-w-0"></span>
+    </button>
 
     <!-- ================================================================ -->
     <!-- FLOATING TOP-RIGHT PILLS: Empty-State Tools / Loaded Actions     -->
     <!-- ================================================================ -->
     <div id="headerEmptyActions" class="no-print fixed top-3 right-3 z-40 flex items-center gap-1.5 shrink-0">
       <button id="headerBricksLibBtn" type="button" class="studio-pill h-10 px-3.5 rounded-full hover:bg-[var(--surface-hover)] text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer">
-        <svg class="w-4 h-4 text-[var(--primary)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 3 7.5 12 12l9-4.5L12 3Z"/><path d="m3 12 9 4.5 9-4.5"/><path d="m3 16.5 9 4.5 9-4.5"/></svg>
+        <svg class="w-4 h-4 text-[var(--accent-warm)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 3 7.5 12 12l9-4.5L12 3Z"/><path d="m3 12 9 4.5 9-4.5"/><path d="m3 16.5 9 4.5 9-4.5"/></svg>
         <span class="hidden sm:inline">Bricks Library</span>
         <span class="sm:hidden">Bricks</span>
       </button>
       <button id="headerLoadProjBtn" type="button" title="Open saved project (.biw)" class="hidden sm:inline-flex studio-pill h-10 px-3.5 rounded-full hover:bg-[var(--surface-hover)] text-xs font-semibold items-center gap-1.5 transition-colors cursor-pointer">
-        <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
+        <svg class="w-3.5 h-3.5 text-[var(--info)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
         <span>Import Project</span>
       </button>
     </div>
@@ -75,7 +91,7 @@
         </button>
       </div>
       <button id="btnStylePop" type="button" aria-haspopup="true" aria-expanded="false" class="studio-pill h-10 px-3.5 rounded-full hover:bg-[var(--surface-hover)] flex items-center gap-1.5 text-xs font-semibold transition-colors cursor-pointer">
-        <svg class="w-4 h-4 text-[var(--primary)] transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="13.5" cy="6.5" r=".6" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".6" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".6" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".6" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></svg>
+        <svg class="w-4 h-4 text-[var(--accent-warm)] transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="13.5" cy="6.5" r=".6" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".6" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".6" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".6" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></svg>
         <span>Style</span>
       </button>
       <button id="btnHeaderExport" type="button" title="Print or export" aria-label="Export and print" class="h-10 w-10 sm:w-auto sm:px-3.5 rounded-full bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] shadow-[var(--shadow-surface)] flex items-center justify-center gap-1.5 text-xs font-semibold transition-colors cursor-pointer">
@@ -91,7 +107,14 @@
       <div class="relative z-10 w-full max-w-2xl rounded-xl proof-sheet-frame overflow-hidden">
         <!-- Sheet Calibration Strip -->
         <div class="px-6 sm:px-8 py-3 border-b border-[var(--border)] bg-[var(--surface-sunken)] flex items-center justify-between gap-3 text-xs text-[var(--muted-foreground)]">
-          <span class="font-semibold text-[var(--foreground)]">Proofing Table</span>
+          <div class="flex items-center gap-2">
+            <span class="inline-flex items-center gap-1" aria-hidden="true">
+              <span class="w-2 h-2 rounded-full bg-[var(--brand-sky)]"></span>
+              <span class="w-2 h-2 rounded-full bg-[var(--brand-maroon)]"></span>
+              <span class="w-2 h-2 rounded-full bg-[var(--brand-orange)]"></span>
+            </span>
+            <span class="font-semibold text-[var(--foreground)]">Proofing Table</span>
+          </div>
           <span class="font-mono">.io · .ldr · .mpd · .biw</span>
         </div>
 
@@ -123,7 +146,7 @@
               <span>Import Model File</span>
             </button>
             <button id="emptyLoadProjBtn" type="button" class="sm:flex-1 shrink-0 h-11 px-5 rounded-full border border-[var(--border-strong)] bg-[var(--card)] hover:bg-[var(--surface-hover)] text-[var(--foreground)] text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors cursor-pointer">
-              <svg class="w-4 h-4 text-[var(--primary)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M12 18v-6"/><path d="m9 15 3-3 3 3"/></svg>
+              <svg class="w-4 h-4 text-[var(--info)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M12 18v-6"/><path d="m9 15 3-3 3 3"/></svg>
               <span>Import Project</span>
             </button>
           </div>
@@ -154,7 +177,7 @@
     <!-- ================================================================ -->
     <!-- FULL-SCREEN ZOOMABLE LIVE PAGE STAGE                             -->
     <!-- ================================================================ -->
-    <main id="stageViewport" class="stage-viewport proofing-stage hidden flex-1 min-h-0 relative w-full h-full overflow-hidden flex items-center justify-center pt-16 pb-28 px-3">
+    <main id="stageViewport" class="stage-viewport proofing-stage hidden flex-1 min-h-0 relative w-full h-full overflow-hidden flex items-center justify-center pt-[104px] md:pt-16 pb-28 px-3">
       <div id="stageContainer" class="relative z-10 w-0 h-0 overflow-visible origin-center will-change-transform flex items-center justify-center">
         <div id="pageFrame" class="shrink-0 studio-page-frame overflow-hidden relative transition-colors"></div>
       </div>
@@ -224,7 +247,7 @@
         <!-- Drawer Header -->
         <div class="px-5 py-4 border-b border-[var(--rail-border)] bg-[var(--rail)] text-[var(--rail-foreground)] flex items-center justify-between gap-3 shrink-0">
           <div class="flex items-center gap-3 min-w-0">
-            <div class="w-9 h-9 rounded-lg bg-[#faf9f6] flex items-center justify-center shrink-0">
+            <div class="w-9 h-9 rounded-lg bg-[#fcfcfd] flex items-center justify-center shrink-0">
               <svg class="w-7 h-7 shrink-0" viewBox="0 0 64 64" fill="none" aria-hidden="true">
                 <g transform="rotate(12 32 32)">
                   <path d="M24.8 7.8 Q17.9 12.8 13.7 20.2 L16.3 19.7 Q13.8 23.2 11.6 26.6 Q11.3 31.1 11.6 35.3 L14.9 32.7 Q13.9 38.0 13.3 42.8 Q14.6 45.2 15.8 47.2 L18.2 42.8 Q19.8 48.9 21.1 54.7 Q14.1 52.2 6.7 49.4 L13.1 48.9 Q12.0 46.5 11.1 43.7 Q7.5 38.4 3.3 32.7 L8.9 35.6 Q8.9 31.0 9.8 26.2 Q9.4 20.7 8.7 14.7 L11.7 19.3 Q17.3 12.2 24.8 7.8 Z" fill="#38bdf8"/>
