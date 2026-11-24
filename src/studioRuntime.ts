@@ -6756,8 +6756,6 @@ function renderAll() {
   document.getElementById('emptyState').classList.toggle('hidden', hasModel);
   document.getElementById('stageViewport').classList.toggle('hidden', !hasModel);
   document.getElementById('topRightPills').classList.toggle('hidden', !hasModel);
-  const headerEmptyEl = document.getElementById('headerEmptyActions');
-  if (headerEmptyEl) headerEmptyEl.classList.toggle('hidden', hasModel);
   document.getElementById('bottomDock').classList.toggle('hidden', !hasModel);
   const mobileBrandPill = document.getElementById('mobileEditorBrandPill');
   if (mobileBrandPill) {
@@ -15478,15 +15476,11 @@ async function closeCurrentModel() {
   showToast(`Closed ${closedTitle}.`);
 }
 
-// Top-rail Export, Bricks Library, Import Project, Close Model, and Dropzone handlers
+// Top-rail Export, Close Model, and Dropzone handlers
 const menuCloseModelBtnEl = document.getElementById('menuCloseModelBtn');
 if (menuCloseModelBtnEl) menuCloseModelBtnEl.onclick = closeCurrentModel;
 const btnHeaderExportEl = document.getElementById('btnHeaderExport');
 if (btnHeaderExportEl) btnHeaderExportEl.onclick = openExportModal;
-const headerBricksLibBtnEl = document.getElementById('headerBricksLibBtn');
-if (headerBricksLibBtnEl) headerBricksLibBtnEl.onclick = () => openBricksLibraryModal();
-const headerLoadProjBtnEl = document.getElementById('headerLoadProjBtn');
-if (headerLoadProjBtnEl) headerLoadProjBtnEl.onclick = triggerProjectLoad;
 
 const emptyStateEl = document.getElementById('emptyState');
 const emptyDropZoneEl = document.getElementById('emptyDropZone');

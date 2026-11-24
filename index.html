@@ -65,21 +65,8 @@
     </button>
 
     <!-- ================================================================ -->
-    <!-- FLOATING TOP-RIGHT PILLS: Empty-State Tools / Loaded Actions     -->
+    <!-- FLOATING TOP-RIGHT PILLS: Loaded-Model Actions                   -->
     <!-- ================================================================ -->
-    <div id="headerEmptyActions" class="no-print fixed top-3 right-3 z-40 flex items-center gap-1.5 shrink-0">
-      <button id="headerBricksLibBtn" type="button" class="studio-pill h-10 px-3.5 rounded-full hover:bg-[var(--surface-hover)] text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer">
-        <svg class="w-4 h-4 text-[var(--accent-warm)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 3 7.5 12 12l9-4.5L12 3Z"/><path d="m3 12 9 4.5 9-4.5"/><path d="m3 16.5 9 4.5 9-4.5"/></svg>
-        <span class="hidden sm:inline">Bricks Library</span>
-        <span class="sm:hidden">Bricks</span>
-      </button>
-      <button id="headerLoadProjBtn" type="button" title="Open saved project (.biw)" class="hidden sm:inline-flex studio-pill h-10 px-3.5 rounded-full hover:bg-[var(--surface-hover)] text-xs font-semibold items-center gap-1.5 transition-colors cursor-pointer">
-        <svg class="w-3.5 h-3.5 text-[var(--info)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
-        <span>Import Project</span>
-      </button>
-    </div>
-
-    <!-- Loaded-Model Floating Pills: Undo / Redo + Style + Export -->
     <div id="topRightPills" class="no-print hidden fixed top-3 right-3 z-40 flex items-center gap-1.5 shrink-0">
       <div class="studio-pill h-10 rounded-full px-1 inline-flex items-center gap-0.5">
         <button id="btnUndo" type="button" title="Undo" aria-label="Undo" class="h-8 w-8 rounded-full flex items-center justify-center hover:bg-[var(--surface-hover)] disabled:opacity-35 transition-colors cursor-pointer disabled:cursor-default">
