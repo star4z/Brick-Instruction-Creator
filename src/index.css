@@ -379,7 +379,6 @@ body {
 #exportModal:not(.hidden) .studio-sheet,
 #pageSetupModal:not(.hidden) .studio-sheet,
 #bomSetupModal:not(.hidden) .studio-sheet,
-#stepEditModal:not(.hidden) .studio-sheet,
 #applyAngleModal:not(.hidden) .studio-sheet,
 #openModelModal:not(.hidden) .studio-sheet,
 #errorsModal:not(.hidden) .studio-sheet,

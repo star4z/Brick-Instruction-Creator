@@ -84,8 +84,9 @@ To achieve a publication-grade LEGO studio photography look on the Cover Page (a
    - Rendered in 3D at `y = minY - 0.12` receiving all three softbox shadow maps with proximity-weighted contact darkening (dark crisp contact shadow right under grounded feet/stands + wide feathered penumbra under overhanging hulls/wings) and transparent alpha feathering so it blends onto any theme or custom background.
 6. **Screen-Space Ambient Occlusion (SSAO) Crevice Pass**:
    - Renders a linear view-space depth pass and evaluates a 16-sample depth-thresholded rotated screen-space occlusion kernel to softly darken stud bases, brick-to-brick joints, and recessed corners without creating silhouette halos.
-7. **High Resolution, Mesh Caching & Graceful Fallback**:
+7. **High Resolution, Interactive Orbit & Graceful Fallback**:
    - Live cover preview renders up to `1600px` wide; PDF export renders up to `2000px` wide. Both reuse the cached hero beveled mesh and rendered snapshots across UI edits, and gracefully fall back to `WebGLBrickEngine` if FBOs are unavailable.
+   - In **`Camera`** mode on both Front Cover and Build Complete pages, dragging directly over the hero render runs `StudioPhotoRenderer.renderToCanvas(..., { fastInteractive: true })` (skipping per-frame SSAO FBO churn and `toDataURL` encoding) for smooth 60fps live 3D orbiting, paired with the same 4 isometric **Cube + Camera** angle presets (`45°`, `135°`, `225°`, `315°`), **Zoom** (`− / % / +`), and **Reset Camera** controls used on step pages. Elevation remains clamped above the studio floor (`4°..60°`) so floor shadows stay grounded, and releasing the drag commits a full-resolution snapshot. Content, logos, toggles, and backgrounds live separately under **`Page`** mode.
 
 ---
 
@@ -119,8 +120,8 @@ The pure-JS PDF 1.4 binary builder supports per-page URI link annotations (`PdfP
 | `title` | `string` | `''` (falls back to `model.title`) | Model name shown at top-left |
 | `subtitle` | `string` | `''` (hidden when empty) | Optional subtitle below model name |
 | `az` | `number` | `34` | Hero camera azimuth in degrees |
-| `el` | `number` | `18` | Hero camera elevation in degrees |
-| `zoom` | `number` | `1.0` | Hero render scale (`0.75`–`1.35`) |
+| `el` | `number` | `18` | Hero camera elevation in degrees (`4`–`60`) |
+| `zoom` | `number` | `1.0` | Hero render scale (`0.70`–`1.40`) |
 | `bgSrc` | `string \| null` | `null` | Optional full-page background image data URL |
 | `creatorLogoSrc` | `string \| null` | `null` | Optional creator logo image above model name (top-left) |
 | `themeImageSrc` | `string \| null` | `null` | Optional series / theme logo (top-right) |
@@ -132,4 +133,17 @@ The pure-JS PDF 1.4 binary builder supports per-page URI link annotations (`PdfP
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `subtitle` | `string` (locked) | `'Made with Brick Instruction Works'` | Non-editable; always normalized to `BACK_COVER_CREDIT` |
-| `bgSrc` | `string \| null` | `null` | Optional full-page background image data URL (uploadable & clearable in Edit Back Cover) |
+| `bgSrc` | `string \| null` | `null` | Optional full-page background image data URL (uploadable & clearable in Back Cover `Page` mode) |
+
+`completeMeta` (normalized via `normalizeCompleteMeta()` alongside `coverMeta`):
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `title` | `string` | `'Build Complete!'` | Showcase heading |
+| `subtitle` | `string` | `'Ready for display!'` | Showcase subtitle |
+| `az` | `number` | `315` | Hero camera azimuth in degrees |
+| `el` | `number` | `28` | Hero camera elevation in degrees (`4`–`60`) |
+| `zoom` | `number` | `1.0` | Hero render scale (`0.70`–`1.40`) |
+| `bgSrc` | `string \| null` | `null` | Optional full-page background image data URL |
+| `showText` | `boolean` | `true` | Toggle heading & subtitle visibility |
+| `showFireworks` | `boolean` | `true` | Toggle celebratory fireworks backdrop |

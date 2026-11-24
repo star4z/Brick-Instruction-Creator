@@ -201,7 +201,7 @@ describe('studioRuntime safety checks', () => {
     const html = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf8');
     const runtime = fs.readFileSync(path.resolve(process.cwd(), 'src/studioRuntime.ts'), 'utf8');
 
-    // Always-visible instructions copy removed from overview modal & Edit Step modal
+    // Always-visible instructions copy removed from overview modal & step/page controls
     expect(html).not.toContain('locks a step to the start of a new page so editing earlier steps');
     expect(runtime).not.toContain('Pins a page break before Step ${step.num} so adding, splitting, or merging earlier steps');
 
@@ -209,14 +209,25 @@ describe('studioRuntime safety checks', () => {
     expect(html).toContain('id="pageBreakHelpTooltip"');
     expect(html).toContain('id="overviewPinsBar"');
 
-    // Both overview and Edit Step Page Break buttons include integrated `?` triggers wired to tooltip controller
-    expect(runtime).toContain('id="stepEditPinBreakHelp"');
+    // Both overview and floating Page card Page Break buttons include integrated `?` triggers wired to tooltip controller
+    expect(runtime).toContain('page-break-help-btn');
     expect(runtime).toContain('class="pb-help-btn');
     expect(runtime).toContain('function showPageBreakHelpTooltip(');
     expect(runtime).toContain('function togglePageBreakHelpTooltip(');
     expect(runtime).toContain('function hidePageBreakHelpTooltip(');
     expect(runtime).toContain('computeHelpTooltipPosition(');
     expect(runtime).toContain('getPageBreakHelpExplanation(');
+  });
+
+  it('wires scope-based editor cards, 3-tier scope badges, and live Cover/Complete 3D orbit', () => {
+    const runtimePath = path.resolve(process.cwd(), 'src/studioRuntime.ts');
+    const sourceText = fs.readFileSync(runtimePath, 'utf8');
+
+    expect(sourceText).toContain('function renderScopeBadge(');
+    expect(sourceText).toContain('function bindHeroCameraOrbit(');
+    expect(sourceText).toContain('resolveModeForPage(');
+    expect(sourceText).not.toContain('openStepEditModal');
+    expect(sourceText).not.toContain('closeStepEditModal');
   });
 });
 

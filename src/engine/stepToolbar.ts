@@ -1,4 +1,6 @@
-export type StudioMode = 'pan' | 'select' | 'rotate' | 'edit';
+export type StudioMode = 'pan' | 'parts' | 'camera' | 'step' | 'page';
+export type StepEditorSubTab = 'camera' | 'layout' | 'notes';
+export type ScopeTier = 'local' | 'range' | 'manual';
 
 export type MinifigStyleOptionId = 'exploded' | 'sequential' | 'classic';
 export type StepFocusModeId = 'auto' | 'focus' | 'full';
@@ -294,37 +296,84 @@ export function getCameraAngleLabel(cornerId: string | undefined): string {
   return (found || CAMERA_ANGLE_PRESETS[0]).label;
 }
 
+/**
+ * Matches an arbitrary camera azimuth (e.g. from Cover / Build Complete drag-orbit)
+ * to the nearest isometric Cube+Camera preset within `toleranceDeg`.
+ */
+export function findMatchingCameraPreset(
+  azDeg: number,
+  toleranceDeg = 14,
+): CameraAnglePreset | null {
+  if (!Number.isFinite(azDeg)) return null;
+  const norm = ((azDeg % 360) + 360) % 360;
+  let best: CameraAnglePreset | null = null;
+  let bestDiff = Infinity;
+  for (const preset of CAMERA_ANGLE_PRESETS) {
+    const rawDiff = Math.abs(norm - preset.az);
+    const diff = Math.min(rawDiff, 360 - rawDiff);
+    if (diff <= toleranceDeg && diff < bestDiff) {
+      best = preset;
+      bestDiff = diff;
+    }
+  }
+  return best;
+}
+
+export function clampStepModelScale(scale: number): number {
+  if (!Number.isFinite(scale)) return 1.0;
+  return Math.max(0.5, Math.min(2.2, Math.round(scale * 100) / 100));
+}
+
 export function getVisibleModeTabs(pageKind: string | null | undefined): StudioMode[] {
   if (pageKind === 'steps') {
-    return ['pan', 'select', 'rotate', 'edit'];
+    return ['pan', 'parts', 'step', 'page'];
   }
-  if (
-    pageKind === 'cover' ||
-    pageKind === 'complete' ||
-    pageKind === 'back' ||
-    pageKind === 'divider' ||
-    pageKind === 'bom'
-  ) {
-    return ['pan', 'edit'];
+  if (pageKind === 'cover' || pageKind === 'complete') {
+    return ['pan', 'camera', 'page'];
+  }
+  if (pageKind === 'back' || pageKind === 'divider' || pageKind === 'bom') {
+    return ['pan', 'page'];
   }
   return [];
 }
 
 /**
- * Returns the bottom mode pill label for the `edit` action button on a given page kind.
+ * Returns the bottom mode pill label for the `page` action button on a given page kind.
  * Parts List (`bom`) pages show "Customize Parts List" and directly open the Parts List dialog.
  */
 export function getEditModeButtonLabel(pageKind: string | null | undefined): string {
-  return pageKind === 'bom' ? 'Customize Parts List' : 'Edit';
+  return pageKind === 'bom' ? 'Customize Parts List' : 'Page';
 }
 
 /**
- * Returns true when pressing the `edit` mode pill action directly opens a dedicated modal
- * (Step Edit modal on step pages, Parts List Setup modal on BOM pages) rather than switching
- * into an inline floating overlay.
+ * Returns true when pressing the `page` mode pill action directly opens a dedicated modal
+ * (Parts List Setup modal on BOM pages) rather than switching into an inline floating card.
  */
 export function isModalEditPageKind(pageKind: string | null | undefined): boolean {
-  return pageKind === 'steps' || pageKind === 'bom';
+  return pageKind === 'bom';
+}
+
+/**
+ * Normalizes legacy mode IDs and smoothly maps equivalent modes across page kinds
+ * (e.g. Cover `camera` <-> Step `step`, legacy `select` -> `parts`, `rotate` -> `camera`/`step`, `edit` -> `page`).
+ */
+export function resolveModeForPage(
+  mode: string | null | undefined,
+  pageKind: string | null | undefined,
+): StudioMode {
+  const visible = getVisibleModeTabs(pageKind);
+  if (visible.length === 0) return 'pan';
+
+  let mapped: string = mode || 'pan';
+  if (mapped === 'select') mapped = 'parts';
+  else if (mapped === 'rotate') mapped = pageKind === 'steps' ? 'step' : 'camera';
+  else if (mapped === 'edit') mapped = 'page';
+  else if (mapped === 'arrange') mapped = 'pan';
+
+  if (mapped === 'camera' && pageKind === 'steps') mapped = 'step';
+  if (mapped === 'step' && (pageKind === 'cover' || pageKind === 'complete')) mapped = 'camera';
+
+  return visible.includes(mapped as StudioMode) ? (mapped as StudioMode) : 'pan';
 }
 
 export interface StepOverrideLike {
@@ -364,6 +413,7 @@ export interface StepToolbarCapabilityInput {
   pageInsertCount?: number;
   totalStepCount?: number;
   followingStepCount?: number;
+  canMergeWithPrev?: boolean;
 }
 
 export interface StepToolbarCapabilities {
@@ -372,11 +422,16 @@ export interface StepToolbarCapabilities {
   hasMovableCallout: boolean;
   hasMovableElements: boolean;
   hasCustomCameraAngle: boolean;
+  hasCustomModelZoom: boolean;
+  hasCustomFocusMode: boolean;
+  hasCustomCameraAny: boolean;
   hasCustomArrangeLayout: boolean;
   canApplyAngleToRange: boolean;
   canApplyAngleToFollowing: boolean;
   showMinifigSettings: boolean;
   showSubassemblySettings: boolean;
+  canMergeWithPrev: boolean;
+  hasStepLayoutControls: boolean;
 }
 
 export function resolveStepToolbarCapabilities(
@@ -396,6 +451,9 @@ export function resolveStepToolbarCapabilities(
     ov.corner !== undefined ||
     typeof ov.az === 'number' ||
     typeof ov.el === 'number';
+  const hasCustomModelZoom = typeof ov.modelScale === 'number' && Math.abs(ov.modelScale - 1) > 0.001;
+  const hasCustomFocusMode = Boolean(ov.focusMode && ov.focusMode !== 'auto');
+  const hasCustomCameraAny = hasCustomCameraAngle || hasCustomModelZoom || hasCustomFocusMode;
 
   const pliPos = ov.pliPos;
   const calloutPos = ov.calloutPos;
@@ -406,6 +464,9 @@ export function resolveStepToolbarCapabilities(
 
   const followingCount = input.followingStepCount ?? 0;
   const totalSteps = input.totalStepCount ?? (followingCount > 0 ? followingCount + 1 : 1);
+  const canMergeWithPrev = Boolean(input.canMergeWithPrev);
+  const hasStepLayoutControls =
+    hasPartsBox || input.hasSubassembly || input.isMinifigBuild || canMergeWithPrev;
 
   return {
     isOfficialMinifigStyle,
@@ -413,21 +474,33 @@ export function resolveStepToolbarCapabilities(
     hasMovableCallout,
     hasMovableElements,
     hasCustomCameraAngle,
+    hasCustomModelZoom,
+    hasCustomFocusMode,
+    hasCustomCameraAny,
     hasCustomArrangeLayout,
     canApplyAngleToRange: totalSteps >= 2,
     canApplyAngleToFollowing: followingCount > 0,
     showMinifigSettings: input.isMinifigBuild,
     showSubassemblySettings: input.hasSubassembly,
+    canMergeWithPrev,
+    hasStepLayoutControls,
   };
 }
 
-export function clearStepCameraOverride<T extends StepOverrideLike>(override?: T | null): Partial<T> {
+export function clearStepCameraOverride<T extends StepOverrideLike>(
+  override?: T | null,
+  includeZoomAndFraming = false,
+): Partial<T> {
   if (!override) return {};
   const next = { ...override };
   delete next.side;
   delete next.corner;
   delete next.az;
   delete next.el;
+  if (includeZoomAndFraming) {
+    delete next.modelScale;
+    delete next.focusMode;
+  }
   return next;
 }
 
@@ -440,7 +513,8 @@ export function clearStepArrangeOverride<T extends StepOverrideLike>(override?: 
 }
 
 /**
- * Applies a camera orientation to every step in the inclusive ABSOLUTE step range [startNum..endNum].
+ * Applies a camera orientation (and optionally model zoom & framing) to every step in the
+ * inclusive ABSOLUTE step range [startNum..endNum].
  * Uses `absNum` (unique across the manual) so submodels whose printed numbers restart at 1
  * are not accidentally included. Falls back to `num` only when `absNum` is missing.
  * Allows targeting steps both before and after the currently edited step.
@@ -450,7 +524,7 @@ export function applyCameraAngleToStepRange<T extends StepOverrideLike>(
   overrides: Readonly<Record<string, T>>,
   startNum: number,
   endNum: number,
-  camera: { side: string; corner: string; az: number; el: number },
+  camera: { side: string; corner: string; az: number; el: number; modelScale?: number; focusMode?: string },
 ): { overrides: Record<string, T>; appliedCount: number } {
   const lo = Math.min(startNum, endNum);
   const hi = Math.max(startNum, endNum);
@@ -459,13 +533,20 @@ export function applyCameraAngleToStepRange<T extends StepOverrideLike>(
   for (const s of steps) {
     const n = typeof s.absNum === 'number' ? s.absNum : s.num;
     if (n >= lo && n <= hi) {
-      next[s.id] = {
+      const updated: StepOverrideLike = {
         ...(next[s.id] || ({} as T)),
         side: camera.side,
         corner: camera.corner,
         az: camera.az,
         el: camera.el,
       };
+      if (typeof camera.modelScale === 'number' && Number.isFinite(camera.modelScale)) {
+        updated.modelScale = clampStepModelScale(camera.modelScale);
+      }
+      if (typeof camera.focusMode === 'string' && camera.focusMode.length > 0) {
+        updated.focusMode = camera.focusMode;
+      }
+      next[s.id] = updated as T;
       appliedCount++;
     }
   }

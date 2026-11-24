@@ -6,47 +6,90 @@ import {
   PAPER_FORMAT_ORDER,
   PAPER_FORMAT_SPECS,
   applyCameraAngleToStepRange,
+  clampStepModelScale,
   clearStepArrangeOverride,
   clearStepCameraOverride,
   computePaperPreviewBox,
+  findMatchingCameraPreset,
   getCameraAngleLabel,
   getEditModeButtonLabel,
   getFocusModeDescription,
   getVisibleModeTabs,
   isModalEditPageKind,
   migratePageInsertsToSteps,
+  resolveModeForPage,
   resolveStepToolbarCapabilities,
 } from '../stepToolbar';
 
-describe('Step Toolbar & Full-Page Editor Capabilities', () => {
-  it('exposes Pan, Select, Rotate, and Edit tabs on step pages (Arrange removed)', () => {
-    expect(getVisibleModeTabs('steps')).toEqual(['pan', 'select', 'rotate', 'edit']);
+describe('Step Toolbar & Scope-Based Editor Capabilities', () => {
+  it('exposes scope-based Pan, Parts, Step, and Page tabs on step pages', () => {
+    expect(getVisibleModeTabs('steps')).toEqual(['pan', 'parts', 'step', 'page']);
   });
 
-  it('exposes Pan and Edit tabs on cover, build complete, back cover, divider, and Parts List pages', () => {
-    expect(getVisibleModeTabs('cover')).toEqual(['pan', 'edit']);
-    expect(getVisibleModeTabs('complete')).toEqual(['pan', 'edit']);
-    expect(getVisibleModeTabs('back')).toEqual(['pan', 'edit']);
-    expect(getVisibleModeTabs('divider')).toEqual(['pan', 'edit']);
-    expect(getVisibleModeTabs('bom')).toEqual(['pan', 'edit']);
+  it('exposes Pan, Camera, and Page tabs on Cover and Build Complete pages', () => {
+    expect(getVisibleModeTabs('cover')).toEqual(['pan', 'camera', 'page']);
+    expect(getVisibleModeTabs('complete')).toEqual(['pan', 'camera', 'page']);
+  });
+
+  it('exposes Pan and Page tabs on Back Cover, Divider, and Parts List pages', () => {
+    expect(getVisibleModeTabs('back')).toEqual(['pan', 'page']);
+    expect(getVisibleModeTabs('divider')).toEqual(['pan', 'page']);
+    expect(getVisibleModeTabs('bom')).toEqual(['pan', 'page']);
   });
 
   it('hides mode tabs on unknown or empty page kinds', () => {
     expect(getVisibleModeTabs(null)).toEqual([]);
     expect(getVisibleModeTabs(undefined)).toEqual([]);
+    expect(getVisibleModeTabs('section_divider')).toEqual([]);
   });
 
-  it('labels the Edit mode button as Customize Parts List on BOM pages and opens modal editors directly on steps and BOM pages', () => {
+  it('resolves legacy mode IDs and smoothly maps Camera <-> Step across page kinds', () => {
+    // Legacy migrations
+    expect(resolveModeForPage('select', 'steps')).toBe('parts');
+    expect(resolveModeForPage('rotate', 'steps')).toBe('step');
+    expect(resolveModeForPage('rotate', 'cover')).toBe('camera');
+    expect(resolveModeForPage('edit', 'steps')).toBe('page');
+    expect(resolveModeForPage('edit', 'cover')).toBe('page');
+    expect(resolveModeForPage('arrange', 'steps')).toBe('pan');
+
+    // Cross-page transitions preserve camera editing intent
+    expect(resolveModeForPage('camera', 'steps')).toBe('step');
+    expect(resolveModeForPage('step', 'cover')).toBe('camera');
+    expect(resolveModeForPage('step', 'complete')).toBe('camera');
+    expect(resolveModeForPage('parts', 'cover')).toBe('pan');
+    expect(resolveModeForPage('camera', 'bom')).toBe('pan');
+    expect(resolveModeForPage('page', 'bom')).toBe('page');
+    expect(resolveModeForPage('page', null)).toBe('pan');
+  });
+
+  it('matches arbitrary azimuths (including wrap-around) to the nearest Cube+Camera preset', () => {
+    expect(findMatchingCameraPreset(38)?.id).toBe('front_right');
+    expect(findMatchingCameraPreset(34)?.id).toBe('front_right'); // default Cover angle
+    expect(findMatchingCameraPreset(315)?.id).toBe('front_left'); // default Build Complete angle
+    expect(findMatchingCameraPreset(-38)?.id).toBe('front_left'); // negative wrap-around
+    expect(findMatchingCameraPreset(502)?.id).toBe('back_right'); // >360 wrap-around (142°)
+    expect(findMatchingCameraPreset(90)).toBeNull(); // midway between 38° and 142°
+    expect(findMatchingCameraPreset(Number.NaN)).toBeNull();
+  });
+
+  it('clamps step 3D model zoom scale cleanly within 50%..220%', () => {
+    expect(clampStepModelScale(0.1)).toBe(0.5);
+    expect(clampStepModelScale(3.5)).toBe(2.2);
+    expect(clampStepModelScale(1.149)).toBe(1.15);
+    expect(clampStepModelScale(Number.NaN)).toBe(1.0);
+  });
+
+  it('labels the Page mode button as Customize Parts List on BOM pages and opens the Parts List modal directly', () => {
     expect(getEditModeButtonLabel('bom')).toBe('Customize Parts List');
-    expect(getEditModeButtonLabel('steps')).toBe('Edit');
-    expect(getEditModeButtonLabel('cover')).toBe('Edit');
-    expect(getEditModeButtonLabel('complete')).toBe('Edit');
-    expect(getEditModeButtonLabel('back')).toBe('Edit');
-    expect(getEditModeButtonLabel('divider')).toBe('Edit');
-    expect(getEditModeButtonLabel(null)).toBe('Edit');
+    expect(getEditModeButtonLabel('steps')).toBe('Page');
+    expect(getEditModeButtonLabel('cover')).toBe('Page');
+    expect(getEditModeButtonLabel('complete')).toBe('Page');
+    expect(getEditModeButtonLabel('back')).toBe('Page');
+    expect(getEditModeButtonLabel('divider')).toBe('Page');
+    expect(getEditModeButtonLabel(null)).toBe('Page');
 
     expect(isModalEditPageKind('bom')).toBe(true);
-    expect(isModalEditPageKind('steps')).toBe(true);
+    expect(isModalEditPageKind('steps')).toBe(false);
     expect(isModalEditPageKind('cover')).toBe(false);
     expect(isModalEditPageKind('complete')).toBe(false);
     expect(isModalEditPageKind('back')).toBe(false);
@@ -68,6 +111,7 @@ describe('Step Toolbar & Full-Page Editor Capabilities', () => {
     expect(exploded.hasMovableElements).toBe(false);
     expect(exploded.showMinifigSettings).toBe(true);
     expect(exploded.canApplyAngleToRange).toBe(true);
+    expect(exploded.hasStepLayoutControls).toBe(true);
 
     const withInsert = resolveStepToolbarCapabilities({
       isMinifigBuild: true,
@@ -90,11 +134,13 @@ describe('Step Toolbar & Full-Page Editor Capabilities', () => {
       stepInsertCount: 0,
       totalStepCount: 3,
       followingStepCount: 2,
+      canMergeWithPrev: true,
     });
     expect(classicMf.isOfficialMinifigStyle).toBe(false);
     expect(classicMf.hasPartsBox).toBe(true);
     expect(classicMf.hasMovableElements).toBe(true);
     expect(classicMf.showMinifigSettings).toBe(true);
+    expect(classicMf.canMergeWithPrev).toBe(true);
 
     const subCallout = resolveStepToolbarCapabilities({
       isMinifigBuild: false,
@@ -123,7 +169,7 @@ describe('Step Toolbar & Full-Page Editor Capabilities', () => {
     expect(subPages.hasMovableCallout).toBe(false);
   });
 
-  it('detects custom camera angles and custom arrange layouts independently', () => {
+  it('detects custom camera angle, zoom, framing, and arrange layouts independently', () => {
     const caps = resolveStepToolbarCapabilities({
       isMinifigBuild: false,
       minifigStyle: 'exploded',
@@ -134,9 +180,12 @@ describe('Step Toolbar & Full-Page Editor Capabilities', () => {
       followingStepCount: 1,
     });
     expect(caps.hasCustomCameraAngle).toBe(true);
+    expect(caps.hasCustomModelZoom).toBe(false);
+    expect(caps.hasCustomFocusMode).toBe(false);
+    expect(caps.hasCustomCameraAny).toBe(true);
     expect(caps.hasCustomArrangeLayout).toBe(true);
 
-    const clean = resolveStepToolbarCapabilities({
+    const zoomOnly = resolveStepToolbarCapabilities({
       isMinifigBuild: false,
       minifigStyle: 'exploded',
       hasSubassembly: false,
@@ -145,12 +194,15 @@ describe('Step Toolbar & Full-Page Editor Capabilities', () => {
       totalStepCount: 2,
       followingStepCount: 1,
     });
-    expect(clean.hasCustomCameraAngle).toBe(false);
-    expect(clean.hasCustomArrangeLayout).toBe(false);
+    expect(zoomOnly.hasCustomCameraAngle).toBe(false);
+    expect(zoomOnly.hasCustomModelZoom).toBe(true);
+    expect(zoomOnly.hasCustomFocusMode).toBe(true);
+    expect(zoomOnly.hasCustomCameraAny).toBe(true);
+    expect(zoomOnly.hasCustomArrangeLayout).toBe(false);
   });
 
-  it('clears only camera angle fields without disturbing framing, scale, layout, or page breaks', () => {
-    const next = clearStepCameraOverride({
+  it('clears camera angle fields and optionally clears zoom & framing without disturbing layout or page breaks', () => {
+    const ov = {
       side: 'bottom',
       corner: 'back_left',
       az: 225,
@@ -159,10 +211,16 @@ describe('Step Toolbar & Full-Page Editor Capabilities', () => {
       modelScale: 1.4,
       pliPos: { x: 20, y: 15 },
       pin: true,
-    });
-    expect(next).toEqual({
+    };
+
+    expect(clearStepCameraOverride(ov)).toEqual({
       focusMode: 'focus',
       modelScale: 1.4,
+      pliPos: { x: 20, y: 15 },
+      pin: true,
+    });
+
+    expect(clearStepCameraOverride(ov, true)).toEqual({
       pliPos: { x: 20, y: 15 },
       pin: true,
     });
@@ -203,7 +261,7 @@ describe('Step Toolbar & Full-Page Editor Capabilities', () => {
     expect(getCameraAngleLabel('back_right')).toBe('135°');
   });
 
-  it('applies camera angle cleanly across any inclusive step range (before and after current step)', () => {
+  it('applies camera angle (and optional zoom & framing) cleanly across any inclusive step range', () => {
     const steps = [
       { id: 's1', num: 1 },
       { id: 's2', num: 2 },
@@ -224,6 +282,25 @@ describe('Step Toolbar & Full-Page Editor Capabilities', () => {
     expect(res.overrides.s3).toEqual({ side: 'bottom', corner: 'back_left', az: 218, el: -30 });
     expect(res.overrides.s4).toEqual({ side: 'bottom', corner: 'back_left', az: 218, el: -30 });
     expect(res.overrides.s5).toBeUndefined();
+
+    const withFraming = applyCameraAngleToStepRange(
+      steps,
+      {},
+      2,
+      3,
+      { side: 'top', corner: 'front_right', az: 38, el: 29, modelScale: 1.4, focusMode: 'focus' },
+    );
+    expect(withFraming.appliedCount).toBe(2);
+    expect(withFraming.overrides.s2).toEqual({
+      side: 'top',
+      corner: 'front_right',
+      az: 38,
+      el: 29,
+      modelScale: 1.4,
+      focusMode: 'focus',
+    });
+    expect(withFraming.overrides.s3?.modelScale).toBe(1.4);
+    expect(withFraming.overrides.s3?.focusMode).toBe('focus');
   });
 
   it('applies camera ranges by absolute step number so submodel steps with the same printed number are not included', () => {

@@ -66,6 +66,17 @@ export interface CoverLayoutMetrics {
   cardRadius: number;
 }
 
+export interface CompleteMeta {
+  title: string;
+  subtitle: string;
+  az: number;
+  el: number;
+  zoom: number;
+  bgSrc: string | null;
+  showText: boolean;
+  showFireworks: boolean;
+}
+
 export function createDefaultCoverMeta(): CoverMeta {
   return {
     title: '',
@@ -88,6 +99,19 @@ export function createDefaultBackMeta(): BackCoverMeta {
     az: 38,
     el: 24,
     bgSrc: null,
+  };
+}
+
+export function createDefaultCompleteMeta(): CompleteMeta {
+  return {
+    title: 'Build Complete!',
+    subtitle: 'Ready for display!',
+    az: 315,
+    el: 28,
+    zoom: 1.0,
+    bgSrc: null,
+    showText: true,
+    showFireworks: true,
   };
 }
 
@@ -132,6 +156,32 @@ export function normalizeBackMeta(raw: unknown): BackCoverMeta {
     el: typeof r.el === 'number' && Number.isFinite(r.el) ? r.el : def.el,
     bgSrc: typeof r.bgSrc === 'string' && r.bgSrc.length > 0 ? r.bgSrc : null,
   };
+}
+
+export function normalizeCompleteMeta(raw: unknown): CompleteMeta {
+  const def = createDefaultCompleteMeta();
+  if (!raw || typeof raw !== 'object') return def;
+  const r = raw as Record<string, unknown>;
+  return {
+    title: typeof r.title === 'string' ? r.title : def.title,
+    subtitle: typeof r.subtitle === 'string' ? r.subtitle : def.subtitle,
+    az: typeof r.az === 'number' && Number.isFinite(r.az) ? ((r.az % 360) + 360) % 360 : def.az,
+    el: typeof r.el === 'number' ? clampCoverElevation(r.el) : def.el,
+    zoom: typeof r.zoom === 'number' ? clampCoverZoom(r.zoom) : def.zoom,
+    bgSrc: typeof r.bgSrc === 'string' && r.bgSrc.length > 0 ? r.bgSrc : null,
+    showText: typeof r.showText === 'boolean' ? r.showText : def.showText,
+    showFireworks: typeof r.showFireworks === 'boolean' ? r.showFireworks : def.showFireworks,
+  };
+}
+
+export function isHeroCameraCustomized(
+  current: { az: number; el: number; zoom?: number },
+  defaults: { az: number; el: number; zoom: number },
+): boolean {
+  const azDelta = Math.abs((((current.az - defaults.az) % 360) + 540) % 360 - 180);
+  const elDelta = Math.abs(current.el - defaults.el);
+  const zoomDelta = Math.abs((current.zoom ?? 1.0) - defaults.zoom);
+  return azDelta > 0.5 || elDelta > 0.5 || zoomDelta > 0.005;
 }
 
 export interface CoverLayoutInput {

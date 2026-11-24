@@ -151,14 +151,17 @@ import {
   MINIFIG_STYLE_OPTIONS,
   PAPER_FORMAT_SPECS,
   applyCameraAngleToStepRange,
+  clampStepModelScale,
   clearStepArrangeOverride,
   clearStepCameraOverride,
   computePaperPreviewBox,
+  findMatchingCameraPreset,
   getCameraAngleLabel,
   getEditModeButtonLabel,
   getFocusModeDescription,
   getVisibleModeTabs,
   migratePageInsertsToSteps,
+  resolveModeForPage,
   resolveStepToolbarCapabilities,
 } from './engine/stepToolbar';
 import {
@@ -233,8 +236,11 @@ import {
   computeCoverLayout,
   computeTightCameraBounds,
   createDefaultBackMeta,
+  createDefaultCompleteMeta,
   createDefaultCoverMeta,
+  isHeroCameraCustomized,
   normalizeBackMeta,
+  normalizeCompleteMeta,
   normalizeCoverMeta,
 } from './cover/coverLayout';
 import { buildQrSvg, drawQrCanvas } from './cover/qrCode';
@@ -2960,17 +2966,7 @@ function getCoverHeroGpuMaxDim() {
   return snapshotEngine?.maxDim || 4096;
 }
 
-function renderCoverHeroSnapshot(parts, az, el, zoom, targetW, targetH, theme) {
-  const safeZoom = clampCoverZoom(zoom ?? 1.0);
-  const photo = getStudioPhotoEngine();
-  const maxDim = Math.max(1024, Math.min(4096, (photo && photo.isAvailable() ? photo.getMaxDimension() : snapshotEngine?.maxDim) || 4096));
-  const rw = Math.max(480, Math.min(maxDim, Math.round(targetW)));
-  const rh = Math.max(320, Math.min(maxDim, Math.round(targetH)));
-  const darkTheme = isDarkHexColor(toHexColor(theme?.bgColor || '#ffffff', '#ffffff'));
-  const cacheKey = `${parts.length}|${Math.round(az * 10)}|${Math.round(el * 10)}|${safeZoom}|${rw}x${rh}|${darkTheme ? 'd' : 'l'}`;
-  if (coverHeroCache.has(cacheKey)) return coverHeroCache.get(cacheKey);
-
-  // Reuse hero beveled mesh across angle/zoom/theme edits for instant responsiveness
+function getCoverHeroMesh(parts, theme) {
   const meshCacheKey = `__hero_mesh_${parts.length}`;
   let mesh = coverHeroCache.get(meshCacheKey);
   if (!mesh) {
@@ -2983,6 +2979,21 @@ function renderCoverHeroSnapshot(parts, az, el, zoom, targetW, targetH, theme) {
     });
     coverHeroCache.set(meshCacheKey, mesh);
   }
+  return { mesh, meshCacheKey };
+}
+
+function renderCoverHeroSnapshot(parts, az, el, zoom, targetW, targetH, theme) {
+  const safeZoom = clampCoverZoom(zoom ?? 1.0);
+  const photo = getStudioPhotoEngine();
+  const maxDim = Math.max(1024, Math.min(4096, (photo && photo.isAvailable() ? photo.getMaxDimension() : snapshotEngine?.maxDim) || 4096));
+  const rw = Math.max(480, Math.min(maxDim, Math.round(targetW)));
+  const rh = Math.max(320, Math.min(maxDim, Math.round(targetH)));
+  const darkTheme = isDarkHexColor(toHexColor(theme?.bgColor || '#ffffff', '#ffffff'));
+  const cacheKey = `${parts.length}|${Math.round(az * 10)}|${Math.round(el * 10)}|${safeZoom}|${rw}x${rh}|${darkTheme ? 'd' : 'l'}`;
+  if (coverHeroCache.has(cacheKey)) return coverHeroCache.get(cacheKey);
+
+  // Reuse hero beveled mesh across angle/zoom/theme edits for instant responsiveness
+  const { mesh, meshCacheKey } = getCoverHeroMesh(parts, theme);
 
   // Primary path: Photorealistic multi-pass WebGL Studio Renderer (triple softbox shadow maps,
   // linear-space GGX ABS plastic PBR, Fresnel softbox reflections, 3D shadow-catcher floor, SSAO)
@@ -6223,12 +6234,13 @@ const state = {
   pageInserts: {},         // legacy page-keyed inserts (auto-migrated to stepInserts on load)
   dividerAfter: {},        // keyed by pageId: { title, note }
   coverMeta: createDefaultCoverMeta(),
-  completeMeta: { title:'Build Complete!', subtitle:'Ready for display!', az:315, el:28, bgSrc:null, showText:true, showFireworks:true },
+  completeMeta: createDefaultCompleteMeta(),
   backMeta:  createDefaultBackMeta(),
   bomConfig: createDefaultBomConfig(),
   pages: [],
   pageIdx: 0,
-  mode: 'pan',             // pan | select | rotate | edit
+  mode: 'pan',             // pan | parts | camera | step | page
+  stepSubTab: 'camera',    // camera | layout | notes
   selectedStepId: null,
   selectedPartIds: new Set(),
   selectedArrangeEl: null, // legacy / optional dragged element state
@@ -6242,6 +6254,7 @@ const state = {
 
 // Keep hit-test projection metadata for active rendered step slots
 let currentSlotRenderInfo = new Map();
+let activeHeroOrbitCleanup = null;
 
 function pushUndo() {
   if (!state.model) return;
@@ -6270,7 +6283,7 @@ function applyHistorySnap(json) {
   state.pageInserts = s.pageInserts || {};
   state.dividerAfter = s.dividerAfter;
   state.coverMeta = normalizeCoverMeta(s.coverMeta);
-  if (s.completeMeta) state.completeMeta = s.completeMeta;
+  if (s.completeMeta) state.completeMeta = normalizeCompleteMeta(s.completeMeta);
   state.backMeta = normalizeBackMeta(s.backMeta);
   if (s.layoutConfig) state.layoutConfig = normalizePageLayoutSpec(s.layoutConfig);
   if (Array.isArray(s.layoutGroups)) state.layoutGroups = normalizeLayoutGroups(s.layoutGroups);
@@ -7051,22 +7064,16 @@ function getModelFileTypeLabel() {
   return 'Imported Model';
 }
 
-function isSimpleEditPage(page) {
-  return Boolean(page && (page.kind === 'cover' || page.kind === 'complete' || page.kind === 'back' || page.kind === 'divider'));
-}
-
 function isPanGestureEnabled() {
   const page = state.pages[state.pageIdx];
-  return state.mode === 'pan' || (page?.kind !== 'steps' && !isSimpleEditPage(page));
+  return state.mode === 'pan' || getVisibleModeTabs(page?.kind).length === 0;
 }
 
 function syncModePillButtons(page) {
   const visibleModes = getVisibleModeTabs(page?.kind);
   const modePill = document.getElementById('modePill');
   if (modePill) modePill.classList.toggle('hidden', visibleModes.length === 0);
-  const isSimpleEdit = isSimpleEditPage(page);
   const isBom = page?.kind === 'bom';
-  const editModalOpen = page?.kind === 'steps' && isStepEditModalOpen();
   const bomModalOpen = isBom && isBomSetupModalOpen();
   const editLabelEl = document.getElementById('modeEditLabel');
   if (editLabelEl) editLabelEl.textContent = getEditModeButtonLabel(page?.kind);
@@ -7077,13 +7084,9 @@ function syncModePillButtons(page) {
   document.querySelectorAll('.mode-btn').forEach(b => {
     const m = b.getAttribute('data-mode');
     const visible = visibleModes.includes(m);
-    const active = isBom
-      ? (bomModalOpen ? m === 'edit' : m === 'pan')
-      : isSimpleEdit
-        ? (m === 'pan' ? state.mode === 'pan' : m === 'edit' && state.mode !== 'pan')
-        : editModalOpen
-          ? m === 'edit'
-          : m === state.mode;
+    const active = visible && (isBom
+      ? (bomModalOpen ? m === 'page' : m === 'pan')
+      : m === state.mode);
     b.className = `mode-btn ${visible ? 'flex' : 'hidden'} min-h-[34px] px-2.5 sm:px-3 py-1.5 rounded-full items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer ${
       active ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--surface-hover)]'
     }`;
@@ -7251,6 +7254,7 @@ function getThemeForPage(page) {
 
 function renderAll() {
   if (activeLiveEngine) { activeLiveEngine.dispose(); activeLiveEngine = null; }
+  if (activeHeroOrbitCleanup) { activeHeroOrbitCleanup(); activeHeroOrbitCleanup = null; }
   currentSlotRenderInfo.clear();
 
   const hasModel = Boolean(state.model);
@@ -7329,15 +7333,9 @@ function renderAll() {
   const lastPageEl = document.getElementById('lastPage');
   if (lastPageEl) lastPageEl.disabled = !navState.canGoLast;
 
-  const isSteps = page.kind === 'steps';
-  if (state.mode === 'arrange') {
-    state.mode = 'pan';
-  }
-  if (isSteps && state.mode === 'edit') {
-    state.mode = 'pan';
-  }
-  if (!isSteps && isStepEditModalOpen()) {
-    closeStepEditModal();
+  state.mode = resolveModeForPage(state.mode, page?.kind);
+  if (state.mode !== 'parts' && state.selectedPartIds.size > 0) {
+    state.selectedPartIds.clear();
   }
   if (state.pageInserts && Object.keys(state.pageInserts).length > 0 && state.pages.length > 0) {
     state.stepInserts = migratePageInsertsToSteps(state.pageInserts, state.stepInserts, state.pages);
@@ -7381,7 +7379,9 @@ function renderAll() {
   // Render Page Contents
   if (page.kind === 'cover') {
     const dens = DENSITY_PAD[state.density] || DENSITY_PAD.balanced;
-    const cm = normalizeCoverMeta(state.coverMeta);
+    state.coverMeta = normalizeCoverMeta(state.coverMeta);
+    const cm = state.coverMeta;
+    const isHeroCameraMode = state.mode === 'camera';
     const title = (cm.title || state.model.title || 'Untitled Model').trim();
     const sub = (cm.subtitle || '').trim();
     const layout = computeCoverLayout({
@@ -7443,8 +7443,9 @@ function renderAll() {
     frame.innerHTML = `
       <div class="relative w-full h-full overflow-hidden ${guideCls}" style="${cm.bgSrc ? `background-image:url(${cm.bgSrc});background-size:cover;background-position:center;` : ''}">
         <!-- High-Quality Page-Filling Hero Render -->
-        <div class="absolute z-0 flex items-center justify-center pointer-events-none" style="left:${layout.heroRect.x}px;top:${layout.heroRect.y}px;width:${layout.heroRect.w}px;height:${layout.heroRect.h}px;">
-          <img data-cover-hero-img="true" src="${snap.url}" alt="${escHtml(title)}" class="w-full h-full object-contain pointer-events-none select-none" />
+        <div id="heroOrbitContainer" class="absolute ${isHeroCameraMode ? 'z-20 cursor-grab active:cursor-grabbing' : 'z-0 pointer-events-none'} flex items-center justify-center" style="left:${layout.heroRect.x}px;top:${layout.heroRect.y}px;width:${layout.heroRect.w}px;height:${layout.heroRect.h}px;touch-action:${isHeroCameraMode ? 'none' : 'auto'};">
+          <img id="heroStaticImg" data-cover-hero-img="true" src="${snap.url}" alt="${escHtml(title)}" class="w-full h-full object-contain pointer-events-none select-none" />
+          ${isHeroCameraMode ? `<canvas id="liveHeroOrbitCanvas" class="hidden absolute inset-0 w-full h-full object-contain pointer-events-none"></canvas>` : ''}
         </div>
 
         <!-- Top-Left: Optional Creator Logo + Model Name + Optional Subtitle -->
@@ -7466,7 +7467,7 @@ function renderAll() {
         ` : ''}
 
         <!-- Bottom-Right: Non-Editable Clickable Program Attribution + QR Code -->
-        <a href="${PROGRAM_URL}" target="_blank" rel="noopener noreferrer" data-cover-link="true" title="Open ${PROGRAM_NAME}" class="absolute z-10 flex items-stretch hover:opacity-90 active:scale-[0.98] transition cursor-pointer" style="right:${layout.pad}px;bottom:${layout.pad}px;height:${layout.brandGroupRect.h}px;gap:${layout.brandGap}px;text-decoration:none;">
+        <a href="${PROGRAM_URL}" target="_blank" rel="noopener noreferrer" data-cover-link="true" title="Open ${PROGRAM_NAME}" class="absolute z-10 flex items-stretch hover:opacity-90 active:scale-[0.98] transition ${isHeroCameraMode ? 'pointer-events-none opacity-85' : 'cursor-pointer'}" style="right:${layout.pad}px;bottom:${layout.pad}px;height:${layout.brandGroupRect.h}px;gap:${layout.brandGap}px;text-decoration:none;">
           <div class="flex items-center shrink-0 shadow-xs overflow-hidden" style="min-width:${layout.brandCardRect.w}px;max-width:${maxBrandCardDomW}px;height:${layout.brandCardRect.h}px;border-radius:${layout.cardRadius}px;padding:0 ${layout.brandPadX}px;gap:${layout.brandInnerGap}px;background:${badgeSurface};border:1px solid ${badgeBorder};backdrop-filter:blur(6px);">
             <svg class="shrink-0" style="width:${layout.brandIconSize}px;height:${layout.brandIconSize}px;" viewBox="0 0 64 64" fill="none" aria-hidden="true">${BRAND_LOGO_SVG_BODY}</svg>
             <div class="min-w-0 flex flex-col justify-center" style="color:${badgeTextColor};">
@@ -7483,8 +7484,21 @@ function renderAll() {
           </div>
         </a>
       </div>`;
+
+    if (isHeroCameraMode) {
+      bindHeroCameraOrbit({
+        meta: state.coverMeta,
+        parts: allParts,
+        theme,
+        renderW: heroSize.width,
+        renderH: heroSize.height,
+        page,
+      });
+    }
   } else if (page.kind === 'complete') {
+    state.completeMeta = normalizeCompleteMeta(state.completeMeta);
     const cm = state.completeMeta;
+    const isHeroCameraMode = state.mode === 'camera';
     const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) ? window.devicePixelRatio : 1;
     const compW = Math.max(240, dims.width - padPx * 2);
     const compH = Math.max(200, Math.round(dims.height * 0.72));
@@ -7497,12 +7511,12 @@ function renderAll() {
       mode: 'screen',
       gpuMaxDim: getCoverHeroGpuMaxDim(),
     });
-    const snap = renderCoverHeroSnapshot(allParts, cm.az, cm.el, 1.0, heroSize.width, heroSize.height, theme);
+    const snap = renderCoverHeroSnapshot(allParts, cm.az, cm.el, cm.zoom, heroSize.width, heroSize.height, theme);
     currentCoverHeroInfo = {
       parts: allParts,
       az: cm.az,
       el: cm.el,
-      zoom: 1.0,
+      zoom: cm.zoom,
       heroW: compW,
       heroH: compH,
       w: snap.w,
@@ -7515,18 +7529,30 @@ function renderAll() {
     frame.innerHTML = `
       <div class="relative w-full h-full text-center flex flex-col items-center justify-between overflow-hidden ${guideCls}" style="padding:${padPx}px;padding-bottom:${padPx + footerH}px;${cm.bgSrc ? `background-image:url(${cm.bgSrc});background-size:cover;background-position:center;` : ''}">
         ${showFw ? buildFireworksSvg() : ''}
-        <div class="relative z-10 shrink-0 ${showText ? '' : 'hidden'}">
+        <div class="relative z-10 shrink-0 pointer-events-none ${showText ? '' : 'hidden'}">
           <h2 class="font-extrabold leading-tight" style="font-size:${typo.complete.titleFont}px">${escHtml(cm.title || 'Build Complete!')}</h2>
           ${cm.subtitle ? `<p style="color:${theme.muted};font-size:${typo.complete.subtitleFont}px;margin-top:${Math.round(typo.pt(2.5))}px">${escHtml(cm.subtitle)}</p>` : ''}
         </div>
-        <div class="relative z-10 flex-1 min-h-0 w-full overflow-hidden" style="margin:${Math.round(typo.pt(8))}px 0">
-          <img data-cover-hero-img="true" src="${snap.url}" alt="Completed build" class="absolute inset-0 w-full h-full object-contain pointer-events-none" />
+        <div id="heroOrbitContainer" class="relative ${isHeroCameraMode ? 'z-20 cursor-grab active:cursor-grabbing' : 'z-10 pointer-events-none'} flex-1 min-h-0 w-full overflow-hidden" style="margin:${Math.round(typo.pt(8))}px 0;touch-action:${isHeroCameraMode ? 'none' : 'auto'};">
+          <img id="heroStaticImg" data-cover-hero-img="true" src="${snap.url}" alt="Completed build" class="absolute inset-0 w-full h-full object-contain pointer-events-none select-none" />
+          ${isHeroCameraMode ? `<canvas id="liveHeroOrbitCanvas" class="hidden absolute inset-0 w-full h-full object-contain pointer-events-none"></canvas>` : ''}
         </div>
         <div class="absolute z-10 flex justify-between font-medium pointer-events-none" style="bottom:${footerPadBottom}px;left:${padPx}px;right:${padPx}px;font-size:${typo.footerFont}px;color:${theme.muted}">
           <span class="truncate">${state.showPageTitle ? escHtml(state.model.title) : ''}</span>
           <span style="color:${theme.text}" class="font-bold shrink-0">${escHtml(pgNumText)}</span>
         </div>
       </div>`;
+
+    if (isHeroCameraMode) {
+      bindHeroCameraOrbit({
+        meta: state.completeMeta,
+        parts: allParts,
+        theme,
+        renderW: heroSize.width,
+        renderH: heroSize.height,
+        page,
+      });
+    }
   } else if (page.kind === 'back') {
     const bm = normalizeBackMeta(state.backMeta);
     const credit = BACK_COVER_CREDIT;
@@ -7544,7 +7570,7 @@ function renderAll() {
     frame.innerHTML = `
       <div class="w-full h-full flex flex-col items-center justify-center text-center ${guideCls}" style="padding:${padPx + Math.round(typo.pt(10))}px;gap:${Math.round(typo.pt(8))}px">
         <div class="font-extrabold" style="font-size:${typo.divider.customTitleFont}px">${escHtml(d.title)}</div>
-        <div style="color:${theme.muted};font-size:${typo.divider.customNoteFont}px;max-width:${Math.round(typo.pt(320))}px">${escHtml(d.note || 'Switch to Edit mode to edit this divider page.')}</div>
+        <div style="color:${theme.muted};font-size:${typo.divider.customNoteFont}px;max-width:${Math.round(typo.pt(320))}px">${escHtml(d.note || 'Switch to Page mode to edit this divider page.')}</div>
       </div>`;
   } else if (page.kind === 'section_divider') {
     const resScale = getPreviewResolutionScale();
@@ -7778,7 +7804,7 @@ function renderAll() {
         fadePrev: state.fadePrev, fadeOpacity: state.fadeOpacity,
         showArrows: true, accent: theme.accent, ov,
         partOffsets: effectivePartOffsets,
-        selectedPartIds: state.mode === 'select' && state.selectedStepId === step.id ? state.selectedPartIds : null,
+        selectedPartIds: state.mode === 'parts' && state.selectedStepId === step.id ? state.selectedPartIds : null,
         ...(mfPrep ? {
           minifigIndicators: mfPrep.indicators || [],
           ghostParts: mfPrep.ghostParts || [],
@@ -7898,8 +7924,10 @@ function renderAll() {
       return { ch, step, minifigSeqSlice, slotRect, estSlotW, estSlotH, prev, cam, ov, snap, isMfBuild, isMfExploded, isMfSeq, mfExploded, mfSeqStages, subImg, attSubImg, mfPrepImg, attMfImg, mf1to1, pli: Array.from(pliMap.values()) };
     });
 
-    const isRotateMode = state.mode === 'rotate';
-    const isArrangeMode = state.mode === 'arrange';
+    const isLiveStepCamera = state.mode === 'step' && state.stepSubTab === 'camera';
+    const isStepNotesMode = state.mode === 'step' && state.stepSubTab === 'notes';
+    const isPartsMode = state.mode === 'parts';
+    const isArrangeMode = false;
     const pgNumText = formatPageNumber(page.num, state.pages.length);
 
     frame.innerHTML = `
@@ -7926,7 +7954,7 @@ function renderAll() {
             const slotWidthPct = (slotRect.w / gridW) * 100;
             const slotHeightPct = (slotRect.h / gridH) * 100;
             const isSelStep = state.selectedStepId === step.id;
-            const showLive3D = isRotateMode && isSelStep;
+            const showLive3D = isLiveStepCamera && isSelStep;
             const isOfficialMfStyle = isMfExploded || isMfSeq;
             const pliScale = ov.pliScale || (isTightSlot ? 0.9 : 1.0);
             const pliPos = ov.pliPos || { x: 0, y: 0 };
@@ -7983,9 +8011,9 @@ function renderAll() {
               : (!step.subassembly || ov.calloutAsPages ? `
                 <div data-drag="pli" data-step="${step.id}" class="draggable-el flex items-center flex-wrap shadow-xs w-fit max-w-full min-w-0 ${isArrangeMode ? 'cursor-move' : ''}" style="gap:${Math.round(typo.pt(5))}px;padding:${Math.round(typo.pt(2.5))}px ${Math.round(typo.pt(6))}px;border-radius:${Math.round(typo.pt(8))}px;background:${theme.pliBg};border:${pliSel ? `2px solid ${theme.accent}` : `1px solid ${theme.pliBorder}`};transform:translate(${pliPos.x}px,${pliPos.y}px) scale(${pliScale});transform-origin:top left;">
                   ${pli.slice(0, 7).map(item => {
-                    const anySel = state.mode === 'select' && item.ids.some(id => state.selectedPartIds.has(id));
+                    const anySel = isPartsMode && item.ids.some(id => state.selectedPartIds.has(id));
                     const thumb = getPliThumb(item.part);
-                    return `<button type="button" data-pli-ids="${item.ids.join(',')}" data-step="${step.id}" class="pli-chip flex flex-col items-center rounded-lg transition ${anySel ? 'ring-2 ring-[var(--primary)] bg-[var(--primary-soft)]' : ''}" style="padding:${Math.round(typo.pt(1.5))}px ${Math.round(typo.pt(2))}px" title="${escHtml(resolvePart(item.part.p).name)}">
+                    return `<button type="button" data-pli-ids="${item.ids.join(',')}" data-step="${step.id}" class="pli-chip flex flex-col items-center rounded-lg transition ${isPartsMode ? 'cursor-pointer' : ''} ${anySel ? 'ring-2 ring-[var(--primary)] bg-[var(--primary-soft)]' : ''}" style="padding:${Math.round(typo.pt(1.5))}px ${Math.round(typo.pt(2))}px" title="${escHtml(resolvePart(item.part.p).name)}">
                       <div class="flex items-center font-bold" style="gap:${Math.round(typo.pt(2.5))}px;font-size:${pliQtyPx}px">
                         <img src="${thumb}" style="width:${pliThumbPx}px;height:${pliThumbPx}px" class="shrink-0 object-contain pointer-events-none" />
                         <span>${item.qty}×</span>
@@ -8061,7 +8089,7 @@ function renderAll() {
 
                   <div class="flex-1 min-w-0 min-h-0 w-full h-full flex items-center justify-center relative overflow-hidden">
                     ${showLive3D
-                      ? `<canvas id="liveRotateCanvas" class="absolute inset-0 w-full h-full object-contain cursor-grab active:cursor-grabbing"></canvas>`
+                      ? `<canvas id="liveRotateCanvas" class="absolute inset-0 w-full h-full object-contain cursor-grab active:cursor-grabbing" style="touch-action:none;"></canvas>`
                       : isMfExploded && mfExploded
                         ? `<img data-pick-step="${step.id}" src="${mfExploded.url}" alt="${escHtml(step.minifigName || 'Minifigure assembly')}" class="absolute inset-0 w-full h-full object-contain pointer-events-none" />`
                         : isMfSeq && mfSeqStages
@@ -8071,7 +8099,7 @@ function renderAll() {
                                   <img src="${img.url}" alt="${escHtml(`Step ${stage.stepNumber}: ${stage.label}`)}" class="max-w-full max-h-full w-full h-full object-contain pointer-events-none" />
                                 </div>`).join('')}
                             </div>`
-                          : `<img data-pick-step="${step.id}" src="${snap.url}" class="step-render-img absolute inset-0 w-full h-full object-contain ${state.mode === 'select' ? 'cursor-crosshair' : 'pointer-events-none'}" />`
+                          : `<img data-pick-step="${step.id}" src="${snap.url}" class="step-render-img absolute inset-0 w-full h-full object-contain ${isPartsMode ? 'cursor-crosshair' : 'pointer-events-none'}" />`
                     }
                     ${step.isSubmodelFinal ? `<span class="absolute rounded-full font-black text-white shadow-md pointer-events-none" style="bottom:${Math.round(typo.pt(5))}px;right:${Math.round(typo.pt(5))}px;padding:${Math.round(typo.pt(3))}px ${Math.round(typo.pt(9))}px;font-size:${st.subFinalFont}px;background:${theme.accent}">×${step.submodelRepeat || 2}</span>` : ''}
                   </div>
@@ -8115,7 +8143,7 @@ function renderAll() {
                         : corner === 'bottom-left'
                           ? `left:${offsetPx}px;bottom:${offsetPx + stackShift}px;transform-origin:bottom left;`
                           : `right:${offsetPx}px;bottom:${offsetPx + stackShift}px;transform-origin:bottom right;`;
-                  return `<div data-drag="step-insert" data-step="${step.id}" data-insert-id="${ins.id}" class="draggable-el absolute z-20 ${state.mode === 'select' ? 'cursor-move' : 'pointer-events-none'}" style="${posStyle}padding:${Math.round(typo.pt(5))}px ${Math.round(typo.pt(7))}px;border-radius:${Math.round(typo.pt(8))}px;transform:scale(${ins.scale || 1});border:1px solid ${ins.kind === 'text' ? theme.calloutBorder : 'transparent'};background:${ins.kind === 'text' ? theme.calloutBg : 'transparent'};box-shadow:0 2px 6px rgba(0,0,0,0.08)">
+                  return `<div data-drag="step-insert" data-step="${step.id}" data-insert-id="${ins.id}" class="draggable-el absolute z-20 ${isStepNotesMode ? 'cursor-move ring-1 ring-dashed ring-[var(--primary)]/55' : 'pointer-events-none'}" style="${posStyle}padding:${Math.round(typo.pt(5))}px ${Math.round(typo.pt(7))}px;border-radius:${Math.round(typo.pt(8))}px;transform:scale(${ins.scale || 1});border:1px solid ${ins.kind === 'text' ? theme.calloutBorder : 'transparent'};background:${ins.kind === 'text' ? theme.calloutBg : 'transparent'};box-shadow:0 2px 6px rgba(0,0,0,0.08);touch-action:${isStepNotesMode ? 'none' : 'auto'};">
                     ${ins.kind === 'text'
                       ? `<div class="font-bold leading-snug break-words overflow-hidden" style="font-size:${st.insertTextFont}px;max-width:${st.insertTextMaxW}px">${escHtml(ins.text)}</div>`
                       : `<img src="${ins.src}" style="width:${st.insertImgSize}px;height:${st.insertImgSize}px" class="object-contain rounded-lg pointer-events-none" />`}
@@ -8136,16 +8164,130 @@ function renderAll() {
   }
 
   renderContextOverlay(page);
-  if (isStepEditModalOpen()) renderStepEditModal();
   syncMenuControls();
   applyStageTransform();
 }
 
 // =========================================================================
-// 7. DIRECT CANVAS INTERACTIONS (3D Picking, Live Orbit, 2D Drag-and-Drop)
+// 7. DIRECT CANVAS INTERACTIONS (Hero 3D Orbit, Part Picking, Step Orbit, Notes Drag)
 // =========================================================================
+function bindHeroCameraOrbit({ meta, parts, theme, renderW, renderH }) {
+  const container = document.getElementById('heroOrbitContainer');
+  const staticImg = document.getElementById('heroStaticImg');
+  const liveCanvas = document.getElementById('liveHeroOrbitCanvas');
+  if (!container || !liveCanvas || !meta || !parts?.length) return;
+
+  const { mesh } = getCoverHeroMesh(parts, theme);
+  const darkTheme = isDarkHexColor(toHexColor(theme?.bgColor || '#ffffff', '#ffffff'));
+  const scale = Math.min(1, 680 / Math.max(renderW || 640, renderH || 480, 1));
+  const dragW = Math.max(320, Math.round((renderW || 640) * scale));
+  const dragH = Math.max(240, Math.round((renderH || 480) * scale));
+
+  let dragging = false;
+  let moved = false;
+  let pushedUndo = false;
+  let startX = 0, startY = 0, lx = 0, ly = 0;
+  let az = meta.az, el = meta.el;
+  let rafId = 0;
+
+  const drawInteractiveFrame = () => {
+    rafId = 0;
+    const zoom = clampCoverZoom(meta.zoom ?? 1.0);
+    const photo = getStudioPhotoEngine();
+    if (photo && photo.isAvailable()) {
+      const rendered = photo.renderToCanvas(mesh, {
+        azDeg: az,
+        elDeg: el,
+        width: dragW,
+        height: dragH,
+        zoom,
+        darkBackground: darkTheme,
+        fastInteractive: true,
+        getTextureImage: (texKey) => textureStore.getDecodedImage(texKey),
+      });
+      if (rendered) {
+        if (liveCanvas.width !== rendered.width || liveCanvas.height !== rendered.height) {
+          liveCanvas.width = rendered.width;
+          liveCanvas.height = rendered.height;
+        }
+        const ctx2d = liveCanvas.getContext('2d');
+        if (ctx2d) {
+          ctx2d.clearRect(0, 0, liveCanvas.width, liveCanvas.height);
+          ctx2d.drawImage(rendered, 0, 0);
+        }
+      }
+    } else {
+      if (!activeLiveEngine) activeLiveEngine = new WebGLBrickEngine(liveCanvas);
+      activeLiveEngine.draw(mesh, dragW, dragH, az, el, zoom, 0, {
+        tightFit: true,
+        heroShading: true,
+        lineAlpha: 0.32,
+      });
+    }
+    if (staticImg) staticImg.classList.add('hidden');
+    liveCanvas.classList.remove('hidden');
+  };
+
+  container.onpointerdown = (e) => {
+    e.stopPropagation();
+    dragging = true;
+    moved = false;
+    pushedUndo = false;
+    startX = lx = e.clientX;
+    startY = ly = e.clientY;
+    az = meta.az;
+    el = meta.el;
+    container.setPointerCapture(e.pointerId);
+  };
+
+  container.onpointermove = (e) => {
+    if (!dragging) return;
+    e.stopPropagation();
+    const dx = e.clientX - lx;
+    const dy = e.clientY - ly;
+    lx = e.clientX;
+    ly = e.clientY;
+    if (!moved && Math.hypot(e.clientX - startX, e.clientY - startY) < 2) return;
+    if (!pushedUndo) {
+      pushUndo();
+      pushedUndo = true;
+    }
+    moved = true;
+    az = (az - dx * 0.6 + 360) % 360;
+    el = Math.max(4, Math.min(60, el + dy * 0.45));
+    meta.az = Math.round(az) % 360;
+    meta.el = clampCoverElevation(el);
+    const readout = document.getElementById('heroCamReadout');
+    if (readout) readout.textContent = `${meta.az}° / ${meta.el}°`;
+    if (!rafId) rafId = requestAnimationFrame(drawInteractiveFrame);
+  };
+
+  const finishDrag = (e) => {
+    if (!dragging) return;
+    e.stopPropagation();
+    dragging = false;
+    if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+    if (moved) {
+      meta.az = Math.round(az) % 360;
+      meta.el = clampCoverElevation(el);
+      renderAll();
+    }
+  };
+
+  container.onpointerup = finishDrag;
+  container.onpointercancel = finishDrag;
+
+  activeHeroOrbitCleanup = () => {
+    if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+    dragging = false;
+  };
+}
+
 function bindStepPageInteractions(page) {
   const frame = document.getElementById('pageFrame');
+  const isPartsMode = state.mode === 'parts';
+  const isLiveStepCamera = state.mode === 'step' && state.stepSubTab === 'camera';
+  const isStepNotesMode = state.mode === 'step' && state.stepSubTab === 'notes';
 
   // Tap a step slot to make it active
   frame.querySelectorAll('.step-slot').forEach(slotEl => {
@@ -8159,10 +8301,10 @@ function bindStepPageInteractions(page) {
     });
   });
 
-  // SELECT MODE: Tap PLI chip to select/toggle those exact pieces!
+  // PARTS MODE: Tap PLI chip to select/toggle those exact parts
   frame.querySelectorAll('.pli-chip').forEach(btn => {
     btn.addEventListener('click', (e) => {
-      if (state.mode !== 'select') return;
+      if (!isPartsMode) return;
       e.stopPropagation();
       const sid = btn.getAttribute('data-step');
       const ids = btn.getAttribute('data-pli-ids').split(',').filter(Boolean);
@@ -8173,10 +8315,10 @@ function bindStepPageInteractions(page) {
     });
   });
 
-  // SELECT MODE: Tap directly on a 3D piece in the step render to pick it!
+  // PARTS MODE: Tap directly on a 3D part in the step render to pick it
   frame.querySelectorAll('.step-render-img').forEach(img => {
     img.addEventListener('click', (e) => {
-      if (state.mode !== 'select') return;
+      if (!isPartsMode) return;
       e.stopPropagation();
       const sid = img.getAttribute('data-pick-step');
       const info = currentSlotRenderInfo.get(sid);
@@ -8191,7 +8333,7 @@ function bindStepPageInteractions(page) {
       const ndcX = ((e.clientX - rect.left - ox) / drawW) * 2 - 1;
       const ndcY = 1 - ((e.clientY - rect.top - oy) / drawH) * 2;
 
-      // Pick closest new piece in this step whose projected 3D box contains (or is nearest to) tap
+      // Pick closest new part in this step whose projected 3D box contains (or is nearest to) tap
       let bestId = null, bestScore = 0.28;
       const ov = info.ov || {};
       for (const p of info.step.parts) {
@@ -8208,13 +8350,13 @@ function bindStepPageInteractions(page) {
         else state.selectedPartIds.add(bestId);
         renderAll();
       } else {
-        showToast('Tap a highlighted piece or a piece in the Parts List box.');
+        showToast('Tap a highlighted part or a part in the Parts Box.');
       }
     });
   });
 
-  // ROTATE 3D MODE: Attach single GPU-cached live WebGL canvas matching static snapshot size identically!
-  if (state.mode === 'rotate') {
+  // STEP -> CAMERA MODE: Attach single GPU-cached live WebGL canvas matching static snapshot size identically
+  if (isLiveStepCamera) {
     const liveCanvas = document.getElementById('liveRotateCanvas');
     const info = currentSlotRenderInfo.get(state.selectedStepId);
     if (liveCanvas && info) {
@@ -8228,30 +8370,68 @@ function bindStepPageInteractions(page) {
       let az = info.cam.az, el = info.cam.el;
       activeLiveEngine.draw(info.snap.mesh, w, h, az, el, info.modelScale, fixedHalfH, liveDrawOpts);
 
-      let dragging = false, lx = 0, ly = 0;
-      liveCanvas.onpointerdown = (e) => { e.stopPropagation(); dragging = true; lx = e.clientX; ly = e.clientY; liveCanvas.setPointerCapture(e.pointerId); };
+      let dragging = false, moved = false, pushedUndo = false, startX = 0, startY = 0, lx = 0, ly = 0;
+      liveCanvas.onpointerdown = (e) => {
+        e.stopPropagation();
+        dragging = true;
+        moved = false;
+        pushedUndo = false;
+        startX = lx = e.clientX;
+        startY = ly = e.clientY;
+        liveCanvas.setPointerCapture(e.pointerId);
+      };
       liveCanvas.onpointermove = (e) => {
         if (!dragging || !activeLiveEngine) return;
         e.stopPropagation();
-        az = (az - (e.clientX - lx) * 0.7 + 360) % 360;
-        el = Math.max(-75, Math.min(75, el + (e.clientY - ly) * 0.5));
-        lx = e.clientX; ly = e.clientY;
-        state.overrides[info.step.id] = { ...(state.overrides[info.step.id] || {}), az: Math.round(az), el: Math.round(el) };
+        const dx = e.clientX - lx;
+        const dy = e.clientY - ly;
+        lx = e.clientX;
+        ly = e.clientY;
+        if (!moved && Math.hypot(e.clientX - startX, e.clientY - startY) < 2) return;
+        if (!pushedUndo) {
+          pushUndo();
+          pushedUndo = true;
+        }
+        moved = true;
+        az = (az - dx * 0.7 + 360) % 360;
+        el = Math.max(-75, Math.min(75, el + dy * 0.5));
+        const nextSide = el < 0 ? 'bottom' : 'top';
+        const matchedPreset = findMatchingCameraPreset(az);
+        const roundedAz = Math.round(az) % 360;
+        const roundedEl = Math.round(el);
+        state.overrides[info.step.id] = {
+          ...(state.overrides[info.step.id] || {}),
+          side: nextSide,
+          ...(matchedPreset ? { corner: matchedPreset.id } : {}),
+          az: roundedAz,
+          el: roundedEl,
+        };
+        const readout = document.getElementById('stepCamReadout');
+        if (readout) readout.textContent = `${roundedAz}° / ${roundedEl}°`;
         activeLiveEngine.draw(info.snap.mesh, w, h, az, el, info.modelScale, fixedHalfH, liveDrawOpts);
       };
-      liveCanvas.onpointerup = () => { dragging = false; };
+      const endOrbit = (e) => {
+        if (!dragging) return;
+        e.stopPropagation();
+        dragging = false;
+        if (moved) {
+          renderContextOverlay(page);
+        }
+      };
+      liveCanvas.onpointerup = endOrbit;
+      liveCanvas.onpointercancel = endOrbit;
     }
   }
 
-  // SELECT MODE: Allow dragging step-bound custom callouts directly inside their step slot
-  if (state.mode === 'select') {
+  // STEP -> NOTES MODE: Allow dragging step-bound custom callouts directly inside their step slot
+  if (isStepNotesMode) {
     frame.querySelectorAll('[data-drag="step-insert"]').forEach(el => {
-      let dragging = false, sx = 0, sy = 0, origX = 0, origY = 0, moved = false;
+      let dragging = false, sx = 0, sy = 0, origX = 0, origY = 0, moved = false, pushedUndo = false;
       const sid = el.getAttribute('data-step');
       const insId = el.getAttribute('data-insert-id');
       el.onpointerdown = (e) => {
         e.stopPropagation();
-        dragging = true; moved = false;
+        dragging = true; moved = false; pushedUndo = false;
         sx = e.clientX; sy = e.clientY;
         el.setPointerCapture(e.pointerId);
         const slotEl = el.closest('.step-slot');
@@ -8268,6 +8448,10 @@ function bindStepPageInteractions(page) {
         const dx = (e.clientX - sx) / effScale, dy = (e.clientY - sy) / effScale;
         if (Math.hypot(dx, dy) > 2) moved = true;
         if (!moved) return;
+        if (!pushedUndo) {
+          pushUndo();
+          pushedUndo = true;
+        }
         const nx = Math.max(0, Math.round(origX + dx));
         const ny = Math.max(0, Math.round(origY + dy));
         const ins = (state.stepInserts[sid] || []).find(x => x.id === insId);
@@ -8281,7 +8465,10 @@ function bindStepPageInteractions(page) {
         }
       };
       el.onpointerup = (e) => {
-        if (dragging && moved) { e.stopPropagation(); }
+        if (dragging && moved) {
+          e.stopPropagation();
+          renderContextOverlay(page);
+        }
         dragging = false;
       };
     });
@@ -8289,8 +8476,59 @@ function bindStepPageInteractions(page) {
 }
 
 // =========================================================================
-// 8. FLOATING CONTEXTUAL OVERLAYS (D-Pad, Step Split Bar, Camera Pill, Arrange Pill)
+// 8. FLOATING CONTEXTUAL CARDS (Scope-Organized: Parts | Camera | Step | Page)
 // =========================================================================
+function renderScopeBadge(tier, label) {
+  if (tier === 'range') {
+    return `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-[var(--warning-soft)] text-[var(--warning)] border border-[var(--warning)]/30 whitespace-nowrap shrink-0" title="Affects multiple steps or pages"><svg class="w-2.5 h-2.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg><span>${escHtml(label)}</span></span>`;
+  }
+  if (tier === 'manual') {
+    return `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-[var(--info-soft)] text-[var(--info)] border border-[var(--info)]/30 whitespace-nowrap shrink-0" title="Applies across the whole manual"><svg class="w-2.5 h-2.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><span>${escHtml(label)}</span></span>`;
+  }
+  return `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-[var(--surface-sunken)] text-[var(--muted-foreground)] border border-[var(--border)] whitespace-nowrap shrink-0"><span class="w-1.5 h-1.5 rounded-full bg-current opacity-65"></span><span>${escHtml(label)}</span></span>`;
+}
+
+// Visual Cube + Simple Stylized Camera SVG icons shared across Cover, Build Complete & Step Camera controls
+function buildCameraViewSvg(kind) {
+  if (kind === 'top') {
+    return `<svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <rect x="8" y="2" width="8" height="4.5" rx="1.2" fill="currentColor"/>
+      <path d="M10.5 6.5 9 9.5h6l-1.5-3" fill="currentColor" opacity="0.5"/>
+      <path d="M12 11.5 18 14.5 12 17.5 6 14.5 12 11.5Z" fill="currentColor" fill-opacity="0.22" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+      <path d="M6 14.5V19.5L12 22.5L18 19.5V14.5M12 17.5V22.5" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+    </svg>`;
+  }
+  if (kind === 'bottom') {
+    return `<svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M12 1.5 18 4.5 12 7.5 6 4.5 12 1.5Z" fill="currentColor" fill-opacity="0.16" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+      <path d="M6 4.5V9.5L12 12.5L18 9.5V4.5M12 7.5V12.5" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+      <path d="M10.5 17.5 9 14.5h6l-1.5 3" fill="currentColor" opacity="0.5"/>
+      <rect x="8" y="17.5" width="8" height="4.5" rx="1.2" fill="currentColor"/>
+    </svg>`;
+  }
+  const camPos = {
+    se: { x: 18.5, y: 18.5, ray: 'M15.8 16.2 13.8 14.6' },
+    ne: { x: 18.5, y: 5.5,  ray: 'M15.8 7.8 13.8 9.4' },
+    nw: { x: 5.5,  y: 5.5,  ray: 'M8.2 7.8 10.2 9.4' },
+    sw: { x: 5.5,  y: 18.5, ray: 'M8.2 16.2 10.2 14.6' },
+  }[kind] || { x: 18.5, y: 18.5, ray: 'M15.8 16.2 13.8 14.6' };
+  return `<svg class="w-5 h-5 shrink-0" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <path d="M12 7.2 16.4 9.5 12 11.8 7.6 9.5 12 7.2Z" fill="currentColor" fill-opacity="0.2" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+    <path d="M7.6 9.5V14.5L12 16.8L16.4 14.5V9.5M12 11.8V16.8" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+    <path d="${camPos.ray}" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" opacity="0.7"/>
+    <rect x="${(camPos.x - 3).toFixed(1)}" y="${(camPos.y - 2.3).toFixed(1)}" width="6" height="4.6" rx="1.2" fill="currentColor"/>
+    <circle cx="${camPos.x}" cy="${camPos.y}" r="1.1" fill="var(--card)"/>
+  </svg>`;
+}
+
+function renderZoomStepperHtml({ downId, upId, pct, downLabel, upLabel }) {
+  return `<div class="inline-flex items-center gap-0.5 rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] p-0.5">
+    <button type="button" id="${downId}" aria-label="${escHtml(downLabel)}" title="${escHtml(downLabel)}" class="w-6 h-6 rounded bg-[var(--card)] hover:bg-[var(--surface-hover)] font-bold flex items-center justify-center cursor-pointer">−</button>
+    <span class="font-mono text-[11px] font-bold tabular-nums min-w-[40px] text-center">${pct}%</span>
+    <button type="button" id="${upId}" aria-label="${escHtml(upLabel)}" title="${escHtml(upLabel)}" class="w-6 h-6 rounded bg-[var(--card)] hover:bg-[var(--surface-hover)] font-bold flex items-center justify-center cursor-pointer">+</button>
+  </div>`;
+}
+
 function renderContextOverlay(page) {
   const box = document.getElementById('contextOverlay');
   box.innerHTML = '';
@@ -8304,43 +8542,106 @@ function renderContextOverlay(page) {
   if (state.mode === 'pan') { box.classList.add('hidden'); return; }
   box.classList.remove('hidden');
 
-  // COVER / BUILD COMPLETE / BACK COVER EDITOR OVERLAY
+  const icoClose = '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
+  const icoSpark = '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg>';
+  const icoOrbit = '<svg class="w-3.5 h-3.5 text-[var(--primary)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 0 1-15.5 6.3"/><path d="M3 12a9 9 0 0 1 15.5-6.3"/><polyline points="3 16 3 12 7 12"/><polyline points="21 8 21 12 17 12"/></svg>';
+
+  // =========================================================================
+  // COVER & BUILD COMPLETE — CAMERA MODE (Unified with Step Camera Controls!)
+  // =========================================================================
+  if ((page.kind === 'cover' || page.kind === 'complete') && state.mode === 'camera') {
+    const isCover = page.kind === 'cover';
+    if (isCover) state.coverMeta = normalizeCoverMeta(state.coverMeta);
+    else state.completeMeta = normalizeCompleteMeta(state.completeMeta);
+    const meta = isCover ? state.coverMeta : state.completeMeta;
+    const defaults = isCover ? createDefaultCoverMeta() : createDefaultCompleteMeta();
+    const matchedPreset = findMatchingCameraPreset(meta.az);
+    const zoomPct = Math.round(clampCoverZoom(meta.zoom ?? 1.0) * 100);
+    const customized = isHeroCameraCustomized(meta, defaults);
+
+    box.innerHTML = `
+      <div class="pointer-events-auto studio-surface rounded-xl p-3.5 w-full space-y-2.5 text-xs">
+        <div class="flex items-center justify-between gap-2 flex-wrap">
+          <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[var(--primary-soft)] border border-[var(--primary-border)] text-[var(--foreground)] font-extrabold text-xs tracking-tight">
+            ${icoOrbit}
+            <span>Drag 3D model to orbit</span>
+          </span>
+          <div class="flex items-center gap-2 shrink-0">
+            ${renderScopeBadge('local', isCover ? 'Cover Page' : 'Build Complete')}
+            <span id="heroCamReadout" class="font-mono text-[11px] font-semibold text-[var(--muted-foreground)] tabular-nums">${Math.round(meta.az) % 360}° / ${Math.round(meta.el)}°</span>
+          </div>
+        </div>
+        <div class="flex items-center gap-1.5 flex-wrap">
+          <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)] mr-0.5">Angle</span>
+          ${CORNERS.map(c => `<button type="button" data-hero-corner="${c.id}" title="Orbit camera to ${c.label} corner" class="hero-corner-btn px-2 py-1 rounded-md text-xs font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer ${matchedPreset?.id === c.id ? 'bg-[var(--primary-soft)] text-[var(--primary)] ring-1 ring-[var(--primary)]' : 'bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)]'}">${buildCameraViewSvg(c.quadrant)}<span class="font-mono">${c.label}</span></button>`).join('')}
+        </div>
+        <div class="flex items-center justify-between gap-2 flex-wrap pt-2 border-t border-[var(--border)]">
+          <div class="flex items-center gap-2">
+            <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Zoom</span>
+            ${renderZoomStepperHtml({ downId: 'heroZoomOut', upId: 'heroZoomIn', pct: zoomPct, downLabel: 'Zoom model out', upLabel: 'Zoom model in' })}
+          </div>
+          ${customized ? `<button id="heroResetCam" type="button" class="px-2.5 py-1 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] text-xs font-semibold cursor-pointer">Reset Camera</button>` : ''}
+        </div>
+      </div>`;
+
+    box.querySelectorAll('.hero-corner-btn').forEach(b => {
+      b.onclick = () => {
+        const cObj = CORNERS.find(c => c.id === b.getAttribute('data-hero-corner'));
+        if (!cObj) return;
+        pushUndo();
+        meta.az = cObj.az;
+        meta.el = clampCoverElevation(meta.el);
+        renderAll();
+      };
+    });
+    box.querySelector('#heroZoomOut').onclick = () => {
+      pushUndo();
+      meta.zoom = clampCoverZoom((meta.zoom ?? 1.0) - 0.1);
+      renderAll();
+    };
+    box.querySelector('#heroZoomIn').onclick = () => {
+      pushUndo();
+      meta.zoom = clampCoverZoom((meta.zoom ?? 1.0) + 0.1);
+      renderAll();
+    };
+    const resetBtn = box.querySelector('#heroResetCam');
+    if (resetBtn) {
+      resetBtn.onclick = () => {
+        pushUndo();
+        meta.az = defaults.az;
+        meta.el = defaults.el;
+        meta.zoom = defaults.zoom;
+        renderAll();
+      };
+    }
+    return;
+  }
+
+  // =========================================================================
+  // COVER / BUILD COMPLETE / BACK COVER — PAGE MODE (Content & Branding Only)
+  // =========================================================================
   if (page.kind === 'cover' || page.kind === 'complete' || page.kind === 'back') {
     const isCover = page.kind === 'cover';
     const isComplete = page.kind === 'complete';
     const isBack = page.kind === 'back';
     if (isCover) state.coverMeta = normalizeCoverMeta(state.coverMeta);
+    if (isComplete) state.completeMeta = normalizeCompleteMeta(state.completeMeta);
     if (isBack) state.backMeta = normalizeBackMeta(state.backMeta);
     const meta = isCover ? state.coverMeta : isComplete ? state.completeMeta : state.backMeta;
-    const label = isCover ? 'Cover Page' : isComplete ? 'Build Complete Page' : 'Back Cover';
     const defaultTitle = isCover ? state.model.title : 'Build Complete!';
-
-    const icoRotL = '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>';
-    const icoRotR = '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>';
-    const icoUp = '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>';
-    const icoDown = '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>';
-    const icoMinus = '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="5" x2="19" y1="12" y2="12"/></svg>';
-    const icoPlus = '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="12" x2="12" y1="5" y2="19"/><line x1="5" x2="19" y1="12" y2="12"/></svg>';
-    const icoClose = '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
-    const icoSpark = '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg>';
 
     if (isCover) {
       const hasCreatorLogo = Boolean(meta.creatorLogoSrc);
       const hasThemeImg = Boolean(meta.themeImageSrc);
       const hasBg = Boolean(meta.bgSrc);
+      const paperSpec = PAPER_FORMAT_SPECS[state.paperFormat] || PAPER_FORMAT_SPECS.screen;
+      const orientTxt = paperSpec.supportsOrientation ? (state.orientation === 'portrait' ? 'Portrait' : 'Landscape') : '';
+      const manualSummary = [paperSpec.shortName, orientTxt].filter(Boolean).join(' · ');
       box.innerHTML = `
         <div class="pointer-events-auto studio-surface rounded-xl p-3.5 w-full space-y-2.5 text-xs">
-          <div class="flex items-center justify-between gap-2 flex-wrap font-semibold">
-            <span>Edit Cover Page</span>
-            <div class="flex items-center gap-1 flex-wrap">
-              <button id="covRotL" type="button" title="Rotate model left" aria-label="Rotate model left" class="h-8 w-8 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] flex items-center justify-center">${icoRotL}</button>
-              <button id="covRotR" type="button" title="Rotate model right" aria-label="Rotate model right" class="h-8 w-8 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] flex items-center justify-center">${icoRotR}</button>
-              <button id="covTiltU" type="button" title="Tilt camera up" aria-label="Tilt camera up" class="h-8 w-8 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] flex items-center justify-center">${icoUp}</button>
-              <button id="covTiltD" type="button" title="Tilt camera down" aria-label="Tilt camera down" class="h-8 w-8 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] flex items-center justify-center">${icoDown}</button>
-              <button id="covZoomOut" type="button" title="Zoom model out" aria-label="Zoom model out" class="h-8 w-8 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] flex items-center justify-center">${icoMinus}</button>
-              <button id="covZoomIn" type="button" title="Zoom model in" aria-label="Zoom model in" class="h-8 w-8 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] flex items-center justify-center">${icoPlus}</button>
-              <button id="covResetCam" type="button" title="Reset hero camera" class="h-8 px-2.5 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] font-semibold">Reset</button>
-            </div>
+          <div class="flex items-center justify-between gap-2 flex-wrap">
+            <span class="font-bold">Cover Page</span>
+            ${renderScopeBadge('local', 'This Page')}
           </div>
           <div class="grid grid-cols-2 gap-2">
             <input id="covTitleIn" value="${escHtml(meta.title || defaultTitle)}" placeholder="Model name" class="px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] outline-none focus:border-[var(--primary)]" />
@@ -8348,34 +8649,34 @@ function renderContextOverlay(page) {
           </div>
           <div class="flex items-center gap-1.5 flex-wrap">
             <div class="inline-flex items-center rounded-md overflow-hidden ${hasCreatorLogo ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'bg-[var(--surface-sunken)]'}">
-              <button id="covCreatorLogoBtn" type="button" class="px-2.5 py-1.5 font-semibold">Creator Logo</button>
-              ${hasCreatorLogo ? `<button id="covCreatorLogoClr" type="button" title="Remove creator logo" aria-label="Remove creator logo" class="pr-2 pl-1 py-1.5 flex items-center justify-center opacity-85 hover:opacity-100">${icoClose}</button>` : ''}
+              <button id="covCreatorLogoBtn" type="button" class="px-2.5 py-1.5 font-semibold cursor-pointer">Creator Logo</button>
+              ${hasCreatorLogo ? `<button id="covCreatorLogoClr" type="button" title="Remove creator logo" aria-label="Remove creator logo" class="pr-2 pl-1 py-1.5 flex items-center justify-center opacity-85 hover:opacity-100 cursor-pointer">${icoClose}</button>` : ''}
             </div>
             <div class="inline-flex items-center rounded-md overflow-hidden ${hasThemeImg ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'bg-[var(--surface-sunken)]'}">
-              <button id="covThemeImgBtn" type="button" title="Upload top-right series or theme logo" class="px-2.5 py-1.5 font-semibold">Series / Theme Logo</button>
-              ${hasThemeImg ? `<button id="covThemeImgClr" type="button" title="Remove series / theme logo" aria-label="Remove series or theme logo" class="pr-2 pl-1 py-1.5 flex items-center justify-center opacity-85 hover:opacity-100">${icoClose}</button>` : ''}
+              <button id="covThemeImgBtn" type="button" title="Upload top-right series or theme logo" class="px-2.5 py-1.5 font-semibold cursor-pointer">Series / Theme Logo</button>
+              ${hasThemeImg ? `<button id="covThemeImgClr" type="button" title="Remove series / theme logo" aria-label="Remove series or theme logo" class="pr-2 pl-1 py-1.5 flex items-center justify-center opacity-85 hover:opacity-100 cursor-pointer">${icoClose}</button>` : ''}
             </div>
             <div class="inline-flex items-center rounded-md overflow-hidden ${hasBg ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'bg-[var(--surface-sunken)]'}">
-              <button id="covBgBtn" type="button" class="px-2.5 py-1.5 font-semibold">Background Image</button>
-              ${hasBg ? `<button id="covBgClr" type="button" title="Remove background image" aria-label="Remove background image" class="pr-2 pl-1 py-1.5 flex items-center justify-center opacity-85 hover:opacity-100">${icoClose}</button>` : ''}
+              <button id="covBgBtn" type="button" class="px-2.5 py-1.5 font-semibold cursor-pointer">Background Image</button>
+              ${hasBg ? `<button id="covBgClr" type="button" title="Remove background image" aria-label="Remove background image" class="pr-2 pl-1 py-1.5 flex items-center justify-center opacity-85 hover:opacity-100 cursor-pointer">${icoClose}</button>` : ''}
+            </div>
+          </div>
+          <div class="pt-2 border-t border-[var(--border)] flex items-center justify-between gap-2 flex-wrap">
+            <div class="flex items-center gap-2 min-w-0 flex-1">
+              ${renderScopeBadge('manual', 'All Pages')}
+              <span class="font-mono text-[11px] text-[var(--muted-foreground)] truncate">${escHtml(manualSummary)}</span>
+            </div>
+            <div class="flex items-center gap-1.5 shrink-0">
+              <button id="covOpenPageSetupBtn" type="button" class="px-2.5 py-1 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold cursor-pointer">Page Setup…</button>
+              <button id="covOpenStyleBtn" type="button" class="px-2.5 py-1 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold cursor-pointer">Style…</button>
             </div>
           </div>
         </div>`;
 
+      box.querySelector('#covOpenPageSetupBtn').onclick = () => openPageSetupModal();
+      box.querySelector('#covOpenStyleBtn').onclick = () => setStylePopoverOpen(true);
       box.querySelector('#covTitleIn').onchange = (e) => { pushUndo(); meta.title = e.target.value; renderAll(); };
       box.querySelector('#covSubIn').onchange = (e) => { pushUndo(); meta.subtitle = e.target.value; renderAll(); };
-      box.querySelector('#covRotL').onclick = () => { pushUndo(); meta.az = (meta.az - 22.5 + 360) % 360; renderAll(); };
-      box.querySelector('#covRotR').onclick = () => { pushUndo(); meta.az = (meta.az + 22.5) % 360; renderAll(); };
-      box.querySelector('#covTiltU').onclick = () => { pushUndo(); meta.el = clampCoverElevation(meta.el + 8); renderAll(); };
-      box.querySelector('#covTiltD').onclick = () => { pushUndo(); meta.el = clampCoverElevation(meta.el - 8); renderAll(); };
-      box.querySelector('#covZoomIn').onclick = () => { pushUndo(); meta.zoom = clampCoverZoom((meta.zoom ?? 1.0) + 0.08); renderAll(); };
-      box.querySelector('#covZoomOut').onclick = () => { pushUndo(); meta.zoom = clampCoverZoom((meta.zoom ?? 1.0) - 0.08); renderAll(); };
-      box.querySelector('#covResetCam').onclick = () => {
-        pushUndo();
-        const def = createDefaultCoverMeta();
-        meta.az = def.az; meta.el = def.el; meta.zoom = def.zoom;
-        renderAll();
-      };
       box.querySelector('#covCreatorLogoBtn').onclick = () => openCoverImagePicker('creatorLogo');
       const clrCreator = box.querySelector('#covCreatorLogoClr');
       if (clrCreator) clrCreator.onclick = () => { pushUndo(); meta.creatorLogoSrc = null; renderAll(); };
@@ -8391,20 +8692,19 @@ function renderContextOverlay(page) {
     const hasBg = Boolean(meta.bgSrc);
     box.innerHTML = `
       <div class="pointer-events-auto studio-surface rounded-xl p-3.5 w-full space-y-2.5 text-xs">
-        <div class="flex items-center justify-between gap-2 flex-wrap font-semibold">
-          <span>Edit ${label}</span>
+        <div class="flex items-center justify-between gap-2 flex-wrap">
+          <div class="flex items-center gap-2">
+            <span class="font-bold">${isComplete ? 'Build Complete Page' : 'Back Cover'}</span>
+            ${renderScopeBadge('local', 'This Page')}
+          </div>
           <div class="flex items-center gap-1.5 flex-wrap">
-            ${!isBack ? `
-              <button id="covRotL" type="button" class="px-2.5 py-1.5 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] inline-flex items-center gap-1">${icoRotL}<span>Angle</span></button>
-              <button id="covRotR" type="button" class="px-2.5 py-1.5 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] inline-flex items-center gap-1">${icoRotR}<span>Angle</span></button>
-            ` : ''}
             ${isComplete ? `
-              <button id="compToggleText" type="button" class="px-2.5 py-1.5 rounded-md ${meta.showText !== false ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'bg-[var(--surface-sunken)]'}">Text</button>
-              <button id="compToggleFw" type="button" class="px-2.5 py-1.5 rounded-md inline-flex items-center gap-1 ${meta.showFireworks !== false ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'bg-[var(--surface-sunken)]'}">${icoSpark}<span>Fireworks</span></button>
+              <button id="compToggleText" type="button" class="px-2.5 py-1.5 rounded-md font-semibold cursor-pointer ${meta.showText !== false ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'bg-[var(--surface-sunken)]'}">Text</button>
+              <button id="compToggleFw" type="button" class="px-2.5 py-1.5 rounded-md font-semibold inline-flex items-center gap-1 cursor-pointer ${meta.showFireworks !== false ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'bg-[var(--surface-sunken)]'}">${icoSpark}<span>Fireworks</span></button>
             ` : ''}
             <div class="inline-flex items-center rounded-md overflow-hidden ${hasBg ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'bg-[var(--surface-sunken)]'}">
-              <button id="covBgBtn" type="button" class="px-2.5 py-1.5 font-semibold">Background Image</button>
-              ${hasBg ? `<button id="covBgClr" type="button" title="Remove background image" aria-label="Remove background image" class="pr-2 pl-1 py-1.5 flex items-center justify-center opacity-85 hover:opacity-100">${icoClose}</button>` : ''}
+              <button id="covBgBtn" type="button" class="px-2.5 py-1.5 font-semibold cursor-pointer">Background Image</button>
+              ${hasBg ? `<button id="covBgClr" type="button" title="Remove background image" aria-label="Remove background image" class="pr-2 pl-1 py-1.5 flex items-center justify-center opacity-85 hover:opacity-100 cursor-pointer">${icoClose}</button>` : ''}
             </div>
           </div>
         </div>
@@ -8419,10 +8719,6 @@ function renderContextOverlay(page) {
     if (titleIn) titleIn.onchange = (e) => { pushUndo(); meta.title = e.target.value; renderAll(); };
     const subIn = box.querySelector('#covSubIn');
     if (subIn) subIn.onchange = (e) => { pushUndo(); meta.subtitle = e.target.value; renderAll(); };
-    const rotL = box.querySelector('#covRotL');
-    if (rotL) rotL.onclick = () => { pushUndo(); meta.az = (meta.az - 30 + 360) % 360; renderAll(); };
-    const rotR = box.querySelector('#covRotR');
-    if (rotR) rotR.onclick = () => { pushUndo(); meta.az = (meta.az + 30) % 360; renderAll(); };
     const tText = box.querySelector('#compToggleText');
     if (tText) tText.onclick = () => { pushUndo(); meta.showText = !(meta.showText !== false); renderAll(); };
     const tFw = box.querySelector('#compToggleFw');
@@ -8433,16 +8729,20 @@ function renderContextOverlay(page) {
     return;
   }
 
+  // DIVIDER — PAGE MODE
   if (page.kind === 'divider') {
     const d = state.dividerAfter[page.sourcePgId] || { title:'Section Divider', note:'' };
     box.innerHTML = `
       <div class="pointer-events-auto studio-surface rounded-xl p-3.5 w-full space-y-2.5 text-xs">
-        <div class="flex justify-between items-center font-semibold">
-          <span>Edit Divider Page</span>
-          <button id="delDividerBtn" type="button" class="px-3 py-1.5 rounded-md bg-[var(--danger-soft)] text-[var(--danger)] font-semibold">Delete Page</button>
+        <div class="flex justify-between items-center gap-2">
+          <div class="flex items-center gap-2">
+            <span class="font-bold">Divider Page</span>
+            ${renderScopeBadge('local', 'This Page')}
+          </div>
+          <button id="delDividerBtn" type="button" class="px-3 py-1.5 rounded-md bg-[var(--danger-soft)] text-[var(--danger)] font-semibold cursor-pointer">Delete Page</button>
         </div>
-        <input id="divTitleIn" value="${d.title.replace(/"/g,'&quot;')}" class="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] outline-none focus:border-[var(--primary)]" placeholder="Divider Title" />
-        <input id="divNoteIn" value="${(d.note || '').replace(/"/g,'&quot;')}" class="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] outline-none focus:border-[var(--primary)]" placeholder="Optional note..." />
+        <input id="divTitleIn" value="${escHtml(d.title)}" class="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] outline-none focus:border-[var(--primary)]" placeholder="Divider Title" />
+        <input id="divNoteIn" value="${escHtml(d.note || '')}" class="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] outline-none focus:border-[var(--primary)]" placeholder="Optional note…" />
       </div>`;
     box.querySelector('#divTitleIn').onchange = (e) => { pushUndo(); state.dividerAfter[page.sourcePgId].title = e.target.value; renderAll(); };
     box.querySelector('#divNoteIn').onchange = (e) => { pushUndo(); state.dividerAfter[page.sourcePgId].note = e.target.value; renderAll(); };
@@ -8455,16 +8755,35 @@ function renderContextOverlay(page) {
   if (!active) { box.classList.add('hidden'); return; }
   const { ch, step } = active;
   const ov = state.overrides[step.id] || {};
+  const slots = page.slots || [];
 
-  // ---- MODE: SELECT PIECES (Floating D-Pad + Step Action Bar — ZERO SLIDERS!) ----
-  if (state.mode === 'select') {
+  // =========================================================================
+  // STEP PAGES — PARTS MODE (Part-Level Controls + Clearly Scoped Split/Move)
+  // =========================================================================
+  if (state.mode === 'parts') {
     const selCount = state.selectedPartIds.size;
     if (selCount === 0) {
       box.innerHTML = `
-        <div class="pointer-events-auto studio-surface px-4 py-2.5 rounded-lg text-xs font-semibold flex items-center gap-2">
-          <span class="w-2 h-2 rounded-full bg-[var(--primary)]"></span>
-          <span>Tap parts in the 3D step or Parts List to move or split them</span>
+        <div class="pointer-events-auto studio-surface rounded-xl px-3.5 py-2.5 w-full space-y-2 text-xs">
+          <div class="flex items-center justify-between gap-2 flex-wrap">
+            <div class="flex items-center gap-2 min-w-0">
+              <span class="w-2 h-2 rounded-full bg-[var(--primary)] shrink-0"></span>
+              <span class="font-semibold">Tap parts in the 3D step or Parts Box to nudge, tilt, or split them</span>
+            </div>
+            ${renderScopeBadge('local', `Step ${step.num}`)}
+          </div>
+          ${slots.length > 1 ? `
+            <div class="flex items-center gap-1 flex-wrap">
+              <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)] mr-0.5">Active</span>
+              ${slots.map(sl => `<button type="button" data-parts-slot="${sl.step.id}" class="parts-slot-btn px-2 py-0.5 rounded-md font-semibold cursor-pointer ${sl.step.id === step.id ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)]'}">Step ${sl.step.num}</button>`).join('')}
+            </div>` : ''}
         </div>`;
+      box.querySelectorAll('.parts-slot-btn').forEach(b => {
+        b.onclick = () => {
+          const sid = b.getAttribute('data-parts-slot');
+          if (sid && state.selectedStepId !== sid) { state.selectedStepId = sid; state.selectedPartIds.clear(); renderAll(); }
+        };
+      });
       return;
     }
 
@@ -8482,36 +8801,36 @@ function renderContextOverlay(page) {
     const icoArrBack = '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7"/><path d="M8 7h9v9"/></svg>';
     const icoTiltL = '<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="10" width="10" height="7" rx="1.2" transform="rotate(-16 12 13.5)" fill="currentColor" fill-opacity="0.14"/><path d="M6.5 6.5A8 8 0 0 1 16 5"/><path d="M6.5 3.5v3.5H10"/></svg>';
     const icoTiltR = '<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="10" width="10" height="7" rx="1.2" transform="rotate(16 12 13.5)" fill="currentColor" fill-opacity="0.14"/><path d="M17.5 6.5A8 8 0 0 0 8 5"/><path d="M17.5 3.5v3.5H14"/></svg>';
-    const icoDismiss = '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
+
     box.innerHTML = `
-      <div class="pointer-events-auto studio-surface rounded-xl p-3.5 w-full space-y-2.5 text-xs">
-        <div class="flex items-center justify-between gap-2">
-          <span class="font-bold text-[var(--primary)]">${selCount} piece${selCount > 1 ? 's' : ''} selected · Step ${step.num}</span>
+      <div class="pointer-events-auto studio-surface rounded-xl p-3.5 w-full max-h-[46vh] overflow-y-auto space-y-2.5 text-xs">
+        <div class="flex items-center justify-between gap-2 flex-wrap">
+          <div class="flex items-center gap-2 min-w-0">
+            <span class="font-bold text-[var(--primary)]">${formatPartCount(selCount)} selected · Step ${step.num}</span>
+            ${renderScopeBadge('local', 'Selected Parts')}
+          </div>
           <div class="flex items-center gap-1.5">
-            <button id="btnToggleArrow" type="button" class="px-2.5 py-1.5 rounded-md border text-xs font-semibold cursor-pointer ${pOv.arrow !== false ? 'bg-[var(--primary-soft)] border-[var(--primary)] text-[var(--primary)]' : 'border-[var(--border)] bg-[var(--surface-sunken)]'}">Arrow ${pOv.arrow !== false ? 'On' : 'Off'}</button>
-            <button id="btnResetSelPos" type="button" class="px-2.5 py-1.5 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] text-xs font-semibold cursor-pointer">Reset</button>
-            <button id="btnClearSel" type="button" aria-label="Clear selection" class="w-8 h-8 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] flex items-center justify-center cursor-pointer">${icoDismiss}</button>
+            <button id="btnToggleArrow" type="button" class="px-2.5 py-1 rounded-md border text-xs font-semibold cursor-pointer ${pOv.arrow !== false ? 'bg-[var(--primary-soft)] border-[var(--primary)] text-[var(--primary)]' : 'border-[var(--border)] bg-[var(--surface-sunken)]'}">Arrow ${pOv.arrow !== false ? 'On' : 'Off'}</button>
+            <button id="btnResetSelPos" type="button" class="px-2.5 py-1 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] text-xs font-semibold cursor-pointer">Reset</button>
+            <button id="btnClearSel" type="button" aria-label="Clear selection" class="w-7 h-7 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] flex items-center justify-center cursor-pointer">${icoClose}</button>
           </div>
         </div>
 
-        <!-- Visual 3D Axis Move Pad + Brick Tilt Control -->
+        <!-- Part-Level Placement: Visual 3D Axis Move Pad + Brick Tilt -->
         <div class="flex items-center justify-between gap-2 flex-wrap">
           <div class="flex items-center gap-1.5 flex-wrap">
-            <!-- Up / Down (Y Axis) -->
             <div class="inline-flex items-center gap-0.5 p-0.5 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)]" title="Move Up / Down">
               <span class="px-1.5 text-[10px] font-bold uppercase tracking-wider text-[var(--success)]">Up/Dn</span>
               <button data-nudge="0,20,0" type="button" class="nudge-btn h-7 w-7 rounded-md bg-[var(--card)] hover:bg-[var(--surface-hover)] text-[var(--success)] flex items-center justify-center cursor-pointer" title="Lift Up 1 stud" aria-label="Lift Up">${icoArrUp}</button>
               <button data-nudge="0,-20,0" type="button" class="nudge-btn h-7 w-7 rounded-md bg-[var(--card)] hover:bg-[var(--surface-hover)] text-[var(--success)] flex items-center justify-center cursor-pointer" title="Lower 1 stud" aria-label="Lower">${icoArrDown}</button>
               ${studY !== 0 ? `<span class="px-1 font-mono text-[10px] font-bold">${studY > 0 ? `+${studY}` : studY}</span>` : ''}
             </div>
-            <!-- Left / Right (X Axis) -->
             <div class="inline-flex items-center gap-0.5 p-0.5 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)]" title="Move Left / Right">
               <span class="px-1.5 text-[10px] font-bold uppercase tracking-wider text-[var(--primary)]">L/R</span>
               <button data-nudge="-20,0,0" type="button" class="nudge-btn h-7 w-7 rounded-md bg-[var(--card)] hover:bg-[var(--surface-hover)] text-[var(--primary)] flex items-center justify-center cursor-pointer" title="Move Left 1 stud" aria-label="Left">${icoArrLeft}</button>
               <button data-nudge="20,0,0" type="button" class="nudge-btn h-7 w-7 rounded-md bg-[var(--card)] hover:bg-[var(--surface-hover)] text-[var(--primary)] flex items-center justify-center cursor-pointer" title="Move Right 1 stud" aria-label="Right">${icoArrRight}</button>
               ${studX !== 0 ? `<span class="px-1 font-mono text-[10px] font-bold">${studX > 0 ? `+${studX}` : studX}</span>` : ''}
             </div>
-            <!-- Forward / Back (Z Axis) -->
             <div class="inline-flex items-center gap-0.5 p-0.5 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)]" title="Move Forward / Back">
               <span class="px-1.5 text-[10px] font-bold uppercase tracking-wider text-[var(--info)]">Depth</span>
               <button data-nudge="0,0,20" type="button" class="nudge-btn h-7 w-7 rounded-md bg-[var(--card)] hover:bg-[var(--surface-hover)] text-[var(--info)] flex items-center justify-center cursor-pointer" title="Move Forward 1 stud" aria-label="Forward">${icoArrFwd}</button>
@@ -8519,8 +8838,7 @@ function renderContextOverlay(page) {
               ${studZ !== 0 ? `<span class="px-1 font-mono text-[10px] font-bold">${studZ > 0 ? `+${studZ}` : studZ}</span>` : ''}
             </div>
           </div>
-          <!-- Visual Brick Tilt Control -->
-          <div class="inline-flex items-center gap-1 p-0.5 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)]" title="Tilt selected piece">
+          <div class="inline-flex items-center gap-1 p-0.5 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)]" title="Tilt selected part">
             <span class="px-1.5 text-[10px] font-bold uppercase tracking-wider text-[var(--muted-foreground)]">Tilt</span>
             <button data-tilt="-15" type="button" class="tilt-btn h-7 w-7 rounded-md bg-[var(--card)] hover:bg-[var(--surface-hover)] flex items-center justify-center cursor-pointer" title="Tilt Left −15°" aria-label="Tilt Left">${icoTiltL}</button>
             <span class="font-mono text-[11px] font-bold min-w-[30px] text-center">${tiltDeg > 0 ? `+${tiltDeg}°` : `${tiltDeg}°`}</span>
@@ -8528,14 +8846,18 @@ function renderContextOverlay(page) {
           </div>
         </div>
 
-        <!-- Direct Step Reorganization Bar -->
-        <div class="flex items-center gap-1.5 flex-wrap pt-2.5 border-t border-[var(--border)]">
-          <span class="text-xs font-semibold text-[var(--muted-foreground)] mr-0.5">Step</span>
-          <button id="actNewBefore" type="button" class="px-3 py-1.5 rounded-md bg-[var(--primary)] text-[var(--primary-foreground)] font-semibold">New Step Before</button>
-          <button id="actNewAfter" type="button" class="px-3 py-1.5 rounded-md bg-[var(--primary)] text-[var(--primary-foreground)] font-semibold">New Step After</button>
-          <button id="actMoveStep" type="button" class="px-3 py-1.5 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] font-semibold">Move to Step…</button>
-          <button id="actMergePrev" type="button" class="px-3 py-1.5 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] font-semibold">Merge Prev</button>
-          <button id="actMakeSub" type="button" class="px-3 py-1.5 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] font-semibold">Make Submodel</button>
+        <!-- Cross-Step Reorganization (Explicitly marked as affecting other steps) -->
+        <div class="pt-2.5 border-t border-[var(--border)] space-y-1.5">
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Move or Split Selected Parts</span>
+            ${renderScopeBadge('range', 'Affects Other Steps')}
+          </div>
+          <div class="flex items-center gap-1.5 flex-wrap">
+            <button id="actNewBefore" type="button" class="px-2.5 py-1.5 rounded-md bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] font-semibold cursor-pointer">New Step Before</button>
+            <button id="actNewAfter" type="button" class="px-2.5 py-1.5 rounded-md bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] font-semibold cursor-pointer">New Step After</button>
+            <button id="actMoveStep" type="button" class="px-2.5 py-1.5 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] font-semibold cursor-pointer">Move to Step…</button>
+            <button id="actMakeSub" type="button" class="px-2.5 py-1.5 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] font-semibold cursor-pointer">Make Submodel</button>
+          </div>
         </div>
       </div>`;
 
@@ -8592,13 +8914,12 @@ function renderContextOverlay(page) {
       ch.steps.splice(idx + (deltaIdx < 0 ? 0 : 1), 0, newStep);
       state.selectedStepId = newStep.id;
       state.selectedPartIds.clear();
-      showToast(`Moved ${moved.length} piece(s) into a new step.`);
+      showToast(`Moved ${formatPartCount(moved.length)} into a new step.`);
       renderAll();
     };
     box.querySelector('#actNewBefore').onclick = () => splitSelectedToOffset(-1);
     box.querySelector('#actNewAfter').onclick = () => splitSelectedToOffset(1);
     box.querySelector('#actMoveStep').onclick = () => {
-      // Absolute step number: printed numbers restart in each submodel and are not unique.
       const targetNum = parseInt(prompt(`Move selected parts to which absolute Step # (1–${getAllSteps(state.model).length})? This step is #${getAbsStepNum(step)}.`), 10);
       if (!targetNum) return;
       const all = getAllSteps(state.model);
@@ -8613,19 +8934,7 @@ function renderContextOverlay(page) {
         delete state.overrides[step.id];
       }
       state.selectedPartIds.clear();
-      showToast(`Moved ${moved.length} part(s) to ${dest.ch.name ? `${dest.ch.name} ` : ""}Step ${dest.step.num} (#${targetNum}).`);
-      renderAll();
-    };
-    box.querySelector('#actMergePrev').onclick = () => {
-      const idx = ch.steps.indexOf(step);
-      if (idx <= 0) { showToast('No previous step in this section to merge into.'); return; }
-      pushUndo();
-      ch.steps[idx - 1].parts.push(...step.parts);
-      ch.steps.splice(idx, 1);
-      delete state.overrides[step.id];
-      state.selectedStepId = ch.steps[idx - 1].id;
-      state.selectedPartIds.clear();
-      showToast('Merged into previous step.');
+      showToast(`Moved ${formatPartCount(moved.length)} to ${dest.ch.name ? `${dest.ch.name} ` : ''}Step ${dest.step.num} (#${targetNum}).`);
       renderAll();
     };
     box.querySelector('#actMakeSub').onclick = () => {
@@ -8642,7 +8951,6 @@ function renderContextOverlay(page) {
     return;
   }
 
-  const slots = page.slots || [];
   const allStepsList = getAllSteps(state.model);
   const stepIdxInCh = ch.steps.indexOf(step);
   const followingCount = stepIdxInCh >= 0 ? Math.max(0, ch.steps.length - 1 - stepIdxInCh) : 0;
@@ -8657,91 +8965,229 @@ function renderContextOverlay(page) {
     stepInsertCount: stepInserts.length,
     totalStepCount: allStepsList.length,
     followingStepCount: followingCount,
+    canMergeWithPrev: stepIdxInCh > 0,
   });
 
-  // Visual Cube + Simple Stylized Camera SVG icons for View (Top / Bottom) & 4 Isometric Angles
-  const buildCameraViewSvg = (kind) => {
-    if (kind === 'top') {
-      return `<svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <rect x="8" y="2" width="8" height="4.5" rx="1.2" fill="currentColor"/>
-        <path d="M10.5 6.5 9 9.5h6l-1.5-3" fill="currentColor" opacity="0.5"/>
-        <path d="M12 11.5 18 14.5 12 17.5 6 14.5 12 11.5Z" fill="currentColor" fill-opacity="0.22" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
-        <path d="M6 14.5V19.5L12 22.5L18 19.5V14.5M12 17.5V22.5" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
-      </svg>`;
-    }
-    if (kind === 'bottom') {
-      return `<svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <path d="M12 1.5 18 4.5 12 7.5 6 4.5 12 1.5Z" fill="currentColor" fill-opacity="0.16" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
-        <path d="M6 4.5V9.5L12 12.5L18 9.5V4.5M12 7.5V12.5" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
-        <path d="M10.5 17.5 9 14.5h6l-1.5 3" fill="currentColor" opacity="0.5"/>
-        <rect x="8" y="17.5" width="8" height="4.5" rx="1.2" fill="currentColor"/>
-      </svg>`;
-    }
-    // 4 isometric corners around a centered simple 3D cube
-    const camPos = {
-      se: { x: 18.5, y: 18.5, ray: 'M15.8 16.2 13.8 14.6' },
-      ne: { x: 18.5, y: 5.5,  ray: 'M15.8 7.8 13.8 9.4' },
-      nw: { x: 5.5,  y: 5.5,  ray: 'M8.2 7.8 10.2 9.4' },
-      sw: { x: 5.5,  y: 18.5, ray: 'M8.2 16.2 10.2 14.6' },
-    }[kind] || { x: 18.5, y: 18.5, ray: 'M15.8 16.2 13.8 14.6' };
-    return `<svg class="w-5 h-5 shrink-0" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M12 7.2 16.4 9.5 12 11.8 7.6 9.5 12 7.2Z" fill="currentColor" fill-opacity="0.2" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
-      <path d="M7.6 9.5V14.5L12 16.8L16.4 14.5V9.5M12 11.8V16.8" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
-      <path d="${camPos.ray}" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" opacity="0.7"/>
-      <rect x="${(camPos.x - 3).toFixed(1)}" y="${(camPos.y - 2.3).toFixed(1)}" width="6" height="4.6" rx="1.2" fill="currentColor"/>
-      <circle cx="${camPos.x}" cy="${camPos.y}" r="1.1" fill="var(--card)"/>
-    </svg>`;
-  };
+  // =========================================================================
+  // STEP PAGES — STEP MODE (Inline Sub-Tabs: Camera | Layout | Notes)
+  // =========================================================================
+  if (state.mode === 'step') {
+    const subTab = state.stepSubTab || 'camera';
+    const absNum = getAbsStepNum(step);
+    const stepHeaderLeft = slots.length > 1
+      ? `<div class="inline-flex items-center gap-0.5 rounded-md bg-[var(--surface-sunken)] p-0.5 text-xs font-bold overflow-x-auto no-scrollbar max-w-full">
+          ${slots.map(sl => `<button type="button" data-pick-slot="${sl.step.id}" class="step-slot-pick-btn px-2 py-0.5 rounded-md whitespace-nowrap transition-colors cursor-pointer ${sl.step.id === step.id ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'hover:bg-[var(--surface-hover)]'}">Step ${sl.step.num}</button>`).join('')}
+        </div>`
+      : `<div class="flex items-center gap-1.5 min-w-0">
+          <span class="font-bold truncate">${escHtml(getStepShortLabel(step, ch))}</span>
+          ${absNum !== step.num ? `<span class="px-1 py-0.5 rounded border border-[var(--border)] font-mono text-[10px] font-semibold text-[var(--muted-foreground)]" title="Absolute step number">#${absNum}</span>` : ''}
+        </div>`;
 
-  // ---- MODE: ROTATE 3D (Strictly 3D Camera Angle & Orientation) ----
-  if (state.mode === 'rotate') {
-    const cam = getStepCamera(step);
-    const isMfStep = isMfBuild || Boolean(step.isMinifigPoseStep);
-    const mfDefaultCam = step.isMinifigPoseStep
-      ? { side: 'top', corner: step.corner || MINIFIG_POSE_CAMERA.corner, az: step.az ?? MINIFIG_POSE_CAMERA.az, el: step.el ?? MINIFIG_POSE_CAMERA.el }
-      : MINIFIG_BUILD_CAMERA;
-    const isFront34 = isMfStep && Math.abs(cam.az - mfDefaultCam.az) <= 4 && Math.abs(cam.el - mfDefaultCam.el) <= 4;
-
-    box.innerHTML = `
-      <div class="pointer-events-auto studio-surface rounded-xl p-3.5 w-full space-y-2.5 text-xs">
-        <div class="flex items-center justify-between gap-2 flex-wrap">
-          <div class="flex items-center gap-2 flex-wrap min-w-0">
-            ${slots.length > 1 ? `
-              <div class="inline-flex items-center gap-0.5 rounded-md bg-[var(--surface-sunken)] p-0.5 text-xs font-bold">
-                ${slots.map(sl => `<button type="button" data-pick-slot="${sl.step.id}" class="rotate-step-btn px-2 py-0.5 rounded-md transition-colors cursor-pointer ${sl.step.id === step.id ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'hover:bg-[var(--surface-hover)]'}">Step ${sl.step.num}</button>`).join('')}
-              </div>` : ''}
-            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[var(--primary-soft)] border border-[var(--primary-border)] text-[var(--foreground)] font-extrabold text-xs tracking-tight">
-              <svg class="w-3.5 h-3.5 text-[var(--primary)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 0 1-15.5 6.3"/><path d="M3 12a9 9 0 0 1 15.5-6.3"/><polyline points="3 16 3 12 7 12"/><polyline points="21 8 21 12 17 12"/></svg>
-              <span>Drag 3D model to orbit</span>
-            </span>
-          </div>
-          <div class="flex items-center gap-1.5 shrink-0">
-            <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">View</span>
-            <div class="inline-flex rounded-md bg-[var(--surface-sunken)] p-0.5 text-xs font-semibold gap-0.5">
-              <button type="button" id="camTop" title="Look down from above" class="px-2.5 py-1 rounded-md inline-flex items-center gap-1.5 transition-colors cursor-pointer ${cam.side === 'top' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'hover:bg-[var(--surface-hover)]'}">${buildCameraViewSvg('top')}<span>Top</span></button>
-              <button type="button" id="camBot" title="Look up from underneath" class="px-2.5 py-1 rounded-md inline-flex items-center gap-1.5 transition-colors cursor-pointer ${cam.side === 'bottom' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'hover:bg-[var(--surface-hover)]'}">${buildCameraViewSvg('bottom')}<span>Bottom</span></button>
-            </div>
-          </div>
-        </div>
-        <div class="flex items-center gap-1.5 flex-wrap">
-          <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)] mr-0.5">Angle</span>
-          ${isMfStep ? `<button type="button" id="btnMfFront34" class="px-2.5 py-1 rounded-md text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer ${isFront34 ? 'bg-[var(--primary-soft)] text-[var(--primary)] ring-1 ring-[var(--primary)]' : 'bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)]'}"><span>3/4 Pose</span></button>` : ''}
-          ${CORNERS.map(c => `<button type="button" data-corner="${c.id}" title="Orbit camera to ${c.label} corner" class="corner-btn px-2 py-1 rounded-md text-xs font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer ${!isFront34 && cam.corner === c.id ? 'bg-[var(--primary-soft)] text-[var(--primary)] ring-1 ring-[var(--primary)]' : 'bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)]'}">${buildCameraViewSvg(c.quadrant)}<span class="font-mono">${c.label}</span></button>`).join('')}
-        </div>
-        ${(caps.canApplyAngleToRange || caps.hasCustomCameraAngle) ? `
-          <div class="flex items-center justify-between gap-2 flex-wrap pt-2 border-t border-[var(--border)]">
-            ${caps.hasCustomCameraAngle
-              ? `<button type="button" id="btnResetCam" class="px-2.5 py-1 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] text-xs font-semibold cursor-pointer">Reset Angle</button>`
-              : `<span></span>`}
-            ${caps.canApplyAngleToRange
-              ? `<button type="button" id="btnApplyAngleRange" class="px-3 py-1.5 rounded-md bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer">
-                  <span>Apply Angle to Steps…</span>
-                </button>`
-              : ''}
-          </div>` : ''}
+    const subTabsHtml = `
+      <div class="inline-flex items-center gap-0.5 rounded-md bg-[var(--surface-sunken)] p-0.5 text-xs font-semibold shrink-0" role="tablist" aria-label="Step control sections">
+        <button type="button" role="tab" aria-selected="${subTab === 'camera'}" data-step-subtab="camera" class="step-subtab-btn px-2.5 py-1 rounded transition-colors cursor-pointer ${subTab === 'camera' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--surface-hover)]'}">Camera</button>
+        <button type="button" role="tab" aria-selected="${subTab === 'layout'}" data-step-subtab="layout" class="step-subtab-btn px-2.5 py-1 rounded transition-colors cursor-pointer ${subTab === 'layout' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--surface-hover)]'}">Layout</button>
+        <button type="button" role="tab" aria-selected="${subTab === 'notes'}" data-step-subtab="notes" class="step-subtab-btn px-2.5 py-1 rounded transition-colors cursor-pointer inline-flex items-center gap-1 ${subTab === 'notes' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--surface-hover)]'}"><span>Notes</span>${stepInserts.length > 0 ? `<span class="font-mono text-[10px] px-1 rounded ${subTab === 'notes' ? 'bg-white/20' : 'bg-[var(--card)] border border-[var(--border)]'}">${stepInserts.length}</span>` : ''}</button>
       </div>`;
 
-    box.querySelectorAll('.rotate-step-btn').forEach(b => {
+    let bodyHtml = '';
+
+    if (subTab === 'camera') {
+      const cam = getStepCamera(step);
+      const isMfStep = isMfBuild || Boolean(step.isMinifigPoseStep);
+      const mfDefaultCam = step.isMinifigPoseStep
+        ? { side: 'top', corner: step.corner || MINIFIG_POSE_CAMERA.corner, az: step.az ?? MINIFIG_POSE_CAMERA.az, el: step.el ?? MINIFIG_POSE_CAMERA.el }
+        : MINIFIG_BUILD_CAMERA;
+      const isFront34 = isMfStep && Math.abs(cam.az - mfDefaultCam.az) <= 4 && Math.abs(cam.el - mfDefaultCam.el) <= 4;
+      const matchedCorner = findMatchingCameraPreset(cam.az);
+      const modelScalePct = Math.round((ov.modelScale || 1.0) * 100);
+      const fMode = ov.focusMode || 'auto';
+
+      bodyHtml = `
+        <div class="space-y-2">
+          <div class="flex items-center justify-between gap-2 flex-wrap">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[var(--primary-soft)] border border-[var(--primary-border)] text-[var(--foreground)] font-extrabold text-xs tracking-tight">
+                ${icoOrbit}
+                <span>Drag 3D model to orbit</span>
+              </span>
+              ${renderScopeBadge('local', 'This Step')}
+              <span id="stepCamReadout" class="font-mono text-[11px] font-semibold text-[var(--muted-foreground)] tabular-nums">${Math.round(cam.az) % 360}° / ${Math.round(cam.el)}°</span>
+            </div>
+            <div class="flex items-center gap-1.5 shrink-0">
+              <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">View</span>
+              <div class="inline-flex rounded-md bg-[var(--surface-sunken)] p-0.5 text-xs font-semibold gap-0.5">
+                <button type="button" id="camTop" title="Look down from above" class="px-2 py-1 rounded inline-flex items-center gap-1 transition-colors cursor-pointer ${cam.side === 'top' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'hover:bg-[var(--surface-hover)]'}">${buildCameraViewSvg('top')}<span>Top</span></button>
+                <button type="button" id="camBot" title="Look up from underneath" class="px-2 py-1 rounded inline-flex items-center gap-1 transition-colors cursor-pointer ${cam.side === 'bottom' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'hover:bg-[var(--surface-hover)]'}">${buildCameraViewSvg('bottom')}<span>Bottom</span></button>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-1.5 flex-wrap">
+            <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)] mr-0.5">Angle</span>
+            ${isMfStep ? `<button type="button" id="btnMfFront34" class="px-2.5 py-1 rounded-md text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer ${isFront34 ? 'bg-[var(--primary-soft)] text-[var(--primary)] ring-1 ring-[var(--primary)]' : 'bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)]'}"><span>3/4 Pose</span></button>` : ''}
+            ${CORNERS.map(c => `<button type="button" data-corner="${c.id}" title="Orbit camera to ${c.label} corner" class="corner-btn px-2 py-1 rounded-md text-xs font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer ${!isFront34 && matchedCorner?.id === c.id ? 'bg-[var(--primary-soft)] text-[var(--primary)] ring-1 ring-[var(--primary)]' : 'bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)]'}">${buildCameraViewSvg(c.quadrant)}<span class="font-mono">${c.label}</span></button>`).join('')}
+          </div>
+
+          <div class="flex items-center justify-between gap-2 flex-wrap">
+            <div class="flex items-center gap-2 flex-wrap">
+              <div class="flex items-center gap-1.5">
+                <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Zoom</span>
+                ${renderZoomStepperHtml({ downId: 'stepCamZoomDown', upId: 'stepCamZoomUp', pct: modelScalePct, downLabel: 'Zoom step model out', upLabel: 'Zoom step model in' })}
+              </div>
+              <div class="flex items-center gap-1.5">
+                <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Framing</span>
+                <div class="inline-flex rounded-md bg-[var(--surface-sunken)] p-0.5 gap-0.5">
+                  ${FOCUS_MODE_OPTIONS.map(opt => `<button type="button" data-step-focus="${opt.id}" title="${escHtml(opt.description)}" class="step-focus-btn px-2 py-1 rounded text-[11px] font-semibold transition-colors cursor-pointer ${fMode === opt.id ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'hover:bg-[var(--surface-hover)]'}">${escHtml(opt.label)}</button>`).join('')}
+                </div>
+              </div>
+            </div>
+            ${caps.hasCustomCameraAny ? `<button type="button" id="btnResetCam" class="px-2.5 py-1 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] text-xs font-semibold cursor-pointer">Reset</button>` : ''}
+          </div>
+        </div>
+
+        ${caps.canApplyAngleToRange ? `
+          <div class="flex items-center justify-between gap-2 flex-wrap pt-2 border-t border-[var(--border)]">
+            <div class="flex items-center gap-2 min-w-0">
+              ${renderScopeBadge('range', 'Step Range')}
+              <span class="text-[11px] text-[var(--muted-foreground)] truncate">Share this camera across steps</span>
+            </div>
+            <button type="button" id="btnApplyAngleRange" class="px-3 py-1.5 rounded-md bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] text-xs font-semibold shrink-0 cursor-pointer">Apply Camera to Steps…</button>
+          </div>` : ''}`;
+    } else if (subTab === 'layout') {
+      const pliScalePct = Math.round((ov.pliScale || 1.0) * 100);
+      const prevStep = stepIdxInCh > 0 ? ch.steps[stepIdxInCh - 1] : null;
+      const hasLocalLayout = caps.hasPartsBox || (caps.showSubassemblySettings && !ov.calloutAsPages);
+      const sections = [];
+
+      if (hasLocalLayout) {
+        sections.push(`
+          <div class="space-y-2">
+            <div class="flex items-center justify-between gap-2">
+              <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Step Display</span>
+              ${renderScopeBadge('local', 'This Step')}
+            </div>
+            ${caps.hasPartsBox ? `
+              <div class="flex items-center justify-between gap-2 flex-wrap">
+                <span class="font-semibold">Parts Box Size</span>
+                <div class="flex items-center gap-1.5">
+                  ${renderZoomStepperHtml({ downId: 'stepPliDown', upId: 'stepPliUp', pct: pliScalePct, downLabel: 'Decrease Parts Box size', upLabel: 'Increase Parts Box size' })}
+                  ${pliScalePct !== 100 ? `<button type="button" id="stepPliReset" class="px-2 py-1 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] text-xs font-semibold cursor-pointer">Reset</button>` : ''}
+                </div>
+              </div>` : ''}
+            ${caps.showSubassemblySettings && !ov.calloutAsPages ? `
+              <div class="flex items-center justify-between gap-2 flex-wrap">
+                <span class="font-semibold">Callout Position</span>
+                <div class="inline-flex rounded-md bg-[var(--surface-sunken)] p-0.5 gap-0.5">
+                  <button type="button" id="stepSubHoriz" class="px-2.5 py-1 rounded text-xs font-semibold cursor-pointer ${ov.calloutDir !== 'vertical' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'hover:bg-[var(--surface-hover)]'}">Side-by-Side</button>
+                  <button type="button" id="stepSubVert" class="px-2.5 py-1 rounded text-xs font-semibold cursor-pointer ${ov.calloutDir === 'vertical' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'hover:bg-[var(--surface-hover)]'}">Stacked</button>
+                </div>
+              </div>` : ''}
+          </div>`);
+      }
+
+      if (caps.showSubassemblySettings) {
+        sections.push(`
+          <div class="space-y-1.5">
+            <div class="flex items-center justify-between gap-2 flex-wrap">
+              <span class="font-semibold">${escHtml(step.subassembly.name || 'Subassembly')} Display</span>
+              ${renderScopeBadge('range', 'Adds / Removes Pages')}
+            </div>
+            <div class="grid grid-cols-2 gap-1.5">
+              <button type="button" id="stepSubCallout" class="py-1.5 px-2.5 rounded-md border font-semibold transition-colors cursor-pointer ${!ov.calloutAsPages ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)]'}">Inline Callout Box</button>
+              <button type="button" id="stepSubPages" class="py-1.5 px-2.5 rounded-md border font-semibold transition-colors cursor-pointer ${ov.calloutAsPages ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)]'}">Separate Full Pages</button>
+            </div>
+          </div>`);
+      }
+
+      if (caps.canMergeWithPrev && prevStep) {
+        sections.push(`
+          <div class="flex items-center justify-between gap-2 flex-wrap">
+            <div class="flex items-center gap-2 min-w-0">
+              ${renderScopeBadge('range', 'Affects Prev Step')}
+              <span class="text-[11px] text-[var(--muted-foreground)] truncate">Combine parts into Step ${prevStep.num}</span>
+            </div>
+            <button type="button" id="stepMergePrevBtn" class="px-2.5 py-1.5 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold shrink-0 cursor-pointer">Merge into Step ${prevStep.num}</button>
+          </div>`);
+      }
+
+      if (caps.showMinifigSettings) {
+        sections.push(`
+          <div class="space-y-2">
+            <div class="flex items-center justify-between gap-2 flex-wrap">
+              <span class="font-semibold">Minifigure Style</span>
+              ${renderScopeBadge('manual', 'All Minifigures')}
+            </div>
+            <div class="grid grid-cols-3 gap-1.5">
+              ${MINIFIG_STYLE_OPTIONS.map(opt => `<button type="button" data-step-mf-style="${opt.id}" title="${escHtml(opt.description)}" class="step-mf-style-btn py-1.5 px-2 rounded-md border font-semibold text-xs transition-colors cursor-pointer ${curMfStyle === opt.id ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)]'}">${escHtml(opt.label)}</button>`).join('')}
+            </div>
+            <label class="flex items-center justify-between gap-2 cursor-pointer">
+              <span class="text-[11px] font-medium text-[var(--muted-foreground)]">1:1 Actual-Size Height Card</span>
+              <input id="stepMf1to1Chk" type="checkbox" ${state.showMinifig1to1 ? 'checked' : ''} class="w-4 h-4 accent-[var(--primary)] cursor-pointer" />
+            </label>
+          </div>`);
+      }
+
+      bodyHtml = sections.length > 0
+        ? sections.map((sec, idx) => `<div class="${idx > 0 ? 'pt-2.5 border-t border-[var(--border)]' : ''}">${sec}</div>`).join('')
+        : `<p class="text-[11px] text-[var(--muted-foreground)]">No additional layout controls for this step.</p>`;
+    } else {
+      // subTab === 'notes'
+      const corners = [
+        { id: 'top-left', lbl: 'TL', title: 'Top Left' },
+        { id: 'top-right', lbl: 'TR', title: 'Top Right' },
+        { id: 'bottom-left', lbl: 'BL', title: 'Bottom Left' },
+        { id: 'bottom-right', lbl: 'BR', title: 'Bottom Right' },
+      ];
+      bodyHtml = `
+        <div class="space-y-2">
+          <div class="flex items-center justify-between gap-2 flex-wrap">
+            <span class="text-[11px] text-[var(--muted-foreground)]">Stays attached to Step ${step.num} even if pages reflow. Drag callouts on the step to position.</span>
+            ${renderScopeBadge('local', 'This Step')}
+          </div>
+          <div class="flex items-center gap-1.5">
+            <input id="stepNoteInput" type="text" maxlength="160" placeholder="Add a builder note for Step ${step.num}…" class="flex-1 min-w-0 px-2.5 py-1.5 rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] outline-none focus:border-[var(--primary)]" />
+            <button type="button" id="stepAddNoteBtn" class="px-2.5 py-1.5 rounded-md bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] font-semibold shrink-0 cursor-pointer">+ Note</button>
+            <button type="button" id="stepAddImgBtn" class="px-2.5 py-1.5 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold shrink-0 cursor-pointer">+ Image</button>
+          </div>
+          ${stepInserts.length > 0 ? `
+            <div class="space-y-1.5 max-h-28 overflow-y-auto pr-0.5">
+              ${stepInserts.map(ins => {
+                const curCorner = ins.corner || 'bottom-right';
+                const insPct = Math.round((ins.scale || 1) * 100);
+                return `
+                  <div class="flex items-center justify-between gap-2 flex-wrap px-2.5 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)]/70">
+                    <div class="flex items-center gap-1.5 min-w-0 flex-1">
+                      ${ins.kind === 'image'
+                        ? `<img src="${ins.src}" alt="Step image" class="w-6 h-6 rounded object-contain border border-[var(--border)] shrink-0 bg-[var(--card)]" />`
+                        : `<span class="px-1.5 py-0.5 rounded bg-[var(--primary-soft)] text-[var(--primary)] text-[10px] font-bold shrink-0">Note</span>`}
+                      <span class="truncate font-medium">${ins.kind === 'text' ? escHtml(ins.text) : `Image (${insPct}%)`}</span>
+                    </div>
+                    <div class="flex items-center gap-1 shrink-0">
+                      ${corners.map(c => `<button type="button" data-ins-corner="${ins.id}:${c.id}" title="${c.title}" class="step-ins-corner px-1.5 py-0.5 rounded border text-[10px] font-mono font-bold cursor-pointer ${curCorner === c.id && typeof ins.x !== 'number' ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)]'}">${c.lbl}</button>`).join('')}
+                      <div class="inline-flex items-center gap-0.5 rounded border border-[var(--border)] bg-[var(--card)] px-0.5">
+                        <button type="button" data-ins-scale="${ins.id}:down" aria-label="Smaller" class="step-ins-scale w-5 h-5 rounded hover:bg-[var(--surface-hover)] font-bold cursor-pointer">−</button>
+                        <span class="font-mono text-[10px] font-bold min-w-[28px] text-center">${insPct}%</span>
+                        <button type="button" data-ins-scale="${ins.id}:up" aria-label="Larger" class="step-ins-scale w-5 h-5 rounded hover:bg-[var(--surface-hover)] font-bold cursor-pointer">+</button>
+                      </div>
+                      <button type="button" data-del-insert="${ins.id}" title="Delete" aria-label="Delete callout" class="step-del-ins w-6 h-6 rounded bg-[var(--danger-soft)] text-[var(--danger)] flex items-center justify-center cursor-pointer">${icoClose}</button>
+                    </div>
+                  </div>`;
+              }).join('')}
+            </div>` : ''}
+        </div>`;
+    }
+
+    box.innerHTML = `
+      <div class="pointer-events-auto studio-surface rounded-xl p-3.5 w-full max-h-[46vh] overflow-y-auto space-y-2.5 text-xs">
+        <div class="flex items-center justify-between gap-2 flex-wrap pb-2 border-b border-[var(--border)]">
+          ${stepHeaderLeft}
+          ${subTabsHtml}
+        </div>
+        ${bodyHtml}
+      </div>`;
+
+    box.querySelectorAll('.step-slot-pick-btn').forEach(b => {
       b.onclick = () => {
         const sid = b.getAttribute('data-pick-slot');
         if (sid && state.selectedStepId !== sid) {
@@ -8751,53 +9197,287 @@ function renderContextOverlay(page) {
         }
       };
     });
-
-    const setCam = (patch) => {
-      pushUndo();
-      const cur = state.overrides[step.id] || {};
-      const nextSide = patch.side ?? cur.side ?? step.side ?? 'top';
-      const nextCorner = patch.corner ?? cur.corner ?? step.corner ?? 'front_right';
-      const cObj = CORNERS.find(c => c.id === nextCorner) || CORNERS[0];
-      state.overrides[step.id] = {
-        ...cur,
-        side: nextSide,
-        corner: nextCorner,
-        az: patch.az ?? cObj.az,
-        el: patch.el ?? (nextSide === 'bottom' ? -30 : 30),
+    box.querySelectorAll('.step-subtab-btn').forEach(b => {
+      b.onclick = () => {
+        const nextTab = b.getAttribute('data-step-subtab');
+        if (nextTab && state.stepSubTab !== nextTab) {
+          state.stepSubTab = nextTab;
+          renderAll();
+        }
       };
-      renderAll();
-    };
-    box.querySelector('#camTop').onclick = () => setCam({ side: 'top' });
-    box.querySelector('#camBot').onclick = () => setCam({ side: 'bottom' });
-    const mf34Btn = box.querySelector('#btnMfFront34');
-    if (mf34Btn) {
-      mf34Btn.onclick = () => setCam({ side: 'top', corner: mfDefaultCam.corner, az: mfDefaultCam.az, el: mfDefaultCam.el });
-    }
-    box.querySelectorAll('.corner-btn').forEach(b => { b.onclick = () => setCam({ corner: b.getAttribute('data-corner') }); });
-    const resetCamBtn = box.querySelector('#btnResetCam');
-    if (resetCamBtn) {
-      resetCamBtn.onclick = () => {
+    });
+
+    if (subTab === 'camera') {
+      const isMfStep = isMfBuild || Boolean(step.isMinifigPoseStep);
+      const mfDefaultCam = step.isMinifigPoseStep
+        ? { side: 'top', corner: step.corner || MINIFIG_POSE_CAMERA.corner, az: step.az ?? MINIFIG_POSE_CAMERA.az, el: step.el ?? MINIFIG_POSE_CAMERA.el }
+        : MINIFIG_BUILD_CAMERA;
+      const setCam = (patch) => {
         pushUndo();
-        state.overrides[step.id] = clearStepCameraOverride(state.overrides[step.id]);
-        showToast(`Reset camera angle for Step ${step.num}.`);
+        const cur = state.overrides[step.id] || {};
+        const nextSide = patch.side ?? cur.side ?? step.side ?? 'top';
+        const nextCorner = patch.corner ?? cur.corner ?? step.corner ?? 'front_right';
+        const cObj = CORNERS.find(c => c.id === nextCorner) || CORNERS[0];
+        state.overrides[step.id] = {
+          ...cur,
+          side: nextSide,
+          corner: nextCorner,
+          az: patch.az ?? cObj.az,
+          el: patch.el ?? (nextSide === 'bottom' ? -30 : 30),
+        };
         renderAll();
       };
+      box.querySelector('#camTop').onclick = () => setCam({ side: 'top' });
+      box.querySelector('#camBot').onclick = () => setCam({ side: 'bottom' });
+      const mf34Btn = box.querySelector('#btnMfFront34');
+      if (mf34Btn) {
+        mf34Btn.onclick = () => setCam({ side: 'top', corner: mfDefaultCam.corner, az: mfDefaultCam.az, el: mfDefaultCam.el });
+      }
+      box.querySelectorAll('.corner-btn').forEach(b => { b.onclick = () => setCam({ corner: b.getAttribute('data-corner') }); });
+      box.querySelector('#stepCamZoomDown').onclick = () => {
+        pushUndo();
+        state.overrides[step.id] = { ...(state.overrides[step.id] || {}), modelScale: clampStepModelScale((ov.modelScale || 1) - 0.1) };
+        renderAll();
+      };
+      box.querySelector('#stepCamZoomUp').onclick = () => {
+        pushUndo();
+        state.overrides[step.id] = { ...(state.overrides[step.id] || {}), modelScale: clampStepModelScale((ov.modelScale || 1) + 0.1) };
+        renderAll();
+      };
+      box.querySelectorAll('.step-focus-btn').forEach(b => {
+        b.onclick = () => {
+          pushUndo();
+          state.overrides[step.id] = { ...(state.overrides[step.id] || {}), focusMode: b.getAttribute('data-step-focus') };
+          renderAll();
+        };
+      });
+      const resetCamBtn = box.querySelector('#btnResetCam');
+      if (resetCamBtn) {
+        resetCamBtn.onclick = () => {
+          pushUndo();
+          state.overrides[step.id] = clearStepCameraOverride(state.overrides[step.id], true);
+          showToast(`Reset camera for Step ${step.num}.`);
+          renderAll();
+        };
+      }
+      const applyRangeBtn = box.querySelector('#btnApplyAngleRange');
+      if (applyRangeBtn) {
+        applyRangeBtn.onclick = () => openApplyAngleModal(step, ch);
+      }
+    } else if (subTab === 'layout') {
+      const pliDown = box.querySelector('#stepPliDown');
+      const pliUp = box.querySelector('#stepPliUp');
+      const pliReset = box.querySelector('#stepPliReset');
+      if (pliDown) pliDown.onclick = () => { pushUndo(); state.overrides[step.id] = { ...ov, pliScale: Math.max(0.6, Number(((ov.pliScale || 1) - 0.1).toFixed(2))) }; renderAll(); };
+      if (pliUp) pliUp.onclick = () => { pushUndo(); state.overrides[step.id] = { ...ov, pliScale: Math.min(1.6, Number(((ov.pliScale || 1) + 0.1).toFixed(2))) }; renderAll(); };
+      if (pliReset) pliReset.onclick = () => { pushUndo(); state.overrides[step.id] = { ...ov, pliScale: 1 }; renderAll(); };
+
+      const subHoriz = box.querySelector('#stepSubHoriz');
+      const subVert = box.querySelector('#stepSubVert');
+      if (subHoriz) subHoriz.onclick = () => { pushUndo(); state.overrides[step.id] = { ...ov, calloutDir: 'horizontal' }; renderAll(); };
+      if (subVert) subVert.onclick = () => { pushUndo(); state.overrides[step.id] = { ...ov, calloutDir: 'vertical' }; renderAll(); };
+
+      const subCallout = box.querySelector('#stepSubCallout');
+      const subPages = box.querySelector('#stepSubPages');
+      if (subCallout) subCallout.onclick = () => { pushUndo(); state.overrides[step.id] = { ...ov, calloutAsPages: false }; renderAll(); };
+      if (subPages) subPages.onclick = () => { pushUndo(); state.overrides[step.id] = { ...ov, calloutAsPages: true }; renderAll(); };
+
+      const mergeBtn = box.querySelector('#stepMergePrevBtn');
+      if (mergeBtn) {
+        mergeBtn.onclick = () => {
+          const idx = ch.steps.indexOf(step);
+          if (idx <= 0) { showToast('No previous step in this section to merge into.'); return; }
+          pushUndo();
+          ch.steps[idx - 1].parts.push(...step.parts);
+          ch.steps.splice(idx, 1);
+          delete state.overrides[step.id];
+          state.selectedStepId = ch.steps[idx - 1].id;
+          state.selectedPartIds.clear();
+          showToast(`Merged into Step ${ch.steps[idx - 1].num}.`);
+          renderAll();
+        };
+      }
+
+      box.querySelectorAll('.step-mf-style-btn').forEach(b => {
+        b.onclick = () => applyMinifigStyleChange(b.getAttribute('data-step-mf-style'), step.id);
+      });
+      const mf1to1Chk = box.querySelector('#stepMf1to1Chk');
+      if (mf1to1Chk) {
+        mf1to1Chk.onchange = (e) => patchActiveTheme({ showMinifig1to1: Boolean(e.target.checked) });
+      }
+    } else {
+      // subTab === 'notes'
+      const noteInput = box.querySelector('#stepNoteInput');
+      const addNote = () => {
+        const txt = (noteInput?.value || '').trim();
+        if (!txt) {
+          showToast('Enter note text first.');
+          noteInput?.focus();
+          return;
+        }
+        pushUndo();
+        const arr = state.stepInserts[step.id] || [];
+        arr.push({ id: 'ins_' + Date.now().toString(36), kind: 'text', text: txt, corner: 'bottom-right', scale: 1 });
+        state.stepInserts[step.id] = arr;
+        showToast(`Added note to Step ${step.num}.`);
+        renderAll();
+      };
+      box.querySelector('#stepAddNoteBtn').onclick = addNote;
+      if (noteInput) {
+        noteInput.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); addNote(); } };
+      }
+      box.querySelector('#stepAddImgBtn').onclick = () => document.getElementById('insertImageInput').click();
+      box.querySelectorAll('.step-ins-corner').forEach(b => {
+        b.onclick = () => {
+          const [id, corner] = (b.getAttribute('data-ins-corner') || '').split(':');
+          const ins = (state.stepInserts[step.id] || []).find(x => x.id === id);
+          if (!ins || !corner) return;
+          pushUndo();
+          ins.corner = corner;
+          delete ins.x;
+          delete ins.y;
+          renderAll();
+        };
+      });
+      box.querySelectorAll('.step-ins-scale').forEach(b => {
+        b.onclick = () => {
+          const [id, dir] = (b.getAttribute('data-ins-scale') || '').split(':');
+          const ins = (state.stepInserts[step.id] || []).find(x => x.id === id);
+          if (!ins) return;
+          pushUndo();
+          const delta = dir === 'up' ? 0.15 : -0.15;
+          ins.scale = Math.max(0.5, Math.min(2.2, Number(((ins.scale || 1) + delta).toFixed(2))));
+          renderAll();
+        };
+      });
+      box.querySelectorAll('.step-del-ins').forEach(b => {
+        b.onclick = () => {
+          const id = b.getAttribute('data-del-insert');
+          pushUndo();
+          state.stepInserts[step.id] = (state.stepInserts[step.id] || []).filter(x => x.id !== id);
+          if (state.stepInserts[step.id].length === 0) delete state.stepInserts[step.id];
+          renderAll();
+        };
+      });
     }
-    const applyRangeBtn = box.querySelector('#btnApplyAngleRange');
-    if (applyRangeBtn) {
-      applyRangeBtn.onclick = () => openApplyAngleModal(step, ch);
+    return;
+  }
+
+  // =========================================================================
+  // STEP PAGES — PAGE MODE (This Page Flow vs Step Range vs All Pages)
+  // =========================================================================
+  if (state.mode === 'page') {
+    const canAddDiv = canInsertDividerAfterPage(page, state.dividerAfter);
+    const activeGroup = page.layoutGroup || null;
+    const firstAbs = slots.length > 0 ? getAbsStepNum(slots[0].step) : getAbsStepNum(step);
+    const lastAbs = slots.length > 0 ? getAbsStepNum(slots[slots.length - 1].step) : firstAbs;
+    const paperSpec = PAPER_FORMAT_SPECS[state.paperFormat] || PAPER_FORMAT_SPECS.screen;
+    const orientTxt = paperSpec.supportsOrientation ? (state.orientation === 'portrait' ? 'Portrait' : 'Landscape') : '';
+    const gridSummary = describePageLayoutSpec(state.layoutConfig);
+    const manualSummary = [paperSpec.shortName, orientTxt, gridSummary].filter(Boolean).join(' · ');
+
+    box.innerHTML = `
+      <div class="pointer-events-auto studio-surface rounded-xl p-3.5 w-full max-h-[46vh] overflow-y-auto space-y-2.5 text-xs">
+        <div class="flex items-center justify-between gap-2 pb-2 border-b border-[var(--border)]">
+          <div class="flex items-center gap-2 min-w-0">
+            <span class="font-bold truncate">Page ${page.num} of ${state.pages.length}</span>
+            <span class="text-[11px] text-[var(--muted-foreground)] truncate">${escHtml(page.label)}</span>
+          </div>
+          ${renderScopeBadge('local', 'This Page')}
+        </div>
+
+        <!-- Page Breaks & Page Inserts (affects later pages) -->
+        <div class="space-y-1.5">
+          <div class="flex items-center justify-between gap-2 flex-wrap">
+            <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Page Breaks &amp; Dividers</span>
+            ${renderScopeBadge('range', 'Affects Later Pages')}
+          </div>
+          <div class="flex items-center gap-1.5 flex-wrap">
+            ${slots.map((sl, slIdx) => {
+              const pinned = Boolean((state.overrides[sl.step.id] || {}).pin);
+              const slLabel = getStepShortLabel(sl.step, sl.ch);
+              const tip = getStepBreakTooltip({ stepLabel: slLabel, pinned, slotIndex: slIdx });
+              return `<span class="pb-btn-group inline-flex items-stretch rounded-md border transition-colors ${pinned ? 'bg-[var(--primary)] text-[var(--primary-foreground)] border-transparent' : 'border-[var(--border)] bg-[var(--card)]'}">
+                <button type="button" data-page-break-step="${sl.step.id}" title="${escHtml(tip)}" aria-pressed="${pinned ? 'true' : 'false'}" class="page-break-slot-btn pl-2.5 pr-2 py-1.5 rounded-l-[5px] font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer ${pinned ? 'hover:bg-[var(--primary-hover)]' : 'hover:bg-[var(--surface-hover)]'}">
+                  <svg class="w-3 h-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4"/><path d="M10 12h4"/><path d="M17 12h4"/><path d="M6 4v3a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V4"/><path d="M6 20v-3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v3"/></svg>
+                  <span>Step ${sl.step.num}: ${pinned ? 'Break On' : 'New Page'}</span>
+                </button>
+                <button type="button" aria-label="${escHtml(`What is a Page Break? (${slLabel})`)}" aria-expanded="false" data-pb-help-step="${escHtml(slLabel)}" data-pb-help-pinned="${pinned ? '1' : '0'}" class="pb-help-btn page-break-help-btn px-2 py-1.5 rounded-r-[5px] border-l inline-flex items-center justify-center font-bold leading-none transition-colors cursor-pointer ${pinned ? 'pb-help-btn-pinned' : 'pb-help-btn-default'}"><span aria-hidden="true">?</span></button>
+              </span>`;
+            }).join('')}
+            ${canAddDiv ? `
+              <button id="pageInsertDividerBtn" type="button" class="px-2.5 py-1.5 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold inline-flex items-center gap-1 cursor-pointer">
+                <span>+ Divider After</span>
+              </button>` : ''}
+          </div>
+        </div>
+
+        <!-- Step Range Group (affects a custom range of steps/pages) -->
+        <div class="pt-2 border-t border-[var(--border)] flex items-center justify-between gap-2 flex-wrap">
+          <div class="flex items-center gap-2 min-w-0 flex-1">
+            ${renderScopeBadge('range', 'Step Range')}
+            <span class="text-[11px] text-[var(--muted-foreground)] truncate">${activeGroup ? `${escHtml(activeGroup.name)} (#${activeGroup.startStepNum}–#${activeGroup.endStepNum})` : 'Using manual default grid'}</span>
+          </div>
+          <button id="pageRangeGroupBtn" type="button" class="px-2.5 py-1.5 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold shrink-0 cursor-pointer">${activeGroup ? 'Edit Group…' : 'Custom Layout for Page…'}</button>
+        </div>
+
+        <!-- Whole-Manual Settings (affects all pages) -->
+        <div class="pt-2 border-t border-[var(--border)] flex items-center justify-between gap-2 flex-wrap">
+          <div class="flex items-center gap-2 min-w-0 flex-1">
+            ${renderScopeBadge('manual', 'All Pages')}
+            <span class="font-mono text-[11px] text-[var(--muted-foreground)] truncate">${escHtml(manualSummary)}</span>
+          </div>
+          <div class="flex items-center gap-1.5 shrink-0">
+            <button id="pageOpenSetupBtn" type="button" class="px-2.5 py-1.5 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold cursor-pointer">Page Setup…</button>
+            <button id="pageOpenStyleBtn" type="button" class="px-2.5 py-1.5 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold cursor-pointer">Style…</button>
+          </div>
+        </div>
+      </div>`;
+
+    box.querySelectorAll('.page-break-slot-btn').forEach(b => {
+      b.onclick = () => {
+        const sid = b.getAttribute('data-page-break-step');
+        const found = slots.find(sl => sl.step.id === sid);
+        if (found) toggleStepPageBreak(found.step, { ch: found.ch, followToggledStep: true });
+      };
+    });
+    box.querySelectorAll('.page-break-help-btn').forEach(helpBtn => {
+      helpBtn.onclick = (e) => {
+        e.stopPropagation();
+        togglePageBreakHelpTooltip(helpBtn);
+      };
+    });
+    const divBtn = box.querySelector('#pageInsertDividerBtn');
+    if (divBtn) {
+      divBtn.onclick = () => {
+        if (!canInsertDividerAfterPage(page, state.dividerAfter)) return;
+        pushUndo();
+        state.dividerAfter[page.id] = { title: 'Next Section', note: '' };
+        renderAll();
+        showToast('Inserted divider page after current page.');
+      };
     }
+    box.querySelector('#pageRangeGroupBtn').onclick = () => {
+      openPageSetupModal();
+      if (activeGroup) openLayoutGroupEditor(activeGroup);
+      else openLayoutGroupEditor(null, { start: firstAbs, end: lastAbs });
+    };
+    box.querySelector('#pageOpenSetupBtn').onclick = () => openPageSetupModal();
+    box.querySelector('#pageOpenStyleBtn').onclick = () => setStylePopoverOpen(true);
     return;
   }
 }
 
 // =========================================================================
-// 8A. APPLY CAMERA ANGLE TO STEP RANGE MODAL (Dual-Handle Range + 3D Thumbs)
+// 8A. APPLY CAMERA TO STEP RANGE MODAL (Dual-Handle Range + 3D Thumbs)
 // =========================================================================
 const applyAngleState = {
   sourceStep: null,
   sourceCh: null,
   camera: null,
+  sourceModelScale: 1.0,
+  sourceFocusMode: 'auto',
+  includeFraming: false,
   allSteps: [],
   startNum: 1,
   endNum: 1,
@@ -8815,6 +9495,10 @@ function openApplyAngleModal(step, ch) {
   const allSteps = getAllSteps(state.model);
   if (allSteps.length < 2) return;
   const cam = getStepCamera(step);
+  const ov = state.overrides[step.id] || {};
+  const modelScale = clampStepModelScale(ov.modelScale ?? 1.0);
+  const focusMode = ov.focusMode || 'auto';
+  const focusLabel = (FOCUS_MODE_OPTIONS.find(o => o.id === focusMode) || FOCUS_MODE_OPTIONS[0]).label;
   // All range values below are ABSOLUTE step numbers (unique across the manual).
   const maxNum = getAbsStepNum(allSteps[allSteps.length - 1].step);
   const srcAbs = getAbsStepNum(step);
@@ -8823,6 +9507,9 @@ function openApplyAngleModal(step, ch) {
   applyAngleState.sourceStep = step;
   applyAngleState.sourceCh = ch;
   applyAngleState.camera = { side: cam.side, corner: cam.corner, az: Math.round(cam.az), el: Math.round(cam.el) };
+  applyAngleState.sourceModelScale = modelScale;
+  applyAngleState.sourceFocusMode = focusMode;
+  applyAngleState.includeFraming = false;
   applyAngleState.allSteps = allSteps;
   applyAngleState.startNum = srcAbs;
   applyAngleState.endNum = Math.min(maxNum, Math.max(srcAbs, chMaxNum || maxNum));
@@ -8834,6 +9521,11 @@ function openApplyAngleModal(step, ch) {
   if (sub) {
     sub.textContent = `Sharing ${ch?.name ? `${ch.name} · ` : ''}${formatDualStepLabel(step, { alwaysShowAbs: true })} camera (${cam.side === 'bottom' ? 'Bottom' : 'Top'} · ${Math.round(cam.az)}° / ${Math.round(cam.el)}°)`;
   }
+
+  const incChk = document.getElementById('applyCameraIncludeFraming');
+  const incLbl = document.getElementById('applyCameraIncludeFramingLabel');
+  if (incChk) incChk.checked = false;
+  if (incLbl) incLbl.textContent = `Also copy Zoom (${Math.round(modelScale * 100)}%) & Framing (${focusLabel})`;
 
   const minInp = document.getElementById('angleRangeMin');
   const maxInp = document.getElementById('angleRangeMax');
@@ -8898,7 +9590,7 @@ function syncApplyAngleRangeUI() {
   if (countBadge) countBadge.textContent = `${selectedCount} step${selectedCount === 1 ? '' : 's'}`;
 
   const confirmBtn = document.getElementById('btnConfirmApplyAngle');
-  if (confirmBtn) confirmBtn.textContent = `Apply Angle to ${selectedCount} Step${selectedCount === 1 ? '' : 's'}`;
+  if (confirmBtn) confirmBtn.textContent = `Apply Camera to ${selectedCount} Step${selectedCount === 1 ? '' : 's'}`;
 
   // Update row highlights without recreating thumbnails
   const listEl = document.getElementById('angleStepList');
@@ -8963,7 +9655,7 @@ function renderApplyAngleModal(scrollToSource = false) {
             <span class="font-bold text-xs">Step ${step.num}</span>
             <span class="px-1 py-0.5 rounded border border-[var(--border)] font-mono text-[10px] font-semibold text-[var(--muted-foreground)]" title="Absolute step number (unique across the whole manual)">#${abs}</span>
             ${isCur ? `<span class="px-1.5 py-0.5 rounded bg-[var(--surface-sunken)] border border-[var(--border)] text-[10px] font-bold text-[var(--foreground)]">Current</span>` : ''}
-            <span class="font-mono text-[10px] text-[var(--muted-foreground)]">${step.parts.length} pc${step.parts.length === 1 ? '' : 's'}</span>
+            <span class="font-mono text-[10px] text-[var(--muted-foreground)]">${formatPartCount(step.parts.length)}</span>
           </div>
           <div class="text-[11px] text-[var(--muted-foreground)] truncate mt-0.5">${escHtml(ch.name)} · ${stepCam.side === 'bottom' ? 'Bottom' : 'Top'} ${Math.round(stepCam.az)}°</div>
         </div>
@@ -9029,472 +9721,6 @@ function renderApplyAngleModal(scrollToSource = false) {
     }
   };
   requestAnimationFrame(renderBatch);
-}
-
-// =========================================================================
-// 8B. FULL-PAGE EDIT STEP & PAGE MODAL (Dedicated, Clearly Labeled Controls)
-// =========================================================================
-function isStepEditModalOpen() {
-  const el = document.getElementById('stepEditModal');
-  return Boolean(el && !el.classList.contains('hidden'));
-}
-
-function openStepEditModal() {
-  const page = state.pages[state.pageIdx];
-  if (!page || page.kind !== 'steps') return;
-  closeMenu();
-  document.getElementById('stylePopover')?.classList.add('hidden');
-  document.getElementById('stepEditModal').classList.remove('hidden');
-  renderStepEditModal();
-  syncModePillButtons(page);
-}
-
-function closeStepEditModal() {
-  hidePageBreakHelpTooltip();
-  const el = document.getElementById('stepEditModal');
-  if (el) el.classList.add('hidden');
-  const page = state.pages[state.pageIdx];
-  if (page) syncModePillButtons(page);
-}
-
-function renderStepEditModal() {
-  const modal = document.getElementById('stepEditModal');
-  const body = document.getElementById('stepEditBody');
-  const stepBar = document.getElementById('stepEditStepBar');
-  const subtitle = document.getElementById('stepEditSubtitle');
-  if (!modal || !body) return;
-
-  const page = state.pages[state.pageIdx];
-  if (!page || page.kind !== 'steps') {
-    closeStepEditModal();
-    return;
-  }
-  const active = getActiveStepObj();
-  if (!active) {
-    closeStepEditModal();
-    return;
-  }
-
-  const { ch, step } = active;
-  const ov = state.overrides[step.id] || {};
-  const slots = page.slots || [];
-  const slotIdx = Math.max(0, slots.findIndex(s => s.step.id === step.id));
-  const isMfBuild = Boolean((step.isStandaloneFigure || ch.kind === 'minifigure') && !step.isMinifigPoseStep);
-  const curMfStyle = isMfBuild ? getEffectiveMinifigStyle(step) : 'classic';
-  const fMode = ov.focusMode || 'auto';
-  const modelScalePct = Math.round((ov.modelScale || 1.0) * 100);
-  const pliScalePct = Math.round((ov.pliScale || 1.0) * 100);
-  const cam = getStepCamera(step);
-  const cornerLabel = getCameraAngleLabel(cam.corner);
-  const stepInserts = state.stepInserts[step.id] || [];
-  const stepIdxInCh = ch.steps.indexOf(step);
-  const followingCount = stepIdxInCh >= 0 ? Math.max(0, ch.steps.length - 1 - stepIdxInCh) : 0;
-  const isPinned = Boolean(ov.pin);
-  const stepShortLabel = getStepShortLabel(step, ch);
-  const pinTooltip = getStepBreakTooltip({ stepLabel: stepShortLabel, pinned: isPinned, slotIndex: slotIdx });
-
-  const caps = resolveStepToolbarCapabilities({
-    isMinifigBuild: isMfBuild,
-    minifigStyle: curMfStyle,
-    hasSubassembly: Boolean(step.subassembly),
-    override: ov,
-    stepInsertCount: stepInserts.length,
-    followingStepCount: followingCount,
-  });
-
-  if (subtitle) {
-    subtitle.textContent = `Page ${page.num} of ${state.pages.length} · ${page.label} · Editing ${stepShortLabel} · #${getAbsStepNum(step)}`;
-  }
-
-  // Multi-step switcher bar at top of modal
-  if (stepBar) {
-    if (slots.length > 1) {
-      stepBar.classList.remove('hidden');
-      stepBar.innerHTML = `
-        <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)] shrink-0">Editing:</span>
-        ${slots.map(sl => {
-          const slIsMf = Boolean((sl.step.isStandaloneFigure || sl.ch.kind === 'minifigure') && !sl.step.isMinifigPoseStep);
-          const lbl = slIsMf && sl.step.minifigName ? `Step ${sl.step.num} · ${sl.step.minifigName}` : `Step ${sl.step.num}`;
-          const activeCls = sl.step.id === step.id
-            ? 'bg-[var(--primary)] text-[var(--primary-foreground)] border-transparent'
-            : 'border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)]';
-          return `<button type="button" data-edit-slot="${sl.step.id}" class="step-edit-slot-btn px-3 py-1 rounded-md border text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${activeCls}">${escHtml(lbl)}</button>`;
-        }).join('')}`;
-      stepBar.querySelectorAll('.step-edit-slot-btn').forEach(b => {
-        b.onclick = () => {
-          const sid = b.getAttribute('data-edit-slot');
-          if (sid && state.selectedStepId !== sid) {
-            state.selectedStepId = sid;
-            state.selectedPartIds.clear();
-            renderAll();
-          }
-        };
-      });
-    } else {
-      stepBar.classList.add('hidden');
-      stepBar.innerHTML = '';
-    }
-  }
-
-  const scopeBadge = (text, accent = false) =>
-    `<span class="px-2 py-0.5 rounded-md text-[11px] font-semibold ${accent ? 'bg-[var(--primary-soft)] text-[var(--primary)]' : 'bg-[var(--surface-sunken)] text-[var(--muted-foreground)]'}">${escHtml(text)}</span>`;
-
-  body.innerHTML = `
-    ${caps.showMinifigSettings ? `
-      <section class="p-4 rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)]/60 space-y-3">
-        <div class="flex items-center justify-between gap-2 flex-wrap">
-          <div>
-            <div class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Minifigure Instruction Style</div>
-            <h3 class="text-sm font-bold mt-0.5">How Minifigures Are Presented</h3>
-          </div>
-          ${scopeBadge('All minifigure steps', true)}
-        </div>
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
-          ${MINIFIG_STYLE_OPTIONS.map(opt => {
-            const selected = curMfStyle === opt.id;
-            return `<button type="button" data-edit-mf-style="${opt.id}" aria-pressed="${selected ? 'true' : 'false'}" class="step-edit-mf-btn p-3 rounded-lg border text-left transition-colors cursor-pointer flex flex-col gap-1 ${
-              selected
-                ? 'border-[var(--primary)] bg-[var(--primary-soft)] ring-1 ring-[var(--primary)]'
-                : 'border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)]'
-            }">
-              <div class="flex items-center justify-between gap-1.5">
-                <span class="font-bold text-xs ${selected ? 'text-[var(--primary)]' : ''}">${escHtml(opt.label)}</span>
-                ${selected ? `<span class="text-[10px] font-bold uppercase tracking-wider text-[var(--primary)]">Active</span>` : ''}
-              </div>
-              <p class="text-[11px] text-[var(--muted-foreground)] leading-snug">${escHtml(opt.description)}</p>
-            </button>`;
-          }).join('')}
-        </div>
-        <label class="flex items-center justify-between gap-3 pt-3 border-t border-[var(--border)] cursor-pointer">
-          <div class="min-w-0">
-            <div class="font-semibold">1:1 Actual-Size Minifigure Preview</div>
-            <p class="text-[11px] text-[var(--muted-foreground)] leading-snug">Show a life-size height reference card next to each minifigure.</p>
-          </div>
-          <input id="stepEditMf1to1" type="checkbox" ${state.showMinifig1to1 ? 'checked' : ''} class="w-4 h-4 accent-[var(--primary)] shrink-0 cursor-pointer" />
-        </label>
-      </section>` : ''}
-
-    <section class="p-4 rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)]/60 space-y-3.5">
-      <div class="flex items-center justify-between gap-2 flex-wrap">
-        <div>
-          <div class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Step Display &amp; Framing</div>
-          <h3 class="text-sm font-bold mt-0.5">${escHtml(stepShortLabel)}</h3>
-        </div>
-        ${scopeBadge('This step')}
-      </div>
-
-      <!-- Camera Framing -->
-      <div class="space-y-1.5">
-        <div class="font-semibold">Camera Framing</div>
-        <div class="grid grid-cols-3 gap-1.5">
-          ${FOCUS_MODE_OPTIONS.map(opt => `
-            <button type="button" data-edit-focus="${opt.id}" aria-pressed="${fMode === opt.id ? 'true' : 'false'}" class="step-edit-focus-btn py-2 px-2 rounded-md border font-semibold transition-colors cursor-pointer ${
-              fMode === opt.id
-                ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]'
-                : 'border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)]'
-            }">${escHtml(opt.label)}</button>`).join('')}
-        </div>
-        <p class="text-[11px] text-[var(--muted-foreground)] leading-snug">${escHtml(getFocusModeDescription(fMode))}</p>
-      </div>
-
-      <!-- 3D Model Size -->
-      <div class="flex items-center justify-between gap-3 pt-3 border-t border-[var(--border)] flex-wrap">
-        <div class="min-w-0 flex-1">
-          <div class="font-semibold">3D Model Size</div>
-          <p class="text-[11px] text-[var(--muted-foreground)] leading-snug">Scale how large the 3D model renders inside this step.</p>
-        </div>
-        <div class="flex items-center gap-1.5 shrink-0">
-          <div class="inline-flex items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--card)] px-1.5 py-1">
-            <button type="button" id="stepEditModScaleDown" aria-label="Decrease 3D model size" class="w-6 h-6 rounded-md hover:bg-[var(--surface-hover)] font-bold cursor-pointer">−</button>
-            <span class="text-xs font-bold tabular-nums min-w-[40px] text-center">${modelScalePct}%</span>
-            <button type="button" id="stepEditModScaleUp" aria-label="Increase 3D model size" class="w-6 h-6 rounded-md hover:bg-[var(--surface-hover)] font-bold cursor-pointer">+</button>
-          </div>
-          ${modelScalePct !== 100 ? `<button type="button" id="stepEditModScaleReset" class="px-2.5 py-1.5 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] text-xs font-semibold cursor-pointer">Reset</button>` : ''}
-        </div>
-      </div>
-
-      <!-- Parts Box Size (only when visible) -->
-      ${caps.hasPartsBox ? `
-        <div class="flex items-center justify-between gap-3 pt-3 border-t border-[var(--border)] flex-wrap">
-          <div class="min-w-0 flex-1">
-            <div class="font-semibold">Parts Box Size</div>
-            <p class="text-[11px] text-[var(--muted-foreground)] leading-snug">Resize the Parts List box shown at the top of this step.</p>
-          </div>
-          <div class="flex items-center gap-1.5 shrink-0">
-            <div class="inline-flex items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--card)] px-1.5 py-1">
-              <button type="button" id="stepEditPliDown" aria-label="Decrease Parts Box size" class="w-6 h-6 rounded-md hover:bg-[var(--surface-hover)] font-bold cursor-pointer">−</button>
-              <span class="text-xs font-bold tabular-nums min-w-[40px] text-center">${pliScalePct}%</span>
-              <button type="button" id="stepEditPliUp" aria-label="Increase Parts Box size" class="w-6 h-6 rounded-md hover:bg-[var(--surface-hover)] font-bold cursor-pointer">+</button>
-            </div>
-            ${pliScalePct !== 100 ? `<button type="button" id="stepEditPliReset" class="px-2.5 py-1.5 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] text-xs font-semibold cursor-pointer">Reset</button>` : ''}
-          </div>
-        </div>` : ''}
-
-      <!-- Camera Angle Bridge (links directly to Rotate without duplicating controls) -->
-      <div class="flex items-center justify-between gap-3 pt-3 border-t border-[var(--border)] flex-wrap">
-        <div class="min-w-0 flex-1">
-          <div class="font-semibold">3D Camera Angle</div>
-          <p class="text-[11px] text-[var(--muted-foreground)] leading-snug">${cam.side === 'bottom' ? 'Bottom' : 'Top'} view · ${escHtml(cornerLabel)} (${Math.round(cam.az)}° / ${Math.round(cam.el)}°)</p>
-        </div>
-        <button type="button" id="stepEditGoRotate" class="px-3 py-1.5 rounded-md border border-[var(--primary)]/40 bg-[var(--primary-soft)] text-[var(--primary)] font-semibold shrink-0 cursor-pointer">Rotate in 3D →</button>
-      </div>
-    </section>
-
-    ${caps.showSubassemblySettings ? `
-      <section class="p-4 rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)]/60 space-y-3">
-        <div class="flex items-center justify-between gap-2 flex-wrap">
-          <div>
-            <div class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Subassembly Layout</div>
-            <h3 class="text-sm font-bold mt-0.5">${escHtml(step.subassembly.name || 'Subassembly')}</h3>
-          </div>
-          ${scopeBadge('This step')}
-        </div>
-        <div class="space-y-1.5">
-          <div class="font-semibold">Display Style</div>
-          <div class="grid grid-cols-2 gap-2">
-            <button type="button" id="stepEditSubCallout" class="py-2 px-3 rounded-md border font-semibold transition-colors cursor-pointer ${!ov.calloutAsPages ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)]'}">Inline Callout Box</button>
-            <button type="button" id="stepEditSubPages" class="py-2 px-3 rounded-md border font-semibold transition-colors cursor-pointer ${ov.calloutAsPages ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)]'}">Separate Full Pages</button>
-          </div>
-          <p class="text-[11px] text-[var(--muted-foreground)] leading-snug">Show this subassembly inside a yellow callout box on this step, or break it out into its own full pages.</p>
-        </div>
-        ${!ov.calloutAsPages ? `
-          <div class="space-y-1.5 pt-3 border-t border-[var(--border)]">
-            <div class="font-semibold">Callout Box Position</div>
-            <div class="grid grid-cols-2 gap-2">
-              <button type="button" id="stepEditSubHoriz" class="py-2 px-3 rounded-md border font-semibold transition-colors cursor-pointer ${ov.calloutDir !== 'vertical' ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)]'}">Side-by-Side</button>
-              <button type="button" id="stepEditSubVert" class="py-2 px-3 rounded-md border font-semibold transition-colors cursor-pointer ${ov.calloutDir === 'vertical' ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)]'}">Stacked Vertically</button>
-            </div>
-          </div>` : ''}
-      </section>` : ''}
-
-    <section class="p-4 rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)]/60 space-y-3">
-      <div class="flex items-center justify-between gap-2 flex-wrap">
-        <div>
-          <div class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Pagination &amp; Page Break</div>
-          <h3 class="text-sm font-bold mt-0.5">Page Flow for Step ${step.num}</h3>
-        </div>
-        ${scopeBadge('This step')}
-      </div>
-      <div class="flex items-center justify-between gap-3 flex-wrap">
-        <div class="min-w-0 flex-1">
-          <div class="font-semibold">Start Step ${step.num} on a New Page</div>
-        </div>
-        <span class="pb-btn-group inline-flex items-stretch rounded-md border shrink-0 transition-colors ${isPinned ? 'bg-[var(--primary)] text-[var(--primary-foreground)] border-transparent' : 'border-[var(--border)] bg-[var(--card)]'}">
-          <button type="button" id="stepEditPinBreak" title="${escHtml(pinTooltip)}" aria-pressed="${isPinned ? 'true' : 'false'}" class="pl-3.5 pr-3 py-2 rounded-l-[5px] font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer ${isPinned ? 'hover:bg-[var(--primary-hover)]' : 'hover:bg-[var(--surface-hover)]'}">
-            <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4"/><path d="M10 12h4"/><path d="M17 12h4"/><path d="M6 4v3a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V4"/><path d="M6 20v-3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v3"/></svg>
-            <span>${isPinned ? 'Page Break On' : 'Add Page Break'}</span>
-          </button>
-          <button type="button" id="stepEditPinBreakHelp" aria-label="${escHtml(`What is a Page Break? (${stepShortLabel})`)}" aria-expanded="false" data-pb-help-step="${escHtml(stepShortLabel)}" data-pb-help-pinned="${isPinned ? '1' : '0'}" class="pb-help-btn px-2.5 py-2 rounded-r-[5px] border-l inline-flex items-center justify-center font-bold leading-none transition-colors cursor-pointer ${isPinned ? 'pb-help-btn-pinned' : 'pb-help-btn-default'}">
-            <span aria-hidden="true">?</span>
-          </button>
-        </span>
-      </div>
-      <div class="pt-3 border-t border-[var(--border)] flex items-center justify-between gap-2 flex-wrap">
-        <span class="text-[11px] text-[var(--muted-foreground)]">Want to change the page grid, step order, or paper size?</span>
-        <button type="button" id="stepEditOpenPageSetup" class="px-3 py-1.5 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold shrink-0 cursor-pointer">Open Page Setup…</button>
-      </div>
-    </section>
-
-    <section class="p-4 rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)]/60 space-y-3">
-      <div class="flex items-center justify-between gap-2 flex-wrap">
-        <div>
-          <div class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Step Notes &amp; Images</div>
-          <h3 class="text-sm font-bold mt-0.5">Custom Callouts on Step ${step.num}</h3>
-        </div>
-        ${scopeBadge('This step')}
-      </div>
-      <p class="text-[11px] text-[var(--muted-foreground)] leading-snug">Add builder tips, warnings, or logos attached directly to Step ${step.num} so they stay with this step even if pagination changes. You can also drag them in <b>Select</b> mode.</p>
-
-      <div class="flex items-center gap-2">
-        <input id="stepEditNoteInput" type="text" maxlength="160" placeholder="Type a builder note (e.g. Press firmly until it clicks)…" class="flex-1 min-w-0 px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--card)] outline-none focus:border-[var(--primary)]" />
-        <button type="button" id="stepEditAddNoteBtn" class="px-3.5 py-2 rounded-md bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] font-semibold shrink-0 cursor-pointer">+ Add Note</button>
-      </div>
-
-      <div class="flex items-center gap-2 flex-wrap">
-        <button type="button" id="stepEditAddImgBtn" class="px-3.5 py-2 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold inline-flex items-center gap-1.5 cursor-pointer">
-          <svg class="w-3.5 h-3.5 text-[var(--primary)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
-          <span>+ Add Image / Logo</span>
-        </button>
-      </div>
-
-      ${stepInserts.length > 0 ? `
-        <div class="space-y-2 pt-2.5 border-t border-[var(--border)]">
-          <div class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Attached to Step ${step.num} (${stepInserts.length})</div>
-          ${stepInserts.map(ins => {
-            const curCorner = ins.corner || 'bottom-right';
-            const insPct = Math.round((ins.scale || 1) * 100);
-            const corners = [
-              { id: 'top-left', lbl: 'TL', title: 'Top Left' },
-              { id: 'top-right', lbl: 'TR', title: 'Top Right' },
-              { id: 'bottom-left', lbl: 'BL', title: 'Bottom Left' },
-              { id: 'bottom-right', lbl: 'BR', title: 'Bottom Right' },
-            ];
-            return `
-            <div class="p-2.5 rounded-lg border border-[var(--border)] bg-[var(--card)] space-y-2">
-              <div class="flex items-center justify-between gap-2">
-                <div class="flex items-center gap-2 min-w-0 flex-1">
-                  ${ins.kind === 'image'
-                    ? `<img src="${ins.src}" alt="Step image" class="w-8 h-8 rounded-md object-contain border border-[var(--border)] shrink-0 bg-[var(--surface-sunken)]" />`
-                    : `<span class="px-2 py-0.5 rounded-md bg-[var(--primary-soft)] text-[var(--primary)] text-[10px] font-bold shrink-0">Note</span>`}
-                  <span class="truncate font-medium">${ins.kind === 'text' ? escHtml(ins.text) : `Custom Image (${insPct}%)`}</span>
-                </div>
-                <button type="button" data-del-insert="${ins.id}" class="step-edit-del-ins px-2.5 py-1 rounded-md bg-[var(--danger-soft)] text-[var(--danger)] font-semibold shrink-0 cursor-pointer">Delete</button>
-              </div>
-              <div class="flex items-center justify-between gap-2 flex-wrap pt-1.5 border-t border-[var(--border)]/60">
-                <div class="inline-flex items-center gap-1">
-                  <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)] mr-0.5">Corner</span>
-                  ${corners.map(c => `<button type="button" data-ins-corner="${ins.id}:${c.id}" title="${c.title}" class="step-edit-ins-corner px-1.5 py-0.5 rounded border text-[10px] font-mono font-bold cursor-pointer ${curCorner === c.id && typeof ins.x !== 'number' ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)]'}">${c.lbl}</button>`).join('')}
-                </div>
-                <div class="inline-flex items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] px-1 py-0.5">
-                  <button type="button" data-ins-scale="${ins.id}:down" aria-label="Smaller" class="step-edit-ins-scale w-5 h-5 rounded hover:bg-[var(--surface-hover)] font-bold cursor-pointer">−</button>
-                  <span class="font-mono text-[10px] font-bold min-w-[32px] text-center">${insPct}%</span>
-                  <button type="button" data-ins-scale="${ins.id}:up" aria-label="Larger" class="step-edit-ins-scale w-5 h-5 rounded hover:bg-[var(--surface-hover)] font-bold cursor-pointer">+</button>
-                </div>
-              </div>
-            </div>`;
-          }).join('')}
-        </div>` : ''}
-    </section>
-  `;
-
-  // Bind Minifigure controls
-  body.querySelectorAll('.step-edit-mf-btn').forEach(b => {
-    b.onclick = () => applyMinifigStyleChange(b.getAttribute('data-edit-mf-style'), step.id);
-  });
-  const mf1to1Check = body.querySelector('#stepEditMf1to1');
-  if (mf1to1Check) {
-    mf1to1Check.onchange = (e) => {
-      patchActiveTheme({ showMinifig1to1: Boolean(e.target.checked) });
-    };
-  }
-
-  // Bind Framing & Scaling controls
-  body.querySelectorAll('.step-edit-focus-btn').forEach(b => {
-    b.onclick = () => {
-      pushUndo();
-      state.overrides[step.id] = { ...(state.overrides[step.id] || {}), focusMode: b.getAttribute('data-edit-focus') };
-      renderAll();
-    };
-  });
-  body.querySelector('#stepEditModScaleDown').onclick = () => {
-    pushUndo();
-    state.overrides[step.id] = { ...ov, modelScale: Math.max(0.5, Number(((ov.modelScale || 1) - 0.15).toFixed(2))) };
-    renderAll();
-  };
-  body.querySelector('#stepEditModScaleUp').onclick = () => {
-    pushUndo();
-    state.overrides[step.id] = { ...ov, modelScale: Math.min(2.2, Number(((ov.modelScale || 1) + 0.15).toFixed(2))) };
-    renderAll();
-  };
-  const modResetBtn = body.querySelector('#stepEditModScaleReset');
-  if (modResetBtn) {
-    modResetBtn.onclick = () => {
-      pushUndo();
-      state.overrides[step.id] = { ...ov, modelScale: 1 };
-      renderAll();
-    };
-  }
-
-  const pliDownBtn = body.querySelector('#stepEditPliDown');
-  const pliUpBtn = body.querySelector('#stepEditPliUp');
-  const pliResetBtn = body.querySelector('#stepEditPliReset');
-  if (pliDownBtn) pliDownBtn.onclick = () => { pushUndo(); state.overrides[step.id] = { ...ov, pliScale: Math.max(0.6, Number(((ov.pliScale || 1) - 0.1).toFixed(2))) }; renderAll(); };
-  if (pliUpBtn) pliUpBtn.onclick = () => { pushUndo(); state.overrides[step.id] = { ...ov, pliScale: Math.min(1.6, Number(((ov.pliScale || 1) + 0.1).toFixed(2))) }; renderAll(); };
-  if (pliResetBtn) pliResetBtn.onclick = () => { pushUndo(); state.overrides[step.id] = { ...ov, pliScale: 1 }; renderAll(); };
-
-  body.querySelector('#stepEditGoRotate').onclick = () => {
-    closeStepEditModal();
-    state.mode = 'rotate';
-    state.selectedPartIds.clear();
-    state.selectedArrangeEl = null;
-    renderAll();
-  };
-
-  // Bind Subassembly controls
-  const subCalloutBtn = body.querySelector('#stepEditSubCallout');
-  const subPagesBtn = body.querySelector('#stepEditSubPages');
-  if (subCalloutBtn) subCalloutBtn.onclick = () => { pushUndo(); state.overrides[step.id] = { ...ov, calloutAsPages: false }; renderAll(); };
-  if (subPagesBtn) subPagesBtn.onclick = () => { pushUndo(); state.overrides[step.id] = { ...ov, calloutAsPages: true }; renderAll(); };
-  const subHorizBtn = body.querySelector('#stepEditSubHoriz');
-  const subVertBtn = body.querySelector('#stepEditSubVert');
-  if (subHorizBtn) subHorizBtn.onclick = () => { pushUndo(); state.overrides[step.id] = { ...ov, calloutDir: 'horizontal' }; renderAll(); };
-  if (subVertBtn) subVertBtn.onclick = () => { pushUndo(); state.overrides[step.id] = { ...ov, calloutDir: 'vertical' }; renderAll(); };
-
-  // Bind Pagination controls
-  body.querySelector('#stepEditPinBreak').onclick = () => {
-    toggleStepPageBreak(step, { ch, followToggledStep: true });
-  };
-  const pinHelpBtn = body.querySelector('#stepEditPinBreakHelp');
-  if (pinHelpBtn) {
-    pinHelpBtn.onclick = (e) => {
-      e.stopPropagation();
-      e.preventDefault();
-      togglePageBreakHelpTooltip(pinHelpBtn);
-    };
-  }
-  body.querySelector('#stepEditOpenPageSetup').onclick = () => {
-    closeStepEditModal();
-    openPageSetupModal();
-  };
-
-  // Bind Step Notes & Images controls (step-specific!)
-  const noteInput = body.querySelector('#stepEditNoteInput');
-  const addNote = () => {
-    const txt = (noteInput?.value || '').trim();
-    if (!txt) {
-      showToast('Enter note text first.');
-      noteInput?.focus();
-      return;
-    }
-    pushUndo();
-    const arr = state.stepInserts[step.id] || [];
-    arr.push({ id: 'ins_' + Date.now().toString(36), kind: 'text', text: txt, corner: 'bottom-right', scale: 1 });
-    state.stepInserts[step.id] = arr;
-    showToast(`Added note to Step ${step.num}.`);
-    renderAll();
-  };
-  body.querySelector('#stepEditAddNoteBtn').onclick = addNote;
-  if (noteInput) {
-    noteInput.onkeydown = (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        addNote();
-      }
-    };
-  }
-  body.querySelector('#stepEditAddImgBtn').onclick = () => document.getElementById('insertImageInput').click();
-  body.querySelectorAll('.step-edit-ins-corner').forEach(b => {
-    b.onclick = () => {
-      const [id, corner] = (b.getAttribute('data-ins-corner') || '').split(':');
-      const ins = (state.stepInserts[step.id] || []).find(x => x.id === id);
-      if (!ins || !corner) return;
-      pushUndo();
-      ins.corner = corner;
-      delete ins.x;
-      delete ins.y;
-      renderAll();
-    };
-  });
-  body.querySelectorAll('.step-edit-ins-scale').forEach(b => {
-    b.onclick = () => {
-      const [id, dir] = (b.getAttribute('data-ins-scale') || '').split(':');
-      const ins = (state.stepInserts[step.id] || []).find(x => x.id === id);
-      if (!ins) return;
-      pushUndo();
-      const delta = dir === 'up' ? 0.15 : -0.15;
-      ins.scale = Math.max(0.5, Math.min(2.2, Number(((ins.scale || 1) + delta).toFixed(2))));
-      renderAll();
-    };
-  });
-  body.querySelectorAll('.step-edit-del-ins').forEach(b => {
-    b.onclick = () => {
-      const id = b.getAttribute('data-del-insert');
-      pushUndo();
-      state.stepInserts[step.id] = (state.stepInserts[step.id] || []).filter(x => x.id !== id);
-      if (state.stepInserts[step.id].length === 0) delete state.stepInserts[step.id];
-      renderAll();
-    };
-  });
 }
 
 function getStepShortLabel(step, ch = null) {
@@ -10930,7 +11156,7 @@ function renderOverviewModal(opts = {}) {
           tightFit = true;
           heroShading = true;
         } else if (pg.kind === 'complete') {
-          const cm = state.completeMeta || { az: 38, el: 24 };
+          const cm = normalizeCompleteMeta(state.completeMeta);
           parts = allModelParts;
           partsSig = allModelPartsSig;
           az = cm.az;
@@ -13612,7 +13838,7 @@ async function restoreLastSessionOnStart() {
     state.pageInserts = prefs.pageInserts || {};
     state.dividerAfter = prefs.dividerAfter || {};
     if (prefs.coverMeta) state.coverMeta = normalizeCoverMeta({ ...state.coverMeta, ...prefs.coverMeta });
-    if (prefs.completeMeta) state.completeMeta = { ...state.completeMeta, ...prefs.completeMeta };
+    if (prefs.completeMeta) state.completeMeta = normalizeCompleteMeta({ ...state.completeMeta, ...prefs.completeMeta });
     if (prefs.backMeta) state.backMeta = normalizeBackMeta({ ...state.backMeta, ...prefs.backMeta });
     state.pageIdx = Math.max(0, prefs.pageIdx || 0);
     state.seenDiagnosticKeys = deserializeSeenDiagnosticKeys(prefs.seenDiagnosticKeys);
@@ -13996,7 +14222,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       links.push(canvasRectToPdfLink(actualGroupRect, pxW, pxH, pageWpt, pageHpt, PROGRAM_URL));
     }
   } else if (page.kind === 'complete') {
-    const cm = state.completeMeta;
+    const cm = normalizeCompleteMeta(state.completeMeta);
     if (cm.bgSrc) {
       const bgImg = await loadImgPromise(cm.bgSrc);
       if (bgImg) drawCoverImage(ctx, bgImg, 0, 0, pxW, pxH);
@@ -14025,7 +14251,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       mode: 'pdf',
       gpuMaxDim: getCoverHeroGpuMaxDim(),
     });
-    const snap = renderCoverHeroSnapshot(allParts, cm.az, cm.el, 1.0, heroSize.width, heroSize.height, theme);
+    const snap = renderCoverHeroSnapshot(allParts, cm.az, cm.el, cm.zoom, heroSize.width, heroSize.height, theme);
     const img = await loadImgPromise(snap.url);
     drawContain(ctx, img, pad, topOff, pxW - pad * 2, availH);
     drawFooter(state.model.title);
@@ -15199,12 +15425,13 @@ document.getElementById('themeImportInput').onchange = async (e) => {
 
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
+  const applyModal = document.getElementById('applyAngleModal');
   if (isPageBreakHelpTooltipOpen()) {
     hidePageBreakHelpTooltip();
   } else if (isBricksLibraryModalOpen()) {
     closeBricksLibraryModal();
-  } else if (isStepEditModalOpen()) {
-    closeStepEditModal();
+  } else if (applyModal && !applyModal.classList.contains('hidden')) {
+    closeApplyAngleModal();
   } else if (isBomSetupModalOpen()) {
     closeBomSetupModal();
   } else if (isOverviewModalOpen()) {
@@ -15348,7 +15575,7 @@ document.getElementById('btnRedo').onclick = () => {
   applyHistorySnap(state.redoStack.pop());
 };
 
-// Apply Camera Angle to Step Range Modal bindings
+// Apply Camera to Step Range Modal bindings
 const applyAngleModalEl = document.getElementById('applyAngleModal');
 if (applyAngleModalEl) {
   applyAngleModalEl.onclick = (e) => { if (e.target === applyAngleModalEl) closeApplyAngleModal(); };
@@ -15423,21 +15650,34 @@ if (btnAnglePresetAll) {
     syncApplyAngleRangeUI();
   };
 }
+const applyCameraIncludeFramingEl = document.getElementById('applyCameraIncludeFraming');
+if (applyCameraIncludeFramingEl) {
+  applyCameraIncludeFramingEl.onchange = (e) => {
+    applyAngleState.includeFraming = Boolean(e.target.checked);
+  };
+}
 const btnConfirmApplyAngle = document.getElementById('btnConfirmApplyAngle');
 if (btnConfirmApplyAngle) {
   btnConfirmApplyAngle.onclick = () => {
     if (!applyAngleState.camera || !applyAngleState.allSteps.length) return;
     pushUndo();
+    const cameraPayload = applyAngleState.includeFraming
+      ? {
+          ...applyAngleState.camera,
+          modelScale: applyAngleState.sourceModelScale,
+          focusMode: applyAngleState.sourceFocusMode,
+        }
+      : applyAngleState.camera;
     const res = applyCameraAngleToStepRange(
       applyAngleState.allSteps.map(x => x.step),
       state.overrides,
       applyAngleState.startNum,
       applyAngleState.endNum,
-      applyAngleState.camera,
+      cameraPayload,
     );
     state.overrides = res.overrides;
     closeApplyAngleModal();
-    showToast(`Applied camera angle to ${res.appliedCount} step${res.appliedCount === 1 ? '' : 's'}.`);
+    showToast(`Applied camera${applyAngleState.includeFraming ? ', zoom & framing' : ''} to ${res.appliedCount} step${res.appliedCount === 1 ? '' : 's'}.`);
     renderAll();
   };
 }
@@ -15445,16 +15685,9 @@ if (btnConfirmApplyAngle) {
 document.querySelectorAll('.mode-btn').forEach(b => {
   b.onclick = () => {
     const nextMode = b.getAttribute('data-mode');
+    if (!nextMode) return;
     const curPage = state.pages[state.pageIdx];
-    if (nextMode === 'edit' && curPage?.kind === 'steps') {
-      if (isStepEditModalOpen()) {
-        closeStepEditModal();
-      } else {
-        openStepEditModal();
-      }
-      return;
-    }
-    if (nextMode === 'edit' && curPage?.kind === 'bom') {
+    if (nextMode === 'page' && curPage?.kind === 'bom') {
       if (isBomSetupModalOpen()) {
         closeBomSetupModal();
       } else {
@@ -15462,10 +15695,9 @@ document.querySelectorAll('.mode-btn').forEach(b => {
       }
       return;
     }
-    if (isStepEditModalOpen()) closeStepEditModal();
     if (isBomSetupModalOpen()) closeBomSetupModal();
     state.mode = nextMode;
-    if (state.mode !== 'select') state.selectedPartIds.clear();
+    if (state.mode !== 'parts') state.selectedPartIds.clear();
     state.selectedArrangeEl = null;
     renderAll();
   };
@@ -15990,22 +16222,23 @@ async function runInteractiveHtmlExport() {
           },
         });
       } else if (pg.kind === 'complete') {
-        const az = state.completeMeta?.az ?? 315, el = state.completeMeta?.el ?? 28;
+        const comp = normalizeCompleteMeta(state.completeMeta);
+        const az = comp.az, el = comp.el, zoom = comp.zoom;
         exportPages.push({
           id: pg.id,
           kind: 'complete',
           num: pg.num,
           label: pg.label || 'Build Complete',
-          title: state.completeMeta?.title || 'Build Complete!',
-          subtitle: state.completeMeta?.subtitle || `${allParts.length} pieces assembled`,
+          title: comp.title || 'Build Complete!',
+          subtitle: comp.subtitle || `${allParts.length} pieces assembled`,
           badge: 'Complete',
-          previewUrl: renderFallbackPreview([], allParts, az, el, 1.0, { highlightNew: false, fadePrev: false }),
+          previewUrl: renderFallbackPreview([], allParts, az, el, zoom, { highlightNew: false, fadePrev: false }),
           scene: {
             prevPartIdx: [],
             newPartIdx: allPartIndices,
             az,
             el,
-            zoom: 1.0,
+            zoom,
             hero: true,
           },
         });
@@ -16321,7 +16554,6 @@ function openExportModal() {
   cleanupPrintAllPages();
   closeMenu();
   closeBricksLibraryModal();
-  closeStepEditModal();
   closeBomSetupModal();
   document.getElementById('pageSetupModal').classList.add('hidden');
   const fmt = PAPER_FORMATS[state.paperFormat] || PAPER_FORMATS.letter;
@@ -16344,10 +16576,6 @@ document.getElementById('btnClosePageSetup').onclick = closePageSetupModal;
 document.getElementById('pageSetupDoneBtn').onclick = closePageSetupModal;
 document.getElementById('pageSetupPrintBtn').onclick = openExportModal;
 document.getElementById('pageSetupModal').onclick = (e) => { if (e.target.id === 'pageSetupModal') closePageSetupModal(); };
-
-document.getElementById('btnCloseStepEdit').onclick = closeStepEditModal;
-document.getElementById('stepEditDoneBtn').onclick = closeStepEditModal;
-document.getElementById('stepEditModal').onclick = (e) => { if (e.target.id === 'stepEditModal') closeStepEditModal(); };
 
 document.getElementById('menuBomSetupBtn').onclick = openBomSetupModal;
 document.getElementById('btnCloseBomSetup').onclick = closeBomSetupModal;
@@ -16417,7 +16645,7 @@ async function handleIncomingProjectFile(f) {
     state.pageInserts = data.pageInserts || {};
     state.dividerAfter = data.dividerAfter || {};
     state.coverMeta = normalizeCoverMeta(data.coverMeta);
-    if (data.completeMeta) state.completeMeta = { ...state.completeMeta, ...data.completeMeta };
+    state.completeMeta = normalizeCompleteMeta(data.completeMeta);
     state.backMeta = normalizeBackMeta(data.backMeta);
     if (data.pageNumberFormat) state.pageNumberFormat = data.pageNumberFormat;
     if (typeof data.detectDuplicates === 'boolean') state.detectDuplicates = data.detectDuplicates;
@@ -17813,8 +18041,8 @@ async function closeCurrentModel() {
   }
   const closedTitle = state.model.title || 'model';
   closeMenu();
-  closeStepEditModal();
   closeBomSetupModal();
+  closeApplyAngleModal();
   closeBricksLibraryModal();
   stopOverviewThumbQueue();
   setStylePopoverOpen(false);
@@ -17838,6 +18066,10 @@ async function closeCurrentModel() {
     activeLiveEngine.dispose();
     activeLiveEngine = null;
   }
+  if (activeHeroOrbitCleanup) {
+    activeHeroOrbitCleanup();
+    activeHeroOrbitCleanup = null;
+  }
   currentSlotRenderInfo.clear();
 
   clearTimeout(savePrefsTimer);
@@ -17859,25 +18091,19 @@ async function closeCurrentModel() {
   state.pages = [];
   state.pageIdx = 0;
   state.mode = 'pan';
+  state.stepSubTab = 'camera';
   state.selectedStepId = null;
   state.selectedPartIds.clear();
   state.selectedArrangeEl = null;
   state.overrides = {};
+  state.stepInserts = {};
   state.pageInserts = {};
   state.dividerAfter = {};
   state.layoutGroups = [];
   state.layout = 'auto';
   state.layoutConfig = createDefaultPageLayoutSpec();
   state.coverMeta = createDefaultCoverMeta();
-  state.completeMeta = {
-    title: 'Build Complete!',
-    subtitle: 'Ready for display!',
-    az: 315,
-    el: 28,
-    bgSrc: null,
-    showText: true,
-    showFireworks: true,
-  };
+  state.completeMeta = createDefaultCompleteMeta();
   state.backMeta = createDefaultBackMeta();
   state.pendingImport = null;
   state.undoStack = [];

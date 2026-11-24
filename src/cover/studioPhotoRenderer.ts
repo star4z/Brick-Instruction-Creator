@@ -58,6 +58,8 @@ export interface StudioRenderOptions {
   zoom?: number;
   darkBackground?: boolean;
   fovYDeg?: number;
+  /** Skips screen-space FBO SSAO resize churn for fast 60fps interactive drag-to-orbit */
+  fastInteractive?: boolean;
   getTextureImage?: (texKey: string) => TexImageSource | null;
 }
 
@@ -1060,7 +1062,7 @@ export class StudioPhotoRenderer {
     gl.disable(gl.POLYGON_OFFSET_FILL);
   }
 
-  render(mesh: StudioMeshData, options: StudioRenderOptions): { url: string; width: number; height: number } | null {
+  renderToCanvas(mesh: StudioMeshData, options: StudioRenderOptions): HTMLCanvasElement | null {
     const gl = this.gl;
     const hasTexDraws = Boolean(mesh.texDraws && mesh.texDraws.length > 0);
     if (!gl || !this.ready || (mesh.triPos.length < 9 && !hasTexDraws)) return null;
@@ -1096,7 +1098,7 @@ export class StudioPhotoRenderer {
     this.renderShadowMap(this.fillFbo!, mesh, fillMvp);
     this.renderShadowMap(this.overFbo!, mesh, overMvp);
 
-    const useSsao = this.ensureScreenFbos(w, h);
+    const useSsao = !options.fastInteractive && this.ensureScreenFbos(w, h);
 
     // 2. Render Linear View-Space Depth Pass for SSAO
     if (useSsao && this.viewDepthFbo) {
@@ -1338,10 +1340,16 @@ export class StudioPhotoRenderer {
       gl.drawArrays(gl.TRIANGLES, 0, 6);
     }
 
+    return this.canvas;
+  }
+
+  render(mesh: StudioMeshData, options: StudioRenderOptions): { url: string; width: number; height: number } | null {
+    const canvas = this.renderToCanvas(mesh, options);
+    if (!canvas) return null;
     return {
-      url: this.canvas.toDataURL('image/png'),
-      width: w,
-      height: h,
+      url: canvas.toDataURL('image/png'),
+      width: canvas.width,
+      height: canvas.height,
     };
   }
 

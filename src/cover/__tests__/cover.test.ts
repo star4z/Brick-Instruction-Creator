@@ -8,8 +8,11 @@ import {
   computeCoverLayout,
   computeTightCameraBounds,
   createDefaultBackMeta,
+  createDefaultCompleteMeta,
   createDefaultCoverMeta,
+  isHeroCameraCustomized,
   normalizeBackMeta,
+  normalizeCompleteMeta,
   normalizeCoverMeta,
 } from '../coverLayout';
 import { buildQrSvg, generateQrMatrix } from '../qrCode';
@@ -274,6 +277,32 @@ describe('Cover Metadata & LEGO-Style Layout Geometry', () => {
     });
     expect(customBack.subtitle).toBe(BACK_COVER_CREDIT);
     expect(customBack.bgSrc).toBe('data:image/png;base64,ABC');
+  });
+
+  it('normalizes Build Complete metadata with clamped elevation and zoom', () => {
+    const def = createDefaultCompleteMeta();
+    expect(def.az).toBe(315);
+    expect(def.el).toBe(28);
+    expect(def.zoom).toBe(1.0);
+    expect(def.showText).toBe(true);
+    expect(def.showFireworks).toBe(true);
+
+    const norm = normalizeCompleteMeta({ title: 'Done!', az: -45, el: -10, zoom: 2.5, showFireworks: false });
+    expect(norm.title).toBe('Done!');
+    expect(norm.az).toBe(315);
+    expect(norm.el).toBe(4); // kept above the studio floor
+    expect(norm.zoom).toBe(1.4); // clamped to max hero zoom
+    expect(norm.showText).toBe(true);
+    expect(norm.showFireworks).toBe(false);
+  });
+
+  it('detects whether a hero camera differs from its default angle, elevation, or zoom', () => {
+    const def = createDefaultCoverMeta();
+    expect(isHeroCameraCustomized({ az: 34, el: 18, zoom: 1.0 }, def)).toBe(false);
+    expect(isHeroCameraCustomized({ az: 394, el: 18, zoom: 1.0 }, def)).toBe(false); // 360° wrap
+    expect(isHeroCameraCustomized({ az: 142, el: 18, zoom: 1.0 }, def)).toBe(true);
+    expect(isHeroCameraCustomized({ az: 34, el: 30, zoom: 1.0 }, def)).toBe(true);
+    expect(isHeroCameraCustomized({ az: 34, el: 18, zoom: 1.2 }, def)).toBe(true);
   });
 
   it('computes a page-filling hero region and non-overlapping corner zones on landscape, portrait, square, and narrow pages', () => {
