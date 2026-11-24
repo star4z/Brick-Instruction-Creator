@@ -83,4 +83,37 @@ describe('studioRuntime safety checks', () => {
     expect(fnBody).toContain('heroShading: true');
     expect(fnBody).toContain('tightFit: true');
   });
+
+  it('uses camera-relative primary and secondary light sources in WebGLBrickEngine', () => {
+    const runtimePath = path.resolve(process.cwd(), 'src/studioRuntime.ts');
+    const sourceText = fs.readFileSync(runtimePath, 'utf8');
+
+    const engStart = sourceText.indexOf('class WebGLBrickEngine {');
+    const engEnd = sourceText.indexOf('const snapshotCanvas =', engStart);
+    expect(engStart).toBeGreaterThan(-1);
+    expect(engEnd).toBeGreaterThan(engStart);
+    const engBody = sourceText.slice(engStart, engEnd);
+
+    expect(engBody).toContain('uniform vec3 uKeyDir;');
+    expect(engBody).toContain('uniform vec3 uFillDir;');
+    expect(engBody).toContain('uniform vec3 uRimDir;');
+    expect(engBody).toContain('uniform vec3 uCamUp;');
+    expect(engBody).toContain('computePreviewLightDirs(right, up, forward)');
+    expect(engBody).toContain('this.loc.tFillDir');
+    expect(engBody).toContain('this.loc.xFillDir');
+  });
+
+  it('renders step, library, and import previews at HiDPI resolution', () => {
+    const runtimePath = path.resolve(process.cwd(), 'src/studioRuntime.ts');
+    const sourceText = fs.readFileSync(runtimePath, 'utf8');
+
+    const thumbMatch = sourceText.match(/const LIB_THUMB_SIZE = (\d+);/);
+    const inspectorMatch = sourceText.match(/const LIB_INSPECTOR_SIZE = (\d+);/);
+    expect(thumbMatch).not.toBeNull();
+    expect(inspectorMatch).not.toBeNull();
+    expect(Number(thumbMatch![1])).toBeGreaterThanOrEqual(300);
+    expect(Number(inspectorMatch![1])).toBeGreaterThanOrEqual(768);
+    expect(sourceText).toContain('function getPreviewResolutionScale()');
+    expect(sourceText).toContain('const resScale = getPreviewResolutionScale();');
+  });
 });

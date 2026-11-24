@@ -2329,6 +2329,29 @@ function buildMeshBuffers(prevParts, newParts, opts) {
   };
 }
 
+function getPreviewResolutionScale() {
+  const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) ? window.devicePixelRatio : 1;
+  return Math.min(2, Math.max(1.5, dpr));
+}
+
+function computePreviewLightDirs(right, up, forward) {
+  const combine = (wr, wu, wf) => {
+    const x = right[0] * wr + up[0] * wu + forward[0] * wf;
+    const y = right[1] * wr + up[1] * wu + forward[1] * wf;
+    const z = right[2] * wr + up[2] * wu + forward[2] * wf;
+    const len = Math.hypot(x, y, z) || 1;
+    return [x / len, y / len, z / len];
+  };
+  return {
+    // Primary warm studio key light (upper-front-right relative to camera)
+    key: combine(0.64, 0.64, 0.42),
+    // Secondary cool-neutral studio fill light (opposing front-left & slightly lower relative to camera)
+    fill: combine(-0.74, 0.16, 0.66),
+    // Back-rim catchlight strip (upper-back-left relative to camera)
+    rim: combine(-0.30, 0.64, -0.70),
+  };
+}
+
 // GPU-Cached WebGL Engine: Uploads buffers ONLY once per mesh (0 bytes uploaded while orbiting!)
 class WebGLBrickEngine {
   constructor(canvas) {
@@ -2342,39 +2365,59 @@ class WebGLBrickEngine {
     const fsTri = `precision mediump float;
       uniform float uHeroMode;
       uniform vec3 uViewDir;
+      uniform vec3 uKeyDir;
+      uniform vec3 uFillDir;
+      uniform vec3 uRimDir;
+      uniform vec3 uCamUp;
       varying vec3 vNorm;
       varying vec4 vCol;
       void main(){
         vec3 n = normalize(vNorm);
         if (!gl_FrontFacing) n = -n;
+        vec3 v = normalize(uViewDir);
+        vec3 keyDir = normalize(uKeyDir);
+        vec3 fillDir = normalize(uFillDir);
+        float key = max(dot(n, keyDir), 0.0);
+        float fill = max(dot(n, fillDir), 0.0);
+        float camUpDot = dot(n, normalize(uCamUp));
         if (uHeroMode > 0.5) {
-          vec3 v = normalize(uViewDir);
-          vec3 keyDir = normalize(vec3(0.42, 0.86, 0.52));
-          vec3 fillDir = normalize(vec3(-0.68, 0.38, 0.34));
-          vec3 rimDir = normalize(vec3(-0.22, 0.58, -0.78));
-          float key = max(dot(n, keyDir), 0.0);
-          float fill = max(dot(n, fillDir), 0.0);
+          vec3 rimDir = normalize(uRimDir);
           float rim = max(dot(n, rimDir), 0.0);
-          float hemi = 0.50 + 0.14 * n.y + 0.05 * max(-n.y, 0.0);
-          float diff = min(1.06, hemi + key * 0.44 + fill * 0.18 + rim * 0.12);
+          float hemi = 0.44 + 0.12 * camUpDot + 0.07 * max(-camUpDot, 0.0);
+          vec3 keyCol = vec3(1.02, 1.00, 0.97) * (key * 0.46);
+          vec3 fillCol = vec3(0.93, 0.98, 1.06) * (fill * 0.28);
+          vec3 rimCol = vec3(0.96, 0.99, 1.04) * (rim * 0.13);
+          vec3 diff = min(vec3(1.08), vec3(hemi) + keyCol + fillCol + rimCol);
           vec3 hKey = normalize(keyDir + v);
           float specKey = pow(max(dot(n, hKey), 0.0), 42.0) * 0.17;
+          vec3 hFill = normalize(fillDir + v);
+          float specFill = pow(max(dot(n, hFill), 0.0), 28.0) * 0.09;
           vec3 hRim = normalize(rimDir + v);
           float specRim = pow(max(dot(n, hRim), 0.0), 26.0) * 0.07;
-          vec3 col = min(vec3(1.0), vCol.rgb * diff + vec3(specKey + specRim));
+          vec3 spec = vec3(1.00, 0.99, 0.97) * specKey + vec3(0.92, 0.97, 1.05) * specFill + vec3(specRim);
+          vec3 col = min(vec3(1.0), vCol.rgb * diff + spec);
           gl_FragColor = vec4(col, vCol.a);
         } else {
-          float key = max(dot(n, normalize(vec3(0.55,0.85,0.55))), 0.0);
-          float fill = max(dot(n, normalize(vec3(-0.7,0.35,-0.5))), 0.0);
-          float hemi = 0.50 + 0.15 * n.y;
-          float shade = min(1.08, hemi + key * 0.44 + fill * 0.18);
-          gl_FragColor = vec4(vCol.rgb * shade, vCol.a);
+          float hemi = 0.46 + 0.12 * camUpDot + 0.07 * max(-camUpDot, 0.0);
+          vec3 keyCol = vec3(1.01, 1.00, 0.98) * (key * 0.45);
+          vec3 fillCol = vec3(0.94, 0.98, 1.05) * (fill * 0.28);
+          vec3 diff = min(vec3(1.08), vec3(hemi) + keyCol + fillCol);
+          vec3 hKey = normalize(keyDir + v);
+          float specKey = pow(max(dot(n, hKey), 0.0), 36.0) * 0.07;
+          vec3 hFill = normalize(fillDir + v);
+          float specFill = pow(max(dot(n, hFill), 0.0), 24.0) * 0.045;
+          vec3 col = min(vec3(1.0), vCol.rgb * diff + vec3(specKey) + vec3(0.93, 0.97, 1.04) * specFill);
+          gl_FragColor = vec4(col, vCol.a);
         }
       }`;
     const vsTex = `attribute vec3 aPos; attribute vec3 aNorm; attribute vec2 aUv; attribute vec4 aCol; uniform mat4 uMVP; varying vec3 vNorm; varying vec2 vUv; varying vec4 vCol; void main(){ gl_Position = uMVP * vec4(aPos,1.0); vNorm = aNorm; vUv = aUv; vCol = aCol; }`;
     const fsTex = `precision mediump float;
       uniform float uHeroMode;
       uniform vec3 uViewDir;
+      uniform vec3 uKeyDir;
+      uniform vec3 uFillDir;
+      uniform vec3 uRimDir;
+      uniform vec3 uCamUp;
       uniform sampler2D uTex;
       uniform float uUseTex;
       uniform float uFadeMix;
@@ -2390,28 +2433,40 @@ class WebGLBrickEngine {
           vec3 decalRgb = mix(decal.rgb, vec3(0.855, 0.871, 0.894), uFadeMix);
           baseRgb = mix(baseRgb, decalRgb, decal.a);
         }
+        vec3 v = normalize(uViewDir);
+        vec3 keyDir = normalize(uKeyDir);
+        vec3 fillDir = normalize(uFillDir);
+        float key = max(dot(n, keyDir), 0.0);
+        float fill = max(dot(n, fillDir), 0.0);
+        float camUpDot = dot(n, normalize(uCamUp));
         if (uHeroMode > 0.5) {
-          vec3 v = normalize(uViewDir);
-          vec3 keyDir = normalize(vec3(0.42, 0.86, 0.52));
-          vec3 fillDir = normalize(vec3(-0.68, 0.38, 0.34));
-          vec3 rimDir = normalize(vec3(-0.22, 0.58, -0.78));
-          float key = max(dot(n, keyDir), 0.0);
-          float fill = max(dot(n, fillDir), 0.0);
+          vec3 rimDir = normalize(uRimDir);
           float rim = max(dot(n, rimDir), 0.0);
-          float hemi = 0.50 + 0.14 * n.y + 0.05 * max(-n.y, 0.0);
-          float diff = min(1.06, hemi + key * 0.44 + fill * 0.18 + rim * 0.12);
+          float hemi = 0.44 + 0.12 * camUpDot + 0.07 * max(-camUpDot, 0.0);
+          vec3 keyCol = vec3(1.02, 1.00, 0.97) * (key * 0.46);
+          vec3 fillCol = vec3(0.93, 0.98, 1.06) * (fill * 0.28);
+          vec3 rimCol = vec3(0.96, 0.99, 1.04) * (rim * 0.13);
+          vec3 diff = min(vec3(1.08), vec3(hemi) + keyCol + fillCol + rimCol);
           vec3 hKey = normalize(keyDir + v);
           float specKey = pow(max(dot(n, hKey), 0.0), 42.0) * 0.17;
+          vec3 hFill = normalize(fillDir + v);
+          float specFill = pow(max(dot(n, hFill), 0.0), 28.0) * 0.09;
           vec3 hRim = normalize(rimDir + v);
           float specRim = pow(max(dot(n, hRim), 0.0), 26.0) * 0.07;
-          vec3 col = min(vec3(1.0), baseRgb * diff + vec3(specKey + specRim));
+          vec3 spec = vec3(1.00, 0.99, 0.97) * specKey + vec3(0.92, 0.97, 1.05) * specFill + vec3(specRim);
+          vec3 col = min(vec3(1.0), baseRgb * diff + spec);
           gl_FragColor = vec4(col, vCol.a);
         } else {
-          float key = max(dot(n, normalize(vec3(0.55,0.85,0.55))), 0.0);
-          float fill = max(dot(n, normalize(vec3(-0.7,0.35,-0.5))), 0.0);
-          float hemi = 0.50 + 0.15 * n.y;
-          float shade = min(1.08, hemi + key * 0.44 + fill * 0.18);
-          gl_FragColor = vec4(baseRgb * shade, vCol.a);
+          float hemi = 0.46 + 0.12 * camUpDot + 0.07 * max(-camUpDot, 0.0);
+          vec3 keyCol = vec3(1.01, 1.00, 0.98) * (key * 0.45);
+          vec3 fillCol = vec3(0.94, 0.98, 1.05) * (fill * 0.28);
+          vec3 diff = min(vec3(1.08), vec3(hemi) + keyCol + fillCol);
+          vec3 hKey = normalize(keyDir + v);
+          float specKey = pow(max(dot(n, hKey), 0.0), 36.0) * 0.07;
+          vec3 hFill = normalize(fillDir + v);
+          float specFill = pow(max(dot(n, hFill), 0.0), 24.0) * 0.045;
+          vec3 col = min(vec3(1.0), baseRgb * diff + vec3(specKey) + vec3(0.93, 0.97, 1.04) * specFill);
+          gl_FragColor = vec4(col, vCol.a);
         }
       }`;
     const vsLine = `attribute vec3 aPos; attribute vec4 aCol; uniform mat4 uMVP; varying vec4 vCol; void main(){ gl_Position = uMVP * vec4(aPos,1.0); gl_Position.z -= 0.00022; vCol = aCol; }`;
@@ -2425,12 +2480,20 @@ class WebGLBrickEngine {
       tMVP: gl.getUniformLocation(this.triProg, 'uMVP'),
       tHeroMode: gl.getUniformLocation(this.triProg, 'uHeroMode'),
       tViewDir: gl.getUniformLocation(this.triProg, 'uViewDir'),
+      tKeyDir: gl.getUniformLocation(this.triProg, 'uKeyDir'),
+      tFillDir: gl.getUniformLocation(this.triProg, 'uFillDir'),
+      tRimDir: gl.getUniformLocation(this.triProg, 'uRimDir'),
+      tCamUp: gl.getUniformLocation(this.triProg, 'uCamUp'),
       tPos: gl.getAttribLocation(this.triProg, 'aPos'),
       tNorm: gl.getAttribLocation(this.triProg, 'aNorm'),
       tCol: gl.getAttribLocation(this.triProg, 'aCol'),
       xMVP: gl.getUniformLocation(this.texProg, 'uMVP'),
       xHeroMode: gl.getUniformLocation(this.texProg, 'uHeroMode'),
       xViewDir: gl.getUniformLocation(this.texProg, 'uViewDir'),
+      xKeyDir: gl.getUniformLocation(this.texProg, 'uKeyDir'),
+      xFillDir: gl.getUniformLocation(this.texProg, 'uFillDir'),
+      xRimDir: gl.getUniformLocation(this.texProg, 'uRimDir'),
+      xCamUp: gl.getUniformLocation(this.texProg, 'uCamUp'),
       xTex: gl.getUniformLocation(this.texProg, 'uTex'),
       xUseTex: gl.getUniformLocation(this.texProg, 'uUseTex'),
       xFadeMix: gl.getUniformLocation(this.texProg, 'uFadeMix'),
@@ -2541,12 +2604,17 @@ class WebGLBrickEngine {
     const lineAlpha = typeof drawOpts?.lineAlpha === 'number' ? drawOpts.lineAlpha : (heroShading ? 0.52 : 1.0);
     const fixedCenter = drawOpts?.fixedCenter || null;
     const mvp = this.computeMVP(mesh, w, h, azDeg, elDeg, zoom, fixedHalfH, tightFit, fixedCenter);
-    const { forward } = computeCameraBasis(azDeg, elDeg);
+    const { right, up, forward } = computeCameraBasis(azDeg, elDeg);
+    const lights = computePreviewLightDirs(right, up, forward);
 
     gl.useProgram(this.triProg);
     gl.uniformMatrix4fv(this.loc.tMVP, false, mvp);
     gl.uniform1f(this.loc.tHeroMode, heroShading ? 1.0 : 0.0);
     gl.uniform3f(this.loc.tViewDir, forward[0], forward[1], forward[2]);
+    gl.uniform3f(this.loc.tKeyDir, lights.key[0], lights.key[1], lights.key[2]);
+    gl.uniform3f(this.loc.tFillDir, lights.fill[0], lights.fill[1], lights.fill[2]);
+    gl.uniform3f(this.loc.tRimDir, lights.rim[0], lights.rim[1], lights.rim[2]);
+    gl.uniform3f(this.loc.tCamUp, up[0], up[1], up[2]);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.bTriPos); gl.enableVertexAttribArray(this.loc.tPos); gl.vertexAttribPointer(this.loc.tPos, 3, gl.FLOAT, false, 0, 0);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.bTriNorm); gl.enableVertexAttribArray(this.loc.tNorm); gl.vertexAttribPointer(this.loc.tNorm, 3, gl.FLOAT, false, 0, 0);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.bTriCol); gl.enableVertexAttribArray(this.loc.tCol); gl.vertexAttribPointer(this.loc.tCol, 4, gl.UNSIGNED_BYTE, true, 0, 0);
@@ -2560,6 +2628,10 @@ class WebGLBrickEngine {
       gl.uniformMatrix4fv(this.loc.xMVP, false, mvp);
       gl.uniform1f(this.loc.xHeroMode, heroShading ? 1.0 : 0.0);
       gl.uniform3f(this.loc.xViewDir, forward[0], forward[1], forward[2]);
+      gl.uniform3f(this.loc.xKeyDir, lights.key[0], lights.key[1], lights.key[2]);
+      gl.uniform3f(this.loc.xFillDir, lights.fill[0], lights.fill[1], lights.fill[2]);
+      gl.uniform3f(this.loc.xRimDir, lights.rim[0], lights.rim[1], lights.rim[2]);
+      gl.uniform3f(this.loc.xCamUp, up[0], up[1], up[2]);
       gl.uniform1i(this.loc.xTex, 0);
       gl.enableVertexAttribArray(this.loc.xPos);
       gl.enableVertexAttribArray(this.loc.xNorm);
@@ -2660,7 +2732,7 @@ function getPliThumb(part) {
   if (pliThumbCache.has(key)) return pliThumbCache.get(key);
   const samplePart = normalizeCompositeThumbPart(part, (pid) => resolvePart(pid).name, computeWorldBox);
   const mesh = buildMeshBuffers([], [samplePart], { highlightNew:false, fadePrev:false, showArrows:false, accent:'#1a73e8' });
-  snapshotEngine.draw(mesh, 160, 160, 32, 22, 1.08);
+  snapshotEngine.draw(mesh, 240, 240, 32, 22, 1.08);
   const url = snapshotCanvas.toDataURL('image/png');
   if (pliThumbCache.size > 220) pliThumbCache.clear();
   pliThumbCache.set(key, url);
@@ -6935,7 +7007,8 @@ function renderAll() {
         <div style="color:${theme.muted};font-size:${typo.divider.customNoteFont}px;max-width:${Math.round(typo.pt(320))}px">${escHtml(d.note || 'Switch to Edit mode to edit this divider page.')}</div>
       </div>`;
   } else if (page.kind === 'section_divider') {
-    const snap = renderSnapshot([], page.previewParts || [], 38, 28, 720, 460, 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent });
+    const resScale = getPreviewResolutionScale();
+    const snap = renderSnapshot([], page.previewParts || [], 38, 28, Math.round(720 * resScale), Math.round(460 * resScale), 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent });
     const pgNumText = formatPageNumber(page.num, state.pages.length);
     const pillPadX = Math.round(typo.pt(8));
     const pillPadY = Math.round(typo.pt(2.5));
@@ -6961,7 +7034,8 @@ function renderAll() {
       </div>`;
   } else if (page.kind === 'submodel_page') {
     const sub = page.step.subassembly;
-    const snap = renderSnapshot([], sub.buildParts, 38, 30, 720, 460, 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent });
+    const resScale = getPreviewResolutionScale();
+    const snap = renderSnapshot([], sub.buildParts, 38, 30, Math.round(720 * resScale), Math.round(460 * resScale), 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent });
     const pgNumText = formatPageNumber(page.num, state.pages.length);
     frame.innerHTML = `
       <div class="relative w-full h-full flex flex-col justify-between overflow-hidden ${guideCls}" style="padding:${padPx}px;padding-bottom:${padPx + footerH}px">
@@ -7062,23 +7136,28 @@ function renderAll() {
           highlightOnlyPartIds: new Set(mfPrep.rotatedPartIds || []),
         } : {}),
       };
-      const rw = (slots.length === 1 || slotRect.isFeatured) ? 760 : (slotRect.isCompact ? 400 : 500);
-      const rh = (slots.length === 1 || slotRect.isFeatured) ? 500 : (slotRect.isCompact ? 300 : 360);
+      const resScale = getPreviewResolutionScale();
+      const baseRw = (slots.length === 1 || slotRect.isFeatured) ? 760 : (slotRect.isCompact ? 400 : 500);
+      const baseRh = (slots.length === 1 || slotRect.isFeatured) ? 500 : (slotRect.isCompact ? 300 : 360);
+      const rw = Math.round(baseRw * resScale);
+      const rh = Math.round(baseRh * resScale);
       const snap = renderSnapshot(prev, step.parts, cam.az, cam.el, rw, rh, modelScale, opts);
       currentSlotRenderInfo.set(step.id, { ch, step, prev, cam, ov, snap, modelScale, opts, isMfBuild, isMfExploded, isMfSeq });
 
       let mfExploded = null;
       let mfSeqStages = null;
       if (isMfExploded) {
-        const expW = (slots.length === 1 || slotRect.isFeatured) ? 920 : 640;
-        const expH = (slots.length === 1 || slotRect.isFeatured) ? 640 : 480;
+        const mfScale = Math.min(resScale, 1.5);
+        const expW = Math.round(((slots.length === 1 || slotRect.isFeatured) ? 920 : 640) * mfScale);
+        const expH = Math.round(((slots.length === 1 || slotRect.isFeatured) ? 640 : 480) * mfScale);
         mfExploded = renderMinifigExplodedDiagram(step, cam, expW, expH, theme, modelScale);
       } else if (isMfSeq) {
         const seqPlan = getMinifigSequentialPlanForStep(step);
         const sl = minifigSeqSlice || { start: 0, end: seqPlan.stages.length, cols: Math.min(3, seqPlan.stages.length), pageIdx: 0, pageCount: 1 };
         const visibleStages = seqPlan.stages.slice(sl.start, sl.end);
-        const stW = visibleStages.length >= 4 ? 320 : visibleStages.length === 3 ? 380 : 440;
-        const stH = visibleStages.length >= 4 ? 460 : 540;
+        const mfScale = Math.min(resScale, 1.5);
+        const stW = Math.round((visibleStages.length >= 4 ? 320 : visibleStages.length === 3 ? 380 : 440) * mfScale);
+        const stH = Math.round((visibleStages.length >= 4 ? 460 : 540) * mfScale);
         mfSeqStages = visibleStages.map(st => ({
           stage: st,
           img: renderMinifigSequentialStage(step, st, seqPlan, cam, stW, stH, theme, modelScale),
@@ -7086,7 +7165,7 @@ function renderAll() {
       }
 
       const subImg = (step.subassembly && !ov.calloutAsPages)
-        ? renderSnapshot([], step.subassembly.buildParts, 38, 30, 260, 180, 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent }).url
+        ? renderSnapshot([], step.subassembly.buildParts, 38, 30, Math.round(260 * resScale), Math.round(180 * resScale), 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent }).url
         : null;
       const attSubImg = step.attachedSubmodel ? getSubmodelThumb(step.attachedSubmodel, 160, 120) : null;
       const mfPrepImg = step.minifigPrep
@@ -10397,10 +10476,10 @@ async function fetchMissingPartsOnline(fetchOpts = {}) {
 }
 
 // ---- DEDICATED BRICKS LIBRARY SCREEN (BROWSE, SEARCH, 3D PREVIEW, FETCH & MANAGE) ----
-const LIB_THUMB_SIZE = 220;
+const LIB_THUMB_SIZE = 320;
 const LIB_THUMB_AZ = 34;
 const LIB_THUMB_EL = 22;
-const LIB_INSPECTOR_SIZE = 440;
+const LIB_INSPECTOR_SIZE = 880;
 
 function renderPartPreviewDataUrl(partId, colorId, size = LIB_THUMB_SIZE, az = 38, el = 24) {
   const cacheKey = `${partId}:${colorId}:${size}:${az}:${el}`;
@@ -11832,7 +11911,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       ),
     );
   } else if (page.kind === 'section_divider') {
-    const snap = renderSnapshot([], page.previewParts || [], 38, 28, 760, 480, 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent });
+    const snap = renderSnapshot([], page.previewParts || [], 38, 28, 1140, 720, 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent });
     const img = await loadImgPromise(snap.url);
     ctx.fillStyle = theme.accent;
     ctx.font = themeCanvasFont(theme, 800, typo.divider.badgeFont);
@@ -12233,7 +12312,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
         const effectivePartOffsets = step.defaultPartOffsets
           ? { ...step.defaultPartOffsets, ...(ov.partOffsets || {}) }
           : (ov.partOffsets || {});
-        const snap = renderSnapshot(prev, step.parts, cam.az, cam.el, 760, 520, modelScale, {
+        const snap = renderSnapshot(prev, step.parts, cam.az, cam.el, 1140, 780, modelScale, {
           highlightNew: state.highlightNew, highlightColor: state.highlightColor,
           fadePrev: state.fadePrev, fadeOpacity: state.fadeOpacity,
           showArrows: true, accent: theme.accent, ov, partOffsets: effectivePartOffsets,
@@ -14164,9 +14243,9 @@ function drawImportPreviewFrame() {
   const canvas = document.getElementById('impPreviewCanvas');
   if (!canvas || !impPreviewEngine || !impPreviewMesh) return;
   const rect = canvas.getBoundingClientRect();
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  const w = Math.max(240, Math.round((rect.width || 360) * dpr));
-  const h = Math.max(180, Math.round((rect.height || 240) * dpr));
+  const dpr = Math.min(Math.max(window.devicePixelRatio || 1, 1.75), 3);
+  const w = Math.max(540, Math.round((rect.width || 360) * dpr));
+  const h = Math.max(380, Math.round((rect.height || 240) * dpr));
   impPreviewEngine.draw(impPreviewMesh, w, h, impState.az, impState.el, 1.0);
 }
 
