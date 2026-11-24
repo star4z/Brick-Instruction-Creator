@@ -34,9 +34,15 @@ Replaces one-way "Apply Angle to Following" with a visual range-picker modal:
 - **Step Generation** *(placed directly below `Page & Export` and above `Bricks Library`)*: Single neutral-styled **`Step Generation >`** button opening the unified `#importModal` where **Build Organization** is a `<select>` dropdown paired with **Auto-Detect Duplicate Submodels** so subdivision and step regeneration apply together in one step.
 - **Bricks Library** & **Page Inserts**.
 
+### 5. Pages & Steps Overview (`#overviewModal`) Live Step & Page Previews
+Every entry in the Pages & Steps list includes a theme-backed miniature preview on the left:
+- **Step rows**: HiDPI 4:3 3D snapshot (`computeOverviewThumbDimensions(resScale)`) rendered on the page's active theme background (including custom Step Range Group themes), respecting each step's camera angle, model scale, part offsets, highlight/fade settings, minifigure pose indicators, and sequential minifigure sub-step slices. In **Select Range** mode, selected rows overlay a compact `✓` badge on the preview corner so row layout never shifts.
+- **Non-step pages**: 3D previews for Cover, Build Complete, Section Dividers, and Submodel Pages; a 2×2 sample parts mini-grid for Parts List (`bom`) pages; and themed miniature glyphs for Divider and Back Cover pages.
+- **Visibility-first lazy rendering & content-addressed caching**: `IntersectionObserver` rooted on `#overviewList` plus a viewport-prioritized `requestAnimationFrame` batch queue renders currently visible steps first (even when opening directly at a deep page) and cancels immediately on modal close. A bounded LRU cache keyed by O(N) cumulative step signatures, camera, offsets, display flags, slice, and library epoch makes range selection and page-break toggles synchronous and flicker-free without ever showing stale thumbnails.
+
 ---
 
-## Pure Capability Module
+## Pure Capability Modules
 
 [`src/engine/stepToolbar.ts`](../src/engine/stepToolbar.ts) centralizes:
 - `getVisibleModeTabs(pageKind)` — canonical bottom mode pill tab visibility (`['pan', 'select', 'rotate', 'edit']` on step pages).
@@ -46,4 +52,7 @@ Replaces one-way "Apply Angle to Following" with a visual range-picker modal:
 - `migratePageInsertsToSteps()` — legacy page-bound custom callout migration into step-bound `stepInserts`.
 - `resolveStepToolbarCapabilities()`, `clearStepCameraOverride()`, `clearStepArrangeOverride()`.
 
-Unit tests live in [`src/engine/__tests__/stepToolbar.test.ts`](../src/engine/__tests__/stepToolbar.test.ts).
+[`src/engine/overviewPreviews.ts`](../src/engine/overviewPreviews.ts) centralizes:
+- `computeOverviewThumbDimensions()`, `computeStepPreviewPartSignature()`, `computeOverviewStepSignatures()` (O(N) cumulative previous-part signatures matching `getPreviousPartsForStep`), `buildStepPreviewCacheKey()`, `buildPagePreviewCacheKey()`, `resolveOverviewPagePreviewKind()`, and `createOverviewThumbCache()`.
+
+Unit tests live in [`src/engine/__tests__/stepToolbar.test.ts`](../src/engine/__tests__/stepToolbar.test.ts) and [`src/engine/__tests__/overviewPreviews.test.ts`](../src/engine/__tests__/overviewPreviews.test.ts).

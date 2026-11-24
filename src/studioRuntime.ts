@@ -102,6 +102,15 @@ import {
   withDerivedStepsPerPage,
 } from './engine/pageLayout';
 import {
+  buildPagePreviewCacheKey,
+  buildStepPreviewCacheKey,
+  computeOverviewStepSignatures,
+  computeOverviewThumbDimensions,
+  computeStepPreviewPartSignature,
+  createOverviewThumbCache,
+  resolveOverviewPagePreviewKind,
+} from './engine/overviewPreviews';
+import {
   CAMERA_ANGLE_PRESETS,
   FOCUS_MODE_OPTIONS,
   MINIFIG_STYLE_OPTIONS,
@@ -1027,7 +1036,11 @@ function scheduleTextureReadyRerender() {
     submodelThumbCache.clear();
     clearMinifigDiagramCaches();
     coverHeroCache.clear();
-    if (state.model) renderAll();
+    overviewThumbCache.bumpEpoch();
+    if (state.model) {
+      renderAll();
+      if (isOverviewModalOpen()) renderOverviewModal();
+    }
   }, 60);
 }
 
@@ -2707,6 +2720,7 @@ let studioPhotoEngine = null;
 let activeLiveEngine = null;
 const pliThumbCache = new Map();
 const coverHeroCache = new Map();
+const overviewThumbCache = createOverviewThumbCache();
 
 function getStudioPhotoEngine() {
   if (!studioPhotoEngine) {
@@ -3614,7 +3628,7 @@ async function extractIoArchive(arrayBuffer) {
   const m1Text = m1Entry ? await readZipEntryText(bytes, view, m1Entry) : '';
   const m2Text = m2Entry ? await readZipEntryText(bytes, view, m2Entry) : '';
 
-  embeddedDatRaw.clear(); embeddedDatTitles.clear(); embeddedDatCompiled.clear(); compositePartDefs.clear(); pliThumbCache.clear(); submodelThumbCache.clear(); clearMinifigDiagramCaches();
+  embeddedDatRaw.clear(); embeddedDatTitles.clear(); embeddedDatCompiled.clear(); compositePartDefs.clear(); pliThumbCache.clear(); submodelThumbCache.clear(); clearMinifigDiagramCaches(); overviewThumbCache.bumpEpoch();
   textureStore.clearEmbedded();
 
   // Extract any embedded texture PNGs bundled directly in the .io archive (skipping thumbnail.png)
@@ -9333,12 +9347,206 @@ function syncMenuControls() {
   syncStylePanel();
 }
 
-function renderOverviewModal() {
+let overviewThumbObserver = null;
+let overviewThumbQueue = [];
+let overviewThumbRafId = 0;
+let overviewThumbRenderJobId = 0;
+const overviewThumbTasks = new WeakMap();
+
+function isOverviewModalOpen() {
+  const modal = document.getElementById('overviewModal');
+  return Boolean(modal && !modal.classList.contains('hidden'));
+}
+
+function stopOverviewThumbQueue() {
+  overviewThumbRenderJobId++;
+  overviewThumbQueue = [];
+  if (overviewThumbRafId) {
+    cancelAnimationFrame(overviewThumbRafId);
+    overviewThumbRafId = 0;
+  }
+  if (overviewThumbObserver) {
+    overviewThumbObserver.disconnect();
+    overviewThumbObserver = null;
+  }
+}
+
+function closeOverviewModal() {
+  stopOverviewThumbQueue();
+  document.getElementById('overviewModal')?.classList.add('hidden');
+}
+
+function renderOverviewThumbTask(task) {
+  if (task.kind === 'bom_grid') {
+    const imgs = task.bomImgs || [];
+    const entries = task.bomEntries || [];
+    let anyLoaded = false;
+    for (let i = 0; i < imgs.length && i < entries.length; i++) {
+      const url = getPliThumb(entries[i].part);
+      if (url) {
+        imgs[i].src = url;
+        imgs[i].classList.remove('opacity-0');
+        anyLoaded = true;
+      }
+    }
+    if (anyLoaded && task.phEl) task.phEl.classList.add('hidden');
+    return;
+  }
+
+  let url = overviewThumbCache.get(task.cacheKey);
+  if (!url) {
+    if (task.kind === 'step') {
+      const { ch, step, minifigSeqSlice, cam, ov, modelScale, effectivePartOffsets, isMfSeq, accent, width, height } = task;
+      let prev = [];
+      let next = step.parts || [];
+      let snapOpts = {
+        highlightNew: state.highlightNew,
+        highlightColor: state.highlightColor,
+        fadePrev: state.fadePrev,
+        fadeOpacity: state.fadeOpacity,
+        showArrows: false,
+        accent,
+        ov,
+        partOffsets: effectivePartOffsets,
+      };
+      if (isMfSeq && minifigSeqSlice) {
+        const seqPlan = getMinifigSequentialPlanForStep(step);
+        const stageIdx = Math.max(0, Math.min(seqPlan.stages.length - 1, minifigSeqSlice.end - 1));
+        const stage = seqPlan.stages[stageIdx];
+        if (stage) {
+          prev = stage.baseParts || [];
+          next = stage.addedParts || [];
+          snapOpts = {
+            ...snapOpts,
+            partOffsets: stage.partOffsets || {},
+          };
+        }
+      } else {
+        prev = getPreviousPartsForStep(state.model, ch, step);
+        const mfPrep = step.isMinifigPoseStep ? step.minifigPrep : null;
+        if (mfPrep) {
+          snapOpts = {
+            ...snapOpts,
+            minifigIndicators: mfPrep.indicators || [],
+            ghostParts: mfPrep.ghostParts || [],
+            highlightOnlyPartIds: new Set(mfPrep.rotatedPartIds || []),
+          };
+        }
+      }
+      if (prev.length === 0 && next.length === 0) return;
+      const snap = renderSnapshot(prev, next, cam.az, cam.el, width, height, modelScale, snapOpts);
+      url = snap.url;
+    } else if (task.kind === 'page_3d') {
+      if (!task.parts || task.parts.length === 0) return;
+      const snap = renderSnapshot([], task.parts, task.az, task.el, task.width, task.height, 1.0, {
+        highlightNew: false,
+        fadePrev: false,
+        showArrows: false,
+        tightFit: Boolean(task.tightFit),
+        heroShading: Boolean(task.heroShading),
+        accent: task.accent,
+      });
+      url = snap.url;
+    }
+    if (url) overviewThumbCache.set(task.cacheKey, url);
+  }
+
+  if (url && task.imgEl) {
+    task.imgEl.src = url;
+    task.imgEl.classList.remove('opacity-0');
+    if (task.phEl) task.phEl.classList.add('hidden');
+  }
+}
+
+function flushOverviewThumbQueue(jobId) {
+  overviewThumbRafId = 0;
+  if (jobId !== overviewThumbRenderJobId || !isOverviewModalOpen()) {
+    overviewThumbQueue = [];
+    return;
+  }
+  const listEl = document.getElementById('overviewList');
+  const listRect = listEl ? listEl.getBoundingClientRect() : null;
+  const budget = 3;
+  let rendered = 0;
+  while (overviewThumbQueue.length > 0 && rendered < budget) {
+    let pickIdx = 0;
+    if (listRect && listRect.height > 0 && overviewThumbQueue.length > 1) {
+      const visIdx = overviewThumbQueue.findIndex((t) => {
+        if (!t.targetEl?.isConnected) return false;
+        const r = t.targetEl.getBoundingClientRect();
+        return r.bottom >= listRect.top - 180 && r.top <= listRect.bottom + 180;
+      });
+      if (visIdx >= 0) pickIdx = visIdx;
+    }
+    const task = overviewThumbQueue.splice(pickIdx, 1)[0];
+    if (!task || !task.targetEl?.isConnected || task.done) continue;
+    task.done = true;
+    try {
+      renderOverviewThumbTask(task);
+    } catch (_) {}
+    rendered++;
+  }
+  if (overviewThumbQueue.length > 0 && jobId === overviewThumbRenderJobId) {
+    overviewThumbRafId = requestAnimationFrame(() => flushOverviewThumbQueue(jobId));
+  }
+}
+
+function enqueueOverviewThumbTask(task, jobId) {
+  if (!task || task.done || jobId !== overviewThumbRenderJobId) return;
+  if (task.cacheKey) {
+    const cached = overviewThumbCache.get(task.cacheKey);
+    if (cached && task.imgEl) {
+      task.done = true;
+      task.imgEl.src = cached;
+      task.imgEl.classList.remove('opacity-0');
+      if (task.phEl) task.phEl.classList.add('hidden');
+      return;
+    }
+  }
+  overviewThumbQueue.push(task);
+  if (!overviewThumbRafId) {
+    overviewThumbRafId = requestAnimationFrame(() => flushOverviewThumbQueue(jobId));
+  }
+}
+
+function observeOverviewThumbs(targets, scrollRoot, jobId) {
+  if (!targets.length || jobId !== overviewThumbRenderJobId) return;
+  if (typeof IntersectionObserver !== 'undefined') {
+    overviewThumbObserver = new IntersectionObserver((entries) => {
+      if (jobId !== overviewThumbRenderJobId) return;
+      for (const entry of entries) {
+        if (entry.isIntersecting) {
+          overviewThumbObserver?.unobserve(entry.target);
+          const task = overviewThumbTasks.get(entry.target);
+          if (task) enqueueOverviewThumbTask(task, jobId);
+        }
+      }
+    }, { root: scrollRoot || null, rootMargin: '180px 0px' });
+    for (const el of targets) overviewThumbObserver.observe(el);
+  } else {
+    for (const el of targets) {
+      const task = overviewThumbTasks.get(el);
+      if (task) enqueueOverviewThumbTask(task, jobId);
+    }
+  }
+}
+
+function renderOverviewModal(opts = {}) {
   const list = document.getElementById('overviewList');
+  if (!list) return;
   const prevScrollTop = list.scrollTop;
+  stopOverviewThumbQueue();
+  const jobId = overviewThumbRenderJobId;
   list.innerHTML = '';
 
   const pageBreakSvg = '<svg class="w-3 h-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4"/><path d="M10 12h4"/><path d="M17 12h4"/><path d="M6 4v3a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V4"/><path d="M6 20v-3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v3"/></svg>';
+  const resScale = getPreviewResolutionScale();
+  const { width: thumbW, height: thumbH } = computeOverviewThumbDimensions(resScale);
+  const thumbEpoch = overviewThumbCache.getEpoch();
+  const stepSigs = computeOverviewStepSignatures(state.model?.chapters);
+  const allModelParts = state.model ? getAllParts(state.model) : [];
+  const allModelPartsSig = computeStepPreviewPartSignature(allModelParts);
+  const observedTargets = [];
 
   const breakCount = countStepPageBreaks(state.model?.chapters, state.overrides);
 
@@ -9429,26 +9637,173 @@ function renderOverviewModal() {
     state.pageIdx = idx;
     if (stepId) state.selectedStepId = stepId;
     state.selectedPartIds.clear();
-    document.getElementById('overviewModal').classList.add('hidden');
+    closeOverviewModal();
     resetZoom();
     renderAll();
+  };
+
+  const createPreviewBox = (pageTheme, highlighted) => {
+    const box = document.createElement('div');
+    box.className = `w-14 h-[44px] sm:w-[76px] sm:h-[56px] rounded-md border shrink-0 overflow-hidden flex items-center justify-center relative select-none ${highlighted ? 'border-[var(--primary)] ring-1 ring-[var(--primary-border)]' : 'border-[var(--border)]'}`;
+    applyThemeBackgroundToElement(box, pageTheme);
+    return box;
   };
 
   state.pages.forEach((pg, idx) => {
     const active = idx === state.pageIdx;
     const slots = pg.slots || [];
+    const pageTheme = getThemeForPage(pg);
 
     // Non-step pages (Cover, Divider, Submodel Page, Build Complete, Parts List, Back Cover)
     if (slots.length === 0) {
       const row = document.createElement('div');
       if (active) row.dataset.active = 'true';
-      row.className = `flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border cursor-pointer transition ${active ? 'border-[var(--primary)] bg-[var(--primary-soft)]' : 'border-[var(--border)] bg-[var(--background)] hover:border-[var(--primary-border)]'}`;
+      row.className = `flex items-center justify-between gap-2.5 sm:gap-3 px-3 py-2 rounded-lg border cursor-pointer transition ${active ? 'border-[var(--primary)] bg-[var(--primary-soft)]' : 'border-[var(--border)] bg-[var(--background)] hover:border-[var(--primary-border)]'}`;
+
+      const thumbBox = createPreviewBox(pageTheme, active);
+      const previewKind = resolveOverviewPagePreviewKind(pg);
+
+      if (previewKind === 'model_3d') {
+        let parts = [];
+        let partsSig = '0:0';
+        let az = 38;
+        let el = 28;
+        let tightFit = false;
+        let heroShading = false;
+        if (pg.kind === 'cover') {
+          const cm = normalizeCoverMeta(state.coverMeta);
+          parts = allModelParts;
+          partsSig = allModelPartsSig;
+          az = cm.az;
+          el = cm.el;
+          tightFit = true;
+          heroShading = true;
+        } else if (pg.kind === 'complete') {
+          const cm = state.completeMeta || { az: 38, el: 24 };
+          parts = allModelParts;
+          partsSig = allModelPartsSig;
+          az = cm.az;
+          el = cm.el;
+          tightFit = true;
+          heroShading = true;
+        } else if (pg.kind === 'section_divider') {
+          parts = pg.previewParts || [];
+          partsSig = computeStepPreviewPartSignature(parts);
+          az = 38;
+          el = 28;
+        } else if (pg.kind === 'submodel_page') {
+          parts = pg.step?.subassembly?.buildParts || [];
+          partsSig = computeStepPreviewPartSignature(parts);
+          az = 38;
+          el = 30;
+        }
+        const cacheKey = buildPagePreviewCacheKey({
+          epoch: thumbEpoch,
+          kind: pg.kind,
+          pageId: pg.id,
+          partsSignature: partsSig,
+          camAz: az,
+          camEl: el,
+          accent: pageTheme.accent,
+          width: thumbW,
+          height: thumbH,
+        });
+        const cachedUrl = parts.length > 0 ? overviewThumbCache.get(cacheKey) : undefined;
+        const img = document.createElement('img');
+        img.alt = `${pg.label} preview`;
+        img.className = `w-full h-full object-contain p-0.5 pointer-events-none ${cachedUrl ? '' : 'opacity-0 transition-opacity duration-150'}`;
+        if (cachedUrl) img.src = cachedUrl;
+        const ph = document.createElement('span');
+        ph.className = `font-mono text-[10px] font-semibold absolute pointer-events-none ${cachedUrl ? 'hidden' : ''}`;
+        ph.style.color = pageTheme.muted || '#64748b';
+        ph.setAttribute('aria-hidden', 'true');
+        ph.textContent = `P${pg.num}`;
+        thumbBox.appendChild(img);
+        thumbBox.appendChild(ph);
+        if (!cachedUrl && parts.length > 0) {
+          overviewThumbTasks.set(thumbBox, {
+            kind: 'page_3d',
+            targetEl: thumbBox,
+            imgEl: img,
+            phEl: ph,
+            cacheKey,
+            parts,
+            az,
+            el,
+            tightFit,
+            heroShading,
+            accent: pageTheme.accent,
+            width: thumbW,
+            height: thumbH,
+            done: false,
+          });
+          observedTargets.push(thumbBox);
+        }
+      } else if (previewKind === 'bom_grid') {
+        const bomSample = (pg.bomEntries || []).slice(0, 4);
+        const grid = document.createElement('div');
+        grid.className = 'w-full h-full grid grid-cols-2 grid-rows-2 gap-0.5 p-1 pointer-events-none';
+        const bomImgs = [];
+        for (let i = 0; i < 4; i++) {
+          const cell = document.createElement('div');
+          cell.className = 'w-full h-full flex items-center justify-center overflow-hidden';
+          if (bomSample[i]) {
+            const im = document.createElement('img');
+            im.alt = '';
+            im.className = 'w-full h-full object-contain opacity-0 transition-opacity duration-150';
+            cell.appendChild(im);
+            bomImgs.push(im);
+          }
+          grid.appendChild(cell);
+        }
+        const ph = document.createElement('span');
+        ph.className = 'absolute pointer-events-none flex items-center justify-center';
+        ph.style.color = pageTheme.muted || '#64748b';
+        ph.setAttribute('aria-hidden', 'true');
+        ph.innerHTML = '<svg class="w-4 h-4 opacity-70" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>';
+        thumbBox.appendChild(grid);
+        thumbBox.appendChild(ph);
+        if (bomSample.length > 0) {
+          overviewThumbTasks.set(thumbBox, {
+            kind: 'bom_grid',
+            targetEl: thumbBox,
+            bomImgs,
+            bomEntries: bomSample,
+            phEl: ph,
+            done: false,
+          });
+          observedTargets.push(thumbBox);
+        }
+      } else if (previewKind === 'divider_card') {
+        thumbBox.innerHTML = `
+          <div class="w-full h-full flex flex-col items-center justify-center gap-1 px-2 pointer-events-none" aria-hidden="true">
+            <span class="w-5 h-1 rounded-full" style="background:${escHtml(pageTheme.accent || '#7c152e')}"></span>
+            <span class="w-8 h-0.5 rounded-full opacity-45" style="background:${escHtml(pageTheme.muted || '#64748b')}"></span>
+            <span class="w-6 h-0.5 rounded-full opacity-30" style="background:${escHtml(pageTheme.muted || '#64748b')}"></span>
+          </div>`;
+      } else if (previewKind === 'back_card') {
+        thumbBox.innerHTML = `
+          <div class="w-7 h-7 rounded-md flex items-center justify-center pointer-events-none" style="background:${escHtml(pageTheme.pliBg || 'rgba(255,255,255,0.75)')};border:1px solid ${escHtml(pageTheme.pliBorder || 'rgba(15,23,42,0.12)')}" aria-hidden="true">
+            <svg class="w-4 h-4" viewBox="0 0 64 64" fill="none">${BRAND_LOGO_SVG_BODY}</svg>
+          </div>`;
+      } else {
+        thumbBox.innerHTML = `<span class="font-mono text-[10px] font-semibold" style="color:${escHtml(pageTheme.muted || '#64748b')}" aria-hidden="true">P${pg.num}</span>`;
+      }
+
       const showChapterSub = Boolean(pg.chapterName && pg.chapterName !== pg.label);
-      row.innerHTML = `
-        <div class="min-w-0">
-          <div class="font-bold truncate">${escHtml(`Page ${pg.num} · ${pg.label}`)}</div>
-          ${showChapterSub ? `<div class="text-xs text-[var(--muted-foreground)] truncate">${escHtml(pg.chapterName)}</div>` : ''}
-        </div>`;
+      const infoWrap = document.createElement('div');
+      infoWrap.className = 'flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1';
+      infoWrap.appendChild(thumbBox);
+      const textWrap = document.createElement('div');
+      textWrap.className = 'min-w-0 flex-1';
+      textWrap.innerHTML = `
+        <div class="flex items-center gap-1.5 min-w-0">
+          ${active ? '<span class="w-1.5 h-1.5 rounded-full bg-[var(--primary)] shrink-0" aria-hidden="true"></span>' : ''}
+          <span class="font-bold truncate ${active ? 'text-[var(--primary)]' : ''}">${escHtml(`Page ${pg.num} · ${pg.label}`)}</span>
+        </div>
+        ${showChapterSub ? `<div class="text-xs text-[var(--muted-foreground)] truncate mt-0.5">${escHtml(pg.chapterName)}</div>` : ''}`;
+      infoWrap.appendChild(textWrap);
+      row.appendChild(infoWrap);
       row.onclick = () => jumpToPageAndStep(idx, null);
       list.appendChild(row);
       return;
@@ -9506,11 +9861,14 @@ function renderOverviewModal() {
       const isStepActive = active && (state.selectedStepId === step.id || (!state.selectedStepId && slotIdx === 0));
       const inSelRange = isStepInOverviewRange(getAbsStepNum(step));
       const isMfBuild = Boolean((step.isStandaloneFigure || slot.ch?.kind === 'minifigure') && !step.isMinifigPoseStep);
+      const mfStyle = isMfBuild ? getEffectiveMinifigStyle(step) : null;
+      const isMfSeq = Boolean(isMfBuild && mfStyle === 'sequential');
 
       const stepTitle = isMfBuild && step.minifigName
         ? `Step ${step.num} · ${step.minifigName}`
         : `Step ${step.num}`;
-      const absBadge = `#${getAbsStepNum(step)}`;
+      const absNum = getAbsStepNum(step);
+      const absBadge = `#${absNum}`;
 
       const metaParts = [];
       if (slot.minifigSeqSlice) {
@@ -9518,7 +9876,7 @@ function renderOverviewModal() {
         metaParts.push(sl.end - sl.start === 1 ? `Sub-step ${sl.start + 1}` : `Sub-steps ${sl.start + 1}–${sl.end}`);
       } else {
         const partCount = (step.parts || []).length;
-        if (partCount > 0) metaParts.push(`${partCount} pc${partCount === 1 ? '' : 's'}`);
+        if (partCount > 0) metaParts.push(formatPartCount(partCount));
       }
       if (step.subassembly) metaParts.push(step.subassembly.name || 'Callout');
       else if (step.attachedSubmodel) metaParts.push(`Attach ${step.attachedSubmodel.name || 'Submodel'}`);
@@ -9536,23 +9894,109 @@ function renderOverviewModal() {
         slotIndex: slotIdx,
       });
 
-      stepRow.innerHTML = `
-        <div class="flex items-center gap-2 min-w-0">
-          ${inSelRange ? '<span class="w-4 h-4 rounded bg-[var(--primary)] text-[var(--primary-foreground)] text-xs font-bold inline-flex items-center justify-center shrink-0">✓</span>' : (isStepActive ? '<span class="w-1.5 h-1.5 rounded-full bg-[var(--primary)] shrink-0" aria-hidden="true"></span>' : '')}
-          <div class="min-w-0">
-            <div class="flex items-center gap-1.5 min-w-0"><span class="font-semibold truncate ${inSelRange || isStepActive ? 'text-[var(--primary)]' : ''}">${escHtml(stepTitle)}</span><span class="shrink-0 px-1 py-0.5 rounded border border-[var(--border)] font-mono text-[10px] font-semibold text-[var(--muted-foreground)]" title="Absolute step number (unique across the whole manual)">${absBadge}</span></div>
-            ${stepMeta ? `<div class="text-xs text-[var(--muted-foreground)] truncate">${escHtml(stepMeta)}</div>` : ''}
-          </div>
+      const cam = getStepCamera(step);
+      const ov = state.overrides[step.id] || {};
+      const modelScale = ov.modelScale || 1.0;
+      const effectivePartOffsets = step.defaultPartOffsets
+        ? { ...step.defaultPartOffsets, ...(ov.partOffsets || {}) }
+        : (ov.partOffsets || {});
+      const sigInfo = stepSigs.get(step.id) || {
+        prevCount: 0,
+        prevSignature: '0:0',
+        stepSignature: computeStepPreviewPartSignature(step.parts),
+      };
+      const cacheKey = buildStepPreviewCacheKey({
+        epoch: thumbEpoch,
+        stepId: step.id,
+        prevSignature: sigInfo.prevSignature,
+        stepSignature: sigInfo.stepSignature,
+        camAz: cam.az,
+        camEl: cam.el,
+        modelScale,
+        partOffsets: effectivePartOffsets,
+        highlightNew: state.highlightNew,
+        highlightColor: state.highlightColor,
+        fadePrev: state.fadePrev,
+        fadeOpacity: state.fadeOpacity,
+        accent: pageTheme.accent,
+        minifigStyle: mfStyle,
+        seqSlice: slot.minifigSeqSlice ? { start: slot.minifigSeqSlice.start, end: slot.minifigSeqSlice.end } : null,
+        isMinifigPoseStep: Boolean(step.isMinifigPoseStep),
+        width: thumbW,
+        height: thumbH,
+      });
+      const cachedUrl = overviewThumbCache.get(cacheKey);
+
+      const thumbBox = createPreviewBox(pageTheme, inSelRange || isStepActive);
+      const img = document.createElement('img');
+      img.alt = `Step ${step.num} (absolute #${absNum}) preview`;
+      img.className = `w-full h-full object-contain p-0.5 pointer-events-none ${cachedUrl ? '' : 'opacity-0 transition-opacity duration-150'}`;
+      if (cachedUrl) img.src = cachedUrl;
+      const ph = document.createElement('span');
+      ph.className = `font-mono text-[10px] font-semibold absolute pointer-events-none ${cachedUrl ? 'hidden' : ''}`;
+      ph.style.color = pageTheme.muted || '#64748b';
+      ph.setAttribute('aria-hidden', 'true');
+      ph.textContent = absBadge;
+      thumbBox.appendChild(img);
+      thumbBox.appendChild(ph);
+      if (inSelRange) {
+        const chk = document.createElement('span');
+        chk.className = 'absolute top-0.5 left-0.5 w-4 h-4 rounded bg-[var(--primary)] text-[var(--primary-foreground)] text-[10px] font-bold inline-flex items-center justify-center shadow-xs pointer-events-none';
+        chk.setAttribute('aria-hidden', 'true');
+        chk.textContent = '✓';
+        thumbBox.appendChild(chk);
+      }
+
+      if (!cachedUrl) {
+        overviewThumbTasks.set(thumbBox, {
+          kind: 'step',
+          targetEl: thumbBox,
+          imgEl: img,
+          phEl: ph,
+          cacheKey,
+          ch: slot.ch,
+          step,
+          minifigSeqSlice: slot.minifigSeqSlice || null,
+          cam,
+          ov,
+          modelScale,
+          effectivePartOffsets,
+          isMfSeq,
+          accent: pageTheme.accent,
+          width: thumbW,
+          height: thumbH,
+          done: false,
+        });
+        observedTargets.push(thumbBox);
+      }
+
+      const leftWrap = document.createElement('div');
+      leftWrap.className = 'flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1';
+      leftWrap.appendChild(thumbBox);
+
+      const textWrap = document.createElement('div');
+      textWrap.className = 'min-w-0 flex-1';
+      textWrap.innerHTML = `
+        <div class="flex items-center gap-1.5 min-w-0">
+          ${!inSelRange && isStepActive ? '<span class="w-1.5 h-1.5 rounded-full bg-[var(--primary)] shrink-0" aria-hidden="true"></span>' : ''}
+          <span class="font-semibold truncate ${inSelRange || isStepActive ? 'text-[var(--primary)]' : ''}">${escHtml(stepTitle)}</span>
+          <span class="shrink-0 px-1 py-0.5 rounded border border-[var(--border)] font-mono text-[10px] font-semibold text-[var(--muted-foreground)]" title="Absolute step number (unique across the whole manual)">${absBadge}</span>
         </div>
-        <div class="flex items-center gap-1 shrink-0">
-          ${isSeqCont
-            ? '<span class="px-2 py-0.5 rounded-md text-xs font-medium text-[var(--muted-foreground)] bg-black/5 dark:bg-white/10">Continued</span>'
-            : `<button type="button" title="${escHtml(breakTitle)}" aria-label="${escHtml(`Page break before Step ${step.num}`)}" aria-pressed="${hasBreak ? 'true' : 'false'}" class="ov-step-pin px-2.5 py-1 rounded-md text-xs font-semibold border inline-flex items-center gap-1 transition ${hasBreak ? 'bg-[var(--primary)] text-[var(--primary-foreground)] border-transparent' : 'border-[var(--border)] bg-[var(--card)] hover:border-[var(--primary-border)]'}">${pageBreakSvg}<span>Page Break</span></button>`}
-        </div>`;
+        ${stepMeta ? `<div class="text-xs text-[var(--muted-foreground)] truncate mt-0.5">${escHtml(stepMeta)}</div>` : ''}`;
+      leftWrap.appendChild(textWrap);
+
+      const rightWrap = document.createElement('div');
+      rightWrap.className = 'flex items-center gap-1 shrink-0';
+      rightWrap.innerHTML = isSeqCont
+        ? '<span class="px-2 py-0.5 rounded-md text-xs font-medium text-[var(--muted-foreground)] bg-black/5 dark:bg-white/10">Continued</span>'
+        : `<button type="button" title="${escHtml(breakTitle)}" aria-label="${escHtml(`Page break before Step ${step.num}`)}" aria-pressed="${hasBreak ? 'true' : 'false'}" class="ov-step-pin px-2 py-1 sm:px-2.5 rounded-md text-xs font-semibold border inline-flex items-center gap-1 transition ${hasBreak ? 'bg-[var(--primary)] text-[var(--primary-foreground)] border-transparent' : 'border-[var(--border)] bg-[var(--card)] hover:border-[var(--primary-border)]'}">${pageBreakSvg}<span>Page Break</span></button>`;
+
+      stepRow.appendChild(leftWrap);
+      stepRow.appendChild(rightWrap);
 
       stepRow.onclick = () => {
         if (overviewRangeState.active) {
-          pickRangeStep(getAbsStepNum(step));
+          pickRangeStep(absNum);
         } else {
           jumpToPageAndStep(idx, step.id);
         }
@@ -9573,7 +10017,14 @@ function renderOverviewModal() {
     list.appendChild(card);
   });
 
-  list.scrollTop = prevScrollTop;
+  if (opts && opts.scrollActiveIntoView) {
+    const activeRow = list.querySelector('[data-active="true"]');
+    if (activeRow) activeRow.scrollIntoView({ block: 'center', behavior: 'instant' });
+  } else {
+    list.scrollTop = prevScrollTop;
+  }
+
+  observeOverviewThumbs(observedTargets, list, jobId);
 }
 
 // =========================================================================
@@ -9842,6 +10293,7 @@ function invalidateLibraryRenderCaches() {
   submodelThumbCache.clear();
   clearMinifigDiagramCaches();
   coverHeroCache.clear();
+  overviewThumbCache.bumpEpoch();
   libThumbCache.clear();
   libPreviewMeshCache = { key: '', mesh: null };
   libCachedSnapshot = null;
@@ -13144,28 +13596,25 @@ document.getElementById('themeImportInput').onchange = async (e) => {
 
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
-  const ovModal = document.getElementById('overviewModal');
   if (isBricksLibraryModalOpen()) {
     closeBricksLibraryModal();
   } else if (isStepEditModalOpen()) {
     closeStepEditModal();
-  } else if (ovModal && !ovModal.classList.contains('hidden')) {
-    ovModal.classList.add('hidden');
+  } else if (isOverviewModalOpen()) {
+    closeOverviewModal();
   } else if (stylePopEl && !stylePopEl.classList.contains('hidden')) {
     setStylePopoverOpen(false);
   }
 });
 
 document.getElementById('btnPageOverview').onclick = () => {
-  renderOverviewModal();
   const modal = document.getElementById('overviewModal');
   modal.classList.remove('hidden');
-  const activeRow = modal.querySelector('[data-active="true"]');
-  if (activeRow) activeRow.scrollIntoView({ block: 'center' });
+  renderOverviewModal({ scrollActiveIntoView: true });
 };
-document.getElementById('btnCloseOverview').onclick = () => document.getElementById('overviewModal').classList.add('hidden');
+document.getElementById('btnCloseOverview').onclick = () => closeOverviewModal();
 document.getElementById('overviewModal').onclick = (e) => {
-  if (e.target === e.currentTarget) e.currentTarget.classList.add('hidden');
+  if (e.target === e.currentTarget) closeOverviewModal();
 };
 
 document.getElementById('btnUndo').onclick = () => {
@@ -13479,7 +13928,7 @@ if (btnOverviewRangeCreate) {
     overviewRangeState.active = false;
     overviewRangeState.startStep = null;
     overviewRangeState.endStep = null;
-    document.getElementById('overviewModal').classList.add('hidden');
+    closeOverviewModal();
     openPageSetupModal();
     openLayoutGroupEditor(null, { start: lo, end: hi });
   };
@@ -14103,6 +14552,7 @@ async function handleIncomingProjectFile(f) {
     submodelThumbCache.clear();
     coverHeroCache.clear();
     clearMinifigDiagramCaches();
+    overviewThumbCache.bumpEpoch();
     state.model = { title: data.title || 'Loaded Manual', subtitle: '', chapters: data.chapters || [] };
     state.overrides = data.overrides || {};
     state.stepInserts = data.stepInserts || {};
@@ -15023,6 +15473,7 @@ function finishImport(parsed, mode, subdivisionPlan = null, isPostImport = false
   const skipAutoFetch = Boolean(importOpts && importOpts.skipAutoFetch);
   submodelThumbCache.clear();
   coverHeroCache.clear();
+  overviewThumbCache.bumpEpoch();
   state.model = buildManualFromParsed(parsed, mode, subdivisionPlan);
   if (!isPostImport) {
     state.overrides = {}; state.stepInserts = {}; state.pageInserts = {}; state.dividerAfter = {};
@@ -15362,7 +15813,7 @@ async function handleIncomingModelFile(file) {
       parsed = parseImportedModel(m1Text, m2Text, file.name);
       await textureStore.predecodeAllPending();
     } else {
-      embeddedDatRaw.clear(); embeddedDatTitles.clear(); embeddedDatCompiled.clear(); compositePartDefs.clear(); pliThumbCache.clear(); submodelThumbCache.clear(); clearMinifigDiagramCaches();
+      embeddedDatRaw.clear(); embeddedDatTitles.clear(); embeddedDatCompiled.clear(); compositePartDefs.clear(); pliThumbCache.clear(); submodelThumbCache.clear(); clearMinifigDiagramCaches(); overviewThumbCache.bumpEpoch();
       textureStore.clearEmbedded();
       const txt = await file.text();
       pendingRawFile = { kind: 'ldr', fileName: file.name, data: txt };
@@ -15394,6 +15845,7 @@ async function closeCurrentModel() {
   closeMenu();
   closeStepEditModal();
   closeBricksLibraryModal();
+  stopOverviewThumbQueue();
   setStylePopoverOpen(false);
   cleanupPrintAllPages();
 
@@ -15430,6 +15882,7 @@ async function closeCurrentModel() {
   pliThumbCache.clear();
   submodelThumbCache.clear();
   clearMinifigDiagramCaches();
+  overviewThumbCache.bumpEpoch();
   textureStore.clearEmbedded();
 
   state.model = null;

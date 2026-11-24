@@ -116,4 +116,21 @@ describe('studioRuntime safety checks', () => {
     expect(sourceText).toContain('function getPreviewResolutionScale()');
     expect(sourceText).toContain('const resScale = getPreviewResolutionScale();');
   });
+
+  it('renders Pages & Steps list with cached HiDPI lazy step & page previews', () => {
+    const runtimePath = path.resolve(process.cwd(), 'src/studioRuntime.ts');
+    const sourceText = fs.readFileSync(runtimePath, 'utf8');
+
+    const fnStart = sourceText.indexOf('function renderOverviewModal(');
+    const fnEnd = sourceText.indexOf('// 10. STAGE GESTURES', fnStart);
+    expect(fnStart).toBeGreaterThan(-1);
+    expect(fnEnd).toBeGreaterThan(fnStart);
+    const fnBody = sourceText.slice(fnStart, fnEnd);
+
+    expect(fnBody).toContain('computeOverviewThumbDimensions(resScale)');
+    expect(fnBody).toContain('buildStepPreviewCacheKey(');
+    expect(fnBody).toContain('buildPagePreviewCacheKey(');
+    expect(fnBody).toContain('observeOverviewThumbs(');
+    expect(fnBody).toContain('applyThemeBackgroundToElement(');
+  });
 });
