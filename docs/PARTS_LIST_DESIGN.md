@@ -16,7 +16,7 @@ Give manual creators dense, customizable, print-ready Parts List (BOM) pages acr
 | :--- | :--- | :--- | :--- |
 | `format` | `'grid' \| 'table'` | `'grid'` | Visual tile grid or tabular inventory list |
 | `gridMode` | `'auto' \| 'custom'` | `'auto'` | Page- & count-aware automatic sizing vs. explicit `cols × rows` |
-| `minCellSizeIn` | `number` (`0.35–2.0`) | `0.5` | Minimum physical cell width & height (in inches, including labels) for Auto mode |
+| `minCellSizeIn` | `number` (`0.5–2.0`) | `0.5` | Minimum physical cell width & height (in inches, including labels) for Auto mode |
 | `customCols` / `customRows` | `number` (`1–24`) | `8` / `6` | Explicit column & row counts when `gridMode === 'custom'` |
 | `flowAxis` | `'rows' \| 'columns'` | `'rows'` | Primary grid traversal axis (fill across rows first vs. along columns first) |
 | `horizontalDir` | `'ltr' \| 'rtl'` | `'ltr'` | Horizontal progression direction (Left → Right vs. Right → Left) |

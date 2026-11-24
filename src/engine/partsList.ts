@@ -58,7 +58,7 @@ export interface BomConfig {
   density: BomLegacyDensity;
 }
 
-export const MIN_BOM_CELL_SIZE_IN = 0.35;
+export const MIN_BOM_CELL_SIZE_IN = 0.5;
 export const MAX_BOM_CELL_SIZE_IN = 2.0;
 export const DEFAULT_BOM_MIN_CELL_SIZE_IN = 0.5;
 export const MIN_BOM_GRID_TRACKS = 1;

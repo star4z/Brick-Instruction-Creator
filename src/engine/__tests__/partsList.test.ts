@@ -85,6 +85,9 @@ describe('Parts List (BOM) configuration & legacy migration', () => {
     const ids = ['15573', '3069b', '3001', '3069a', '3023'];
     ids.sort(comparePartIdsNatural);
     expect(ids).toEqual(['3001', '3023', '3069a', '3069b', '15573']);
+
+    expect(normalizeBomConfig({ minCellSizeIn: 0.2 }).minCellSizeIn).toBe(0.5);
+    expect(normalizeBomConfig({ minCellSizeIn: 3.5 }).minCellSizeIn).toBe(2.0);
   });
 });
 
