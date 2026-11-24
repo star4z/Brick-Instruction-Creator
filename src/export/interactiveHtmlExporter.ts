@@ -624,9 +624,21 @@ export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload)
   }
   .drawer-head {
     padding: 14px 16px; border-bottom: 1px solid var(--glass-border);
-    display: flex; align-items: center; justify-content: space-between; font-weight: 800; font-size: 14px;
+    display: flex; align-items: center; justify-content: space-between; font-weight: 800; font-size: 14px; flex-shrink: 0;
   }
-  .drawer-list { overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 6px; }
+  .drawer-body {
+    position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden;
+  }
+  .drawer-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 6px; }
+  .drawer-jump {
+    position: absolute; left: 50%; transform: translateX(-50%); z-index: 4;
+    width: 34px; height: 34px; border-radius: 999px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--accent); cursor: pointer;
+  }
+  .drawer-jump[hidden] { display: none; }
+  .drawer-jump-top { top: 8px; }
+  .drawer-jump-bottom { bottom: 8px; }
   .drawer-item {
     display: flex; align-items: center; justify-content: space-between; gap: 8px;
     width: 100%; padding: 10px 12px; border-radius: 14px; border: 1px solid var(--glass-border);
@@ -684,7 +696,15 @@ ${staticFallbackHtml}
         <span>Pages &amp; Steps</span>
         <button id="btnCloseDrawer" class="nav-btn" type="button" style="height:30px;padding:0 10px">✕</button>
       </div>
-      <div id="drawerList" class="drawer-list"></div>
+      <div class="drawer-body">
+        <div id="drawerList" class="drawer-list"></div>
+        <button id="btnDrawerJumpTop" class="drawer-jump drawer-jump-top glass" type="button" title="Jump to top" aria-label="Jump to top" hidden>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h14"/><path d="m6 13 6-6 6 6"/><path d="M12 7v13"/></svg>
+        </button>
+        <button id="btnDrawerJumpBottom" class="drawer-jump drawer-jump-bottom glass" type="button" title="Jump to bottom" aria-label="Jump to bottom" hidden>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 20h14"/><path d="m6 11 6 6 6-6"/><path d="M12 4v13"/></svg>
+        </button>
+      </div>
     </div>
   </div>
 </div>
@@ -1457,6 +1477,36 @@ ${staticFallbackHtml}
     scrub.value = String(curIdx);
   }
 
+  function syncDrawerScrollButtons() {
+    const list = document.getElementById('drawerList');
+    const topBtn = document.getElementById('btnDrawerJumpTop');
+    const bottomBtn = document.getElementById('btnDrawerJumpBottom');
+    if (!list || !topBtn || !bottomBtn) return;
+    const threshold = 8;
+    const maxScroll = Math.max(0, list.scrollHeight - list.clientHeight);
+    if (list.clientHeight <= 0 || maxScroll <= threshold) {
+      topBtn.hidden = true;
+      bottomBtn.hidden = true;
+      return;
+    }
+    const clampedTop = Math.min(maxScroll, Math.max(0, list.scrollTop));
+    topBtn.hidden = !(clampedTop > threshold);
+    bottomBtn.hidden = !(maxScroll - clampedTop > threshold);
+  }
+
+  function scrollDrawerTo(edge) {
+    const list = document.getElementById('drawerList');
+    if (!list) return;
+    const reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const targetTop = edge === 'top' ? 0 : Math.max(0, list.scrollHeight - list.clientHeight);
+    if (typeof list.scrollTo === 'function') {
+      list.scrollTo({ top: targetTop, behavior: reduced ? 'auto' : 'smooth' });
+    } else {
+      list.scrollTop = targetTop;
+    }
+    syncDrawerScrollButtons();
+  }
+
   function openDrawer() {
     const list = document.getElementById('drawerList');
     list.innerHTML = viewerItems.map((it, idx) => {
@@ -1474,6 +1524,12 @@ ${staticFallbackHtml}
       };
     });
     document.getElementById('drawerBackdrop').classList.add('open');
+    const activeItem = list.querySelector('.drawer-item.active');
+    if (activeItem && typeof activeItem.scrollIntoView === 'function') {
+      activeItem.scrollIntoView({ block: 'center' });
+    }
+    syncDrawerScrollButtons();
+    requestAnimationFrame(syncDrawerScrollButtons);
   }
 
   document.getElementById('btnPrev').onclick = () => { if (curIdx > 0) { curIdx--; renderView(); } };
@@ -1483,6 +1539,9 @@ ${staticFallbackHtml}
   document.getElementById('btnPagesTop').onclick = openDrawer;
   document.getElementById('btnCloseDrawer').onclick = () => document.getElementById('drawerBackdrop').classList.remove('open');
   document.getElementById('drawerBackdrop').onclick = (e) => { if (e.target.id === 'drawerBackdrop') e.target.classList.remove('open'); };
+  document.getElementById('drawerList').addEventListener('scroll', syncDrawerScrollButtons, { passive: true });
+  document.getElementById('btnDrawerJumpTop').onclick = () => scrollDrawerTo('top');
+  document.getElementById('btnDrawerJumpBottom').onclick = () => scrollDrawerTo('bottom');
   document.getElementById('btnResetCam').onclick = resetCameraSmooth;
   document.getElementById('btnZoomIn').onclick = () => { targetCam = null; cam.zoom = Math.min(4.8, cam.zoom * 1.2); requestDraw(); };
   document.getElementById('btnZoomOut').onclick = () => { targetCam = null; cam.zoom = Math.max(0.4, cam.zoom / 1.2); requestDraw(); };
@@ -1497,7 +1556,7 @@ ${staticFallbackHtml}
     else if (e.key === '-' || e.key === '_') { cam.zoom = Math.max(0.4, cam.zoom / 1.15); requestDraw(); }
     else if (e.key === 'Escape') { document.getElementById('drawerBackdrop').classList.remove('open'); }
   });
-  window.addEventListener('resize', requestDraw);
+  window.addEventListener('resize', () => { requestDraw(); syncDrawerScrollButtons(); });
 
   renderView();
   } catch (err) {

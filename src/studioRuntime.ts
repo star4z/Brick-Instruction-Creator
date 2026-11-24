@@ -44,6 +44,7 @@ import {
   canInsertDividerAfterPage,
   computeMenuVisibility,
 } from './engine/menuVisibility';
+import { computeScrollJumpVisibility } from './engine/scrollJump';
 import {
   MINIFIG_BUILD_CAMERA,
   MINIFIG_POSE_CAMERA,
@@ -10025,6 +10026,35 @@ function renderOverviewModal(opts = {}) {
   }
 
   observeOverviewThumbs(observedTargets, list, jobId);
+  syncOverviewScrollButtons();
+  requestAnimationFrame(syncOverviewScrollButtons);
+}
+
+function syncOverviewScrollButtons() {
+  const list = document.getElementById('overviewList');
+  const topBtn = document.getElementById('btnOverviewJumpTop');
+  const bottomBtn = document.getElementById('btnOverviewJumpBottom');
+  if (!list || !topBtn || !bottomBtn) return;
+  const { showJumpTop, showJumpBottom } = computeScrollJumpVisibility({
+    scrollTop: list.scrollTop,
+    clientHeight: list.clientHeight,
+    scrollHeight: list.scrollHeight,
+  });
+  topBtn.classList.toggle('hidden', !showJumpTop);
+  bottomBtn.classList.toggle('hidden', !showJumpBottom);
+}
+
+function scrollOverviewListTo(edge) {
+  const list = document.getElementById('overviewList');
+  if (!list) return;
+  const reducedMotion = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  const targetTop = edge === 'top' ? 0 : Math.max(0, list.scrollHeight - list.clientHeight);
+  if (typeof list.scrollTo === 'function') {
+    list.scrollTo({ top: targetTop, behavior: reducedMotion ? 'auto' : 'smooth' });
+  } else {
+    list.scrollTop = targetTop;
+  }
+  syncOverviewScrollButtons();
 }
 
 // =========================================================================
@@ -13616,6 +13646,22 @@ document.getElementById('btnCloseOverview').onclick = () => closeOverviewModal()
 document.getElementById('overviewModal').onclick = (e) => {
   if (e.target === e.currentTarget) closeOverviewModal();
 };
+const overviewListEl = document.getElementById('overviewList');
+if (overviewListEl) {
+  overviewListEl.addEventListener('scroll', syncOverviewScrollButtons, { passive: true });
+  if (typeof ResizeObserver === 'function') {
+    const overviewRo = new ResizeObserver(() => syncOverviewScrollButtons());
+    overviewRo.observe(overviewListEl);
+  }
+}
+const btnOverviewJumpTop = document.getElementById('btnOverviewJumpTop');
+if (btnOverviewJumpTop) {
+  btnOverviewJumpTop.onclick = () => scrollOverviewListTo('top');
+}
+const btnOverviewJumpBottom = document.getElementById('btnOverviewJumpBottom');
+if (btnOverviewJumpBottom) {
+  btnOverviewJumpBottom.onclick = () => scrollOverviewListTo('bottom');
+}
 
 document.getElementById('btnUndo').onclick = () => {
   if (!state.undoStack.length) return;

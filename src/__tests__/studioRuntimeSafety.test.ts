@@ -133,4 +133,15 @@ describe('studioRuntime safety checks', () => {
     expect(fnBody).toContain('observeOverviewThumbs(');
     expect(fnBody).toContain('applyThemeBackgroundToElement(');
   });
+
+  it('wires jump-to-top and jump-to-bottom arrows in the Pages & Steps overview list', () => {
+    const html = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf8');
+    const runtime = fs.readFileSync(path.resolve(process.cwd(), 'src/studioRuntime.ts'), 'utf8');
+
+    expect(html).toContain('id="btnOverviewJumpTop"');
+    expect(html).toContain('id="btnOverviewJumpBottom"');
+    expect(runtime).toContain('computeScrollJumpVisibility');
+    expect(runtime).toContain('function syncOverviewScrollButtons()');
+    expect(runtime).toContain('function scrollOverviewListTo(');
+  });
 });
