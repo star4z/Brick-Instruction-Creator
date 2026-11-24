@@ -10,8 +10,10 @@ import {
   clearStepCameraOverride,
   computePaperPreviewBox,
   getCameraAngleLabel,
+  getEditModeButtonLabel,
   getFocusModeDescription,
   getVisibleModeTabs,
+  isModalEditPageKind,
   migratePageInsertsToSteps,
   resolveStepToolbarCapabilities,
 } from '../stepToolbar';
@@ -32,6 +34,24 @@ describe('Step Toolbar & Full-Page Editor Capabilities', () => {
   it('hides mode tabs on unknown or empty page kinds', () => {
     expect(getVisibleModeTabs(null)).toEqual([]);
     expect(getVisibleModeTabs(undefined)).toEqual([]);
+  });
+
+  it('labels the Edit mode button as Customize Parts List on BOM pages and opens modal editors directly on steps and BOM pages', () => {
+    expect(getEditModeButtonLabel('bom')).toBe('Customize Parts List');
+    expect(getEditModeButtonLabel('steps')).toBe('Edit');
+    expect(getEditModeButtonLabel('cover')).toBe('Edit');
+    expect(getEditModeButtonLabel('complete')).toBe('Edit');
+    expect(getEditModeButtonLabel('back')).toBe('Edit');
+    expect(getEditModeButtonLabel('divider')).toBe('Edit');
+    expect(getEditModeButtonLabel(null)).toBe('Edit');
+
+    expect(isModalEditPageKind('bom')).toBe(true);
+    expect(isModalEditPageKind('steps')).toBe(true);
+    expect(isModalEditPageKind('cover')).toBe(false);
+    expect(isModalEditPageKind('complete')).toBe(false);
+    expect(isModalEditPageKind('back')).toBe(false);
+    expect(isModalEditPageKind('divider')).toBe(false);
+    expect(isModalEditPageKind(undefined)).toBe(false);
   });
 
   it('recognizes that official Exploded and Step-by-Step minifigure pages have no movable Parts Box', () => {

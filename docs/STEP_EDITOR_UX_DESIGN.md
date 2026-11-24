@@ -12,7 +12,8 @@ Every mode tab owns a single, unambiguous responsibility (the redundant `Arrange
     - Visual **Cube + Simple Camera** SVG icons for **View** (`Top` / `Bottom`) and 4 neutral isometric **Angle** presets (`45°`, `135°`, `225°`, `315°` — avoiding arbitrary "Front/Back" labels while keeping legacy project IDs).
     - **`Apply Angle to Steps…`** button opening the dedicated `#applyAngleModal` step-range dialog.
   - **`Edit`**: Opens the dedicated full-page **`Edit Step & Page`** dialog (`#stepEditModal`) without discarding the user's underlying canvas mode.
-- **Simple edit pages (`cover`, `complete`, `back`, `divider`, `bom`)**: `[ Pan | Edit ]`
+- **Parts List pages (`bom`)**: `[ Pan | Customize Parts List ]` — pressing **`Customize Parts List`** directly opens `#bomSetupModal` without showing an intermediate floating chip, while `Pan` & pinch-zoom remain active on the page canvas.
+- **Simple edit pages (`cover`, `complete`, `back`, `divider`)**: `[ Pan | Edit ]`
 
 ### 2. Apply Camera Angle to Steps Modal (`#applyAngleModal`)
 Replaces one-way "Apply Angle to Following" with a visual range-picker modal:
@@ -46,6 +47,7 @@ Every entry in the Pages & Steps list includes a theme-backed miniature preview 
 
 [`src/engine/stepToolbar.ts`](../src/engine/stepToolbar.ts) centralizes:
 - `getVisibleModeTabs(pageKind)` — canonical bottom mode pill tab visibility (`['pan', 'select', 'rotate', 'edit']` on step pages).
+- `getEditModeButtonLabel(pageKind)` & `isModalEditPageKind(pageKind)` — relabels the `edit` button to `Customize Parts List` on Parts List (`bom`) pages and marks modal-backed edit pages (`steps`, `bom`).
 - `CAMERA_ANGLE_PRESETS` & `getCameraAngleLabel()` — neutral degree labels (`45°`, `135°`, `225°`, `315°`) mapped to legacy-compatible IDs.
 - `PAPER_FORMAT_SPECS`, `PAPER_FORMAT_ORDER`, & `computePaperPreviewBox()` — expanded paper sizes (`Screen Fit`, `US Letter`, `A4`, `A5`, `B5`, `Half Letter`, `US Legal`, `Tabloid`, `A3`, `Booklet Square`, `Custom`) and exact aspect-ratio preview box geometry.
 - `applyCameraAngleToStepRange()` — inclusive step-range camera override helper.

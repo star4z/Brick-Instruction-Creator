@@ -145,6 +145,7 @@ import {
   clearStepCameraOverride,
   computePaperPreviewBox,
   getCameraAngleLabel,
+  getEditModeButtonLabel,
   getFocusModeDescription,
   getVisibleModeTabs,
   migratePageInsertsToSteps,
@@ -6159,7 +6160,6 @@ const state = {
   completeMeta: { title:'Build Complete!', subtitle:'Ready for display!', az:315, el:28, bgSrc:null, showText:true, showFireworks:true },
   backMeta:  createDefaultBackMeta(),
   bomConfig: createDefaultBomConfig(),
-  bomShortcutVisible: false,
   pages: [],
   pageIdx: 0,
   mode: 'pan',             // pan | select | rotate | edit
@@ -6950,7 +6950,7 @@ function getModelFileTypeLabel() {
 }
 
 function isSimpleEditPage(page) {
-  return Boolean(page && (page.kind === 'cover' || page.kind === 'complete' || page.kind === 'back' || page.kind === 'divider' || page.kind === 'bom'));
+  return Boolean(page && (page.kind === 'cover' || page.kind === 'complete' || page.kind === 'back' || page.kind === 'divider'));
 }
 
 function isPanGestureEnabled() {
@@ -6963,15 +6963,25 @@ function syncModePillButtons(page) {
   const modePill = document.getElementById('modePill');
   if (modePill) modePill.classList.toggle('hidden', visibleModes.length === 0);
   const isSimpleEdit = isSimpleEditPage(page);
+  const isBom = page?.kind === 'bom';
   const editModalOpen = page?.kind === 'steps' && isStepEditModalOpen();
+  const bomModalOpen = isBom && isBomSetupModalOpen();
+  const editLabelEl = document.getElementById('modeEditLabel');
+  if (editLabelEl) editLabelEl.textContent = getEditModeButtonLabel(page?.kind);
+  const editIconDef = document.getElementById('modeEditIconDefault');
+  const editIconBom = document.getElementById('modeEditIconBom');
+  if (editIconDef) editIconDef.classList.toggle('hidden', isBom);
+  if (editIconBom) editIconBom.classList.toggle('hidden', !isBom);
   document.querySelectorAll('.mode-btn').forEach(b => {
     const m = b.getAttribute('data-mode');
     const visible = visibleModes.includes(m);
-    const active = isSimpleEdit
-      ? (m === 'pan' ? state.mode === 'pan' : m === 'edit' && state.mode !== 'pan')
-      : editModalOpen
-        ? m === 'edit'
-        : m === state.mode;
+    const active = isBom
+      ? (bomModalOpen ? m === 'edit' : m === 'pan')
+      : isSimpleEdit
+        ? (m === 'pan' ? state.mode === 'pan' : m === 'edit' && state.mode !== 'pan')
+        : editModalOpen
+          ? m === 'edit'
+          : m === state.mode;
     b.className = `mode-btn ${visible ? 'flex' : 'hidden'} min-h-[34px] px-2.5 sm:px-3 py-1.5 rounded-full items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer ${
       active ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--surface-hover)]'
     }`;
@@ -7213,7 +7223,6 @@ function renderAll() {
   document.getElementById('nextPage').disabled = state.pageIdx >= state.pages.length - 1;
 
   const isSteps = page.kind === 'steps';
-  const isSimpleEdit = isSimpleEditPage(page);
   if (state.mode === 'arrange') {
     state.mode = 'pan';
   }
@@ -7568,7 +7577,7 @@ function renderAll() {
     }
 
     frame.innerHTML = `
-      <div id="bomPageTapArea" class="relative w-full h-full flex flex-col overflow-hidden cursor-pointer ${guideCls}" style="padding:${padPx}px;padding-bottom:${padPx + footerH}px">
+      <div class="relative w-full h-full flex flex-col overflow-hidden ${guideCls}" style="padding:${padPx}px;padding-bottom:${padPx + footerH}px">
         <div class="shrink-0 flex items-baseline justify-between border-b" style="border-color:${theme.pliBorder};padding-bottom:${bt.headerPb}px;margin-bottom:${bt.headerMb}px;gap:${Math.round(typo.pt(8))}px">
           <div class="flex items-baseline min-w-0" style="gap:${Math.round(typo.pt(8))}px">
             <h2 class="font-bold truncate leading-tight" style="font-size:${bt.titleFont}px">Parts List</h2>
@@ -7582,14 +7591,6 @@ function renderAll() {
           <span style="color:${theme.text}" class="font-bold shrink-0">${escHtml(pgNumText)}</span>
         </div>
       </div>`;
-
-    const tapArea = frame.querySelector('#bomPageTapArea');
-    if (tapArea) {
-      tapArea.addEventListener('click', () => {
-        state.bomShortcutVisible = !state.bomShortcutVisible;
-        renderContextOverlay(page);
-      });
-    }
   } else {
     // STEPS PAGE
     if (zoomHiResTimer) { clearTimeout(zoomHiResTimer); zoomHiResTimer = 0; }
@@ -8144,16 +8145,9 @@ function renderContextOverlay(page) {
   const box = document.getElementById('contextOverlay');
   box.innerHTML = '';
 
-  // PARTS LIST TAP SHORTCUT (works in ANY mode, including Pan! Tap the Parts List page to toggle)
+  // PARTS LIST: Edited directly via the bottom mode pill ("Customize Parts List" -> #bomSetupModal)
   if (page.kind === 'bom') {
-    if (!state.bomShortcutVisible && state.mode === 'pan') { box.classList.add('hidden'); return; }
-    box.classList.remove('hidden');
-    box.innerHTML = `
-      <button id="bomQuickCustomizeBtn" class="pointer-events-auto studio-surface px-4 py-2.5 rounded-full inline-flex items-center gap-2 text-xs font-bold text-[var(--primary)] hover:scale-[1.02] active:scale-95 transition">
-        <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
-        <span>Customize Parts List</span>
-      </button>`;
-    box.querySelector('#bomQuickCustomizeBtn').onclick = () => openBomSetupModal();
+    box.classList.add('hidden');
     return;
   }
 
@@ -11116,10 +11110,6 @@ function scrollOverviewListTo(edge) {
       startPanX = state.panX; startPanY = state.panY;
       startX = t[0].clientX; startY = t[0].clientY;
     } else if (t.length === 0) {
-      if (modeTouch === 'pan' && !touchMoved && state.pages[state.pageIdx]?.kind === 'bom') {
-        state.bomShortcutVisible = !state.bomShortcutVisible;
-        renderContextOverlay(state.pages[state.pageIdx]);
-      }
       modeTouch = null;
     }
   };
@@ -13218,10 +13208,25 @@ function openPageSetupModal() {
   document.getElementById('pageSetupModal').classList.remove('hidden');
 }
 
+function isBomSetupModalOpen() {
+  const el = document.getElementById('bomSetupModal');
+  return Boolean(el && !el.classList.contains('hidden'));
+}
+
 function openBomSetupModal() {
   closeMenu();
+  document.getElementById('stylePopover')?.classList.add('hidden');
   syncMenuControls();
   document.getElementById('bomSetupModal').classList.remove('hidden');
+  const page = state.pages[state.pageIdx];
+  if (page) syncModePillButtons(page);
+}
+
+function closeBomSetupModal() {
+  const el = document.getElementById('bomSetupModal');
+  if (el) el.classList.add('hidden');
+  const page = state.pages[state.pageIdx];
+  if (page) syncModePillButtons(page);
 }
 
 let lastSourceRecord = null; // { kind:'io'|'ldr'|'project', fileName, data, importMode }
@@ -14908,6 +14913,8 @@ document.addEventListener('keydown', (e) => {
     closeBricksLibraryModal();
   } else if (isStepEditModalOpen()) {
     closeStepEditModal();
+  } else if (isBomSetupModalOpen()) {
+    closeBomSetupModal();
   } else if (isOverviewModalOpen()) {
     closeOverviewModal();
   } else if (stylePopEl && !stylePopEl.classList.contains('hidden')) {
@@ -15060,9 +15067,17 @@ document.querySelectorAll('.mode-btn').forEach(b => {
       }
       return;
     }
+    if (nextMode === 'edit' && curPage?.kind === 'bom') {
+      if (isBomSetupModalOpen()) {
+        closeBomSetupModal();
+      } else {
+        openBomSetupModal();
+      }
+      return;
+    }
     if (isStepEditModalOpen()) closeStepEditModal();
+    if (isBomSetupModalOpen()) closeBomSetupModal();
     state.mode = nextMode;
-    if (state.mode === 'pan') state.bomShortcutVisible = false;
     if (state.mode !== 'select') state.selectedPartIds.clear();
     state.selectedArrangeEl = null;
     renderAll();
@@ -15071,11 +15086,11 @@ document.querySelectorAll('.mode-btn').forEach(b => {
 
 document.getElementById('prevPage').onclick = () => {
   dismissErrorBanner();
-  if (state.pageIdx > 0) { state.pageIdx--; state.bomShortcutVisible = false; state.selectedPartIds.clear(); resetZoom(); renderAll(); }
+  if (state.pageIdx > 0) { state.pageIdx--; state.selectedPartIds.clear(); resetZoom(); renderAll(); }
 };
 document.getElementById('nextPage').onclick = () => {
   dismissErrorBanner();
-  if (state.pageIdx < state.pages.length - 1) { state.pageIdx++; state.bomShortcutVisible = false; state.selectedPartIds.clear(); resetZoom(); renderAll(); }
+  if (state.pageIdx < state.pages.length - 1) { state.pageIdx++; state.selectedPartIds.clear(); resetZoom(); renderAll(); }
 };
 document.getElementById('btnZoomIn').onclick = () => setZoom(state.zoom * 1.22);
 document.getElementById('btnZoomOut').onclick = () => setZoom(state.zoom * 0.82);
@@ -15912,8 +15927,8 @@ function openExportModal() {
   closeMenu();
   closeBricksLibraryModal();
   closeStepEditModal();
+  closeBomSetupModal();
   document.getElementById('pageSetupModal').classList.add('hidden');
-  document.getElementById('bomSetupModal').classList.add('hidden');
   const fmt = PAPER_FORMATS[state.paperFormat] || PAPER_FORMATS.letter;
   const [wIn, hIn] = getActivePagePhysicalInches();
   document.getElementById('expFormatSummary').textContent = `${fmt.name} (${formatPhysicalDims(wIn, hIn)}) · ${state.pages.length} pages`;
@@ -15940,7 +15955,6 @@ document.getElementById('stepEditDoneBtn').onclick = closeStepEditModal;
 document.getElementById('stepEditModal').onclick = (e) => { if (e.target.id === 'stepEditModal') closeStepEditModal(); };
 
 document.getElementById('menuBomSetupBtn').onclick = openBomSetupModal;
-const closeBomSetupModal = () => document.getElementById('bomSetupModal').classList.add('hidden');
 document.getElementById('btnCloseBomSetup').onclick = closeBomSetupModal;
 document.getElementById('bomSetupDoneBtn').onclick = closeBomSetupModal;
 document.getElementById('bomSetupModal').onclick = (e) => { if (e.target.id === 'bomSetupModal') closeBomSetupModal(); };
@@ -15949,7 +15963,7 @@ document.getElementById('bomSetupJumpBtn').onclick = () => {
   if (!state.model) { showToast('Import a model first.'); return; }
   if (!state.showExtras) { state.showExtras = true; rebuildPages(); }
   const idx = state.pages.findIndex(p => p.kind === 'bom');
-  if (idx >= 0) { state.pageIdx = idx; state.bomShortcutVisible = false; resetZoom(); renderAll(); }
+  if (idx >= 0) { state.pageIdx = idx; resetZoom(); renderAll(); }
 };
 document.getElementById('errorsModal').onclick = (e) => { if (e.target.id === 'errorsModal') document.getElementById('errorsModal').classList.add('hidden'); };
 document.getElementById('btnCloseExport').onclick = () => document.getElementById('exportModal').classList.add('hidden');
@@ -17405,6 +17419,7 @@ async function closeCurrentModel() {
   const closedTitle = state.model.title || 'model';
   closeMenu();
   closeStepEditModal();
+  closeBomSetupModal();
   closeBricksLibraryModal();
   stopOverviewThumbQueue();
   setStylePopoverOpen(false);
@@ -17414,7 +17429,6 @@ async function closeCurrentModel() {
     'openModelModal',
     'exportModal',
     'pageSetupModal',
-    'bomSetupModal',
     'errorsModal',
     'overviewModal',
     'importModal',
@@ -17470,7 +17484,6 @@ async function closeCurrentModel() {
     showFireworks: true,
   };
   state.backMeta = createDefaultBackMeta();
-  state.bomShortcutVisible = false;
   state.pendingImport = null;
   state.undoStack = [];
   state.redoStack = [];

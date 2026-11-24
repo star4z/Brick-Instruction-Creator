@@ -310,6 +310,23 @@ export function getVisibleModeTabs(pageKind: string | null | undefined): StudioM
   return [];
 }
 
+/**
+ * Returns the bottom mode pill label for the `edit` action button on a given page kind.
+ * Parts List (`bom`) pages show "Customize Parts List" and directly open the Parts List dialog.
+ */
+export function getEditModeButtonLabel(pageKind: string | null | undefined): string {
+  return pageKind === 'bom' ? 'Customize Parts List' : 'Edit';
+}
+
+/**
+ * Returns true when pressing the `edit` mode pill action directly opens a dedicated modal
+ * (Step Edit modal on step pages, Parts List Setup modal on BOM pages) rather than switching
+ * into an inline floating overlay.
+ */
+export function isModalEditPageKind(pageKind: string | null | undefined): boolean {
+  return pageKind === 'steps' || pageKind === 'bom';
+}
+
 export interface StepOverrideLike {
   side?: string;
   corner?: string;
