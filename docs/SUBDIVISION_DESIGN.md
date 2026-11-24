@@ -165,7 +165,7 @@ The upgraded `#importModal` in [`index.html`](../index.html) adapts automaticall
 - **Desktop (`lg+`)**: Responsive 2-pane modal (`max-w-4xl`) with the 3D preview on the left and ranked proposals on the right.
 
 ### Live 3D Preview Controls & Proposal Curation
-- **Orbit**: 1-finger touch drag or mouse drag directly on the WebGL canvas (`WebGLBrickEngine`), reusing uploaded GPU buffers with zero re-uploads while orbiting.
+- **Orbit, Zoom & Pan**: 1-finger touch drag or left-click drag orbits the WebGL canvas (`WebGLBrickEngine`), reusing uploaded GPU buffers with zero re-uploads. Mouse wheel / trackpad scroll and 2-finger pinch zoom (`0.45×–5×`), right-drag / middle-drag / Shift+drag / 2-finger drag pans in screen space, and double-tap / double-click resets the view. The `<canvas>` is positioned `absolute inset-0` inside its container so high-DPR buffer sizing never triggers flex layout growth while orbiting.
 - **Always-Visible Overlay Icons**: Subtle circular overlay icon buttons sit in the top-right corner of the 3D preview:
   - **Animated Explode Toggle**: Shown for multi-section proposals; smoothly eases (`340 ms` cubic ease-in-out) each connected section outward along its computed `explodeOffset` vector (and collapses back cleanly). Whole-minifigure assemblies (via `extractMinifigureGroups`) ride with their host section.
   - **Color Mode Toggle**: Switches between colorblind-safe **Section Colors** and true **Part Colors**. When **Single Continuous Build** is selected with **Section Colors** active, the entire model renders in one unified section color (`SECTION_PREVIEW_PALETTE[0]`) while the explode toggle is hidden.

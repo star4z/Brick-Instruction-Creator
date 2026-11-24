@@ -2670,7 +2670,7 @@ class WebGLBrickEngine {
     gl.bindBuffer(gl.ARRAY_BUFFER, this.bLineCol); gl.bufferData(gl.ARRAY_BUFFER, mesh.lineCol, gl.STATIC_DRAW);
     this.uploadedMesh = mesh;
   }
-  computeMVP(mesh, w, h, azDeg, elDeg, zoom = 1, fixedHalfH = 0, tightFit = false, fixedCenter = null) {
+  computeMVP(mesh, w, h, azDeg, elDeg, zoom = 1, fixedHalfH = 0, tightFit = false, fixedCenter = null, panX = 0, panY = 0) {
     const az = azDeg * Math.PI / 180, el = elDeg * Math.PI / 180;
     const center = fixedCenter || mesh.center;
     // Tight near/far ortho depth range around full model radius for 4x sharper Z-buffer occlusion!
@@ -2702,15 +2702,18 @@ class WebGLBrickEngine {
       }
     }
     const aspect = w / Math.max(1, h);
+    const safeZoom = Math.max(0.4, zoom);
     let halfH = fixedHalfH > 0
-      ? (fixedCenter ? fixedHalfH / Math.max(0.4, zoom) : fixedHalfH)
-      : ((mesh.radius * 1.12) / Math.max(0.4, zoom));
+      ? (fixedCenter ? fixedHalfH / safeZoom : fixedHalfH)
+      : ((mesh.radius * 1.12) / safeZoom);
     // Ensure portrait/tall slots never clip wide models horizontally
     if (fixedHalfH <= 0 && aspect < 1) {
       halfH = halfH / Math.max(0.5, aspect);
     }
     const halfW = halfH * aspect;
-    return mulMat4(orthoMat4(-halfW, halfW, -halfH, halfH, near, far), view);
+    const pxX = panX * halfW * safeZoom;
+    const pxY = panY * halfH * safeZoom;
+    return mulMat4(orthoMat4(-halfW - pxX, halfW - pxX, -halfH + pxY, halfH + pxY, near, far), view);
   }
   draw(mesh, w, h, azDeg, elDeg, zoom = 1, fixedHalfH = 0, drawOpts = null) {
     const gl = this.gl;
@@ -2732,7 +2735,9 @@ class WebGLBrickEngine {
     const heroShading = Boolean(drawOpts?.heroShading);
     const lineAlpha = typeof drawOpts?.lineAlpha === 'number' ? drawOpts.lineAlpha : (heroShading ? 0.52 : 1.0);
     const fixedCenter = drawOpts?.fixedCenter || null;
-    const mvp = this.computeMVP(mesh, dw, dh, azDeg, elDeg, zoom, fixedHalfH, tightFit, fixedCenter);
+    const panX = typeof drawOpts?.panX === 'number' ? drawOpts.panX : 0;
+    const panY = typeof drawOpts?.panY === 'number' ? drawOpts.panY : 0;
+    const mvp = this.computeMVP(mesh, dw, dh, azDeg, elDeg, zoom, fixedHalfH, tightFit, fixedCenter, panX, panY);
     const { right, up, forward } = computeCameraBasis(azDeg, elDeg);
     const lights = computePreviewLightDirs(right, up, forward);
     const center = fixedCenter || mesh.center;
@@ -16361,6 +16366,9 @@ let impState = {
   colorMode: 'sections', // 'sections' | 'bricks'
   az: 38,
   el: 28,
+  zoom: 1.0,
+  panX: 0,
+  panY: 0,
   isPostImport: false,
   skipAutoFetch: false,
   pickerOpen: false,
@@ -16487,18 +16495,25 @@ function rebuildAndDrawImportPreview() {
 function drawImportPreviewFrame() {
   const canvas = document.getElementById('impPreviewCanvas');
   if (!canvas || !impPreviewEngine || !impPreviewMesh) return;
-  const rect = canvas.getBoundingClientRect();
+  const host = canvas.parentElement || canvas;
+  const cssW = host.clientWidth || 360;
+  const cssH = host.clientHeight || 240;
   const dpr = Math.min(Math.max(window.devicePixelRatio || 1, 1.75), 3);
-  const w = Math.max(540, Math.round((rect.width || 360) * dpr));
-  const h = Math.max(380, Math.round((rect.height || 240) * dpr));
-  impPreviewEngine.draw(impPreviewMesh, w, h, impState.az, impState.el, 1.0, 0, {
+  const w = Math.max(540, Math.round(cssW * dpr));
+  const h = Math.max(380, Math.round(cssH * dpr));
+  impPreviewEngine.draw(impPreviewMesh, w, h, impState.az, impState.el, impState.zoom || 1.0, 0, {
     heroShading: true,
     lineAlpha: 0.48,
+    panX: impState.panX || 0,
+    panY: impState.panY || 0,
   });
 }
 
-// Orbit pointer gesture for the 3D Import Preview canvas
+// Orbit, zoom (wheel/pinch), and pan pointer gestures for the 3D Import Preview canvas
 const IMP_EXPLODED_PCT = 50;
+const IMP_MIN_ZOOM = 0.45;
+const IMP_MAX_ZOOM = 5.0;
+const IMP_MAX_PAN = 2.5;
 let impExplodeAnimRaf = 0;
 
 function syncImportPreviewControlsUI() {
@@ -16565,22 +16580,108 @@ function animateImportExplode(nextExploded) {
 (function bindImportPreviewOrbit() {
   const canvas = document.getElementById('impPreviewCanvas');
   if (!canvas) return;
-  let dragging = false, lastX = 0, lastY = 0;
+  const pointers = new Map();
+  let lastPinchDist = 0;
+  let lastMid = null;
+  let movedDist = 0;
+  let lastTapTime = 0;
+
+  const applyPanDelta = (dx, dy) => {
+    const host = canvas.parentElement || canvas;
+    const cssW = Math.max(100, host.clientWidth || 360);
+    const cssH = Math.max(100, host.clientHeight || 240);
+    const zoom = Math.max(IMP_MIN_ZOOM, impState.zoom || 1.0);
+    impState.panX = Math.max(-IMP_MAX_PAN, Math.min(IMP_MAX_PAN, impState.panX + (dx / cssW) * (2.0 / zoom)));
+    impState.panY = Math.max(-IMP_MAX_PAN, Math.min(IMP_MAX_PAN, impState.panY + (dy / cssH) * (2.0 / zoom)));
+  };
+
   canvas.addEventListener('pointerdown', (e) => {
-    dragging = true; lastX = e.clientX; lastY = e.clientY;
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, btn: e.button, shift: e.shiftKey });
     try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
+    if (pointers.size === 1) {
+      movedDist = 0;
+    } else if (pointers.size === 2) {
+      const pts = Array.from(pointers.values());
+      lastPinchDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+      lastMid = { x: (pts[0].x + pts[1].x) * 0.5, y: (pts[0].y + pts[1].y) * 0.5 };
+      movedDist = 999;
+    }
   });
+
   canvas.addEventListener('pointermove', (e) => {
-    if (!dragging) return;
-    const dx = e.clientX - lastX;
-    const dy = e.clientY - lastY;
-    lastX = e.clientX; lastY = e.clientY;
-    impState.az = (impState.az - dx * 0.55 + 360) % 360;
-    impState.el = Math.max(-75, Math.min(80, impState.el + dy * 0.45));
-    drawImportPreviewFrame();
+    const prev = pointers.get(e.pointerId);
+    if (!prev) return;
+    if (pointers.size === 1) {
+      const dx = e.clientX - prev.x;
+      const dy = e.clientY - prev.y;
+      prev.x = e.clientX; prev.y = e.clientY;
+      movedDist += Math.hypot(dx, dy);
+      if (e.shiftKey || prev.btn === 2 || prev.btn === 1 || (e.buttons & 2) || (e.buttons & 4)) {
+        applyPanDelta(dx, dy);
+      } else {
+        impState.az = (impState.az - dx * 0.55 + 360) % 360;
+        impState.el = Math.max(-75, Math.min(80, impState.el + dy * 0.45));
+      }
+      drawImportPreviewFrame();
+    } else if (pointers.size === 2) {
+      prev.x = e.clientX; prev.y = e.clientY;
+      const pts = Array.from(pointers.values());
+      const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+      const mid = { x: (pts[0].x + pts[1].x) * 0.5, y: (pts[0].y + pts[1].y) * 0.5 };
+      if (lastPinchDist > 5) {
+        impState.zoom = Math.max(IMP_MIN_ZOOM, Math.min(IMP_MAX_ZOOM, (impState.zoom || 1.0) * (dist / lastPinchDist)));
+      }
+      if (lastMid) {
+        applyPanDelta(mid.x - lastMid.x, mid.y - lastMid.y);
+      }
+      lastPinchDist = dist;
+      lastMid = mid;
+      movedDist = 999;
+      drawImportPreviewFrame();
+    }
   });
-  canvas.addEventListener('pointerup', () => { dragging = false; });
-  canvas.addEventListener('pointercancel', () => { dragging = false; });
+
+  const endPtr = (e) => {
+    pointers.delete(e.pointerId);
+    if (pointers.size < 2) {
+      lastPinchDist = 0;
+      lastMid = null;
+    }
+  };
+
+  canvas.addEventListener('pointerup', (e) => {
+    const now = Date.now();
+    if (pointers.size === 1 && movedDist < 6) {
+      if (now - lastTapTime < 280) {
+        impState.az = 38;
+        impState.el = 28;
+        impState.zoom = 1.0;
+        impState.panX = 0;
+        impState.panY = 0;
+        lastTapTime = 0;
+        drawImportPreviewFrame();
+      } else {
+        lastTapTime = now;
+      }
+    }
+    endPtr(e);
+  });
+  canvas.addEventListener('pointercancel', endPtr);
+  canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const step = Math.max(0.75, Math.min(1.35, Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0018))));
+    impState.zoom = Math.max(IMP_MIN_ZOOM, Math.min(IMP_MAX_ZOOM, (impState.zoom || 1.0) * step));
+    drawImportPreviewFrame();
+  }, { passive: false });
+
+  if (typeof ResizeObserver !== 'undefined' && canvas.parentElement) {
+    const ro = new ResizeObserver(() => {
+      const modal = document.getElementById('importModal');
+      if (modal && !modal.classList.contains('hidden')) drawImportPreviewFrame();
+    });
+    ro.observe(canvas.parentElement);
+  }
 })();
 
 const SINGLE_BUILD_DESCRIPTION = 'Generates clean, buildable steps in one continuous chapter without splitting the model into sections.';
@@ -16800,6 +16901,9 @@ function openImportAssistant(parsed, isPostImport = false) {
   impState.colorMode = 'sections';
   impState.az = 38;
   impState.el = 28;
+  impState.zoom = 1.0;
+  impState.panX = 0;
+  impState.panY = 0;
 
   // When reopened from Step Generation menu, match the currently active plan if any; otherwise pick recommended
   const currentPlan = isPostImport ? state.model?._subdivisionPlan : null;
