@@ -9824,8 +9824,12 @@ const libUiState = {
   visibleLimit: 48,
 };
 
+const LIB_PAGE_BATCH_SIZE = 48;
 let libCachedSnapshot = null;
 let libThumbObserver = null;
+let libScrollObserver = null;
+let libCurrentFilteredItems = [];
+let libRenderedCount = 0;
 let libThumbQueue = [];
 let libThumbRafId = 0;
 let libSearchDebounceTimer = null;
@@ -10541,6 +10545,10 @@ function stopLibThumbQueue() {
     libThumbObserver.disconnect();
     libThumbObserver = null;
   }
+  if (libScrollObserver) {
+    libScrollObserver.disconnect();
+    libScrollObserver = null;
+  }
 }
 
 function flushLibThumbQueue() {
@@ -10589,19 +10597,19 @@ function enqueueLibThumbImg(imgEl) {
   }
 }
 
-function attachLibThumbLazyLoader(gridEl, scrollRoot) {
-  stopLibThumbQueue();
-  const imgs = Array.from(gridEl.querySelectorAll('img[data-part-id]'));
+function observeLibThumbImgs(imgs, scrollRoot) {
   if (!imgs.length) return;
   if (typeof IntersectionObserver !== 'undefined') {
-    libThumbObserver = new IntersectionObserver((entries) => {
-      for (const entry of entries) {
-        if (entry.isIntersecting) {
-          libThumbObserver?.unobserve(entry.target);
-          enqueueLibThumbImg(entry.target);
+    if (!libThumbObserver) {
+      libThumbObserver = new IntersectionObserver((entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            libThumbObserver?.unobserve(entry.target);
+            enqueueLibThumbImg(entry.target);
+          }
         }
-      }
-    }, { root: scrollRoot || null, rootMargin: '140px 0px' });
+      }, { root: scrollRoot || null, rootMargin: '140px 0px' });
+    }
     for (const img of imgs) libThumbObserver.observe(img);
   } else {
     for (const img of imgs) enqueueLibThumbImg(img);
@@ -10991,19 +10999,13 @@ function renderLibBrowseTab(resetLimit = false) {
   const gridEl = document.getElementById('libBrowseGrid');
   const gridWrap = document.getElementById('libBrowseGridWrap');
   const loadMoreWrap = document.getElementById('libLoadMoreWrap');
-  const loadMoreBtn = document.getElementById('libLoadMoreBtn');
   const fetchBannerEl = document.getElementById('libSearchFetchBanner');
   if (!gridEl) return;
 
-  const shown = filtered.slice(0, libUiState.visibleLimit);
   if (summaryEl) {
-    if (filtered.length === 0) {
-      summaryEl.textContent = 'No matching parts in current view';
-    } else if (filtered.length > shown.length) {
-      summaryEl.textContent = `Showing ${shown.length.toLocaleString()} of ${filtered.length.toLocaleString()} matching parts`;
-    } else {
-      summaryEl.textContent = `${filtered.length.toLocaleString()} part${filtered.length === 1 ? '' : 's'}`;
-    }
+    summaryEl.textContent = filtered.length === 0
+      ? 'No matching parts'
+      : `${filtered.length.toLocaleString()} part${filtered.length === 1 ? '' : 's'}`;
   }
 
   // If the user typed a specific part ID (e.g. "3010" or "3626cp01") that isn't saved yet, offer direct online fetch!
@@ -11040,8 +11042,14 @@ function renderLibBrowseTab(resetLimit = false) {
     }
   }
 
-  if (shown.length === 0) {
-    stopLibThumbQueue();
+  stopLibThumbQueue();
+  libCurrentFilteredItems = filtered;
+  libRenderedCount = 0;
+  if (resetLimit && gridWrap) {
+    gridWrap.scrollTop = 0;
+  }
+
+  if (filtered.length === 0) {
     gridEl.innerHTML = `
       <div class="col-span-full py-10 text-center space-y-2 text-[var(--muted-foreground)]">
         <div class="font-bold text-sm text-[var(--foreground)]">No parts found</div>
@@ -11054,31 +11062,69 @@ function renderLibBrowseTab(resetLimit = false) {
     return;
   }
 
-  gridEl.innerHTML = shown.map((item) => {
-    const selected = libUiState.selectedId === item.id;
-    // Catalog-only parts have no local geometry yet — show a download placeholder instead of
-    // rendering an approximate box; tapping the card downloads & previews the exact shape.
-    const thumbHtml = isOnlineOnlyItem(item)
-      ? `<div class="flex flex-col items-center justify-center gap-1 text-[var(--muted-foreground)]" title="Tap to download & preview">
-           <svg viewBox="0 0 24 24" class="w-8 h-8 opacity-60" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 8.5a4 4 0 0 1-.5 7.97"/><path d="M12 12v8"/><path d="m9 17 3 3 3-3"/></svg>
-           <span class="text-[10px] font-semibold">Tap to preview</span>
-         </div>`
-      : `<img data-part-id="${escHtml(item.id)}" data-color-id="${getEffectivePreviewColorForPart(item.id)}" alt="${escHtml(item.name)}" class="w-full h-full object-contain opacity-0 transition-opacity duration-150 drop-shadow-[0_3px_6px_rgba(15,23,42,0.12)]" />`;
-    return `
-      <button type="button" data-lib-part="${escHtml(item.id)}" class="group text-left p-2 rounded-lg border transition flex flex-col gap-1.5 ${selected ? 'border-[var(--primary)] ring-2 ring-[var(--primary-border)] bg-[var(--primary-soft)]' : 'border-[var(--border)] bg-[var(--background)] hover:border-[var(--primary-border)]'}">
-        <div class="aspect-square w-full rounded-xl bg-[radial-gradient(circle_at_50%_40%,var(--card)_0%,var(--surface-sunken)_100%)] border border-[var(--border)]/60 relative flex items-center justify-center p-2 overflow-hidden">
-          ${thumbHtml}
-          <div class="absolute top-1.5 right-1.5">${getSourceBadgeHtml(item)}</div>
-        </div>
-        <div class="px-0.5 min-w-0 space-y-0.5">
-          <div class="font-mono text-xs font-bold truncate">${escHtml(item.id)}</div>
-          <div class="text-xs text-[var(--muted-foreground)] leading-tight line-clamp-2 min-h-[26px]">${escHtml(item.name)}</div>
-        </div>
-      </button>
-    `;
-  }).join('');
+  gridEl.innerHTML = '';
+  const initialCount = Math.max(LIB_PAGE_BATCH_SIZE, libUiState.visibleLimit);
+  appendLibBrowseBatch(initialCount);
 
-  gridEl.querySelectorAll('button[data-lib-part]').forEach((btn) => {
+  if (loadMoreWrap && typeof IntersectionObserver !== 'undefined') {
+    libScrollObserver = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting && libRenderedCount < libCurrentFilteredItems.length) {
+          appendLibBrowseBatch(LIB_PAGE_BATCH_SIZE);
+        }
+      }
+    }, { root: gridWrap || null, rootMargin: '280px 0px' });
+    libScrollObserver.observe(loadMoreWrap);
+  }
+}
+
+function renderLibPartCardHtml(item) {
+  const selected = libUiState.selectedId === item.id;
+  // Catalog-only parts have no local geometry yet — show a download placeholder instead of
+  // rendering an approximate box; tapping the card downloads & previews the exact shape.
+  const thumbHtml = isOnlineOnlyItem(item)
+    ? `<div class="flex flex-col items-center justify-center gap-1 text-[var(--muted-foreground)]" title="Tap to download & preview">
+         <svg viewBox="0 0 24 24" class="w-8 h-8 opacity-60" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 8.5a4 4 0 0 1-.5 7.97"/><path d="M12 12v8"/><path d="m9 17 3 3 3-3"/></svg>
+         <span class="text-[10px] font-semibold">Tap to preview</span>
+       </div>`
+    : `<img data-part-id="${escHtml(item.id)}" data-color-id="${getEffectivePreviewColorForPart(item.id)}" alt="${escHtml(item.name)}" class="w-full h-full object-contain opacity-0 transition-opacity duration-150 drop-shadow-[0_3px_6px_rgba(15,23,42,0.12)]" />`;
+  return `
+    <button type="button" data-lib-part="${escHtml(item.id)}" class="group text-left p-2 rounded-lg border transition flex flex-col gap-1.5 ${selected ? 'border-[var(--primary)] ring-2 ring-[var(--primary-border)] bg-[var(--primary-soft)]' : 'border-[var(--border)] bg-[var(--background)] hover:border-[var(--primary-border)]'}">
+      <div class="aspect-square w-full rounded-xl bg-[radial-gradient(circle_at_50%_40%,var(--card)_0%,var(--surface-sunken)_100%)] border border-[var(--border)]/60 relative flex items-center justify-center p-2 overflow-hidden">
+        ${thumbHtml}
+        <div class="absolute top-1.5 right-1.5">${getSourceBadgeHtml(item)}</div>
+      </div>
+      <div class="px-0.5 min-w-0 space-y-0.5">
+        <div class="font-mono text-xs font-bold truncate">${escHtml(item.id)}</div>
+        <div class="text-xs text-[var(--muted-foreground)] leading-tight line-clamp-2 min-h-[26px]">${escHtml(item.name)}</div>
+      </div>
+    </button>
+  `;
+}
+
+function appendLibBrowseBatch(batchSize = LIB_PAGE_BATCH_SIZE) {
+  const gridEl = document.getElementById('libBrowseGrid');
+  const gridWrap = document.getElementById('libBrowseGridWrap');
+  const loadMoreWrap = document.getElementById('libLoadMoreWrap');
+  const loadMoreBtn = document.getElementById('libLoadMoreBtn');
+  if (!gridEl) return;
+
+  const start = libRenderedCount;
+  const end = Math.min(libCurrentFilteredItems.length, start + batchSize);
+  if (end <= start) {
+    if (loadMoreWrap) loadMoreWrap.classList.add('hidden');
+    return;
+  }
+
+  const batch = libCurrentFilteredItems.slice(start, end);
+  const template = document.createElement('template');
+  template.innerHTML = batch.map(renderLibPartCardHtml).join('');
+  const frag = template.content;
+
+  const newButtons = Array.from(frag.querySelectorAll('button[data-lib-part]'));
+  const newImgs = Array.from(frag.querySelectorAll('img[data-part-id]'));
+
+  for (const btn of newButtons) {
     btn.onclick = () => {
       const pid = btn.getAttribute('data-lib-part');
       libUiState.selectedId = pid;
@@ -11094,17 +11140,20 @@ function renderLibBrowseTab(resetLimit = false) {
       });
       renderLibPreviewInspector();
     };
-  });
-
-  if (loadMoreWrap && loadMoreBtn) {
-    const remaining = filtered.length - shown.length;
-    loadMoreWrap.classList.toggle('hidden', remaining <= 0);
-    if (remaining > 0) {
-      loadMoreBtn.textContent = `Load more parts (${remaining.toLocaleString()} remaining)`;
-    }
   }
 
-  attachLibThumbLazyLoader(gridEl, gridWrap);
+  gridEl.appendChild(frag);
+  libRenderedCount = end;
+  libUiState.visibleLimit = Math.max(libUiState.visibleLimit, libRenderedCount);
+  observeLibThumbImgs(newImgs, gridWrap);
+
+  const hasMore = libRenderedCount < libCurrentFilteredItems.length;
+  if (loadMoreWrap) {
+    loadMoreWrap.classList.toggle('hidden', !hasMore);
+  }
+  if (loadMoreBtn && hasMore) {
+    loadMoreBtn.textContent = 'Loading more parts…';
+  }
 }
 
 function renderLibManageTab() {
@@ -14179,8 +14228,7 @@ if (libIncludeHelpersEl) {
 const libLoadMoreBtnEl = document.getElementById('libLoadMoreBtn');
 if (libLoadMoreBtnEl) {
   libLoadMoreBtnEl.onclick = () => {
-    libUiState.visibleLimit += 48;
-    renderLibBrowseTab(false);
+    appendLibBrowseBatch(LIB_PAGE_BATCH_SIZE);
   };
 }
 
