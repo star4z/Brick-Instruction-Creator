@@ -6541,23 +6541,23 @@ function computePageFrameDimensions() {
 // =========================================================================
 // 6. MAIN RENDERER (LIVE FULL-SCREEN PAGE + FLOATING CONTEXT OVERLAYS)
 // =========================================================================
-function getModelFileTypeInfo() {
+function getModelFileTypeLabel() {
   const rec = lastSourceRecord;
   const rawName = (rec?.fileName || '').trim();
   const lower = rawName.toLowerCase();
   if (lower.endsWith('.io') || rec?.kind === 'io') {
-    return { badge: '.IO', label: 'BrickLink Studio (.io)', cls: 'bg-[var(--primary-soft)] text-[var(--primary)]' };
+    return 'BrickLink Studio (.io)';
   }
   if (lower.endsWith('.mpd')) {
-    return { badge: '.MPD', label: 'LDraw Multi-Part (.mpd)', cls: 'bg-[var(--info-soft)] text-[var(--info)]' };
+    return 'LDraw Multi-Part (.mpd)';
   }
   if (lower.endsWith('.ldr') || rec?.kind === 'ldr') {
-    return { badge: '.LDR', label: 'LDraw (.ldr)', cls: 'bg-[var(--warning-soft)] text-[var(--warning)]' };
+    return 'LDraw (.ldr)';
   }
   if (rec?.kind === 'project' || isProjectFileName(rawName)) {
-    return { badge: '.BIW', label: `Saved Project (${PROJECT_FILE_EXT})`, cls: 'bg-[var(--success-soft)] text-[var(--success)]' };
+    return `Saved Project (${PROJECT_FILE_EXT})`;
   }
-  return { badge: 'MODEL', label: 'Imported Model', cls: 'bg-black/10 dark:bg-white/10 text-[var(--muted-foreground)]' };
+  return 'Imported Model';
 }
 
 function isSimpleEditPage(page) {
@@ -6771,7 +6771,6 @@ function renderAll() {
   const mobileModelSepEl = document.getElementById('mobileEditorModelSep');
   const mobileModelNameEl = document.getElementById('mobileEditorModelName');
 
-  const typeBadgeEl = document.getElementById('menuModelTypeBadge');
   const fileTypeEl = document.getElementById('menuModelFileType');
   const statsEl = document.getElementById('menuModelStats');
 
@@ -6782,7 +6781,6 @@ function renderAll() {
     if (mobileModelSepEl) mobileModelSepEl.classList.add('hidden');
     if (mobileModelNameEl) { mobileModelNameEl.textContent = ''; mobileModelNameEl.classList.add('hidden'); }
     document.getElementById('menuModelName').textContent = 'No model loaded';
-    if (typeBadgeEl) typeBadgeEl.classList.add('hidden');
     if (fileTypeEl) { fileTypeEl.textContent = 'Import a model below to get started.'; fileTypeEl.classList.remove('hidden'); }
     if (statsEl) { statsEl.innerHTML = ''; statsEl.classList.add('hidden'); }
     document.getElementById('contextOverlay').classList.add('hidden');
@@ -6795,20 +6793,16 @@ function renderAll() {
   const theme = getThemeForPage(page);
   const allSteps = getAllSteps(state.model);
   const allParts = getAllParts(state.model);
-  const ft = getModelFileTypeInfo();
+  const fileTypeLabel = getModelFileTypeLabel();
 
   if (desktopSepEl) desktopSepEl.classList.remove('hidden');
   if (desktopNameEl) { desktopNameEl.textContent = state.model.title; desktopNameEl.classList.remove('hidden'); }
-  if (desktopMetaEl) desktopMetaEl.textContent = `· ${ft.badge} · ${formatPartCount(allParts.length)}`;
+  if (desktopMetaEl) desktopMetaEl.textContent = `· ${formatPartCount(allParts.length)}`;
   if (mobileModelSepEl) mobileModelSepEl.classList.remove('hidden');
   if (mobileModelNameEl) { mobileModelNameEl.textContent = state.model.title; mobileModelNameEl.classList.remove('hidden'); }
   document.getElementById('menuModelName').textContent = state.model.title;
-  if (typeBadgeEl) {
-    typeBadgeEl.textContent = ft.badge;
-    typeBadgeEl.className = `shrink-0 px-2 py-0.5 rounded font-mono text-xs font-semibold tracking-wide uppercase ${ft.cls}`;
-  }
   if (fileTypeEl) {
-    fileTypeEl.textContent = ft.label;
+    fileTypeEl.textContent = fileTypeLabel;
     fileTypeEl.classList.remove('hidden');
   }
   if (statsEl) {
