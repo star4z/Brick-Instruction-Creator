@@ -1,6 +1,12 @@
 import {
   classifyMinifigGroupKind,
   classifyMinifigLeafRole,
+  mat3Multiply,
+  mat3Orthonormalize,
+  mat3Transpose,
+  mat3Vec,
+  R_IDENTITY,
+  type Mat3,
   type RuntimePart,
   type Vec3,
   type WorldBox,
@@ -37,6 +43,19 @@ export interface MinifigAccessoryGroup {
   subassemblyOffsets: Record<string, MinifigPartOffset>;
   /** 3D arrows inside the multi-part accessory subassembly callout box. */
   subassemblyArrows: MinifigArrow3D[];
+  /**
+   * Front-facing preview of the accessory for the "before attaching" callout box / pill.
+   * The primary part's world rotation is removed so the piece faces the camera in its
+   * native LDraw orientation; the assembled figure keeps using the posed `parts`.
+   */
+  display: MinifigAccessoryDisplay;
+}
+
+export interface MinifigAccessoryDisplay {
+  parts: RuntimePart[];
+  box: WorldBox;
+  subassemblyOffsets: Record<string, MinifigPartOffset>;
+  subassemblyArrows: MinifigArrow3D[];
 }
 
 export interface DecomposedMinifig {
@@ -49,6 +68,13 @@ export interface DecomposedMinifig {
   accessories: MinifigAccessoryGroup[];
   bodyBox: WorldBox;
   fullBox: WorldBox;
+  /**
+   * Vertical neck/stud centerline (x, z) shared by every stacked body layer. Derived from the
+   * bare torso body (arms & hands excluded) so raised/posed arms never skew stacking arrows.
+   */
+  axis: { x: number; z: number };
+  /** Box of the bare torso body (no arms/hands); its max Y is the top of the neck stud. */
+  torsoCoreBox: WorldBox | null;
 }
 
 export interface MinifigExplodedLayer {
@@ -176,34 +202,21 @@ function pointToBoxDist(pt: Vec3, b: WorldBox): number {
   return Math.hypot(dx, dy, dz);
 }
 
-function buildAccessorySubassembly(
-  parts: RuntimePart[],
-  partBoxes: Map<RuntimePart, WorldBox>,
-  groupIdx: number,
-  bodyCenterX: number,
-): MinifigAccessoryGroup {
-  const boxes = parts.map((p) => partBoxes.get(p)!);
-  const groupBox = mergeBoxes(boxes);
-  const side: 'left' | 'right' | 'center' =
-    groupBox.center[0] < bodyCenterX - 4
-      ? 'right' // viewer-left / minifig right hand
-      : groupBox.center[0] > bodyCenterX + 4
-        ? 'left' // viewer-right / minifig left hand
-        : 'center';
+interface SubassemblyLayout {
+  ordered: RuntimePart[];
+  box: WorldBox;
+  subassemblyOffsets: Record<string, MinifigPartOffset>;
+  subassemblyArrows: MinifigArrow3D[];
+}
 
+/** Explodes a (possibly multi-part) accessory bottom-to-top (or along X when wider than tall). */
+function layoutSubassembly(parts: RuntimePart[], partBoxes: Map<RuntimePart, WorldBox>): SubassemblyLayout {
+  const groupBox = mergeBoxes(parts.map((p) => partBoxes.get(p)!));
   const subassemblyOffsets: Record<string, MinifigPartOffset> = {};
   const subassemblyArrows: MinifigArrow3D[] = [];
 
   if (parts.length <= 1) {
-    return {
-      id: `acc_${groupIdx + 1}`,
-      parts,
-      isMultiPart: false,
-      side,
-      box: groupBox,
-      subassemblyOffsets,
-      subassemblyArrows,
-    };
+    return { ordered: parts, box: groupBox, subassemblyOffsets, subassemblyArrows };
   }
 
   // Sort constituent parts bottom-to-top along +Y (or along dominant axis if wider than tall)
@@ -257,15 +270,119 @@ function buildAccessorySubassembly(
     }
   }
 
+  return { ordered, box: groupBox, subassemblyOffsets, subassemblyArrows };
+}
+
+function boxVolume(b: WorldBox): number {
+  return Math.max(0, b.max[0] - b.min[0]) * Math.max(0, b.max[1] - b.min[1]) * Math.max(0, b.max[2] - b.min[2]);
+}
+
+function rotateClonedLeaf(leaf: RuntimePart, pivot: Vec3, rot: Mat3): RuntimePart {
+  const d = mat3Vec(rot, leaf.x - pivot[0], leaf.y - pivot[1], leaf.z - pivot[2]);
+  return {
+    ...leaf,
+    x: pivot[0] + d[0],
+    y: pivot[1] + d[1],
+    z: pivot[2] + d[2],
+    m: mat3Multiply(rot, (leaf.m as Mat3 | undefined) || R_IDENTITY),
+  };
+}
+
+/**
+ * Returns cloned accessory parts rotated so the primary (largest) part is shown in its
+ * native LDraw orientation, i.e. facing the camera (+Z) and upright. All other parts of a
+ * multi-part accessory keep their exact relative placement. Ids are preserved so offsets
+ * computed on the display parts can be keyed the same way as the posed parts.
+ */
+export function buildFrontFacingAccessoryParts(
+  parts: RuntimePart[],
+  computeBox: (part: RuntimePart) => WorldBox,
+): RuntimePart[] {
+  if (parts.length === 0) return [];
+  let primary = parts[0];
+  let bestVol = -1;
+  for (const p of parts) {
+    const v = boxVolume(computeBox(p));
+    if (v > bestVol) {
+      bestVol = v;
+      primary = p;
+    }
+  }
+  // For composite parts, the primary leaf orientation is the composite's first leaf (or itself)
+  const primaryLeaf = primary.children && primary.children.length > 0 ? primary.children[0] : primary;
+  const primaryRot = mat3Orthonormalize((primaryLeaf.m as Mat3 | undefined) || R_IDENTITY);
+  const unRot = mat3Transpose(primaryRot);
+  const pivot: Vec3 = [primaryLeaf.x, primaryLeaf.y, primaryLeaf.z];
+
+  return parts.map((p) => {
+    const rotated = rotateClonedLeaf(p, pivot, unRot);
+    if (p.children && p.children.length > 0) {
+      rotated.children = p.children.map((ch) => rotateClonedLeaf(ch, pivot, unRot));
+    }
+    return rotated;
+  });
+}
+
+function buildAccessorySubassembly(
+  parts: RuntimePart[],
+  partBoxes: Map<RuntimePart, WorldBox>,
+  groupIdx: number,
+  bodyCenterX: number,
+  computeBox: (part: RuntimePart) => WorldBox,
+): MinifigAccessoryGroup {
+  const world = layoutSubassembly(parts, partBoxes);
+  const groupBox = world.box;
+  const side: 'left' | 'right' | 'center' =
+    groupBox.center[0] < bodyCenterX - 4
+      ? 'right' // viewer-left / minifig right hand
+      : groupBox.center[0] > bodyCenterX + 4
+        ? 'left' // viewer-right / minifig left hand
+        : 'center';
+
+  // Front-facing "before attaching" preview: un-rotate so the piece is recognizable
+  const displayParts = buildFrontFacingAccessoryParts(world.ordered, computeBox);
+  const displayBoxes = new Map<RuntimePart, WorldBox>();
+  for (const dp of displayParts) displayBoxes.set(dp, computeBox(dp));
+  const displayLayout = layoutSubassembly(displayParts, displayBoxes);
+
   return {
     id: `acc_${groupIdx + 1}`,
-    parts: ordered,
-    isMultiPart: true,
+    parts: world.ordered,
+    isMultiPart: parts.length > 1,
     side,
     box: groupBox,
-    subassemblyOffsets,
-    subassemblyArrows,
+    subassemblyOffsets: world.subassemblyOffsets,
+    subassemblyArrows: world.subassemblyArrows,
+    display: {
+      parts: displayLayout.ordered,
+      box: displayLayout.box,
+      subassemblyOffsets: displayLayout.subassemblyOffsets,
+      subassemblyArrows: displayLayout.subassemblyArrows,
+    },
   };
+}
+
+/**
+ * Computes the bare torso body box (arms & hands excluded) so the stacking centerline and the
+ * neck-stud top are not skewed by posed/raised arms or hand-held props.
+ */
+function computeTorsoCoreBox(
+  torso: RuntimePart[],
+  resolveName: (partId: string) => string,
+  computeBox: (part: RuntimePart) => WorldBox,
+): WorldBox | null {
+  if (torso.length === 0) return null;
+  // Torso may be one composite (torso + arms + hands as children) or flat separate parts
+  const allLeaves: RuntimePart[] = [];
+  for (const tp of torso) {
+    if (tp.children && tp.children.length > 0) allLeaves.push(...tp.children);
+    else allLeaves.push(tp);
+  }
+  const roles = allLeaves.map((lf) => classifyMinifigLeafRole(lf.p, resolveName(lf.p)));
+  const core = allLeaves.filter((_, i) => roles[i] === 'torso');
+  const nonLimb = allLeaves.filter((_, i) => roles[i] !== 'arm_r' && roles[i] !== 'arm_l' && roles[i] !== 'hand');
+  const leaves = core.length > 0 ? core : nonLimb.length > 0 ? nonLimb : allLeaves;
+  return mergeBoxes(leaves.map((lf) => computeBox(lf)));
 }
 
 /**
@@ -320,8 +437,11 @@ export function decomposeMinifigParts(
     }
   }
 
-  const bodyCenterX = torsoBox ? torsoBox.center[0] : headBox ? headBox.center[0] : legsBox ? legsBox.center[0] : 0;
-  const bodyCenterZ = torsoBox ? torsoBox.center[2] : headBox ? headBox.center[2] : 0;
+  // Neck/stud centerline from the bare torso body so posed arms don't skew it
+  const torsoCoreBox = computeTorsoCoreBox(torso, resolveName, computeBox);
+  const axisBox = torsoCoreBox ?? torsoBox;
+  const bodyCenterX = axisBox ? axisBox.center[0] : headBox ? headBox.center[0] : legsBox ? legsBox.center[0] : 0;
+  const bodyCenterZ = axisBox ? axisBox.center[2] : headBox ? headBox.center[2] : legsBox ? legsBox.center[2] : 0;
 
   // Pass 2: Classify wearables (cape, neckwear, headgear) vs handheld accessories
   for (const p of remainder) {
@@ -422,7 +542,7 @@ export function decomposeMinifigParts(
         }
       }
     }
-    accessories.push(buildAccessorySubassembly(cluster, partBoxes, accessories.length, bodyCenterX));
+    accessories.push(buildAccessorySubassembly(cluster, partBoxes, accessories.length, bodyCenterX, computeBox));
   }
 
   // Order accessories so multi-part props come first (like lightsaber Step 5 before cookie Step 6 in IMG_0315)
@@ -446,6 +566,8 @@ export function decomposeMinifigParts(
     accessories,
     bodyBox,
     fullBox,
+    axis: { x: bodyCenterX, z: bodyCenterZ },
+    torsoCoreBox,
   };
 }
 
@@ -507,11 +629,17 @@ export function buildMinifigExplodedPlan(
       if (prev.role === 'legs' && layer.role === 'torso') {
         stackArrows.push(...computeDoubleHipArrows(prev.box, yFrom, yTo, 'red'));
       } else {
-        const cx = prev.box.center[0];
-        const cz = prev.box.center[2];
+        // Land exactly on the neck stud / head stud centerline (not the arm-skewed box center)
+        const cx = decomposed.axis.x;
+        const cz = decomposed.axis.z;
+        const attachTopY =
+          prev.role === 'torso' && decomposed.torsoCoreBox
+            ? decomposed.torsoCoreBox.max[1] + prev.offsetY
+            : prevTopY;
+        const singleYTo = attachTopY + 2;
         stackArrows.push({
           from: [cx, yFrom, cz],
-          to: [cx, yTo, cz],
+          to: [cx, singleYTo, cz],
           color: 'red',
           kind: 'single',
         });
@@ -560,8 +688,10 @@ export function buildMinifigSequentialPlan(
   const legsBox = decomposed.legs.length > 0 ? mergeBoxes(decomposed.legs.map((p) => computeBox(p))) : null;
   const torsoBox = decomposed.torso.length > 0 ? mergeBoxes(decomposed.torso.map((p) => computeBox(p))) : null;
   const headBox = decomposed.head.length > 0 ? mergeBoxes(decomposed.head.map((p) => computeBox(p))) : null;
-  const centerX = torsoBox ? torsoBox.center[0] : headBox ? headBox.center[0] : legsBox ? legsBox.center[0] : 0;
-  const centerZ = torsoBox ? torsoBox.center[2] : headBox ? headBox.center[2] : 0;
+  // Shared neck/stud centerline (arms excluded) so every stacking arrow lands on the stud
+  const centerX = decomposed.axis.x;
+  const centerZ = decomposed.axis.z;
+  const torsoTopY = decomposed.torsoCoreBox ? decomposed.torsoCoreBox.max[1] : torsoBox ? torsoBox.max[1] : null;
 
   let maxStageY = decomposed.fullBox.max[1];
   let hasTallAccessoryPill = false;
@@ -596,7 +726,7 @@ export function buildMinifigSequentialPlan(
   // Stage 2: Optional Cape / Back wearable
   if (decomposed.cape.length > 0) {
     const capeBox = mergeBoxes(decomposed.cape.map((p) => computeBox(p)));
-    const attachTopY = torsoBox ? torsoBox.max[1] : assembledSoFar.length > 0 ? mergeBoxes(assembledSoFar.map(computeBox)).max[1] : 72;
+    const attachTopY = torsoTopY !== null ? torsoTopY : assembledSoFar.length > 0 ? mergeBoxes(assembledSoFar.map(computeBox)).max[1] : 72;
     const dy = Math.max(26, attachTopY + 24 - capeBox.min[1]);
     const partOffsets: Record<string, MinifigPartOffset> = {};
     for (const p of decomposed.cape) partOffsets[p.id] = { x: 0, y: dy, z: 0, arrow: false };
@@ -624,7 +754,7 @@ export function buildMinifigSequentialPlan(
   // Stage 3: Neckwear + Head (stacked like IMG_0315 Step 3) OR Head alone
   if (decomposed.neckwear.length > 0 && decomposed.head.length > 0 && headBox) {
     const neckBox = mergeBoxes(decomposed.neckwear.map((p) => computeBox(p)));
-    const attachTopY = torsoBox ? torsoBox.max[1] : 72;
+    const attachTopY = torsoTopY ?? 72;
     const dyNeck = Math.max(20, attachTopY + 22 - neckBox.min[1]);
     const neckTopY = neckBox.max[1] + dyNeck;
     const dyHead = Math.max(dyNeck + 16, neckTopY + 18 - headBox.min[1]);
@@ -659,7 +789,7 @@ export function buildMinifigSequentialPlan(
   } else {
     if (decomposed.neckwear.length > 0) {
       const neckBox = mergeBoxes(decomposed.neckwear.map((p) => computeBox(p)));
-      const attachTopY = torsoBox ? torsoBox.max[1] : 72;
+      const attachTopY = torsoTopY ?? 72;
       const dy = Math.max(22, attachTopY + 22 - neckBox.min[1]);
       const partOffsets: Record<string, MinifigPartOffset> = {};
       for (const p of decomposed.neckwear) partOffsets[p.id] = { x: 0, y: dy, z: 0, arrow: false };
@@ -684,7 +814,7 @@ export function buildMinifigSequentialPlan(
       assembledSoFar.push(...decomposed.neckwear);
     }
     if (decomposed.head.length > 0 && headBox) {
-      const attachTopY = torsoBox ? torsoBox.max[1] : 72;
+      const attachTopY = torsoTopY ?? 72;
       const dy = Math.max(22, attachTopY + 24 - headBox.min[1]);
       const partOffsets: Record<string, MinifigPartOffset> = {};
       for (const p of decomposed.head) partOffsets[p.id] = { x: 0, y: dy, z: 0, arrow: false };
@@ -713,7 +843,7 @@ export function buildMinifigSequentialPlan(
   // Stage 4: Optional Hair / Helmet / Headgear
   if (decomposed.headgear.length > 0) {
     const hgBox = mergeBoxes(decomposed.headgear.map((p) => computeBox(p)));
-    const attachTopY = headBox ? headBox.max[1] : torsoBox ? torsoBox.max[1] + 24 : 96;
+    const attachTopY = headBox ? headBox.max[1] : torsoTopY !== null ? torsoTopY + 24 : 96;
     const dy = Math.max(22, attachTopY + 24 - hgBox.min[1]);
     const partOffsets: Record<string, MinifigPartOffset> = {};
     for (const p of decomposed.headgear) partOffsets[p.id] = { x: 0, y: dy, z: 0, arrow: false };

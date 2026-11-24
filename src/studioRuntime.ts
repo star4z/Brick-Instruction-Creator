@@ -2689,20 +2689,23 @@ function renderMinifigExplodedDiagram(step, cam, w, h, theme, zoom = 1.0) {
       const aPad = Math.max(5, Math.round(Math.min(accBoxW, accBoxH) * 0.12));
       const aInnerW = Math.max(28, accBoxW - aPad * 2);
       const aInnerH = Math.max(28, accBoxH - aPad * 2);
-      const accMesh = buildMeshBuffers([], acc.parts, {
+      // Front-facing preview (primary part un-rotated to face the camera) so the piece is
+      // recognizable; the assembled figure on the right keeps its exact posed rotation.
+      const accDisplay = acc.display || acc;
+      const accMesh = buildMeshBuffers([], accDisplay.parts, {
         highlightNew: false,
         fadePrev: false,
         showArrows: false,
         accent: theme?.accent || '#1a73e8',
-        partOffsets: acc.isMultiPart ? acc.subassemblyOffsets : {},
+        partOffsets: acc.isMultiPart ? accDisplay.subassemblyOffsets : {},
       });
       const accMvp = snapshotEngine.draw(accMesh, aInnerW, aInnerH, cam.az, cam.el, 1.0, 0, { tightFit: true });
       ctx.drawImage(snapshotCanvas, ax + aPad, ay + aPad, aInnerW, aInnerH);
 
-      if (acc.isMultiPart && acc.subassemblyArrows.length > 0) {
+      if (acc.isMultiPart && accDisplay.subassemblyArrows.length > 0) {
         drawProjectedMinifigArrows(
           ctx,
-          acc.subassemblyArrows.map(a => ({ ...a, color: 'red' })),
+          accDisplay.subassemblyArrows.map(a => ({ ...a, color: 'red' })),
           accMvp,
           ax + aPad,
           ay + aPad,
@@ -2824,8 +2827,10 @@ function renderMinifigSequentialStage(step, stage, plan, cam, w, h, theme, zoom 
       figW,
       figH,
     );
-    const accSpanX = acc.box.max[0] - acc.box.min[0];
-    const accSpanY = acc.box.max[1] - acc.box.min[1];
+    // Pill shows the front-facing preview; the figure keeps the posed accessory
+    const accDisplay = acc.display || acc;
+    const accSpanX = accDisplay.box.max[0] - accDisplay.box.min[0];
+    const accSpanY = accDisplay.box.max[1] - accDisplay.box.min[1];
     const isTallAcc = accSpanY >= accSpanX * 0.8;
 
     const pillW = Math.round(
@@ -2855,12 +2860,12 @@ function renderMinifigSequentialStage(step, stage, plan, cam, w, h, theme, zoom 
     const pPadY = Math.max(6, Math.round(pillH * 0.08));
     const pInnerW = Math.max(24, pillW - pPadX * 2);
     const pInnerH = Math.max(36, pillH - pPadY * 2);
-    const pillMesh = buildMeshBuffers([], acc.parts, {
+    const pillMesh = buildMeshBuffers([], accDisplay.parts, {
       highlightNew: false,
       fadePrev: false,
       showArrows: false,
       accent: theme?.accent || '#1a73e8',
-      partOffsets: acc.subassemblyOffsets || {},
+      partOffsets: accDisplay.subassemblyOffsets || {},
     });
     const pillMvp = snapshotEngine.draw(pillMesh, pInnerW, pInnerH, cam.az, cam.el, 1.0, 0, { tightFit: true });
     ctx.drawImage(snapshotCanvas, pillX + pPadX, pillY + pPadY, pInnerW, pInnerH);
@@ -2868,7 +2873,7 @@ function renderMinifigSequentialStage(step, stage, plan, cam, w, h, theme, zoom 
     // Blue downward arrow inside the warm peach pill (blade -> hilt)
     drawProjectedMinifigArrows(
       ctx,
-      acc.subassemblyArrows,
+      accDisplay.subassemblyArrows,
       pillMvp,
       pillX + pPadX,
       pillY + pPadY,

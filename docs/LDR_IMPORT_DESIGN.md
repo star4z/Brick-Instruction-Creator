@@ -54,3 +54,10 @@ flowchart LR
 - `isLDrawPartSubfile` treats `0 !LDRAW_ORG Model` / `Unofficial_Model` as submodels while keeping `Part` / `Subpart` / `Primitive` / `Shortcut` as embedded `.dat` parts.
 - `extractCleanDatTitle` and `extractMovedToTarget` clean `=` alias prefixes, collapse repeated whitespace, and follow `~Moved to <target>` chains in `getHumanPartName`.
 - `parseLDrawColorToken` and `resolveColorInfo` support direct RGB (`0x2RRGGBB`) plus expanded official LDConfig rubber, translucent, satin, metallic, and modern colors.
+
+### 2.5 BrickLink Studio Part-Origin Corrections (`src/engine/studioPartOrigins.ts`)
+- A few parts in BrickLink Studio's library use a different local origin than the LDraw library file we download for the same part number (Studio's mesh descends from LEGO Digital Designer; the LDraw author re-centered the part on its connection point). Studio writes its own origin into exported placement lines, so rendering with LDraw geometry shifts the part.
+- `STUDIO_PART_ORIGIN_OFFSETS` stores, per part, the LDraw origin expressed in Studio's part-local LDraw frame; `parseLDrawSource` applies `P' = P + R · offset` to the leaf placement.
+- Only applied when the source is Studio-authored (`.io`, or `.ldr`/`.mpd` containing Studio meta lines such as `0 FlexibleBrickControlPointUnitLength`, `0 NumOfBricks:`, `0 CustomBrick`, `0 FlexibleBrick:`, `PE_TEX_*`, `IsSubModel`) **and** the part geometry is not embedded in the file (embedded Studio geometry already matches Studio's origin).
+- Current entries: `93091` *Figure Friends Handbag with Zipper* — Studio's origin is the bag base, LDraw's is the handle-bar axis 28.5 LDU above it. Verified against a Studio export where the uncorrected handle sat ~30 LDU from the hand; after correction the handle bar passes through the hand's grip center (< 1 LDU).
+

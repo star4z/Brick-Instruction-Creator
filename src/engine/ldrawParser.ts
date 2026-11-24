@@ -17,6 +17,7 @@ import {
   quantize,
   vec3Add,
 } from './math';
+import { applyStudioOriginOffset, getStudioOriginOffset, isStudioAuthoredSource } from './studioPartOrigins';
 
 interface ParsedSubfile {
   name: string;
@@ -167,6 +168,9 @@ export function parseLDrawSource(
     }
   }
 
+  // Studio exports place a few parts with Studio-library origins that differ from LDraw's
+  const studioAuthored = sourceFormat === 'io' || isStudioAuthoredSource(source);
+
   const parts: PartInstance[] = [];
   const submodelPartMap = new Map<string, { partIds: string[]; hasSteps: boolean }>();
   let totalStepsDetected = 0;
@@ -229,7 +233,12 @@ export function parseLDrawSource(
       } else {
         const partId = normalizePartId(refName);
         const def = resolvePartDefinition(partId);
-        const yUpPos = ldrawPosToYUp(worldLdrPos);
+        const studioOffset =
+          studioAuthored && !embeddedLDrawFiles[partId] ? getStudioOriginOffset(partId) : null;
+        const placedLdrPos = studioOffset
+          ? applyStudioOriginOffset(worldLdrPos, worldLdrRot, studioOffset)
+          : worldLdrPos;
+        const yUpPos = ldrawPosToYUp(placedLdrPos);
         const yUpRot = ldrawMatToYUp(worldLdrRot);
         const id = `part_${++partCounter}`;
         const signature = buildPartSignature(partId, colorId, yUpPos, yUpRot);

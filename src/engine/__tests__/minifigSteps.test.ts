@@ -209,6 +209,83 @@ describe('Official LEGO Minifigure Step Styles (Exploded IMG_0316 & Sequential I
     expect(exp.stackOffsets['hand_l'].y).toBe(torsoDy);
   });
 
+  it('aims single stacking arrows at the neck stud even when a raised arm skews the torso box', () => {
+    // Composite torso: bare torso centered at x=0 with the right arm/hand raised far to viewer-left
+    const torso: RuntimePart = {
+      ...makePart('torso', '973c01', -8, 58, 4, 85),
+      children: [
+        makePart('torso_core', '973', 0, 58, 0, 85),
+        makePart('arm_r', '3818', -22, 64, 8, 85),
+        makePart('hand_r', '3820', -30, 66, 18, 14),
+        makePart('arm_l', '3819', 16, 56, 0, 85),
+        makePart('hand_l', '3820', 19, 44, 6, 14),
+      ],
+    };
+    const parts: RuntimePart[] = [
+      makePart('legs', '3815c01', 0, 20, 0, 272),
+      torso,
+      makePart('scarf', '2587', 0, 76, 0, 28),
+      makePart('head', '3626c', 0, 88, 0, 14),
+      makePart('hair', '3901', 0, 108, 0, 29),
+    ];
+    // Torso box (incl. arm/hand children) is skewed left; computeBox in this test only uses
+    // the composite's own extents, so emulate a merged box via children for realism.
+    const boxWithChildren = (p: RuntimePart): WorldBox => {
+      if (!p.children || p.children.length === 0) return computeBox(p);
+      const bs = p.children.map(computeBox);
+      const min: [number, number, number] = [0, 1, 2].map((k) => Math.min(...bs.map((b) => b.min[k]))) as [number, number, number];
+      const max: [number, number, number] = [0, 1, 2].map((k) => Math.max(...bs.map((b) => b.max[k]))) as [number, number, number];
+      return { min, max, center: [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2] };
+    };
+
+    const plan = buildMinifigExplodedPlan(parts, resolveName, boxWithChildren);
+    expect(plan.decomposed.axis.x).toBeCloseTo(0, 5);
+    expect(plan.decomposed.axis.z).toBeCloseTo(0, 5);
+    const singles = plan.stackArrows.filter((a) => a.kind === 'single');
+    expect(singles.length).toBeGreaterThanOrEqual(2);
+    for (const a of singles) {
+      expect(a.from[0]).toBeCloseTo(0, 5);
+      expect(a.to[0]).toBeCloseTo(0, 5);
+      expect(a.from[2]).toBeCloseTo(0, 5);
+    }
+    // Neckwear arrow lands on the top of the bare torso's neck stud (973 half-height 16 → top 74)
+    const torsoLayer = plan.stackLayers.find((l) => l.role === 'torso')!;
+    const neckArrow = singles[0];
+    expect(neckArrow.to[1]).toBeCloseTo(74 + torsoLayer.offsetY + 2, 5);
+
+    const seq = buildMinifigSequentialPlan(parts, resolveName, boxWithChildren);
+    for (const st of seq.stages) {
+      for (const a of st.arrows.filter((x) => x.kind === 'single')) {
+        expect(a.from[0]).toBeCloseTo(0, 5);
+      }
+    }
+  });
+
+  it('shows accessory callouts front-facing while the assembled figure keeps the posed rotation', () => {
+    // Bag rotated 90° about Z (handle vertical) in the figure's right hand
+    const rotZ90: RuntimePart['m'] = [0, -1, 0, 1, 0, 0, 0, 0, 1];
+    const bag: RuntimePart = { ...makePart('bag', '93091', -26, 40, 12, 26), m: rotZ90 };
+    const parts: RuntimePart[] = [
+      makePart('legs', '3815c01', 0, 20, 0, 272),
+      makePart('torso', '973', 0, 58, 0, 85),
+      makePart('arm_r', '3818', -16, 56, 0, 85),
+      makePart('hand_r', '3820', -24, 44, 10, 14),
+      makePart('head', '3626c', 0, 88, 0, 14),
+      bag,
+    ];
+    const plan = buildMinifigExplodedPlan(parts, (pid) => (pid === '93091' ? 'Minifigure Handbag / Purse' : resolveName(pid)), computeBox);
+    expect(plan.accessoryCallouts).toHaveLength(1);
+    const acc = plan.accessoryCallouts[0];
+    // Assembled figure: untouched posed rotation
+    expect(acc.parts[0].m).toEqual(rotZ90);
+    expect(plan.assembledParts.find((p) => p.id === 'bag')!.m).toEqual(rotZ90);
+    // Callout preview: native (identity) orientation facing the camera, same id
+    expect(acc.display.parts[0].id).toBe('bag');
+    const m = acc.display.parts[0].m!;
+    const ident = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+    m.forEach((v, i) => expect(v).toBeCloseTo(ident[i], 6));
+  });
+
   it('paginates sequential stages cleanly into horizontal rows for both landscape and portrait pages', () => {
     // 6-stage build (IMG_0315): always 3 + 3 across 2 pages!
     expect(paginateMinifigSequentialStages(6, false)).toEqual([
