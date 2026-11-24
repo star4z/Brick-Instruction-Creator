@@ -297,7 +297,7 @@ export function getCameraAngleLabel(cornerId: string | undefined): string {
 }
 
 /**
- * Matches an arbitrary camera azimuth (e.g. from Cover / Build Complete drag-orbit)
+ * Matches a camera azimuth (e.g. from step drag-orbit or Cover / Build Complete angles)
  * to the nearest isometric Cube+Camera preset within `toleranceDeg`.
  */
 export function findMatchingCameraPreset(

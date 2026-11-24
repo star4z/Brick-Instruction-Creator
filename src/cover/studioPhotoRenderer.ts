@@ -58,8 +58,6 @@ export interface StudioRenderOptions {
   zoom?: number;
   darkBackground?: boolean;
   fovYDeg?: number;
-  /** Skips screen-space FBO SSAO resize churn for fast 60fps interactive drag-to-orbit */
-  fastInteractive?: boolean;
   getTextureImage?: (texKey: string) => TexImageSource | null;
 }
 
@@ -1098,7 +1096,7 @@ export class StudioPhotoRenderer {
     this.renderShadowMap(this.fillFbo!, mesh, fillMvp);
     this.renderShadowMap(this.overFbo!, mesh, overMvp);
 
-    const useSsao = !options.fastInteractive && this.ensureScreenFbos(w, h);
+    const useSsao = this.ensureScreenFbos(w, h);
 
     // 2. Render Linear View-Space Depth Pass for SSAO
     if (useSsao && this.viewDepthFbo) {

@@ -84,9 +84,9 @@ To achieve a publication-grade LEGO studio photography look on the Cover Page (a
    - Rendered in 3D at `y = minY - 0.12` receiving all three softbox shadow maps with proximity-weighted contact darkening (dark crisp contact shadow right under grounded feet/stands + wide feathered penumbra under overhanging hulls/wings) and transparent alpha feathering so it blends onto any theme or custom background.
 6. **Screen-Space Ambient Occlusion (SSAO) Crevice Pass**:
    - Renders a linear view-space depth pass and evaluates a 16-sample depth-thresholded rotated screen-space occlusion kernel to softly darken stud bases, brick-to-brick joints, and recessed corners without creating silhouette halos.
-7. **High Resolution, Interactive Orbit & Graceful Fallback**:
-   - Live cover preview renders up to `1600px` wide; PDF export renders up to `2000px` wide. Both reuse the cached hero beveled mesh and rendered snapshots across UI edits, and gracefully fall back to `WebGLBrickEngine` if FBOs are unavailable.
-   - In **`Camera`** mode on both Front Cover and Build Complete pages, dragging directly over the hero render runs `StudioPhotoRenderer.renderToCanvas(..., { fastInteractive: true })` (skipping per-frame SSAO FBO churn and `toDataURL` encoding) for smooth 60fps live 3D orbiting, paired with the same 4 isometric **Cube + Camera** angle presets (`45°`, `135°`, `225°`, `315°`), **Zoom** (`− / % / +`), and **Reset Camera** controls used on step pages. Elevation remains clamped above the studio floor (`4°..60°`) so floor shadows stay grounded, and releasing the drag commits a full-resolution snapshot. Content, logos, toggles, and backgrounds live separately under **`Page`** mode.
+7. **High Resolution, Camera Controls & Graceful Fallback**:
+   - Live cover preview renders up to 4K display scaling (`computeCoverHeroRenderSize`); PDF export renders at 300 DPI. Both reuse the cached hero beveled mesh and rendered snapshots across UI edits, and gracefully fall back to `WebGLBrickEngine` if FBOs are unavailable.
+   - In **`Camera`** mode on both Front Cover and Build Complete pages, the floating camera card provides the same 4 isometric **Cube + Camera** angle presets (`45°`, `135°`, `225°`, `315°`), **Zoom** (`− / % / +`), and **Reset Camera** controls used on step pages (without drag-to-orbit on the hero image). Elevation remains clamped above the studio floor (`4°..60°`) so floor shadows stay grounded. Content, logos, toggles, and backgrounds live separately under **`Page`** mode.
 
 ---
 

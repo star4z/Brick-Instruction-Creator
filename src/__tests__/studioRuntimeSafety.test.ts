@@ -219,13 +219,16 @@ describe('studioRuntime safety checks', () => {
     expect(runtime).toContain('getPageBreakHelpExplanation(');
   });
 
-  it('wires scope-based editor cards, 3-tier scope badges, and live Cover/Complete 3D orbit', () => {
+  it('wires scope-based editor cards and 3-tier scope badges without Cover/Complete drag-to-orbit', () => {
     const runtimePath = path.resolve(process.cwd(), 'src/studioRuntime.ts');
     const sourceText = fs.readFileSync(runtimePath, 'utf8');
 
     expect(sourceText).toContain('function renderScopeBadge(');
-    expect(sourceText).toContain('function bindHeroCameraOrbit(');
     expect(sourceText).toContain('resolveModeForPage(');
+    expect(sourceText).not.toContain('bindHeroCameraOrbit');
+    expect(sourceText).not.toContain('liveHeroOrbitCanvas');
+    expect(sourceText).not.toContain('heroOrbitContainer');
+    expect(sourceText.match(/Drag 3D model to orbit/g)?.length).toBe(1);
     expect(sourceText).not.toContain('openStepEditModal');
     expect(sourceText).not.toContain('closeStepEditModal');
   });

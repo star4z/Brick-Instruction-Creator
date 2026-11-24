@@ -6286,7 +6286,6 @@ const state = {
 
 // Keep hit-test projection metadata for active rendered step slots
 let currentSlotRenderInfo = new Map();
-let activeHeroOrbitCleanup = null;
 
 function getEffectiveBomConfig() {
   return resolveEffectiveBomConfig(normalizeBomConfig(state.bomConfig), Boolean(state.bomShowTextFields));
@@ -7334,7 +7333,6 @@ function getThemeForPage(page) {
 
 function renderAll() {
   if (activeLiveEngine) { activeLiveEngine.dispose(); activeLiveEngine = null; }
-  if (activeHeroOrbitCleanup) { activeHeroOrbitCleanup(); activeHeroOrbitCleanup = null; }
   currentSlotRenderInfo.clear();
 
   const hasModel = Boolean(state.model);
@@ -7463,7 +7461,6 @@ function renderAll() {
     const dens = DENSITY_PAD[state.density] || DENSITY_PAD.balanced;
     state.coverMeta = normalizeCoverMeta(state.coverMeta, !wordless);
     const cm = state.coverMeta;
-    const isHeroCameraMode = state.mode === 'camera';
     const showCoverText = cm.showText !== false;
     const title = showCoverText ? (cm.title || state.model.title || 'Untitled Model').trim() : '';
     const sub = showCoverText ? (cm.subtitle || '').trim() : '';
@@ -7527,9 +7524,8 @@ function renderAll() {
     frame.innerHTML = `
       <div class="relative w-full h-full overflow-hidden ${guideCls}" style="${cm.bgSrc ? `background-image:url(${cm.bgSrc});background-size:cover;background-position:center;` : ''}">
         <!-- High-Quality Page-Filling Hero Render -->
-        <div id="heroOrbitContainer" class="absolute ${isHeroCameraMode ? 'z-20 cursor-grab active:cursor-grabbing' : 'z-0 pointer-events-none'} flex items-center justify-center" style="left:${layout.heroRect.x}px;top:${layout.heroRect.y}px;width:${layout.heroRect.w}px;height:${layout.heroRect.h}px;touch-action:${isHeroCameraMode ? 'none' : 'auto'};">
-          <img id="heroStaticImg" data-cover-hero-img="true" src="${snap.url}" alt="${escHtml(title || state.model.title || 'Model')}" class="w-full h-full object-contain pointer-events-none select-none" />
-          ${isHeroCameraMode ? `<canvas id="liveHeroOrbitCanvas" class="hidden absolute inset-0 w-full h-full object-contain pointer-events-none"></canvas>` : ''}
+        <div class="absolute z-0 flex items-center justify-center pointer-events-none" style="left:${layout.heroRect.x}px;top:${layout.heroRect.y}px;width:${layout.heroRect.w}px;height:${layout.heroRect.h}px;">
+          <img data-cover-hero-img="true" src="${snap.url}" alt="${escHtml(title || state.model.title || 'Model')}" class="w-full h-full object-contain pointer-events-none select-none" />
         </div>
 
         <!-- Top-Left: Optional Creator Logo + Optional Model Name & Subtitle -->
@@ -7555,7 +7551,7 @@ function renderAll() {
         ` : ''}
 
         <!-- Bottom-Right: Non-Editable Clickable Program Attribution + QR Code -->
-        <a href="${PROGRAM_URL}" target="_blank" rel="noopener noreferrer" data-cover-link="true" title="Open ${PROGRAM_NAME}" class="absolute z-10 flex items-stretch hover:opacity-90 active:scale-[0.98] transition ${isHeroCameraMode ? 'pointer-events-none opacity-85' : 'cursor-pointer'}" style="right:${layout.pad}px;bottom:${layout.pad}px;height:${layout.brandGroupRect.h}px;gap:${layout.brandGap}px;text-decoration:none;">
+        <a href="${PROGRAM_URL}" target="_blank" rel="noopener noreferrer" data-cover-link="true" title="Open ${PROGRAM_NAME}" class="absolute z-10 flex items-stretch hover:opacity-90 active:scale-[0.98] transition cursor-pointer" style="right:${layout.pad}px;bottom:${layout.pad}px;height:${layout.brandGroupRect.h}px;gap:${layout.brandGap}px;text-decoration:none;">
           <div class="flex items-center shrink-0 shadow-xs overflow-hidden" style="min-width:${layout.brandCardRect.w}px;max-width:${maxBrandCardDomW}px;height:${layout.brandCardRect.h}px;border-radius:${layout.cardRadius}px;padding:0 ${layout.brandPadX}px;gap:${layout.brandInnerGap}px;background:${badgeSurface};border:1px solid ${badgeBorder};backdrop-filter:blur(6px);">
             <svg class="shrink-0" style="width:${layout.brandIconSize}px;height:${layout.brandIconSize}px;" viewBox="0 0 64 64" fill="none" aria-hidden="true">${BRAND_LOGO_SVG_BODY}</svg>
             <div class="min-w-0 flex flex-col justify-center" style="color:${badgeTextColor};">
@@ -7572,21 +7568,9 @@ function renderAll() {
           </div>
         </a>
       </div>`;
-
-    if (isHeroCameraMode) {
-      bindHeroCameraOrbit({
-        meta: state.coverMeta,
-        parts: allParts,
-        theme,
-        renderW: heroSize.width,
-        renderH: heroSize.height,
-        page,
-      });
-    }
   } else if (page.kind === 'complete') {
     state.completeMeta = normalizeCompleteMeta(state.completeMeta);
     const cm = state.completeMeta;
-    const isHeroCameraMode = state.mode === 'camera';
     const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) ? window.devicePixelRatio : 1;
     const compW = Math.max(240, dims.width - padPx * 2);
     const compH = Math.max(200, Math.round(dims.height * 0.72));
@@ -7621,26 +7605,14 @@ function renderAll() {
           <h2 class="font-extrabold leading-tight" style="font-size:${typo.complete.titleFont}px">${escHtml(cm.title || 'Build Complete!')}</h2>
           ${cm.subtitle ? `<p style="color:${theme.muted};font-size:${typo.complete.subtitleFont}px;margin-top:${Math.round(typo.pt(2.5))}px">${escHtml(cm.subtitle)}</p>` : ''}
         </div>
-        <div id="heroOrbitContainer" class="relative ${isHeroCameraMode ? 'z-20 cursor-grab active:cursor-grabbing' : 'z-10 pointer-events-none'} flex-1 min-h-0 w-full overflow-hidden" style="margin:${Math.round(typo.pt(8))}px 0;touch-action:${isHeroCameraMode ? 'none' : 'auto'};">
-          <img id="heroStaticImg" data-cover-hero-img="true" src="${snap.url}" alt="Completed build" class="absolute inset-0 w-full h-full object-contain pointer-events-none select-none" />
-          ${isHeroCameraMode ? `<canvas id="liveHeroOrbitCanvas" class="hidden absolute inset-0 w-full h-full object-contain pointer-events-none"></canvas>` : ''}
+        <div class="relative z-10 flex-1 min-h-0 w-full overflow-hidden pointer-events-none" style="margin:${Math.round(typo.pt(8))}px 0;">
+          <img data-cover-hero-img="true" src="${snap.url}" alt="Completed build" class="absolute inset-0 w-full h-full object-contain pointer-events-none select-none" />
         </div>
         <div class="absolute z-10 flex justify-between font-medium pointer-events-none" style="bottom:${footerPadBottom}px;left:${padPx}px;right:${padPx}px;font-size:${typo.footerFont}px;color:${theme.muted}">
           <span class="truncate">${showFooterTitle ? escHtml(state.model.title) : ''}</span>
           <span style="color:${theme.text}" class="font-bold shrink-0">${escHtml(pgNumText)}</span>
         </div>
       </div>`;
-
-    if (isHeroCameraMode) {
-      bindHeroCameraOrbit({
-        meta: state.completeMeta,
-        parts: allParts,
-        theme,
-        renderW: heroSize.width,
-        renderH: heroSize.height,
-        page,
-      });
-    }
   } else if (page.kind === 'back') {
     const bm = normalizeBackMeta(state.backMeta);
     const credit = BACK_COVER_CREDIT;
@@ -8314,120 +8286,8 @@ function renderAll() {
 }
 
 // =========================================================================
-// 7. DIRECT CANVAS INTERACTIONS (Hero 3D Orbit, Part Picking, Step Orbit, Notes Drag)
+// 7. DIRECT CANVAS INTERACTIONS (Part Picking, Step Orbit, Notes Drag)
 // =========================================================================
-function bindHeroCameraOrbit({ meta, parts, theme, renderW, renderH }) {
-  const container = document.getElementById('heroOrbitContainer');
-  const staticImg = document.getElementById('heroStaticImg');
-  const liveCanvas = document.getElementById('liveHeroOrbitCanvas');
-  if (!container || !liveCanvas || !meta || !parts?.length) return;
-
-  const { mesh } = getCoverHeroMesh(parts, theme);
-  const darkTheme = isDarkHexColor(toHexColor(theme?.bgColor || '#ffffff', '#ffffff'));
-  const scale = Math.min(1, 680 / Math.max(renderW || 640, renderH || 480, 1));
-  const dragW = Math.max(320, Math.round((renderW || 640) * scale));
-  const dragH = Math.max(240, Math.round((renderH || 480) * scale));
-
-  let dragging = false;
-  let moved = false;
-  let pushedUndo = false;
-  let startX = 0, startY = 0, lx = 0, ly = 0;
-  let az = meta.az, el = meta.el;
-  let rafId = 0;
-
-  const drawInteractiveFrame = () => {
-    rafId = 0;
-    const zoom = clampCoverZoom(meta.zoom ?? 1.0);
-    const photo = getStudioPhotoEngine();
-    if (photo && photo.isAvailable()) {
-      const rendered = photo.renderToCanvas(mesh, {
-        azDeg: az,
-        elDeg: el,
-        width: dragW,
-        height: dragH,
-        zoom,
-        darkBackground: darkTheme,
-        fastInteractive: true,
-        getTextureImage: (texKey) => textureStore.getDecodedImage(texKey),
-      });
-      if (rendered) {
-        if (liveCanvas.width !== rendered.width || liveCanvas.height !== rendered.height) {
-          liveCanvas.width = rendered.width;
-          liveCanvas.height = rendered.height;
-        }
-        const ctx2d = liveCanvas.getContext('2d');
-        if (ctx2d) {
-          ctx2d.clearRect(0, 0, liveCanvas.width, liveCanvas.height);
-          ctx2d.drawImage(rendered, 0, 0);
-        }
-      }
-    } else {
-      if (!activeLiveEngine) activeLiveEngine = new WebGLBrickEngine(liveCanvas);
-      activeLiveEngine.draw(mesh, dragW, dragH, az, el, zoom, 0, {
-        tightFit: true,
-        heroShading: true,
-        lineAlpha: 0.32,
-      });
-    }
-    if (staticImg) staticImg.classList.add('hidden');
-    liveCanvas.classList.remove('hidden');
-  };
-
-  container.onpointerdown = (e) => {
-    e.stopPropagation();
-    dragging = true;
-    moved = false;
-    pushedUndo = false;
-    startX = lx = e.clientX;
-    startY = ly = e.clientY;
-    az = meta.az;
-    el = meta.el;
-    container.setPointerCapture(e.pointerId);
-  };
-
-  container.onpointermove = (e) => {
-    if (!dragging) return;
-    e.stopPropagation();
-    const dx = e.clientX - lx;
-    const dy = e.clientY - ly;
-    lx = e.clientX;
-    ly = e.clientY;
-    if (!moved && Math.hypot(e.clientX - startX, e.clientY - startY) < 2) return;
-    if (!pushedUndo) {
-      pushUndo();
-      pushedUndo = true;
-    }
-    moved = true;
-    az = (az - dx * 0.6 + 360) % 360;
-    el = Math.max(4, Math.min(60, el + dy * 0.45));
-    meta.az = Math.round(az) % 360;
-    meta.el = clampCoverElevation(el);
-    const readout = document.getElementById('heroCamReadout');
-    if (readout) readout.textContent = `${meta.az}° / ${meta.el}°`;
-    if (!rafId) rafId = requestAnimationFrame(drawInteractiveFrame);
-  };
-
-  const finishDrag = (e) => {
-    if (!dragging) return;
-    e.stopPropagation();
-    dragging = false;
-    if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
-    if (moved) {
-      meta.az = Math.round(az) % 360;
-      meta.el = clampCoverElevation(el);
-      renderAll();
-    }
-  };
-
-  container.onpointerup = finishDrag;
-  container.onpointercancel = finishDrag;
-
-  activeHeroOrbitCleanup = () => {
-    if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
-    dragging = false;
-  };
-}
-
 function bindStepPageInteractions(page) {
   const frame = document.getElementById('pageFrame');
   const isPartsMode = state.mode === 'parts';
@@ -8692,11 +8552,11 @@ function renderContextOverlay(page) {
   const icoOrbit = '<svg class="w-3.5 h-3.5 text-[var(--primary)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 0 1-15.5 6.3"/><path d="M3 12a9 9 0 0 1 15.5-6.3"/><polyline points="3 16 3 12 7 12"/><polyline points="21 8 21 12 17 12"/></svg>';
 
   // =========================================================================
-  // COVER & BUILD COMPLETE — CAMERA MODE (Unified with Step Camera Controls!)
+  // COVER & BUILD COMPLETE — CAMERA MODE (Preset Angles + Zoom)
   // =========================================================================
   if ((page.kind === 'cover' || page.kind === 'complete') && state.mode === 'camera') {
     const isCover = page.kind === 'cover';
-    if (isCover) state.coverMeta = normalizeCoverMeta(state.coverMeta);
+    if (isCover) state.coverMeta = normalizeCoverMeta(state.coverMeta, !state.wordlessMode);
     else state.completeMeta = normalizeCompleteMeta(state.completeMeta);
     const meta = isCover ? state.coverMeta : state.completeMeta;
     const defaults = isCover ? createDefaultCoverMeta() : createDefaultCompleteMeta();
@@ -8707,18 +8567,15 @@ function renderContextOverlay(page) {
     box.innerHTML = `
       <div class="pointer-events-auto studio-surface rounded-xl p-3.5 w-full space-y-2.5 text-xs">
         <div class="flex items-center justify-between gap-2 flex-wrap">
-          <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[var(--primary-soft)] border border-[var(--primary-border)] text-[var(--foreground)] font-extrabold text-xs tracking-tight">
-            ${icoOrbit}
-            <span>Drag 3D model to orbit</span>
-          </span>
-          <div class="flex items-center gap-2 shrink-0">
+          <div class="flex items-center gap-2 min-w-0">
+            <span class="font-bold">${isCover ? 'Cover Camera' : 'Build Complete Camera'}</span>
             ${renderScopeBadge('local', isCover ? 'Cover Page' : 'Build Complete')}
-            <span id="heroCamReadout" class="font-mono text-[11px] font-semibold text-[var(--muted-foreground)] tabular-nums">${Math.round(meta.az) % 360}° / ${Math.round(meta.el)}°</span>
           </div>
+          <span class="font-mono text-[11px] font-semibold text-[var(--muted-foreground)] tabular-nums shrink-0">${Math.round(meta.az) % 360}° / ${Math.round(meta.el)}°</span>
         </div>
         <div class="flex items-center gap-1.5 flex-wrap">
           <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)] mr-0.5">Angle</span>
-          ${CORNERS.map(c => `<button type="button" data-hero-corner="${c.id}" title="Orbit camera to ${c.label} corner" class="hero-corner-btn px-2 py-1 rounded-md text-xs font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer ${matchedPreset?.id === c.id ? 'bg-[var(--primary-soft)] text-[var(--primary)] ring-1 ring-[var(--primary)]' : 'bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)]'}">${buildCameraViewSvg(c.quadrant)}<span class="font-mono">${c.label}</span></button>`).join('')}
+          ${CORNERS.map(c => `<button type="button" data-hero-corner="${c.id}" title="Set camera to ${c.label} corner" class="hero-corner-btn px-2 py-1 rounded-md text-xs font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer ${matchedPreset?.id === c.id ? 'bg-[var(--primary-soft)] text-[var(--primary)] ring-1 ring-[var(--primary)]' : 'bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)]'}">${buildCameraViewSvg(c.quadrant)}<span class="font-mono">${c.label}</span></button>`).join('')}
         </div>
         <div class="flex items-center justify-between gap-2 flex-wrap pt-2 border-t border-[var(--border)]">
           <div class="flex items-center gap-2">
@@ -18653,10 +18510,6 @@ async function closeCurrentModel() {
   if (activeLiveEngine) {
     activeLiveEngine.dispose();
     activeLiveEngine = null;
-  }
-  if (activeHeroOrbitCleanup) {
-    activeHeroOrbitCleanup();
-    activeHeroOrbitCleanup = null;
   }
   currentSlotRenderInfo.clear();
 
