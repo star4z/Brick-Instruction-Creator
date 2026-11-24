@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   ONLINE_STARTER_PACKS,
+  buildLibraryColorPalette,
   buildLibraryIndex,
   classifyDatEntryKind,
+  classifyLDrawColorGroup,
   classifyLibraryCategory,
   computeStarterPackProgress,
   extractFetchablePartIdFromQuery,
@@ -370,6 +372,51 @@ describe('bricksLibrary engine', () => {
       expect(classifyLibraryCategory('3705', 'Technic Axle 4L')).toBe('technic');
       expect(classifyLibraryCategory('3626c', 'Minifigure Head')).toBe('minifigs');
       expect(classifyLibraryCategory('60594', 'Window Frame 1 x 4 x 3')).toBe('windows');
+    });
+  });
+
+  describe('LDraw preview color palette', () => {
+    const sampleColors = {
+      0: { name: 'Black', hex: '#1e2126' },
+      4: { name: 'Red', hex: '#c91a09' },
+      15: { name: 'White', hex: '#f6f7f9' },
+      41: { name: 'Trans-Light Blue', hex: '#7ec8f2', alpha: 0.44 },
+      71: { name: 'Light Bluish Gray', hex: '#a0a5a9' },
+      256: { name: 'Rubber Black', hex: '#212121' },
+      297: { name: 'Pearl Gold', hex: '#aa7f2e' },
+      378: { name: 'Sand Green', hex: '#a0bcac' },
+    };
+
+    it('classifies LDraw colors into solid, transparent, metallic, and special finish groups', () => {
+      expect(classifyLDrawColorGroup(sampleColors[4])).toBe('solid');
+      expect(classifyLDrawColorGroup(sampleColors[41])).toBe('transparent');
+      expect(classifyLDrawColorGroup(sampleColors[297])).toBe('metallic');
+      expect(classifyLDrawColorGroup(sampleColors[256])).toBe('special');
+    });
+
+    it('surfaces an In Current Model section sorted by usage count and supports name/ID search', () => {
+      const sections = buildLibraryColorPalette(sampleColors, {
+        modelColorCounts: new Map([
+          [378, 12],
+          [71, 45],
+        ]),
+      });
+
+      expect(sections[0]?.id).toBe('model');
+      expect(sections[0]?.colors.map((c) => c.id)).toEqual([71, 378]);
+      expect(sections.map((s) => s.id)).toEqual(['model', 'solid', 'transparent', 'metallic', 'special']);
+
+      // Neutrals in Solid are ordered White -> Light Bluish Gray -> Black before chromatic hues
+      const solidIds = sections.find((s) => s.id === 'solid')?.colors.map((c) => c.id) ?? [];
+      expect(solidIds.slice(0, 3)).toEqual([15, 71, 0]);
+
+      // Search by name
+      const byName = buildLibraryColorPalette(sampleColors, { query: 'sand' });
+      expect(byName.flatMap((s) => s.colors.map((c) => c.id))).toEqual([378]);
+
+      // Search by LDraw numeric ID (with or without #)
+      const byId = buildLibraryColorPalette(sampleColors, { query: '#297' });
+      expect(byId.flatMap((s) => s.colors.map((c) => c.id))).toEqual([297]);
     });
   });
 });

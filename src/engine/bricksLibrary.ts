@@ -725,3 +725,165 @@ export function getModelFetchCopy(opts: {
     buttonEnabled: false,
   };
 }
+
+export type LibraryColorGroup = 'model' | 'solid' | 'transparent' | 'metallic' | 'special';
+
+export interface LibraryColorDefinition {
+  name: string;
+  hex: string;
+  edge?: string;
+  alpha?: number;
+}
+
+export interface LibraryColorEntry extends LibraryColorDefinition {
+  id: number;
+  group: LibraryColorGroup;
+  countInModel?: number;
+}
+
+export interface LibraryColorSection {
+  id: LibraryColorGroup;
+  label: string;
+  colors: LibraryColorEntry[];
+}
+
+export function classifyLDrawColorGroup(
+  entry: Pick<LibraryColorDefinition, 'name' | 'alpha'>,
+): Exclude<LibraryColorGroup, 'model'> {
+  if (entry.alpha !== undefined || /\b(?:trans-|glitter|satin)\b/i.test(entry.name)) {
+    return 'transparent';
+  }
+  if (/\b(?:metallic|metal|pearl|chrome|flat silver|flat dark gold|copper|alloy)\b/i.test(entry.name)) {
+    return 'metallic';
+  }
+  if (/\b(?:rubber|glow)\b/i.test(entry.name)) {
+    return 'special';
+  }
+  return 'solid';
+}
+
+function hexToHsl(hex: string): { h: number; s: number; l: number; c: number } {
+  const clean = String(hex || '#888888').replace(/^#/, '');
+  const full =
+    clean.length === 3
+      ? clean[0] + clean[0] + clean[1] + clean[1] + clean[2] + clean[2]
+      : clean.padEnd(6, '0').slice(0, 6);
+  const r = parseInt(full.slice(0, 2), 16) / 255;
+  const g = parseInt(full.slice(2, 4), 16) / 255;
+  const b = parseInt(full.slice(4, 6), 16) / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  const d = max - min;
+  if (d === 0) return { h: 0, s: 0, l, c: 0 };
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h = 0;
+  if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+  else if (max === g) h = ((b - r) / d + 2) / 6;
+  else h = ((r - g) / d + 4) / 6;
+  return { h: h * 360, s, l, c: d };
+}
+
+function sortColorsPerceptually(list: LibraryColorEntry[]): LibraryColorEntry[] {
+  return [...list].sort((a, b) => {
+    const ha = hexToHsl(a.hex);
+    const hb = hexToHsl(b.hex);
+    const aNeutral = ha.s < 0.12 || ha.c < 0.06;
+    const bNeutral = hb.s < 0.12 || hb.c < 0.06;
+    if (aNeutral !== bNeutral) return aNeutral ? -1 : 1;
+    if (aNeutral && bNeutral) return hb.l - ha.l;
+    // Group into 12 smooth hue bands (30 deg each), then sort light -> dark within each band
+    const bandA = Math.floor(((ha.h + 15) % 360) / 30);
+    const bandB = Math.floor(((hb.h + 15) % 360) / 30);
+    if (bandA !== bandB) return bandA - bandB;
+    return hb.l - ha.l;
+  });
+}
+
+/**
+ * Organizes the full LDraw color dictionary into scannable finish sections (plus an optional
+ * "In Current Model" section) with instant search by color name or LDraw numeric ID.
+ */
+export function buildLibraryColorPalette(
+  colors: Readonly<Record<number, LibraryColorDefinition>>,
+  options: {
+    modelColorCounts?: ReadonlyMap<number, number> | null;
+    query?: string;
+  } = {},
+): LibraryColorSection[] {
+  const rawQuery = String(options.query || '').trim().toLowerCase();
+  const idQuery = rawQuery.replace(/^#/, '');
+  const matchesQuery = (id: number, name: string): boolean => {
+    if (!rawQuery) return true;
+    if (name.toLowerCase().includes(rawQuery)) return true;
+    if (idQuery && String(id).includes(idQuery)) return true;
+    return false;
+  };
+
+  const buckets: Record<Exclude<LibraryColorGroup, 'model'>, LibraryColorEntry[]> = {
+    solid: [],
+    transparent: [],
+    metallic: [],
+    special: [],
+  };
+
+  for (const [rawId, def] of Object.entries(colors)) {
+    const id = Number(rawId);
+    if (!Number.isFinite(id) || !def || !def.hex) continue;
+    if (!matchesQuery(id, def.name)) continue;
+    const group = classifyLDrawColorGroup(def);
+    buckets[group].push({
+      id,
+      name: def.name,
+      hex: def.hex,
+      edge: def.edge,
+      alpha: def.alpha,
+      group,
+      countInModel: options.modelColorCounts?.get(id),
+    });
+  }
+
+  const sections: LibraryColorSection[] = [];
+
+  if (options.modelColorCounts && options.modelColorCounts.size > 0) {
+    const modelEntries: LibraryColorEntry[] = [];
+    for (const [id, count] of options.modelColorCounts.entries()) {
+      const def = colors[id];
+      if (!def || !def.hex) continue;
+      if (!matchesQuery(id, def.name)) continue;
+      modelEntries.push({
+        id,
+        name: def.name,
+        hex: def.hex,
+        edge: def.edge,
+        alpha: def.alpha,
+        group: 'model',
+        countInModel: count,
+      });
+    }
+    modelEntries.sort((a, b) => (b.countInModel ?? 0) - (a.countInModel ?? 0) || a.id - b.id);
+    if (modelEntries.length > 0) {
+      sections.push({ id: 'model', label: 'In Current Model', colors: modelEntries });
+    }
+  }
+
+  const orderedGroups: Array<{ id: Exclude<LibraryColorGroup, 'model'>; label: string }> = [
+    { id: 'solid', label: 'Solid' },
+    { id: 'transparent', label: 'Transparent & Satin' },
+    { id: 'metallic', label: 'Metallic, Pearl & Chrome' },
+    { id: 'special', label: 'Rubber & Glow' },
+  ];
+
+  for (const g of orderedGroups) {
+    if (buckets[g.id].length > 0) {
+      sections.push({
+        id: g.id,
+        label: g.label,
+        colors: sortColorsPerceptually(buckets[g.id]),
+      });
+    }
+  }
+
+  return sections;
+}
+

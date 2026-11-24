@@ -188,6 +188,7 @@ import {
 } from './engine/pageTypography';
 import {
   ONLINE_STARTER_PACKS,
+  buildLibraryColorPalette,
   buildLibraryIndex,
   classifyDatEntryKind,
   computeStarterPackProgress,
@@ -9813,19 +9814,6 @@ function refreshSubdivisionPlanForParsed(parsed, prevPlan) {
   }
 }
 
-const LIB_PREVIEW_COLORS = [
-  { id: 4, label: 'Red' },
-  { id: 1, label: 'Blue' },
-  { id: 14, label: 'Yellow' },
-  { id: 2, label: 'Green' },
-  { id: 15, label: 'White' },
-  { id: 71, label: 'Light Gray' },
-  { id: 72, label: 'Dark Gray' },
-  { id: 0, label: 'Black' },
-  { id: 19, label: 'Tan' },
-  { id: 25, label: 'Orange' },
-];
-
 const libThumbCache = new Map();
 const libUiState = {
   tab: 'browse', // 'browse' | 'manage'
@@ -9833,7 +9821,9 @@ const libUiState = {
   scope: 'all',
   category: 'all',
   includeHelpers: false,
-  previewColor: 4,
+  previewColor: 'model', // 'model' (match loaded model colors) | LDraw numeric color ID
+  colorPickerOpen: false,
+  colorQuery: '',
   previewAz: 38,
   previewEl: 24,
   selectedId: null,
@@ -9862,6 +9852,8 @@ function collectCurrentModelPartSets() {
   const modelPartIds = new Set();
   const missingShapePartIds = new Set();
   const missingExactDatPartIds = new Set();
+  const modelColorCounts = new Map();
+  const modelPartColors = new Map();
   if (state.model) {
     for (const { step } of getAllSteps(state.model)) {
       for (const p of step.parts) {
@@ -9872,17 +9864,33 @@ function collectCurrentModelPartSets() {
           modelPartIds.add(k);
           if (!hasKnownShape(k)) missingShapePartIds.add(k);
           if (!lookupExactRawDat(k)) missingExactDatPartIds.add(k);
+          const colId = Number(lf.c);
+          if (Number.isFinite(colId) && COLORS[colId]) {
+            modelColorCounts.set(colId, (modelColorCounts.get(colId) || 0) + 1);
+            let perPart = modelPartColors.get(k);
+            if (!perPart) {
+              perPart = new Map();
+              modelPartColors.set(k, perPart);
+            }
+            perPart.set(colId, (perPart.get(colId) || 0) + 1);
+          }
         }
       }
     }
   }
-  return { modelPartIds, missingShapePartIds, missingExactDatPartIds };
+  return { modelPartIds, missingShapePartIds, missingExactDatPartIds, modelColorCounts, modelPartColors };
 }
 
 function getLibrarySnapshot(forceRebuild = false) {
   if (!forceRebuild && libCachedSnapshot) return libCachedSnapshot;
-  const { modelPartIds, missingShapePartIds, missingExactDatPartIds } = collectCurrentModelPartSets();
-  libCachedSnapshot = buildLibraryIndex({
+  const {
+    modelPartIds,
+    missingShapePartIds,
+    missingExactDatPartIds,
+    modelColorCounts,
+    modelPartColors,
+  } = collectCurrentModelPartSets();
+  const built = buildLibraryIndex({
     userLibRaw,
     userLibTitles,
     embeddedDatRaw,
@@ -9895,7 +9903,29 @@ function getLibrarySnapshot(forceRebuild = false) {
     savedTextureCount: textureStore.getLibraryCount(),
     onlineCatalog: onlinePartsCatalog?.entries || null,
   });
+  libCachedSnapshot = { ...built, modelColorCounts, modelPartColors };
   return libCachedSnapshot;
+}
+
+function getPartModelColorList(partId) {
+  const { modelPartColors } = getLibrarySnapshot();
+  const perPart = modelPartColors?.get(partId);
+  if (!perPart || perPart.size === 0) return [];
+  return Array.from(perPart.entries())
+    .map(([id, count]) => ({ id, count }))
+    .sort((a, b) => b.count - a.count || a.id - b.id);
+}
+
+function getEffectivePreviewColorForPart(partId) {
+  if (typeof libUiState.previewColor === 'number' && Number.isFinite(libUiState.previewColor)) {
+    return libUiState.previewColor;
+  }
+  if (state.model) {
+    const partColors = getPartModelColorList(partId);
+    if (partColors.length > 0) return partColors[0].id;
+    return 71; // Neutral Light Bluish Gray for catalog shapes when matching model colors
+  }
+  return 4; // Classic Red when no model is loaded
 }
 
 /** Lazily loads the bundled Online Parts Catalog (once per session) and refreshes the library UI. */
@@ -10531,8 +10561,9 @@ function flushLibThumbQueue() {
     const imgEl = libThumbQueue.shift();
     if (!imgEl || !imgEl.isConnected || imgEl.dataset.loaded === '1') continue;
     const pid = imgEl.dataset.partId;
-    const col = Number(imgEl.dataset.colorId || libUiState.previewColor);
     if (!pid) continue;
+    const rawCol = Number(imgEl.dataset.colorId);
+    const col = Number.isFinite(rawCol) ? rawCol : getEffectivePreviewColorForPart(pid);
     try {
       imgEl.src = renderPartPreviewDataUrl(pid, col, LIB_THUMB_SIZE, LIB_THUMB_AZ, LIB_THUMB_EL);
       imgEl.dataset.loaded = '1';
@@ -10548,7 +10579,9 @@ function flushLibThumbQueue() {
 function enqueueLibThumbImg(imgEl) {
   if (!imgEl || imgEl.dataset.loaded === '1') return;
   const pid = imgEl.dataset.partId;
-  const col = Number(imgEl.dataset.colorId || libUiState.previewColor);
+  if (!pid) return;
+  const rawCol = Number(imgEl.dataset.colorId);
+  const col = Number.isFinite(rawCol) ? rawCol : getEffectivePreviewColorForPart(pid);
   const cacheKey = `${pid}:${col}:${LIB_THUMB_SIZE}:${LIB_THUMB_AZ}:${LIB_THUMB_EL}`;
   if (libThumbCache.has(cacheKey)) {
     imgEl.src = libThumbCache.get(cacheKey);
@@ -10600,23 +10633,141 @@ function getSourceBadgeHtml(item) {
   return '<span class="px-1.5 py-0.5 rounded-md text-xs font-semibold bg-black/6 dark:bg-white/10 text-[var(--muted-foreground)]">Built-in</span>';
 }
 
+const LIB_MODEL_MOSAIC_BG = 'conic-gradient(#c91a09 0 25%, #0055bf 25% 50%, #f2cd37 50% 75%, #237841 75% 100%)';
+
+function getSwatchStyleAttr(col) {
+  if (!col) return 'background:#c91a09';
+  if (col.alpha !== undefined) {
+    return `background:linear-gradient(135deg, ${col.hex}cc 0%, ${col.hex}88 55%, #ffffffaa 100%)`;
+  }
+  return `background:${col.hex}`;
+}
+
+function formatColorReadoutHtml(colorMode) {
+  if (colorMode === 'model' && state.model) {
+    return `<span class="inline-flex items-center gap-1.5 min-w-0"><span class="w-3 h-3 rounded-full border border-black/25 dark:border-white/25 shrink-0" style="background:${LIB_MODEL_MOSAIC_BG}"></span><span class="font-semibold text-[var(--foreground)] truncate">Model colors</span></span><span class="shrink-0">Per-part from model</span>`;
+  }
+  const colId = typeof colorMode === 'number' && Number.isFinite(colorMode) ? colorMode : 4;
+  const col = COLORS[colId] || COLORS[4];
+  const { modelColorCounts } = getLibrarySnapshot();
+  const inModelCount = modelColorCounts?.get(colId) || 0;
+  const countNote = inModelCount > 0 ? ` · ${inModelCount.toLocaleString()} in model` : '';
+  return `<span class="inline-flex items-center gap-1.5 min-w-0"><span class="w-3 h-3 rounded-full border border-black/25 dark:border-white/25 shrink-0" style="${getSwatchStyleAttr(col)}"></span><span class="font-semibold text-[var(--foreground)] truncate">${escHtml(col?.name || `Color ${colId}`)}</span></span><span class="font-mono shrink-0">#${colId}${escHtml(countNote)}</span>`;
+}
+
+function setLibColorPickerOpen(open) {
+  libUiState.colorPickerOpen = Boolean(open);
+  const popover = document.getElementById('libColorPopover');
+  const btn = document.getElementById('libColorPickerBtn');
+  if (popover) popover.classList.toggle('hidden', !libUiState.colorPickerOpen);
+  if (btn) btn.setAttribute('aria-expanded', libUiState.colorPickerOpen ? 'true' : 'false');
+  if (libUiState.colorPickerOpen) {
+    renderLibColorSwatches();
+    const searchEl = document.getElementById('libColorSearchInput');
+    if (searchEl) {
+      searchEl.value = libUiState.colorQuery;
+      requestAnimationFrame(() => searchEl.focus());
+    }
+  }
+}
+
+function applyLibPreviewColor(nextColor, closeAfter = true) {
+  if (nextColor !== libUiState.previewColor) {
+    libUiState.previewColor = nextColor;
+    renderLibBrowseTab(false);
+    renderLibPreviewInspector();
+  }
+  if (closeAfter) {
+    setLibColorPickerOpen(false);
+  }
+  renderLibColorSwatches();
+}
+
 function renderLibColorSwatches() {
-  const wrap = document.getElementById('libColorSwatches');
-  if (!wrap) return;
-  wrap.innerHTML = LIB_PREVIEW_COLORS.map((sw) => {
-    const col = COLORS[sw.id] || { hex: '#c91a09', name: sw.label };
-    const active = libUiState.previewColor === sw.id;
-    return `<button type="button" data-lib-color="${sw.id}" title="${escHtml(sw.label)}" class="w-4 h-4 rounded-full border transition ${active ? 'ring-2 ring-[var(--primary)] ring-offset-1 ring-offset-[var(--card)] scale-110 border-white/80' : 'border-black/25 dark:border-white/25 hover:scale-110'}" style="background:${col.hex}"></button>`;
-  }).join('');
-  wrap.querySelectorAll('button[data-lib-color]').forEach((btn) => {
-    btn.onclick = () => {
-      const nextColor = Number(btn.getAttribute('data-lib-color'));
-      if (Number.isFinite(nextColor) && nextColor !== libUiState.previewColor) {
-        libUiState.previewColor = nextColor;
-        renderLibColorSwatches();
-        renderLibBrowseTab(false);
-        renderLibPreviewInspector();
-      }
+  const btnSwatch = document.getElementById('libColorBtnSwatch');
+  const btnLabel = document.getElementById('libColorBtnLabel');
+  const popover = document.getElementById('libColorPopover');
+  const btn = document.getElementById('libColorPickerBtn');
+  const isModelMode = libUiState.previewColor === 'model' && Boolean(state.model);
+  const activeColId = typeof libUiState.previewColor === 'number' ? libUiState.previewColor : 4;
+  const activeCol = COLORS[activeColId] || COLORS[4];
+
+  if (btnSwatch) {
+    btnSwatch.setAttribute('style', isModelMode ? `background:${LIB_MODEL_MOSAIC_BG}` : getSwatchStyleAttr(activeCol));
+  }
+  if (btnLabel) {
+    btnLabel.textContent = isModelMode ? 'Model colors' : (activeCol?.name || `Color ${activeColId}`);
+  }
+  if (btn) {
+    btn.setAttribute('aria-expanded', libUiState.colorPickerOpen ? 'true' : 'false');
+  }
+  if (!popover || !libUiState.colorPickerOpen) return;
+
+  const { modelColorCounts } = getLibrarySnapshot();
+  const modelModeWrap = document.getElementById('libColorModelModeWrap');
+  if (modelModeWrap) {
+    if (state.model) {
+      modelModeWrap.classList.remove('hidden');
+      modelModeWrap.innerHTML = `
+        <button type="button" data-lib-color="model" class="w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition cursor-pointer ${isModelMode ? 'border-[var(--primary)] bg-[var(--primary-soft)] text-[var(--primary)]' : 'border-[var(--border)] bg-[var(--surface-sunken)] hover:border-[var(--primary-border)] text-[var(--foreground)]'}">
+          <span class="inline-flex items-center gap-2 min-w-0">
+            <span class="w-4 h-4 rounded-full border border-black/25 dark:border-white/25 shrink-0" style="background:${LIB_MODEL_MOSAIC_BG}"></span>
+            <span class="truncate">Match model colors</span>
+          </span>
+          <span class="text-[11px] font-normal text-[var(--muted-foreground)] shrink-0">${isModelMode ? 'Active' : 'Auto'}</span>
+        </button>
+      `;
+    } else {
+      modelModeWrap.classList.add('hidden');
+      modelModeWrap.innerHTML = '';
+    }
+  }
+
+  const sectionsEl = document.getElementById('libColorPaletteSections');
+  const readoutEl = document.getElementById('libColorHoverReadout');
+  const sections = buildLibraryColorPalette(COLORS, {
+    modelColorCounts: state.model ? modelColorCounts : null,
+    query: libUiState.colorQuery,
+  });
+
+  if (sectionsEl) {
+    if (sections.length === 0) {
+      sectionsEl.innerHTML = `<div class="py-6 text-center text-xs text-[var(--muted-foreground)]">No LDraw colors matching “${escHtml(libUiState.colorQuery)}”</div>`;
+    } else {
+      sectionsEl.innerHTML = sections.map((sec) => {
+        const swatches = sec.colors.map((c) => {
+          const active = !isModelMode && libUiState.previewColor === c.id;
+          const title = `${c.name} (#${c.id})${c.countInModel ? ` — ${c.countInModel} in model` : ''}`;
+          return `<button type="button" data-lib-color="${c.id}" title="${escHtml(title)}" aria-label="${escHtml(title)}" class="w-6 h-6 rounded-md border transition cursor-pointer ${active ? 'ring-2 ring-[var(--primary)] ring-offset-1 ring-offset-[var(--card)] scale-110 border-white/90 z-10' : 'border-black/25 dark:border-white/25 hover:scale-110'}" style="${getSwatchStyleAttr(c)}"></button>`;
+        }).join('');
+        return `
+          <div class="space-y-1.5">
+            <div class="flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">
+              <span>${escHtml(sec.label)}</span>
+              <span class="font-mono font-normal">${sec.colors.length}</span>
+            </div>
+            <div class="grid grid-cols-10 gap-1.5">${swatches}</div>
+          </div>
+        `;
+      }).join('');
+    }
+  }
+
+  if (readoutEl) {
+    readoutEl.innerHTML = formatColorReadoutHtml(isModelMode ? 'model' : activeColId);
+  }
+
+  popover.querySelectorAll('button[data-lib-color]').forEach((swBtn) => {
+    const rawVal = swBtn.getAttribute('data-lib-color');
+    const parsedVal = rawVal === 'model' ? 'model' : Number(rawVal);
+    swBtn.onclick = () => {
+      applyLibPreviewColor(parsedVal, true);
+    };
+    swBtn.onmouseenter = () => {
+      if (readoutEl) readoutEl.innerHTML = formatColorReadoutHtml(parsedVal);
+    };
+    swBtn.onmouseleave = () => {
+      if (readoutEl) readoutEl.innerHTML = formatColorReadoutHtml(isModelMode ? 'model' : activeColId);
     };
   });
 }
@@ -10648,6 +10799,7 @@ function renderLibPreviewInspector() {
   emptyEl.classList.add('hidden');
   detailEl.classList.remove('hidden');
 
+  const effectiveColor = getEffectivePreviewColorForPart(item.id);
   const onlineOnly = isOnlineOnlyItem(item);
   if (onlineOnly) {
     imgEl.removeAttribute('src');
@@ -10661,7 +10813,7 @@ function renderLibPreviewInspector() {
     }
   } else {
     try {
-      imgEl.src = renderPartPreviewDataUrl(item.id, libUiState.previewColor, LIB_INSPECTOR_SIZE, libUiState.previewAz, libUiState.previewEl);
+      imgEl.src = renderPartPreviewDataUrl(item.id, effectiveColor, LIB_INSPECTOR_SIZE, libUiState.previewAz, libUiState.previewEl);
     } catch (_) {}
   }
 
@@ -10690,7 +10842,23 @@ function renderLibPreviewInspector() {
   else if (item.inCurrentModel) sourceLabels.push('<span class="px-2 py-0.5 rounded-md text-xs font-bold bg-[var(--success-soft)] text-[var(--success)]">In Current Model</span>');
 
   const kindLabel = item.kind === 'part' ? 'Part' : item.kind === 'subpart' ? 'Subpart' : 'Primitive';
-  const colorName = COLORS[libUiState.previewColor]?.name || `Color ${libUiState.previewColor}`;
+  const colorObj = COLORS[effectiveColor] || COLORS[4];
+  const colorName = colorObj?.name || `Color ${effectiveColor}`;
+  const partModelColors = getPartModelColorList(item.id);
+  const modelColorsHtml = partModelColors.length > 0
+    ? `
+      <div class="space-y-1.5 pt-1">
+        <div class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Colors in model (${partModelColors.length})</div>
+        <div class="flex items-center gap-1.5 flex-wrap">
+          ${partModelColors.map((mc) => {
+            const cDef = COLORS[mc.id];
+            const isSel = effectiveColor === mc.id;
+            return `<button type="button" data-inspector-color="${mc.id}" title="${escHtml(`${cDef?.name || `Color ${mc.id}`} (#${mc.id}) — ×${mc.count} in model`)}" class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border text-[11px] font-mono transition cursor-pointer ${isSel ? 'border-[var(--primary)] bg-[var(--primary-soft)] text-[var(--primary)] font-bold' : 'border-[var(--border)] bg-[var(--card)] text-[var(--muted-foreground)] hover:border-[var(--primary-border)]'}"><span class="w-3 h-3 rounded-full border border-black/25 dark:border-white/25 shrink-0" style="${getSwatchStyleAttr(cDef)}"></span><span>×${mc.count}</span></button>`;
+          }).join('')}
+        </div>
+      </div>
+    `
+    : '';
   const onlineHint = onlineOnly
     ? `<div class="text-xs text-[var(--muted-foreground)] pt-0.5">${fetchPartsInFlight ? 'Downloading exact 3D shape…' : 'Exact 3D shape not downloaded yet — it\u2019s fetched on demand from the online library.'}</div>`
     : '';
@@ -10703,10 +10871,31 @@ function renderLibPreviewInspector() {
     </div>
     <div class="flex items-center gap-1 flex-wrap pt-0.5">${sourceLabels.join('')}</div>
     ${onlineHint}
-    <div class="text-xs text-[var(--muted-foreground)] pt-0.5">
-      Preview color: <b>${escHtml(colorName)}</b>${item.subpartRefCount > 0 ? ` · ${item.subpartRefCount} subfile ref${item.subpartRefCount === 1 ? '' : 's'}` : ''}
+    ${modelColorsHtml}
+    <div class="text-xs text-[var(--muted-foreground)] pt-0.5 flex items-center gap-1.5 flex-wrap">
+      <span>Preview:</span>
+      <button type="button" id="libInspectorColorBtn" class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-[var(--border)] bg-[var(--card)] hover:border-[var(--primary-border)] text-[var(--foreground)] font-semibold transition cursor-pointer" title="Choose from all 150+ LDraw preview colors">
+        <span class="w-3 h-3 rounded-full border border-black/25 dark:border-white/25 shrink-0" style="${getSwatchStyleAttr(colorObj)}"></span>
+        <span>${escHtml(colorName)}</span>
+        <span class="font-mono text-[10px] text-[var(--muted-foreground)]">#${effectiveColor}</span>
+      </button>
+      ${item.subpartRefCount > 0 ? `<span>· ${item.subpartRefCount} subfile ref${item.subpartRefCount === 1 ? '' : 's'}</span>` : ''}
     </div>
   `;
+
+  metaEl.querySelectorAll('button[data-inspector-color]').forEach((cBtn) => {
+    cBtn.onclick = () => {
+      const nextCol = Number(cBtn.getAttribute('data-inspector-color'));
+      if (Number.isFinite(nextCol)) applyLibPreviewColor(nextCol, false);
+    };
+  });
+  const inspColorBtn = metaEl.querySelector('#libInspectorColorBtn');
+  if (inspColorBtn) {
+    inspColorBtn.onclick = (e) => {
+      e.stopPropagation();
+      setLibColorPickerOpen(true);
+    };
+  }
 
   const actionButtons = [];
   if (!item.sources.includes('saved')) {
@@ -10880,7 +11069,7 @@ function renderLibBrowseTab(resetLimit = false) {
            <svg viewBox="0 0 24 24" class="w-8 h-8 opacity-60" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 8.5a4 4 0 0 1-.5 7.97"/><path d="M12 12v8"/><path d="m9 17 3 3 3-3"/></svg>
            <span class="text-[10px] font-semibold">Tap to preview</span>
          </div>`
-      : `<img data-part-id="${escHtml(item.id)}" data-color-id="${libUiState.previewColor}" alt="${escHtml(item.name)}" class="w-full h-full object-contain opacity-0 transition-opacity duration-150 drop-shadow-[0_3px_6px_rgba(15,23,42,0.12)]" />`;
+      : `<img data-part-id="${escHtml(item.id)}" data-color-id="${getEffectivePreviewColorForPart(item.id)}" alt="${escHtml(item.name)}" class="w-full h-full object-contain opacity-0 transition-opacity duration-150 drop-shadow-[0_3px_6px_rgba(15,23,42,0.12)]" />`;
     return `
       <button type="button" data-lib-part="${escHtml(item.id)}" class="group text-left p-2 rounded-lg border transition flex flex-col gap-1.5 ${selected ? 'border-[var(--primary)] ring-2 ring-[var(--primary-border)] bg-[var(--primary-soft)]' : 'border-[var(--border)] bg-[var(--background)] hover:border-[var(--primary-border)]'}">
         <div class="aspect-square w-full rounded-xl bg-[radial-gradient(circle_at_50%_40%,var(--card)_0%,var(--surface-sunken)_100%)] border border-[var(--border)]/60 relative flex items-center justify-center p-2 overflow-hidden">
@@ -13912,8 +14101,35 @@ document.getElementById('menuBricksLibBtn').onclick = () => openBricksLibraryMod
 document.getElementById('btnCloseBricksLib').onclick = closeBricksLibraryModal;
 document.getElementById('bricksLibDoneBtn').onclick = closeBricksLibraryModal;
 document.getElementById('bricksLibraryModal').onclick = (e) => {
-  if (e.target.id === 'bricksLibraryModal') closeBricksLibraryModal();
+  if (e.target.id === 'bricksLibraryModal') {
+    closeBricksLibraryModal();
+    return;
+  }
+  if (libUiState.colorPickerOpen) {
+    const wrap = document.getElementById('libColorPickerWrap');
+    if (wrap && !wrap.contains(e.target)) {
+      setLibColorPickerOpen(false);
+    }
+  }
 };
+const libColorPickerBtnEl = document.getElementById('libColorPickerBtn');
+if (libColorPickerBtnEl) {
+  libColorPickerBtnEl.onclick = (e) => {
+    e.stopPropagation();
+    setLibColorPickerOpen(!libUiState.colorPickerOpen);
+  };
+}
+const libColorPopoverCloseEl = document.getElementById('libColorPopoverClose');
+if (libColorPopoverCloseEl) {
+  libColorPopoverCloseEl.onclick = () => setLibColorPickerOpen(false);
+}
+const libColorSearchInputEl = document.getElementById('libColorSearchInput');
+if (libColorSearchInputEl) {
+  libColorSearchInputEl.oninput = (e) => {
+    libUiState.colorQuery = e.target.value || '';
+    renderLibColorSwatches();
+  };
+}
 
 document.querySelectorAll('.lib-tab-btn').forEach((btn) => {
   btn.onclick = () => {
