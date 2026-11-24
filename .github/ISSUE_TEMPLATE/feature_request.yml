@@ -1,0 +1,48 @@
+name: Feature Request
+description: Suggest a new feature or improvement for Brick Instruction Works
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for sharing your feedback! Please describe the feature or improvement you'd like to see and how it would help your workflow.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem or need does this address?
+      description: Describe the workflow, limitation, or goal behind this request.
+      placeholder: I'm trying to... / It would be helpful if...
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed feature or solution
+      description: A clear and concise description of what you'd like to happen.
+      placeholder: Describe the feature or improvement you'd like to see...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area of the app
+      description: Which part of Brick Instruction Works does this relate to (if applicable)?
+      options:
+        - Model Import (.io / .ldr / .mpd)
+        - Step Generation & Ordering
+        - Step Editor & Submodels
+        - Page Layout & Styling
+        - 3D Rendering & Camera
+        - PDF / Print Export
+        - Bricks Library
+        - Other
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context or examples
+      description: Add any screenshots, mockups, or extra details that might help illustrate your idea.

@@ -59,4 +59,6 @@ body:
     id: attachments
     attributes:
       label: Screenshots, Console Errors, or Sample File
-      description: Drag and drop screenshots, paste browser console errors, or mention model size/details if relevant.
+      description: >-
+        Drag and drop screenshots, paste browser console errors, or attach a sample model file if relevant.
+        If you want to keep your source files private, you can share them on Google Drive with brick-instruction-works-dev@googlegroups.com and mention the file name here.
