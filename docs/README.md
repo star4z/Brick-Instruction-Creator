@@ -23,6 +23,7 @@ All architecture specifications and feature design proposals for **Brick Instruc
 - [`ABSOLUTE_STEP_NUMBERING_DESIGN.md`](./ABSOLUTE_STEP_NUMBERING_DESIGN.md) — Printed (per-submodel) vs absolute (manual-wide, unique) step numbers; all step ranges (camera angle, Step Range Groups, overview selection) use absolute numbers, both shown in the UI, with legacy group migration.
 - [`THEME_FONTS_DESIGN.md`](./THEME_FONTS_DESIGN.md) — Customizable theme fonts: heading vs body font roles, curated offline-safe font catalog (bundled Public Sans / JetBrains Mono + platform stacks), sanitized `.biwtheme` fields, and consistent DOM / PDF canvas / interactive HTML rendering.
 - [`STYLE_DIALOG_THEMES_DESIGN.md`](./STYLE_DIALOG_THEMES_DESIGN.md) — All theme editing inline in the Style dialog: sticky recency-ordered horizontal theme strip header (current first), auto-fork of built-in themes on edit, New from Current, step display options stored on themes with legacy migration, and single-file `.biwtheme` export (iOS share "2 Items" fix).
+- [`STEP_RENDER_RESOLUTION_DESIGN.md`](./STEP_RENDER_RESOLUTION_DESIGN.md) — High-resolution step page model rendering: slot-aspect-aware HiDPI sizing, zoom-aware in-place sharpening, supersampled print-ready (~180 DPI) PDF export, mipmapped/anisotropic decal filtering, and smoother curved procedural brick geometry.
 
 ## Conventions
 

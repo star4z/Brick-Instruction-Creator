@@ -127,6 +127,14 @@ import {
   resolveStepToolbarCapabilities,
 } from './engine/stepToolbar';
 import {
+  clampRenderDimensions,
+  computeMinifigDiagramRenderSize,
+  computePdfPagePixelDimensions,
+  computePreviewResolutionScale,
+  computeStepSlotRenderSize,
+  shouldUpgradeStepRenderForZoom,
+} from './engine/stepRenderResolution';
+import {
   DEFAULT_EDITOR_URL,
   buildInteractiveHtmlFilename,
   encodeTypedArrayBase64,
@@ -1176,6 +1184,7 @@ function buildMeshBuffers(prevParts, newParts, opts) {
   const texGroups = new Map();
 
   const heroQuality = Boolean(opts.heroQuality);
+  const smoothCurves = heroQuality || totalParts <= 320;
 
   const pushTri = (a, b, c, n, col, aByte) => {
     const isTrans = aByte < 245;
@@ -1297,7 +1306,9 @@ function buildMeshBuffers(prevParts, newParts, opts) {
   };
 
   const addCyl = (cx, cy, cz, rTop, rBot, h, axis, segs, m, ox, oy, oz, hinge, col, eCol, aByte, bevelTop = false) => {
-    const effSegs = heroQuality ? Math.max(segs, 20) : segs;
+    const effSegs = heroQuality
+      ? Math.max(segs, 20)
+      : (smoothCurves ? Math.max(segs, Math.max(rTop, rBot) > 7 ? 18 : 14) : segs);
     const hh = h / 2;
     const mk = (u, v, t) => axis === 'y' ? [cx+u,cy+t,cz+v] : axis === 'x' ? [cx+t,cy+u,cz+v] : [cx+u,cy+v,cz+t];
     const mkN = (u, v, t) => xformNorm(axis === 'y' ? [u, t, v] : axis === 'x' ? [t, u, v] : [u, v, t], m, hinge);
@@ -1316,7 +1327,7 @@ function buildMeshBuffers(prevParts, newParts, opts) {
       const t1 = xformPt(mk(c1*rTop, s1*rTop, sideTopY), m, ox, oy, oz, hinge);
       const b0 = xformPt(mk(c0*rBot, s0*rBot, -hh), m, ox, oy, oz, hinge);
       const b1 = xformPt(mk(c1*rBot, s1*rBot, -hh), m, ox, oy, oz, hinge);
-      if (heroQuality) {
+      if (smoothCurves) {
         const sn0 = mkN(c0, s0, 0);
         const sn1 = mkN(c1, s1, 0);
         pushTriSmooth(b0, b1, t1, sn0, sn1, sn1, col, aByte);
@@ -1345,7 +1356,9 @@ function buildMeshBuffers(prevParts, newParts, opts) {
   // Hollow cylindrical ring / annulus (for round tiles with holes, Technic hole collars, and clips)
   const addAnnulus = (cx, cy, cz, rOut, rIn, h, axis, segs, m, ox, oy, oz, hinge, col, eCol, aByte, startAng = 0, endAng = Math.PI * 2) => {
     const isFull = Math.abs((endAng - startAng) - Math.PI * 2) < 1e-4;
-    const effSegs = heroQuality ? Math.max(segs, isFull ? 24 : 16) : segs;
+    const effSegs = heroQuality
+      ? Math.max(segs, isFull ? 24 : 16)
+      : (smoothCurves ? Math.max(segs, isFull ? 18 : 14) : segs);
     const hh = h / 2;
     const mk = (u, v, t) => axis === 'y' ? [cx+u,cy+t,cz+v] : axis === 'x' ? [cx+t,cy+u,cz+v] : [cx+u,cy+v,cz+t];
     const mkN = (u, v, t) => xformNorm(axis === 'y' ? [u, t, v] : axis === 'x' ? [t, u, v] : [u, v, t], m, hinge);
@@ -1363,7 +1376,7 @@ function buildMeshBuffers(prevParts, newParts, opts) {
       const it1 = xformPt(mk(c1*rIn, s1*rIn, hh), m, ox, oy, oz, hinge);
       const ib0 = xformPt(mk(c0*rIn, s0*rIn, -hh), m, ox, oy, oz, hinge);
       const ib1 = xformPt(mk(c1*rIn, s1*rIn, -hh), m, ox, oy, oz, hinge);
-      if (heroQuality) {
+      if (smoothCurves) {
         const on0 = mkN(c0, s0, 0), on1 = mkN(c1, s1, 0);
         const in0 = mkN(-c0, -s0, 0), in1 = mkN(-c1, -s1, 0);
         pushTriSmooth(ob0, ob1, ot1, on0, on1, on1, col, aByte);
@@ -1415,7 +1428,7 @@ function buildMeshBuffers(prevParts, newParts, opts) {
       const dy = pts2D[j][1] - pts2D[i][1];
       const len = Math.hypot(dx, dy) || 1;
       const flatN = xformNorm([dy / len, -dx / len, 0], m, hinge);
-      if (heroQuality && smoothNorms && smoothNorms[i] && smoothNorms[j]) {
+      if (smoothCurves && smoothNorms && smoothNorms[i] && smoothNorms[j]) {
         const sn0 = xformNorm([smoothNorms[i][0], smoothNorms[i][1], 0], m, hinge);
         const sn1 = xformNorm([smoothNorms[j][0], smoothNorms[j][1], 0], m, hinge);
         pushTriSmooth(fPts[i], bPts[i], bPts[j], sn0, sn0, sn1, col, aByte);
@@ -1615,7 +1628,7 @@ function buildMeshBuffers(prevParts, newParts, opts) {
 
   const addTopStuds = (def, m, ox, oy, oz, hinge, col, eCol, aByte) => {
     if (!def.studs) return;
-    const studSegs = heroQuality ? 18 : 8;
+    const studSegs = heroQuality ? 18 : (totalParts <= 200 ? 14 : totalParts <= 450 ? 10 : 8);
     const emitStud = (x, z) => {
       addCyl(x, 1.8, z, 5.8, 5.8, 4.4, 'y', studSegs, m, ox, oy, oz, hinge, col, eCol, aByte, true);
     };
@@ -1645,7 +1658,7 @@ function buildMeshBuffers(prevParts, newParts, opts) {
 
   // Tapered arbitrary-axis limb segment (for sculpted minifigure arms & wrists)
   const addLimb = (p0, p1, r0, r1, segs, m, ox, oy, oz, hinge, col, eCol, aByte, capEdges = false) => {
-    const effSegs = heroQuality ? Math.max(segs, 14) : segs;
+    const effSegs = heroQuality ? Math.max(segs, 14) : (smoothCurves ? Math.max(segs, 12) : segs);
     const dx = p1[0]-p0[0], dy = p1[1]-p0[1], dz = p1[2]-p0[2];
     const len = Math.hypot(dx, dy, dz);
     if (len < 0.1) return;
@@ -1672,7 +1685,7 @@ function buildMeshBuffers(prevParts, newParts, opts) {
       const a0 = (i/effSegs)*Math.PI*2, a1 = ((i+1)/effSegs)*Math.PI*2, am = (a0+a1)/2;
       const v00 = ringPt(p0, r0, a0), v01 = ringPt(p0, r0, a1);
       const v10 = ringPt(p1, r1, a0), v11 = ringPt(p1, r1, a1);
-      if (heroQuality) {
+      if (smoothCurves) {
         const sn0 = ringNorm(a0), sn1 = ringNorm(a1);
         pushTriSmooth(v00, v01, v11, sn0, sn1, sn1, col, aByte);
         pushTriSmooth(v00, v11, v10, sn0, sn1, sn0, col, aByte);
@@ -2346,7 +2359,7 @@ function buildMeshBuffers(prevParts, newParts, opts) {
 
 function getPreviewResolutionScale() {
   const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) ? window.devicePixelRatio : 1;
-  return Math.min(2, Math.max(1.5, dpr));
+  return computePreviewResolutionScale(dpr, 1);
 }
 
 function computePreviewLightDirs(right, up, forward) {
@@ -2373,9 +2386,24 @@ class WebGLBrickEngine {
     this.canvas = canvas;
     this.uploadedMesh = null;
     this.glTextures = new Map();
+    this.maxDim = 2048;
+    this.anisoExt = null;
+    this.maxAniso = 1;
     const gl = canvas.getContext('webgl', { antialias: true, alpha: true, preserveDrawingBuffer: true, powerPreference: 'default' });
     this.gl = gl;
     if (!gl) return;
+    try {
+      const vp = gl.getParameter(gl.MAX_VIEWPORT_DIMS);
+      const rb = gl.getParameter(gl.MAX_RENDERBUFFER_SIZE) || 2048;
+      const vpMin = vp && vp.length >= 2 ? Math.min(vp[0], vp[1]) : 2048;
+      this.maxDim = Math.max(1024, Math.min(vpMin, rb, 4096));
+      this.anisoExt = gl.getExtension('EXT_texture_filter_anisotropic')
+        || gl.getExtension('WEBKIT_EXT_TEXTURE_FILTER_ANISOTROPIC')
+        || gl.getExtension('MOZ_EXT_TEXTURE_FILTER_ANISOTROPIC');
+      if (this.anisoExt) {
+        this.maxAniso = Math.min(8, gl.getParameter(this.anisoExt.MAX_TEXTURE_MAX_ANISOTROPY_EXT) || 1);
+      }
+    } catch (_) {}
     const vsTri = `attribute vec3 aPos; attribute vec3 aNorm; attribute vec4 aCol; uniform mat4 uMVP; varying vec3 vNorm; varying vec4 vCol; void main(){ gl_Position = uMVP * vec4(aPos,1.0); vNorm = aNorm; vCol = aCol; }`;
     const fsTri = `precision mediump float;
       uniform float uHeroMode;
@@ -2547,9 +2575,20 @@ class WebGLBrickEngine {
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+    const iw = img.naturalWidth || img.width || 0;
+    const ih = img.naturalHeight || img.height || 0;
+    const isPow2 = iw > 0 && ih > 0 && (iw & (iw - 1)) === 0 && (ih & (ih - 1)) === 0;
+    if (isPow2) {
+      gl.generateMipmap(gl.TEXTURE_2D);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    } else {
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    }
+    if (this.anisoExt && this.maxAniso > 1) {
+      gl.texParameterf(gl.TEXTURE_2D, this.anisoExt.TEXTURE_MAX_ANISOTROPY_EXT, this.maxAniso);
+    }
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 0);
     this.glTextures.set(texKey, tex);
     return tex;
@@ -2595,19 +2634,27 @@ class WebGLBrickEngine {
         );
       }
     }
-    const halfH = fixedHalfH > 0
+    const aspect = w / Math.max(1, h);
+    let halfH = fixedHalfH > 0
       ? (fixedCenter ? fixedHalfH / Math.max(0.4, zoom) : fixedHalfH)
       : ((mesh.radius * 1.12) / Math.max(0.4, zoom));
-    const halfW = halfH * (w / Math.max(1, h));
+    // Ensure portrait/tall slots never clip wide models horizontally
+    if (fixedHalfH <= 0 && aspect < 1) {
+      halfH = halfH / Math.max(0.5, aspect);
+    }
+    const halfW = halfH * aspect;
     return mulMat4(orthoMat4(-halfW, halfW, -halfH, halfH, near, far), view);
   }
   draw(mesh, w, h, azDeg, elDeg, zoom = 1, fixedHalfH = 0, drawOpts = null) {
     const gl = this.gl;
     const hasTexDraws = Boolean(mesh.texDraws && mesh.texDraws.length > 0);
     if (!gl || (mesh.triPos.length === 0 && !hasTexDraws)) return null;
-    if (this.canvas.width !== w || this.canvas.height !== h) { this.canvas.width = w; this.canvas.height = h; }
+    const clamped = clampRenderDimensions(w, h, this.maxDim || 2048, (this.maxDim || 2048) * (this.maxDim || 2048), 32);
+    const dw = clamped.width;
+    const dh = clamped.height;
+    if (this.canvas.width !== dw || this.canvas.height !== dh) { this.canvas.width = dw; this.canvas.height = dh; }
     this.uploadIfNeeded(mesh);
-    gl.viewport(0, 0, w, h);
+    gl.viewport(0, 0, dw, dh);
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL);
@@ -2618,7 +2665,7 @@ class WebGLBrickEngine {
     const heroShading = Boolean(drawOpts?.heroShading);
     const lineAlpha = typeof drawOpts?.lineAlpha === 'number' ? drawOpts.lineAlpha : (heroShading ? 0.52 : 1.0);
     const fixedCenter = drawOpts?.fixedCenter || null;
-    const mvp = this.computeMVP(mesh, w, h, azDeg, elDeg, zoom, fixedHalfH, tightFit, fixedCenter);
+    const mvp = this.computeMVP(mesh, dw, dh, azDeg, elDeg, zoom, fixedHalfH, tightFit, fixedCenter);
     const { right, up, forward } = computeCameraBasis(azDeg, elDeg);
     const lights = computePreviewLightDirs(right, up, forward);
 
@@ -2748,7 +2795,7 @@ function getPliThumb(part) {
   if (pliThumbCache.has(key)) return pliThumbCache.get(key);
   const samplePart = normalizeCompositeThumbPart(part, (pid) => resolvePart(pid).name, computeWorldBox);
   const mesh = buildMeshBuffers([], [samplePart], { highlightNew:false, fadePrev:false, showArrows:false, accent:'#1a73e8' });
-  snapshotEngine.draw(mesh, 240, 240, 32, 22, 1.08);
+  snapshotEngine.draw(mesh, 360, 360, 32, 22, 1.08);
   const url = snapshotCanvas.toDataURL('image/png');
   if (pliThumbCache.size > 220) pliThumbCache.clear();
   pliThumbCache.set(key, url);
@@ -2758,7 +2805,39 @@ function getPliThumb(part) {
 function renderSnapshot(prev, next, az, el, w, h, zoom, opts) {
   const mesh = buildMeshBuffers(prev, next, opts);
   const mvp = snapshotEngine.draw(mesh, w, h, az, el, zoom, opts?.fixedHalfH || 0, opts);
-  return { url: snapshotCanvas.toDataURL('image/png'), mesh, mvp, w, h };
+  return {
+    url: snapshotCanvas.toDataURL('image/png'),
+    mesh,
+    mvp,
+    w: snapshotCanvas.width || w,
+    h: snapshotCanvas.height || h,
+  };
+}
+
+function renderMeshSnapshot(mesh, az, el, w, h, zoom, opts) {
+  const mvp = snapshotEngine.draw(mesh, w, h, az, el, zoom, opts?.fixedHalfH || 0, opts);
+  return {
+    url: snapshotCanvas.toDataURL('image/png'),
+    mesh,
+    mvp,
+    w: snapshotCanvas.width || w,
+    h: snapshotCanvas.height || h,
+  };
+}
+
+function drawSupersampledMeshToCtx(ctx, mesh, dstX, dstY, dstW, dstH, az, el, zoom = 1.0, fixedHalfH = 0, drawOpts = null, factor = 1.5) {
+  const ss = clampRenderDimensions(
+    Math.round(dstW * factor),
+    Math.round(dstH * factor),
+    Math.min(snapshotEngine.maxDim || 2048, 2200),
+    3_600_000,
+    Math.max(48, Math.round(Math.min(dstW, dstH))),
+  );
+  const mvp = snapshotEngine.draw(mesh, ss.width, ss.height, az, el, zoom, fixedHalfH, drawOpts);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(snapshotCanvas, 0, 0, snapshotCanvas.width, snapshotCanvas.height, dstX, dstY, dstW, dstH);
+  return mvp;
 }
 
 function renderCoverHeroSnapshot(parts, az, el, zoom, targetW, targetH, theme) {
@@ -2891,8 +2970,8 @@ function renderMinifigOneToOne(parts, pagePxH, pageHIn, maxPxW, maxPxH, accent =
   const heightLdu = Math.max(24, mesh.bounds.maxY - mesh.bounds.minY);
   const layout = computeMinifigOneToOneLayout({ widthLdu, heightLdu }, pagePxH, pageHIn, maxPxW, maxPxH);
   const aspect = layout.worldSpanW / Math.max(1, layout.worldSpanH);
-  const rh = Math.max(160, Math.min(480, Math.round(layout.displayPxH * 2.5)));
-  const rw = Math.max(96, Math.round(rh * aspect));
+  const rh = Math.max(240, Math.min(960, Math.round(layout.displayPxH * 3.0)));
+  const rw = Math.max(140, Math.round(rh * aspect));
   snapshotEngine.draw(mesh, rw, rh, 0, 0, 1.0, layout.fixedHalfH);
   return { url: snapshotCanvas.toDataURL('image/png'), ...layout };
 }
@@ -3144,10 +3223,20 @@ function renderMinifigExplodedDiagram(step, cam, w, h, theme, zoom = 1.0) {
     accent: theme?.accent || '#1a73e8',
     partOffsets: plan.stackOffsets,
   });
-  const stackMvp = snapshotEngine.draw(stackMesh, stackW, stackH, cam.az, cam.el, Math.max(0.82, Math.min(1.18, zoom)), 0, {
-    tightFit: true,
-  });
-  ctx.drawImage(snapshotCanvas, boxX + innerPadX, boxY + innerPadY, stackW, stackH);
+  const stackMvp = drawSupersampledMeshToCtx(
+    ctx,
+    stackMesh,
+    boxX + innerPadX,
+    boxY + innerPadY,
+    stackW,
+    stackH,
+    cam.az,
+    cam.el,
+    Math.max(0.82, Math.min(1.18, zoom)),
+    0,
+    { tightFit: true },
+    1.5,
+  );
 
   // Crisp crimson-red vertical downward arrows between exploded body layers
   const redLineW = Math.max(1.8, Math.min(3.2, rh * 0.0048));
@@ -3178,10 +3267,20 @@ function renderMinifigExplodedDiagram(step, cam, w, h, theme, zoom = 1.0) {
     showArrows: false,
     accent: theme?.accent || '#1a73e8',
   });
-  const figMvp = snapshotEngine.draw(figMesh, figAreaW, figAreaH, cam.az, cam.el, Math.max(0.75, Math.min(1.25, zoom)), 0, {
-    tightFit: true,
-  });
-  ctx.drawImage(snapshotCanvas, figAreaX, figAreaY, figAreaW, figAreaH);
+  const figMvp = drawSupersampledMeshToCtx(
+    ctx,
+    figMesh,
+    figAreaX,
+    figAreaY,
+    figAreaW,
+    figAreaH,
+    cam.az,
+    cam.el,
+    Math.max(0.75, Math.min(1.25, zoom)),
+    0,
+    { tightFit: true },
+    1.5,
+  );
 
   // 3. Horizontal black connector arrow from lower-right edge of white callout box to the standing figure's legs
   const bodyBox = plan.decomposed.bodyBox;
@@ -3255,8 +3354,20 @@ function renderMinifigExplodedDiagram(step, cam, w, h, theme, zoom = 1.0) {
         accent: theme?.accent || '#1a73e8',
         partOffsets: acc.isMultiPart ? accDisplay.subassemblyOffsets : {},
       });
-      const accMvp = snapshotEngine.draw(accMesh, aInnerW, aInnerH, cam.az, cam.el, 1.0, 0, { tightFit: true });
-      ctx.drawImage(snapshotCanvas, ax + aPad, ay + aPad, aInnerW, aInnerH);
+      const accMvp = drawSupersampledMeshToCtx(
+        ctx,
+        accMesh,
+        ax + aPad,
+        ay + aPad,
+        aInnerW,
+        aInnerH,
+        cam.az,
+        cam.el,
+        1.0,
+        0,
+        { tightFit: true },
+        2.0,
+      );
 
       if (acc.isMultiPart && accDisplay.subassemblyArrows.length > 0) {
         drawProjectedMinifigArrows(
@@ -3332,10 +3443,17 @@ function renderMinifigSequentialStage(step, stage, plan, cam, w, h, theme, zoom 
     accent: theme?.accent || '#1a73e8',
     partOffsets: stage.partOffsets || {},
   });
+  const stageSs = clampRenderDimensions(
+    Math.round(figW * 1.5),
+    Math.round(figH * 1.5),
+    Math.min(snapshotEngine.maxDim || 2048, 2200),
+    3_600_000,
+    Math.max(96, Math.min(figW, figH)),
+  );
   const stageMvp = snapshotEngine.draw(
     stageMesh,
-    figW,
-    figH,
+    stageSs.width,
+    stageSs.height,
     cam.az,
     cam.el,
     Math.max(0.65, Math.min(1.6, zoom)),
@@ -3353,8 +3471,10 @@ function renderMinifigSequentialStage(step, stage, plan, cam, w, h, theme, zoom 
     drawMinifigCelebrationStarburst(ctx, centerPt[0], centerPt[1], figVisualH * 0.78, theme);
   }
 
-  // 2. Composite crisp WebGL minifigure stage
-  ctx.drawImage(snapshotCanvas, figX, figY, figW, figH);
+  // 2. Composite crisp supersampled WebGL minifigure stage
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(snapshotCanvas, 0, 0, snapshotCanvas.width, snapshotCanvas.height, figX, figY, figW, figH);
 
   // 3. Crisp official LEGO cyan-blue assembly arrows
   const blueColor = darkBg ? '#38bdf8' : '#0088ce';
@@ -3423,8 +3543,20 @@ function renderMinifigSequentialStage(step, stage, plan, cam, w, h, theme, zoom 
       accent: theme?.accent || '#1a73e8',
       partOffsets: accDisplay.subassemblyOffsets || {},
     });
-    const pillMvp = snapshotEngine.draw(pillMesh, pInnerW, pInnerH, cam.az, cam.el, 1.0, 0, { tightFit: true });
-    ctx.drawImage(snapshotCanvas, pillX + pPadX, pillY + pPadY, pInnerW, pInnerH);
+    const pillMvp = drawSupersampledMeshToCtx(
+      ctx,
+      pillMesh,
+      pillX + pPadX,
+      pillY + pPadY,
+      pInnerW,
+      pInnerH,
+      cam.az,
+      cam.el,
+      1.0,
+      0,
+      { tightFit: true },
+      2.0,
+    );
 
     // Blue downward arrow inside the warm peach pill (blade -> hilt)
     drawProjectedMinifigArrows(
@@ -6467,8 +6599,71 @@ function getActiveStepObj() {
 // 5. ZOOM & PAN ENGINE (Hardware-Accelerated CSS Transform — Zero Crash!)
 // =========================================================================
 let stageRafId = 0, lastZoomText = '', currentPageFitScale = 1;
+let zoomHiResTimer = 0, lastZoomRendered = 1;
 function getEffectiveStageScale() {
   return Math.max(0.1, currentPageFitScale * state.zoom);
+}
+function refreshStepModelsForZoom() {
+  zoomHiResTimer = 0;
+  if (!state.model || currentSlotRenderInfo.size === 0) return;
+  const pg = state.pages[state.pageIdx];
+  if (!pg || pg.kind !== 'steps') return;
+  const frame = document.getElementById('pageFrame');
+  if (!frame) return;
+  const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) ? window.devicePixelRatio : 1;
+  lastZoomRendered = state.zoom;
+
+  for (const [stepId, info] of currentSlotRenderInfo.entries()) {
+    if (state.mode === 'rotate' && state.selectedStepId === stepId) continue;
+    if (info.isMfExploded) {
+      const expSize = computeMinifigDiagramRenderSize({
+        kind: 'exploded',
+        slotCount: info.slotCount || 1,
+        isFeatured: Boolean(info.isFeatured),
+        dpr,
+        zoom: state.zoom,
+        mode: 'screen',
+        gpuMaxDim: snapshotEngine.maxDim,
+      });
+      if (!shouldUpgradeStepRenderForZoom(info.mfExplodedW || 0, info.mfExplodedH || 0, expSize.width, expSize.height)) continue;
+      const upgraded = renderMinifigExplodedDiagram(info.step, info.cam, expSize.width, expSize.height, info.theme, info.modelScale);
+      info.mfExplodedW = upgraded.w;
+      info.mfExplodedH = upgraded.h;
+      const img = frame.querySelector(`img[data-pick-step="${stepId}"]`);
+      if (img && upgraded.url) img.src = upgraded.url;
+    } else if (!info.isMfSeq && info.snap?.mesh) {
+      const target = computeStepSlotRenderSize({
+        slotWidth: info.estSlotW || 640,
+        slotHeight: info.estSlotH || 440,
+        slotCount: info.slotCount || 1,
+        isFeatured: Boolean(info.isFeatured),
+        isCompact: Boolean(info.isCompact),
+        dpr,
+        zoom: state.zoom,
+        stageFitScale: currentPageFitScale,
+        mode: 'screen',
+        gpuMaxDim: snapshotEngine.maxDim,
+      });
+      if (!shouldUpgradeStepRenderForZoom(info.snap.w, info.snap.h, target.width, target.height)) continue;
+      const upgraded = renderMeshSnapshot(
+        info.snap.mesh,
+        info.cam.az,
+        info.cam.el,
+        target.width,
+        target.height,
+        info.modelScale,
+        info.opts,
+      );
+      info.snap = upgraded;
+      const img = frame.querySelector(`.step-render-img[data-pick-step="${stepId}"]`);
+      if (img && upgraded.url) img.src = upgraded.url;
+    }
+  }
+}
+function scheduleZoomHiResRefresh() {
+  if (zoomHiResTimer) clearTimeout(zoomHiResTimer);
+  if (state.zoom <= 1.05 || Math.abs(state.zoom - lastZoomRendered) < 0.14) return;
+  zoomHiResTimer = window.setTimeout(refreshStepModelsForZoom, 180);
 }
 function getStageOrigin() {
   const stage = document.getElementById('stageViewport');
@@ -6501,6 +6696,7 @@ function flushStageTransform() {
     const lbl = document.getElementById('btnZoomFit');
     if (lbl) lbl.textContent = txt;
   }
+  scheduleZoomHiResRefresh();
 }
 
 function applyStageTransform() {
@@ -7017,7 +7213,14 @@ function renderAll() {
       </div>`;
   } else if (page.kind === 'section_divider') {
     const resScale = getPreviewResolutionScale();
-    const snap = renderSnapshot([], page.previewParts || [], 38, 28, Math.round(720 * resScale), Math.round(460 * resScale), 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent });
+    const divSize = clampRenderDimensions(
+      Math.round(Math.max(920, dims.width - padPx * 2) * resScale),
+      Math.round(Math.max(580, dims.height - padPx * 2 - footerH - 80) * resScale),
+      Math.min(snapshotEngine.maxDim || 2048, 2200),
+      3_800_000,
+      480,
+    );
+    const snap = renderSnapshot([], page.previewParts || [], 38, 28, divSize.width, divSize.height, 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent });
     const pgNumText = formatPageNumber(page.num, state.pages.length);
     const pillPadX = Math.round(typo.pt(8));
     const pillPadY = Math.round(typo.pt(2.5));
@@ -7044,7 +7247,14 @@ function renderAll() {
   } else if (page.kind === 'submodel_page') {
     const sub = page.step.subassembly;
     const resScale = getPreviewResolutionScale();
-    const snap = renderSnapshot([], sub.buildParts, 38, 30, Math.round(720 * resScale), Math.round(460 * resScale), 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent });
+    const subPageSize = clampRenderDimensions(
+      Math.round(Math.max(920, dims.width - padPx * 2) * resScale),
+      Math.round(Math.max(580, dims.height - padPx * 2 - footerH - 80) * resScale),
+      Math.min(snapshotEngine.maxDim || 2048, 2200),
+      3_800_000,
+      480,
+    );
+    const snap = renderSnapshot([], sub.buildParts, 38, 30, subPageSize.width, subPageSize.height, 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent });
     const pgNumText = formatPageNumber(page.num, state.pages.length);
     frame.innerHTML = `
       <div class="relative w-full h-full flex flex-col justify-between overflow-hidden ${guideCls}" style="padding:${padPx}px;padding-bottom:${padPx + footerH}px">
@@ -7106,16 +7316,19 @@ function renderAll() {
     }
   } else {
     // STEPS PAGE
+    if (zoomHiResTimer) { clearTimeout(zoomHiResTimer); zoomHiResTimer = 0; }
+    lastZoomRendered = state.zoom;
     const activeObj = getActiveStepObj();
     const slots = page.slots;
     const pageSpec = page.layoutSpec || state.layoutConfig;
-    const subIntroImg = page.submodelIntro ? getSubmodelThumb(page.submodelIntro, 240, 150) : null;
+    const subIntroImg = page.submodelIntro ? getSubmodelThumb(page.submodelIntro, 480, 300) : null;
     const effectivePageHIn = dims.heightIn;
     const st = typo.steps;
     const introEstH = page.submodelIntro ? Math.round(st.introThumbH + typo.pt(20)) : 0;
     const gridW = Math.max(120, dims.width - padPx * 2);
     const gridH = Math.max(120, dims.height - padPx * 2 - footerH - introEstH);
     const slotRects = computePageSlotRects(slots.length, pageSpec, dims.isLandscape, gridW, gridH, gapPx);
+    const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) ? window.devicePixelRatio : 1;
 
     const slotData = slots.map(({ ch, step, minifigSeqSlice }, slotIdx) => {
       const slotRect = slotRects[slotIdx] || { x: 0, y: 0, w: gridW, h: gridH, isFeatured: slots.length === 1, isCompact: false };
@@ -7146,39 +7359,89 @@ function renderAll() {
         } : {}),
       };
       const resScale = getPreviewResolutionScale();
-      const baseRw = (slots.length === 1 || slotRect.isFeatured) ? 760 : (slotRect.isCompact ? 400 : 500);
-      const baseRh = (slots.length === 1 || slotRect.isFeatured) ? 500 : (slotRect.isCompact ? 300 : 360);
-      const rw = Math.round(baseRw * resScale);
-      const rh = Math.round(baseRh * resScale);
+      const stepRenderDims = computeStepSlotRenderSize({
+        slotWidth: estSlotW,
+        slotHeight: estSlotH,
+        slotCount: slots.length,
+        isFeatured: Boolean(slotRect.isFeatured),
+        isCompact: Boolean(slotRect.isCompact),
+        dpr,
+        zoom: state.zoom,
+        stageFitScale: currentPageFitScale,
+        mode: 'screen',
+        gpuMaxDim: snapshotEngine.maxDim,
+      });
+      const rw = stepRenderDims.width;
+      const rh = stepRenderDims.height;
       const snap = renderSnapshot(prev, step.parts, cam.az, cam.el, rw, rh, modelScale, opts);
-      currentSlotRenderInfo.set(step.id, { ch, step, prev, cam, ov, snap, modelScale, opts, isMfBuild, isMfExploded, isMfSeq });
 
       let mfExploded = null;
       let mfSeqStages = null;
       if (isMfExploded) {
-        const mfScale = Math.min(resScale, 1.5);
-        const expW = Math.round(((slots.length === 1 || slotRect.isFeatured) ? 920 : 640) * mfScale);
-        const expH = Math.round(((slots.length === 1 || slotRect.isFeatured) ? 640 : 480) * mfScale);
-        mfExploded = renderMinifigExplodedDiagram(step, cam, expW, expH, theme, modelScale);
+        const expDims = computeMinifigDiagramRenderSize({
+          kind: 'exploded',
+          slotCount: slots.length,
+          isFeatured: Boolean(slotRect.isFeatured),
+          dpr,
+          zoom: state.zoom,
+          mode: 'screen',
+          gpuMaxDim: snapshotEngine.maxDim,
+        });
+        mfExploded = renderMinifigExplodedDiagram(step, cam, expDims.width, expDims.height, theme, modelScale);
       } else if (isMfSeq) {
         const seqPlan = getMinifigSequentialPlanForStep(step);
         const sl = minifigSeqSlice || { start: 0, end: seqPlan.stages.length, cols: Math.min(3, seqPlan.stages.length), pageIdx: 0, pageCount: 1 };
         const visibleStages = seqPlan.stages.slice(sl.start, sl.end);
-        const mfScale = Math.min(resScale, 1.5);
-        const stW = Math.round((visibleStages.length >= 4 ? 320 : visibleStages.length === 3 ? 380 : 440) * mfScale);
-        const stH = Math.round((visibleStages.length >= 4 ? 460 : 540) * mfScale);
+        const seqDims = computeMinifigDiagramRenderSize({
+          kind: 'sequential',
+          slotCount: slots.length,
+          stageCount: visibleStages.length,
+          dpr,
+          zoom: state.zoom,
+          mode: 'screen',
+          gpuMaxDim: snapshotEngine.maxDim,
+        });
         mfSeqStages = visibleStages.map(st => ({
           stage: st,
-          img: renderMinifigSequentialStage(step, st, seqPlan, cam, stW, stH, theme, modelScale),
+          img: renderMinifigSequentialStage(step, st, seqPlan, cam, seqDims.width, seqDims.height, theme, modelScale),
         }));
       }
 
+      currentSlotRenderInfo.set(step.id, {
+        ch,
+        step,
+        prev,
+        cam,
+        ov,
+        snap,
+        modelScale,
+        opts,
+        isMfBuild,
+        isMfExploded,
+        isMfSeq,
+        estSlotW,
+        estSlotH,
+        slotCount: slots.length,
+        isFeatured: Boolean(slotRect.isFeatured),
+        isCompact: Boolean(slotRect.isCompact),
+        theme,
+        mfExplodedW: mfExploded?.w || 0,
+        mfExplodedH: mfExploded?.h || 0,
+      });
+
+      const subCalloutDims = clampRenderDimensions(
+        Math.round(380 * resScale),
+        Math.round(260 * resScale),
+        Math.min(snapshotEngine.maxDim || 2048, 1400),
+        1_500_000,
+        240,
+      );
       const subImg = (step.subassembly && !ov.calloutAsPages)
-        ? renderSnapshot([], step.subassembly.buildParts, 38, 30, Math.round(260 * resScale), Math.round(180 * resScale), 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent }).url
+        ? renderSnapshot([], step.subassembly.buildParts, 38, 30, subCalloutDims.width, subCalloutDims.height, 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent }).url
         : null;
-      const attSubImg = step.attachedSubmodel ? getSubmodelThumb(step.attachedSubmodel, 160, 120) : null;
+      const attSubImg = step.attachedSubmodel ? getSubmodelThumb(step.attachedSubmodel, 360, 270) : null;
       const mfPrepImg = step.minifigPrep
-        ? getMinifigThumb(step.minifigPrep.canonicalParts, `prep_${step.minifigPrep.id}`, MINIFIG_BUILD_CAMERA.az, MINIFIG_BUILD_CAMERA.el, 120, 120)
+        ? getMinifigThumb(step.minifigPrep.canonicalParts, `prep_${step.minifigPrep.id}`, MINIFIG_BUILD_CAMERA.az, MINIFIG_BUILD_CAMERA.el, 320, 320)
         : null;
       const attMfImg = step.attachedMinifig
         ? getMinifigThumb(
@@ -7186,8 +7449,8 @@ function renderAll() {
             `att_${step.attachedMinifig.id}`,
             Math.round(cam.az),
             Math.round(Math.min(30, Math.max(16, cam.el))),
-            120,
-            120,
+            320,
+            320,
           )
         : null;
       const allowMf1to1OnPage = !isMfSeq || !minifigSeqSlice || minifigSeqSlice.pageIdx === minifigSeqSlice.pageCount - 1;
@@ -12468,6 +12731,8 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
   const canvas = document.createElement('canvas');
   canvas.width = pxW; canvas.height = pxH;
   const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
   const theme = getThemeForPage(page);
   await ensureThemeFontsLoaded(theme);
   const allParts = getAllParts(state.model);
@@ -12723,8 +12988,6 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       ),
     );
   } else if (page.kind === 'section_divider') {
-    const snap = renderSnapshot([], page.previewParts || [], 38, 28, 1140, 720, 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent });
-    const img = await loadImgPromise(snap.url);
     ctx.fillStyle = theme.accent;
     ctx.font = themeCanvasFont(theme, 800, typo.divider.badgeFont);
     ctx.fillText(`BUILD STAGE ${page.bagNumber || 1}`, pad, pad);
@@ -12738,7 +13001,19 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
     ctx.fillText(`${page.pieceCount || 0} pcs · Steps ${page.firstStepNum}–${page.lastStepNum}`, pxW - pad, titleY + Math.round((typo.divider.titleFont - typo.divider.metaFont) * 0.5));
     ctx.textAlign = 'left';
     const imgTop = titleY + Math.round(typo.divider.titleFont * 1.4);
-    drawContain(ctx, img, pad, imgTop, pxW - pad * 2, pxH - imgTop - pad - footerH);
+    const divAvailW = pxW - pad * 2;
+    const divAvailH = Math.max(120, pxH - imgTop - pad - footerH);
+    const divDims = computeStepSlotRenderSize({
+      slotWidth: divAvailW,
+      slotHeight: divAvailH,
+      slotCount: 1,
+      isFeatured: true,
+      mode: 'pdf',
+      gpuMaxDim: snapshotEngine.maxDim,
+    });
+    const snap = renderSnapshot([], page.previewParts || [], 38, 28, divDims.width, divDims.height, 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent });
+    const img = await loadImgPromise(snap.url);
+    drawContain(ctx, img, pad, imgTop, divAvailW, divAvailH);
     drawFooter(state.model.title);
   } else if (page.kind === 'bom') {
     const cfg = state.bomConfig;
@@ -12864,7 +13139,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       ctx.save();
       drawRRect(pad, pad, bannerW, bannerH, Math.round(typo.pt(10)));
       ctx.clip();
-      const thumbUrl = getSubmodelThumb(sub, 260, 160);
+      const thumbUrl = getSubmodelThumb(sub, 520, 320);
       if (thumbUrl) {
         const introImg = await loadImgPromise(thumbUrl);
         drawContain(ctx, introImg, pad + Math.round(typo.pt(10)), pad + Math.round(typo.pt(6)), st.introThumbW, bannerH - Math.round(typo.pt(12)));
@@ -12965,7 +13240,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
           ctx.save();
           drawRRect(pliX, pliY, attBoxW, pliH, pliRadius);
           ctx.clip();
-          const attUrl = getSubmodelThumb(att, 160, 120);
+          const attUrl = getSubmodelThumb(att, 360, 270);
           if (attUrl) {
             const attImg = await loadImgPromise(attUrl);
             drawContain(ctx, attImg, pliX + 6, pliY + 4, pliH * 1.25, pliH - 8);
@@ -12991,7 +13266,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
           ctx.save();
           drawRRect(pliX, pliY, prepBoxW, pliH, pliRadius);
           ctx.clip();
-          const prepUrl = getMinifigThumb(prep.canonicalParts, `prep_${prep.id}`, MINIFIG_BUILD_CAMERA.az, MINIFIG_BUILD_CAMERA.el, 120, 120);
+          const prepUrl = getMinifigThumb(prep.canonicalParts, `prep_${prep.id}`, MINIFIG_BUILD_CAMERA.az, MINIFIG_BUILD_CAMERA.el, 320, 320);
           if (prepUrl) {
             const prepImg = await loadImgPromise(prepUrl);
             drawContain(ctx, prepImg, pliX + 6, pliY + 4, pliH * 1.0, pliH - 8);
@@ -13022,8 +13297,8 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
             `att_${att.id}`,
             Math.round(cam.az),
             Math.round(Math.min(30, Math.max(16, cam.el))),
-            120,
-            120,
+            320,
+            320,
           );
           if (attUrl) {
             const attImg = await loadImgPromise(attUrl);
@@ -13104,7 +13379,16 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       }
 
       if (isMfExploded) {
-        const expDiag = renderMinifigExplodedDiagram(step, cam, Math.max(760, Math.round(mainAvailW * 1.2)), Math.max(520, Math.round(renderAvailH * 1.2)), theme, modelScale);
+        const expDims = computeMinifigDiagramRenderSize({
+          kind: 'exploded',
+          slotCount: slots.length,
+          isFeatured: Boolean(rect.isFeatured),
+          targetWidth: mainAvailW,
+          targetHeight: renderAvailH,
+          mode: 'pdf',
+          gpuMaxDim: snapshotEngine.maxDim,
+        });
+        const expDiag = renderMinifigExplodedDiagram(step, cam, expDims.width, expDims.height, theme, modelScale);
         const expImg = await loadImgPromise(expDiag.url);
         drawContain(ctx, expImg, sx + st.slotPad, renderTopY, mainAvailW, renderAvailH);
       } else if (isMfSeq) {
@@ -13113,10 +13397,17 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
         const visibleStages = seqPlan.stages.slice(sl.start, sl.end);
         const stGap = Math.round(Math.max(8, mainAvailW * 0.015));
         const stCellW = (mainAvailW - stGap * Math.max(0, visibleStages.length - 1)) / Math.max(1, visibleStages.length);
-        const stPixW = Math.max(320, Math.round(stCellW * 1.25));
-        const stPixH = Math.max(440, Math.round(renderAvailH * 1.25));
+        const seqDims = computeMinifigDiagramRenderSize({
+          kind: 'sequential',
+          slotCount: slots.length,
+          stageCount: visibleStages.length,
+          targetWidth: stCellW,
+          targetHeight: renderAvailH,
+          mode: 'pdf',
+          gpuMaxDim: snapshotEngine.maxDim,
+        });
         for (let si = 0; si < visibleStages.length; si++) {
-          const stDiag = renderMinifigSequentialStage(step, visibleStages[si], seqPlan, cam, stPixW, stPixH, theme, modelScale);
+          const stDiag = renderMinifigSequentialStage(step, visibleStages[si], seqPlan, cam, seqDims.width, seqDims.height, theme, modelScale);
           const stImg = await loadImgPromise(stDiag.url);
           drawContain(ctx, stImg, sx + st.slotPad + si * (stCellW + stGap), renderTopY, stCellW, renderAvailH);
         }
@@ -13124,7 +13415,16 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
         const effectivePartOffsets = step.defaultPartOffsets
           ? { ...step.defaultPartOffsets, ...(ov.partOffsets || {}) }
           : (ov.partOffsets || {});
-        const snap = renderSnapshot(prev, step.parts, cam.az, cam.el, 1140, 780, modelScale, {
+        const pdfStepDims = computeStepSlotRenderSize({
+          slotWidth: mainAvailW,
+          slotHeight: renderAvailH,
+          slotCount: slots.length,
+          isFeatured: Boolean(rect.isFeatured),
+          isCompact: Boolean(rect.isCompact),
+          mode: 'pdf',
+          gpuMaxDim: snapshotEngine.maxDim,
+        });
+        const snap = renderSnapshot(prev, step.parts, cam.az, cam.el, pdfStepDims.width, pdfStepDims.height, modelScale, {
           highlightNew: state.highlightNew, highlightColor: state.highlightColor,
           fadePrev: state.fadePrev, fadeOpacity: state.fadeOpacity,
           showArrows: true, accent: theme.accent, ov, partOffsets: effectivePartOffsets,
@@ -13279,7 +13579,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
     drawFooter(page.chapterName || '');
   }
 
-  const jpegQuality = page.kind === 'cover' ? 0.94 : 0.88;
+  const jpegQuality = page.kind === 'cover' ? 0.94 : 0.92;
   const dataUrl = canvas.toDataURL('image/jpeg', jpegQuality);
   const b64 = dataUrl.split(',')[1];
   const binStr = atob(b64);
@@ -13291,8 +13591,6 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
 let lastGeneratedPdfBlob = null, lastGeneratedPdfUrl = null, lastGeneratedPdfName = 'manual.pdf';
 async function runPdfExport(pagesToExport) {
   const [pageWpt, pageHpt] = getPdfPaperPts();
-  const basePxW = Math.round(pageWpt * 1.45), basePxH = Math.round(pageHpt * 1.45);
-  const coverPxW = Math.min(2400, Math.round(pageWpt * 2.1)), coverPxH = Math.min(2400, Math.round(pageHpt * 2.1));
   document.getElementById('expProgressWrap').classList.remove('hidden');
   document.getElementById('expReadyWrap').classList.add('hidden');
   const jpegPages = [];
@@ -13303,9 +13601,8 @@ async function runPdfExport(pagesToExport) {
     document.getElementById('expProgressBar').style.width = pct + '%';
     await new Promise(r => setTimeout(r, 8));
     const pg = pagesToExport[i];
-    const w = pg.kind === 'cover' ? coverPxW : basePxW;
-    const h = pg.kind === 'cover' ? coverPxH : basePxH;
-    jpegPages.push(await renderPageToJpegBytes(pg, w, h, pageWpt, pageHpt));
+    const pgDims = computePdfPagePixelDimensions(pageWpt, pageHpt, pg.kind);
+    jpegPages.push(await renderPageToJpegBytes(pg, pgDims.width, pgDims.height, pageWpt, pageHpt));
   }
   const pdfBytes = buildPdfBinary(jpegPages, pageWpt, pageHpt);
   if (lastGeneratedPdfUrl) URL.revokeObjectURL(lastGeneratedPdfUrl);

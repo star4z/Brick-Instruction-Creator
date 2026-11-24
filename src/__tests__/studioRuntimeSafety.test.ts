@@ -115,6 +115,9 @@ describe('studioRuntime safety checks', () => {
     expect(Number(inspectorMatch![1])).toBeGreaterThanOrEqual(768);
     expect(sourceText).toContain('function getPreviewResolutionScale()');
     expect(sourceText).toContain('const resScale = getPreviewResolutionScale();');
+    expect(sourceText).toContain('computeStepSlotRenderSize(');
+    expect(sourceText).toContain('computePdfPagePixelDimensions(');
+    expect(sourceText).toContain('function refreshStepModelsForZoom()');
   });
 
   it('renders Pages & Steps list with cached HiDPI lazy step & page previews', () => {

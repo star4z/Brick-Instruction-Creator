@@ -43,7 +43,7 @@ class TechnicalSnapshotRenderer {
           alpha: true,
           preserveDrawingBuffer: true,
         });
-        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        this.renderer.setPixelRatio(Math.min(Math.max(window.devicePixelRatio || 1, 2), 3));
         this.renderer.outputColorSpace = THREE.SRGBColorSpace;
         this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
         this.renderer.toneMappingExposure = 1.08;

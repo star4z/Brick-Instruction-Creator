@@ -1105,7 +1105,7 @@ ${staticFallbackHtml}
   function drawScene() {
     if (!activeScene) return;
     const rect = canvas.getBoundingClientRect();
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const dpr = Math.min(Math.max(window.devicePixelRatio || 1, 1.5), 3);
     const w = Math.max(100, Math.round((rect.width || window.innerWidth) * dpr));
     const h = Math.max(100, Math.round((rect.height || window.innerHeight) * dpr));
     if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }

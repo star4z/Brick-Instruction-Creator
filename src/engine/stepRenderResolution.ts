@@ -1,0 +1,231 @@
+/**
+ * Pure, DOM-free resolution & supersampling calculations for 3D model renders
+ * on step pages, minifig diagrams, submodel callouts, and print-ready PDF exports.
+ */
+
+export const DEFAULT_SCREEN_MAX_EDGE = 2400;
+export const DEFAULT_SCREEN_MAX_PIXELS = 4_200_000;
+export const DEFAULT_PDF_MAX_EDGE = 2800;
+export const DEFAULT_PDF_MAX_PIXELS = 5_800_000;
+export const DEFAULT_GPU_MAX_DIM = 4096;
+
+export const STEP_PDF_PT_SCALE = 2.5; // ~180 DPI (72 pt/in * 2.5)
+export const COVER_PDF_PT_SCALE = 2.8; // ~202 DPI for cover / completion hero pages
+export const STEP_PDF_MAX_EDGE = 2500;
+export const COVER_PDF_MAX_EDGE = 2800;
+
+export interface RenderDimensions {
+  width: number;
+  height: number;
+}
+
+export interface StepSlotRenderSizeInput {
+  /** Estimated visual width of the step slot (CSS px on screen, or canvas px in PDF). */
+  slotWidth: number;
+  /** Estimated visual height of the step slot (CSS px on screen, or canvas px in PDF). */
+  slotHeight: number;
+  /** Number of step slots on the page. */
+  slotCount: number;
+  isFeatured?: boolean;
+  isCompact?: boolean;
+  /** Display devicePixelRatio (screen mode). */
+  dpr?: number;
+  /** Current stage page zoom factor (screen mode, 1 = fit). */
+  zoom?: number;
+  /** Page fit scale on the viewport at zoom = 1 (screen mode). */
+  stageFitScale?: number;
+  /** Target rendering mode. */
+  mode?: 'screen' | 'pdf';
+  /** WebGL hardware max viewport/renderbuffer edge. */
+  gpuMaxDim?: number;
+}
+
+export interface MinifigDiagramRenderSizeInput {
+  kind: 'exploded' | 'sequential';
+  slotCount: number;
+  isFeatured?: boolean;
+  stageCount?: number;
+  dpr?: number;
+  zoom?: number;
+  targetWidth?: number;
+  targetHeight?: number;
+  mode?: 'screen' | 'pdf';
+  gpuMaxDim?: number;
+}
+
+/**
+ * Clamp target pixel dimensions to a max edge and max pixel budget while
+ * preserving aspect ratio and ensuring valid positive integer bounds.
+ */
+export function clampRenderDimensions(
+  width: number,
+  height: number,
+  maxEdge: number,
+  maxPixels: number,
+  minEdge = 64,
+): RenderDimensions {
+  const safeMaxEdge = Math.max(minEdge, Math.floor(maxEdge || DEFAULT_SCREEN_MAX_EDGE));
+  const safeMaxPixels = Math.max(minEdge * minEdge, Math.floor(maxPixels || DEFAULT_SCREEN_MAX_PIXELS));
+
+  let w = Math.max(minEdge, Number.isFinite(width) ? width : minEdge);
+  let h = Math.max(minEdge, Number.isFinite(height) ? height : minEdge);
+
+  const longest = Math.max(w, h);
+  if (longest > safeMaxEdge) {
+    const s = safeMaxEdge / longest;
+    w *= s;
+    h *= s;
+  }
+
+  const area = w * h;
+  if (area > safeMaxPixels) {
+    const s = Math.sqrt(safeMaxPixels / area);
+    w *= s;
+    h *= s;
+  }
+
+  return {
+    width: Math.max(minEdge, Math.round(w)),
+    height: Math.max(minEdge, Math.round(h)),
+  };
+}
+
+/**
+ * Compute HiDPI + zoom-aware preview resolution multiplier for on-screen renders.
+ * - Floors at 2.0× even on 1× desktop displays for crisp supersampled edges & decals.
+ * - Supports native 3× Retina displays (iPhone / iPad Pro).
+ * - Scales smoothly when the user zooms into a page (up to 4.5× before per-slot caps).
+ */
+export function computePreviewResolutionScale(dpr = 1, zoom = 1): number {
+  const safeDpr = Number.isFinite(dpr) && dpr > 0 ? dpr : 1;
+  const safeZoom = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+  const baseScale = Math.min(3, Math.max(2, safeDpr));
+  const zoomBoost = safeZoom > 1.05 ? Math.min(2.25, safeZoom) : 1;
+  return Math.min(4.5, Number((baseScale * zoomBoost).toFixed(3)));
+}
+
+/**
+ * Compute crisp high-resolution WebGL render dimensions for a step slot,
+ * matching the slot's visual aspect ratio (preventing wasted letterboxing pixels)
+ * and scaling cleanly with HiDPI displays, page zoom, and print-ready PDF targets.
+ */
+export function computeStepSlotRenderSize(input: StepSlotRenderSizeInput): RenderDimensions {
+  const mode = input.mode ?? 'screen';
+  const gpuLimit = Math.max(1024, Math.floor(input.gpuMaxDim || DEFAULT_GPU_MAX_DIM));
+  const slotCount = Math.max(1, input.slotCount || 1);
+  const isLargeSlot = slotCount === 1 || Boolean(input.isFeatured);
+  const isCompact = Boolean(input.isCompact);
+
+  // Estimate usable model box inside the slot (subtracting top step-number/PLI strip)
+  const rawW = Math.max(120, Number.isFinite(input.slotWidth) ? input.slotWidth : 640);
+  const rawH = Math.max(120, Number.isFinite(input.slotHeight) ? input.slotHeight : 440);
+  const visualW = mode === 'pdf' ? rawW : rawW * 0.94;
+  const visualH = mode === 'pdf' ? rawH : rawH * (isLargeSlot ? 0.78 : 0.74);
+
+  // Clamp aspect ratio to a sensible framing range so extreme slots don't distort
+  const aspect = Math.max(0.72, Math.min(2.25, visualW / Math.max(1, visualH)));
+
+  if (mode === 'pdf') {
+    // Supersample 1.5x over the high-DPI PDF slot rectangle so downsampling yields crisp AA
+    const minW = isLargeSlot ? 1600 : isCompact ? 1050 : 1280;
+    const targetW = Math.max(minW, Math.round(visualW * 1.5));
+    const targetH = Math.round(targetW / aspect);
+    const maxEdge = Math.min(DEFAULT_PDF_MAX_EDGE, gpuLimit);
+    return clampRenderDimensions(targetW, targetH, maxEdge, DEFAULT_PDF_MAX_PIXELS, 240);
+  }
+
+  const dpr = Number.isFinite(input.dpr) && (input.dpr as number) > 0 ? (input.dpr as number) : 1;
+  const zoom = Number.isFinite(input.zoom) && (input.zoom as number) > 0 ? (input.zoom as number) : 1;
+  const fitScale = Number.isFinite(input.stageFitScale) && (input.stageFitScale as number) > 0
+    ? (input.stageFitScale as number)
+    : 1;
+
+  const resScale = computePreviewResolutionScale(dpr, zoom);
+
+  // Crisp baseline floors (in canonical px before resScale) so even zoomed-out viewports stay sharp
+  const baseW = isLargeSlot ? 820 : isCompact ? 480 : 600;
+  const baseH = isLargeSlot ? 560 : isCompact ? 360 : 440;
+
+  // Displayed physical pixels on screen * 1.35 supersampling factor
+  const displayOversample = Math.max(resScale, Math.min(4.5, fitScale * zoom * Math.max(1.5, dpr) * 1.35));
+  const fromSlotW = visualW * displayOversample;
+  const fromSlotH = visualH * displayOversample;
+  const fromBaseW = baseW * resScale;
+  const fromBaseH = baseH * resScale;
+
+  // Choose the larger target while respecting the actual slot's visual aspect ratio
+  const desiredArea = Math.max(fromSlotW * fromSlotH, fromBaseW * fromBaseH);
+  const desiredW = Math.sqrt(desiredArea * aspect);
+  const desiredH = desiredW / aspect;
+
+  const maxEdge = Math.min(DEFAULT_SCREEN_MAX_EDGE, gpuLimit);
+  return clampRenderDimensions(desiredW, desiredH, maxEdge, DEFAULT_SCREEN_MAX_PIXELS, 240);
+}
+
+/**
+ * Compute crisp pixel dimensions for Minifigure Exploded & Sequential step diagrams.
+ */
+export function computeMinifigDiagramRenderSize(input: MinifigDiagramRenderSizeInput): RenderDimensions {
+  const mode = input.mode ?? 'screen';
+  const gpuLimit = Math.max(1024, Math.floor(input.gpuMaxDim || DEFAULT_GPU_MAX_DIM));
+  const isLarge = input.slotCount === 1 || Boolean(input.isFeatured);
+
+  if (mode === 'pdf') {
+    const maxEdge = Math.min(DEFAULT_PDF_MAX_EDGE, gpuLimit);
+    if (input.kind === 'exploded') {
+      const w = Math.max(1400, Math.round((input.targetWidth || 1000) * 1.45));
+      const h = Math.max(960, Math.round((input.targetHeight || 700) * 1.45));
+      return clampRenderDimensions(w, h, maxEdge, DEFAULT_PDF_MAX_PIXELS, 360);
+    }
+    const w = Math.max(640, Math.round((input.targetWidth || 460) * 1.5));
+    const h = Math.max(840, Math.round((input.targetHeight || 620) * 1.5));
+    return clampRenderDimensions(w, h, Math.min(1800, maxEdge), 2_600_000, 240);
+  }
+
+  const resScale = Math.min(2.6, computePreviewResolutionScale(input.dpr ?? 1, input.zoom ?? 1));
+  const maxEdge = Math.min(DEFAULT_SCREEN_MAX_EDGE, gpuLimit);
+  if (input.kind === 'exploded') {
+    const baseW = isLarge ? 980 : 720;
+    const baseH = isLarge ? 680 : 520;
+    return clampRenderDimensions(baseW * resScale, baseH * resScale, maxEdge, DEFAULT_SCREEN_MAX_PIXELS, 360);
+  }
+
+  const stages = Math.max(1, input.stageCount || 3);
+  const baseW = stages >= 4 ? 360 : stages === 3 ? 420 : 480;
+  const baseH = stages >= 4 ? 500 : 580;
+  return clampRenderDimensions(baseW * resScale, baseH * resScale, Math.min(1600, maxEdge), 2_200_000, 240);
+}
+
+/**
+ * Compute print-ready PDF page canvas pixel dimensions from PDF points (72 pt/in).
+ */
+export function computePdfPagePixelDimensions(
+  pageWpt: number,
+  pageHpt: number,
+  pageKind: string,
+): RenderDimensions {
+  const safeW = Math.max(72, Number.isFinite(pageWpt) ? pageWpt : 792);
+  const safeH = Math.max(72, Number.isFinite(pageHpt) ? pageHpt : 612);
+  const isHero = pageKind === 'cover' || pageKind === 'complete';
+  const scale = isHero ? COVER_PDF_PT_SCALE : STEP_PDF_PT_SCALE;
+  const maxEdge = isHero ? COVER_PDF_MAX_EDGE : STEP_PDF_MAX_EDGE;
+  const maxPixels = isHero ? 6_400_000 : 5_200_000;
+  return clampRenderDimensions(safeW * scale, safeH * scale, maxEdge, maxPixels, 360);
+}
+
+/**
+ * Decide whether an already-rendered step snapshot should be re-rendered at higher
+ * resolution after a user zoom change (avoids churn on small nudges).
+ */
+export function shouldUpgradeStepRenderForZoom(
+  renderedW: number,
+  renderedH: number,
+  targetW: number,
+  targetH: number,
+  thresholdRatio = 1.18,
+): boolean {
+  if (renderedW <= 0 || renderedH <= 0) return true;
+  const ratioW = targetW / renderedW;
+  const ratioH = targetH / renderedH;
+  return Math.max(ratioW, ratioH) >= thresholdRatio;
+}
