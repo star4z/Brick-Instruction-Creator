@@ -45,4 +45,6 @@ body:
     id: context
     attributes:
       label: Additional context or examples
-      description: Add any screenshots, mockups, or extra details that might help illustrate your idea.
+      description: >-
+        Add any screenshots, mockups, or sample model files that help illustrate your idea.
+        To upload a model file directly to GitHub, compress it into a .zip file first.
