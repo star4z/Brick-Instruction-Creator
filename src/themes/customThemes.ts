@@ -137,6 +137,95 @@ export function applyThemeFontsToElement(
   el.style.setProperty('--theme-heading-font', getThemeFontStack(theme, 'heading'));
 }
 
+export type ThemeMinifigStyle = 'exploded' | 'sequential' | 'classic';
+
+/**
+ * Step display options that belong to a theme (formerly loose Style popover
+ * toggles). Field names intentionally match the studio runtime `state` keys so
+ * the active theme can be mirrored into state with a simple copy.
+ */
+export interface ThemeStyleOptions {
+  highlightNew: boolean;
+  highlightColor: string;
+  fadePrev: boolean;
+  fadeOpacity: number;
+  showRotCues: boolean;
+  showSizeGuides: boolean;
+  minifigStyle: ThemeMinifigStyle;
+  showMinifig1to1: boolean;
+  showStepBorders: boolean;
+  showPageTitle: boolean;
+}
+
+export const THEME_STYLE_OPTION_KEYS: Array<keyof ThemeStyleOptions> = [
+  'highlightNew',
+  'highlightColor',
+  'fadePrev',
+  'fadeOpacity',
+  'showRotCues',
+  'showSizeGuides',
+  'minifigStyle',
+  'showMinifig1to1',
+  'showStepBorders',
+  'showPageTitle',
+];
+
+export const DEFAULT_THEME_STYLE_OPTIONS: ThemeStyleOptions = {
+  highlightNew: true,
+  highlightColor: '#ff2d55',
+  fadePrev: true,
+  fadeOpacity: 0.82,
+  showRotCues: true,
+  showSizeGuides: true,
+  minifigStyle: 'exploded',
+  showMinifig1to1: false,
+  showStepBorders: true,
+  showPageTitle: true,
+};
+
+/**
+ * Normalizes untrusted style options, falling back field-by-field to
+ * `fallback` (default: {@link DEFAULT_THEME_STYLE_OPTIONS}).
+ */
+export function normalizeThemeStyleOptions(
+  raw: unknown,
+  fallback: Partial<ThemeStyleOptions> = DEFAULT_THEME_STYLE_OPTIONS,
+): ThemeStyleOptions {
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const fb = { ...DEFAULT_THEME_STYLE_OPTIONS, ...fallback };
+  const bool = (k: keyof ThemeStyleOptions) => (typeof r[k] === 'boolean' ? (r[k] as boolean) : (fb[k] as boolean));
+  const fade = typeof r.fadeOpacity === 'number' && Number.isFinite(r.fadeOpacity)
+    ? Math.max(0.2, Math.min(1, r.fadeOpacity))
+    : fb.fadeOpacity;
+  const mf = r.minifigStyle === 'exploded' || r.minifigStyle === 'sequential' || r.minifigStyle === 'classic'
+    ? r.minifigStyle
+    : fb.minifigStyle;
+  return {
+    highlightNew: bool('highlightNew'),
+    highlightColor: sanitizeHexColor(r.highlightColor, sanitizeHexColor(fb.highlightColor, '#ff2d55')),
+    fadePrev: bool('fadePrev'),
+    fadeOpacity: fade,
+    showRotCues: bool('showRotCues'),
+    showSizeGuides: bool('showSizeGuides'),
+    minifigStyle: mf,
+    showMinifig1to1: bool('showMinifig1to1'),
+    showStepBorders: bool('showStepBorders'),
+    showPageTitle: bool('showPageTitle'),
+  };
+}
+
+/** Extracts a theme's complete, normalized style options. */
+export function getThemeStyleOptions(theme: Partial<ManualTheme> | null | undefined): ThemeStyleOptions {
+  return normalizeThemeStyleOptions(theme);
+}
+
+/** True when every style option in `a` equals the matching option in `b`. */
+export function themeStyleOptionsEqual(a: ThemeStyleOptions, b: ThemeStyleOptions): boolean {
+  return THEME_STYLE_OPTION_KEYS.every((k) =>
+    k === 'fadeOpacity' ? Math.abs(a.fadeOpacity - b.fadeOpacity) < 0.001 : a[k] === b[k],
+  );
+}
+
 export interface ManualTheme {
   id: string;
   name: string;
@@ -158,6 +247,17 @@ export interface ManualTheme {
   headingFont?: ThemeFontId;
   /** Font for labels, part names & body text (defaults to `public-sans`). */
   bodyFont?: ThemeFontId;
+  // Step display style options (see ThemeStyleOptions)
+  highlightNew?: boolean;
+  highlightColor?: string;
+  fadePrev?: boolean;
+  fadeOpacity?: number;
+  showRotCues?: boolean;
+  showSizeGuides?: boolean;
+  minifigStyle?: ThemeMinifigStyle;
+  showMinifig1to1?: boolean;
+  showStepBorders?: boolean;
+  showPageTitle?: boolean;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -287,6 +387,7 @@ export const BUILT_IN_THEMES: Record<string, ManualTheme> = {
     bp: false,
     headingFont: 'public-sans',
     bodyFont: 'public-sans',
+    ...DEFAULT_THEME_STYLE_OPTIONS,
   },
   white: {
     id: 'white',
@@ -307,6 +408,7 @@ export const BUILT_IN_THEMES: Record<string, ManualTheme> = {
     bp: false,
     headingFont: 'public-sans',
     bodyFont: 'public-sans',
+    ...DEFAULT_THEME_STYLE_OPTIONS,
   },
   dark: {
     id: 'dark',
@@ -327,6 +429,7 @@ export const BUILT_IN_THEMES: Record<string, ManualTheme> = {
     bp: false,
     headingFont: 'public-sans',
     bodyFont: 'public-sans',
+    ...DEFAULT_THEME_STYLE_OPTIONS,
   },
   blueprint: {
     id: 'blueprint',
@@ -347,6 +450,7 @@ export const BUILT_IN_THEMES: Record<string, ManualTheme> = {
     bp: true,
     headingFont: 'public-sans',
     bodyFont: 'public-sans',
+    ...DEFAULT_THEME_STYLE_OPTIONS,
   },
 };
 
@@ -440,6 +544,7 @@ export function normalizeCustomTheme(
     bp: typeof raw.bp === 'boolean' ? raw.bp : false,
     headingFont: sanitizeThemeFontId(raw.headingFont, sanitizeThemeFontId(fallbackBase.headingFont)),
     bodyFont: sanitizeThemeFontId(raw.bodyFont, sanitizeThemeFontId(fallbackBase.bodyFont)),
+    ...normalizeThemeStyleOptions(raw, getThemeStyleOptions(fallbackBase)),
     createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : now,
     updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : now,
   };
@@ -468,6 +573,7 @@ export function createThemeDraftFromBase(base: ManualTheme, name?: string): Manu
     bp: Boolean(base.bp),
     headingFont: sanitizeThemeFontId(base.headingFont),
     bodyFont: sanitizeThemeFontId(base.bodyFont),
+    ...getThemeStyleOptions(base),
     createdAt: now,
     updatedAt: now,
   };
@@ -740,4 +846,76 @@ export function mergeImportedThemes(
   }
 
   return { merged, importedIds, updatedCount, addedCount };
+}
+
+// ---------------------------------------------------------------------------
+// Theme recents (Style dialog theme strip is ordered by last use)
+// ---------------------------------------------------------------------------
+
+export const THEME_RECENTS_STORAGE_KEY = 'bic_theme_recents_v1';
+
+/**
+ * Orders themes for the Style dialog strip: the current theme first, then
+ * themes by most recent use, then never-used themes in their default order
+ * (built-ins, then custom themes in creation order).
+ */
+export function orderThemesByRecent(
+  themes: ManualTheme[],
+  recentIds: string[],
+  currentId: string,
+): ManualTheme[] {
+  const byId = new Map(themes.map((t) => [t.id, t] as const));
+  const out: ManualTheme[] = [];
+  const seen = new Set<string>();
+  for (const id of [currentId, ...recentIds]) {
+    const t = byId.get(id);
+    if (t && !seen.has(id)) {
+      seen.add(id);
+      out.push(t);
+    }
+  }
+  for (const t of themes) {
+    if (!seen.has(t.id)) {
+      seen.add(t.id);
+      out.push(t);
+    }
+  }
+  return out;
+}
+
+/** Moves `id` to the front of the recents list (deduped, capped). */
+export function touchThemeRecent(recentIds: string[], id: string, max = 64): string[] {
+  if (!id) return recentIds.slice(0, max);
+  return [id, ...recentIds.filter((r) => r !== id)].slice(0, max);
+}
+
+export function loadThemeRecentsFromStorage(): string[] {
+  if (typeof localStorage === 'undefined') return [];
+  try {
+    const parsed = JSON.parse(localStorage.getItem(THEME_RECENTS_STORAGE_KEY) || '[]');
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string').slice(0, 64) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveThemeRecentsToStorage(recentIds: string[]): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(THEME_RECENTS_STORAGE_KEY, JSON.stringify(recentIds.slice(0, 64)));
+  } catch {
+    // Ignore storage quota or private browsing errors
+  }
+}
+
+/** Returns `desired` or `desired 2`, `desired 3`, … so theme names stay unique. */
+export function makeUniqueThemeName(desired: string, existingNames: string[]): string {
+  const base = (desired.trim() || 'Custom Theme').slice(0, 36);
+  const taken = new Set(existingNames.map((n) => n.toLowerCase()));
+  if (!taken.has(base.toLowerCase())) return base;
+  for (let i = 2; i < 1000; i++) {
+    const candidate = `${base} ${i}`;
+    if (!taken.has(candidate.toLowerCase())) return candidate;
+  }
+  return base;
 }

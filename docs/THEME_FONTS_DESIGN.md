@@ -27,7 +27,7 @@ Fonts are picked from a fixed list, `THEME_FONTS` in [`src/themes/customThemes.t
 
 - `ManualTheme.headingFont?` / `ManualTheme.bodyFont?` hold `ThemeFontId` values. Built-in themes set both to `public-sans`.
 - `normalizeCustomTheme()` runs every value through `sanitizeThemeFontId()`. Unknown, missing, or malicious values fall back to the base theme's font, and then to `public-sans`. Legacy saved themes and older `.biwtheme` files without font fields still load. The `.biwtheme` payload `version` stays `1` because the fields are additive and optional.
-- `createThemeDraftFromBase()` copies the base theme's fonts. In the editor, the **Start From Base** buttons swap colors and background but **keep** the fonts already chosen.
+- `createThemeDraftFromBase()` copies the base theme's fonts, so **New from Current** and auto-forks keep the current typography.
 
 ## Rendering Pipeline
 
@@ -39,13 +39,13 @@ flowchart LR
   S --> H["Interactive HTML export: --font-body / --font-heading"]
 ```
 
-- **Live page (DOM):** `applyThemeFontsToElement()` sets the body stack inline on `#pageFrame` and exposes the heading stack as `--theme-heading-font`. In `index.css`, `#pageFrame .font-extrabold, #pageFrame .font-black` (and the same classes in the theme editor's `#themePreviewCard`) use the heading variable.
+- **Live page (DOM):** `applyThemeFontsToElement()` sets the body stack inline on `#pageFrame` and exposes the heading stack as `--theme-heading-font`. In `index.css`, `#pageFrame .font-extrabold, #pageFrame .font-black` (and the same classes in the Style dialog's `.theme-card-preview` cards) use the heading variable.
 - **Canvas (PDF / print / images):** every `ctx.font` in `renderPageToJpegBytes()` and `drawRotationCueBadgeCanvas()` goes through `themeCanvasFont()`. Weights ≥ 800 get the heading font and lighter weights get the body font, which matches the DOM rule. Before drawing, `ensureThemeFontsLoaded()` waits on `document.fonts.load()` for bundled families so canvas text never falls back to another face.
 - **Interactive 3D HTML export:** the payload theme carries `headingFont` / `bodyFont` CSS stacks. `sanitizeFontStack()` strips them down to `[A-Za-z0-9 ,"'_-]` before they go into the inline `<style>`. Bundled web fonts are not embedded in the export, so viewers see the stack's platform fallback.
 
 ## Editor UI
 
-The Custom Theme Editor modal has a **Typography** section with two `<select>` pickers (`#themeHeadingFont`, `#themeBodyFont`). Each option previews in its own font. The live preview card updates as you change the selection.
+The Style dialog has a **Typography** section with two `<select>` pickers (`#themeHeadingFont`, `#themeBodyFont`). Each option previews in its own font. Changes apply live to the page and to the theme strip's preview cards; editing a built-in theme creates a custom copy first (see [`STYLE_DIALOG_THEMES_DESIGN.md`](./STYLE_DIALOG_THEMES_DESIGN.md)).
 
 ## Future Work
 

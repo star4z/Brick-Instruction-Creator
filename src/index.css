@@ -194,11 +194,12 @@ body {
 
 /* Theme fonts: the page frame's body font is set inline by
    applyThemeFontsToElement(); heavy-weight text (step numbers, titles, counts)
-   uses the theme heading font — mirroring themeCanvasFont() for PDF export. */
+   uses the theme heading font — mirroring themeCanvasFont() for PDF export.
+   .theme-card-preview is the mini page preview on Style dialog theme cards. */
 #pageFrame .font-extrabold,
 #pageFrame .font-black,
-#themePreviewCard .font-extrabold,
-#themePreviewCard .font-black {
+.theme-card-preview .font-extrabold,
+.theme-card-preview .font-black {
   font-family: var(--theme-heading-font, inherit);
 }
 
@@ -533,4 +534,13 @@ body {
     border-radius: 0 !important;
     max-width: none !important;
   }
+}
+
+/* Style dialog theme strip: horizontal scroll without a chunky scrollbar */
+.theme-strip {
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.theme-strip::-webkit-scrollbar {
+  display: none;
 }

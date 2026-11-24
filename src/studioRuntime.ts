@@ -126,24 +126,33 @@ import {
   BUILT_IN_THEME_IDS,
   THEME_FONTS,
   THEME_FONT_IDS,
+  THEME_STYLE_OPTION_KEYS,
   applyThemeBackgroundToElement,
   applyThemeFontsToElement,
   buildThemeBgCss,
   createThemeDraftFromBase,
   ensureThemeFontsLoaded,
   fillThemeBackgroundCanvas,
+  getAllThemes,
   getThemeFontStack,
+  getThemeStyleOptions,
+  loadThemeRecentsFromStorage,
+  makeUniqueThemeName,
   loadCustomThemesFromStorage,
   mergeImportedThemes,
   normalizeCustomTheme,
+  normalizeThemeStyleOptions,
+  orderThemesByRecent,
   parseImportedThemeFile,
   resolveThemeById,
   sanitizeThemeFontId,
   saveCustomThemesToStorage,
+  saveThemeRecentsToStorage,
   serializeThemeExport,
-  serializeThemesPackExport,
   themeCanvasFont,
+  themeStyleOptionsEqual,
   toHexColor,
+  touchThemeRecent,
 } from './themes/customThemes';
 import {
   CUSTOM_FILE_MIME_TYPE,
@@ -151,7 +160,6 @@ import {
   PROJECT_FILE_FORMAT,
   PROJECT_FILE_STUDIO_VERSION,
   THEME_FILE_EXT,
-  THEME_PACK_FILE_NAME,
   assertProjectFileName,
   buildProjectFileName,
   buildThemeFileName,
@@ -397,10 +405,94 @@ function getActiveTheme() {
 }
 
 function persistCustomThemes() {
+  clearTimeout(persistThemesTimer);
   saveCustomThemesToStorage(customThemes);
   if (typeof dbPut === 'function') {
     dbPut('customThemes', customThemes);
   }
+}
+
+// Theme recents: the Style dialog strip shows the current theme first, then by last use.
+let themeRecents = loadThemeRecentsFromStorage();
+let persistThemesTimer = null;
+let themeRenderRaf = 0;
+
+function schedulePersistCustomThemes() {
+  clearTimeout(persistThemesTimer);
+  persistThemesTimer = setTimeout(persistCustomThemes, 300);
+}
+
+function scheduleThemeRender() {
+  if (themeRenderRaf) return;
+  themeRenderRaf = requestAnimationFrame(() => { themeRenderRaf = 0; renderAll(); });
+}
+
+/** Mirrors the active theme's step-display style options into `state`. */
+function applyActiveThemeStyleToState() {
+  const opts = getThemeStyleOptions(getActiveTheme());
+  for (const k of THEME_STYLE_OPTION_KEYS) state[k] = opts[k];
+}
+
+function noteThemeUsed() {
+  if (themeRecents[0] === state.themeId) return;
+  themeRecents = touchThemeRecent(themeRecents, state.themeId);
+  saveThemeRecentsToStorage(themeRecents);
+}
+
+function selectTheme(id) {
+  // Commit/abandon an in-progress rename before switching themes.
+  const nameEl = document.getElementById('themeNameInput');
+  if (nameEl && document.activeElement === nameEl) nameEl.blur();
+  state.themeId = resolveThemeById(id, customThemes).id;
+  applyActiveThemeStyleToState();
+  renderAll();
+}
+
+/** Creates (and selects) a new custom theme copied from `base`, with optional overrides. */
+function forkThemeIntoCustom(base, overrides = {}) {
+  const desired = base.builtIn ? `${base.name} Custom` : `${base.name} Copy`;
+  const draft = createThemeDraftFromBase(base, makeUniqueThemeName(desired, getAllThemes(customThemes).map(t => t.name)));
+  const normalized = normalizeCustomTheme({ ...draft, ...overrides, id: draft.id }, draft);
+  customThemes.push(normalized);
+  persistCustomThemes();
+  state.themeId = normalized.id;
+  applyActiveThemeStyleToState();
+  return normalized;
+}
+
+/**
+ * Applies a partial change to the active theme. Built-in themes are never
+ * modified: the first edit forks them into a new custom theme automatically.
+ */
+function patchActiveTheme(patch, { render = true } = {}) {
+  const theme = getActiveTheme();
+  if (theme.builtIn || BUILT_IN_THEME_IDS.has(theme.id)) {
+    const forked = forkThemeIntoCustom(theme, patch);
+    showToast(`Created "${forked.name}" — built-in themes stay unchanged.`);
+  } else {
+    const idx = customThemes.findIndex(t => t.id === theme.id);
+    const normalized = normalizeCustomTheme({ ...theme, ...patch, id: theme.id, updatedAt: new Date().toISOString() }, theme);
+    if (!normalized) return;
+    const next = { ...normalized, createdAt: theme.createdAt || normalized.createdAt };
+    if (idx >= 0) customThemes[idx] = next; else customThemes.push(next);
+    schedulePersistCustomThemes();
+    applyActiveThemeStyleToState();
+  }
+  if (render) scheduleThemeRender();
+}
+
+/**
+ * Migrates pre-theme style options (old session prefs / .biw projects) into the
+ * active theme. Built-in themes are forked; custom themes are updated in place.
+ */
+function adoptLegacyStyleOptions(raw) {
+  if (!raw || typeof raw !== 'object') return;
+  if (!THEME_STYLE_OPTION_KEYS.some(k => raw[k] !== undefined)) return;
+  const theme = getActiveTheme();
+  const current = getThemeStyleOptions(theme);
+  const legacy = normalizeThemeStyleOptions(raw, current);
+  if (themeStyleOptionsEqual(current, legacy)) return;
+  patchActiveTheme(legacy, { render: false });
 }
 
 async function shareOrDownloadCustomFile(textContent, fileName, sharedMsg, savedMsg) {
@@ -408,7 +500,7 @@ async function shareOrDownloadCustomFile(textContent, fileName, sharedMsg, saved
   const file = new File([blob], fileName, { type: CUSTOM_FILE_MIME_TYPE });
   if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
     try {
-      await navigator.share({ files: [file], title: fileName });
+      await navigator.share({ files: [file] });
       showToast(sharedMsg);
       return;
     } catch (_) {
@@ -8110,8 +8202,7 @@ function renderStepEditModal() {
   const mf1to1Check = body.querySelector('#stepEditMf1to1');
   if (mf1to1Check) {
     mf1to1Check.onchange = (e) => {
-      state.showMinifig1to1 = Boolean(e.target.checked);
-      renderAll();
+      patchActiveTheme({ showMinifig1to1: Boolean(e.target.checked) });
     };
   }
 
@@ -8287,7 +8378,7 @@ function toggleStepPageBreak(step, opts = {}) {
 function applyMinifigStyleChange(rawStyle, anchorStepId = null) {
   const nextStyle = normalizeMinifigStepStyle(rawStyle);
   const currentStepId = anchorStepId || state.pages[state.pageIdx]?.slots?.[0]?.step?.id || null;
-  state.minifigStyle = nextStyle;
+  patchActiveTheme({ minifigStyle: nextStyle }, { render: false });
   rebuildPages();
   if (currentStepId) {
     const idx = state.pages.findIndex(pg => pg.slots?.some(sl => sl.step.id === currentStepId));
@@ -8793,83 +8884,7 @@ function syncMenuControls() {
     b.className = `fade-chip py-1 rounded-md border font-semibold transition ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
   });
 
-  const pg = document.getElementById('presetGrid');
-  pg.innerHTML = '';
-  for (const t of Object.values(THEMES)) {
-    const b = document.createElement('button');
-    b.type = 'button';
-    const act = t.id === state.themeId;
-    b.className = `p-2.5 rounded-lg border text-left transition ${act ? 'border-[var(--primary)] ring-2 ring-[var(--primary-border)]' : 'border-[var(--border)] hover:border-[var(--primary-border)]'}`;
-    const swatch = document.createElement('div');
-    swatch.className = 'h-6 rounded-lg mb-1.5 border border-black/10 relative overflow-hidden';
-    applyThemeBackgroundToElement(swatch, t);
-    const label = document.createElement('div');
-    label.className = 'text-xs font-semibold truncate';
-    label.textContent = t.name;
-    b.appendChild(swatch);
-    b.appendChild(label);
-    b.onclick = () => { state.themeId = t.id; renderAll(); };
-    pg.appendChild(b);
-  }
-
-  const cg = document.getElementById('customThemeGrid');
-  const exportBtn = document.getElementById('btnExportThemes');
-  if (exportBtn) {
-    exportBtn.classList.toggle('hidden', customThemes.length === 0);
-    exportBtn.title = customThemes.length === 1
-      ? `Export custom theme (${THEME_FILE_EXT})`
-      : `Export all ${customThemes.length} custom themes (${THEME_FILE_EXT})`;
-  }
-  if (cg) {
-    cg.innerHTML = '';
-    cg.classList.toggle('hidden', customThemes.length === 0);
-    for (const t of customThemes) {
-      const card = document.createElement('div');
-      const act = t.id === state.themeId;
-      card.setAttribute('role', 'button');
-      card.tabIndex = 0;
-      card.className = `p-2.5 rounded-lg border text-left transition cursor-pointer ${act ? 'border-[var(--primary)] ring-2 ring-[var(--primary-border)]' : 'border-[var(--border)] hover:border-[var(--primary-border)]'}`;
-
-      const swatch = document.createElement('div');
-      swatch.className = 'h-6 rounded-lg mb-1.5 border border-black/10 relative overflow-hidden flex items-center justify-end px-1.5';
-      applyThemeBackgroundToElement(swatch, t);
-      const dot = document.createElement('span');
-      dot.className = 'w-2.5 h-2.5 rounded-full border border-white/70 shadow-xs shrink-0';
-      dot.style.background = t.accent;
-      swatch.appendChild(dot);
-
-      const footer = document.createElement('div');
-      footer.className = 'flex items-center justify-between gap-1';
-      const label = document.createElement('span');
-      label.className = 'text-xs font-semibold truncate min-w-0';
-      label.textContent = t.name;
-
-      const editBtn = document.createElement('button');
-      editBtn.type = 'button';
-      editBtn.title = `Edit ${t.name}`;
-      editBtn.setAttribute('aria-label', `Edit ${t.name}`);
-      editBtn.className = 'w-5 h-5 rounded-full flex items-center justify-center shrink-0 text-[var(--muted-foreground)] hover:text-[var(--primary)] hover:bg-black/5 dark:hover:bg-white/10 transition';
-      editBtn.innerHTML = '<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4Z"/></svg>';
-      editBtn.onclick = (e) => {
-        e.stopPropagation();
-        openThemeEditor(t);
-      };
-
-      footer.appendChild(label);
-      footer.appendChild(editBtn);
-      card.appendChild(swatch);
-      card.appendChild(footer);
-      card.onclick = () => { state.themeId = t.id; renderAll(); };
-      card.onkeydown = (e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          state.themeId = t.id;
-          renderAll();
-        }
-      };
-      cg.appendChild(card);
-    }
-  }
+  syncStylePanel();
 }
 
 function renderOverviewModal() {
@@ -10906,6 +10921,8 @@ function scheduleSaveSessionPrefs() {
 // Hook renderAll to keep session preferences persisted automatically
 const _origRenderAll = renderAll;
 renderAll = function () {
+  applyActiveThemeStyleToState();
+  noteThemeUsed();
   _origRenderAll();
   updateLibraryStatusUI();
   updateErrorIndicators();
@@ -10941,16 +10958,7 @@ async function restoreLastSessionOnStart() {
     state.layoutGroups = normalizeLayoutGroups(prefs.layoutGroups);
     syncLegacyLayoutFlag();
     if (typeof prefs.detectDuplicates === 'boolean') state.detectDuplicates = prefs.detectDuplicates;
-    if (typeof prefs.highlightNew === 'boolean') state.highlightNew = prefs.highlightNew;
-    if (prefs.highlightColor) state.highlightColor = prefs.highlightColor;
-    if (typeof prefs.fadePrev === 'boolean') state.fadePrev = prefs.fadePrev;
-    if (typeof prefs.fadeOpacity === 'number') state.fadeOpacity = prefs.fadeOpacity;
-    if (typeof prefs.showRotCues === 'boolean') state.showRotCues = prefs.showRotCues;
-    if (typeof prefs.showSizeGuides === 'boolean') state.showSizeGuides = prefs.showSizeGuides;
-    if (prefs.minifigStyle) state.minifigStyle = normalizeMinifigStepStyle(prefs.minifigStyle);
-    if (typeof prefs.showMinifig1to1 === 'boolean') state.showMinifig1to1 = prefs.showMinifig1to1;
-    if (typeof prefs.showStepBorders === 'boolean') state.showStepBorders = prefs.showStepBorders;
-    if (typeof prefs.showPageTitle === 'boolean') state.showPageTitle = prefs.showPageTitle;
+    adoptLegacyStyleOptions(prefs);
     if (prefs.pageNumberFormat) state.pageNumberFormat = prefs.pageNumberFormat;
     if (typeof prefs.showExtras === 'boolean') state.showExtras = prefs.showExtras;
     if (prefs.bomConfig) state.bomConfig = { ...state.bomConfig, ...prefs.bomConfig };
@@ -12019,88 +12027,160 @@ document.addEventListener('pointerdown', (e) => {
   setStylePopoverOpen(false);
 }, true);
 
-// Custom Theme Editor Modal + Import / Export
-const themeEditorModalEl = document.getElementById('themeEditorModal');
-let themeEditorDraft = null;
-let themeEditorEditingId = null;
+/* ------------------------------------------------------------------
+ * Style dialog: theme strip + inline theme editing
+ * ------------------------------------------------------------------ */
+const THEME_COLOR_FIELDS = [
+  ['themeColorBg', 'bgColor', '#d8ecfd'],
+  ['themeColorBgEnd', 'bgColorEnd', '#b7daf9'],
+  ['themeColorText', 'text', '#172536'],
+  ['themeColorMuted', 'muted', '#4a607a'],
+  ['themeColorAccent', 'accent', '#1a73e8'],
+  ['themeColorPliBg', 'pliBg', '#ffffff'],
+  ['themeColorPliBorder', 'pliBorder', '#8ab8e6'],
+  ['themeColorCalloutBg', 'calloutBg', '#fffbe6'],
+  ['themeColorCalloutBorder', 'calloutBorder', '#eab308'],
+];
 
-function syncThemeEditorUI() {
-  if (!themeEditorDraft) return;
-  const d = themeEditorDraft;
-  d.bg = buildThemeBgCss(d.bgType, d.bgColor, d.bgColorEnd, d.bgAngle);
+function buildThemeStripCard(t, isActive) {
+  const card = document.createElement('button');
+  card.type = 'button';
+  card.setAttribute('role', 'option');
+  card.setAttribute('aria-selected', isActive ? 'true' : 'false');
+  card.title = `${t.name}${t.builtIn ? '' : ' (custom)'}${isActive ? ' — current' : ''}`;
+  card.className = `theme-strip-card snap-start shrink-0 w-[112px] rounded-lg border p-1.5 text-left transition cursor-pointer ${isActive ? 'border-[var(--primary)] ring-2 ring-[var(--primary-border)]' : 'border-[var(--border)] hover:border-[var(--primary-border)]'}`;
+
+  const preview = document.createElement('div');
+  preview.className = 'theme-card-preview h-[58px] rounded-md border border-black/10 relative overflow-hidden px-2 py-1.5 flex flex-col justify-between';
+  applyThemeBackgroundToElement(preview, t);
+  applyThemeFontsToElement(preview, t);
+  preview.style.color = t.text;
+
+  const top = document.createElement('div');
+  top.className = 'flex items-start justify-between gap-1';
+  const num = document.createElement('span');
+  num.className = 'font-black text-lg leading-none';
+  num.textContent = '1';
+  const pli = document.createElement('span');
+  pli.className = 'px-1 py-0.5 rounded-[3px] text-[9px] font-bold leading-none flex items-center gap-0.5';
+  pli.style.background = t.pliBg;
+  pli.style.border = `1px solid ${t.pliBorder}`;
+  pli.innerHTML = '<span class="w-2 h-1.5 rounded-[1px] bg-[#c91a09] inline-block"></span><span>2×</span>';
+  top.appendChild(num);
+  top.appendChild(pli);
+
+  const bottom = document.createElement('div');
+  bottom.className = 'flex items-center justify-between gap-1 text-[9px] font-medium leading-none';
+  const muted = document.createElement('span');
+  muted.className = 'truncate';
+  muted.style.color = t.muted;
+  muted.textContent = 'Aa Bb';
+  const dot = document.createElement('span');
+  dot.className = 'w-2.5 h-2.5 rounded-full border border-white/70 shrink-0';
+  dot.style.background = t.accent;
+  bottom.appendChild(muted);
+  bottom.appendChild(dot);
+
+  preview.appendChild(top);
+  preview.appendChild(bottom);
+
+  const label = document.createElement('div');
+  label.className = 'mt-1 flex items-center gap-1 min-w-0';
+  const name = document.createElement('span');
+  name.className = 'text-[11px] font-semibold truncate min-w-0';
+  name.textContent = t.name;
+  label.appendChild(name);
+  if (!t.builtIn) {
+    // Compact pencil marker for custom themes (keeps names readable on narrow cards)
+    const tag = document.createElement('span');
+    tag.className = 'shrink-0 text-[var(--muted-foreground)]';
+    tag.setAttribute('aria-label', 'Custom theme');
+    tag.innerHTML = '<svg class="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4Z"/></svg>';
+    label.insertBefore(tag, name);
+  }
+
+  card.appendChild(preview);
+  card.appendChild(label);
+  card.onclick = () => {
+    if (t.id === state.themeId) return;
+    selectTheme(t.id);
+    const strip = document.getElementById('themeStrip');
+    if (strip) strip.scrollTo({ left: 0, behavior: 'smooth' });
+  };
+  return card;
+}
+
+function renderThemeStrip() {
+  const strip = document.getElementById('themeStrip');
+  if (!strip) return;
+  const ordered = orderThemesByRecent(getAllThemes(customThemes), themeRecents, state.themeId);
+  const sig = ordered.map(t => `${t.id}:${t.updatedAt || ''}:${t.name}`).join('|') + `#${state.themeId}`;
+  if (strip.dataset.sig === sig) return;
+  const keepScroll = strip.dataset.sigHead === `${state.themeId}` ? strip.scrollLeft : 0;
+  strip.dataset.sig = sig;
+  strip.dataset.sigHead = `${state.themeId}`;
+  strip.innerHTML = '';
+  for (const t of ordered) strip.appendChild(buildThemeStripCard(t, t.id === state.themeId));
+  strip.scrollLeft = keepScroll;
+}
+
+function syncStylePanel() {
+  const t = getActiveTheme();
+  const isBuiltIn = Boolean(t.builtIn || BUILT_IN_THEME_IDS.has(t.id));
+  renderThemeStrip();
 
   const nameInput = document.getElementById('themeNameInput');
-  if (nameInput && nameInput.value !== d.name) nameInput.value = d.name;
+  if (nameInput && document.activeElement !== nameInput && nameInput.value !== t.name) nameInput.value = t.name;
+  document.getElementById('themeBuiltInHint')?.classList.toggle('hidden', !isBuiltIn);
+  const delBtn = document.getElementById('btnDeleteTheme');
+  if (delBtn) {
+    delBtn.disabled = isBuiltIn;
+    delBtn.title = isBuiltIn ? 'Built-in themes cannot be deleted' : `Delete "${t.name}"`;
+  }
+  const expBtn = document.getElementById('btnExportTheme');
+  if (expBtn) expBtn.title = `Export "${t.name}" (${THEME_FILE_EXT})`;
 
-  const setPicker = (id, val, fallback) => {
-    const el = document.getElementById(id);
-    if (el) el.value = toHexColor(val || fallback, d.bgColor);
-  };
-  setPicker('themeColorBg', d.bgColor, '#d8ecfd');
-  setPicker('themeColorBgEnd', d.bgColorEnd, '#b7daf9');
-  setPicker('themeColorText', d.text, '#172536');
-  setPicker('themeColorMuted', d.muted, '#4a607a');
-  setPicker('themeColorAccent', d.accent, '#1a73e8');
-  setPicker('themeColorPliBg', d.pliBg, '#ffffff');
-  setPicker('themeColorPliBorder', d.pliBorder, '#8ab8e6');
-  setPicker('themeColorCalloutBg', d.calloutBg, '#fffbe6');
-  setPicker('themeColorCalloutBorder', d.calloutBorder, '#eab308');
-
+  for (const [elId, field, fallback] of THEME_COLOR_FIELDS) {
+    const el = document.getElementById(elId);
+    if (el) {
+      const v = toHexColor(t[field] || fallback, t.bgColor);
+      if (el.value !== v) el.value = v;
+    }
+  }
   const bpEl = document.getElementById('themeBlueprintGrid');
-  if (bpEl) bpEl.checked = Boolean(d.bp);
-
-  const isGrad = d.bgType === 'gradient';
+  if (bpEl) bpEl.checked = Boolean(t.bp);
+  const isGrad = t.bgType === 'gradient';
   document.getElementById('themeColorBgEndWrap')?.classList.toggle('hidden', !isGrad);
   document.getElementById('themeAngleWrap')?.classList.toggle('hidden', !isGrad);
-
   document.querySelectorAll('.theme-bgtype-btn').forEach(b => {
-    const act = b.getAttribute('data-bg-type') === d.bgType;
-    b.className = `theme-bgtype-btn px-2.5 py-1 rounded text-xs font-semibold transition ${act ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'text-[var(--muted-foreground)]'}`;
+    const act = b.getAttribute('data-bg-type') === t.bgType;
+    b.className = `theme-bgtype-btn px-2.5 py-1 rounded text-xs font-semibold transition cursor-pointer ${act ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'text-[var(--muted-foreground)]'}`;
   });
   document.querySelectorAll('.theme-angle-btn').forEach(b => {
-    const act = Number(b.getAttribute('data-bg-angle')) === Number(d.bgAngle);
-    b.className = `theme-angle-btn py-1.5 rounded-md border font-semibold transition ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
+    const act = Number(b.getAttribute('data-bg-angle')) === Number(t.bgAngle);
+    b.className = `theme-angle-btn py-1.5 rounded-md border font-semibold transition cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
   });
 
-  // Update live preview card
-  const prevCard = document.getElementById('themePreviewCard');
-  if (prevCard) {
-    applyThemeBackgroundToElement(prevCard, d);
-    prevCard.style.color = d.text;
-    prevCard.style.borderColor = d.pliBorder;
-  }
-  const prevStep = document.getElementById('themePreviewStepNum');
-  if (prevStep) prevStep.style.color = d.text;
-  const prevPli = document.getElementById('themePreviewPli');
-  if (prevPli) {
-    prevPli.style.background = d.pliBg;
-    prevPli.style.border = `1px solid ${d.pliBorder}`;
-    prevPli.style.color = d.text;
-  }
-  const prevCallout = document.getElementById('themePreviewCallout');
-  if (prevCallout) {
-    prevCallout.style.background = d.calloutBg;
-    prevCallout.style.border = `1.5px solid ${d.calloutBorder}`;
-    prevCallout.style.color = d.text;
-  }
-  const prevAccent = document.getElementById('themePreviewAccent');
-  if (prevAccent) prevAccent.style.background = d.accent;
-  const prevMuted = document.getElementById('themePreviewMuted');
-  if (prevMuted) {
-    prevMuted.style.color = d.muted;
-    prevMuted.textContent = state.model?.title || 'My Model';
-  }
-  const prevPageNum = document.getElementById('themePreviewPageNum');
-  if (prevPageNum) prevPageNum.style.color = d.text;
-
-  // Typography pickers + preview fonts
-  d.headingFont = sanitizeThemeFontId(d.headingFont);
-  d.bodyFont = sanitizeThemeFontId(d.bodyFont);
   const headingSel = document.getElementById('themeHeadingFont');
-  if (headingSel && headingSel.value !== d.headingFont) headingSel.value = d.headingFont;
+  const hf = sanitizeThemeFontId(t.headingFont);
+  if (headingSel && headingSel.value !== hf) headingSel.value = hf;
   const bodySel = document.getElementById('themeBodyFont');
-  if (bodySel && bodySel.value !== d.bodyFont) bodySel.value = d.bodyFont;
-  if (prevCard) applyThemeFontsToElement(prevCard, d);
+  const bf = sanitizeThemeFontId(t.bodyFont);
+  if (bodySel && bodySel.value !== bf) bodySel.value = bf;
+
+  const opts = getThemeStyleOptions(t);
+  const setChk = (id, val) => { const el = document.getElementById(id); if (el) el.checked = Boolean(val); };
+  setChk('toggleHighlight', opts.highlightNew);
+  setChk('toggleFade', opts.fadePrev);
+  setChk('toggleRotCues', opts.showRotCues);
+  setChk('toggleSizeGuides', opts.showSizeGuides);
+  setChk('toggleMinifig1to1', opts.showMinifig1to1);
+  setChk('toggleStepBorders', opts.showStepBorders);
+  setChk('toggleStepBordersSetup', opts.showStepBorders);
+  setChk('togglePageTitle', opts.showPageTitle);
+  setChk('togglePageTitleSetup', opts.showPageTitle);
+  const hlEl = document.getElementById('highlightColor');
+  if (hlEl && hlEl.value !== opts.highlightColor) hlEl.value = opts.highlightColor;
 }
 
 function populateThemeFontSelect(elId) {
@@ -12111,181 +12191,63 @@ function populateThemeFontSelect(elId) {
     return `<option value="${id}" style="font-family:${f.stack.replace(/"/g, '&quot;')}">${escHtml(f.label)}</option>`;
   }).join('');
   sel.onchange = (e) => {
-    if (!themeEditorDraft) return;
-    themeEditorDraft[elId === 'themeHeadingFont' ? 'headingFont' : 'bodyFont'] = sanitizeThemeFontId(e.target.value);
-    syncThemeEditorUI();
+    patchActiveTheme({ [elId === 'themeHeadingFont' ? 'headingFont' : 'bodyFont']: sanitizeThemeFontId(e.target.value) });
   };
 }
 populateThemeFontSelect('themeHeadingFont');
 populateThemeFontSelect('themeBodyFont');
 
-function openThemeEditor(existingTheme = null) {
-  setStylePopoverOpen(false);
-  if (existingTheme && !existingTheme.builtIn) {
-    themeEditorEditingId = existingTheme.id;
-    themeEditorDraft = {
-      ...existingTheme,
-      bgColor: toHexColor(existingTheme.bgColor, '#ffffff'),
-      bgColorEnd: toHexColor(existingTheme.bgColorEnd, existingTheme.bgColor),
-      text: toHexColor(existingTheme.text, existingTheme.bgColor),
-      muted: toHexColor(existingTheme.muted, existingTheme.bgColor),
-      pliBg: toHexColor(existingTheme.pliBg, existingTheme.bgColor),
-      pliBorder: toHexColor(existingTheme.pliBorder, existingTheme.bgColor),
-      accent: toHexColor(existingTheme.accent, existingTheme.bgColor),
-      calloutBg: toHexColor(existingTheme.calloutBg, existingTheme.bgColor),
-      calloutBorder: toHexColor(existingTheme.calloutBorder, existingTheme.bgColor),
-    };
-    document.getElementById('themeEditorTitle').textContent = 'Edit Custom Theme';
-    document.getElementById('btnThemeEditorDelete').classList.remove('hidden');
-  } else {
-    themeEditorEditingId = null;
-    themeEditorDraft = createThemeDraftFromBase(getActiveTheme());
-    document.getElementById('themeEditorTitle').textContent = 'New Custom Theme';
-    document.getElementById('btnThemeEditorDelete').classList.add('hidden');
-  }
-  syncThemeEditorUI();
-  themeEditorModalEl.classList.remove('hidden');
-}
-
-function closeThemeEditor() {
-  themeEditorModalEl.classList.add('hidden');
-  themeEditorDraft = null;
-  themeEditorEditingId = null;
-}
-
-document.getElementById('btnNewCustomTheme').onclick = () => openThemeEditor(null);
-document.getElementById('btnCloseThemeEditor').onclick = closeThemeEditor;
-document.getElementById('btnThemeEditorCancel').onclick = closeThemeEditor;
-themeEditorModalEl.onclick = (e) => { if (e.target === themeEditorModalEl) closeThemeEditor(); };
-
-document.getElementById('themeNameInput').oninput = (e) => {
-  if (!themeEditorDraft) return;
-  themeEditorDraft.name = e.target.value.slice(0, 40);
-};
-
-document.querySelectorAll('.theme-base-btn').forEach(b => {
-  b.onclick = () => {
-    if (!themeEditorDraft) return;
-    const base = THEMES[b.getAttribute('data-theme-base')] || THEMES.blue;
-    const preservedName = themeEditorDraft.name;
-    const preservedId = themeEditorDraft.id;
-    const { headingFont: preservedHeading, bodyFont: preservedBody } = themeEditorDraft;
-    themeEditorDraft = createThemeDraftFromBase(base, preservedName);
-    themeEditorDraft.id = preservedId;
-    // Base templates swap colors/background only; keep the chosen typography.
-    themeEditorDraft.headingFont = sanitizeThemeFontId(preservedHeading);
-    themeEditorDraft.bodyFont = sanitizeThemeFontId(preservedBody);
-    syncThemeEditorUI();
-  };
-});
-
-document.querySelectorAll('.theme-bgtype-btn').forEach(b => {
-  b.onclick = () => {
-    if (!themeEditorDraft) return;
-    themeEditorDraft.bgType = b.getAttribute('data-bg-type') === 'gradient' ? 'gradient' : 'solid';
-    syncThemeEditorUI();
-  };
-});
-
-document.querySelectorAll('.theme-angle-btn').forEach(b => {
-  b.onclick = () => {
-    if (!themeEditorDraft) return;
-    themeEditorDraft.bgAngle = Number(b.getAttribute('data-bg-angle')) || 180;
-    syncThemeEditorUI();
-  };
-});
-
-document.getElementById('themeBlueprintGrid').onchange = (e) => {
-  if (!themeEditorDraft) return;
-  themeEditorDraft.bp = e.target.checked;
-  syncThemeEditorUI();
-};
-
-const bindThemeColorInput = (elId, field) => {
+for (const [elId, field] of THEME_COLOR_FIELDS) {
   const el = document.getElementById(elId);
-  if (!el) return;
-  el.oninput = (e) => {
-    if (!themeEditorDraft) return;
-    themeEditorDraft[field] = e.target.value;
-    syncThemeEditorUI();
-  };
+  if (el) el.oninput = (e) => patchActiveTheme({ [field]: e.target.value });
+}
+document.querySelectorAll('.theme-bgtype-btn').forEach(b => {
+  b.onclick = () => patchActiveTheme({ bgType: b.getAttribute('data-bg-type') === 'gradient' ? 'gradient' : 'solid' });
+});
+document.querySelectorAll('.theme-angle-btn').forEach(b => {
+  b.onclick = () => patchActiveTheme({ bgAngle: Number(b.getAttribute('data-bg-angle')) || 180 });
+});
+document.getElementById('themeBlueprintGrid').onchange = (e) => patchActiveTheme({ bp: e.target.checked });
+
+const themeNameInputEl = document.getElementById('themeNameInput');
+themeNameInputEl.oninput = (e) => {
+  const v = String(e.target.value || '').slice(0, 40);
+  if (!v.trim()) return; // keep the old name until something is typed
+  patchActiveTheme({ name: v });
 };
-bindThemeColorInput('themeColorBg', 'bgColor');
-bindThemeColorInput('themeColorBgEnd', 'bgColorEnd');
-bindThemeColorInput('themeColorText', 'text');
-bindThemeColorInput('themeColorMuted', 'muted');
-bindThemeColorInput('themeColorAccent', 'accent');
-bindThemeColorInput('themeColorPliBg', 'pliBg');
-bindThemeColorInput('themeColorPliBorder', 'pliBorder');
-bindThemeColorInput('themeColorCalloutBg', 'calloutBg');
-bindThemeColorInput('themeColorCalloutBorder', 'calloutBorder');
+themeNameInputEl.onblur = () => { themeNameInputEl.value = getActiveTheme().name; };
+themeNameInputEl.onkeydown = (e) => { if (e.key === 'Enter') themeNameInputEl.blur(); };
 
-document.getElementById('btnThemeEditorSave').onclick = () => {
-  if (!themeEditorDraft) return;
-  const cleanedName = (document.getElementById('themeNameInput').value || '').trim() || 'Custom Theme';
-  const normalized = normalizeCustomTheme({
-    ...themeEditorDraft,
-    id: themeEditorEditingId || themeEditorDraft.id,
-    name: cleanedName,
-    updatedAt: new Date().toISOString(),
-  });
-  if (!normalized) return;
-
-  const idx = customThemes.findIndex(t => t.id === normalized.id);
-  if (idx >= 0) {
-    customThemes[idx] = { ...normalized, createdAt: customThemes[idx].createdAt || normalized.createdAt };
-  } else {
-    customThemes.push(normalized);
-  }
-  persistCustomThemes();
-  state.themeId = normalized.id;
-  closeThemeEditor();
+document.getElementById('btnNewCustomTheme').onclick = () => {
+  const created = forkThemeIntoCustom(getActiveTheme());
   renderAll();
-  showToast(idx >= 0 ? `Updated "${normalized.name}".` : `Saved theme "${normalized.name}".`);
-};
-
-document.getElementById('btnThemeEditorDelete').onclick = () => {
-  if (!themeEditorEditingId) return;
-  const removed = customThemes.find(t => t.id === themeEditorEditingId);
-  customThemes = customThemes.filter(t => t.id !== themeEditorEditingId);
-  persistCustomThemes();
-  if (state.themeId === themeEditorEditingId) {
-    state.themeId = 'blue';
-  }
-  closeThemeEditor();
-  renderAll();
-  showToast(removed ? `Deleted "${removed.name}".` : 'Deleted custom theme.');
-};
-
-document.getElementById('btnThemeEditorExport').onclick = async () => {
-  if (!themeEditorDraft) return;
-  const cleanedName = (document.getElementById('themeNameInput').value || '').trim() || 'Custom Theme';
-  const normalized = normalizeCustomTheme({
-    ...themeEditorDraft,
-    id: themeEditorEditingId || themeEditorDraft.id,
-    name: cleanedName,
+  showToast(`Created "${created.name}" from the current theme.`);
+  requestAnimationFrame(() => {
+    const strip = document.getElementById('themeStrip');
+    if (strip) strip.scrollTo({ left: 0, behavior: 'smooth' });
+    themeNameInputEl.focus();
+    themeNameInputEl.select();
   });
-  if (!normalized) return;
-  const payload = serializeThemeExport(normalized);
-  const fileName = buildThemeFileName(normalized.name);
-  await shareOrDownloadCustomFile(payload, fileName, `Shared "${normalized.name}" theme.`, `Exported ${fileName}`);
 };
 
-document.getElementById('btnExportThemes').onclick = async () => {
-  if (!customThemes.length) { showToast('Create a custom theme first.'); return; }
-  if (customThemes.length === 1) {
-    const t = customThemes[0];
-    const fileName = buildThemeFileName(t.name);
-    await shareOrDownloadCustomFile(serializeThemeExport(t), fileName, `Shared "${t.name}" theme.`, `Exported ${fileName}`);
-  } else {
-    const fileName = THEME_PACK_FILE_NAME;
-    await shareOrDownloadCustomFile(
-      serializeThemesPackExport(customThemes),
-      fileName,
-      `Shared ${customThemes.length} custom themes.`,
-      `Exported ${customThemes.length} custom themes (${fileName})`,
-    );
-  }
+document.getElementById('btnDeleteTheme').onclick = () => {
+  const t = getActiveTheme();
+  if (t.builtIn || BUILT_IN_THEME_IDS.has(t.id)) return;
+  if (!confirm(`Delete the custom theme "${t.name}"?`)) return;
+  customThemes = customThemes.filter(c => c.id !== t.id);
+  themeRecents = themeRecents.filter(id => id !== t.id);
+  saveThemeRecentsToStorage(themeRecents);
+  persistCustomThemes();
+  const next = orderThemesByRecent(getAllThemes(customThemes), themeRecents, '')[0];
+  selectTheme(next ? next.id : 'blue');
+  showToast(`Deleted "${t.name}".`);
+};
+
+document.getElementById('btnExportTheme').onclick = async () => {
+  const t = getActiveTheme();
+  const payload = serializeThemeExport(t);
+  const fileName = buildThemeFileName(t.name);
+  await shareOrDownloadCustomFile(payload, fileName, `Shared "${t.name}" theme.`, `Exported ${fileName}`);
 };
 
 document.getElementById('btnImportTheme').onclick = () => {
@@ -12301,10 +12263,11 @@ document.getElementById('themeImportInput').onchange = async (e) => {
     const { merged, importedIds } = mergeImportedThemes(customThemes, incoming);
     customThemes = merged;
     persistCustomThemes();
-    if (importedIds.length > 0) {
-      state.themeId = importedIds[0];
-    }
-    renderAll();
+    // Older theme packs may contain several themes; surface them all in the strip.
+    for (const id of [...importedIds].reverse()) themeRecents = touchThemeRecent(themeRecents, id);
+    saveThemeRecentsToStorage(themeRecents);
+    if (importedIds.length > 0) selectTheme(importedIds[0]);
+    else renderAll();
     const first = customThemes.find(t => t.id === importedIds[0]);
     showToast(
       importedIds.length === 1 && first
@@ -12325,8 +12288,6 @@ document.addEventListener('keydown', (e) => {
     closeStepEditModal();
   } else if (ovModal && !ovModal.classList.contains('hidden')) {
     ovModal.classList.add('hidden');
-  } else if (themeEditorModalEl && !themeEditorModalEl.classList.contains('hidden')) {
-    closeThemeEditor();
   } else if (stylePopEl && !stylePopEl.classList.contains('hidden')) {
     setStylePopoverOpen(false);
   }
@@ -12691,7 +12652,7 @@ if (btnOverviewRangeCreate) {
 
 document.querySelectorAll('.dens-btn').forEach(b => { b.onclick = () => { state.density = b.getAttribute('data-density'); renderAll(); }; });
 document.querySelectorAll('.pgnum-btn').forEach(b => { b.onclick = () => { state.pageNumberFormat = b.getAttribute('data-pgnum'); renderAll(); }; });
-document.querySelectorAll('.fade-chip').forEach(b => { b.onclick = () => { state.fadeOpacity = parseFloat(b.getAttribute('data-fade')); renderAll(); }; });
+document.querySelectorAll('.fade-chip').forEach(b => { b.onclick = () => patchActiveTheme({ fadeOpacity: parseFloat(b.getAttribute('data-fade')) }); });
 
 // Parts List Setup controls
 document.querySelectorAll('.bom-dens-btn').forEach(b => { b.onclick = () => { state.bomConfig.density = b.getAttribute('data-bom-dens'); renderAll(); }; });
@@ -12703,20 +12664,21 @@ document.getElementById('toggleBomNames').onchange = (e) => { state.bomConfig.sh
 
 document.getElementById('togglePrintGuides').onchange = (e) => { state.showPrintGuides = e.target.checked; renderAll(); };
 document.getElementById('toggleExtras').onchange = (e) => { state.showExtras = e.target.checked; renderAll(); };
-document.getElementById('toggleHighlight').onchange = (e) => { state.highlightNew = e.target.checked; renderAll(); };
-document.getElementById('highlightColor').oninput = (e) => { state.highlightColor = e.target.value; renderAll(); };
-document.getElementById('toggleFade').onchange = (e) => { state.fadePrev = e.target.checked; renderAll(); };
-document.getElementById('toggleRotCues').onchange = (e) => { state.showRotCues = e.target.checked; renderAll(); };
-document.getElementById('toggleSizeGuides').onchange = (e) => { state.showSizeGuides = e.target.checked; renderAll(); };
+// Step display options are part of the active theme (built-ins fork on first edit)
+document.getElementById('toggleHighlight').onchange = (e) => patchActiveTheme({ highlightNew: e.target.checked });
+document.getElementById('highlightColor').oninput = (e) => patchActiveTheme({ highlightColor: e.target.value });
+document.getElementById('toggleFade').onchange = (e) => patchActiveTheme({ fadePrev: e.target.checked });
+document.getElementById('toggleRotCues').onchange = (e) => patchActiveTheme({ showRotCues: e.target.checked });
+document.getElementById('toggleSizeGuides').onchange = (e) => patchActiveTheme({ showSizeGuides: e.target.checked });
 const mf1to1ToggleEl = document.getElementById('toggleMinifig1to1');
-if (mf1to1ToggleEl) mf1to1ToggleEl.onchange = (e) => { state.showMinifig1to1 = e.target.checked; renderAll(); };
+if (mf1to1ToggleEl) mf1to1ToggleEl.onchange = (e) => patchActiveTheme({ showMinifig1to1: e.target.checked });
 document.querySelectorAll('.mf-style-btn').forEach(b => {
   b.onclick = () => applyMinifigStyleChange(b.getAttribute('data-mf-style'));
 });
-const setStepBorders = (e) => { state.showStepBorders = e.target.checked; renderAll(); };
+const setStepBorders = (e) => patchActiveTheme({ showStepBorders: e.target.checked });
 document.getElementById('toggleStepBorders').onchange = setStepBorders;
 document.getElementById('toggleStepBordersSetup').onchange = setStepBorders;
-const setPageTitle = (e) => { state.showPageTitle = e.target.checked; renderAll(); };
+const setPageTitle = (e) => patchActiveTheme({ showPageTitle: e.target.checked });
 document.getElementById('togglePageTitle').onchange = setPageTitle;
 document.getElementById('togglePageTitleSetup').onchange = setPageTitle;
 document.getElementById('toggleCompleteText').onchange = (e) => { state.completeMeta.showText = e.target.checked; renderAll(); };
@@ -13095,7 +13057,7 @@ async function runInteractiveHtmlExport() {
       try {
         const file = new File([blob], fileName, { type: 'text/html' });
         if (navigator.canShare({ files: [file] })) {
-          await navigator.share({ files: [file], title: `${state.model.title} — Interactive 3D Instructions` });
+          await navigator.share({ files: [file] });
           shared = true;
         }
       } catch (_) {}
@@ -13263,7 +13225,7 @@ document.getElementById('btnSharePdf').onclick = async () => {
   if (!lastGeneratedPdfBlob) return;
   try {
     const file = new File([lastGeneratedPdfBlob], lastGeneratedPdfName, { type: 'application/pdf' });
-    await navigator.share({ files: [file], title: state.model.title });
+    await navigator.share({ files: [file] });
   } catch (_) {}
 };
 document.getElementById('btnSysPrint').onclick = () => {
@@ -13315,12 +13277,8 @@ async function handleIncomingProjectFile(f) {
     if (data.completeMeta) state.completeMeta = { ...state.completeMeta, ...data.completeMeta };
     if (data.backMeta) state.backMeta = { ...state.backMeta, ...data.backMeta };
     if (data.bomConfig) state.bomConfig = { ...state.bomConfig, ...data.bomConfig };
-    if (typeof data.showStepBorders === 'boolean') state.showStepBorders = data.showStepBorders;
-    if (typeof data.showPageTitle === 'boolean') state.showPageTitle = data.showPageTitle;
     if (data.pageNumberFormat) state.pageNumberFormat = data.pageNumberFormat;
     if (typeof data.detectDuplicates === 'boolean') state.detectDuplicates = data.detectDuplicates;
-    if (data.minifigStyle) state.minifigStyle = normalizeMinifigStepStyle(data.minifigStyle);
-    if (typeof data.showMinifig1to1 === 'boolean') state.showMinifig1to1 = data.showMinifig1to1;
     if (data.customTheme) {
       const normalized = normalizeCustomTheme(data.customTheme);
       if (normalized) {
@@ -13332,6 +13290,8 @@ async function handleIncomingProjectFile(f) {
     } else if (data.themeId) {
       state.themeId = resolveThemeById(data.themeId, customThemes).id;
     }
+    // Pre-theme projects stored step display options at the top level.
+    if (!data.customTheme) adoptLegacyStyleOptions(data);
     if (data.paperFormat) state.paperFormat = data.paperFormat;
     if (data.orientation) state.orientation = data.orientation;
     if (data.density) state.density = data.density;

@@ -7,8 +7,10 @@ Brick Instruction Works uses dedicated custom file extensions for all portable s
 | Artifact | Extension | Format Header (`format`) | Schema Version |
 | --- | --- | --- | --- |
 | Studio Project Export/Import | `.biw` | `brick-instruction-works-project` | Studio `4` / Store `1` |
-| Single Custom Theme Export/Import | `.biwtheme` | `brick-instruction-works-theme` | `1` |
-| Custom Theme Pack Export/Import | `.biwtheme` | `brick-instruction-works-themes` | `1` |
+| Theme Export/Import (one theme per file) | `.biwtheme` | `brick-instruction-works-theme` | `1` |
+| Legacy Custom Theme Pack (import only) | `.biwtheme` | `brick-instruction-works-themes` | `1` |
+
+Theme **export** always writes exactly one `.biwtheme` file for the current theme, from the Style dialog's **Export** button. Multi-theme packs are no longer exported. Older pack files still import, and every theme in the pack is added to the theme strip.
 
 ## Validation
 
@@ -18,6 +20,7 @@ Brick Instruction Works uses dedicated custom file extensions for all portable s
 ## Browser & iOS Compatibility
 
 - **Download / Share MIME Type**: Exported `.biw` and `.biwtheme` files are packaged with `application/octet-stream` (`CUSTOM_FILE_MIME_TYPE`) so desktop and mobile Safari preserve `.biw` and `.biwtheme` filenames instead of appending `.json`.
+- **Single-item Share Sheet**: `navigator.share()` is called with `{ files: [file] }` only. If a `title` is passed as well, iOS treats it as a second shared item: the share sheet's **Save to Files** shows "Save as 2 Items" and writes an extra text file next to the `.biwtheme` / `.biw` / PDF. This applies to theme, project, PDF and interactive HTML exports.
 - **File Picker `accept` Filtering**:
   - Desktop browsers filter file pickers via `accept=".biw"` (`#projectLoadInput`) and `accept=".biwtheme"` (`#themeImportInput`).
   - Because iOS/iPadOS Files greys out unregistered custom extensions when `accept` is present, the studio runtime removes `accept` on Apple touch devices while JavaScript validation checks `.biw` and `.biwtheme` on all platforms.

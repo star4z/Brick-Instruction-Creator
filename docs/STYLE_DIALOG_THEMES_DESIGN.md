@@ -1,0 +1,42 @@
+# Style Dialog Themes Design
+
+The Style dialog (`#stylePopover`) is now the only place to choose and edit themes. The separate Custom Theme Editor modal and its "Start From Base" templates are gone.
+
+## Layout
+
+1. **Theme strip** (`#themeStrip`): one horizontally scrollable row containing every theme, built-in and custom. Each card shows a mini page preview: background, step number "1" in the theme's heading font, a parts box, muted text in the body font, and an accent dot. Custom themes have a small pencil marker.
+   - **Order:** the current theme always comes first, then other themes by most recent use, then themes never used in their default order (built-ins, then custom themes in creation order). This comes from `orderThemesByRecent()`, with recents kept in `localStorage` (`bic_theme_recents_v1`) via `touchThemeRecent()`. The renderAll wrapper calls `noteThemeUsed()`, so every way of changing the theme (strip, import, project load, delete) updates the order.
+   - **New from Current** (`#btnNewCustomTheme`) copies the current theme into a new custom theme, selects it, and focuses the name field.
+2. **Theme name** plus **Import / Export / Delete**. Delete is disabled for built-ins. A hint explains that changing a built-in creates a custom copy.
+3. **Page Background**, **Text, Boxes & Accents**, **Typography**: the former editor controls. They apply live.
+4. **Step Display**: the former loose style toggles, now stored on the theme.
+
+## Editing Model
+
+- `patchActiveTheme(patch)` is the single write path. **Built-in themes are never modified.** The first change to one forks it with `forkThemeIntoCustom()` (named "<Name> Custom" and de-duplicated by `makeUniqueThemeName()`), applies the change, selects the fork, and shows a toast.
+- Custom themes save automatically. The theme is normalized on each change, localStorage/IndexedDB writes are debounced (300 ms), and re-renders are batched per animation frame, so dragging a color picker stays smooth.
+- Renaming applies as you type. An empty field keeps the previous name, and the field resets to the saved name on blur.
+
+## Style Options Stored on the Theme
+
+`ThemeStyleOptions` in [`src/themes/customThemes.ts`](../src/themes/customThemes.ts) uses the same key names as the runtime `state`:
+
+| Option | Default |
+| --- | --- |
+| `highlightNew` / `highlightColor` (Outline New Parts) | `true` / `#ff2d55` |
+| `fadePrev` / `fadeOpacity` (Fade Earlier Parts, Earlier Piece Visibility) | `true` / `0.82` |
+| `showRotCues` (Rotation Badges) | `true` |
+| `showSizeGuides` (1:1 Axle & Beam Guides) | `true` |
+| `minifigStyle` (Minifigure Steps) | `exploded` |
+| `showMinifig1to1` (1:1 Minifigure View) | `false` |
+| `showStepBorders` (Box Around Each Step) | `true` |
+| `showPageTitle` (Model Title on Pages) | `true` |
+
+- Built-in themes use the defaults. `normalizeThemeStyleOptions()` checks types and clamps or sanitizes values (e.g. `fadeOpacity` is kept within 0.2–1 and `highlightColor` must be a hex color). These options are included in `.biwtheme` exports.
+- `applyActiveThemeStyleToState()` copies the active theme's options into `state` before every render, so the renderers are unchanged. Every control that used to write these `state` fields directly now goes through `patchActiveTheme()`. That includes the Page Setup duplicates of Box Around Each Step and Model Title on Pages, the Step Edit modal's 1:1 Minifigure checkbox, and `applyMinifigStyleChange()`.
+- **Migration:** `adoptLegacyStyleOptions()` reads the old top-level values from saved session prefs and pre-theme `.biw` projects. If they differ from the active theme, it applies them to the theme (forking a built-in, or updating a custom theme in place), so existing users keep their settings.
+
+## Export: One File
+
+- Export always writes **one** `.biwtheme` file for the current theme. Multi-theme pack export was removed. Older pack files still import.
+- On iOS, the extra "2 Items" in Save to Files came from the share call. It passed a `title` along with the file, and iOS saved that title as a second item. All share calls now pass only `{ files: [file] }`. See [`CUSTOM_FILE_EXTENSIONS_DESIGN.md`](./CUSTOM_FILE_EXTENSIONS_DESIGN.md).

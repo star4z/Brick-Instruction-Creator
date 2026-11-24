@@ -170,3 +170,39 @@ describe('theme fonts', () => {
     expect(draft.bodyFont).toBe('rounded');
   });
 });
+
+describe('theme style options, recents & naming', () => {
+  it('stores step display options on themes with safe defaults and round-trips them', async () => {
+    const m = await import('../customThemes');
+    expect(m.getThemeStyleOptions(BUILT_IN_THEMES.blue)).toEqual(m.DEFAULT_THEME_STYLE_OPTIONS);
+    const t = normalizeCustomTheme({
+      name: 'Bold',
+      showStepBorders: false,
+      minifigStyle: 'sequential',
+      fadeOpacity: 7,
+      highlightColor: 'red;}',
+    })!;
+    expect(t.showStepBorders).toBe(false);
+    expect(t.minifigStyle).toBe('sequential');
+    expect(t.fadeOpacity).toBe(1);
+    expect(t.highlightColor).toBe('#ff2d55');
+    const [back] = parseImportedThemesJson(serializeThemeExport(t));
+    expect(m.themeStyleOptionsEqual(m.getThemeStyleOptions(back), m.getThemeStyleOptions(t))).toBe(true);
+    expect(createThemeDraftFromBase(t).showStepBorders).toBe(false);
+  });
+
+  it('orders themes current-first, then by last use, then default order', async () => {
+    const { orderThemesByRecent, touchThemeRecent } = await import('../customThemes');
+    const all = Object.values(BUILT_IN_THEMES);
+    const ids = (r: string[], cur: string) => orderThemesByRecent(all, r, cur).map((t) => t.id);
+    expect(ids([], 'dark')).toEqual(['dark', 'blue', 'white', 'blueprint']);
+    expect(ids(['white', 'blueprint', 'gone'], 'dark')).toEqual(['dark', 'white', 'blueprint', 'blue']);
+    expect(touchThemeRecent(['a', 'b', 'c'], 'c')).toEqual(['c', 'a', 'b']);
+  });
+
+  it('generates unique theme names', async () => {
+    const { makeUniqueThemeName } = await import('../customThemes');
+    expect(makeUniqueThemeName('Classic Blue Custom', ['Classic Blue'])).toBe('Classic Blue Custom');
+    expect(makeUniqueThemeName('Classic Blue Custom', ['classic blue custom', 'Classic Blue Custom 2'])).toBe('Classic Blue Custom 3');
+  });
+});

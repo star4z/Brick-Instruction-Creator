@@ -22,6 +22,7 @@ All architecture specifications and feature design proposals for **Brick Instruc
 - [`TERMINOLOGY.md`](./TERMINOLOGY.md) — UI wording convention: "parts" for elements and all counts in the editor, "pcs" only on printed manual pages, "brick" only for the category and product names.
 - [`ABSOLUTE_STEP_NUMBERING_DESIGN.md`](./ABSOLUTE_STEP_NUMBERING_DESIGN.md) — Printed (per-submodel) vs absolute (manual-wide, unique) step numbers; all step ranges (camera angle, Step Range Groups, overview selection) use absolute numbers, both shown in the UI, with legacy group migration.
 - [`THEME_FONTS_DESIGN.md`](./THEME_FONTS_DESIGN.md) — Customizable theme fonts: heading vs body font roles, curated offline-safe font catalog (bundled Public Sans / JetBrains Mono + platform stacks), sanitized `.biwtheme` fields, and consistent DOM / PDF canvas / interactive HTML rendering.
+- [`STYLE_DIALOG_THEMES_DESIGN.md`](./STYLE_DIALOG_THEMES_DESIGN.md) — All theme editing inline in the Style dialog: recency-ordered horizontal theme strip (current first), auto-fork of built-in themes on edit, New from Current, step display options stored on themes with legacy migration, and single-file `.biwtheme` export (iOS share "2 Items" fix).
 
 ## Conventions
 
