@@ -69,6 +69,7 @@ export interface InteractiveStepScene extends InteractiveSceneSpec {
   stepNum: number;
   label: string;
   rotationCue?: string;
+  rotationCueKind?: 'none' | 'yaw_90_cw' | 'yaw_90_ccw' | 'yaw_180' | 'flip_vertical';
   pli: InteractivePliEntry[];
   subLabel?: string;
   previewUrl?: string; // Static preview fallback image for JS-disabled viewers (e.g., iOS Quick Look)
@@ -84,6 +85,7 @@ export interface InteractiveViewerPage {
   subtitle?: string;
   note?: string;
   badge?: string;
+  bagNumber?: number;
   previewUrl?: string; // Static preview fallback image for JS-disabled viewers (e.g., iOS Quick Look)
   scene?: InteractiveSceneSpec;
   steps?: InteractiveStepScene[];
@@ -131,6 +133,8 @@ export interface InteractiveHtmlPayload {
   editorUrl: string;
   totalPieces: number;
   totalSteps: number;
+  /** When true, renders LEGO-style wordless iconography and numeric UI chrome. */
+  wordless?: boolean;
   theme: InteractiveViewerTheme;
   highlightNew: boolean;
   highlightColor: string;
@@ -205,6 +209,17 @@ export function buildInteractiveHtmlFilename(title: string): string {
  * the complete illustrated manual instead of an empty screen.
  */
 function buildStaticFallbackHtml(payload: InteractiveHtmlPayload, safeEditorUrl: string): string {
+  const wordless = Boolean(payload.wordless);
+  const pgLabel = (n: number) => (wordless ? String(n) : `Page ${n}`);
+  const rotSvg = (kind?: string) => {
+    if (kind === 'flip_vertical') {
+      return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="10.2" width="8" height="3.6" rx="0.9" fill="currentColor" stroke="none"/><path d="M5.5 9.5C6.2 5.6 8.9 3.6 12 3.6c3.2 0 5.9 2.1 6.6 5.9"/><polyline points="16 7.5 18.8 10 21 7.2"/><path d="M18.5 14.5c-.7 3.9-3.4 5.9-6.5 5.9-3.2 0-5.9-2.1-6.6-5.9"/><polyline points="8 16.5 5.2 14 3 16.8"/></svg>';
+    }
+    const mirror = kind === 'yaw_90_ccw' ? ' transform="translate(24 0) scale(-1 1)"' : '';
+    return `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><g${mirror}><path d="M20.5 11.5A8.5 8.5 0 0 0 6.2 5.4L4 7.6"/><polyline points="4 3.5 4 7.6 8.1 7.6"/><path d="M3.5 12.5A8.5 8.5 0 0 0 17.8 18.6L20 16.4"/><polyline points="20 20.5 20 16.4 15.9 16.4"/></g></svg>`;
+  };
+  const partsIconSvg = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.6"/></svg>';
+  const brickIconSvg = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="9" width="18" height="11" rx="2"/><path d="M6.5 9V6.2A1.2 1.2 0 0 1 7.7 5h2.6a1.2 1.2 0 0 1 1.2 1.2V9"/><path d="M12.5 9V6.2A1.2 1.2 0 0 1 13.7 5h2.6a1.2 1.2 0 0 1 1.2 1.2V9"/></svg>';
   const cards: string[] = [];
 
   for (const pg of payload.pages) {
@@ -217,25 +232,26 @@ function buildStaticFallbackHtml(payload: InteractiveHtmlPayload, safeEditorUrl:
                   (p) =>
                     `<div class="sf-pli-item">${
                       p.thumb ? `<img src="${p.thumb}" alt="${escapeHtmlText(p.name)}" />` : ''
-                    }<div><strong>${p.qty}×</strong><span>${escapeHtmlText(p.partId.toUpperCase())}</span></div></div>`,
+                    }<div><strong>${p.qty}×</strong>${wordless ? '' : `<span>${escapeHtmlText(p.partId.toUpperCase())}</span>`}</div></div>`,
                 )
                 .join('')}</div>`
             : '';
+        const showRot = Boolean(st.rotationCue || (st.rotationCueKind && st.rotationCueKind !== 'none'));
         cards.push(`
           <section class="sf-card">
             <div class="sf-card-head">
               <div class="sf-step-num">${st.stepNum}</div>
               <div class="sf-meta">
-                <div class="sf-ch">${escapeHtmlText(pg.chapterName || st.label)}</div>
+                ${wordless ? '' : `<div class="sf-ch">${escapeHtmlText(pg.chapterName || st.label)}</div>`}
                 ${st.subLabel ? `<div class="sf-sub">${escapeHtmlText(st.subLabel)}</div>` : ''}
-                ${st.rotationCue ? `<span class="sf-badge sf-rot-badge"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 11.5A8.5 8.5 0 0 0 6.2 5.4L4 7.6"/><polyline points="4 3.5 4 7.6 8.1 7.6"/><path d="M3.5 12.5A8.5 8.5 0 0 0 17.8 18.6L20 16.4"/><polyline points="20 20.5 20 16.4 15.9 16.4"/></svg><span>${escapeHtmlText(st.rotationCue)}</span></span>` : ''}
+                ${showRot ? `<span class="sf-badge sf-rot-badge">${rotSvg(st.rotationCueKind)}${st.rotationCue ? `<span>${escapeHtmlText(st.rotationCue)}</span>` : ''}</span>` : ''}
               </div>
-              <span class="sf-pg-num">Page ${pg.num}</span>
+              <span class="sf-pg-num">${pgLabel(pg.num)}</span>
             </div>
             ${pliHtml}
             ${
               st.previewUrl
-                ? `<img class="sf-img" src="${st.previewUrl}" alt="Step ${st.stepNum}" />`
+                ? `<img class="sf-img" src="${st.previewUrl}" alt="${wordless ? String(st.stepNum) : `Step ${st.stepNum}`}" />`
                 : ''
             }
           </section>`);
@@ -243,14 +259,22 @@ function buildStaticFallbackHtml(payload: InteractiveHtmlPayload, safeEditorUrl:
     } else if (pg.kind === 'bom' && pg.bomItems && pg.bomItems.length > 0) {
       const fields = (pg.bomFields && pg.bomFields.length > 0)
         ? pg.bomFields
-        : (['image', 'qty', 'name', 'partId'] as const);
-      const colHeaders: Record<string, string> = {
-        image: 'Part',
-        qty: 'Qty',
-        name: 'Part Name',
-        partId: 'Part ID',
-        color: 'Color',
-      };
+        : (wordless ? (['image', 'qty', 'partId'] as const) : (['image', 'qty', 'name', 'partId'] as const));
+      const colHeaders: Record<string, string> = wordless
+        ? {
+            image: brickIconSvg,
+            qty: '×',
+            name: 'Aa',
+            partId: '#',
+            color: '●',
+          }
+        : {
+            image: 'Part',
+            qty: 'Qty',
+            name: 'Part Name',
+            partId: 'Part ID',
+            color: 'Color',
+          };
       const renderColorChip = (b: InteractivePliEntry) => {
         const sw = b.colorHex
           ? `<span class="bom-swatch" style="background:${escapeHtmlText(b.colorHex)}"></span>`
@@ -259,7 +283,7 @@ function buildStaticFallbackHtml(payload: InteractiveHtmlPayload, safeEditorUrl:
       };
       const bodyHtml = pg.bomFormat === 'table'
         ? `<table class="sf-bom-table"><thead><tr>${fields
-            .map((f) => `<th class="col-${f}">${escapeHtmlText(colHeaders[f] || f)}</th>`)
+            .map((f) => `<th class="col-${f}">${wordless && f === 'image' ? colHeaders[f] : escapeHtmlText(colHeaders[f] || f)}</th>`)
             .join('')}</tr></thead><tbody>${pg.bomItems
             .map(
               (b) =>
@@ -288,34 +312,43 @@ function buildStaticFallbackHtml(payload: InteractiveHtmlPayload, safeEditorUrl:
                   .join('')}</div>`,
             )
             .join('')}</div>`;
+      const bomTitleHtml = wordless
+        ? `<h2 class="sf-h2" style="display:inline-flex;align-items:center;gap:8px">${partsIconSvg}${pg.title ? `<span>${escapeHtmlText(pg.title)}</span>` : ''}</h2>`
+        : `<h2 class="sf-h2">${escapeHtmlText(pg.title || 'Parts List')}</h2>`;
       cards.push(`
         <section class="sf-card">
           <div class="sf-card-head">
-            <div class="sf-meta"><h2 class="sf-h2">${escapeHtmlText(pg.title || 'Parts List')}</h2></div>
-            <span class="sf-pg-num">Page ${pg.num}</span>
+            <div class="sf-meta">${bomTitleHtml}</div>
+            <span class="sf-pg-num">${pgLabel(pg.num)}</span>
           </div>
           ${bodyHtml}
         </section>`);
     } else {
+      const headingText = pg.title !== undefined ? pg.title : (wordless ? '' : pg.label);
+      const bagSvgHtml =
+        wordless && pg.kind === 'section_divider' && pg.bagNumber
+          ? `<svg width="42" height="50" viewBox="0 0 64 76" fill="none" aria-hidden="true" style="display:block;margin-bottom:4px"><path d="M12 4 L52 4 L56 14 L58 68 A4 4 0 0 1 54 72 L10 72 A4 4 0 0 1 6 68 L8 14 Z" fill="var(--pli-bg)" stroke="var(--accent)" stroke-width="3.2" stroke-linejoin="round"/><path d="M11 14 L53 14" stroke="var(--accent)" stroke-width="2.4" stroke-linecap="round"/><circle cx="32" cy="9" r="2.2" fill="var(--accent)"/><text x="32" y="51" text-anchor="middle" font-size="${String(pg.bagNumber).length >= 2 ? 24 : 30}" font-weight="900" fill="var(--text)" font-family="inherit">${escapeHtmlText(String(pg.bagNumber))}</text></svg>`
+          : '';
       cards.push(`
         <section class="sf-card sf-hero-card">
           <div class="sf-card-head">
             <div class="sf-meta">
+              ${bagSvgHtml}
               ${pg.badge ? `<span class="sf-badge">${escapeHtmlText(pg.badge)}</span>` : ''}
-              <h2 class="sf-h2">${escapeHtmlText(pg.title || pg.label)}</h2>
+              ${headingText ? `<h2 class="sf-h2">${escapeHtmlText(headingText)}</h2>` : ''}
               ${pg.subtitle ? `<p class="sf-desc">${escapeHtmlText(pg.subtitle)}</p>` : ''}
               ${pg.note ? `<p class="sf-desc">${escapeHtmlText(pg.note)}</p>` : ''}
             </div>
-            <span class="sf-pg-num">Page ${pg.num}</span>
+            <span class="sf-pg-num">${pgLabel(pg.num)}</span>
           </div>
           ${
             pg.previewUrl
-              ? `<img class="sf-img" src="${pg.previewUrl}" alt="${escapeHtmlText(pg.title || pg.label)}" />`
+              ? `<img class="sf-img" src="${pg.previewUrl}" alt="${escapeHtmlText(headingText || String(pg.num))}" />`
               : ''
           }
           ${
             pg.kind === 'back'
-              ? `<div style="margin-top:14px;text-align:center"><a class="sf-link-btn" href="${safeEditorUrl}" target="_blank" rel="noopener noreferrer">Open in ${TOOL_DISPLAY_NAME} ↗</a></div>`
+              ? `<div style="margin-top:14px;text-align:center"><a class="sf-link-btn" href="${safeEditorUrl}" target="_blank" rel="noopener noreferrer">${wordless ? '↗' : `Open in ${TOOL_DISPLAY_NAME} ↗`}</a></div>`
               : ''
           }
         </section>`);
@@ -326,14 +359,15 @@ function buildStaticFallbackHtml(payload: InteractiveHtmlPayload, safeEditorUrl:
   <div id="noJsFallback" class="sf-root">
     <header class="sf-topbar">
       <div class="sf-brand">
-        <h1>${escapeHtmlText(payload.title || TOOL_DISPLAY_NAME)}</h1>
-        <span>${payload.totalPieces} pieces · ${payload.totalSteps} steps</span>
+        ${wordless
+          ? `<span style="display:inline-flex;align-items:center;gap:6px">${brickIconSvg}<strong>${payload.totalPieces}</strong></span>`
+          : `<h1>${escapeHtmlText(payload.title || TOOL_DISPLAY_NAME)}</h1><span>${payload.totalPieces} pieces · ${payload.totalSteps} steps</span>`}
       </div>
-      <a class="sf-link-btn" href="${safeEditorUrl}" target="_blank" rel="noopener noreferrer">${TOOL_DISPLAY_NAME} ↗</a>
+      <a class="sf-link-btn" href="${safeEditorUrl}" target="_blank" rel="noopener noreferrer">${wordless ? '↗' : `${TOOL_DISPLAY_NAME} ↗`}</a>
     </header>
-    <div class="sf-notice">
+    ${wordless ? '' : `<div class="sf-notice">
       <strong>Static Preview Mode</strong> — Interactive 3D rotation &amp; zoom require JavaScript (iOS Quick Look disables scripts in local HTML previews). Open this file in a web browser for full interactive 3D viewing.
-    </div>
+    </div>`}
     <main class="sf-pages">
       ${cards.join('')}
     </main>
@@ -344,6 +378,7 @@ function buildStaticFallbackHtml(payload: InteractiveHtmlPayload, safeEditorUrl:
  * Generates the complete, self-contained, zero-dependency Interactive 3D HTML file.
  */
 export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload): string {
+  const wordless = Boolean(payload.wordless);
   const safeTitle = escapeHtmlText(payload.title || TOOL_DISPLAY_NAME);
   const safeEditorUrl = escapeHtmlText(payload.editorUrl || DEFAULT_EDITOR_URL);
   const t = payload.theme;
@@ -714,11 +749,13 @@ ${staticFallbackHtml}
 
 <div id="interactiveApp" class="app">
   <header class="topbar">
-    <button id="btnPagesTop" class="pill title-pill" type="button" title="Browse pages">
-      <span>${safeTitle}</span>
+    <button id="btnPagesTop" class="pill title-pill" type="button" title="Browse pages" aria-label="Browse pages">
+      ${wordless
+        ? `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="7" height="7" rx="1.4"/><rect x="14" y="4" width="7" height="7" rx="1.4"/><rect x="3" y="13" width="7" height="7" rx="1.4"/><rect x="14" y="13" width="7" height="7" rx="1.4"/></svg>`
+        : `<span>${safeTitle}</span>`}
     </button>
-    <a class="pill editor-link" href="${safeEditorUrl}" target="_blank" rel="noopener noreferrer" title="Open ${TOOL_DISPLAY_NAME}">
-      <span>${TOOL_DISPLAY_NAME} ↗</span>
+    <a class="pill editor-link" href="${safeEditorUrl}" target="_blank" rel="noopener noreferrer" title="Open ${TOOL_DISPLAY_NAME}" aria-label="${TOOL_DISPLAY_NAME}">
+      <span>${wordless ? '↗' : `${TOOL_DISPLAY_NAME} ↗`}</span>
     </a>
   </header>
 
@@ -733,7 +770,7 @@ ${staticFallbackHtml}
       <button id="btnTogglePli" class="tool-btn" type="button" title="Toggle parts box" aria-label="Toggle parts box" style="display:none">▤</button>
       <button id="btnToggleHl" class="tool-btn" type="button" title="Toggle highlight new pieces" aria-label="Highlight new pieces" style="display:none">✦</button>
     </div>
-    <div id="hintChip" class="hint-chip">Drag to rotate · Pinch or scroll to zoom · Shift-drag or 2-finger to pan</div>
+    <div id="hintChip" class="hint-chip">${wordless ? '360° ↻ · ±' : 'Drag to rotate · Pinch or scroll to zoom · Shift-drag or 2-finger to pan'}</div>
     <div id="flatView" class="flat-view"></div>
   </div>
 
@@ -742,9 +779,9 @@ ${staticFallbackHtml}
       <button id="btnFirst" class="nav-btn icon-only" type="button" title="First page" aria-label="First page">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m17 18-6-6 6-6"/><path d="M7 6v12"/></svg>
       </button>
-      <button id="btnPrev" class="nav-btn" type="button">← Prev</button>
-      <button id="btnPagePicker" class="page-btn" type="button">Page 1</button>
-      <button id="btnNext" class="nav-btn primary" type="button">Next →</button>
+      <button id="btnPrev" class="nav-btn" type="button" aria-label="Previous">${wordless ? '←' : '← Prev'}</button>
+      <button id="btnPagePicker" class="page-btn" type="button">${wordless ? '1' : 'Page 1'}</button>
+      <button id="btnNext" class="nav-btn primary" type="button" aria-label="Next">${wordless ? '→' : 'Next →'}</button>
       <button id="btnLast" class="nav-btn icon-only" type="button" title="Last page" aria-label="Last page">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 18 6-6-6-6"/><path d="M17 6v12"/></svg>
       </button>
@@ -755,7 +792,7 @@ ${staticFallbackHtml}
   <div id="drawerBackdrop" class="drawer-backdrop">
     <div class="drawer glass">
       <div class="drawer-head">
-        <span>Pages &amp; Steps</span>
+        <span>${wordless ? `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="7" height="7" rx="1.4"/><rect x="14" y="4" width="7" height="7" rx="1.4"/><rect x="3" y="13" width="7" height="7" rx="1.4"/><rect x="14" y="13" width="7" height="7" rx="1.4"/></svg>` : 'Pages &amp; Steps'}</span>
         <button id="btnCloseDrawer" class="nav-btn" type="button" style="height:30px;padding:0 10px">✕</button>
       </div>
       <div class="drawer-body">
@@ -1447,31 +1484,41 @@ ${staticFallbackHtml}
       hintEl.style.display = 'none';
     }
 
+    const isWordless = Boolean(DATA.wordless);
+    const rotIconSvg = (kind) => {
+      if (kind === 'flip_vertical') {
+        return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="10.2" width="8" height="3.6" rx="0.9" fill="currentColor" stroke="none"/><path d="M5.5 9.5C6.2 5.6 8.9 3.6 12 3.6c3.2 0 5.9 2.1 6.6 5.9"/><polyline points="16 7.5 18.8 10 21 7.2"/><path d="M18.5 14.5c-.7 3.9-3.4 5.9-6.5 5.9-3.2 0-5.9-2.1-6.6-5.9"/><polyline points="8 16.5 5.2 14 3 16.8"/></svg>';
+      }
+      const mirror = kind === 'yaw_90_ccw' ? ' transform="translate(24 0) scale(-1 1)"' : '';
+      return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><g' + mirror + '><path d="M20.5 11.5A8.5 8.5 0 0 0 6.2 5.4L4 7.6"/><polyline points="4 3.5 4 7.6 8.1 7.6"/><path d="M3.5 12.5A8.5 8.5 0 0 0 17.8 18.6L20 16.4"/><polyline points="20 20.5 20 16.4 15.9 16.4"/></g></svg>';
+    };
+
     if (pg.kind === 'steps' && step) {
       const siblingTabs = pg.steps && pg.steps.length > 1
         ? '<div class="page-step-tabs">' + pg.steps.map((st, si) => {
             const targetIdx = viewerItems.findIndex(v => v.pageIndex === item.pageIndex && v.stepSlotIndex === si);
-            return '<button type="button" class="step-tab-btn ' + (si === item.stepSlotIndex ? 'active' : '') + '" data-jump="' + targetIdx + '">Step ' + st.stepNum + '</button>';
+            return '<button type="button" class="step-tab-btn ' + (si === item.stepSlotIndex ? 'active' : '') + '" data-jump="' + targetIdx + '">' + (isWordless ? st.stepNum : ('Step ' + st.stepNum)) + '</button>';
           }).join('') + '</div>'
         : '';
       const pliHtml = showPli && step.pli && step.pli.length > 0
         ? '<div class="pli-panel"><div class="pli-grid">' + step.pli.map(p =>
             '<div class="pli-item">' +
               (p.thumb ? '<img src="' + p.thumb + '" alt="' + esc(p.name) + '" />' : '') +
-              '<div><div class="pli-qty">' + p.qty + '×</div><div class="pli-id">' + esc(p.partId.toUpperCase()) + '</div></div>' +
+              '<div><div class="pli-qty">' + p.qty + '×</div>' + (isWordless ? '' : '<div class="pli-id">' + esc(p.partId.toUpperCase()) + '</div>') + '</div>' +
             '</div>'
           ).join('') + '</div></div>'
         : '';
+      const showRot = Boolean(step.rotationCue || (step.rotationCueKind && step.rotationCueKind !== 'none'));
+      const metaInner =
+        (isWordless ? '' : '<div class="step-chapter">' + esc(pg.chapterName || step.label || '') + '</div>') +
+        (step.subLabel ? '<div class="step-chapter" style="color:var(--accent)">' + esc(step.subLabel) + '</div>' : '') +
+        (showRot
+          ? '<span class="step-cue" style="' + (step.rotationCue ? '' : 'padding:3px') + '"><span class="step-cue-icon">' + rotIconSvg(step.rotationCueKind) + '</span>' + (step.rotationCue ? '<span>' + esc(step.rotationCue) + '</span>' : '') + '</span>'
+          : '');
       stepHud.innerHTML =
         '<div class="step-header-card glass">' +
           '<div class="step-num-big">' + step.stepNum + '</div>' +
-          '<div class="step-meta">' +
-            '<div class="step-chapter">' + esc(pg.chapterName || step.label || '') + '</div>' +
-            (step.subLabel ? '<div class="step-chapter" style="color:var(--accent)">' + esc(step.subLabel) + '</div>' : '') +
-            (step.rotationCue
-              ? '<span class="step-cue"><span class="step-cue-icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 11.5A8.5 8.5 0 0 0 6.2 5.4L4 7.6"/><polyline points="4 3.5 4 7.6 8.1 7.6"/><path d="M3.5 12.5A8.5 8.5 0 0 0 17.8 18.6L20 16.4"/><polyline points="20 20.5 20 16.4 15.9 16.4"/></svg></span><span>' + esc(step.rotationCue) + '</span></span>'
-              : '') +
-          '</div>' +
+          (metaInner ? '<div class="step-meta">' + metaInner + '</div>' : '') +
         '</div>' +
         siblingTabs +
         pliHtml;
@@ -1481,13 +1528,18 @@ ${staticFallbackHtml}
       });
     } else if (pg.kind === 'cover' || pg.kind === 'complete' || pg.kind === 'section_divider' || pg.kind === 'submodel_page' || pg.kind === 'back') {
       const ctaBtn = pg.kind === 'cover' && viewerItems.length > 1
-        ? '<button id="heroStartBtn" type="button" class="pill primary">Start Building →</button>'
+        ? '<button id="heroStartBtn" type="button" class="pill primary">' + (isWordless ? '▶' : 'Start Building →') + '</button>'
         : pg.kind === 'back'
-          ? '<a class="pill primary" href="' + esc(DATA.editorUrl) + '" target="_blank" rel="noopener noreferrer">Open in ${TOOL_DISPLAY_NAME} ↗</a>'
+          ? '<a class="pill primary" href="' + esc(DATA.editorUrl) + '" target="_blank" rel="noopener noreferrer">' + (isWordless ? '↗' : 'Open in ${TOOL_DISPLAY_NAME} ↗') + '</a>'
           : '';
+      const heroTitle = pg.title !== undefined ? pg.title : (isWordless ? '' : pg.label);
+      const bagSvgHtml = isWordless && pg.kind === 'section_divider' && pg.bagNumber
+        ? '<svg width="46" height="54" viewBox="0 0 64 76" fill="none" aria-hidden="true" style="display:block;margin:0 auto 4px"><path d="M12 4 L52 4 L56 14 L58 68 A4 4 0 0 1 54 72 L10 72 A4 4 0 0 1 6 68 L8 14 Z" fill="var(--pli-bg)" stroke="var(--accent)" stroke-width="3.2" stroke-linejoin="round"/><path d="M11 14 L53 14" stroke="var(--accent)" stroke-width="2.4" stroke-linecap="round"/><circle cx="32" cy="9" r="2.2" fill="var(--accent)"/><text x="32" y="51" text-anchor="middle" font-size="' + (String(pg.bagNumber).length >= 2 ? 24 : 30) + '" font-weight="900" fill="var(--text)" font-family="inherit">' + esc(String(pg.bagNumber)) + '</text></svg>'
+        : '';
       heroEl.innerHTML =
+        bagSvgHtml +
         (pg.badge ? '<span class="hero-badge">' + esc(pg.badge) + '</span>' : '') +
-        '<h1 class="hero-title">' + esc(pg.title || pg.label) + '</h1>' +
+        (heroTitle ? '<h1 class="hero-title">' + esc(heroTitle) + '</h1>' : '') +
         (pg.subtitle ? '<p class="hero-sub">' + esc(pg.subtitle) + '</p>' : '') +
         (pg.note ? '<p class="hero-sub" style="font-size:11px;opacity:.85">' + esc(pg.note) + '</p>' : '') +
         (ctaBtn ? '<div class="hero-cta-row">' + ctaBtn + '</div>' : '');
@@ -1496,14 +1548,20 @@ ${staticFallbackHtml}
       if (startBtn) startBtn.onclick = () => { curIdx = Math.min(viewerItems.length - 1, curIdx + 1); renderView(); };
     } else if (pg.kind === 'bom') {
       const items = pg.bomItems || [];
-      const fields = (pg.bomFields && pg.bomFields.length > 0) ? pg.bomFields : ['image', 'qty', 'name', 'partId'];
-      const headers = { image: 'Part', qty: 'Qty', name: 'Part Name', partId: 'Part ID', color: 'Color' };
+      const fields = (pg.bomFields && pg.bomFields.length > 0)
+        ? pg.bomFields
+        : (isWordless ? ['image', 'qty', 'partId'] : ['image', 'qty', 'name', 'partId']);
+      const partsSvg = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.6"/></svg>';
+      const brickSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="9" width="18" height="11" rx="2"/><path d="M6.5 9V6.2A1.2 1.2 0 0 1 7.7 5h2.6a1.2 1.2 0 0 1 1.2 1.2V9"/><path d="M12.5 9V6.2A1.2 1.2 0 0 1 13.7 5h2.6a1.2 1.2 0 0 1 1.2 1.2V9"/></svg>';
+      const headers = isWordless
+        ? { image: brickSvg, qty: '×', name: 'Aa', partId: '#', color: '●' }
+        : { image: 'Part', qty: 'Qty', name: 'Part Name', partId: 'Part ID', color: 'Color' };
       const colorHtml = (b) => '<span class="bom-color-cell">' +
         (b.colorHex ? '<span class="bom-swatch" style="background:' + esc(b.colorHex) + '"></span>' : '') +
         '<span>' + esc(b.colorName || '') + '</span></span>';
       const bodyHtml = pg.bomFormat === 'table'
         ? '<table class="bom-table"><thead><tr>' +
-            fields.map((f) => '<th class="col-' + f + '">' + esc(headers[f] || f) + '</th>').join('') +
+            fields.map((f) => '<th class="col-' + f + '">' + (isWordless && f === 'image' ? headers[f] : esc(headers[f] || f)) + '</th>').join('') +
           '</tr></thead><tbody>' +
             items.map((b, bi) => {
               const key = pg.id + ':' + bi;
@@ -1529,11 +1587,17 @@ ${staticFallbackHtml}
               }).join('') +
             '</div>';
           }).join('') + '</div>';
+      const bomHeadingHtml = isWordless
+        ? '<h2 style="margin:0;font-size:20px;font-weight:900;display:inline-flex;align-items:center;gap:8px">' + partsSvg + (pg.title ? '<span>' + esc(pg.title) + '</span>' : '') + '</h2>'
+        : '<h2 style="margin:0;font-size:22px;font-weight:900">' + esc(pg.title || 'Parts List') + '</h2>';
+      const bomSummaryHtml = isWordless
+        ? '<span style="font-size:12px;color:var(--muted);font-weight:700;display:inline-flex;align-items:center;gap:5px">' + brickSvg + '<span>' + DATA.totalPieces + '</span></span>'
+        : '<span style="font-size:12px;color:var(--muted);font-weight:600">Tap parts to check them off · ' + DATA.totalPieces + ' total pcs</span>';
       flatEl.innerHTML =
         '<div class="flat-inner">' +
-          '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap">' +
-            '<h2 style="margin:0;font-size:22px;font-weight:900">' + esc(pg.title || 'Parts List') + '</h2>' +
-            '<span style="font-size:12px;color:var(--muted);font-weight:600">Tap parts to check them off · ' + DATA.totalPieces + ' total pcs</span>' +
+          '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">' +
+            bomHeadingHtml +
+            bomSummaryHtml +
           '</div>' +
           bodyHtml +
         '</div>';
@@ -1546,9 +1610,10 @@ ${staticFallbackHtml}
         };
       });
     } else {
+      const divTitle = pg.title !== undefined ? pg.title : (isWordless ? '' : pg.label);
       flatEl.innerHTML =
         '<div class="divider-card glass">' +
-          '<h2 style="margin:0 0 8px;font-size:24px;font-weight:900">' + esc(pg.title || pg.label) + '</h2>' +
+          (divTitle ? '<h2 style="margin:0 0 8px;font-size:24px;font-weight:900">' + esc(divTitle) + '</h2>' : '') +
           (pg.subtitle ? '<p style="margin:0;font-size:14px;color:var(--muted)">' + esc(pg.subtitle) + '</p>' : '') +
         '</div>';
       flatEl.classList.add('open');
@@ -1559,8 +1624,12 @@ ${staticFallbackHtml}
     document.getElementById('btnNext').disabled = curIdx >= viewerItems.length - 1;
     document.getElementById('btnLast').disabled = curIdx >= viewerItems.length - 1;
     const pgPicker = document.getElementById('btnPagePicker');
-    const stepText = step ? ('Step ' + step.stepNum + ' · Page ' + pg.num) : (pg.label + ' · Page ' + pg.num);
-    pgPicker.textContent = stepText + ' / ' + DATA.pages.length;
+    if (isWordless) {
+      pgPicker.textContent = pg.num + ' / ' + DATA.pages.length;
+    } else {
+      const stepText = step ? ('Step ' + step.stepNum + ' · Page ' + pg.num) : (pg.label + ' · Page ' + pg.num);
+      pgPicker.textContent = stepText + ' / ' + DATA.pages.length;
+    }
     const scrub = document.getElementById('pageScrubber');
     scrub.max = String(Math.max(0, viewerItems.length - 1));
     scrub.value = String(curIdx);
@@ -1597,12 +1666,15 @@ ${staticFallbackHtml}
   }
 
   function openDrawer() {
+    const isWordless = Boolean(DATA.wordless);
     const list = document.getElementById('drawerList');
     list.innerHTML = viewerItems.map((it, idx) => {
-      const label = it.step ? ('Step ' + it.step.stepNum + (it.page.chapterName ? ' · ' + it.page.chapterName : '')) : it.page.label;
+      const label = isWordless
+        ? (it.step ? String(it.step.stepNum) : (it.page.bagNumber ? '#' + it.page.bagNumber : (it.page.badge || String(it.page.num))))
+        : (it.step ? ('Step ' + it.step.stepNum + (it.page.chapterName ? ' · ' + it.page.chapterName : '')) : it.page.label);
       return '<button type="button" class="drawer-item ' + (idx === curIdx ? 'active' : '') + '" data-idx="' + idx + '">' +
         '<span>' + esc(label) + '</span>' +
-        '<span class="drawer-num">Page ' + it.page.num + '</span>' +
+        '<span class="drawer-num">' + (isWordless ? String(it.page.num) : ('Page ' + it.page.num)) + '</span>' +
       '</button>';
     }).join('');
     list.querySelectorAll('[data-idx]').forEach((btn) => {

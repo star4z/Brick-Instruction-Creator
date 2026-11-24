@@ -350,6 +350,37 @@ describe('Cover Metadata & LEGO-Style Layout Geometry', () => {
     expect(layout.brandGroupRect.w).toBe(layout.brandCardRect.w + layout.brandGap + layout.qrCardRect.w);
   });
 
+  it('supports optional wordless coverMeta.showText and expands heroRect upward when title is hidden', () => {
+    const wordlessMeta = createDefaultCoverMeta({ showText: false });
+    expect(wordlessMeta.showText).toBe(false);
+    expect(wordlessMeta.showQrCode).toBe(true);
+    expect(wordlessMeta.showProgramBadge).toBe(true);
+
+    // Legacy coverMeta without showText respects fallback defaultShowText
+    expect(normalizeCoverMeta({ title: 'Rover' }, true).showText).toBe(true);
+    expect(normalizeCoverMeta({ title: 'Rover' }, false).showText).toBe(false);
+    expect(normalizeCoverMeta({ title: 'Rover', showText: true }, false).showText).toBe(true);
+
+    const withTitle = computeCoverLayout({
+      pageW: 1100,
+      pageH: 850,
+      hasCreatorLogo: false,
+      hasTitle: true,
+      hasSubtitle: false,
+      hasThemeImage: false,
+    });
+    const withoutTitle = computeCoverLayout({
+      pageW: 1100,
+      pageH: 850,
+      hasCreatorLogo: false,
+      hasTitle: false,
+      hasSubtitle: false,
+      hasThemeImage: false,
+    });
+    expect(withoutTitle.heroRect.y).toBeLessThan(withTitle.heroRect.y);
+    expect(withoutTitle.heroRect.h).toBeGreaterThan(withTitle.heroRect.h);
+  });
+
   it('computes tight camera-space orthographic bounds for elongated models', () => {
     // 4:1 wide container-ship-like box: X in [-200..200], Y in [0..80], Z in [-40..40]
     const corners = [

@@ -202,4 +202,112 @@ describe('interactiveHtmlExporter font stacks', () => {
     expect(scriptMatch).toBeTruthy();
     expect(() => new Function(scriptMatch![1])).not.toThrow();
   });
+
+  it('omits English UI chrome and uses icons/numerals when wordless mode is enabled', () => {
+    const html = generateInteractiveHtmlDocument({
+      version: 1,
+      title: 'Wordless Rover',
+      subtitle: '',
+      author: '',
+      editorUrl: DEFAULT_EDITOR_URL,
+      wordless: true,
+      totalPieces: 6,
+      totalSteps: 2,
+      theme: {
+        bg: '#ffffff',
+        text: '#111111',
+        muted: '#666666',
+        accent: '#1a73e8',
+        pliBg: '#f5f5f5',
+        pliBorder: '#cccccc',
+        calloutBg: '#fffbe6',
+        calloutBorder: '#eab308',
+        isDark: false,
+      },
+      highlightNew: true,
+      highlightColor: '#ff2d55',
+      fadePrev: true,
+      fadeOpacity: 0.7,
+      prototypes: [],
+      textures: {},
+      parts: [],
+      pages: [
+        {
+          id: 'cover',
+          kind: 'cover',
+          num: 1,
+          label: 'Cover',
+          title: '',
+          subtitle: '',
+          badge: '',
+          scene: { prevPartIdx: [], newPartIdx: [], az: 38, el: 28, zoom: 1.0, hero: true },
+        },
+        {
+          id: 'bag_1',
+          kind: 'section_divider',
+          num: 2,
+          bagNumber: 1,
+          label: '1',
+          title: '',
+          subtitle: '6',
+          badge: '1',
+        },
+        {
+          id: 'pg_s1',
+          kind: 'steps',
+          num: 3,
+          label: '1',
+          steps: [
+            {
+              stepId: 's1',
+              stepNum: 1,
+              label: '1',
+              rotationCue: '',
+              rotationCueKind: 'flip_vertical',
+              prevPartIdx: [],
+              newPartIdx: [],
+              az: 38,
+              el: 28,
+              zoom: 1.0,
+              pli: [{ partId: '3001', name: 'Brick 2×4', qty: 4, thumb: '' }],
+            },
+          ],
+        },
+        {
+          id: 'bom_0',
+          kind: 'bom',
+          num: 4,
+          label: 'Parts List',
+          title: '',
+          bomFormat: 'table',
+          bomFields: ['image', 'qty', 'partId'],
+          bomItems: [
+            { partId: '3001', name: 'Brick 2×4', qty: 4, thumb: '' },
+          ],
+        },
+      ],
+    });
+
+    const [markup, scriptPart] = html.split('<script>');
+    expect(scriptPart).toBeTruthy();
+
+    // Interactive chrome & static fallback markup omit English navigation/instruction words
+    expect(markup).not.toContain('Start Building');
+    expect(markup).not.toContain('Drag to rotate · Pinch or scroll to zoom');
+    expect(markup).not.toContain('All Steps');
+    expect(markup).not.toContain('Parts List');
+    expect(markup).not.toContain('Part Name');
+    // Wordless BOM table headers use brick icon + × + #
+    expect(markup).toContain('<th class="col-qty">×</th><th class="col-partId">#</th>');
+    // Numbered bag SVG is rendered in static fallback
+    expect(markup).toContain('viewBox="0 0 64 76"');
+    // Wordless payload flag, rotation cue kind, and wordless runtime branch are embedded
+    expect(scriptPart).toContain('"wordless":true');
+    expect(scriptPart).toContain('"rotationCueKind":"flip_vertical"');
+    expect(scriptPart).toContain("isWordless ? '▶'");
+    // Inline script must parse cleanly
+    const scriptMatch = html.match(/<script>([\s\S]*?)<\/script>/);
+    expect(scriptMatch).toBeTruthy();
+    expect(() => new Function(scriptMatch![1])).not.toThrow();
+  });
 });

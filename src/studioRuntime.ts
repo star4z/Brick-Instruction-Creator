@@ -274,6 +274,35 @@ import {
   getSectionAbsRange,
   migrateLegacyLayoutGroups,
 } from './engine/stepNumbering';
+import {
+  DEFAULT_WORDLESS_MODE,
+  buildAttachArrowIconSvg,
+  buildBrickGlyphSvg,
+  buildFlipVerticalIconInnerSvg,
+  buildMinifigPoseIconSvg,
+  buildNumberedBagSvg,
+  buildPartsGridIconSvg,
+  buildPoseAdjustIconSvg,
+  buildStepHintIconSvg,
+  buildStepsBookletIconSvg,
+  classifyStepHintAction,
+  drawAttachArrowIconCanvas,
+  drawBrickGlyphCanvas,
+  drawMinifigPoseIconCanvas,
+  drawNumberedBagCanvas,
+  drawPartsGridIconCanvas,
+  drawPoseAdjustIconCanvas,
+  drawStepHintIconCanvas,
+  drawStepsBookletIconCanvas,
+  formatManualPageNumber,
+  formatMinifig1to1Header,
+  formatMinifigPoseBadgeText,
+  getBomTableHeaderText,
+  getRotationCueDisplay,
+  getWordlessSurfaceDefaults,
+  resolveEffectiveBomConfig,
+  resolvePageNumberFormatForMode,
+} from './engine/wordlessMode';
 
 const BRAND_LOGO_ROTATION_DEG = 12;
 const BRAND_LOGO_PATHS: ReadonlyArray<readonly [string, string]> = [
@@ -6203,6 +6232,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
 // =========================================================================
 // 4. APPLICATION STATE, UNDO/REDO STACK & PAGINATION
 // =========================================================================
+const initialWordlessDefaults = getWordlessSurfaceDefaults(DEFAULT_WORDLESS_MODE);
 const state = {
   model: null,
   themeId: 'blue',
@@ -6227,14 +6257,16 @@ const state = {
   showMinifig1to1: false,
   showStepBorders: true,
   showPageTitle: true,
-  pageNumberFormat: 'page_n', // 'number' | 'page_n' | 'n_of_total' | 'none'
+  wordlessMode: DEFAULT_WORDLESS_MODE, // LEGO-style icon/number-only instructions (no translation needed)
+  bomShowTextFields: initialWordlessDefaults.bomShowTextFields,
+  pageNumberFormat: initialWordlessDefaults.pageNumberFormat, // 'number' | 'page_n' | 'n_of_total' | 'none'
   showExtras: true,
   overrides: {},           // keyed by stepId: { pin, side, corner, az, el, modelScale, pliScale, pliPos:{x,y}, calloutPos:{x,y}, calloutDir, calloutAsPages, minifigStyle, partOffsets:{ [partId]: {x,y,z,tilt,arrow} } }
   stepInserts: {},         // keyed by stepId: [ { id, kind:'text'|'image', text, src, corner, x, y, scale } ]
   pageInserts: {},         // legacy page-keyed inserts (auto-migrated to stepInserts on load)
   dividerAfter: {},        // keyed by pageId: { title, note }
-  coverMeta: createDefaultCoverMeta(),
-  completeMeta: createDefaultCompleteMeta(),
+  coverMeta: createDefaultCoverMeta({ showText: initialWordlessDefaults.coverShowText }),
+  completeMeta: { ...createDefaultCompleteMeta(), showText: initialWordlessDefaults.completeShowText },
   backMeta:  createDefaultBackMeta(),
   bomConfig: createDefaultBomConfig(),
   pages: [],
@@ -6256,9 +6288,25 @@ const state = {
 let currentSlotRenderInfo = new Map();
 let activeHeroOrbitCleanup = null;
 
-function pushUndo() {
-  if (!state.model) return;
-  const snap = JSON.stringify({
+function getEffectiveBomConfig() {
+  return resolveEffectiveBomConfig(normalizeBomConfig(state.bomConfig), Boolean(state.bomShowTextFields));
+}
+
+function applyWordlessMode(enabled, { pushHistory = true, render = true } = {}) {
+  const next = Boolean(enabled);
+  if (pushHistory && state.model) pushUndo();
+  const defs = getWordlessSurfaceDefaults(next);
+  state.wordlessMode = next;
+  state.coverMeta = { ...normalizeCoverMeta(state.coverMeta, defs.coverShowText), showText: defs.coverShowText };
+  state.completeMeta = { ...state.completeMeta, showText: defs.completeShowText };
+  state.bomShowTextFields = defs.bomShowTextFields;
+  state.pageNumberFormat = resolvePageNumberFormatForMode(state.pageNumberFormat, next);
+  overviewThumbCache.bumpEpoch();
+  if (render) renderAll();
+}
+
+function captureHistorySnap() {
+  return JSON.stringify({
     chapters: state.model.chapters,
     overrides: state.overrides,
     stepInserts: state.stepInserts,
@@ -6267,9 +6315,17 @@ function pushUndo() {
     coverMeta: state.coverMeta,
     completeMeta: state.completeMeta,
     backMeta: state.backMeta,
+    wordlessMode: state.wordlessMode,
+    bomShowTextFields: state.bomShowTextFields,
+    pageNumberFormat: state.pageNumberFormat,
     layoutConfig: state.layoutConfig,
     layoutGroups: state.layoutGroups,
   });
+}
+
+function pushUndo() {
+  if (!state.model) return;
+  const snap = captureHistorySnap();
   state.undoStack.push(snap);
   if (state.undoStack.length > 35) state.undoStack.shift();
   state.redoStack = [];
@@ -6282,12 +6338,16 @@ function applyHistorySnap(json) {
   state.stepInserts = s.stepInserts || {};
   state.pageInserts = s.pageInserts || {};
   state.dividerAfter = s.dividerAfter;
-  state.coverMeta = normalizeCoverMeta(s.coverMeta);
+  if (typeof s.wordlessMode === 'boolean') state.wordlessMode = s.wordlessMode;
+  if (typeof s.bomShowTextFields === 'boolean') state.bomShowTextFields = s.bomShowTextFields;
+  if (s.pageNumberFormat) state.pageNumberFormat = s.pageNumberFormat;
+  state.coverMeta = normalizeCoverMeta(s.coverMeta, !state.wordlessMode);
   if (s.completeMeta) state.completeMeta = normalizeCompleteMeta(s.completeMeta);
   state.backMeta = normalizeBackMeta(s.backMeta);
   if (s.layoutConfig) state.layoutConfig = normalizePageLayoutSpec(s.layoutConfig);
   if (Array.isArray(s.layoutGroups)) state.layoutGroups = normalizeLayoutGroups(s.layoutGroups);
   state.selectedPartIds.clear();
+  overviewThumbCache.bumpEpoch();
   renderAll();
   const ovModal = document.getElementById('overviewModal');
   if (ovModal && !ovModal.classList.contains('hidden')) {
@@ -6382,15 +6442,12 @@ function getMinifigThumb(partsList, cacheKey, az = MINIFIG_BUILD_CAMERA.az, el =
 }
 
 function formatPageNumber(num, total) {
-  if (state.pageNumberFormat === 'none') return '';
-  if (state.pageNumberFormat === 'number') return String(num);
-  if (state.pageNumberFormat === 'n_of_total') return `${num} / ${total}`;
-  return `Page ${num}`;
+  return formatManualPageNumber(num, total, state.pageNumberFormat, Boolean(state.wordlessMode));
 }
 
 function getBomUsableAreaInches() {
   const dims = computePageFrameDimensions();
-  const cfg = normalizeBomConfig(state.bomConfig);
+  const cfg = getEffectiveBomConfig();
   const typo = computePageTypography({
     widthIn: dims.widthIn,
     heightIn: dims.heightIn,
@@ -6741,7 +6798,7 @@ function rebuildPages() {
     // 2. Multi-page spillover Parts List (zero cut-off!) — Grid or Table format
     const allParts = getAllParts(state.model);
     const bomEntries = getSortedBomEntries(allParts);
-    const bomCfg = normalizeBomConfig(state.bomConfig);
+    const bomCfg = getEffectiveBomConfig();
     const { contentWidthIn, contentHeightIn } = getBomUsableAreaInches();
 
     if (bomCfg.format === 'table') {
@@ -7093,15 +7150,14 @@ function syncModePillButtons(page) {
   });
 }
 
-function getRotationCueLabel(cue) {
-  if (cue === 'flip_vertical') return 'Flip Over';
-  if (cue === 'yaw_180') return 'Turn 180°';
-  return 'Rotate 90°';
+function getRotationCueLabel(cue, wordless = Boolean(state.wordlessMode)) {
+  return getRotationCueDisplay(cue, wordless).text;
 }
 
-function renderRotationCueBadgeHtml(cue, theme, typo, isTightSlot = false) {
+function renderRotationCueBadgeHtml(cue, theme, typo, isTightSlot = false, wordless = Boolean(state.wordlessMode)) {
   if (!cue || cue === 'none') return '';
-  const label = getRotationCueLabel(cue);
+  const disp = getRotationCueDisplay(cue, wordless);
+  const label = disp.text;
   const medallionPx = Math.max(isTightSlot ? 24 : 30, Math.round(typo.pt(isTightSlot ? 20 : 26)));
   const svgPx = Math.max(15, Math.round(medallionPx * 0.66));
   const fontPx = Math.max(isTightSlot ? 10 : 12, Math.round(typo.pt(isTightSlot ? 9 : 11)));
@@ -7113,7 +7169,9 @@ function renderRotationCueBadgeHtml(cue, theme, typo, isTightSlot = false) {
 
   let svgInner = '';
   if (cue === 'flip_vertical') {
-    svgInner = `
+    svgInner = wordless
+      ? buildFlipVerticalIconInnerSvg()
+      : `
       <path d="M5 10.5C5 6.3 8.1 3.5 12 3.5c3.9 0 7 2.8 7 7"/>
       <polyline points="16.2 8.2 19 11 21.8 8.2"/>
       <path d="M19 13.5c0 4.2-3.1 7-7 7-3.9 0-7-2.8-7-7"/>
@@ -7130,17 +7188,28 @@ function renderRotationCueBadgeHtml(cue, theme, typo, isTightSlot = false) {
     </g>`;
   }
 
-  return `<span class="inline-flex items-center font-extrabold rounded-full bg-white text-[#18181b] whitespace-nowrap shrink-0" style="gap:${gapPx}px;border:${borderPx}px solid ${theme.accent};font-size:${fontPx}px;padding:${padY}px ${padR}px ${padY}px ${padL}px;box-shadow:0 3px 10px rgba(0,0,0,0.18)" title="${label}">
+  if (disp.iconOnly) {
+    const outerPx = medallionPx + padY * 2;
+    const iconSvgPx = Math.max(17, Math.round(medallionPx * 0.72));
+    return `<span class="inline-flex items-center justify-center rounded-full bg-white shrink-0" style="width:${outerPx}px;height:${outerPx}px;border:${borderPx}px solid ${theme.accent};box-shadow:0 3px 10px rgba(0,0,0,0.18)" title="${escHtml(disp.ariaLabel)}" aria-label="${escHtml(disp.ariaLabel)}">
+      <span class="rounded-full flex items-center justify-center shrink-0" style="width:${medallionPx}px;height:${medallionPx}px;background:${theme.accent};color:#ffffff">
+        <svg style="width:${iconSvgPx}px;height:${iconSvgPx}px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${svgInner}</svg>
+      </span>
+    </span>`;
+  }
+
+  return `<span class="inline-flex items-center font-extrabold rounded-full bg-white text-[#18181b] whitespace-nowrap shrink-0" style="gap:${gapPx}px;border:${borderPx}px solid ${theme.accent};font-size:${fontPx}px;padding:${padY}px ${padR}px ${padY}px ${padL}px;box-shadow:0 3px 10px rgba(0,0,0,0.18)" title="${escHtml(disp.ariaLabel)}">
     <span class="rounded-full flex items-center justify-center shrink-0" style="width:${medallionPx}px;height:${medallionPx}px;background:${theme.accent};color:#ffffff">
       <svg style="width:${svgPx}px;height:${svgPx}px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${svgInner}</svg>
     </span>
-    <span class="tracking-tight leading-none">${label}</span>
+    <span class="tracking-tight leading-none">${escHtml(label)}</span>
   </span>`;
 }
 
-function drawRotationCueBadgeCanvas(ctx, cue, rightX, topY, theme, typo, isTightSlot, drawRRect) {
+function drawRotationCueBadgeCanvas(ctx, cue, rightX, topY, theme, typo, isTightSlot, drawRRect, wordless = Boolean(state.wordlessMode)) {
   if (!cue || cue === 'none') return rightX;
-  const label = getRotationCueLabel(cue);
+  const disp = getRotationCueDisplay(cue, wordless);
+  const label = disp.text;
   const medallionD = Math.max(isTightSlot ? 24 : 30, Math.round(typo.pt(isTightSlot ? 20 : 26)));
   const cueFont = Math.max(isTightSlot ? 10 : 12, Math.round(typo.pt(isTightSlot ? 9 : 11)));
   const padY = Math.max(3, Math.round(typo.pt(isTightSlot ? 2.5 : 3.5)));
@@ -7150,13 +7219,13 @@ function drawRotationCueBadgeCanvas(ctx, cue, rightX, topY, theme, typo, isTight
 
   ctx.save();
   ctx.font = themeCanvasFont(theme, 800, cueFont);
-  const textW = Math.ceil(ctx.measureText(label).width);
+  const textW = disp.iconOnly ? 0 : Math.ceil(ctx.measureText(label).width);
   const cueH = medallionD + padY * 2;
-  const cueW = padL + medallionD + gap + textW + padR;
+  const cueW = disp.iconOnly ? cueH : (padL + medallionD + gap + textW + padR);
   const cueX = rightX - cueW;
   const cueY = topY;
 
-  // Pill body with crisp drop shadow and accent border
+  // Pill or circular medallion body with crisp drop shadow and accent border
   ctx.save();
   ctx.shadowColor = 'rgba(0, 0, 0, 0.18)';
   ctx.shadowBlur = 8;
@@ -7172,7 +7241,7 @@ function drawRotationCueBadgeCanvas(ctx, cue, rightX, topY, theme, typo, isTight
   ctx.stroke();
 
   // Solid accent circular medallion
-  const cx = cueX + padL + medallionD / 2;
+  const cx = disp.iconOnly ? (cueX + cueW / 2) : (cueX + padL + medallionD / 2);
   const cy = cueY + cueH / 2;
   const r = medallionD / 2;
   ctx.beginPath();
@@ -7206,16 +7275,25 @@ function drawRotationCueBadgeCanvas(ctx, cue, rightX, topY, theme, typo, isTight
   };
 
   if (cue === 'flip_vertical') {
+    if (wordless) {
+      // Centered brick bar + top/bottom flip arcs (LEGO-style vertical flip icon)
+      const bw = r * 0.62;
+      const bh = Math.max(2.6, r * 0.28);
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(-bw / 2, -bh / 2, bw, bh, bh * 0.35);
+      else ctx.rect(-bw / 2, -bh / 2, bw, bh);
+      ctx.fill();
+    }
     // Top arch right + bottom arch left
     ctx.beginPath();
-    ctx.arc(0, -ar * 0.15, ar * 0.92, Math.PI * 1.12, Math.PI * 1.88, false);
+    ctx.arc(0, -ar * 0.18, ar * 0.96, Math.PI * 1.12, Math.PI * 1.88, false);
     ctx.stroke();
-    drawArrowHead(Math.cos(Math.PI * 1.88) * ar * 0.92, -ar * 0.15 + Math.sin(Math.PI * 1.88) * ar * 0.92, Math.PI * 0.42);
+    drawArrowHead(Math.cos(Math.PI * 1.88) * ar * 0.96, -ar * 0.18 + Math.sin(Math.PI * 1.88) * ar * 0.96, Math.PI * 0.42);
 
     ctx.beginPath();
-    ctx.arc(0, ar * 0.15, ar * 0.92, Math.PI * 0.12, Math.PI * 0.88, false);
+    ctx.arc(0, ar * 0.18, ar * 0.96, Math.PI * 0.12, Math.PI * 0.88, false);
     ctx.stroke();
-    drawArrowHead(Math.cos(Math.PI * 0.88) * ar * 0.92, ar * 0.15 + Math.sin(Math.PI * 0.88) * ar * 0.92, -Math.PI * 0.58);
+    drawArrowHead(Math.cos(Math.PI * 0.88) * ar * 0.96, ar * 0.18 + Math.sin(Math.PI * 0.88) * ar * 0.96, -Math.PI * 0.58);
   } else {
     // Dual opposing rotation arcs
     ctx.beginPath();
@@ -7236,11 +7314,13 @@ function drawRotationCueBadgeCanvas(ctx, cue, rightX, topY, theme, typo, isTight
   }
   ctx.restore();
 
-  // Bold label
-  ctx.fillStyle = '#18181b';
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(label, cueX + padL + medallionD + gap, cy + 0.5);
+  // Bold label (omitted when iconOnly)
+  if (!disp.iconOnly) {
+    ctx.fillStyle = '#18181b';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, cueX + padL + medallionD + gap, cy + 0.5);
+  }
   ctx.restore();
   return cueX - 8;
 }
@@ -7375,20 +7455,24 @@ function renderAll() {
 
   const guideCls = (state.showPrintGuides && state.paperFormat !== 'screen') ? 'print-margin-guide' : '';
   const footerPadBottom = Math.max(4, Math.round(padPx * 0.42));
+  const wordless = Boolean(state.wordlessMode);
+  const showFooterTitle = !wordless && Boolean(state.showPageTitle);
 
   // Render Page Contents
   if (page.kind === 'cover') {
     const dens = DENSITY_PAD[state.density] || DENSITY_PAD.balanced;
-    state.coverMeta = normalizeCoverMeta(state.coverMeta);
+    state.coverMeta = normalizeCoverMeta(state.coverMeta, !wordless);
     const cm = state.coverMeta;
     const isHeroCameraMode = state.mode === 'camera';
-    const title = (cm.title || state.model.title || 'Untitled Model').trim();
-    const sub = (cm.subtitle || '').trim();
+    const showCoverText = cm.showText !== false;
+    const title = showCoverText ? (cm.title || state.model.title || 'Untitled Model').trim() : '';
+    const sub = showCoverText ? (cm.subtitle || '').trim() : '';
     const layout = computeCoverLayout({
       pageW: dims.width,
       pageH: dims.height,
       hasCreatorLogo: Boolean(cm.creatorLogoSrc),
-      hasSubtitle: sub.length > 0,
+      hasTitle: showCoverText && title.length > 0,
+      hasSubtitle: showCoverText && sub.length > 0,
       hasThemeImage: Boolean(cm.themeImageSrc),
       densityPadFactor: dens.pad / 20,
     });
@@ -7444,20 +7528,24 @@ function renderAll() {
       <div class="relative w-full h-full overflow-hidden ${guideCls}" style="${cm.bgSrc ? `background-image:url(${cm.bgSrc});background-size:cover;background-position:center;` : ''}">
         <!-- High-Quality Page-Filling Hero Render -->
         <div id="heroOrbitContainer" class="absolute ${isHeroCameraMode ? 'z-20 cursor-grab active:cursor-grabbing' : 'z-0 pointer-events-none'} flex items-center justify-center" style="left:${layout.heroRect.x}px;top:${layout.heroRect.y}px;width:${layout.heroRect.w}px;height:${layout.heroRect.h}px;touch-action:${isHeroCameraMode ? 'none' : 'auto'};">
-          <img id="heroStaticImg" data-cover-hero-img="true" src="${snap.url}" alt="${escHtml(title)}" class="w-full h-full object-contain pointer-events-none select-none" />
+          <img id="heroStaticImg" data-cover-hero-img="true" src="${snap.url}" alt="${escHtml(title || state.model.title || 'Model')}" class="w-full h-full object-contain pointer-events-none select-none" />
           ${isHeroCameraMode ? `<canvas id="liveHeroOrbitCanvas" class="hidden absolute inset-0 w-full h-full object-contain pointer-events-none"></canvas>` : ''}
         </div>
 
-        <!-- Top-Left: Optional Creator Logo + Model Name + Optional Subtitle -->
-        <div class="absolute z-10 flex flex-col items-start pointer-events-none" style="left:${layout.pad}px;top:${layout.pad}px;max-width:${layout.topLeftMaxW}px;">
-          ${cm.creatorLogoSrc ? `
-            <img src="${cm.creatorLogoSrc}" alt="Creator logo" class="block object-contain object-left pointer-events-none select-none" style="max-width:${layout.creatorLogoMaxW}px;max-height:${layout.creatorLogoMaxH}px;margin-bottom:${layout.creatorLogoGap}px;" />
-          ` : ''}
-          <h1 class="font-extrabold tracking-tight" style="font-size:${layout.titleFontPx}px;line-height:${layout.titleLineHeightPx}px;letter-spacing:-0.02em;color:${theme.text};display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;${titleShadow}">${escHtml(title)}</h1>
-          ${sub ? `
-            <p class="font-medium" style="font-size:${layout.subtitleFontPx}px;line-height:1.25;margin-top:${layout.subtitleGap}px;color:${theme.muted};display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;${titleShadow}">${escHtml(sub)}</p>
-          ` : ''}
-        </div>
+        <!-- Top-Left: Optional Creator Logo + Optional Model Name & Subtitle -->
+        ${(cm.creatorLogoSrc || (showCoverText && (title || sub))) ? `
+          <div class="absolute z-10 flex flex-col items-start pointer-events-none" style="left:${layout.pad}px;top:${layout.pad}px;max-width:${layout.topLeftMaxW}px;">
+            ${cm.creatorLogoSrc ? `
+              <img src="${cm.creatorLogoSrc}" alt="Creator logo" class="block object-contain object-left pointer-events-none select-none" style="max-width:${layout.creatorLogoMaxW}px;max-height:${layout.creatorLogoMaxH}px;margin-bottom:${showCoverText && (title || sub) ? layout.creatorLogoGap : 0}px;" />
+            ` : ''}
+            ${showCoverText && title ? `
+              <h1 class="font-extrabold tracking-tight" style="font-size:${layout.titleFontPx}px;line-height:${layout.titleLineHeightPx}px;letter-spacing:-0.02em;color:${theme.text};display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;${titleShadow}">${escHtml(title)}</h1>
+            ` : ''}
+            ${showCoverText && sub ? `
+              <p class="font-medium" style="font-size:${layout.subtitleFontPx}px;line-height:1.25;margin-top:${layout.subtitleGap}px;color:${theme.muted};display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;${titleShadow}">${escHtml(sub)}</p>
+            ` : ''}
+          </div>
+        ` : ''}
 
         <!-- Top-Right: Optional Series / Theme Logo -->
         ${cm.themeImageSrc ? `
@@ -7538,7 +7626,7 @@ function renderAll() {
           ${isHeroCameraMode ? `<canvas id="liveHeroOrbitCanvas" class="hidden absolute inset-0 w-full h-full object-contain pointer-events-none"></canvas>` : ''}
         </div>
         <div class="absolute z-10 flex justify-between font-medium pointer-events-none" style="bottom:${footerPadBottom}px;left:${padPx}px;right:${padPx}px;font-size:${typo.footerFont}px;color:${theme.muted}">
-          <span class="truncate">${state.showPageTitle ? escHtml(state.model.title) : ''}</span>
+          <span class="truncate">${showFooterTitle ? escHtml(state.model.title) : ''}</span>
           <span style="color:${theme.text}" class="font-bold shrink-0">${escHtml(pgNumText)}</span>
         </div>
       </div>`;
@@ -7566,11 +7654,13 @@ function renderAll() {
         </a>
       </div>`;
   } else if (page.kind === 'divider') {
-    const d = state.dividerAfter[page.sourcePgId] || { title:'Section Divider', note:'' };
+    const d = state.dividerAfter[page.sourcePgId] || { title: wordless ? '' : 'Section Divider', note:'' };
+    const divTitle = (d.title || '').trim();
+    const divNote = (d.note || '').trim() || (wordless ? '' : 'Switch to Page mode to edit this divider page.');
     frame.innerHTML = `
       <div class="w-full h-full flex flex-col items-center justify-center text-center ${guideCls}" style="padding:${padPx + Math.round(typo.pt(10))}px;gap:${Math.round(typo.pt(8))}px">
-        <div class="font-extrabold" style="font-size:${typo.divider.customTitleFont}px">${escHtml(d.title)}</div>
-        <div style="color:${theme.muted};font-size:${typo.divider.customNoteFont}px;max-width:${Math.round(typo.pt(320))}px">${escHtml(d.note || 'Switch to Page mode to edit this divider page.')}</div>
+        ${divTitle ? `<div class="font-extrabold" style="font-size:${typo.divider.customTitleFont}px">${escHtml(divTitle)}</div>` : ''}
+        ${divNote ? `<div style="color:${theme.muted};font-size:${typo.divider.customNoteFont}px;max-width:${Math.round(typo.pt(320))}px">${escHtml(divNote)}</div>` : ''}
       </div>`;
   } else if (page.kind === 'section_divider') {
     const resScale = getPreviewResolutionScale();
@@ -7585,9 +7675,15 @@ function renderAll() {
     const pgNumText = formatPageNumber(page.num, state.pages.length);
     const pillPadX = Math.round(typo.pt(8));
     const pillPadY = Math.round(typo.pt(2.5));
-    frame.innerHTML = `
-      <div class="relative w-full h-full flex flex-col justify-between overflow-hidden ${guideCls}" style="padding:${padPx}px;padding-bottom:${padPx + footerH}px">
-        <div class="shrink-0 flex items-center justify-between" style="gap:${Math.round(typo.pt(12))}px">
+    const bagHeaderHtml = wordless
+      ? `<div class="shrink-0 flex items-center justify-between" style="gap:${Math.round(typo.pt(12))}px">
+          <div class="shrink-0">${buildNumberedBagSvg(page.bagNumber || 1, Math.round(typo.pt(56)), theme.accent, theme.pliBg, theme.text)}</div>
+          <div class="shrink-0 flex flex-col items-end font-bold" style="gap:${Math.round(typo.pt(4))}px;font-size:${typo.divider.metaFont}px">
+            <span class="inline-flex items-center rounded-full tabular-nums" style="gap:${Math.round(typo.pt(4))}px;background:${theme.pliBg};border:1px solid ${theme.pliBorder};padding:${pillPadY}px ${pillPadX}px">${buildBrickGlyphSvg(Math.max(12, Math.round(typo.divider.metaFont * 1.1)))}<span>${page.pieceCount || 0}</span></span>
+            <span class="inline-flex items-center tabular-nums" style="gap:${Math.round(typo.pt(4))}px;color:${theme.muted};font-size:${typo.divider.subMetaFont}px">${buildStepsBookletIconSvg(Math.max(11, Math.round(typo.divider.subMetaFont * 1.15)))}<span>${page.firstStepNum}–${page.lastStepNum}</span></span>
+          </div>
+        </div>`
+      : `<div class="shrink-0 flex items-center justify-between" style="gap:${Math.round(typo.pt(12))}px">
           <div class="min-w-0">
             <span class="inline-block font-extrabold uppercase tracking-wider rounded-full text-white" style="background:${theme.accent};font-size:${typo.divider.badgeFont}px;padding:${pillPadY}px ${pillPadX}px;margin-bottom:${Math.round(typo.pt(4))}px">Build Stage ${page.bagNumber || 1}</span>
             <h2 class="font-extrabold tracking-tight leading-tight truncate" style="font-size:${typo.divider.titleFont}px">${escHtml(page.chapterName || page.label)}</h2>
@@ -7596,12 +7692,15 @@ function renderAll() {
             <span class="rounded-full" style="background:${theme.pliBg};border:1px solid ${theme.pliBorder};padding:${pillPadY}px ${pillPadX}px">${page.pieceCount || 0} pcs</span>
             <span style="color:${theme.muted};font-size:${typo.divider.subMetaFont}px">Steps ${page.firstStepNum}–${page.lastStepNum}</span>
           </div>
-        </div>
+        </div>`;
+    frame.innerHTML = `
+      <div class="relative w-full h-full flex flex-col justify-between overflow-hidden ${guideCls}" style="padding:${padPx}px;padding-bottom:${padPx + footerH}px">
+        ${bagHeaderHtml}
         <div class="relative flex-1 min-h-0 overflow-hidden" style="margin:${Math.round(typo.pt(8))}px 0">
           <img src="${snap.url}" alt="${escHtml(page.chapterName || 'Stage')}" class="absolute inset-0 w-full h-full object-contain pointer-events-none" />
         </div>
         <div class="absolute flex justify-between font-medium pointer-events-none" style="bottom:${footerPadBottom}px;left:${padPx}px;right:${padPx}px;font-size:${typo.footerFont}px;color:${theme.muted}">
-          <span class="truncate">${state.showPageTitle ? escHtml(state.model.title) : ''}</span>
+          <span class="truncate">${showFooterTitle ? escHtml(state.model.title) : ''}</span>
           <span style="color:${theme.text}" class="font-bold shrink-0">${escHtml(pgNumText)}</span>
         </div>
       </div>`;
@@ -7619,20 +7718,20 @@ function renderAll() {
     const pgNumText = formatPageNumber(page.num, state.pages.length);
     frame.innerHTML = `
       <div class="relative w-full h-full flex flex-col justify-between overflow-hidden ${guideCls}" style="padding:${padPx}px;padding-bottom:${padPx + footerH}px">
-        <div class="shrink-0 flex items-center justify-between">
-          <h2 class="font-extrabold" style="font-size:${typo.submodelPage.titleFont}px">${escHtml(sub.name)}</h2>
-          <span class="rounded-full font-bold text-white" style="background:${theme.accent};font-size:${typo.submodelPage.badgeFont}px;padding:${Math.round(typo.pt(2.5))}px ${Math.round(typo.pt(8))}px">Build ${sub.repeatCount}×</span>
+        <div class="shrink-0 flex items-center ${wordless ? 'justify-end' : 'justify-between'}">
+          ${wordless ? '' : `<h2 class="font-extrabold" style="font-size:${typo.submodelPage.titleFont}px">${escHtml(sub.name)}</h2>`}
+          <span class="rounded-full font-black text-white" style="background:${theme.accent};font-size:${typo.submodelPage.badgeFont}px;padding:${Math.round(typo.pt(2.5))}px ${Math.round(typo.pt(9))}px">${wordless ? `×${sub.repeatCount}` : `Build ${sub.repeatCount}×`}</span>
         </div>
         <div class="relative flex-1 min-h-0 overflow-hidden" style="margin:${Math.round(typo.pt(8))}px 0">
           <img src="${snap.url}" class="absolute inset-0 w-full h-full object-contain pointer-events-none" />
         </div>
         <div class="absolute flex justify-between font-medium pointer-events-none" style="bottom:${footerPadBottom}px;left:${padPx}px;right:${padPx}px;font-size:${typo.footerFont}px;color:${theme.muted}">
-          <span class="truncate">${state.showPageTitle ? escHtml(page.chapterName) : ''}</span>
+          <span class="truncate">${showFooterTitle ? escHtml(page.chapterName) : ''}</span>
           <span style="color:${theme.text}" class="font-bold shrink-0">${escHtml(pgNumText)}</span>
         </div>
       </div>`;
   } else if (page.kind === 'bom') {
-    const cfg = normalizeBomConfig(state.bomConfig);
+    const cfg = getEffectiveBomConfig();
     const enabledFields = getEnabledBomFields(cfg);
     const entries = page.bomEntries || [];
     const pgNumText = formatPageNumber(page.num, state.pages.length);
@@ -7651,10 +7750,15 @@ function renderAll() {
       });
       const tCols = computeBomTableColumns(enabledFields, bodyW, tTypo.rowH);
       const headerRowHtml = `
-        <div class="shrink-0 flex items-center border-b font-bold uppercase tracking-wider" style="height:${tTypo.headerH}px;background:${theme.pliBg};border-color:${theme.pliBorder};color:${theme.muted};font-size:${tTypo.headerFont}px;border-top-left-radius:${Math.round(typo.pt(4))}px;border-top-right-radius:${Math.round(typo.pt(4))}px">
+        <div class="shrink-0 flex items-center border-b font-bold ${wordless ? '' : 'uppercase tracking-wider'}" style="height:${tTypo.headerH}px;background:${theme.pliBg};border-color:${theme.pliBorder};color:${theme.muted};font-size:${tTypo.headerFont}px;border-top-left-radius:${Math.round(typo.pt(4))}px;border-top-right-radius:${Math.round(typo.pt(4))}px">
           ${tCols.map((c) => {
             const ta = c.align === 'right' ? 'text-right justify-end' : c.align === 'center' ? 'text-center justify-center' : 'text-left justify-start';
-            return `<div class="h-full flex items-center overflow-hidden ${ta}" style="width:${(c.widthFrac * 100).toFixed(4)}%;padding:0 ${tTypo.cellPadX}px"><span class="truncate">${escHtml(c.label)}</span></div>`;
+            const colInner = wordless
+              ? (c.id === 'image'
+                ? buildBrickGlyphSvg(Math.max(11, Math.round(tTypo.headerFont * 1.35)))
+                : `<span class="truncate">${escHtml(getBomTableHeaderText(c.id, true))}</span>`)
+              : `<span class="truncate">${escHtml(c.label)}</span>`;
+            return `<div class="h-full flex items-center overflow-hidden ${ta}" style="width:${(c.widthFrac * 100).toFixed(4)}%;padding:0 ${tTypo.cellPadX}px">${colInner}</div>`;
           }).join('')}
         </div>`;
 
@@ -7752,18 +7856,28 @@ function renderAll() {
       bomBodyHtml = `<div class="relative flex-1 min-h-0 w-full">${gridCellsHtml}</div>`;
     }
 
-    frame.innerHTML = `
-      <div class="relative w-full h-full flex flex-col overflow-hidden ${guideCls}" style="padding:${padPx}px;padding-bottom:${padPx + footerH}px">
-        <div class="shrink-0 flex items-baseline justify-between border-b" style="border-color:${theme.pliBorder};padding-bottom:${bt.headerPb}px;margin-bottom:${bt.headerMb}px;gap:${Math.round(typo.pt(8))}px">
+    const bomHeaderHtml = wordless
+      ? `<div class="shrink-0 flex items-center justify-between border-b" style="border-color:${theme.pliBorder};padding-bottom:${bt.headerPb}px;margin-bottom:${bt.headerMb}px;gap:${Math.round(typo.pt(8))}px">
+          <div class="flex items-center min-w-0" style="gap:${Math.round(typo.pt(7))}px">
+            <span class="inline-flex items-center shrink-0" style="color:${theme.accent}">${buildPartsGridIconSvg(Math.max(14, Math.round(bt.titleFont * 1.12)))}</span>
+            ${page.bomPageCount > 1 ? `<span class="font-bold opacity-80 shrink-0 tabular-nums" style="font-size:${bt.pageCountFont}px">${page.bomPageIdx + 1} / ${page.bomPageCount}</span>` : ''}
+          </div>
+          <span class="shrink-0 inline-flex items-center font-bold tabular-nums" style="gap:${Math.round(typo.pt(4))}px;color:${theme.muted};font-size:${bt.summaryFont}px">${buildBrickGlyphSvg(Math.max(12, Math.round(bt.summaryFont * 1.2)))}<span>${page.bomTotalPieces}</span></span>
+        </div>`
+      : `<div class="shrink-0 flex items-baseline justify-between border-b" style="border-color:${theme.pliBorder};padding-bottom:${bt.headerPb}px;margin-bottom:${bt.headerMb}px;gap:${Math.round(typo.pt(8))}px">
           <div class="flex items-baseline min-w-0" style="gap:${Math.round(typo.pt(8))}px">
             <h2 class="font-bold truncate leading-tight" style="font-size:${bt.titleFont}px">Parts List</h2>
             ${page.bomPageCount > 1 ? `<span class="font-semibold opacity-70 shrink-0" style="font-size:${bt.pageCountFont}px">${page.bomPageIdx + 1} / ${page.bomPageCount}</span>` : ''}
           </div>
           <span class="shrink-0 font-medium" style="color:${theme.muted};font-size:${bt.summaryFont}px">${page.bomTotalPieces} pcs · ${page.bomTotalUnique} unique</span>
-        </div>
+        </div>`;
+
+    frame.innerHTML = `
+      <div class="relative w-full h-full flex flex-col overflow-hidden ${guideCls}" style="padding:${padPx}px;padding-bottom:${padPx + footerH}px">
+        ${bomHeaderHtml}
         ${bomBodyHtml}
         <div class="absolute flex justify-between font-medium pointer-events-none" style="bottom:${footerPadBottom}px;left:${padPx}px;right:${padPx}px;font-size:${typo.footerFont}px;color:${theme.muted}">
-          <span class="truncate">${state.showPageTitle ? escHtml(state.model.title) : ''}</span>
+          <span class="truncate">${showFooterTitle ? escHtml(state.model.title) : ''}</span>
           <span style="color:${theme.text}" class="font-bold shrink-0">${escHtml(pgNumText)}</span>
         </div>
       </div>`;
@@ -7936,12 +8050,13 @@ function renderAll() {
           <div class="shrink-0 flex items-center justify-between shadow-xs overflow-hidden" style="margin-bottom:${Math.round(typo.pt(7))}px;padding:${Math.round(typo.pt(5))}px ${Math.round(typo.pt(10))}px;border-radius:${Math.round(typo.pt(10))}px;gap:${Math.round(typo.pt(10))}px;background:${theme.calloutBg};border:1.5px solid ${theme.calloutBorder}">
             <div class="flex items-center min-w-0 flex-1" style="gap:${Math.round(typo.pt(8))}px">
               <img src="${subIntroImg}" alt="${escHtml(page.submodelIntro.name)}" style="width:${st.introThumbW}px;height:${st.introThumbH}px" class="object-contain shrink-0 pointer-events-none" />
-              <div class="min-w-0 flex-1 overflow-hidden">
-                <div class="font-bold uppercase tracking-wider opacity-65 truncate" style="font-size:${st.introLabelFont}px">${page.submodelIntro.isSectionModule ? 'Build Section' : 'Submodel'}</div>
-                <div class="font-extrabold truncate" style="font-size:${st.introTitleFont}px">${escHtml(page.submodelIntro.name)}</div>
-              </div>
+              ${wordless ? '' : `
+                <div class="min-w-0 flex-1 overflow-hidden">
+                  <div class="font-bold uppercase tracking-wider opacity-65 truncate" style="font-size:${st.introLabelFont}px">${page.submodelIntro.isSectionModule ? 'Build Section' : 'Submodel'}</div>
+                  <div class="font-extrabold truncate" style="font-size:${st.introTitleFont}px">${escHtml(page.submodelIntro.name)}</div>
+                </div>`}
             </div>
-            <span class="shrink-0 rounded-full font-black text-white shadow-xs" style="background:${theme.accent};font-size:${st.introPillFont}px;padding:${Math.round(typo.pt(3))}px ${Math.round(typo.pt(10))}px">${page.submodelIntro.repeatCount > 1 ? `×${page.submodelIntro.repeatCount}` : `${page.submodelIntro.pieceCount || page.submodelIntro.canonicalParts.length} pcs`}</span>
+            <span class="shrink-0 inline-flex items-center rounded-full font-black text-white shadow-xs tabular-nums" style="gap:${Math.round(typo.pt(3.5))}px;background:${theme.accent};font-size:${st.introPillFont}px;padding:${Math.round(typo.pt(3))}px ${Math.round(typo.pt(10))}px">${page.submodelIntro.repeatCount > 1 ? `×${page.submodelIntro.repeatCount}` : (wordless ? `${buildBrickGlyphSvg(Math.max(11, Math.round(st.introPillFont * 1.05)))}<span>${page.submodelIntro.pieceCount || page.submodelIntro.canonicalParts.length}</span>` : `${page.submodelIntro.pieceCount || page.submodelIntro.canonicalParts.length} pcs`)}</span>
           </div>` : ''}
         <div class="relative flex-1 min-h-0">
           ${slotData.map(({ ch, step, minifigSeqSlice, slotRect, estSlotW, estSlotH, ov, snap, isMfExploded, isMfSeq, mfExploded, mfSeqStages, subImg, attSubImg, mfPrepImg, attMfImg, mf1to1, pli }) => {
@@ -7970,15 +8085,20 @@ function renderAll() {
 
             const calloutPliScale = ov.pliScale || 1.0;
             const calloutPliStyle = `gap:${Math.round(typo.pt(isTightSlot ? 4.5 : 6))}px;padding:${Math.round(typo.pt(3.5))}px ${Math.round(typo.pt(isTightSlot ? 5.5 : 7))}px;border-radius:${Math.round(typo.pt(8))}px;background:${theme.calloutBg};border:${pliSel ? `2px solid ${theme.accent}` : `1.5px solid ${theme.calloutBorder}`};transform:translate(${pliPos.x}px,${pliPos.y}px) scale(${calloutPliScale});transform-origin:top left;`;
-            const renderCalloutPli = (imgSrc, imgW, imgH, topText, topWeightCls, nameText) => `
-              <div data-drag="pli" data-step="${step.id}" title="${escHtml(`${topText} — ${nameText}`)}" class="draggable-el flex items-center shadow-xs w-fit max-w-full min-w-0 overflow-hidden ${isArrangeMode ? 'cursor-move' : ''}" style="${calloutPliStyle}">
-                <img src="${imgSrc}" alt="${escHtml(nameText)}" style="width:${imgW}px;height:${imgH}px" class="shrink-0 object-contain pointer-events-none" />
-                <div class="min-w-0 flex-1 overflow-hidden leading-tight">
-                  <div class="${topWeightCls} truncate" style="color:${theme.accent};font-size:${st.pliSubCountFont}px">${escHtml(topText)}</div>
-                  <div class="font-semibold opacity-75 truncate" style="font-size:${st.pliSubNameFont}px">${escHtml(nameText)}</div>
-                </div>
-              </div>`;
+            const renderCalloutPli = (imgSrc, imgW, imgH, topText, topWeightCls, nameText, wordlessBadgeHtml = '') => wordless
+              ? `<div data-drag="pli" data-step="${step.id}" title="${escHtml(`${topText} — ${nameText}`)}" class="draggable-el flex items-center shadow-xs w-fit max-w-full min-w-0 overflow-hidden ${isArrangeMode ? 'cursor-move' : ''}" style="${calloutPliStyle}">
+                  <img src="${imgSrc}" alt="${escHtml(nameText)}" style="width:${imgW}px;height:${imgH}px" class="shrink-0 object-contain pointer-events-none" />
+                  <div class="inline-flex items-center shrink-0 font-black leading-none" style="gap:${Math.round(typo.pt(3))}px;color:${theme.accent};font-size:${st.pliSubCountFont}px">${wordlessBadgeHtml}</div>
+                </div>`
+              : `<div data-drag="pli" data-step="${step.id}" title="${escHtml(`${topText} — ${nameText}`)}" class="draggable-el flex items-center shadow-xs w-fit max-w-full min-w-0 overflow-hidden ${isArrangeMode ? 'cursor-move' : ''}" style="${calloutPliStyle}">
+                  <img src="${imgSrc}" alt="${escHtml(nameText)}" style="width:${imgW}px;height:${imgH}px" class="shrink-0 object-contain pointer-events-none" />
+                  <div class="min-w-0 flex-1 overflow-hidden leading-tight">
+                    <div class="${topWeightCls} truncate" style="color:${theme.accent};font-size:${st.pliSubCountFont}px">${escHtml(topText)}</div>
+                    <div class="font-semibold opacity-75 truncate" style="font-size:${st.pliSubNameFont}px">${escHtml(nameText)}</div>
+                  </div>
+                </div>`;
 
+            const pliIconPx = Math.max(13, Math.round(st.pliSubCountFont * 1.18));
             const pliBoxHtml = isOfficialMfStyle
               ? ''
               : step.attachedSubmodel
@@ -7989,6 +8109,9 @@ function renderAll() {
                   step.attachedSubmodel.isSectionAttach ? (step.attachedSubmodel.attachVerb || 'Connect') : `×${step.attachedSubmodel.repeatCount}`,
                   'font-black',
                   step.attachedSubmodel.name || 'Submodel',
+                  step.attachedSubmodel.isSectionAttach
+                    ? `${buildAttachArrowIconSvg(pliIconPx)}${(step.attachedSubmodel.repeatCount || 1) > 1 ? `<span>×${step.attachedSubmodel.repeatCount}</span>` : ''}`
+                    : `<span>×${step.attachedSubmodel.repeatCount}</span>`,
                 )
               : step.minifigPrep
               ? renderCalloutPli(
@@ -7998,6 +8121,7 @@ function renderAll() {
                   step.minifigPrep.label || 'Position',
                   'font-extrabold',
                   step.minifigPrep.name || 'Minifigure',
+                  buildPoseAdjustIconSvg(pliIconPx),
                 )
               : step.attachedMinifig
               ? renderCalloutPli(
@@ -8007,31 +8131,48 @@ function renderAll() {
                   `×${step.attachedMinifig.repeatCount || 1}`,
                   'font-black',
                   step.attachedMinifig.name || 'Minifigure',
+                  `<span>×${step.attachedMinifig.repeatCount || 1}</span>`,
                 )
               : (!step.subassembly || ov.calloutAsPages ? `
                 <div data-drag="pli" data-step="${step.id}" class="draggable-el flex items-center flex-wrap shadow-xs w-fit max-w-full min-w-0 ${isArrangeMode ? 'cursor-move' : ''}" style="gap:${Math.round(typo.pt(5))}px;padding:${Math.round(typo.pt(2.5))}px ${Math.round(typo.pt(6))}px;border-radius:${Math.round(typo.pt(8))}px;background:${theme.pliBg};border:${pliSel ? `2px solid ${theme.accent}` : `1px solid ${theme.pliBorder}`};transform:translate(${pliPos.x}px,${pliPos.y}px) scale(${pliScale});transform-origin:top left;">
                   ${pli.slice(0, 7).map(item => {
                     const anySel = isPartsMode && item.ids.some(id => state.selectedPartIds.has(id));
                     const thumb = getPliThumb(item.part);
+                    const guideRingPx = Math.max(12, Math.round(st.pliGuideFont * 1.45));
                     return `<button type="button" data-pli-ids="${item.ids.join(',')}" data-step="${step.id}" class="pli-chip flex flex-col items-center rounded-lg transition ${isPartsMode ? 'cursor-pointer' : ''} ${anySel ? 'ring-2 ring-[var(--primary)] bg-[var(--primary-soft)]' : ''}" style="padding:${Math.round(typo.pt(1.5))}px ${Math.round(typo.pt(2))}px" title="${escHtml(resolvePart(item.part.p).name)}">
                       <div class="flex items-center font-bold" style="gap:${Math.round(typo.pt(2.5))}px;font-size:${pliQtyPx}px">
                         <img src="${thumb}" style="width:${pliThumbPx}px;height:${pliThumbPx}px" class="shrink-0 object-contain pointer-events-none" />
                         <span>${item.qty}×</span>
                       </div>
-                      ${state.showSizeGuides && item.guide ? `
+                      ${state.showSizeGuides && item.guide ? (wordless ? `
+                        <div class="flex items-center font-extrabold rounded-full bg-black/10 dark:bg-white/15" style="gap:${Math.round(typo.pt(3))}px;font-size:${st.pliGuideFont}px;padding:${Math.round(typo.pt(0.8))}px ${Math.round(typo.pt(3.5))}px">
+                          <span>1:1</span>
+                          <span class="inline-block rounded-full bg-current" style="height:${Math.max(2, Math.round(typo.pt(2.5)))}px;width:${Math.min(34, Math.round(item.guide.lengthL * typo.pt(3)))}px"></span>
+                          <span class="inline-flex items-center justify-center rounded-full border border-current leading-none" style="min-width:${guideRingPx}px;height:${guideRingPx}px;padding:0 ${Math.round(typo.pt(2))}px">${item.guide.lengthL}</span>
+                        </div>` : `
                         <div class="flex items-center font-extrabold rounded-full bg-black/10 dark:bg-white/15" style="gap:${Math.round(typo.pt(3))}px;font-size:${st.pliGuideFont}px;padding:0 ${Math.round(typo.pt(3.5))}px">
                           <span class="inline-block rounded-full bg-current" style="height:${Math.max(2, Math.round(typo.pt(2.5)))}px;width:${Math.min(34, Math.round(item.guide.lengthL * typo.pt(3)))}px"></span>
                           <span>1:1 ${item.guide.lengthL}L</span>
-                        </div>` : ''}
+                        </div>`) : ''}
                     </button>`;
                   }).join('')}
                 </div>` : '');
 
             const effectiveCue = getEffectiveStepCue(ch, step);
+            const iconBadgeOuterPx = Math.max(isTightSlot ? 24 : 28, Math.round(typo.pt(isTightSlot ? 22 : 26)));
+            const iconBadgeSvgPx = Math.max(13, Math.round(iconBadgeOuterPx * 0.58));
             const headerBadgesHtml = [
-              step.stepHint ? `<span class="font-bold rounded-full bg-white text-[#202124] shadow-xs whitespace-nowrap max-w-full truncate" style="border:1.5px solid ${theme.accent};font-size:${st.cueFont}px;padding:${Math.round(typo.pt(2))}px ${Math.round(typo.pt(6))}px">${escHtml(step.stepHint)}</span>` : '',
-              step.minifigPrep ? `<span class="font-bold rounded-full bg-white text-[#202124] shadow-xs whitespace-nowrap max-w-full truncate" style="border:1.5px solid ${theme.accent};font-size:${st.cueFont}px;padding:${Math.round(typo.pt(2))}px ${Math.round(typo.pt(6))}px">↻ Prepare</span>` : '',
-              state.showRotCues && effectiveCue && effectiveCue !== 'none' ? renderRotationCueBadgeHtml(effectiveCue, theme, typo, isTightSlot) : '',
+              step.stepHint
+                ? (wordless
+                  ? `<span class="inline-flex items-center justify-center rounded-full bg-white shadow-xs shrink-0" style="width:${iconBadgeOuterPx}px;height:${iconBadgeOuterPx}px;border:1.8px solid ${theme.accent};color:${theme.accent}" title="${escHtml(step.stepHint)}" aria-label="${escHtml(step.stepHint)}">${buildStepHintIconSvg(classifyStepHintAction(step.stepHint), iconBadgeSvgPx)}</span>`
+                  : `<span class="font-bold rounded-full bg-white text-[#202124] shadow-xs whitespace-nowrap max-w-full truncate" style="border:1.5px solid ${theme.accent};font-size:${st.cueFont}px;padding:${Math.round(typo.pt(2))}px ${Math.round(typo.pt(6))}px">${escHtml(step.stepHint)}</span>`)
+                : '',
+              step.minifigPrep
+                ? (wordless
+                  ? `<span class="inline-flex items-center justify-center rounded-full bg-white shadow-xs shrink-0" style="width:${iconBadgeOuterPx}px;height:${iconBadgeOuterPx}px;border:1.8px solid ${theme.accent};color:${theme.accent}" title="Prepare minifigure pose" aria-label="Prepare minifigure pose">${buildPoseAdjustIconSvg(iconBadgeSvgPx)}</span>`
+                  : `<span class="font-bold rounded-full bg-white text-[#202124] shadow-xs whitespace-nowrap max-w-full truncate" style="border:1.5px solid ${theme.accent};font-size:${st.cueFont}px;padding:${Math.round(typo.pt(2))}px ${Math.round(typo.pt(6))}px">↻ Prepare</span>`)
+                : '',
+              state.showRotCues && effectiveCue && effectiveCue !== 'none' ? renderRotationCueBadgeHtml(effectiveCue, theme, typo, isTightSlot, wordless) : '',
             ].filter(Boolean).join('');
             const stackHeaderBadges = Boolean(headerBadgesHtml) && (isTightSlot || estSlotW < typo.pt(250));
 
@@ -8044,7 +8185,7 @@ function renderAll() {
                     ? `<span class="no-print inline-flex items-center font-bold rounded-full bg-[var(--primary-soft)] text-[var(--primary)] shrink-0 whitespace-nowrap" style="gap:${Math.round(typo.pt(2))}px;font-size:${st.cueFont}px;padding:${Math.round(typo.pt(1.5))}px ${Math.round(typo.pt(5))}px" title="Page break: Step ${step.num} always starts a new page so earlier edits won't shift later pages"><svg style="width:${pinIconPx}px;height:${pinIconPx}px" class="shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4"/><path d="M10 12h4"/><path d="M17 12h4"/><path d="M6 4v3a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V4"/><path d="M6 20v-3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v3"/></svg><span>Page Break</span></span>`
                     : '';
                   if (isOfficialMfStyle) {
-                    const showMfLabel = ch.steps.length > 1 || slots.length > 1;
+                    const showMfLabel = !wordless && (ch.steps.length > 1 || slots.length > 1);
                     if (!showMfLabel && !pinBadgeHtml && !headerBadgesHtml) return '';
                     return `
                 <div class="relative z-10 shrink-0 flex items-center justify-between gap-1.5 px-1 min-w-0">
@@ -8080,8 +8221,8 @@ function renderAll() {
                 <div class="flex-1 min-h-0 flex ${ov.calloutDir === 'vertical' ? 'flex-col' : 'flex-row'} items-center justify-center overflow-hidden" style="gap:${Math.round(typo.pt(6))}px;margin-top:${isOfficialMfStyle ? 0 : Math.round(typo.pt(4))}px">
                   ${step.subassembly && !ov.calloutAsPages && !isOfficialMfStyle ? `
                     <div data-drag="callout" data-step="${step.id}" class="draggable-el shrink-0 ${ov.calloutDir === 'vertical' ? 'max-w-full' : 'max-w-[48%]'} max-h-full flex flex-col overflow-hidden ${isArrangeMode ? 'cursor-move' : ''}" style="width:${isTightSlot ? st.calloutWTight : st.calloutW}px;padding:${Math.round(typo.pt(5))}px;border-radius:${Math.round(typo.pt(8))}px;background:${theme.calloutBg};border:${calloutSel ? `2px solid ${theme.accent}` : `1.5px solid ${theme.calloutBorder}`};transform:translate(${calloutPos.x}px,${calloutPos.y}px)">
-                      <div class="flex items-center justify-between font-bold shrink-0 min-w-0" style="gap:${Math.round(typo.pt(4))}px;font-size:${st.calloutFont}px">
-                        <span class="min-w-0 truncate">${escHtml(step.subassembly.name)}</span>
+                      <div class="flex items-center ${wordless ? 'justify-end' : 'justify-between'} font-bold shrink-0 min-w-0" style="gap:${Math.round(typo.pt(4))}px;font-size:${st.calloutFont}px">
+                        ${wordless ? '' : `<span class="min-w-0 truncate">${escHtml(step.subassembly.name)}</span>`}
                         <span class="rounded-full text-white shrink-0" style="background:${theme.accent};padding:${Math.round(typo.pt(1))}px ${Math.round(typo.pt(4.5))}px">${step.subassembly.repeatCount}×</span>
                       </div>
                       <img src="${subImg}" class="w-full flex-1 min-h-0 object-contain pointer-events-none" />
@@ -8104,11 +8245,13 @@ function renderAll() {
                     ${step.isSubmodelFinal ? `<span class="absolute rounded-full font-black text-white shadow-md pointer-events-none" style="bottom:${Math.round(typo.pt(5))}px;right:${Math.round(typo.pt(5))}px;padding:${Math.round(typo.pt(3))}px ${Math.round(typo.pt(9))}px;font-size:${st.subFinalFont}px;background:${theme.accent}">×${step.submodelRepeat || 2}</span>` : ''}
                   </div>
 
-                  ${mf1to1 ? `
+                  ${mf1to1 ? (() => {
+                    const mf1Hdr = formatMinifig1to1Header(mf1to1.heightMm, mf1to1.isExact, wordless);
+                    return `
                     <div class="shrink-0 max-w-[45%] flex flex-col items-center justify-center max-h-full overflow-hidden shadow-xs" style="border-radius:${Math.round(typo.pt(8))}px;padding:${Math.round(typo.pt(5))}px ${Math.round(typo.pt(7))}px;gap:${Math.round(typo.pt(4))}px;background:${theme.calloutBg};border:1.5px solid ${theme.calloutBorder}" title="Actual-size 1:1 minifigure reference (${Math.round(mf1to1.heightMm)} mm tall)">
                       <div class="flex items-center font-extrabold leading-none max-w-full overflow-hidden whitespace-nowrap" style="gap:${Math.round(typo.pt(4))}px;font-size:${st.mf1to1Font}px">
-                        <span class="rounded-full text-white shrink-0" style="background:${theme.accent};padding:${Math.round(typo.pt(1.5))}px ${Math.round(typo.pt(5))}px">1:1${mf1to1.isExact ? '' : ' · Fit'}</span>
-                        <span class="opacity-75 tabular-nums truncate">${Math.round(mf1to1.heightMm)} mm</span>
+                        <span class="rounded-full text-white shrink-0" style="background:${theme.accent};padding:${Math.round(typo.pt(1.5))}px ${Math.round(typo.pt(5))}px">${escHtml(mf1Hdr.badge)}</span>
+                        ${mf1Hdr.detail ? `<span class="opacity-75 tabular-nums truncate">${escHtml(mf1Hdr.detail)}</span>` : ''}
                       </div>
                       <div class="flex items-center" style="gap:${Math.round(typo.pt(4))}px">
                         <img src="${mf1to1.url}" alt="1:1 actual size minifigure" style="width:${mf1to1.displayPxW}px;height:${mf1to1.displayPxH}px" class="block shrink-0 pointer-events-none" />
@@ -8118,14 +8261,16 @@ function renderAll() {
                           <span class="w-1.5 h-[1.5px] bg-current"></span>
                         </div>
                       </div>
-                    </div>` : ''}
+                    </div>`;
+                  })() : ''}
                 </div>
                 ${step.isMinifigPoseStep && step.minifigPrep?.indicators?.length > 0 ? `
                   <div class="shrink-0 flex items-center justify-center flex-wrap pointer-events-none" style="gap:${Math.round(typo.pt(4))}px;margin-top:${Math.round(typo.pt(4))}px">
                     ${step.minifigPrep.indicators.map(ind => `
-                      <span class="inline-flex items-center font-bold rounded-full shadow-xs bg-white/90 text-[#1e293b] whitespace-nowrap" style="gap:${Math.round(typo.pt(3.5))}px;padding:${Math.round(typo.pt(1.5))}px ${Math.round(typo.pt(6))}px;font-size:${st.cueFont}px;border:1.5px solid ${ind.color || theme.accent}">
+                      <span class="inline-flex items-center font-bold rounded-full shadow-xs bg-white/90 text-[#1e293b] whitespace-nowrap" style="gap:${Math.round(typo.pt(3.5))}px;padding:${Math.round(typo.pt(1.5))}px ${Math.round(typo.pt(6))}px;font-size:${st.cueFont}px;border:1.5px solid ${ind.color || theme.accent}" title="${escHtml(ind.label)}">
                         <span class="rounded-full shrink-0" style="width:${Math.max(6, Math.round(st.cueFont * 0.72))}px;height:${Math.max(6, Math.round(st.cueFont * 0.72))}px;background:${ind.color || theme.accent}"></span>
-                        <span>${escHtml(ind.label)}</span>
+                        ${wordless ? `<span class="inline-flex items-center shrink-0" style="color:${ind.color || theme.accent}">${buildMinifigPoseIconSvg(ind.kind, Math.max(11, Math.round(st.cueFont * 1.22)))}</span>` : ''}
+                        <span class="tabular-nums">${escHtml(formatMinifigPoseBadgeText(ind, wordless))}</span>
                       </span>`).join('')}
                   </div>` : ''}
                 <!-- Step-Specific Custom Callouts (Notes & Images bound to this exact step) -->
@@ -8155,7 +8300,7 @@ function renderAll() {
 
         <!-- Page Footer -->
         <div class="absolute flex justify-between font-medium pointer-events-none" style="bottom:${footerPadBottom}px;left:${padPx}px;right:${padPx}px;font-size:${typo.footerFont}px;color:${theme.muted}">
-          <span class="truncate">${state.showPageTitle ? escHtml(page.chapterName) : ''}</span>
+          <span class="truncate">${showFooterTitle ? escHtml(page.chapterName) : ''}</span>
           <span style="color:${theme.text}" class="font-bold shrink-0">${escHtml(pgNumText)}</span>
         </div>
       </div>`;
@@ -8624,13 +8769,14 @@ function renderContextOverlay(page) {
     const isCover = page.kind === 'cover';
     const isComplete = page.kind === 'complete';
     const isBack = page.kind === 'back';
-    if (isCover) state.coverMeta = normalizeCoverMeta(state.coverMeta);
+    if (isCover) state.coverMeta = normalizeCoverMeta(state.coverMeta, !state.wordlessMode);
     if (isComplete) state.completeMeta = normalizeCompleteMeta(state.completeMeta);
     if (isBack) state.backMeta = normalizeBackMeta(state.backMeta);
     const meta = isCover ? state.coverMeta : isComplete ? state.completeMeta : state.backMeta;
     const defaultTitle = isCover ? state.model.title : 'Build Complete!';
 
     if (isCover) {
+      const showCoverText = meta.showText !== false;
       const hasCreatorLogo = Boolean(meta.creatorLogoSrc);
       const hasThemeImg = Boolean(meta.themeImageSrc);
       const hasBg = Boolean(meta.bgSrc);
@@ -8643,18 +8789,19 @@ function renderContextOverlay(page) {
             <span class="font-bold">Cover Page</span>
             ${renderScopeBadge('local', 'This Page')}
           </div>
-          <div class="grid grid-cols-2 gap-2">
+          <div class="grid grid-cols-2 gap-2 ${showCoverText ? '' : 'hidden'}">
             <input id="covTitleIn" value="${escHtml(meta.title || defaultTitle)}" placeholder="Model name" class="px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] outline-none focus:border-[var(--primary)]" />
             <input id="covSubIn" value="${escHtml(meta.subtitle || '')}" placeholder="Subtitle (optional)" class="px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] outline-none focus:border-[var(--primary)]" />
           </div>
           <div class="flex items-center gap-1.5 flex-wrap">
+            <button id="covTextToggle" type="button" title="Show or hide front cover title and subtitle" class="px-2.5 py-1.5 rounded-md font-semibold cursor-pointer ${showCoverText ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'bg-[var(--surface-sunken)]'}">Title Text</button>
             <div class="inline-flex items-center rounded-md overflow-hidden ${hasCreatorLogo ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'bg-[var(--surface-sunken)]'}">
               <button id="covCreatorLogoBtn" type="button" class="px-2.5 py-1.5 font-semibold cursor-pointer">Creator Logo</button>
               ${hasCreatorLogo ? `<button id="covCreatorLogoClr" type="button" title="Remove creator logo" aria-label="Remove creator logo" class="pr-2 pl-1 py-1.5 flex items-center justify-center opacity-85 hover:opacity-100 cursor-pointer">${icoClose}</button>` : ''}
             </div>
             <div class="inline-flex items-center rounded-md overflow-hidden ${hasThemeImg ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'bg-[var(--surface-sunken)]'}">
               <button id="covThemeImgBtn" type="button" title="Upload top-right series or theme logo" class="px-2.5 py-1.5 font-semibold cursor-pointer">Series / Theme Logo</button>
-              ${hasThemeImg ? `<button id="covThemeImgClr" type="button" title="Remove series / theme logo" aria-label="Remove series or theme logo" class="pr-2 pl-1 py-1.5 flex items-center justify-center opacity-85 hover:opacity-100 cursor-pointer">${icoClose}</button>` : ''}
+              ${hasThemeImg ? `<button id="covThemeImgClr" type="button" title="Remove series or theme logo" aria-label="Remove series or theme logo" class="pr-2 pl-1 py-1.5 flex items-center justify-center opacity-85 hover:opacity-100 cursor-pointer">${icoClose}</button>` : ''}
             </div>
             <div class="inline-flex items-center rounded-md overflow-hidden ${hasBg ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'bg-[var(--surface-sunken)]'}">
               <button id="covBgBtn" type="button" class="px-2.5 py-1.5 font-semibold cursor-pointer">Background Image</button>
@@ -8675,6 +8822,7 @@ function renderContextOverlay(page) {
 
       box.querySelector('#covOpenPageSetupBtn').onclick = () => openPageSetupModal();
       box.querySelector('#covOpenStyleBtn').onclick = () => setStylePopoverOpen(true);
+      box.querySelector('#covTextToggle').onclick = () => { pushUndo(); meta.showText = !(meta.showText !== false); renderAll(); };
       box.querySelector('#covTitleIn').onchange = (e) => { pushUndo(); meta.title = e.target.value; renderAll(); };
       box.querySelector('#covSubIn').onchange = (e) => { pushUndo(); meta.subtitle = e.target.value; renderAll(); };
       box.querySelector('#covCreatorLogoBtn').onclick = () => openCoverImagePicker('creatorLogo');
@@ -10248,9 +10396,10 @@ function syncMenuControls() {
   const stepGenSum = document.getElementById('menuStepGenSummary');
   if (stepGenSum) {
     const plan = state.model?._subdivisionPlan;
-    stepGenSum.textContent = plan?.sections?.length
+    const baseText = plan?.sections?.length
       ? `${plan.sections.length} Sections`
       : (state.detectDuplicates ? 'Auto · Dupes On' : 'Single Build');
+    stepGenSum.textContent = state.wordlessMode ? `${baseText} · Wordless` : baseText;
   }
 
   const activeFmt = PAPER_FORMATS[state.paperFormat] || PAPER_FORMATS.screen;
@@ -10298,17 +10447,31 @@ function syncMenuControls() {
     const act = b.getAttribute('data-density') === state.density;
     b.className = `dens-btn py-2.5 px-2 rounded-lg border font-semibold flex flex-col items-center gap-1.5 transition cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)]'}`;
   });
+  const effPgFmt = state.wordlessMode && state.pageNumberFormat === 'page_n' ? 'number' : state.pageNumberFormat;
   document.querySelectorAll('.pgnum-btn').forEach(b => {
-    const act = b.getAttribute('data-pgnum') === state.pageNumberFormat;
-    b.className = `pgnum-btn py-2.5 px-1.5 rounded-lg border font-semibold flex flex-col items-center gap-1 transition cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)]'}`;
+    const fmt = b.getAttribute('data-pgnum');
+    const disabled = Boolean(state.wordlessMode && fmt === 'page_n');
+    const act = !disabled && fmt === effPgFmt;
+    b.disabled = disabled;
+    b.title = disabled ? 'Wordless mode hides the word "Page" on printed pages' : '';
+    b.className = `pgnum-btn py-2.5 px-1.5 rounded-lg border font-semibold flex flex-col items-center gap-1 transition ${
+      disabled
+        ? 'border-[var(--border)] bg-[var(--surface-sunken)] opacity-45 cursor-not-allowed'
+        : act
+          ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)] cursor-pointer'
+          : 'border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] cursor-pointer'
+    }`;
   });
   const setChk = (id, val) => { const el = document.getElementById(id); if (el) el.checked = Boolean(val); };
+  setChk('toggleWordlessMode', state.wordlessMode);
   setChk('toggleStepBorders', state.showStepBorders);
   setChk('toggleStepBordersSetup', state.showStepBorders);
   setChk('togglePageTitle', state.showPageTitle);
   setChk('togglePageTitleSetup', state.showPageTitle);
+  setChk('toggleCoverText', normalizeCoverMeta(state.coverMeta, !state.wordlessMode).showText !== false);
   setChk('toggleCompleteText', state.completeMeta.showText !== false);
   setChk('toggleCompleteFireworks', state.completeMeta.showFireworks !== false);
+  setChk('toggleBomTextFields', state.bomShowTextFields);
   setChk('togglePrintGuides', state.showPrintGuides);
   setChk('toggleExtras', state.showExtras);
   setChk('toggleDetectDuplicates', state.detectDuplicates);
@@ -10554,35 +10717,41 @@ function renderBomFieldsList(bc) {
   const listEl = document.getElementById('bomFieldsList');
   if (!listEl) return;
   const fields = bc.fields || [];
+  const showTextFields = Boolean(state.bomShowTextFields);
   const enabledCount = fields.filter(f => f.enabled).length;
-  const sig = fields.map(f => `${f.id}:${f.enabled ? 1 : 0}`).join('|');
+  const sig = `${fields.map(f => `${f.id}:${f.enabled ? 1 : 0}`).join('|')}::txt=${showTextFields ? 1 : 0}`;
   if (listEl.dataset.sig === sig && listEl.children.length === fields.length) return;
   listEl.dataset.sig = sig;
   listEl.innerHTML = '';
 
   fields.forEach((f, idx) => {
     const meta = BOM_FIELD_META[f.id] || { label: f.id, sample: '' };
+    const isTextField = f.id === 'name' || f.id === 'color';
+    const hiddenByWordless = isTextField && !showTextFields;
+    const effEnabled = f.enabled && !hiddenByWordless;
     const row = document.createElement('div');
     row.setAttribute('role', 'listitem');
     row.draggable = true;
     row.dataset.fieldIdx = String(idx);
     row.dataset.fieldId = f.id;
     row.className = `bom-field-row flex items-center gap-2 px-2.5 py-2 rounded-lg border select-none ${
-      f.enabled
+      effEnabled
         ? 'border-[var(--border)] bg-[var(--card)]'
         : 'border-[var(--border)]/60 bg-[var(--surface-sunken)]/60 opacity-65'
     }`;
 
-    const sampleBadge = f.id === 'color'
-      ? '<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-[var(--surface-sunken)] text-[10px] font-medium text-[var(--muted-foreground)]"><span class="w-2 h-2 rounded-full bg-[#c91a09] inline-block border border-black/20"></span>Red</span>'
-      : `<span class="px-1.5 py-0.5 rounded bg-[var(--surface-sunken)] text-[10px] ${f.id === 'partId' ? 'font-mono' : f.id === 'qty' ? 'font-extrabold' : 'font-medium'} text-[var(--muted-foreground)]">${escHtml(meta.sample)}</span>`;
+    const sampleBadge = hiddenByWordless
+      ? '<span class="px-1.5 py-0.5 rounded bg-[var(--surface-sunken)] text-[10px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Wordless</span>'
+      : f.id === 'color'
+        ? '<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-[var(--surface-sunken)] text-[10px] font-medium text-[var(--muted-foreground)]"><span class="w-2 h-2 rounded-full bg-[#c91a09] inline-block border border-black/20"></span>Red</span>'
+        : `<span class="px-1.5 py-0.5 rounded bg-[var(--surface-sunken)] text-[10px] ${f.id === 'partId' ? 'font-mono' : f.id === 'qty' ? 'font-extrabold' : 'font-medium'} text-[var(--muted-foreground)]">${escHtml(meta.sample)}</span>`;
 
-    const isLastEnabled = f.enabled && enabledCount <= 1;
+    const isLastEnabled = effEnabled && enabledCount <= 1;
     row.innerHTML = `
       <span class="bom-field-handle touch-none cursor-grab active:cursor-grabbing text-[var(--muted-foreground)] hover:text-[var(--foreground)] px-0.5 py-1" title="Drag to reorder" aria-hidden="true">
         <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>
       </span>
-      <input type="checkbox" ${f.enabled ? 'checked' : ''} ${isLastEnabled ? 'disabled title="At least one field must stay enabled"' : ''} aria-label="Show ${escHtml(meta.label)}" class="bom-field-chk w-4 h-4 accent-[var(--primary)] cursor-pointer shrink-0 disabled:opacity-50" />
+      <input type="checkbox" ${effEnabled ? 'checked' : ''} ${isLastEnabled ? 'disabled title="At least one field must stay enabled"' : ''} aria-label="Show ${escHtml(meta.label)}" class="bom-field-chk w-4 h-4 accent-[var(--primary)] cursor-pointer shrink-0 disabled:opacity-50" />
       <span class="text-[var(--muted-foreground)] inline-flex shrink-0">${BOM_FIELD_ICONS[f.id] || ''}</span>
       <span class="font-semibold flex-1 min-w-0 truncate">${escHtml(meta.label)}</span>
       ${sampleBadge}
@@ -10597,6 +10766,11 @@ function renderBomFieldsList(bc) {
 
     const chk = row.querySelector('.bom-field-chk');
     chk.onchange = (e) => {
+      if (isTextField && e.target.checked && !state.bomShowTextFields) {
+        if (state.model) pushUndo();
+        state.bomShowTextFields = true;
+        overviewThumbCache.bumpEpoch();
+      }
       const nextFields = toggleBomField(normalizeBomConfig(state.bomConfig).fields, f.id, e.target.checked);
       patchBomConfig({ fields: nextFields }, { immediate: true });
     };
@@ -10752,7 +10926,10 @@ function renderBomSetupPreview(bc) {
         : `${rowsPerPage} rows/pg`;
     }
 
-    const headCols = tCols.map(c => `<div class="truncate font-bold uppercase" style="width:${(c.widthFrac * 100).toFixed(1)}%;font-size:6px;text-align:${c.align};padding:0 2px">${escHtml(c.label)}</div>`).join('');
+    const headCols = tCols.map(c => {
+      const lbl = state.wordlessMode ? (c.id === 'image' ? '▪' : getBomTableHeaderText(c.id, true)) : c.label;
+      return `<div class="truncate font-bold ${state.wordlessMode ? '' : 'uppercase'}" style="width:${(c.widthFrac * 100).toFixed(1)}%;font-size:6px;text-align:${c.align};padding:0 2px">${escHtml(lbl)}</div>`;
+    }).join('');
     const rowHtml = Array.from({ length: visRows }, (_, ri) => {
       const cells = tCols.map(c => {
         if (c.id === 'image') return `<div class="flex items-center justify-center" style="width:${(c.widthFrac * 100).toFixed(1)}%"><span class="inline-block w-2.5 h-2 rounded-[1px]" style="background:${theme.accent};opacity:0.75"></span></div>`;
@@ -10987,6 +11164,7 @@ function syncBomSetupUI() {
   });
 
   // Draggable fields & columns list
+  document.getElementById('bomWordlessFieldsBanner')?.classList.toggle('hidden', Boolean(state.bomShowTextFields));
   renderBomFieldsList(bc);
 
   // Sorting selects
@@ -10996,20 +11174,21 @@ function syncBomSetupUI() {
   if (ssEl) ssEl.value = bc.sortSecondary;
 
   // Summaries in side menu, modal subtitle, and Style popover
+  const effBc = getEffectiveBomConfig();
   const traitNames = { color: 'Color', category: 'Category', qty: 'Quantity', size: 'Size', name: 'Name', partId: 'Part ID' };
   const bomMenuSum = document.getElementById('menuBomSetupSummary');
-  if (bomMenuSum) bomMenuSum.textContent = summarizeBomConfig(bc);
+  if (bomMenuSum) bomMenuSum.textContent = summarizeBomConfig(effBc);
   const bomSub = document.getElementById('bomSetupSubtitle');
   if (bomSub) {
     const bomPages = state.pages.filter(p => p.kind === 'bom');
     const uniqueN = bomPages[0]?.bomTotalUnique || 0;
     bomSub.textContent = bomPages.length > 0
       ? `${uniqueN} unique parts across ${bomPages.length} page${bomPages.length === 1 ? '' : 's'} · ${traitNames[bc.sortPrimary] || 'Color'} → ${traitNames[bc.sortSecondary] || 'Category'}`
-      : `${summarizeBomConfig(bc)} · Then by ${traitNames[bc.sortSecondary] || 'Category'}`;
+      : `${summarizeBomConfig(effBc)} · Then by ${traitNames[bc.sortSecondary] || 'Category'}`;
   }
 
   // Live preview inside modal
-  renderBomSetupPreview(bc);
+  renderBomSetupPreview(effBc);
 }
 
 function renderOverviewModal(opts = {}) {
@@ -13761,7 +13940,8 @@ function scheduleSaveSessionPrefs() {
       detectDuplicates: state.detectDuplicates, highlightNew: state.highlightNew, highlightColor: state.highlightColor,
       fadePrev: state.fadePrev, fadeOpacity: state.fadeOpacity, showRotCues: state.showRotCues,
       showSizeGuides: state.showSizeGuides, minifigStyle: state.minifigStyle, showMinifig1to1: state.showMinifig1to1, showStepBorders: state.showStepBorders,
-      showPageTitle: state.showPageTitle, pageNumberFormat: state.pageNumberFormat,
+      showPageTitle: state.showPageTitle, wordlessMode: state.wordlessMode, bomShowTextFields: state.bomShowTextFields,
+      pageNumberFormat: state.pageNumberFormat,
       showExtras: state.showExtras, bomConfig: state.bomConfig,
       overrides: state.overrides, stepInserts: state.stepInserts, pageInserts: state.pageInserts, dividerAfter: state.dividerAfter,
       coverMeta: state.coverMeta, completeMeta: state.completeMeta, backMeta: state.backMeta, pageIdx: state.pageIdx,
@@ -13811,7 +13991,11 @@ async function restoreLastSessionOnStart() {
     syncLegacyLayoutFlag();
     if (typeof prefs.detectDuplicates === 'boolean') state.detectDuplicates = prefs.detectDuplicates;
     adoptLegacyStyleOptions(prefs);
+    // Legacy sessions saved before Wordless mode keep their prior labeled defaults.
+    state.wordlessMode = typeof prefs.wordlessMode === 'boolean' ? prefs.wordlessMode : false;
+    state.bomShowTextFields = typeof prefs.bomShowTextFields === 'boolean' ? prefs.bomShowTextFields : !state.wordlessMode;
     if (prefs.pageNumberFormat) state.pageNumberFormat = prefs.pageNumberFormat;
+    else state.pageNumberFormat = getWordlessSurfaceDefaults(state.wordlessMode).pageNumberFormat;
     if (typeof prefs.showExtras === 'boolean') state.showExtras = prefs.showExtras;
 
     let effectiveRec = rec;
@@ -13850,8 +14034,8 @@ async function restoreLastSessionOnStart() {
     state.stepInserts = prefs.stepInserts || {};
     state.pageInserts = prefs.pageInserts || {};
     state.dividerAfter = prefs.dividerAfter || {};
-    if (prefs.coverMeta) state.coverMeta = normalizeCoverMeta({ ...state.coverMeta, ...prefs.coverMeta });
-    if (prefs.completeMeta) state.completeMeta = normalizeCompleteMeta({ ...state.completeMeta, ...prefs.completeMeta });
+    state.coverMeta = normalizeCoverMeta(prefs.coverMeta ? { ...state.coverMeta, ...prefs.coverMeta } : state.coverMeta, !state.wordlessMode);
+    state.completeMeta = normalizeCompleteMeta(prefs.completeMeta ? { ...state.completeMeta, ...prefs.completeMeta } : { ...state.completeMeta, showText: !state.wordlessMode });
     if (prefs.backMeta) state.backMeta = normalizeBackMeta({ ...state.backMeta, ...prefs.backMeta });
     state.pageIdx = Math.max(0, prefs.pageIdx || 0);
     state.seenDiagnosticKeys = deserializeSeenDiagnosticKeys(prefs.seenDiagnosticKeys);
@@ -13867,6 +14051,12 @@ async function restoreLastSessionOnStart() {
     if (mf1El) mf1El.checked = state.showMinifig1to1;
     const dupEl = document.getElementById('toggleDetectDuplicates');
     if (dupEl) dupEl.checked = state.detectDuplicates;
+    const wlEl = document.getElementById('toggleWordlessMode');
+    if (wlEl) wlEl.checked = state.wordlessMode;
+    const covTxtEl = document.getElementById('toggleCoverText');
+    if (covTxtEl) covTxtEl.checked = state.coverMeta.showText !== false;
+    const bomTxtEl = document.getElementById('toggleBomTextFields');
+    if (bomTxtEl) bomTxtEl.checked = state.bomShowTextFields;
 
     computeModelDiagnostics();
     resetZoom();
@@ -14000,8 +14190,10 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
   const footerH = typo.footerH;
   const footerTextY = pxH - Math.max(6, Math.round(pad * 0.42)) - Math.round(typo.footerFont * 1.15);
   const pgNumText = formatPageNumber(page.num, state.pages.length);
+  const wordless = Boolean(state.wordlessMode);
+  const showFooterTitle = !wordless && Boolean(state.showPageTitle);
   const drawFooter = (leftLabel) => {
-    if (state.showPageTitle && leftLabel) {
+    if (showFooterTitle && leftLabel) {
       ctx.fillStyle = theme.muted;
       ctx.font = themeCanvasFont(theme, 600, typo.footerFont);
       ctx.fillText(leftLabel, pad, footerTextY);
@@ -14018,14 +14210,16 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
 
   if (page.kind === 'cover') {
     const dens = DENSITY_PAD[state.density] || DENSITY_PAD.balanced;
-    const cm = normalizeCoverMeta(state.coverMeta);
-    const title = (cm.title || state.model.title || 'Untitled Model').trim();
-    const sub = (cm.subtitle || '').trim();
+    const cm = normalizeCoverMeta(state.coverMeta, !wordless);
+    const showCoverText = cm.showText !== false;
+    const title = showCoverText ? (cm.title || state.model.title || 'Untitled Model').trim() : '';
+    const sub = showCoverText ? (cm.subtitle || '').trim() : '';
     const layout = computeCoverLayout({
       pageW: pxW,
       pageH: pxH,
       hasCreatorLogo: Boolean(cm.creatorLogoSrc),
-      hasSubtitle: sub.length > 0,
+      hasTitle: showCoverText && title.length > 0,
+      hasSubtitle: showCoverText && sub.length > 0,
       hasThemeImage: Boolean(cm.themeImageSrc),
       densityPadFactor: dens.pad / 20,
     });
@@ -14056,7 +14250,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
     ctx.imageSmoothingQuality = 'high';
     drawContain(ctx, heroImg, layout.heroRect.x, layout.heroRect.y, layout.heroRect.w, layout.heroRect.h);
 
-    // 2. Top-Left: Optional Creator Logo + Model Name + Optional Subtitle
+    // 2. Top-Left: Optional Creator Logo + Optional Model Name & Subtitle
     let topLeftY = layout.pad;
     if (cm.creatorLogoSrc) {
       const creatorImg = await loadImgPromise(cm.creatorLogoSrc);
@@ -14073,32 +14267,37 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       if (drawn) topLeftY += drawn.h + layout.creatorLogoGap;
     }
 
-    ctx.save();
-    if (cm.bgSrc) {
-      ctx.shadowColor = 'rgba(0,0,0,0.28)';
-      ctx.shadowBlur = Math.max(4, Math.round(pxH * 0.008));
-      ctx.shadowOffsetY = 1;
-    }
-    ctx.fillStyle = theme.text;
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'top';
-    ctx.font = themeCanvasFont(theme, 800, layout.titleFontPx);
-    const titleH = drawWrappedText(ctx, title, layout.pad, topLeftY, layout.topLeftMaxW, layout.titleLineHeightPx, 2);
+    if (showCoverText && (title || sub)) {
+      ctx.save();
+      if (cm.bgSrc) {
+        ctx.shadowColor = 'rgba(0,0,0,0.28)';
+        ctx.shadowBlur = Math.max(4, Math.round(pxH * 0.008));
+        ctx.shadowOffsetY = 1;
+      }
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      let titleH = 0;
+      if (title) {
+        ctx.fillStyle = theme.text;
+        ctx.font = themeCanvasFont(theme, 800, layout.titleFontPx);
+        titleH = drawWrappedText(ctx, title, layout.pad, topLeftY, layout.topLeftMaxW, layout.titleLineHeightPx, 2);
+      }
 
-    if (sub) {
-      ctx.fillStyle = theme.muted;
-      ctx.font = themeCanvasFont(theme, 500, layout.subtitleFontPx);
-      drawWrappedText(
-        ctx,
-        sub,
-        layout.pad,
-        topLeftY + titleH + layout.subtitleGap,
-        layout.topLeftMaxW,
-        Math.round(layout.subtitleFontPx * 1.25),
-        2,
-      );
+      if (sub) {
+        ctx.fillStyle = theme.muted;
+        ctx.font = themeCanvasFont(theme, 500, layout.subtitleFontPx);
+        drawWrappedText(
+          ctx,
+          sub,
+          layout.pad,
+          topLeftY + (titleH > 0 ? titleH + layout.subtitleGap : 0),
+          layout.topLeftMaxW,
+          Math.round(layout.subtitleFontPx * 1.25),
+          2,
+        );
+      }
+      ctx.restore();
     }
-    ctx.restore();
 
     // 3. Top-Right: Optional Theming Image
     if (cm.themeImageSrc) {
@@ -14303,20 +14502,131 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
         PROGRAM_URL,
       ),
     );
-  } else if (page.kind === 'section_divider') {
-    ctx.fillStyle = theme.accent;
-    ctx.font = themeCanvasFont(theme, 800, typo.divider.badgeFont);
-    ctx.fillText(`BUILD STAGE ${page.bagNumber || 1}`, pad, pad);
-    const titleY = pad + Math.round(typo.divider.badgeFont * 1.5);
-    ctx.fillStyle = theme.text;
-    ctx.font = themeCanvasFont(theme, 800, typo.divider.titleFont);
-    ctx.fillText(page.chapterName || page.label || 'Build Stage', pad, titleY);
-    ctx.fillStyle = theme.muted;
-    ctx.textAlign = 'right';
-    ctx.font = themeCanvasFont(theme, 700, typo.divider.metaFont);
-    ctx.fillText(`${page.pieceCount || 0} pcs · Steps ${page.firstStepNum}–${page.lastStepNum}`, pxW - pad, titleY + Math.round((typo.divider.titleFont - typo.divider.metaFont) * 0.5));
+  } else if (page.kind === 'divider') {
+    const d = state.dividerAfter[page.sourcePgId] || { title: wordless ? '' : 'Section Divider', note: '' };
+    const divTitle = (d.title || '').trim();
+    const divNote = (d.note || '').trim();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    if (divTitle) {
+      ctx.fillStyle = theme.text;
+      ctx.font = themeCanvasFont(theme, 800, typo.divider.customTitleFont);
+      ctx.fillText(divTitle, pxW / 2, divNote ? pxH * 0.45 : pxH * 0.5, pxW - pad * 2);
+    }
+    if (divNote) {
+      ctx.fillStyle = theme.muted;
+      ctx.font = themeCanvasFont(theme, 500, typo.divider.customNoteFont);
+      ctx.fillText(divNote, pxW / 2, divTitle ? pxH * 0.56 : pxH * 0.5, Math.min(pxW - pad * 2, Math.round(typo.pt(360))));
+    }
     ctx.textAlign = 'left';
-    const imgTop = titleY + Math.round(typo.divider.titleFont * 1.4);
+    ctx.textBaseline = 'top';
+  } else if (page.kind === 'submodel_page' && page.step?.subassembly) {
+    const sub = page.step.subassembly;
+    const badgeLabel = wordless ? `×${sub.repeatCount}` : `Build ${sub.repeatCount}×`;
+    ctx.font = themeCanvasFont(theme, 900, typo.submodelPage.badgeFont);
+    const bW = Math.max(Math.round(typo.pt(42)), Math.ceil(ctx.measureText(badgeLabel).width + typo.pt(18)));
+    const bH = Math.round(typo.submodelPage.badgeFont * 1.85);
+    const bX = pxW - pad - bW;
+    const bY = pad;
+    if (!wordless) {
+      ctx.fillStyle = theme.text;
+      ctx.font = themeCanvasFont(theme, 800, typo.submodelPage.titleFont);
+      ctx.fillText(sub.name || 'Submodel', pad, pad, Math.max(40, bX - pad - typo.pt(12)));
+    }
+    drawRoundedRectPath(ctx, bX, bY, bW, bH, bH / 2);
+    ctx.fillStyle = theme.accent;
+    ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.font = themeCanvasFont(theme, 900, typo.submodelPage.badgeFont);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(badgeLabel, bX + bW / 2, bY + bH / 2 + 0.5);
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+
+    const imgTop = pad + Math.max(bH, Math.round(typo.submodelPage.titleFont * 1.4)) + Math.round(typo.pt(8));
+    const subAvailW = pxW - pad * 2;
+    const subAvailH = Math.max(120, pxH - imgTop - pad - footerH);
+    const subDims = computeStepSlotRenderSize({
+      slotWidth: subAvailW,
+      slotHeight: subAvailH,
+      slotCount: 1,
+      isFeatured: true,
+      mode: 'pdf',
+      gpuMaxDim: snapshotEngine.maxDim,
+    });
+    const snap = renderSnapshot([], sub.buildParts || [], 38, 30, subDims.width, subDims.height, 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent });
+    const img = await loadImgPromise(snap.url);
+    drawContain(ctx, img, pad, imgTop, subAvailW, subAvailH);
+    drawFooter(page.chapterName || state.model.title);
+  } else if (page.kind === 'section_divider') {
+    let imgTop;
+    if (wordless) {
+      const bagH = Math.round(typo.pt(56));
+      const bagNumStr = String(page.bagNumber || 1);
+      drawNumberedBagCanvas(
+        ctx,
+        pad,
+        pad,
+        bagH,
+        page.bagNumber || 1,
+        theme.accent,
+        theme.pliBg,
+        theme.text,
+        themeCanvasFont(theme, 900, bagNumStr.length >= 2 ? 24 : 30),
+      );
+      // Right-aligned brick glyph + piece count pill & booklet icon + step range
+      const metaFont = typo.divider.metaFont;
+      const subMetaFont = typo.divider.subMetaFont;
+      const pieceStr = String(page.pieceCount || 0);
+      const brickSz = Math.max(12, Math.round(metaFont * 1.12));
+      const pillGap = Math.round(typo.pt(4));
+      const pillPadX = Math.round(typo.pt(8));
+      const pillPadY = Math.round(typo.pt(3));
+      ctx.font = themeCanvasFont(theme, 800, metaFont);
+      const pieceW = Math.ceil(ctx.measureText(pieceStr).width);
+      const pillW = pillPadX * 2 + brickSz + pillGap + pieceW;
+      const pillH = Math.max(brickSz, metaFont) + pillPadY * 2;
+      const pillX = pxW - pad - pillW;
+      const pillY = pad + Math.round(typo.pt(4));
+      drawRoundedRectPath(ctx, pillX, pillY, pillW, pillH, pillH / 2);
+      ctx.fillStyle = theme.pliBg;
+      ctx.fill();
+      ctx.strokeStyle = theme.pliBorder;
+      ctx.lineWidth = 1.25;
+      ctx.stroke();
+      drawBrickGlyphCanvas(ctx, pillX + pillPadX, pillY + (pillH - brickSz) / 2, brickSz, theme.text);
+      ctx.fillStyle = theme.text;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(pieceStr, pillX + pillPadX + brickSz + pillGap, pillY + pillH / 2 + 0.5);
+
+      const rangeStr = `${page.firstStepNum}–${page.lastStepNum}`;
+      const bookSz = Math.max(11, Math.round(subMetaFont * 1.15));
+      ctx.font = themeCanvasFont(theme, 700, subMetaFont);
+      const rangeW = Math.ceil(ctx.measureText(rangeStr).width);
+      const rangeX = pxW - pad - rangeW;
+      const rangeY = pillY + pillH + Math.round(typo.pt(5)) + Math.max(bookSz, subMetaFont) / 2;
+      drawStepsBookletIconCanvas(ctx, rangeX - pillGap - bookSz, rangeY - bookSz / 2, bookSz, theme.muted);
+      ctx.fillStyle = theme.muted;
+      ctx.fillText(rangeStr, rangeX, rangeY + 0.5);
+      ctx.textBaseline = 'top';
+      imgTop = pad + bagH + Math.round(typo.pt(10));
+    } else {
+      ctx.fillStyle = theme.accent;
+      ctx.font = themeCanvasFont(theme, 800, typo.divider.badgeFont);
+      ctx.fillText(`BUILD STAGE ${page.bagNumber || 1}`, pad, pad);
+      const titleY = pad + Math.round(typo.divider.badgeFont * 1.5);
+      ctx.fillStyle = theme.text;
+      ctx.font = themeCanvasFont(theme, 800, typo.divider.titleFont);
+      ctx.fillText(page.chapterName || page.label || 'Build Stage', pad, titleY);
+      ctx.fillStyle = theme.muted;
+      ctx.textAlign = 'right';
+      ctx.font = themeCanvasFont(theme, 700, typo.divider.metaFont);
+      ctx.fillText(`${page.pieceCount || 0} pcs · Steps ${page.firstStepNum}–${page.lastStepNum}`, pxW - pad, titleY + Math.round((typo.divider.titleFont - typo.divider.metaFont) * 0.5));
+      ctx.textAlign = 'left';
+      imgTop = titleY + Math.round(typo.divider.titleFont * 1.4);
+    }
     const divAvailW = pxW - pad * 2;
     const divAvailH = Math.max(120, pxH - imgTop - pad - footerH);
     const divDims = computeStepSlotRenderSize({
@@ -14332,7 +14642,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
     drawContain(ctx, img, pad, imgTop, divAvailW, divAvailH);
     drawFooter(state.model.title);
   } else if (page.kind === 'bom') {
-    const cfg = normalizeBomConfig(state.bomConfig);
+    const cfg = getEffectiveBomConfig();
     const enabledFields = getEnabledBomFields(cfg);
     const entries = page.bomEntries || [];
     const bt = typo.bom;
@@ -14357,16 +14667,41 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       return lo > 0 ? text.slice(0, lo).trimEnd() + ell : ell;
     };
 
-    ctx.fillStyle = theme.text;
-    ctx.font = themeCanvasFont(theme, 700, bt.titleFont);
-    ctx.fillText(headerTitle, pad, pad);
-    ctx.fillStyle = theme.muted;
-    ctx.textAlign = 'right';
-    ctx.font = themeCanvasFont(theme, 500, bt.summaryFont);
-    ctx.fillText(`${page.bomTotalPieces || allParts.length} pcs · ${page.bomTotalUnique || entries.length} unique`, pxW - pad, pad + Math.round((bt.titleFont - bt.summaryFont) * 0.72));
-    ctx.textAlign = 'left';
-
     const headerH = bt.headerH;
+    if (wordless) {
+      const hdrContentH = Math.max(14, headerH - bt.headerMb - bt.headerPb);
+      const hdrMidY = pad + hdrContentH / 2;
+      const gridSz = Math.max(14, Math.round(bt.titleFont * 1.12));
+      drawPartsGridIconCanvas(ctx, pad, hdrMidY - gridSz / 2, gridSz, theme.accent);
+      if (page.bomPageCount > 1) {
+        ctx.fillStyle = theme.muted;
+        ctx.font = themeCanvasFont(theme, 700, bt.pageCountFont);
+        ctx.textBaseline = 'middle';
+        ctx.fillText(`${page.bomPageIdx + 1} / ${page.bomPageCount}`, pad + gridSz + Math.round(typo.pt(7)), hdrMidY + 0.5);
+      }
+      const totalStr = String(page.bomTotalPieces || allParts.length);
+      const brickSz = Math.max(12, Math.round(bt.summaryFont * 1.2));
+      const brickGap = Math.round(typo.pt(4));
+      ctx.font = themeCanvasFont(theme, 700, bt.summaryFont);
+      const totalW = Math.ceil(ctx.measureText(totalStr).width);
+      drawBrickGlyphCanvas(ctx, pxW - pad - totalW - brickGap - brickSz, hdrMidY - brickSz / 2, brickSz, theme.muted);
+      ctx.fillStyle = theme.muted;
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(totalStr, pxW - pad, hdrMidY + 0.5);
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+    } else {
+      ctx.fillStyle = theme.text;
+      ctx.font = themeCanvasFont(theme, 700, bt.titleFont);
+      ctx.fillText(headerTitle, pad, pad);
+      ctx.fillStyle = theme.muted;
+      ctx.textAlign = 'right';
+      ctx.font = themeCanvasFont(theme, 500, bt.summaryFont);
+      ctx.fillText(`${page.bomTotalPieces || allParts.length} pcs · ${page.bomTotalUnique || entries.length} unique`, pxW - pad, pad + Math.round((bt.titleFont - bt.summaryFont) * 0.72));
+      ctx.textAlign = 'left';
+    }
+
     ctx.strokeStyle = theme.pliBorder; ctx.lineWidth = 1.25;
     ctx.beginPath(); ctx.moveTo(pad, pad + headerH - bt.headerMb); ctx.lineTo(pxW - pad, pad + headerH - bt.headerMb); ctx.stroke();
 
@@ -14397,10 +14732,15 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       ctx.fillStyle = theme.muted;
       ctx.font = themeCanvasFont(theme, 700, tTypo.headerFont);
       for (const col of tCols) {
-        const label = col.label.toUpperCase();
+        const midY = bodyY + tTypo.headerH / 2;
+        if (wordless && col.id === 'image') {
+          const icoSz = Math.max(11, Math.min(tTypo.headerH - 4, Math.round(tTypo.headerFont * 1.35)));
+          drawBrickGlyphCanvas(ctx, bodyX + col.x + (col.width - icoSz) / 2, midY - icoSz / 2, icoSz, theme.muted);
+          continue;
+        }
+        const label = wordless ? getBomTableHeaderText(col.id, true) : col.label.toUpperCase();
         const maxW = Math.max(8, col.width - tTypo.cellPadX * 2);
         const fitted = fitText(label, maxW);
-        const midY = bodyY + tTypo.headerH / 2;
         if (col.align === 'right') {
           ctx.textAlign = 'right';
           ctx.fillText(fitted, bodyX + col.x + col.width - tTypo.cellPadX, midY);
@@ -14635,9 +14975,14 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       ctx.lineWidth = 1.5;
       ctx.stroke();
 
-      const multLabel = sub.repeatCount > 1 ? `×${sub.repeatCount}` : `${sub.pieceCount || sub.canonicalParts?.length || 0} pcs`;
+      const hasMult = sub.repeatCount > 1;
+      const rawCount = sub.pieceCount || sub.canonicalParts?.length || 0;
+      const multLabel = hasMult ? `×${sub.repeatCount}` : (wordless ? String(rawCount) : `${rawCount} pcs`);
+      const introBrickSz = wordless && !hasMult ? Math.max(11, Math.round(st.introPillFont * 1.08)) : 0;
+      const introBrickGap = introBrickSz > 0 ? Math.round(typo.pt(4)) : 0;
       ctx.font = themeCanvasFont(theme, 900, st.introPillFont);
-      const pillW = Math.max(Math.round(typo.pt(42)), Math.round(ctx.measureText(multLabel).width + typo.pt(20)));
+      const multTextW = Math.ceil(ctx.measureText(multLabel).width);
+      const pillW = Math.max(Math.round(typo.pt(42)), Math.round(multTextW + introBrickSz + introBrickGap + typo.pt(20)));
       const pillH = Math.round(st.introPillFont * 1.9);
       const pillX = pad + bannerW - pillW - Math.round(typo.pt(10));
       const pillY = pad + Math.round((bannerH - pillH) / 2);
@@ -14650,23 +14995,33 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
         const introImg = await loadImgPromise(thumbUrl);
         drawContain(ctx, introImg, pad + Math.round(typo.pt(10)), pad + Math.round(typo.pt(6)), st.introThumbW, bannerH - Math.round(typo.pt(12)));
       }
-      const textX = pad + Math.round(typo.pt(10)) + st.introThumbW + Math.round(typo.pt(10));
-      const introTextMaxW = Math.max(0, pillX - textX - Math.round(typo.pt(8)));
-      ctx.fillStyle = theme.muted;
-      ctx.font = themeCanvasFont(theme, 700, st.introLabelFont);
-      drawTruncatedText(sub.isSectionModule ? 'BUILD SECTION' : 'SUBMODEL', textX, pad + Math.round(bannerH * 0.22), introTextMaxW);
-      ctx.fillStyle = theme.text;
-      ctx.font = themeCanvasFont(theme, 800, st.introTitleFont);
-      drawTruncatedText(sub.name || 'Submodel', textX, pad + Math.round(bannerH * 0.48), introTextMaxW);
+      if (!wordless) {
+        const textX = pad + Math.round(typo.pt(10)) + st.introThumbW + Math.round(typo.pt(10));
+        const introTextMaxW = Math.max(0, pillX - textX - Math.round(typo.pt(8)));
+        ctx.fillStyle = theme.muted;
+        ctx.font = themeCanvasFont(theme, 700, st.introLabelFont);
+        drawTruncatedText(sub.isSectionModule ? 'BUILD SECTION' : 'SUBMODEL', textX, pad + Math.round(bannerH * 0.22), introTextMaxW);
+        ctx.fillStyle = theme.text;
+        ctx.font = themeCanvasFont(theme, 800, st.introTitleFont);
+        drawTruncatedText(sub.name || 'Submodel', textX, pad + Math.round(bannerH * 0.48), introTextMaxW);
+      }
 
       drawRRect(pillX, pillY, pillW, pillH, pillH / 2);
       ctx.fillStyle = theme.accent;
       ctx.fill();
       ctx.fillStyle = '#ffffff';
       ctx.font = themeCanvasFont(theme, 900, st.introPillFont);
-      ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(multLabel, pillX + pillW / 2, pillY + pillH / 2 + 1);
+      if (introBrickSz > 0) {
+        const innerW = introBrickSz + introBrickGap + multTextW;
+        const innerX = pillX + (pillW - innerW) / 2;
+        drawBrickGlyphCanvas(ctx, innerX, pillY + (pillH - introBrickSz) / 2, introBrickSz, '#ffffff');
+        ctx.textAlign = 'left';
+        ctx.fillText(multLabel, innerX + introBrickSz + introBrickGap, pillY + pillH / 2 + 1);
+      } else {
+        ctx.textAlign = 'center';
+        ctx.fillText(multLabel, pillX + pillW / 2, pillY + pillH / 2 + 1);
+      }
       ctx.textAlign = 'left';
       ctx.textBaseline = 'top';
       ctx.restore();
@@ -14713,7 +15068,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       let renderAvailH = Math.max(40, slotH - st.slotPad * 2 - pliH - Math.round(typo.pt(10)) - poseLegendH);
 
       if (isOfficialMfStyle) {
-        const showMfLabel = ch.steps.length > 1 || slots.length > 1;
+        const showMfLabel = !wordless && (ch.steps.length > 1 || slots.length > 1);
         if (showMfLabel) {
           ctx.fillStyle = theme.muted;
           ctx.font = themeCanvasFont(theme, 700, st.pliSubNameFont);
@@ -14731,12 +15086,15 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
         ctx.fillText(String(step.num), sx + st.slotPad, sy + st.slotPad);
         const numWidth = Math.max(Math.round(stepNumPx * 1.15), Math.round(ctx.measureText(String(step.num)).width));
 
-        // PLI Box (shows finished submodel/minifigure thumbnail + ×N or Connect verb on prep & attachment steps, or raw parts otherwise)
+        // PLI Box (shows finished submodel/minifigure thumbnail + ×N or Connect verb/icon on prep & attachment steps, or raw parts otherwise)
         const pliX = sx + st.slotPad + numWidth + Math.round(typo.pt(8));
         const pliY = sy + st.slotPad;
+        const pliIconSz = Math.max(13, Math.round(st.pliSubCountFont * 1.25));
         if (step.attachedSubmodel) {
           const att = step.attachedSubmodel;
-          const attBoxW = Math.min(slotW - (pliX - sx) - st.slotPad, Math.max(Math.round(typo.pt(115)), pliH * 3.4));
+          const attBoxW = wordless
+            ? Math.min(slotW - (pliX - sx) - st.slotPad, Math.max(Math.round(typo.pt(76)), Math.round(pliH * 1.25 + pliIconSz + typo.pt(28))))
+            : Math.min(slotW - (pliX - sx) - st.slotPad, Math.max(Math.round(typo.pt(115)), pliH * 3.4));
           drawRRect(pliX, pliY, attBoxW, pliH, pliRadius);
           ctx.fillStyle = theme.calloutBg;
           ctx.fill();
@@ -14753,16 +15111,37 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
           }
           const tx = pliX + 6 + pliH * 1.25 + 8;
           const textMaxW = Math.max(0, pliX + attBoxW - tx - 8);
-          ctx.fillStyle = theme.accent;
-          ctx.font = themeCanvasFont(theme, 900, st.pliSubCountFont);
-          drawTruncatedText(att.isSectionAttach ? (att.attachVerb || 'Connect') : `×${att.repeatCount}`, tx, pliY + Math.round(pliH * 0.16), textMaxW);
-          ctx.fillStyle = theme.text;
-          ctx.font = themeCanvasFont(theme, 600, st.pliSubNameFont);
-          drawTruncatedText(att.name || 'Submodel', tx, pliY + Math.round(pliH * 0.56), textMaxW);
+          if (wordless) {
+            if (att.isSectionAttach) {
+              drawAttachArrowIconCanvas(ctx, tx, pliY + (pliH - pliIconSz) / 2, pliIconSz, theme.accent);
+              if ((att.repeatCount || 1) > 1) {
+                ctx.fillStyle = theme.accent;
+                ctx.font = themeCanvasFont(theme, 900, st.pliSubCountFont);
+                ctx.textBaseline = 'middle';
+                ctx.fillText(`×${att.repeatCount}`, tx + pliIconSz + 4, pliY + pliH / 2 + 0.5);
+                ctx.textBaseline = 'top';
+              }
+            } else {
+              ctx.fillStyle = theme.accent;
+              ctx.font = themeCanvasFont(theme, 900, st.pliSubCountFont);
+              ctx.textBaseline = 'middle';
+              ctx.fillText(`×${att.repeatCount}`, tx, pliY + pliH / 2 + 0.5);
+              ctx.textBaseline = 'top';
+            }
+          } else {
+            ctx.fillStyle = theme.accent;
+            ctx.font = themeCanvasFont(theme, 900, st.pliSubCountFont);
+            drawTruncatedText(att.isSectionAttach ? (att.attachVerb || 'Connect') : `×${att.repeatCount}`, tx, pliY + Math.round(pliH * 0.16), textMaxW);
+            ctx.fillStyle = theme.text;
+            ctx.font = themeCanvasFont(theme, 600, st.pliSubNameFont);
+            drawTruncatedText(att.name || 'Submodel', tx, pliY + Math.round(pliH * 0.56), textMaxW);
+          }
           ctx.restore();
         } else if (step.minifigPrep) {
           const prep = step.minifigPrep;
-          const prepBoxW = Math.min(slotW - (pliX - sx) - st.slotPad, Math.max(Math.round(typo.pt(130)), pliH * 3.8));
+          const prepBoxW = wordless
+            ? Math.min(slotW - (pliX - sx) - st.slotPad, Math.max(Math.round(typo.pt(64)), Math.round(pliH * 1.0 + pliIconSz + typo.pt(24))))
+            : Math.min(slotW - (pliX - sx) - st.slotPad, Math.max(Math.round(typo.pt(130)), pliH * 3.8));
           drawRRect(pliX, pliY, prepBoxW, pliH, pliRadius);
           ctx.fillStyle = theme.calloutBg;
           ctx.fill();
@@ -14779,16 +15158,22 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
           }
           const tx = pliX + 6 + pliH * 1.0 + 8;
           const textMaxW = Math.max(0, pliX + prepBoxW - tx - 8);
-          ctx.fillStyle = theme.accent;
-          ctx.font = themeCanvasFont(theme, 800, st.pliSubCountFont);
-          drawTruncatedText(prep.label || 'Position', tx, pliY + Math.round(pliH * 0.16), textMaxW);
-          ctx.fillStyle = theme.text;
-          ctx.font = themeCanvasFont(theme, 600, st.pliSubNameFont);
-          drawTruncatedText(prep.name || 'Minifigure', tx, pliY + Math.round(pliH * 0.56), textMaxW);
+          if (wordless) {
+            drawPoseAdjustIconCanvas(ctx, tx, pliY + (pliH - pliIconSz) / 2, pliIconSz, theme.accent);
+          } else {
+            ctx.fillStyle = theme.accent;
+            ctx.font = themeCanvasFont(theme, 800, st.pliSubCountFont);
+            drawTruncatedText(prep.label || 'Position', tx, pliY + Math.round(pliH * 0.16), textMaxW);
+            ctx.fillStyle = theme.text;
+            ctx.font = themeCanvasFont(theme, 600, st.pliSubNameFont);
+            drawTruncatedText(prep.name || 'Minifigure', tx, pliY + Math.round(pliH * 0.56), textMaxW);
+          }
           ctx.restore();
         } else if (step.attachedMinifig) {
           const att = step.attachedMinifig;
-          const attBoxW = Math.min(slotW - (pliX - sx) - st.slotPad, Math.max(Math.round(typo.pt(115)), pliH * 3.3));
+          const attBoxW = wordless
+            ? Math.min(slotW - (pliX - sx) - st.slotPad, Math.max(Math.round(typo.pt(68)), Math.round(pliH * 1.0 + typo.pt(34))))
+            : Math.min(slotW - (pliX - sx) - st.slotPad, Math.max(Math.round(typo.pt(115)), pliH * 3.3));
           drawRRect(pliX, pliY, attBoxW, pliH, pliRadius);
           ctx.fillStyle = theme.calloutBg;
           ctx.fill();
@@ -14812,12 +15197,20 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
           }
           const tx = pliX + 6 + pliH * 1.0 + 8;
           const textMaxW = Math.max(0, pliX + attBoxW - tx - 8);
-          ctx.fillStyle = theme.accent;
-          ctx.font = themeCanvasFont(theme, 900, st.pliSubCountFont);
-          drawTruncatedText(`×${att.repeatCount || 1}`, tx, pliY + Math.round(pliH * 0.16), textMaxW);
-          ctx.fillStyle = theme.text;
-          ctx.font = themeCanvasFont(theme, 600, st.pliSubNameFont);
-          drawTruncatedText(att.name || 'Minifigure', tx, pliY + Math.round(pliH * 0.56), textMaxW);
+          if (wordless) {
+            ctx.fillStyle = theme.accent;
+            ctx.font = themeCanvasFont(theme, 900, st.pliSubCountFont);
+            ctx.textBaseline = 'middle';
+            ctx.fillText(`×${att.repeatCount || 1}`, tx, pliY + pliH / 2 + 0.5);
+            ctx.textBaseline = 'top';
+          } else {
+            ctx.fillStyle = theme.accent;
+            ctx.font = themeCanvasFont(theme, 900, st.pliSubCountFont);
+            drawTruncatedText(`×${att.repeatCount || 1}`, tx, pliY + Math.round(pliH * 0.16), textMaxW);
+            ctx.fillStyle = theme.text;
+            ctx.font = themeCanvasFont(theme, 600, st.pliSubNameFont);
+            drawTruncatedText(att.name || 'Minifigure', tx, pliY + Math.round(pliH * 0.56), textMaxW);
+          }
           ctx.restore();
         } else {
           const pliMap = new Map();
@@ -14843,22 +15236,73 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       let badgeRightX = sx + slotW - 10;
       const effectiveCue = getEffectiveStepCue(ch, step);
       if (state.showRotCues && effectiveCue && effectiveCue !== 'none') {
-        badgeRightX = drawRotationCueBadgeCanvas(ctx, effectiveCue, badgeRightX, sy + 10, theme, typo, slots.length > 2, drawRRect);
+        badgeRightX = drawRotationCueBadgeCanvas(ctx, effectiveCue, badgeRightX, sy + 10, theme, typo, slots.length > 2, drawRRect, wordless);
+      }
+
+      if (step.minifigPrep) {
+        if (wordless) {
+          const bD = Math.max(24, Math.round(typo.pt(isTightSlot ? 22 : 26)));
+          const bx = badgeRightX - bD;
+          const by = sy + 10;
+          drawRRect(bx, by, bD, bD, bD / 2);
+          ctx.fillStyle = '#ffffff';
+          ctx.fill();
+          ctx.strokeStyle = theme.accent;
+          ctx.lineWidth = 1.8;
+          ctx.stroke();
+          const icoSz = Math.max(13, Math.round(bD * 0.58));
+          drawPoseAdjustIconCanvas(ctx, bx + (bD - icoSz) / 2, by + (bD - icoSz) / 2, icoSz, theme.accent);
+          badgeRightX = bx - 6;
+        } else {
+          ctx.font = themeCanvasFont(theme, 700, Math.max(10, st.cueFont));
+          const prepLbl = '↻ Prepare';
+          const prepW = Math.ceil(ctx.measureText(prepLbl).width + 16);
+          const prepH = Math.round(Math.max(20, st.cueFont * 1.9));
+          const px = badgeRightX - prepW;
+          const py = sy + 12;
+          drawRRect(px, py, prepW, prepH, prepH / 2);
+          ctx.fillStyle = '#ffffff';
+          ctx.fill();
+          ctx.strokeStyle = theme.accent;
+          ctx.lineWidth = 1.6;
+          ctx.stroke();
+          ctx.fillStyle = '#202124';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(prepLbl, px + 8, py + prepH / 2 + 0.5);
+          ctx.textBaseline = 'top';
+          badgeRightX = px - 6;
+        }
       }
 
       if (step.stepHint) {
-        ctx.font = themeCanvasFont(theme, 700, 11);
-        const hintW = Math.min(slotW * 0.42, ctx.measureText(step.stepHint).width + 18);
-        const hintX = badgeRightX - hintW;
-        const hintY = sy + 12;
-        drawRRect(hintX, hintY, hintW, 22, 11);
-        ctx.fillStyle = '#ffffff';
-        ctx.fill();
-        ctx.strokeStyle = theme.accent;
-        ctx.lineWidth = 1.6;
-        ctx.stroke();
-        ctx.fillStyle = '#202124';
-        ctx.fillText(step.stepHint, hintX + 9, hintY + 5, hintW - 16);
+        if (wordless) {
+          const bD = Math.max(24, Math.round(typo.pt(isTightSlot ? 22 : 26)));
+          const bx = badgeRightX - bD;
+          const by = sy + 10;
+          drawRRect(bx, by, bD, bD, bD / 2);
+          ctx.fillStyle = '#ffffff';
+          ctx.fill();
+          ctx.strokeStyle = theme.accent;
+          ctx.lineWidth = 1.8;
+          ctx.stroke();
+          const icoSz = Math.max(13, Math.round(bD * 0.58));
+          drawStepHintIconCanvas(ctx, classifyStepHintAction(step.stepHint), bx + (bD - icoSz) / 2, by + (bD - icoSz) / 2, icoSz, theme.accent);
+          badgeRightX = bx - 6;
+        } else {
+          ctx.font = themeCanvasFont(theme, 700, 11);
+          const hintW = Math.min(slotW * 0.42, ctx.measureText(step.stepHint).width + 18);
+          const hintX = badgeRightX - hintW;
+          const hintY = sy + 12;
+          drawRRect(hintX, hintY, hintW, 22, 11);
+          ctx.fillStyle = '#ffffff';
+          ctx.fill();
+          ctx.strokeStyle = theme.accent;
+          ctx.lineWidth = 1.6;
+          ctx.stroke();
+          ctx.fillStyle = '#202124';
+          ctx.fillText(step.stepHint, hintX + 9, hintY + 5, hintW - 16);
+          badgeRightX = hintX - 6;
+        }
       }
 
       // 3D Step Render / Official Minifig Style (+ optional true physical 1:1 Minifigure View card on printed paper!)
@@ -14872,7 +15316,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
         const mf1 = renderMinifigOneToOne(step.parts, pxH, hIn, Math.round(slotW * (isMfSeq ? 0.24 : 0.34)), Math.round(renderAvailH * 0.72), theme.accent);
         const cardPad = Math.round(typo.pt(8));
         const headerH = Math.round(st.mf1to1Font * 1.9);
-        const mfHeaderLabel = `1:1${mf1.isExact ? '' : ' Fit'} · ${Math.round(mf1.heightMm)} mm`;
+        const mfHeaderLabel = formatMinifig1to1Header(mf1.heightMm, mf1.isExact, wordless).canvasLabel;
         ctx.font = themeCanvasFont(theme, 800, st.mf1to1Font);
         const mfHeaderW = Math.ceil(ctx.measureText(mfHeaderLabel).width);
         const cardW = Math.min(Math.round(slotW * 0.44), Math.max(Math.round(typo.pt(68)), mfHeaderW + cardPad * 2, mf1.displayPxW + cardPad * 2 + 12));
@@ -14983,9 +15427,12 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
         const pillFont = Math.max(9, st.cueFont);
         ctx.font = themeCanvasFont(theme, 700, pillFont);
         const pillH = Math.round(pillFont * 1.85), pillGap = Math.round(typo.pt(6)), dotR = Math.max(3, pillFont * 0.34);
+        const poseIcoSz = wordless ? Math.max(11, Math.round(pillFont * 1.22)) : 0;
+        const poseIcoGap = wordless ? Math.round(typo.pt(3.5)) : 0;
         const pills = mfPrep.indicators.map(ind => {
-          const textW = ctx.measureText(ind.label || '').width;
-          return { ind, w: Math.ceil(textW + pillFont * 2.1) };
+          const text = formatMinifigPoseBadgeText(ind, wordless);
+          const textW = ctx.measureText(text).width;
+          return { ind, text, w: Math.ceil(textW + pillFont * 2.1 + poseIcoSz + poseIcoGap) };
         });
         const totalW = pills.reduce((sum, p) => sum + p.w, 0) + pillGap * Math.max(0, pills.length - 1);
         let pxCur = sx + Math.max(st.slotPad, Math.round((slotW - totalW) / 2));
@@ -15003,9 +15450,14 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
           ctx.beginPath();
           ctx.arc(pxCur + Math.round(pillFont * 0.9), pyCur + pillH / 2, dotR, 0, Math.PI * 2);
           ctx.fill();
+          let txtX = pxCur + Math.round(pillFont * 1.5);
+          if (wordless && poseIcoSz > 0) {
+            drawMinifigPoseIconCanvas(ctx, p.ind.kind, txtX, pyCur + (pillH - poseIcoSz) / 2, poseIcoSz, pCol);
+            txtX += poseIcoSz + poseIcoGap;
+          }
           ctx.fillStyle = '#1e293b';
           ctx.textBaseline = 'middle';
-          ctx.fillText(p.ind.label || '', pxCur + Math.round(pillFont * 1.5), pyCur + pillH / 2 + 0.5);
+          ctx.fillText(p.text, txtX, pyCur + pillH / 2 + 0.5);
           ctx.textBaseline = 'top';
           pxCur += p.w + pillGap;
         }
@@ -15327,12 +15779,28 @@ function syncStylePanel() {
   setChk('toggleStepBordersSetup', opts.showStepBorders);
   setChk('togglePageTitle', opts.showPageTitle);
   setChk('togglePageTitleSetup', opts.showPageTitle);
+  const wordlessOn = Boolean(state.wordlessMode);
+  for (const [chkId, lblId, noteId] of [
+    ['togglePageTitle', 'togglePageTitleLabel', 'pageTitleWordlessNote'],
+    ['togglePageTitleSetup', 'togglePageTitleSetupLabel', 'pageTitleSetupWordlessNote'],
+  ]) {
+    const chk = document.getElementById(chkId);
+    const lbl = document.getElementById(lblId);
+    const note = document.getElementById(noteId);
+    if (chk) chk.disabled = wordlessOn;
+    if (lbl) {
+      lbl.classList.toggle('opacity-55', wordlessOn);
+      lbl.title = wordlessOn ? 'Hidden while Wordless Instructions is enabled' : '';
+    }
+    if (note) note.classList.toggle('hidden', !wordlessOn);
+  }
   const hlEl = document.getElementById('highlightColor');
   if (hlEl && hlEl.value !== opts.highlightColor) hlEl.value = opts.highlightColor;
 
   const bc = normalizeBomConfig(opts.bomConfig);
+  const effBc = resolveEffectiveBomConfig(bc, Boolean(state.bomShowTextFields));
   const styleBomSum = document.getElementById('styleBomSummary');
-  if (styleBomSum) styleBomSum.textContent = summarizeBomConfig(bc);
+  if (styleBomSum) styleBomSum.textContent = summarizeBomConfig(effBc);
   document.querySelectorAll('.style-bom-format-btn').forEach(b => {
     const act = b.getAttribute('data-style-bom-format') === bc.format;
     b.className = `style-bom-format-btn py-1.5 px-2 rounded-md border font-semibold text-xs inline-flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--surface-sunken)] hover:border-[var(--primary)]'}`;
@@ -15577,14 +16045,12 @@ if (btnOverviewJumpBottom) {
 
 document.getElementById('btnUndo').onclick = () => {
   if (!state.undoStack.length) return;
-  const cur = JSON.stringify({ chapters: state.model.chapters, overrides: state.overrides, stepInserts: state.stepInserts, pageInserts: state.pageInserts, dividerAfter: state.dividerAfter, coverMeta: state.coverMeta, completeMeta: state.completeMeta, backMeta: state.backMeta, layoutConfig: state.layoutConfig, layoutGroups: state.layoutGroups });
-  state.redoStack.push(cur);
+  state.redoStack.push(captureHistorySnap());
   applyHistorySnap(state.undoStack.pop());
 };
 document.getElementById('btnRedo').onclick = () => {
   if (!state.redoStack.length) return;
-  const cur = JSON.stringify({ chapters: state.model.chapters, overrides: state.overrides, stepInserts: state.stepInserts, pageInserts: state.pageInserts, dividerAfter: state.dividerAfter, coverMeta: state.coverMeta, completeMeta: state.completeMeta, backMeta: state.backMeta, layoutConfig: state.layoutConfig, layoutGroups: state.layoutGroups });
-  state.undoStack.push(cur);
+  state.undoStack.push(captureHistorySnap());
   applyHistorySnap(state.redoStack.pop());
 };
 
@@ -15914,7 +16380,14 @@ if (btnOverviewRangeCreate) {
 }
 
 document.querySelectorAll('.dens-btn').forEach(b => { b.onclick = () => { state.density = b.getAttribute('data-density'); renderAll(); }; });
-document.querySelectorAll('.pgnum-btn').forEach(b => { b.onclick = () => { state.pageNumberFormat = b.getAttribute('data-pgnum'); renderAll(); }; });
+document.querySelectorAll('.pgnum-btn').forEach(b => {
+  b.onclick = () => {
+    const fmt = b.getAttribute('data-pgnum');
+    if (state.wordlessMode && fmt === 'page_n') return;
+    state.pageNumberFormat = fmt;
+    renderAll();
+  };
+});
 document.querySelectorAll('.fade-chip').forEach(b => { b.onclick = () => patchActiveTheme({ fadeOpacity: parseFloat(b.getAttribute('data-fade')) }); });
 
 // Parts List Setup controls (saved with active theme; built-ins auto-fork on edit)
@@ -16058,8 +16531,44 @@ document.getElementById('toggleStepBordersSetup').onchange = setStepBorders;
 const setPageTitle = (e) => patchActiveTheme({ showPageTitle: e.target.checked });
 document.getElementById('togglePageTitle').onchange = setPageTitle;
 document.getElementById('togglePageTitleSetup').onchange = setPageTitle;
-document.getElementById('toggleCompleteText').onchange = (e) => { state.completeMeta.showText = e.target.checked; renderAll(); };
+const toggleWordlessEl = document.getElementById('toggleWordlessMode');
+if (toggleWordlessEl) {
+  toggleWordlessEl.onchange = (e) => applyWordlessMode(e.target.checked);
+}
+const toggleCoverTextEl = document.getElementById('toggleCoverText');
+if (toggleCoverTextEl) {
+  toggleCoverTextEl.onchange = (e) => {
+    if (state.model) pushUndo();
+    state.coverMeta = { ...normalizeCoverMeta(state.coverMeta, !state.wordlessMode), showText: e.target.checked };
+    overviewThumbCache.bumpEpoch();
+    renderAll();
+  };
+}
+document.getElementById('toggleCompleteText').onchange = (e) => {
+  if (state.model) pushUndo();
+  state.completeMeta.showText = e.target.checked;
+  overviewThumbCache.bumpEpoch();
+  renderAll();
+};
 document.getElementById('toggleCompleteFireworks').onchange = (e) => { state.completeMeta.showFireworks = e.target.checked; renderAll(); };
+const toggleBomTextEl = document.getElementById('toggleBomTextFields');
+if (toggleBomTextEl) {
+  toggleBomTextEl.onchange = (e) => {
+    if (state.model) pushUndo();
+    state.bomShowTextFields = e.target.checked;
+    overviewThumbCache.bumpEpoch();
+    renderAll();
+  };
+}
+const btnBomEnableTextEl = document.getElementById('btnBomEnableTextFields');
+if (btnBomEnableTextEl) {
+  btnBomEnableTextEl.onclick = () => {
+    if (state.model) pushUndo();
+    state.bomShowTextFields = true;
+    overviewThumbCache.bumpEpoch();
+    renderAll();
+  };
+}
 const toggleDupEl = document.getElementById('toggleDetectDuplicates');
 if (toggleDupEl) {
   toggleDupEl.onchange = (e) => {
@@ -16210,7 +16719,10 @@ async function runInteractiveHtmlExport() {
       }
     };
 
-    const cm = normalizeCoverMeta(state.coverMeta);
+    const wordless = Boolean(state.wordlessMode);
+    const cm = normalizeCoverMeta(state.coverMeta, !wordless);
+    const showCoverText = cm.showText !== false;
+    const showCompleteText = state.completeMeta?.showText !== false;
     const exportPages = [];
 
     for (const pg of state.pages) {
@@ -16221,9 +16733,13 @@ async function runInteractiveHtmlExport() {
           kind: 'cover',
           num: pg.num,
           label: pg.label || 'Cover',
-          title: (cm.title || state.model.title || 'Untitled Model').trim(),
-          subtitle: (cm.subtitle || `${allParts.length} pieces · ${allSteps.length} steps`).trim(),
-          badge: cm.creatorName ? cm.creatorName.trim() : `${allParts.length} pcs`,
+          title: showCoverText ? (cm.title || state.model.title || 'Untitled Model').trim() : '',
+          subtitle: showCoverText
+            ? (cm.subtitle || (wordless ? '' : `${allParts.length} pieces · ${allSteps.length} steps`)).trim()
+            : '',
+          badge: wordless
+            ? (showCoverText && cm.creatorName ? cm.creatorName.trim() : '')
+            : (cm.creatorName ? cm.creatorName.trim() : `${allParts.length} pcs`),
           previewUrl: renderFallbackPreview([], allParts, az, el, zoom, { highlightNew: false, fadePrev: false }),
           scene: {
             prevPartIdx: [],
@@ -16242,9 +16758,11 @@ async function runInteractiveHtmlExport() {
           kind: 'complete',
           num: pg.num,
           label: pg.label || 'Build Complete',
-          title: comp.title || 'Build Complete!',
-          subtitle: comp.subtitle || `${allParts.length} pieces assembled`,
-          badge: 'Complete',
+          title: showCompleteText ? (comp.title || 'Build Complete!') : '',
+          subtitle: showCompleteText
+            ? (comp.subtitle || (wordless ? '' : `${allParts.length} pieces assembled`))
+            : '',
+          badge: wordless ? '' : 'Complete',
           previewUrl: renderFallbackPreview([], allParts, az, el, zoom, { highlightNew: false, fadePrev: false }),
           scene: {
             prevPartIdx: [],
@@ -16263,9 +16781,9 @@ async function runInteractiveHtmlExport() {
           kind: 'back',
           num: pg.num,
           label: pg.label || 'Back Cover',
-          title: bm.title || state.model.title,
+          title: wordless ? '' : (bm.title || state.model.title),
           subtitle: BACK_COVER_CREDIT,
-          note: `${allParts.length} pieces · ${allSteps.length} steps`,
+          note: wordless ? '' : `${allParts.length} pieces · ${allSteps.length} steps`,
           previewUrl: renderFallbackPreview([], allParts, az, el, 0.95, { highlightNew: false, fadePrev: false }),
           scene: {
             prevPartIdx: [],
@@ -16282,28 +16800,34 @@ async function runInteractiveHtmlExport() {
           id: pg.id,
           kind: 'section_divider',
           num: pg.num,
-          label: pg.label || pg.chapterName || 'Section',
-          title: pg.chapterName || pg.label,
-          subtitle: `${pg.pieceCount || previewIdx.length} pieces · ${pg.stepCount || 0} steps`,
-          badge: pg.bagNumber ? `Section ${pg.bagNumber}` : 'Section',
+          bagNumber: pg.bagNumber || 1,
+          label: wordless ? String(pg.bagNumber || 1) : (pg.label || pg.chapterName || 'Section'),
+          title: wordless ? '' : (pg.chapterName || pg.label),
+          subtitle: wordless
+            ? `${pg.pieceCount || previewIdx.length}`
+            : `${pg.pieceCount || previewIdx.length} pieces · ${pg.stepCount || 0} steps`,
+          badge: wordless
+            ? String(pg.bagNumber || 1)
+            : (pg.bagNumber ? `Section ${pg.bagNumber}` : 'Section'),
           previewUrl: (pg.previewParts || []).length > 0 ? renderFallbackPreview([], pg.previewParts, 38, 28, 1.0, { highlightNew: false, fadePrev: false }) : undefined,
           scene: previewIdx.length > 0 ? { prevPartIdx: [], newPartIdx: previewIdx, az: 38, el: 28, zoom: 1.0, hero: true } : undefined,
         });
       } else if (pg.kind === 'submodel_page' && pg.step?.subassembly) {
         const subRaw = pg.step.subassembly.buildParts || [];
         const subParts = subRaw.map((p) => registerPart(p));
+        const rep = pg.step.subassembly.repeatCount || 1;
         exportPages.push({
           id: pg.id,
           kind: 'submodel_page',
           num: pg.num,
-          label: pg.label || pg.step.subassembly.name,
-          title: pg.step.subassembly.name || 'Submodel',
-          badge: `×${pg.step.subassembly.repeatCount || 1}`,
+          label: wordless ? `×${rep}` : (pg.label || pg.step.subassembly.name),
+          title: wordless ? '' : (pg.step.subassembly.name || 'Submodel'),
+          badge: `×${rep}`,
           previewUrl: subRaw.length > 0 ? renderFallbackPreview([], subRaw, 38, 28, 1.0, { highlightNew: false, fadePrev: false }) : undefined,
           scene: { prevPartIdx: [], newPartIdx: subParts, az: 38, el: 28, zoom: 1.0, hero: false },
         });
       } else if (pg.kind === 'bom') {
-        const bomCfg = normalizeBomConfig(state.bomConfig);
+        const bomCfg = getEffectiveBomConfig();
         const rawEntries = pg.bomEntries || pg.entries || [];
         const bomItems = rawEntries.map((e) => {
           const colInfo = resolveColorInfo(e.part.c);
@@ -16323,7 +16847,9 @@ async function runInteractiveHtmlExport() {
           kind: 'bom',
           num: pg.num,
           label: pg.label || 'Parts List',
-          title: pageCount > 1 ? `Parts List (${pageIdx + 1}/${pageCount})` : 'Parts List',
+          title: wordless
+            ? (pageCount > 1 ? `${pageIdx + 1}/${pageCount}` : '')
+            : (pageCount > 1 ? `Parts List (${pageIdx + 1}/${pageCount})` : 'Parts List'),
           bomFormat: pg.bomFormat || bomCfg.format,
           bomFields: getEnabledBomFields(bomCfg),
           bomItems,
@@ -16335,7 +16861,7 @@ async function runInteractiveHtmlExport() {
           kind: 'divider',
           num: pg.num,
           label: pg.label || 'Divider',
-          title: divMeta.title || 'Next Section',
+          title: divMeta.title || (wordless ? '' : 'Next Section'),
           subtitle: divMeta.note || '',
         });
       } else if (pg.kind === 'steps' && pg.slots?.length > 0) {
@@ -16364,22 +16890,22 @@ async function runInteractiveHtmlExport() {
             pliMap.get(k).qty++;
           }
           const effectiveCue = getEffectiveStepCue(ch, step);
-          const cueLabel = state.showRotCues && effectiveCue && effectiveCue !== 'none'
-            ? getRotationCueLabel(effectiveCue)
-            : undefined;
+          const hasCue = Boolean(state.showRotCues && effectiveCue && effectiveCue !== 'none');
+          const cueLabel = hasCue ? getRotationCueLabel(effectiveCue, wordless) : undefined;
           const subLabel = step.attachedSubmodel
-            ? `Attach ${step.attachedSubmodel.name} (×${step.attachedSubmodel.repeatCount || 1})`
+            ? (wordless ? `×${step.attachedSubmodel.repeatCount || 1}` : `Attach ${step.attachedSubmodel.name} (×${step.attachedSubmodel.repeatCount || 1})`)
             : step.subassembly
-              ? `Includes ${step.subassembly.name} (×${step.subassembly.repeatCount || 1})`
+              ? (wordless ? `×${step.subassembly.repeatCount || 1}` : `Includes ${step.subassembly.name} (×${step.subassembly.repeatCount || 1})`)
               : step.isSubmodelFinal
-                ? `Repeat ×${step.submodelRepeat || 2}`
+                ? (wordless ? `×${step.submodelRepeat || 2}` : `Repeat ×${step.submodelRepeat || 2}`)
                 : undefined;
 
           return {
             stepId: step.id,
             stepNum: step.num,
-            label: `Step ${step.num}`,
+            label: wordless ? String(step.num) : `Step ${step.num}`,
             rotationCue: cueLabel,
+            rotationCueKind: hasCue ? effectiveCue : undefined,
             subLabel,
             pli: Array.from(pliMap.values()),
             previewUrl: renderFallbackPreview(prev, step.parts || [], cam.az, cam.el, ov.modelScale || 1.0, { partOffsets: effOffsets }),
@@ -16395,7 +16921,7 @@ async function runInteractiveHtmlExport() {
           kind: 'steps',
           num: pg.num,
           label: pg.label,
-          chapterName: pg.chapterName,
+          chapterName: wordless ? '' : pg.chapterName,
           steps: stepScenes,
         });
       }
@@ -16409,6 +16935,7 @@ async function runInteractiveHtmlExport() {
       subtitle: cm.subtitle || '',
       author: cm.creatorName || '',
       editorUrl: PROGRAM_URL || DEFAULT_EDITOR_URL,
+      wordless,
       totalPieces: allParts.length,
       totalSteps: allSteps.length,
       theme: {
@@ -16620,7 +17147,7 @@ document.getElementById('menuAddDivider').onclick = () => {
   const pg = state.pages[state.pageIdx];
   if (!canInsertDividerAfterPage(pg, state.dividerAfter)) return;
   pushUndo();
-  state.dividerAfter[pg.id] = { title: 'Next Section', note: '' };
+  state.dividerAfter[pg.id] = { title: state.wordlessMode ? '' : 'Next Section', note: '' };
   closeMenu(); renderAll(); showToast('Inserted divider page after current page.');
 };
 const menuStepGenBtn = document.getElementById('menuStepGenBtn');
@@ -16637,7 +17164,7 @@ document.getElementById('menuSaveProj').onclick = async () => {
   if (!state.model) return;
   const activeTheme = getActiveTheme();
   const embeddedCustomTheme = activeTheme && !activeTheme.builtIn && !BUILT_IN_THEME_IDS.has(activeTheme.id) ? activeTheme : undefined;
-  const payload = JSON.stringify({ format: PROJECT_FILE_FORMAT, version: PROJECT_FILE_STUDIO_VERSION, title: state.model.title, chapters: state.model.chapters, overrides: state.overrides, stepInserts: state.stepInserts, pageInserts: state.pageInserts, dividerAfter: state.dividerAfter, coverMeta: state.coverMeta, completeMeta: state.completeMeta, backMeta: state.backMeta, bomConfig: state.bomConfig, showStepBorders: state.showStepBorders, showPageTitle: state.showPageTitle, pageNumberFormat: state.pageNumberFormat, detectDuplicates: state.detectDuplicates, minifigStyle: state.minifigStyle, showMinifig1to1: state.showMinifig1to1, themeId: state.themeId, ...(embeddedCustomTheme ? { customTheme: embeddedCustomTheme } : {}), paperFormat: state.paperFormat, orientation: state.orientation, density: state.density, layout: state.layout, layoutConfig: state.layoutConfig, layoutGroups: state.layoutGroups }, null, 2);
+  const payload = JSON.stringify({ format: PROJECT_FILE_FORMAT, version: PROJECT_FILE_STUDIO_VERSION, title: state.model.title, chapters: state.model.chapters, overrides: state.overrides, stepInserts: state.stepInserts, pageInserts: state.pageInserts, dividerAfter: state.dividerAfter, coverMeta: state.coverMeta, completeMeta: state.completeMeta, backMeta: state.backMeta, bomConfig: state.bomConfig, wordlessMode: state.wordlessMode, bomShowTextFields: state.bomShowTextFields, showStepBorders: state.showStepBorders, showPageTitle: state.showPageTitle, pageNumberFormat: state.pageNumberFormat, detectDuplicates: state.detectDuplicates, minifigStyle: state.minifigStyle, showMinifig1to1: state.showMinifig1to1, themeId: state.themeId, ...(embeddedCustomTheme ? { customTheme: embeddedCustomTheme } : {}), paperFormat: state.paperFormat, orientation: state.orientation, density: state.density, layout: state.layout, layoutConfig: state.layoutConfig, layoutGroups: state.layoutGroups }, null, 2);
   const fileName = buildProjectFileName(state.model.title);
   closeMenu();
   await shareOrDownloadCustomFile(payload, fileName, 'Shared project file.', `Exported ${fileName}`);
@@ -16657,10 +17184,14 @@ async function handleIncomingProjectFile(f) {
     state.stepInserts = data.stepInserts || {};
     state.pageInserts = data.pageInserts || {};
     state.dividerAfter = data.dividerAfter || {};
-    state.coverMeta = normalizeCoverMeta(data.coverMeta);
-    state.completeMeta = normalizeCompleteMeta(data.completeMeta);
+    // Legacy .biw projects saved before Wordless mode keep their prior labeled appearance.
+    state.wordlessMode = typeof data.wordlessMode === 'boolean' ? data.wordlessMode : false;
+    state.bomShowTextFields = typeof data.bomShowTextFields === 'boolean' ? data.bomShowTextFields : !state.wordlessMode;
+    state.coverMeta = normalizeCoverMeta(data.coverMeta, !state.wordlessMode);
+    state.completeMeta = normalizeCompleteMeta(data.completeMeta ? data.completeMeta : { showText: !state.wordlessMode });
     state.backMeta = normalizeBackMeta(data.backMeta);
     if (data.pageNumberFormat) state.pageNumberFormat = data.pageNumberFormat;
+    else state.pageNumberFormat = getWordlessSurfaceDefaults(state.wordlessMode).pageNumberFormat;
     if (typeof data.detectDuplicates === 'boolean') state.detectDuplicates = data.detectDuplicates;
     if (data.customTheme) {
       const incomingTheme = (data.customTheme.bomConfig === undefined && data.bomConfig)
@@ -17087,6 +17618,7 @@ let impState = {
   skipAutoFetch: false,
   pickerOpen: false,
   pickerFocusIdx: 0,
+  wordlessMode: DEFAULT_WORDLESS_MODE,
 };
 
 function closeImportAssistant(keepPendingRaw = false) {
@@ -17578,6 +18110,25 @@ function renderImportAssistantUI() {
   const dupChk = document.getElementById('toggleDetectDuplicates');
   if (dupChk) dupChk.checked = Boolean(state.detectDuplicates);
 
+  document.querySelectorAll('.imp-wordless-btn').forEach((b) => {
+    const isWlBtn = b.getAttribute('data-imp-wordless') !== 'false';
+    const act = Boolean(impState.wordlessMode) === isWlBtn;
+    b.setAttribute('aria-checked', act ? 'true' : 'false');
+    b.className = `imp-wordless-btn text-left p-3 rounded-lg border transition-colors cursor-pointer flex items-start gap-2.5 ${
+      act
+        ? 'border-[var(--primary)] bg-[var(--primary-soft)] ring-1 ring-[var(--primary)]/30'
+        : 'border-[var(--border)] bg-[var(--card)] hover:border-[var(--primary)]/50 hover:bg-[var(--surface-hover)]'
+    }`;
+    const iconWrap = b.querySelector('span');
+    if (iconWrap) {
+      iconWrap.className = `mt-0.5 w-7 h-7 rounded-md flex items-center justify-center shrink-0 ${
+        act
+          ? 'bg-[var(--primary)] text-[var(--primary-foreground)]'
+          : 'bg-[var(--surface-sunken)] text-[var(--muted-foreground)]'
+      }`;
+    }
+  });
+
   syncImportPreviewControlsUI();
   renderImportProposalPicker();
 
@@ -17611,6 +18162,7 @@ function openImportAssistant(parsed, isPostImport = false) {
   impState.assessment = assessment;
   impState.proposals = proposals;
   impState.isPostImport = isPostImport;
+  impState.wordlessMode = isPostImport ? Boolean(state.wordlessMode) : DEFAULT_WORDLESS_MODE;
   impState.pickerOpen = false;
   impState.colorMode = 'sections';
   impState.az = 38;
@@ -17677,21 +18229,38 @@ if (impColorModeToggleBtn) {
     rebuildAndDrawImportPreview();
   };
 }
+document.querySelectorAll('.imp-wordless-btn').forEach((b) => {
+  b.onclick = () => {
+    impState.wordlessMode = b.getAttribute('data-imp-wordless') !== 'false';
+    renderImportAssistantUI();
+  };
+});
 
 function finishImport(parsed, mode, subdivisionPlan = null, isPostImport = false, importOpts = {}) {
   if (isPostImport) pushUndo();
   const skipAutoFetch = Boolean(importOpts && importOpts.skipAutoFetch);
+  const hasExplicitWordless = typeof importOpts?.wordlessMode === 'boolean';
+  const targetWordless = hasExplicitWordless
+    ? importOpts.wordlessMode
+    : (isPostImport ? Boolean(state.wordlessMode) : DEFAULT_WORDLESS_MODE);
   submodelThumbCache.clear();
   coverHeroCache.clear();
   overviewThumbCache.bumpEpoch();
   state.model = buildManualFromParsed(parsed, mode, subdivisionPlan);
   if (!isPostImport) {
+    const wlDefs = getWordlessSurfaceDefaults(targetWordless);
+    state.wordlessMode = targetWordless;
+    state.bomShowTextFields = wlDefs.bomShowTextFields;
+    state.pageNumberFormat = wlDefs.pageNumberFormat;
     state.overrides = {}; state.stepInserts = {}; state.pageInserts = {}; state.dividerAfter = {};
     state.layoutGroups = [];
-    state.coverMeta = createDefaultCoverMeta();
+    state.coverMeta = createDefaultCoverMeta({ showText: wlDefs.coverShowText });
+    state.completeMeta = { ...createDefaultCompleteMeta(), showText: wlDefs.completeShowText };
     state.backMeta = createDefaultBackMeta();
     state.undoStack = []; state.redoStack = [];
     state.seenDiagnosticKeys = new Set();
+  } else if (hasExplicitWordless && targetWordless !== Boolean(state.wordlessMode)) {
+    applyWordlessMode(targetWordless, { pushHistory: false, render: false });
   }
   state.pageIdx = 0; state.mode = 'pan'; state.selectedPartIds.clear();
   errFilter = 'all';
@@ -17719,11 +18288,17 @@ function finishImport(parsed, mode, subdivisionPlan = null, isPostImport = false
 
 document.getElementById('impBtnAuto').onclick = () => {
   if (!impState.parsed) return;
-  finishImport(impState.parsed, 'auto', impState.activeProposal, impState.isPostImport, { skipAutoFetch: impState.skipAutoFetch });
+  finishImport(impState.parsed, 'auto', impState.activeProposal, impState.isPostImport, {
+    skipAutoFetch: impState.skipAutoFetch,
+    wordlessMode: impState.wordlessMode,
+  });
 };
 document.getElementById('impBtnKeep').onclick = () => {
   if (!impState.parsed) return;
-  finishImport(impState.parsed, 'keep', null, impState.isPostImport, { skipAutoFetch: impState.skipAutoFetch });
+  finishImport(impState.parsed, 'keep', null, impState.isPostImport, {
+    skipAutoFetch: impState.skipAutoFetch,
+    wordlessMode: impState.wordlessMode,
+  });
 };
 document.getElementById('impBtnCancel').onclick = () => closeImportAssistant(false);
 document.getElementById('impBtnCloseX').onclick = () => closeImportAssistant(false);
@@ -17748,7 +18323,7 @@ function proceedAfterMissingPartsCheck(parsed, opts = {}) {
   if (parsed.hasSteps || parsed.submodelCount > 0 || assessment.shouldPrompt) {
     openImportAssistant(parsed, false);
   } else {
-    finishImport(parsed, 'auto', null, false, { skipAutoFetch });
+    finishImport(parsed, 'auto', null, false, { skipAutoFetch, wordlessMode: DEFAULT_WORDLESS_MODE });
     if (assessment.tier === 'borderline') {
       showToast(`Imported ${parsed.title}. Tip: Open Menu → Subdivide Model to split into sections.`);
     }
@@ -18114,9 +18689,13 @@ async function closeCurrentModel() {
   state.dividerAfter = {};
   state.layoutGroups = [];
   state.layout = 'auto';
+  const wlDefs = getWordlessSurfaceDefaults(DEFAULT_WORDLESS_MODE);
   state.layoutConfig = createDefaultPageLayoutSpec();
-  state.coverMeta = createDefaultCoverMeta();
-  state.completeMeta = createDefaultCompleteMeta();
+  state.wordlessMode = DEFAULT_WORDLESS_MODE;
+  state.bomShowTextFields = wlDefs.bomShowTextFields;
+  state.pageNumberFormat = wlDefs.pageNumberFormat;
+  state.coverMeta = createDefaultCoverMeta({ showText: wlDefs.coverShowText });
+  state.completeMeta = { ...createDefaultCompleteMeta(), showText: wlDefs.completeShowText };
   state.backMeta = createDefaultBackMeta();
   state.pendingImport = null;
   state.undoStack = [];

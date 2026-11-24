@@ -125,6 +125,7 @@ The pure-JS PDF 1.4 binary builder supports per-page URI link annotations (`PdfP
 | `bgSrc` | `string \| null` | `null` | Optional full-page background image data URL |
 | `creatorLogoSrc` | `string \| null` | `null` | Optional creator logo image above model name (top-left) |
 | `themeImageSrc` | `string \| null` | `null` | Optional series / theme logo (top-right) |
+| `showText` | `boolean` | `false` on wordless imports (`true` for legacy `.biw`) | Toggles top-left Model Name & Subtitle; when `false`, the hero 3D render expands upward into the freed title area while keeping the bottom-right attribution + QR intact |
 | `showQrCode` | `true` (locked) | `true` | Non-editable; always normalized to `true` so the scannable QR code is always shown |
 | `showProgramBadge` | `true` (locked) | `true` | Non-editable; always normalized to `true` so the program attribution card is always shown |
 

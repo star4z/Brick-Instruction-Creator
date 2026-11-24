@@ -19,6 +19,8 @@ export interface CoverMeta {
   showQrCode: true;
   /** Non-editable: always true on the front cover. Kept for .biw backward compatibility. */
   showProgramBadge: true;
+  /** Whether to show front-cover model title & subtitle (false by default in Wordless mode). */
+  showText: boolean;
 }
 
 export interface BackCoverMeta {
@@ -77,7 +79,7 @@ export interface CompleteMeta {
   showFireworks: boolean;
 }
 
-export function createDefaultCoverMeta(): CoverMeta {
+export function createDefaultCoverMeta(opts?: { showText?: boolean }): CoverMeta {
   return {
     title: '',
     subtitle: '',
@@ -89,6 +91,7 @@ export function createDefaultCoverMeta(): CoverMeta {
     themeImageSrc: null,
     showQrCode: true,
     showProgramBadge: true,
+    showText: opts?.showText ?? true,
   };
 }
 
@@ -125,8 +128,8 @@ export function clampCoverZoom(zoom: number): number {
   return Math.max(0.7, Math.min(1.4, Math.round(zoom * 100) / 100));
 }
 
-export function normalizeCoverMeta(raw: unknown): CoverMeta {
-  const def = createDefaultCoverMeta();
+export function normalizeCoverMeta(raw: unknown, defaultShowText = true): CoverMeta {
+  const def = createDefaultCoverMeta({ showText: defaultShowText });
   if (!raw || typeof raw !== 'object') return def;
   const r = raw as Record<string, unknown>;
   return {
@@ -141,6 +144,7 @@ export function normalizeCoverMeta(raw: unknown): CoverMeta {
     // Program attribution and QR code on the front cover are non-editable and always shown.
     showQrCode: true,
     showProgramBadge: true,
+    showText: typeof r.showText === 'boolean' ? r.showText : defaultShowText,
   };
 }
 
@@ -188,6 +192,8 @@ export interface CoverLayoutInput {
   pageW: number;
   pageH: number;
   hasCreatorLogo: boolean;
+  /** Whether a front-cover model title is rendered (defaults to true for legacy callers). */
+  hasTitle?: boolean;
   hasSubtitle: boolean;
   hasThemeImage: boolean;
   /** Ignored — front-cover QR code is non-editable and always rendered. */
@@ -269,12 +275,15 @@ export function computeCoverLayout(input: CoverLayoutInput): CoverLayoutMetrics 
 
   // Hero 3D model render zone: page-filling edge-to-edge width with clean clearance
   // below top branding/title and above bottom-right program badge + QR code
+  const hasTitle = input.hasTitle !== false;
   const heroInsetX = Math.round(pageW * 0.026);
-  const heroTopRatio = input.hasCreatorLogo
-    ? (input.hasSubtitle ? 0.22 : 0.195)
-    : input.hasThemeImage
-      ? (input.hasSubtitle ? 0.175 : 0.16)
-      : (input.hasSubtitle ? 0.155 : 0.13);
+  const heroTopRatio = !hasTitle && !input.hasSubtitle
+    ? (input.hasCreatorLogo || input.hasThemeImage ? 0.14 : 0.06)
+    : input.hasCreatorLogo
+      ? (input.hasSubtitle ? 0.22 : 0.195)
+      : input.hasThemeImage
+        ? (input.hasSubtitle ? 0.175 : 0.16)
+        : (input.hasSubtitle ? 0.155 : 0.13);
   const heroTop = Math.round(pageH * heroTopRatio);
   const heroBottomMargin = Math.round(pageH * 0.128);
   const heroRect: RectBox = {
