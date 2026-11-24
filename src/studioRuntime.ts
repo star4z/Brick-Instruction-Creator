@@ -10930,22 +10930,38 @@ function renderLibPreviewInspector() {
   }
 
   const actionButtons = [];
-  if (!item.sources.includes('saved')) {
+  if (item.sources.includes('embedded') && !item.sources.includes('saved')) {
     actionButtons.push(`
-      <button id="libPreviewFetchBtn" class="w-full py-2 px-3 rounded-xl bg-[var(--primary)] text-[var(--primary-foreground)] font-semibold hover:opacity-95 transition">
+      <button id="libPreviewSaveEmbeddedBtn" class="w-full py-2 px-3 rounded-xl bg-[var(--primary)] text-[var(--primary-foreground)] font-semibold hover:opacity-95 transition cursor-pointer">
+        Save ${escHtml(item.id)}.dat to Local Library
+      </button>
+    `);
+  } else if (!item.sources.includes('saved')) {
+    actionButtons.push(`
+      <button id="libPreviewFetchBtn" class="w-full py-2 px-3 rounded-xl bg-[var(--primary)] text-[var(--primary-foreground)] font-semibold hover:opacity-95 transition cursor-pointer">
         Fetch Exact ${escHtml(item.id)}.dat Online
       </button>
     `);
   }
   if (item.sources.includes('saved')) {
     actionButtons.push(`
-      <button id="libPreviewRemoveBtn" class="w-full py-2.5 px-3 rounded-md border border-[var(--danger)]/40 bg-[var(--danger-soft)] text-[var(--danger)] font-semibold transition-colors">
+      <button id="libPreviewRemoveBtn" class="w-full py-2.5 px-3 rounded-md border border-[var(--danger)]/40 bg-[var(--danger-soft)] text-[var(--danger)] font-semibold transition-colors cursor-pointer">
         Remove ${escHtml(item.id)}.dat from Saved Library
       </button>
     `);
   }
   actionsEl.innerHTML = actionButtons.join('');
 
+  const saveEmbeddedBtn = actionsEl.querySelector('#libPreviewSaveEmbeddedBtn');
+  if (saveEmbeddedBtn) {
+    saveEmbeddedBtn.onclick = async () => {
+      const savedCount = await saveEmbeddedPartToLocalLibrary(item.id);
+      if (savedCount > 0) {
+        showToast(`Saved ${item.id}.dat${savedCount > 1 ? ` (+${savedCount - 1} subfiles)` : ''} to Local Bricks Library.`);
+      }
+      renderBricksLibraryModal(false);
+    };
+  }
   const fetchOneBtn = actionsEl.querySelector('#libPreviewFetchBtn');
   if (fetchOneBtn) {
     fetchOneBtn.onclick = async () => {
@@ -10982,6 +10998,50 @@ function renderLibPreviewInspector() {
       renderBricksLibraryModal(false);
     };
   }
+}
+
+async function saveEmbeddedPartToLocalLibrary(rootId) {
+  const startKey = normId(rootId);
+  if (!startKey || !embeddedDatRaw.has(startKey)) return 0;
+  const queue = [startKey];
+  const visited = new Set();
+  const toSave = [];
+
+  while (queue.length > 0) {
+    const k = queue.shift();
+    if (!k || visited.has(k)) continue;
+    visited.add(k);
+    const lines = embeddedDatRaw.get(k);
+    if (!lines) continue;
+    if (!userLibRaw.has(k)) {
+      toSave.push({ key: k, text: lines.join('\n') });
+    }
+    for (const raw of lines) {
+      const tr = raw.trim();
+      if (!tr.startsWith('1 ')) continue;
+      const tokens = tr.split(/\s+/);
+      if (tokens.length < 15) continue;
+      const refKey = normId(tokens.slice(14).join(' ').trim());
+      if (refKey && !visited.has(refKey) && embeddedDatRaw.has(refKey)) {
+        queue.push(refKey);
+      } else if (refKey && refKey.includes('/')) {
+        const base = refKey.split('/').pop();
+        if (base && !visited.has(base) && embeddedDatRaw.has(base)) {
+          queue.push(base);
+        }
+      }
+    }
+  }
+
+  if (toSave.length === 0) return 0;
+  const db = await openSessionDB().catch(() => null);
+  for (const entry of toSave) {
+    registerUserLibDat(entry.key, entry.text);
+    if (db) await dbPut(entry.key, entry.text, LIB_STORE).catch(() => {});
+  }
+  invalidateLibraryRenderCaches();
+  updateLibraryStatusUI();
+  return toSave.length;
 }
 
 function renderLibBrowseTab(resetLimit = false) {
@@ -11038,23 +11098,32 @@ function renderLibBrowseTab(resetLimit = false) {
       : `${filtered.length.toLocaleString()} part${filtered.length === 1 ? '' : 's'}`;
   }
 
-  // If the user typed a specific part ID (e.g. "3010" or "3626cp01") that isn't saved yet, offer direct online fetch!
+  // Only offer a direct online fetch banner if the user typed an unlisted part ID that isn't already
+  // saved locally, embedded in the current .io model, already shown in search results, or already fetched.
   if (fetchBannerEl) {
     const fetchableId = extractFetchablePartIdFromQuery(libUiState.query);
-    if (fetchableId && !userLibRaw.has(fetchableId)) {
+    const alreadyInResults = Boolean(fetchableId && filtered.some((it) => it.id === fetchableId));
+    if (
+      fetchableId &&
+      !userLibRaw.has(fetchableId) &&
+      !embeddedDatRaw.has(fetchableId) &&
+      !alreadyInResults &&
+      !libAutoFetchAttempted.has(fetchableId)
+    ) {
       fetchBannerEl.classList.remove('hidden');
       fetchBannerEl.innerHTML = `
         <div class="text-xs min-w-0">
           <div class="font-bold text-[var(--primary)]">Fetch <span class="font-mono">${escHtml(fetchableId)}.dat</span> from online LDraw library?</div>
-          <div class="text-[var(--muted-foreground)]">Downloads its exact 3D geometry and subparts into your saved library.</div>
+          <div class="text-[var(--muted-foreground)]">Not listed in the local catalog — downloads its exact 3D geometry and subparts into your saved library.</div>
         </div>
-        <button id="libQuickSearchFetchBtn" class="px-3.5 py-1.5 rounded-md bg-[var(--primary)] text-[var(--primary-foreground)] font-semibold shrink-0 hover:opacity-95 transition">
+        <button id="libQuickSearchFetchBtn" class="px-3.5 py-1.5 rounded-md bg-[var(--primary)] text-[var(--primary-foreground)] font-semibold shrink-0 hover:opacity-95 transition cursor-pointer">
           Fetch ${escHtml(fetchableId)} Online
         </button>
       `;
       const qBtn = fetchBannerEl.querySelector('#libQuickSearchFetchBtn');
       if (qBtn) {
         qBtn.onclick = async () => {
+          libAutoFetchAttempted.add(fetchableId);
           const res = await fetchPartsOnline({
             mode: 'custom_ids',
             partIds: [fetchableId],
