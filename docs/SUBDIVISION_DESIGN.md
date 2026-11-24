@@ -166,7 +166,7 @@ The upgraded `#importModal` in [`index.html`](../index.html) adapts automaticall
 
 ### Live 3D Preview Controls & Proposal Curation
 - **Orbit**: 1-finger touch drag or mouse drag directly on the WebGL canvas (`WebGLBrickEngine`), reusing uploaded GPU buffers with zero re-uploads while orbiting.
-- **Tap-to-Reveal Overlay Icons**: Tapping inside the 3D preview reveals subtle circular overlay icon buttons in the top-right corner (hidden by default so the 3D model stays unobstructed):
+- **Always-Visible Overlay Icons**: Subtle circular overlay icon buttons sit in the top-right corner of the 3D preview whenever a multi-section proposal is selected:
   - **Animated Explode Toggle**: Binary exploded/assembled toggle that smoothly eases (`340 ms` cubic ease-in-out) each connected section outward along its computed `explodeOffset` vector (and collapses back cleanly). Whole-minifigure assemblies (via `extractMinifigureGroups`) ride with their host section.
   - **Color Mode Toggle**: Switches between colorblind-safe **Section Colors** and true **Part Colors**.
 - **Curated Wizard Proposals**: `analyzeModelSubdivisions()` offers **2-Half Longitudinal Splits**, **Horizontal Floors**, **Footprint Quadrants**, **Natural Sub-Assemblies / Structural Modules**, and **Split by Baseplate** (alongside **Single Continuous Build**). Arbitrary 3-segment longitudinal splits and random Numbered Build Bags are excluded from wizard proposals, and confusing `~N× zoom` / redundant header chips are omitted.

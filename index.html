@@ -718,8 +718,8 @@
           <div id="impPreviewPane" class="lg:w-[46%] shrink-0 bg-[var(--surface-sunken)] border-b lg:border-b-0 lg:border-r border-[var(--border)] flex flex-col">
             <div class="relative h-[32vh] min-h-[195px] sm:h-[260px] lg:h-auto lg:flex-1 min-h-0 w-full flex items-center justify-center overflow-hidden">
               <canvas id="impPreviewCanvas" class="w-full h-full touch-none cursor-grab active:cursor-grabbing"></canvas>
-              <!-- Tap-to-Reveal Overlay Icon Controls (Explode toggle + Section/Part Colors toggle) -->
-              <div id="impPreviewControls" class="opacity-0 pointer-events-none scale-95 transition-all duration-200 absolute top-3 right-3 z-10 flex items-center gap-1.5">
+              <!-- Always-Visible Overlay Icon Controls (Explode toggle + Section/Part Colors toggle) -->
+              <div id="impPreviewControls" class="transition-all duration-200 absolute top-3 right-3 z-10 flex items-center gap-1.5">
                 <button id="impExplodeToggleBtn" type="button" title="Toggle exploded view" aria-label="Toggle exploded view" class="studio-surface w-9 h-9 rounded-md flex items-center justify-center hover:bg-[var(--surface-hover)] transition-colors cursor-pointer">
                   <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/>
@@ -735,7 +735,7 @@
                 </button>
               </div>
               <div class="absolute bottom-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded bg-black/65 text-white text-xs font-medium pointer-events-none whitespace-nowrap">
-                Drag to orbit · Tap for options
+                Drag to orbit
               </div>
             </div>
           </div>

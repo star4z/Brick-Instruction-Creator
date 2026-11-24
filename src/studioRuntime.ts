@@ -14040,7 +14040,6 @@ let impState = {
   activeProposal: null,
   explodePct: 50,
   isExploded: true,
-  controlsVisible: false,
   colorMode: 'sections', // 'sections' | 'bricks'
   az: 38,
   el: 28,
@@ -14059,7 +14058,6 @@ function closeImportAssistant(keepPendingRaw = false) {
   if (!keepPendingRaw) pendingRawFile = null;
   impState.parsed = null;
   impState.activeProposal = null;
-  impState.controlsVisible = false;
   impState.skipAutoFetch = false;
   impState.pickerOpen = false;
   impPreviewMesh = null;
@@ -14172,7 +14170,7 @@ function drawImportPreviewFrame() {
   impPreviewEngine.draw(impPreviewMesh, w, h, impState.az, impState.el, 1.0);
 }
 
-// Orbit + Tap-to-Reveal Controls pointer gesture for the 3D Import Preview canvas
+// Orbit pointer gesture for the 3D Import Preview canvas
 const IMP_EXPLODED_PCT = 50;
 let impExplodeAnimRaf = 0;
 
@@ -14180,8 +14178,7 @@ function syncImportPreviewControlsUI() {
   const wrap = document.getElementById('impPreviewControls');
   const expBtn = document.getElementById('impExplodeToggleBtn');
   const colBtn = document.getElementById('impColorModeToggleBtn');
-  const hasProposal = Boolean(impState.activeProposal);
-  const show = Boolean(impState.controlsVisible) && hasProposal;
+  const show = Boolean(impState.activeProposal);
   if (wrap) {
     wrap.classList.toggle('opacity-0', !show);
     wrap.classList.toggle('pointer-events-none', !show);
@@ -14240,9 +14237,9 @@ function animateImportExplode(nextExploded) {
 (function bindImportPreviewOrbit() {
   const canvas = document.getElementById('impPreviewCanvas');
   if (!canvas) return;
-  let dragging = false, lastX = 0, lastY = 0, movedDist = 0;
+  let dragging = false, lastX = 0, lastY = 0;
   canvas.addEventListener('pointerdown', (e) => {
-    dragging = true; lastX = e.clientX; lastY = e.clientY; movedDist = 0;
+    dragging = true; lastX = e.clientX; lastY = e.clientY;
     try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
   });
   canvas.addEventListener('pointermove', (e) => {
@@ -14250,18 +14247,11 @@ function animateImportExplode(nextExploded) {
     const dx = e.clientX - lastX;
     const dy = e.clientY - lastY;
     lastX = e.clientX; lastY = e.clientY;
-    movedDist += Math.hypot(dx, dy);
     impState.az = (impState.az - dx * 0.55 + 360) % 360;
     impState.el = Math.max(-75, Math.min(80, impState.el + dy * 0.45));
     drawImportPreviewFrame();
   });
-  canvas.addEventListener('pointerup', () => {
-    if (dragging && movedDist < 6 && impState.activeProposal) {
-      impState.controlsVisible = !impState.controlsVisible;
-      syncImportPreviewControlsUI();
-    }
-    dragging = false;
-  });
+  canvas.addEventListener('pointerup', () => { dragging = false; });
   canvas.addEventListener('pointercancel', () => { dragging = false; });
 })();
 
@@ -14314,7 +14304,6 @@ function selectImportProposal(pid) {
   impState.selectedId = pid;
   if (pid === 'none') {
     impState.activeProposal = null;
-    impState.controlsVisible = false;
   } else {
     const found = impState.proposals.find(p => p.id === pid);
     impState.activeProposal = found ? JSON.parse(JSON.stringify(found)) : null;
@@ -14481,7 +14470,6 @@ function openImportAssistant(parsed, isPostImport = false) {
   impState.isPostImport = isPostImport;
   impState.pickerOpen = false;
   impState.colorMode = 'sections';
-  impState.controlsVisible = false;
   impState.az = 38;
   impState.el = 28;
 
@@ -14525,7 +14513,7 @@ function openImportAssistant(parsed, isPostImport = false) {
   requestAnimationFrame(() => rebuildAndDrawImportPreview());
 }
 
-// Wire subtle tap-to-reveal Import Preview overlay controls
+// Wire Import Preview overlay controls
 const impExplodeToggleBtn = document.getElementById('impExplodeToggleBtn');
 if (impExplodeToggleBtn) {
   impExplodeToggleBtn.onclick = (e) => {
