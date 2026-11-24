@@ -2437,59 +2437,126 @@ class WebGLBrickEngine {
         this.maxAniso = Math.min(8, gl.getParameter(this.anisoExt.MAX_TEXTURE_MAX_ANISOTROPY_EXT) || 1);
       }
     } catch (_) {}
-    const vsTri = `attribute vec3 aPos; attribute vec3 aNorm; attribute vec4 aCol; uniform mat4 uMVP; varying vec3 vNorm; varying vec4 vCol; void main(){ gl_Position = uMVP * vec4(aPos,1.0); vNorm = aNorm; vCol = aCol; }`;
+    const vsTri = `attribute vec3 aPos; attribute vec3 aNorm; attribute vec4 aCol; uniform mat4 uMVP; varying vec3 vPos; varying vec3 vNorm; varying vec4 vCol; void main(){ gl_Position = uMVP * vec4(aPos,1.0); vPos = aPos; vNorm = aNorm; vCol = aCol; }`;
+    const absPbrGlsl = `
+      float ggxDist(float NdotH, float rough) {
+        float a = rough * rough;
+        float a2 = a * a;
+        float d = (NdotH * NdotH) * (a2 - 1.0) + 1.0;
+        return a2 / max(0.0002, 3.14159265 * d * d);
+      }
+      float geomSmithAbs(float NdotV, float NdotL, float rough) {
+        float k = ((rough + 1.0) * (rough + 1.0)) * 0.125;
+        float gv = NdotV / max(0.0002, NdotV * (1.0 - k) + k);
+        float glv = NdotL / max(0.0002, NdotL * (1.0 - k) + k);
+        return gv * glv;
+      }
+      vec3 sampleStudioAbsEnv(vec3 R, float rough, vec3 keyDir, vec3 fillDir, vec3 rimDir, vec3 camUp) {
+        float upR = dot(R, camUp);
+        float upMask = smoothstep(-0.22, 0.72, upR);
+        vec3 env = mix(vec3(0.20, 0.22, 0.27), vec3(0.62, 0.65, 0.70), upMask);
+        float topBox = smoothstep(0.42 - rough * 0.25, 0.88, upR);
+        env += vec3(0.76, 0.75, 0.73) * topBox;
+        float keyCard = pow(max(dot(R, keyDir), 0.0), mix(44.0, 12.0, rough));
+        env += vec3(1.28, 1.24, 1.16) * keyCard;
+        float fillCard = pow(max(dot(R, fillDir), 0.0), mix(26.0, 9.0, rough));
+        env += vec3(0.56, 0.64, 0.78) * fillCard;
+        float rimCard = pow(max(dot(R, rimDir), 0.0), mix(48.0, 14.0, rough));
+        env += vec3(0.55, 0.59, 0.66) * rimCard;
+        return env;
+      }
+      vec3 acesAbsTone(vec3 x) {
+        return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
+      }
+      vec4 shadeAbsPlastic(vec3 baseRgb, float alpha, vec3 worldPos, vec3 rawNorm, float heroMode, vec3 eyePos, vec3 keyDirIn, vec3 fillDirIn, vec3 rimDirIn, vec3 camUpIn) {
+        vec3 N = normalize(rawNorm);
+        if (!gl_FrontFacing) N = -N;
+        vec3 V = normalize(eyePos - worldPos);
+        float NdotV = max(dot(N, V), 0.002);
+        vec3 Lkey = normalize(keyDirIn);
+        vec3 Lfill = normalize(fillDirIn);
+        vec3 Lrim = normalize(rimDirIn);
+        vec3 camUp = normalize(camUpIn);
+
+        vec3 albedo = pow(clamp(baseRgb, 0.0, 1.0), vec3(2.2));
+        float isTrans = step(alpha, 0.96);
+        float baseRough = mix(0.22, 0.17, heroMode);
+        float rough = mix(baseRough, 0.10, isTrans);
+        vec3 F0 = vec3(mix(0.052, 0.068, isTrans));
+
+        float NdotLKey = max(dot(N, Lkey), 0.0);
+        float NdotLFill = max(dot(N, Lfill), 0.0);
+        float NdotLRim = max(dot(N, Lrim), 0.0);
+
+        vec3 direct = vec3(0.0);
+        if (NdotLKey > 0.0) {
+          vec3 H = normalize(V + Lkey);
+          float NdotH = max(dot(N, H), 0.0);
+          float HdotV = max(dot(H, V), 0.0);
+          vec3 F = F0 + (1.0 - F0) * pow(1.0 - HdotV, 5.0);
+          float D = ggxDist(NdotH, rough);
+          float G = geomSmithAbs(NdotV, NdotLKey, rough);
+          vec3 spec = (D * G * F) / max(0.001, 4.0 * NdotV * NdotLKey);
+          vec3 rad = vec3(1.52, 1.48, 1.40);
+          direct += ((1.0 - F) * albedo / 3.14159265 + spec * mix(0.95, 1.15, heroMode)) * rad * NdotLKey;
+        }
+        if (NdotLFill > 0.0) {
+          vec3 H = normalize(V + Lfill);
+          float NdotH = max(dot(N, H), 0.0);
+          float HdotV = max(dot(H, V), 0.0);
+          vec3 F = F0 + (1.0 - F0) * pow(1.0 - HdotV, 5.0);
+          float D = ggxDist(NdotH, rough + 0.05);
+          float G = geomSmithAbs(NdotV, NdotLFill, rough + 0.05);
+          vec3 spec = (D * G * F) / max(0.001, 4.0 * NdotV * NdotLFill);
+          vec3 rad = vec3(0.66, 0.73, 0.85);
+          direct += ((1.0 - F) * albedo / 3.14159265 + spec * mix(0.75, 0.95, heroMode)) * rad * NdotLFill;
+        }
+        if (NdotLRim > 0.0) {
+          vec3 H = normalize(V + Lrim);
+          float NdotH = max(dot(N, H), 0.0);
+          float HdotV = max(dot(H, V), 0.0);
+          vec3 F = F0 + (1.0 - F0) * pow(1.0 - HdotV, 5.0);
+          float D = ggxDist(NdotH, rough + 0.02);
+          float G = geomSmithAbs(NdotV, NdotLRim, rough + 0.02);
+          vec3 spec = (D * G * F) / max(0.001, 4.0 * NdotV * NdotLRim);
+          vec3 rad = vec3(0.56, 0.60, 0.68);
+          direct += (albedo * 0.06 + spec * mix(0.55, 0.85, heroMode)) * rad * NdotLRim;
+        }
+
+        float camUpDot = dot(N, camUp);
+        vec3 hemiAmb = mix(vec3(0.17, 0.19, 0.23), vec3(0.35, 0.36, 0.39), camUpDot * 0.5 + 0.5);
+        vec3 ambientDiff = albedo * hemiAmb;
+
+        vec3 Fview = F0 + (vec3(0.46) - F0) * pow(1.0 - NdotV, 4.0);
+        vec3 R = reflect(-V, N);
+        vec3 envRefl = sampleStudioAbsEnv(R, rough, Lkey, Lfill, Lrim, camUp);
+        vec3 ambientSpec = envRefl * Fview * mix(mix(0.48, 0.62, heroMode), 1.15, isTrans);
+
+        vec3 hdr = direct + ambientDiff + ambientSpec + albedo * (0.12 * isTrans);
+        vec3 mapped = acesAbsTone(hdr * 1.24);
+        vec3 srgb = pow(mapped, vec3(1.0 / 2.2));
+        float outAlpha = mix(alpha, clamp(alpha + Fview.r * 0.45, 0.34, 0.94), isTrans);
+        return vec4(srgb, outAlpha);
+      }
+    `;
     const fsTri = `precision mediump float;
       uniform float uHeroMode;
-      uniform vec3 uViewDir;
+      uniform vec3 uEyePos;
       uniform vec3 uKeyDir;
       uniform vec3 uFillDir;
       uniform vec3 uRimDir;
       uniform vec3 uCamUp;
+      varying vec3 vPos;
       varying vec3 vNorm;
       varying vec4 vCol;
+      ${absPbrGlsl}
       void main(){
-        vec3 n = normalize(vNorm);
-        if (!gl_FrontFacing) n = -n;
-        vec3 v = normalize(uViewDir);
-        vec3 keyDir = normalize(uKeyDir);
-        vec3 fillDir = normalize(uFillDir);
-        float key = max(dot(n, keyDir), 0.0);
-        float fill = max(dot(n, fillDir), 0.0);
-        float camUpDot = dot(n, normalize(uCamUp));
-        if (uHeroMode > 0.5) {
-          vec3 rimDir = normalize(uRimDir);
-          float rim = max(dot(n, rimDir), 0.0);
-          float hemi = 0.44 + 0.12 * camUpDot + 0.07 * max(-camUpDot, 0.0);
-          vec3 keyCol = vec3(1.02, 1.00, 0.97) * (key * 0.46);
-          vec3 fillCol = vec3(0.93, 0.98, 1.06) * (fill * 0.28);
-          vec3 rimCol = vec3(0.96, 0.99, 1.04) * (rim * 0.13);
-          vec3 diff = min(vec3(1.08), vec3(hemi) + keyCol + fillCol + rimCol);
-          vec3 hKey = normalize(keyDir + v);
-          float specKey = pow(max(dot(n, hKey), 0.0), 42.0) * 0.17;
-          vec3 hFill = normalize(fillDir + v);
-          float specFill = pow(max(dot(n, hFill), 0.0), 28.0) * 0.09;
-          vec3 hRim = normalize(rimDir + v);
-          float specRim = pow(max(dot(n, hRim), 0.0), 26.0) * 0.07;
-          vec3 spec = vec3(1.00, 0.99, 0.97) * specKey + vec3(0.92, 0.97, 1.05) * specFill + vec3(specRim);
-          vec3 col = min(vec3(1.0), vCol.rgb * diff + spec);
-          gl_FragColor = vec4(col, vCol.a);
-        } else {
-          float hemi = 0.46 + 0.12 * camUpDot + 0.07 * max(-camUpDot, 0.0);
-          vec3 keyCol = vec3(1.01, 1.00, 0.98) * (key * 0.45);
-          vec3 fillCol = vec3(0.94, 0.98, 1.05) * (fill * 0.28);
-          vec3 diff = min(vec3(1.08), vec3(hemi) + keyCol + fillCol);
-          vec3 hKey = normalize(keyDir + v);
-          float specKey = pow(max(dot(n, hKey), 0.0), 36.0) * 0.07;
-          vec3 hFill = normalize(fillDir + v);
-          float specFill = pow(max(dot(n, hFill), 0.0), 24.0) * 0.045;
-          vec3 col = min(vec3(1.0), vCol.rgb * diff + vec3(specKey) + vec3(0.93, 0.97, 1.04) * specFill);
-          gl_FragColor = vec4(col, vCol.a);
-        }
+        gl_FragColor = shadeAbsPlastic(vCol.rgb, vCol.a, vPos, vNorm, uHeroMode, uEyePos, uKeyDir, uFillDir, uRimDir, uCamUp);
       }`;
-    const vsTex = `attribute vec3 aPos; attribute vec3 aNorm; attribute vec2 aUv; attribute vec4 aCol; uniform mat4 uMVP; varying vec3 vNorm; varying vec2 vUv; varying vec4 vCol; void main(){ gl_Position = uMVP * vec4(aPos,1.0); vNorm = aNorm; vUv = aUv; vCol = aCol; }`;
+    const vsTex = `attribute vec3 aPos; attribute vec3 aNorm; attribute vec2 aUv; attribute vec4 aCol; uniform mat4 uMVP; varying vec3 vPos; varying vec3 vNorm; varying vec2 vUv; varying vec4 vCol; void main(){ gl_Position = uMVP * vec4(aPos,1.0); vPos = aPos; vNorm = aNorm; vUv = aUv; vCol = aCol; }`;
     const fsTex = `precision mediump float;
       uniform float uHeroMode;
-      uniform vec3 uViewDir;
+      uniform vec3 uEyePos;
       uniform vec3 uKeyDir;
       uniform vec3 uFillDir;
       uniform vec3 uRimDir;
@@ -2497,53 +2564,19 @@ class WebGLBrickEngine {
       uniform sampler2D uTex;
       uniform float uUseTex;
       uniform float uFadeMix;
+      varying vec3 vPos;
       varying vec3 vNorm;
       varying vec2 vUv;
       varying vec4 vCol;
+      ${absPbrGlsl}
       void main(){
-        vec3 n = normalize(vNorm);
-        if (!gl_FrontFacing) n = -n;
         vec3 baseRgb = vCol.rgb;
         if (uUseTex > 0.5 && vUv.x >= 0.0 && vUv.x <= 1.0 && vUv.y >= 0.0 && vUv.y <= 1.0) {
           vec4 decal = texture2D(uTex, vUv);
           vec3 decalRgb = mix(decal.rgb, vec3(0.855, 0.871, 0.894), uFadeMix);
           baseRgb = mix(baseRgb, decalRgb, decal.a);
         }
-        vec3 v = normalize(uViewDir);
-        vec3 keyDir = normalize(uKeyDir);
-        vec3 fillDir = normalize(uFillDir);
-        float key = max(dot(n, keyDir), 0.0);
-        float fill = max(dot(n, fillDir), 0.0);
-        float camUpDot = dot(n, normalize(uCamUp));
-        if (uHeroMode > 0.5) {
-          vec3 rimDir = normalize(uRimDir);
-          float rim = max(dot(n, rimDir), 0.0);
-          float hemi = 0.44 + 0.12 * camUpDot + 0.07 * max(-camUpDot, 0.0);
-          vec3 keyCol = vec3(1.02, 1.00, 0.97) * (key * 0.46);
-          vec3 fillCol = vec3(0.93, 0.98, 1.06) * (fill * 0.28);
-          vec3 rimCol = vec3(0.96, 0.99, 1.04) * (rim * 0.13);
-          vec3 diff = min(vec3(1.08), vec3(hemi) + keyCol + fillCol + rimCol);
-          vec3 hKey = normalize(keyDir + v);
-          float specKey = pow(max(dot(n, hKey), 0.0), 42.0) * 0.17;
-          vec3 hFill = normalize(fillDir + v);
-          float specFill = pow(max(dot(n, hFill), 0.0), 28.0) * 0.09;
-          vec3 hRim = normalize(rimDir + v);
-          float specRim = pow(max(dot(n, hRim), 0.0), 26.0) * 0.07;
-          vec3 spec = vec3(1.00, 0.99, 0.97) * specKey + vec3(0.92, 0.97, 1.05) * specFill + vec3(specRim);
-          vec3 col = min(vec3(1.0), baseRgb * diff + spec);
-          gl_FragColor = vec4(col, vCol.a);
-        } else {
-          float hemi = 0.46 + 0.12 * camUpDot + 0.07 * max(-camUpDot, 0.0);
-          vec3 keyCol = vec3(1.01, 1.00, 0.98) * (key * 0.45);
-          vec3 fillCol = vec3(0.94, 0.98, 1.05) * (fill * 0.28);
-          vec3 diff = min(vec3(1.08), vec3(hemi) + keyCol + fillCol);
-          vec3 hKey = normalize(keyDir + v);
-          float specKey = pow(max(dot(n, hKey), 0.0), 36.0) * 0.07;
-          vec3 hFill = normalize(fillDir + v);
-          float specFill = pow(max(dot(n, hFill), 0.0), 24.0) * 0.045;
-          vec3 col = min(vec3(1.0), baseRgb * diff + vec3(specKey) + vec3(0.93, 0.97, 1.04) * specFill);
-          gl_FragColor = vec4(col, vCol.a);
-        }
+        gl_FragColor = shadeAbsPlastic(baseRgb, vCol.a, vPos, vNorm, uHeroMode, uEyePos, uKeyDir, uFillDir, uRimDir, uCamUp);
       }`;
     const vsLine = `attribute vec3 aPos; attribute vec4 aCol; uniform mat4 uMVP; varying vec4 vCol; void main(){ gl_Position = uMVP * vec4(aPos,1.0); gl_Position.z -= 0.00022; vCol = aCol; }`;
     const fsLine = `precision mediump float; uniform float uLineAlpha; varying vec4 vCol; void main(){ gl_FragColor = vec4(vCol.rgb, vCol.a * uLineAlpha); }`;
@@ -2555,7 +2588,7 @@ class WebGLBrickEngine {
     this.loc = {
       tMVP: gl.getUniformLocation(this.triProg, 'uMVP'),
       tHeroMode: gl.getUniformLocation(this.triProg, 'uHeroMode'),
-      tViewDir: gl.getUniformLocation(this.triProg, 'uViewDir'),
+      tEyePos: gl.getUniformLocation(this.triProg, 'uEyePos'),
       tKeyDir: gl.getUniformLocation(this.triProg, 'uKeyDir'),
       tFillDir: gl.getUniformLocation(this.triProg, 'uFillDir'),
       tRimDir: gl.getUniformLocation(this.triProg, 'uRimDir'),
@@ -2565,7 +2598,7 @@ class WebGLBrickEngine {
       tCol: gl.getAttribLocation(this.triProg, 'aCol'),
       xMVP: gl.getUniformLocation(this.texProg, 'uMVP'),
       xHeroMode: gl.getUniformLocation(this.texProg, 'uHeroMode'),
-      xViewDir: gl.getUniformLocation(this.texProg, 'uViewDir'),
+      xEyePos: gl.getUniformLocation(this.texProg, 'uEyePos'),
       xKeyDir: gl.getUniformLocation(this.texProg, 'uKeyDir'),
       xFillDir: gl.getUniformLocation(this.texProg, 'uFillDir'),
       xRimDir: gl.getUniformLocation(this.texProg, 'uRimDir'),
@@ -2701,11 +2734,19 @@ class WebGLBrickEngine {
     const mvp = this.computeMVP(mesh, dw, dh, azDeg, elDeg, zoom, fixedHalfH, tightFit, fixedCenter);
     const { right, up, forward } = computeCameraBasis(azDeg, elDeg);
     const lights = computePreviewLightDirs(right, up, forward);
+    const center = fixedCenter || mesh.center;
+    const clipRadius = Math.max(mesh.fullRadius || mesh.radius, mesh.radius, fixedHalfH > 0 ? fixedHalfH * 1.35 : 0, 12);
+    const eyeDist = clipRadius * 3.6;
+    const eyePos = [
+      center[0] + forward[0] * eyeDist,
+      center[1] + forward[1] * eyeDist,
+      center[2] + forward[2] * eyeDist,
+    ];
 
     gl.useProgram(this.triProg);
     gl.uniformMatrix4fv(this.loc.tMVP, false, mvp);
     gl.uniform1f(this.loc.tHeroMode, heroShading ? 1.0 : 0.0);
-    gl.uniform3f(this.loc.tViewDir, forward[0], forward[1], forward[2]);
+    gl.uniform3f(this.loc.tEyePos, eyePos[0], eyePos[1], eyePos[2]);
     gl.uniform3f(this.loc.tKeyDir, lights.key[0], lights.key[1], lights.key[2]);
     gl.uniform3f(this.loc.tFillDir, lights.fill[0], lights.fill[1], lights.fill[2]);
     gl.uniform3f(this.loc.tRimDir, lights.rim[0], lights.rim[1], lights.rim[2]);
@@ -2722,7 +2763,7 @@ class WebGLBrickEngine {
       gl.useProgram(this.texProg);
       gl.uniformMatrix4fv(this.loc.xMVP, false, mvp);
       gl.uniform1f(this.loc.xHeroMode, heroShading ? 1.0 : 0.0);
-      gl.uniform3f(this.loc.xViewDir, forward[0], forward[1], forward[2]);
+      gl.uniform3f(this.loc.xEyePos, eyePos[0], eyePos[1], eyePos[2]);
       gl.uniform3f(this.loc.xKeyDir, lights.key[0], lights.key[1], lights.key[2]);
       gl.uniform3f(this.loc.xFillDir, lights.fill[0], lights.fill[1], lights.fill[2]);
       gl.uniform3f(this.loc.xRimDir, lights.rim[0], lights.rim[1], lights.rim[2]);
@@ -16443,7 +16484,10 @@ function drawImportPreviewFrame() {
   const dpr = Math.min(Math.max(window.devicePixelRatio || 1, 1.75), 3);
   const w = Math.max(540, Math.round((rect.width || 360) * dpr));
   const h = Math.max(380, Math.round((rect.height || 240) * dpr));
-  impPreviewEngine.draw(impPreviewMesh, w, h, impState.az, impState.el, 1.0);
+  impPreviewEngine.draw(impPreviewMesh, w, h, impState.az, impState.el, 1.0, 0, {
+    heroShading: true,
+    lineAlpha: 0.48,
+  });
 }
 
 // Orbit pointer gesture for the 3D Import Preview canvas

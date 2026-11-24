@@ -94,11 +94,16 @@ describe('studioRuntime safety checks', () => {
     expect(engEnd).toBeGreaterThan(engStart);
     const engBody = sourceText.slice(engStart, engEnd);
 
+    expect(engBody).toContain('uniform vec3 uEyePos;');
     expect(engBody).toContain('uniform vec3 uKeyDir;');
     expect(engBody).toContain('uniform vec3 uFillDir;');
     expect(engBody).toContain('uniform vec3 uRimDir;');
     expect(engBody).toContain('uniform vec3 uCamUp;');
+    expect(engBody).toContain('shadeAbsPlastic(');
+    expect(engBody).toContain('sampleStudioAbsEnv(');
     expect(engBody).toContain('computePreviewLightDirs(right, up, forward)');
+    expect(engBody).toContain('this.loc.tEyePos');
+    expect(engBody).toContain('this.loc.xEyePos');
     expect(engBody).toContain('this.loc.tFillDir');
     expect(engBody).toContain('this.loc.xFillDir');
   });
