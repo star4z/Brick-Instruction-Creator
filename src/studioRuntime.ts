@@ -72,6 +72,10 @@ import {
   selectDynamicStepIndices,
 } from './engine/dynamicStepSizer';
 import {
+  computeStepCameraFraming,
+  optimizeStudioStepCameraSequence,
+} from './engine/stepCamera';
+import {
   buildPhysicalVerticalPrereqMap,
   minSubBoxGap,
   partsPhysicallyTouch,
@@ -2368,19 +2372,17 @@ function buildMeshBuffers(prevParts, newParts, opts) {
     scanR(trP, prevTrEnd, trP.length);
     for (const td of texDraws) scanR(td.triPos, td.prevPosEnd, td.triPos.length);
     const newRadius = Math.max(Math.sqrt(newR2), 18);
-    const focusMode = opts.ov?.focusMode || 'auto';
-
-    if (focusMode === 'focus' || (focusMode === 'auto' && fullRadius > 115 && (newRadius / fullRadius) < 0.44)) {
-      // Blend 12% toward full model center so nearby recognizable structure stays in view!
-      const blend = focusMode === 'focus' ? 0.08 : 0.12;
-      targetCenter = [
-        ncx + (fcx - ncx) * blend,
-        ncy + (fcy - ncy) * blend,
-        ncz + (fcz - ncz) * blend,
-      ];
-      viewRadius = Math.min(fullRadius * 0.85, Math.max(newRadius * 2.25, fullRadius * 0.26, 72));
-      isZoomedIn = viewRadius < fullRadius * 0.86;
-    }
+    const framing = computeStepCameraFraming({
+      focusMode: opts.ov?.focusMode || 'auto',
+      hasPrevParts: prevParts.length > 0,
+      fullCenter: [fcx, fcy, fcz],
+      fullRadius,
+      newCenter: [ncx, ncy, ncz],
+      newRadius,
+    });
+    targetCenter = framing.center;
+    viewRadius = framing.radius;
+    isZoomedIn = framing.isZoomedIn;
   }
 
   return {
@@ -4801,41 +4803,49 @@ function appendOccluderBoxes(partsList, out) {
   }
 }
 
-function getDefaultStepCam(step) {
-  const side = step.side || 'top';
-  const corner = step.corner || 'front_right';
-  const cObj = CORNERS.find(c => c.id === corner) || CORNERS[0];
-  return {
-    side,
-    corner,
-    az: typeof step.az === 'number' ? step.az : cObj.az,
-    el: typeof step.el === 'number' ? step.el : (side === 'bottom' ? -30 : 30),
-  };
-}
+// Globally optimizes step-to-step cameras across every build section, bag chain, join sequence,
+// and submodel using orthographic ray-AABB occlusion + Viterbi DP smoothing (preventing needless
+// spinning and 1-step ping-pongs), while keeping minifigure placement steps unobstructed and
+// all rotation cue badges accurately synchronized.
+function optimizeManualStepCameras(chapters) {
+  const optimizeStepList = (steps) => {
+    const allOccluders = [];
+    let builtBounds = null;
+    let lastModelCam = null;
 
-// Ensures every minifigure placement step uses an unobstructed camera angle (never hiding behind the model!)
-// and keeps paired pre-placement pose steps + subsequent model rotation cues in sync.
-function optimizeMinifigPlacementCameras(chapters) {
-  const sectionState = new Map();
-  for (const ch of chapters) {
-    if (ch.kind === 'submodel' || ch.kind === 'minifigure') continue;
-    const secKey = ch.sectionId || ch.id;
-    if (!sectionState.has(secKey)) {
-      sectionState.set(secKey, { occluders: [], lastModelCam: null });
-    }
-    const sec = sectionState.get(secKey);
-    const steps = ch.steps || [];
+    let pendingSteps = [];
+    let pendingInputs = [];
+
+    const flushPendingRun = () => {
+      if (pendingSteps.length === 0) return;
+      const chosenList = optimizeStudioStepCameraSequence(pendingInputs, {
+        initialCamera: lastModelCam,
+      });
+      for (let k = 0; k < pendingSteps.length; k++) {
+        const s = pendingSteps[k];
+        const ch = chosenList[k];
+        s.side = ch.side;
+        s.corner = ch.corner;
+        s.az = ch.az;
+        s.el = ch.el;
+        s.cue = lastModelCam ? computeStudioRotationCue(lastModelCam, ch) : 'none';
+        lastModelCam = { side: ch.side, corner: ch.corner, az: ch.az, el: ch.el };
+      }
+      pendingSteps = [];
+      pendingInputs = [];
+    };
 
     for (let i = 0; i < steps.length; i++) {
       const step = steps[i];
       if (step.isStandaloneFigure || step.isMinifigPoseStep) continue;
 
       if (step.attachedMinifig) {
-        const prevCam = sec.lastModelCam || DEFAULT_STUDIO_CAMERA;
+        flushPendingRun();
+        const prevCam = lastModelCam || DEFAULT_STUDIO_CAMERA;
         const targets = extractTargetBoxesForMinifig(step.parts);
         const chosen = chooseMinifigPlacementCamera(
           targets,
-          sec.occluders,
+          allOccluders,
           step.attachedMinifig.worldForward,
           prevCam,
         );
@@ -4843,22 +4853,61 @@ function optimizeMinifigPlacementCameras(chapters) {
         step.corner = chosen.corner;
         step.az = chosen.az;
         step.el = chosen.el;
-        step.cue = sec.lastModelCam ? chosen.cue : 'none';
-
-        sec.lastModelCam = {
+        step.cue = lastModelCam ? chosen.cue : 'none';
+        lastModelCam = {
           side: chosen.side,
           corner: chosen.corner,
           az: chosen.az,
           el: chosen.el,
         };
-        appendOccluderBoxes(step.parts, sec.occluders);
+        const beforeLen = allOccluders.length;
+        appendOccluderBoxes(step.parts, allOccluders);
+        for (let k = beforeLen; k < allOccluders.length; k++) {
+          builtBounds = expandBoundsWithBox(builtBounds, allOccluders[k].box);
+        }
       } else {
-        const curCam = getDefaultStepCam(step);
-        step.cue = sec.lastModelCam ? computeStudioRotationCue(sec.lastModelCam, curCam) : 'none';
-        sec.lastModelCam = curCam;
-        appendOccluderBoxes(step.parts, sec.occluders);
+        const occluderCountBefore = allOccluders.length;
+        const builtBoundsBefore = builtBounds;
+        const stepOccs = [];
+        appendOccluderBoxes(step.parts, stepOccs);
+        const stepBoxes = stepOccs.map((o) => o.box);
+
+        pendingSteps.push(step);
+        pendingInputs.push({
+          stepBoxes,
+          occludersBefore: allOccluders,
+          occluderCountBefore,
+          builtBoundsBefore,
+          isSectionAttach: Boolean(step.attachedSubmodel?.isSectionAttach),
+        });
+
+        for (let k = 0; k < stepOccs.length; k++) {
+          allOccluders.push(stepOccs[k]);
+          builtBounds = expandBoundsWithBox(builtBounds, stepOccs[k].box);
+        }
       }
     }
+
+    flushPendingRun();
+  };
+
+  // 1. Optimize each standalone submodel chapter in its own local frame
+  const sectionSteps = new Map();
+  for (const ch of chapters) {
+    if (ch.kind === 'minifigure') continue;
+    if (ch.kind === 'submodel') {
+      optimizeStepList(ch.steps || []);
+      continue;
+    }
+    const secKey = ch.sectionId || ch.id;
+    if (!sectionSteps.has(secKey)) sectionSteps.set(secKey, []);
+    const list = sectionSteps.get(secKey);
+    for (const s of ch.steps || []) list.push(s);
+  }
+
+  // 2. Optimize each continuous main / bag / join section as one unified step sequence
+  for (const list of sectionSteps.values()) {
+    optimizeStepList(list);
   }
 }
 
@@ -5064,7 +5113,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
   const adaptiveMaxSpread = modelHorizSpan >= 400 ? 120 : 160;
 
   // Helper: zero-floating chassis-first step generation for any subset of world part indices
-  const buildStepsForIndexList = (idxList, idPrefix, prePlacedSet = new Set(), _maxSpread = adaptiveMaxSpread) => {
+  const buildStepsForIndexList = (idxList, idPrefix, prePlacedSet = new Set(), _maxSpread = adaptiveMaxSpread, initialCam = DEFAULT_STUDIO_CAMERA) => {
     const placed = new Set(prePlacedSet);
     const remaining = new Set(idxList);
     const outSteps = [];
@@ -5075,7 +5124,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
       ? computeBoundsFromBoxes(Array.from(prePlacedSet).map(i => boxes[i]))
       : null;
     const builtBoxes = Array.from(prePlacedSet).map(i => boxes[i]);
-    let activeCam = { ...DEFAULT_STUDIO_CAMERA };
+    let activeCam = { ...(initialCam || DEFAULT_STUDIO_CAMERA) };
     let localStepCount = 0;
 
     while (remaining.size > 0) {
@@ -5173,7 +5222,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
         parts: stepIndices.map(i => parts[i]),
       });
     }
-    return { steps: outSteps, placed };
+    return { steps: outSteps, placed, lastCam: activeCam };
   };
 
   // 3b. SUBDIVISION PLAN EXECUTION (Modular Halves / Floors / Modules + Connect, OR Numbered Build Bags!)
@@ -5282,14 +5331,17 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
         if (bagMinifigs[bestBag]) bagMinifigs[bestBag].push(nm);
       }
 
+      let runningCam = { ...DEFAULT_STUDIO_CAMERA };
       bagSections.forEach((sec, bIdx) => {
         const bagIndices = sec.cleanRepeatGroups.flat();
-        const { steps: bagSteps, placed: afterPlaced } = buildStepsForIndexList(
+        const { steps: bagSteps, placed: afterPlaced, lastCam } = buildStepsForIndexList(
           bagIndices,
           `bag${bIdx + 1}`,
           runningPlaced,
           adaptiveMaxSpread,
+          runningCam,
         );
+        if (lastCam) runningCam = lastCam;
         for (const pi of afterPlaced) runningPlaced.add(pi);
         for (const nm of (bagMinifigs[bIdx] || [])) {
           appendMinifigPlacementSteps(bagSteps, nm, `bag${bIdx + 1}`);
@@ -5308,7 +5360,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
         }
       });
 
-      optimizeMinifigPlacementCameras(chapters);
+      optimizeManualStepCameras(chapters);
       return {
         title: parsed.title,
         subtitle: `${parts.length} pieces · ${globalStep} steps · ${bagSections.length} build bags`,
@@ -5793,7 +5845,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
         });
       }
 
-      optimizeMinifigPlacementCameras(chapters);
+      optimizeManualStepCameras(chapters);
       const modCount = moduleSecs.length + (bogieCanonical ? 1 : 0);
       return {
         title: parsed.title,
@@ -6126,7 +6178,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
     flushMainSteps();
   });
 
-  optimizeMinifigPlacementCameras(chapters);
+  optimizeManualStepCameras(chapters);
   const dupSummary = dupGroups.length > 0 ? ` · ${dupGroups.length} repeated submodel${dupGroups.length === 1 ? '' : 's'}` : '';
   return { title: parsed.title, subtitle: `${parts.length} pieces · ${globalStep} steps${dupSummary}`, chapters, _parsed: parsed, _mode: mode, _subdivisionPlan: null };
 }
@@ -6755,17 +6807,23 @@ function getStepCamera(step) {
 }
 
 function getEffectiveStepCue(ch, step) {
-  if (!step) return 'none';
+  if (!step || step.isStandaloneFigure || step.isMinifigPoseStep) return 'none';
   const steps = ch?.steps;
   if (Array.isArray(steps)) {
     const idx = steps.indexOf(step);
     if (idx > 0) {
-      const prevStep = steps[idx - 1];
+      let prevStep = null;
+      for (let i = idx - 1; i >= 0; i--) {
+        if (!steps[i]?.isStandaloneFigure && !steps[i]?.isMinifigPoseStep) {
+          prevStep = steps[i];
+          break;
+        }
+      }
       const hasCamOverride = (s) => {
         const o = state.overrides[s?.id];
         return Boolean(o && (o.side != null || o.corner != null || typeof o.az === 'number' || typeof o.el === 'number'));
       };
-      if (hasCamOverride(step) || hasCamOverride(prevStep)) {
+      if (prevStep && (hasCamOverride(step) || hasCamOverride(prevStep))) {
         return computeStudioRotationCue(getStepCamera(prevStep), getStepCamera(step));
       }
     }

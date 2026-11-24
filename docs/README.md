@@ -25,6 +25,7 @@ All architecture specifications and feature design proposals for **Brick Instruc
 - [`STYLE_DIALOG_THEMES_DESIGN.md`](./STYLE_DIALOG_THEMES_DESIGN.md) — All theme editing inline in the Style dialog: sticky recency-ordered horizontal theme strip header (current first), auto-fork of built-in themes on edit, New from Current, step display & Parts List options stored on themes with legacy migration, and single-file `.biwtheme` export (iOS share "2 Items" fix).
 - [`STEP_RENDER_RESOLUTION_DESIGN.md`](./STEP_RENDER_RESOLUTION_DESIGN.md) — High-resolution step page model rendering: slot-aspect-aware HiDPI sizing, zoom-aware in-place sharpening, supersampled print-ready (~180 DPI) PDF export, mipmapped/anisotropic decal filtering, and smoother curved procedural brick geometry.
 - [`PARTS_LIST_DESIGN.md`](./PARTS_LIST_DESIGN.md) — Customizable dense & automatic page-filling Parts List grids, strict integer grid-multiple variable part sizing, all 8 directional grid flows (rows/columns × LTR/RTL × TTB/BTT), alternative Table format, unified draggable Columns & Item Fields (including LEGO Part ID & Color swatches), live SVG visual indicators, and theme-level persistence.
+- [`STEP_CAMERA_STABILITY_DESIGN.md`](./STEP_CAMERA_STABILITY_DESIGN.md) — Occlusion-driven step camera selection with readability deadband, strict underside proximity checks, global Viterbi DP sequence smoothing across sections/bags/submodels, tall foreground panel deferral, and steady full-model auto framing.
 
 ## Conventions
 

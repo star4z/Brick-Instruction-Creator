@@ -8,6 +8,7 @@ import type {
 } from '../types/manual';
 import { computePartWorldAabb, type WorldAabb } from './connectivity';
 import { vec3Dot, vec3Normalize } from './math';
+import { stepVisibilityPenalty } from './stepCamera';
 
 export interface CanonicalViewSpec {
   id: CanonicalViewId;
@@ -137,10 +138,10 @@ export function scoreStepVisibility(
 
 export function transitionCost(from: CanonicalViewSpec, to: CanonicalViewSpec): number {
   if (from.id === to.id) return 0;
-  const flipCost = from.isBottom !== to.isBottom ? 0.95 : 0;
+  const flipCost = from.isBottom !== to.isBottom ? 1.35 : 0;
   const yawDiff = Math.abs(from.yawIndex - to.yawIndex);
   const minYawSteps = Math.min(yawDiff, 4 - yawDiff);
-  const yawCost = minYawSteps === 0 ? 0 : minYawSteps === 1 ? 0.26 : 0.42;
+  const yawCost = minYawSteps === 0 ? 0 : minYawSteps === 1 ? 0.68 : 0.95;
   return flipCost + yawCost;
 }
 
@@ -221,9 +222,11 @@ export function optimizeCameraSequence(
         view,
         aabbsById,
       );
-      // Slight anchor preference for standard Front-Right on step 0 when tied
-      const initialBias = t === 0 && view.id === 'top_front_right' ? -0.05 : 0;
-      const emissionCost = (1 - vis) * 1.35 + initialBias;
+      // Slight anchor preference for standard Front-Right on step 0 when tied;
+      // zero visibility penalty above readability deadband prevents gratuitous turns.
+      const initialBias = t === 0 && view.id === 'top_front_right' ? -0.08 : 0;
+      const uprightBias = view.isBottom ? 0.12 : 0;
+      const emissionCost = stepVisibilityPenalty(vis) + uprightBias + initialBias;
 
       if (t === 0) {
         dp[t][v] = emissionCost;

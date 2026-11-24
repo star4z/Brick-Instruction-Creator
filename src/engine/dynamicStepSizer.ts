@@ -7,6 +7,12 @@ import {
   type StudioRotationCue,
 } from './minifigCamera';
 import type { Vec3, WorldBox } from './minifigPose';
+import {
+  STEP_VISIBILITY_DEADBAND,
+  UNDERSIDE_TOP_OCCLUSION_THRESHOLD,
+  evaluateStepOcclusionVisibility,
+  isStrictUndersidePlacement,
+} from './stepCamera';
 
 export interface DynamicPartDescriptor {
   index: number;
@@ -335,6 +341,12 @@ export function compareFrontierCandidates(
   const bandA = Math.round(a.layerY / 16);
   const bandB = Math.round(b.layerY / 16);
   if (bandA !== bandB) return bandA - bandB;
+
+  // Place low bricks/plates on this floor before towering panels/windows (>=48 LDU)
+  // so tall foreground walls never prematurely hide interior or back-side pieces.
+  const tallA = a.box.max[1] - a.box.min[1] >= 48 ? 1 : 0;
+  const tallB = b.box.max[1] - b.box.min[1] >= 48 ? 1 : 0;
+  if (tallA !== tallB) return tallA - tallB;
 
   const bucketA = cameraCornerBucket(a.box, activeCorner, refBounds);
   const bucketB = cameraCornerBucket(b.box, activeCorner, refBounds);
@@ -740,46 +752,6 @@ export function selectDynamicStepIndices(options: DynamicStepSelectionOptions): 
   return stepIndices;
 }
 
-/**
- * Checks whether the bricks placed in a step are tucked strictly underneath
- * already-built overhead structure (meaning a bottom flip is needed to see them).
- */
-function isUndersidePlacement(
-  stepBoxes: readonly WorldBox[],
-  builtBoxes: readonly WorldBox[],
-  builtBounds: WorldBox,
-): boolean {
-  if (builtBoxes.length < 6) return false;
-  const builtHeight = builtBounds.max[1] - builtBounds.min[1];
-  if (builtHeight < 24) return false;
-
-  let coveredCount = 0;
-  for (const sb of stepBoxes) {
-    // Must sit on the lower portion of the model
-    if (sb.max[1] > builtBounds.min[1] + Math.max(24, builtHeight * 0.4)) continue;
-
-    const area = Math.max(1, (sb.max[0] - sb.min[0]) * (sb.max[2] - sb.min[2]));
-    let maxCoverRatio = 0;
-    let totalCoverArea = 0;
-    for (const bb of builtBoxes) {
-      // Overhead brick must sit strictly above (or resting directly atop) this step brick
-      if (bb.min[1] < sb.max[1] - 4) continue;
-      if (bb.max[1] <= sb.max[1] + 6) continue;
-      const ovX = Math.max(0, Math.min(sb.max[0], bb.max[0]) - Math.max(sb.min[0], bb.min[0]));
-      const ovZ = Math.max(0, Math.min(sb.max[2], bb.max[2]) - Math.max(sb.min[2], bb.min[2]));
-      if (ovX <= 2 || ovZ <= 2) continue;
-      const ovArea = ovX * ovZ;
-      totalCoverArea += ovArea;
-      const ratio = ovArea / area;
-      if (ratio > maxCoverRatio) maxCoverRatio = ratio;
-    }
-    if (maxCoverRatio >= 0.55 || totalCoverArea / area >= 0.7) {
-      coveredCount++;
-    }
-  }
-  return coveredCount >= Math.ceil(stepBoxes.length * 0.6);
-}
-
 function makeCornerPose(side: 'top' | 'bottom', corner: StudioCornerId): StudioCameraPose {
   const info = CORNER_LOOKUP.get(corner) ?? CORNER_LOOKUP.get('front_right')!;
   return {
@@ -790,12 +762,22 @@ function makeCornerPose(side: 'top' | 'bottom', corner: StudioCornerId): StudioC
   };
 }
 
+function cornerYawSteps(a: StudioCornerId, b: StudioCornerId): number {
+  const idxA = STUDIO_CORNERS.findIndex((c) => c.id === a);
+  const idxB = STUDIO_CORNERS.findIndex((c) => c.id === b);
+  if (idxA < 0 || idxB < 0) return 0;
+  const diff = Math.abs(idxA - idxB);
+  return Math.min(diff, 4 - diff);
+}
+
 /**
- * Sticky camera-corner selector:
- * - Strongly prefers keeping `currentCam` (no unnecessary spinning).
- * - Rotates to the corner closest to the placed pieces when they fall on the
- *   far/away side of the already-built model, or flips to `bottom` when pieces
- *   are tucked underneath built structure.
+ * Occlusion-aware sticky camera-corner selector:
+ * - Strongly prefers keeping `currentCam` (zero spinning while new bricks remain clearly visible).
+ * - Uses exact orthographic ray-AABB visibility against `builtBoxes`, so open top layers,
+ *   flat baseplates, and bottom-up walls never cause layer-by-layer spinning.
+ * - Rotates to an unobstructed corner only when already-built structure genuinely occludes
+ *   the newly placed pieces, or flips to `bottom` only when pieces sit strictly underneath
+ *   close overhead structure and are hidden from top views.
  */
 export function chooseStickyStepCamera(
   stepBoxes: readonly WorldBox[],
@@ -818,55 +800,120 @@ export function chooseStickyStepCamera(
   }
 
   const stepBox = computeBoundsFromBoxes(stepBoxes);
+  const currentVis = evaluateStepOcclusionVisibility(
+    stepBoxes,
+    builtBoxes,
+    currentCam.az,
+    currentCam.el,
+  ).visibility;
 
-  // Score all 4 horizontal corners by how closely they face the placed pieces
-  let bestCorner: StudioCornerId = currentCam.corner;
-  let bestDot = -Infinity;
-  let currentDot = -Infinity;
-  for (const c of STUDIO_CORNERS) {
-    const d = cornerAlignmentDot(stepBox, c.id, builtBounds);
-    if (c.id === currentCam.corner) currentDot = d;
-    if (d > bestDot) {
-      bestDot = d;
-      bestCorner = c.id;
-    }
-  }
+  // Evaluate all 4 top corners once for underside / rotation decisions
+  const topScores = STUDIO_CORNERS.map((c) => ({
+    corner: c.id,
+    az: c.az,
+    vis:
+      currentCam.side === 'top' && currentCam.corner === c.id && Math.abs(currentCam.el - 30) < 1
+        ? currentVis
+        : evaluateStepOcclusionVisibility(stepBoxes, builtBoxes, c.az, 30).visibility,
+    dot: cornerAlignmentDot(stepBox, c.id, builtBounds),
+  }));
+  const bestTopVis = Math.max(...topScores.map((s) => s.vis));
 
-  // 1. Check underside / flip_vertical transitions
-  const underside = isUndersidePlacement(stepBoxes, builtBoxes, builtBounds);
+  // 1. Check strict underside / flip_vertical transitions
+  const underside = isStrictUndersidePlacement(stepBoxes, builtBoxes, builtBounds);
   if (underside) {
-    const targetCorner = currentDot >= -0.15 ? currentCam.corner : bestCorner;
-    if (currentCam.side !== 'bottom' || (currentDot < -0.15 && bestDot - currentDot >= 0.45)) {
-      const next = makeCornerPose('bottom', targetCorner);
-      const cue = computeStudioRotationCue(currentCam, next);
-      return { ...next, cue, changed: cue !== 'none' };
+    // Never flip upside down if the current top view already sees the bricks clearly
+    if (currentCam.side === 'top' && (currentVis >= 0.62 || bestTopVis >= UNDERSIDE_TOP_OCCLUSION_THRESHOLD)) {
+      // Fall through to normal top-corner logic below
+    } else {
+      const bottomScores = STUDIO_CORNERS.map((c) => ({
+        corner: c.id,
+        az: c.az,
+        vis:
+          currentCam.side === 'bottom' && currentCam.corner === c.id && Math.abs(currentCam.el + 30) < 1
+            ? currentVis
+            : evaluateStepOcclusionVisibility(stepBoxes, builtBoxes, c.az, -30).visibility,
+        dot: cornerAlignmentDot(stepBox, c.id, builtBounds),
+      }));
+      const curBottom = bottomScores.find((s) => s.corner === currentCam.corner) ?? bottomScores[0];
+
+      if (currentCam.side === 'bottom' && curBottom.vis >= STEP_VISIBILITY_DEADBAND) {
+        return { ...currentCam, cue: 'none', changed: false };
+      }
+
+      let bestBottom = curBottom;
+      let bestBottomScore = -Infinity;
+      for (const s of bottomScores) {
+        const yawSteps = cornerYawSteps(currentCam.corner, s.corner);
+        const turnPen = yawSteps === 0 ? 0 : yawSteps === 1 ? 0.04 : 0.07;
+        const sc = s.vis + s.dot * 0.08 - turnPen;
+        if (sc > bestBottomScore) {
+          bestBottomScore = sc;
+          bestBottom = s;
+        }
+      }
+
+      if (bestBottom.vis >= STEP_VISIBILITY_DEADBAND && bestBottom.vis - bestTopVis >= 0.3) {
+        const targetCorner = curBottom.vis >= STEP_VISIBILITY_DEADBAND ? currentCam.corner : bestBottom.corner;
+        const next = makeCornerPose('bottom', targetCorner);
+        const cue = computeStudioRotationCue(currentCam, next);
+        return { ...next, cue, changed: cue !== 'none' };
+      }
+      if (currentCam.side === 'bottom') {
+        return { ...currentCam, cue: 'none', changed: false };
+      }
     }
-    return { ...currentCam, cue: 'none', changed: false };
   }
 
   // If we were flipped upside-down and are now back on top / normal walls, flip back to top
   if (currentCam.side === 'bottom') {
-    const targetCorner = currentDot >= -0.15 ? currentCam.corner : bestCorner;
+    const curTop = topScores.find((s) => s.corner === currentCam.corner) ?? topScores[0];
+    let targetCorner = currentCam.corner;
+    if (curTop.vis < STEP_VISIBILITY_DEADBAND) {
+      let bestTop = curTop;
+      let bestScore = -Infinity;
+      for (const s of topScores) {
+        const yawSteps = cornerYawSteps(currentCam.corner, s.corner);
+        const turnPen = yawSteps === 0 ? 0 : yawSteps === 1 ? 0.04 : 0.07;
+        const sc = s.vis + s.dot * 0.08 - turnPen;
+        if (sc > bestScore) {
+          bestScore = sc;
+          bestTop = s;
+        }
+      }
+      if (bestTop.vis - curTop.vis >= 0.25) {
+        targetCorner = bestTop.corner;
+      }
+    }
     const next = makeCornerPose('top', targetCorner);
     const cue = computeStudioRotationCue(currentCam, next);
     return { ...next, cue, changed: cue !== 'none' };
   }
 
-  // 2. Top-of-roof / top-rim steps are visible from every top corner — apply extra stickiness
-  const isTopSurface =
-    stepBox.min[1] >= builtBounds.max[1] - 8 && stepBox.max[1] >= builtBounds.max[1];
+  // 2. Normal top view: stay rock-steady whenever the current view already sees the bricks clearly!
+  if (currentVis >= STEP_VISIBILITY_DEADBAND) {
+    return { ...currentCam, cue: 'none', changed: false };
+  }
 
-  const farThreshold = isTopSurface ? -0.55 : -0.15;
-  const minImprovement = isTopSurface ? 0.85 : 0.45;
-  const minHorizSpanForTopRotate = isTopSurface ? 140 : 60;
+  // Current view is genuinely occluded -> pick the clearest unobstructed top corner
+  let best = topScores[0];
+  let bestScore = -Infinity;
+  for (const s of topScores) {
+    const yawSteps = cornerYawSteps(currentCam.corner, s.corner);
+    const turnPen = yawSteps === 0 ? 0 : yawSteps === 1 ? 0.04 : 0.07;
+    const sc = s.vis + s.dot * 0.08 - turnPen;
+    if (sc > bestScore) {
+      bestScore = sc;
+      best = s;
+    }
+  }
 
   if (
-    horizSpan >= minHorizSpanForTopRotate &&
-    bestCorner !== currentCam.corner &&
-    currentDot < farThreshold &&
-    bestDot - currentDot >= minImprovement
+    best.corner !== currentCam.corner &&
+    best.vis >= STEP_VISIBILITY_DEADBAND &&
+    best.vis - currentVis >= 0.25
   ) {
-    const next = makeCornerPose('top', bestCorner);
+    const next = makeCornerPose('top', best.corner);
     const cue = computeStudioRotationCue(currentCam, next);
     return { ...next, cue, changed: cue !== 'none' };
   }

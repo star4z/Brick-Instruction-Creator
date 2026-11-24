@@ -41,18 +41,21 @@ To ensure every step reads clearly in a single camera frame without requiring ra
 - **Opposite-wall guard (`areOnOppositeWalls`)**: On builds `≥ 80` LDU wide/deep, a single step will not mix pieces from opposite exterior walls (except compact mirror pairs on spans `≤ 140` LDU).
 - **Cluster footprint cap**: Mixed/scattered steps stay compact (`120–185` LDU), while clean linear structured rows may span slightly wider (`160–260` LDU).
 
-### 4. Camera-Aware Frontier Ordering & Sticky Camera-Corner Selection
+### 4. Camera-Aware Frontier Ordering, Occlusion-Driven Camera Selection & Steady Framing
 
-The camera follows two principles: **prefer not to change the camera**, and **keep placed pieces on the corner closest to the camera**.
+The camera follows two principles: **stay rock-steady whenever the new bricks are already clearly visible**, and **only rotate or flip when previously built structure genuinely occludes them** (see [`STEP_CAMERA_STABILITY_DESIGN.md`](./STEP_CAMERA_STABILITY_DESIGN.md) for full details).
 
 1. **Camera-aware frontier sorting (`compareFrontierCandidates`)**:
    - Strictly preserves wheel-last and bottom-up vertical layering (`16` LDU layer band).
-   - Within the same vertical band, prioritizes bricks on the currently camera-facing corner/half (`cameraCornerBucket` = `0`) before neutral (`1`) and far-side (`2`) bricks, so the generator finishes the visible side smoothly before turning the model.
-2. **Sticky camera-corner selection (`chooseStickyStepCamera`)**:
-   - **Strong hysteresis**: Stays at the active corner whenever the model is still tiny/flat (`< 4` built bricks or `< 80` LDU span & `< 40` LDU height), whenever the step sits on the camera-facing half/center (`currentDot ≥ -0.15`), or when rotating would not meaningfully improve closeness (`bestDot - currentDot < 0.45`). Top-surface/roof steps use even stronger hysteresis (`currentDot < -0.55`, improvement `≥ 0.85`).
-   - **Corner rotation**: When pieces fall clearly on a far side/corner away from the active camera, rotates to the closest of the 4 horizontal corners (`front_right`, `back_right`, `back_left`, `front_left`), emits the matching rotation cue (`yaw_90_cw`, `yaw_90_ccw`, `yaw_180`), and stays at that corner for subsequent steps.
-   - **Underside flip**: When ≥60% of a step's bricks sit strictly underneath already-built overhead structure (`isUndersidePlacement`), flips to `side: 'bottom'` (`flip_vertical`) and flips back to `side: 'top'` once building resumes upright.
-   - **Minifigure integration**: `optimizeMinifigPlacementCameras` continues to run after step generation and synchronizes all rotation cues across both sticky normal steps and occlusion-checked minifigure placement steps.
+   - Defers tall walls/panels/windows (`height ≥ 48` LDU) until shorter bricks and plates on the same floor band are placed, preventing tall foreground walls from prematurely hiding interior or back-side pieces.
+   - Within the same vertical band, prioritizes bricks on the currently camera-facing corner/half (`cameraCornerBucket` = `0`) before neutral (`1`) and far-side (`2`) bricks so once a rotation is needed, all bricks on that side finish cleanly together.
+2. **Occlusion-driven sticky camera & global Viterbi DP smoothing (`chooseStickyStepCamera` + `optimizeStudioStepCameraSequence`)**:
+   - **True 3D orthographic occlusion + deadband**: Evaluates exact orthographic ray-AABB visibility against previously placed bricks. Any view with `visibility ≥ 0.72` incurs zero penalty, eliminating layer-by-layer spinning on flat baseplates, open walls, and elongated decks.
+   - **Global sequence optimization**: Runs Viterbi dynamic programming across each continuous build section, bag chain, join sequence, and submodel with strong transition costs (`0.68` for 90°, `0.95` for 180°, `1.35` for flips), eliminating 1-step ping-pongs and choosing shared angles across consecutive occluded steps.
+   - **Strict underside flip**: Flips to `side: 'bottom'` (`flip_vertical`) only when ≥60% of a step's bricks sit closely underneath overhead built structure (`gap ≤ 32` LDU) AND top views are genuinely occluded (`bestTopVis < 0.55`).
+   - **Minifigure integration**: `optimizeManualStepCameras` seamlessly weaves occlusion-checked minifigure placement steps into the section DP, keeping unobstructed minifigures steady and continuing subsequent steps from the active camera without snap-backs.
+3. **Steady default step framing (`computeStepCameraFraming`)**:
+   - `focusMode: 'auto'` keeps the full built model steadily framed and centered across normal, medium, and subdivided builds (`fullRadius ≤ 340` LDU), preventing step-to-step zoom bouncing and corner panning while preserving explicit per-step `Close-Up` and `Full Model` overrides.
 
 ### 5. Strict Step Connectivity & Grounded Vertical Prerequisites
 

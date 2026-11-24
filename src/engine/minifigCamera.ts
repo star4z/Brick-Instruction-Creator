@@ -500,7 +500,7 @@ export function chooseMinifigPlacementCamera(
     );
 
     const absDeltaAz = Math.abs(normalizeDeltaDeg(cand.az - prevCamera.az));
-    const rotPenalty = absDeltaAz < 20 ? 0 : absDeltaAz <= 115 ? 0.04 : 0.07;
+    const rotPenalty = absDeltaAz < 20 ? 0 : absDeltaAz <= 115 ? 0.09 : 0.12;
 
     const score =
       metrics.bodyVisibility * 0.65 +

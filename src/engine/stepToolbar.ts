@@ -270,7 +270,7 @@ export const FOCUS_MODE_OPTIONS: readonly StepFocusModeOption[] = [
   {
     id: 'auto',
     label: 'Auto',
-    description: 'Automatically zooms in for small details and zooms out when showing larger assemblies.',
+    description: 'Automatically keeps the full model framed steadily, zooming in gently only for tiny details on very large builds.',
   },
   {
     id: 'focus',
