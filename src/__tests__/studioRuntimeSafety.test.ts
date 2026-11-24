@@ -184,4 +184,27 @@ describe('studioRuntime safety checks', () => {
     expect(runtime.match(/COVER_QR_HINT_TEXT/g)?.length).toBeGreaterThanOrEqual(4);
     expect(runtime.match(/BACK_COVER_CREDIT/g)?.length).toBeGreaterThanOrEqual(4);
   });
+
+  it('replaces inline page break instructions with `?` help tooltip triggers on Page Break buttons', () => {
+    const html = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf8');
+    const runtime = fs.readFileSync(path.resolve(process.cwd(), 'src/studioRuntime.ts'), 'utf8');
+
+    // Always-visible instructions copy removed from overview modal & Edit Step modal
+    expect(html).not.toContain('locks a step to the start of a new page so editing earlier steps');
+    expect(runtime).not.toContain('Pins a page break before Step ${step.num} so adding, splitting, or merging earlier steps');
+
+    // Global tooltip & conditional active breaks bar exist in index.html
+    expect(html).toContain('id="pageBreakHelpTooltip"');
+    expect(html).toContain('id="overviewPinsBar"');
+
+    // Both overview and Edit Step Page Break buttons include integrated `?` triggers wired to tooltip controller
+    expect(runtime).toContain('id="stepEditPinBreakHelp"');
+    expect(runtime).toContain('class="pb-help-btn');
+    expect(runtime).toContain('function showPageBreakHelpTooltip(');
+    expect(runtime).toContain('function togglePageBreakHelpTooltip(');
+    expect(runtime).toContain('function hidePageBreakHelpTooltip(');
+    expect(runtime).toContain('computeHelpTooltipPosition(');
+    expect(runtime).toContain('getPageBreakHelpExplanation(');
+  });
 });
+

@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { getLDrawColor } from '../data/ldrawColors';
 import { THEME_PRESETS } from '../data/themePresets';
+import { getPageBreakHelpExplanation } from '../engine/pageBreaks';
 import { partsProvider } from '../engine/partsProvider';
 import { useManualStore } from '../store/useManualStore';
 import type {
@@ -38,6 +39,8 @@ export function InspectorPanel() {
   const [selectedMovePartId, setSelectedMovePartId] = useState<string>('');
   const [cachedPartCount, setCachedPartCount] = useState<number>(0);
   const [importProgress, setImportProgress] = useState<string | null>(null);
+  const [pageBreakHelpPinned, setPageBreakHelpPinned] = useState<boolean>(false);
+  const [pageBreakHelpHover, setPageBreakHelpHover] = useState<boolean>(false);
 
   const model = useManualStore((s) => s.model);
   const plan = useManualStore((s) => s.plan);
@@ -486,25 +489,59 @@ export function InspectorPanel() {
 
                 {/* Page Break & Local Step Count */}
                 <section className="space-y-3 p-3.5 rounded-2xl bg-[#f8f9fa] border border-[#e8eaed]">
-                  <div className="flex items-center justify-between">
-                    <label className="flex items-center gap-2 font-semibold text-[#202124] cursor-pointer">
-                      <Pin className="w-4 h-4 text-[#1a73e8]" />
-                      <span>Page Break</span>
-                    </label>
-                    <input
-                      type="checkbox"
-                      checked={Boolean(selectedOverride?.pinPageBreakBefore)}
-                      onChange={(e) =>
-                        updateStepOverride(selectedStep.id, {
-                          pinPageBreakBefore: e.target.checked,
-                        })
-                      }
-                      className="accent-[#1a73e8] w-4 h-4"
-                    />
+                  <div className="relative flex items-center justify-between gap-2">
+                    <span className="font-semibold text-[#202124]">Start Step {selectedStep.stepNumber} on a New Page</span>
+                    <span className={`pb-btn-group inline-flex items-stretch rounded-md border text-xs font-semibold transition ${
+                      selectedOverride?.pinPageBreakBefore
+                        ? 'bg-[#1a73e8] text-white border-transparent'
+                        : 'bg-white text-[#202124] border-[#dadce0]'
+                    }`}>
+                      <button
+                        type="button"
+                        aria-pressed={Boolean(selectedOverride?.pinPageBreakBefore)}
+                        onClick={() =>
+                          updateStepOverride(selectedStep.id, {
+                            pinPageBreakBefore: !selectedOverride?.pinPageBreakBefore,
+                          })
+                        }
+                        className="inline-flex items-center gap-1.5 pl-2.5 pr-2 py-1.5 rounded-l-[5px] cursor-pointer"
+                      >
+                        <Pin className="w-3.5 h-3.5" />
+                        <span>Page Break</span>
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`What is a Page Break? (Step ${selectedStep.stepNumber})`}
+                        aria-expanded={pageBreakHelpPinned || pageBreakHelpHover}
+                        onMouseEnter={() => setPageBreakHelpHover(true)}
+                        onMouseLeave={() => setPageBreakHelpHover(false)}
+                        onFocus={() => setPageBreakHelpHover(true)}
+                        onBlur={() => setPageBreakHelpHover(false)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setPageBreakHelpPinned((prev) => !prev);
+                        }}
+                        className={`px-2 py-1.5 rounded-r-[5px] border-l font-bold leading-none cursor-pointer ${
+                          selectedOverride?.pinPageBreakBefore
+                            ? 'border-white/30 hover:bg-white/15'
+                            : 'border-[#dadce0] text-[#5f6368] hover:text-[#1a73e8] hover:bg-[#e8f0fe]'
+                        }`}
+                      >
+                        <span aria-hidden="true">?</span>
+                      </button>
+                    </span>
+                    {(pageBreakHelpPinned || pageBreakHelpHover) && (
+                      <div
+                        role="tooltip"
+                        className="absolute right-0 bottom-full mb-2 z-30 w-64 rounded-lg bg-[#23121a] text-[#f7f3f5] border border-white/15 shadow-lg px-3 py-2 text-[11px] leading-snug"
+                      >
+                        {getPageBreakHelpExplanation({
+                          stepLabel: `Step ${selectedStep.stepNumber}`,
+                          pinned: Boolean(selectedOverride?.pinPageBreakBefore),
+                        })}
+                      </div>
+                    )}
                   </div>
-                  <p className="text-[11px] text-[#5f6368] leading-relaxed">
-                    Keeps this step at the start of a new page so editing earlier steps won&apos;t shift later pages. Pages remain editable.
-                  </p>
 
                   <div className="space-y-1.5 pt-1">
                     <span className="text-[11px] font-medium text-[#5f6368]">

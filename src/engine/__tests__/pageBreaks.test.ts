@@ -7,8 +7,10 @@ import { generateInstructionPlan } from '../stepGenerator';
 import { buildPagePlans } from '../layoutEngine';
 import {
   clearAllStepPageBreaks,
+  computeHelpTooltipPosition,
   countStepPageBreaks,
   findPageIndexForStep,
+  getPageBreakHelpExplanation,
   getStepBreakFeedbackMessage,
   getStepBreakTooltip,
   hasStepPageBreak,
@@ -222,4 +224,61 @@ describe('Per-Step Page Breaks', () => {
     const restoredPage = pagesRestored.find((p) => p.slots?.some((s) => s.stepId === firstStepId));
     expect(restoredPage!.slots!.map((s) => s.stepId)).toContain(secondStepId);
   });
+
+  it('builds clear Page Break `?` help explanations for unpinned, pinned, and generic triggers', () => {
+    expect(getPageBreakHelpExplanation({ stepLabel: 'Step 4', pinned: false })).toBe(
+      'Locks Step 4 to the start of a new page so adding, splitting, or merging earlier steps won’t shift later pages.',
+    );
+    expect(getPageBreakHelpExplanation({ stepLabel: 'Step 4', pinned: true })).toBe(
+      'Step 4 is locked to the start of a new page so earlier edits won’t shift later pages. Click Page Break to remove it.',
+    );
+    expect(getPageBreakHelpExplanation()).toBe(
+      'Locks a step to the start of a new page so adding, splitting, or merging earlier steps won’t shift later pages.',
+    );
+    expect(getPageBreakHelpExplanation({ stepLabel: '   ', pinned: true })).toContain(
+      'Locks a step to the start of a new page',
+    );
+  });
+
+  it('positions floating help tooltips within viewport bounds and flips below near the top edge', () => {
+    // Plenty of space above -> places above anchor and centers caret on anchor
+    const above = computeHelpTooltipPosition({
+      anchor: { left: 320, top: 300, right: 344, bottom: 328, width: 24, height: 28 },
+      tooltip: { width: 260, height: 76 },
+      viewport: { width: 1024, height: 768 },
+    });
+    expect(above.placement).toBe('top');
+    expect(above.top).toBe(300 - 76 - 8);
+    expect(above.left).toBe(332 - 130);
+    expect(above.arrowLeft).toBe(130);
+
+    // Near top edge -> flips below anchor
+    const below = computeHelpTooltipPosition({
+      anchor: { left: 320, top: 30, right: 344, bottom: 58, width: 24, height: 28 },
+      tooltip: { width: 260, height: 76 },
+      viewport: { width: 1024, height: 768 },
+    });
+    expect(below.placement).toBe('bottom');
+    expect(below.top).toBe(58 + 8);
+
+    // Near right edge on narrow mobile viewport -> clamps horizontally inside margin and aims arrow right
+    const clampedRight = computeHelpTooltipPosition({
+      anchor: { left: 340, top: 240, right: 364, bottom: 268, width: 24, height: 28 },
+      tooltip: { width: 260, height: 76 },
+      viewport: { width: 375, height: 667 },
+    });
+    expect(clampedRight.left).toBe(375 - 260 - 12);
+    expect(clampedRight.left + 260).toBeLessThanOrEqual(375 - 12);
+    expect(clampedRight.arrowLeft).toBe(Math.min(260 - 14, 352 - clampedRight.left));
+
+    // Near left edge -> clamps left to margin and keeps arrow inset safely inside corner
+    const clampedLeft = computeHelpTooltipPosition({
+      anchor: { left: 4, top: 240, right: 24, bottom: 268, width: 20, height: 28 },
+      tooltip: { width: 260, height: 76 },
+      viewport: { width: 375, height: 667 },
+    });
+    expect(clampedLeft.left).toBe(12);
+    expect(clampedLeft.arrowLeft).toBeGreaterThanOrEqual(14);
+  });
 });
+

@@ -89,8 +89,10 @@ import {
 } from './engine/minifigSteps';
 import {
   clearAllStepPageBreaks,
+  computeHelpTooltipPosition,
   countStepPageBreaks,
   findPageIndexForStep,
+  getPageBreakHelpExplanation,
   getStepBreakFeedbackMessage,
   getStepBreakTooltip,
   hasStepPageBreak,
@@ -9039,6 +9041,7 @@ function openStepEditModal() {
 }
 
 function closeStepEditModal() {
+  hidePageBreakHelpTooltip();
   const el = document.getElementById('stepEditModal');
   if (el) el.classList.add('hidden');
   const page = state.pages[state.pageIdx];
@@ -9266,12 +9269,16 @@ function renderStepEditModal() {
       <div class="flex items-center justify-between gap-3 flex-wrap">
         <div class="min-w-0 flex-1">
           <div class="font-semibold">Start Step ${step.num} on a New Page</div>
-          <p class="text-[11px] text-[var(--muted-foreground)] leading-snug">Pins a page break before Step ${step.num} so adding, splitting, or merging earlier steps won&rsquo;t shift later pages.</p>
         </div>
-        <button type="button" id="stepEditPinBreak" title="${escHtml(pinTooltip)}" aria-pressed="${isPinned ? 'true' : 'false'}" class="px-3.5 py-2 rounded-md font-semibold inline-flex items-center gap-1.5 shrink-0 transition-colors cursor-pointer ${isPinned ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)]'}">
-          <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4"/><path d="M10 12h4"/><path d="M17 12h4"/><path d="M6 4v3a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V4"/><path d="M6 20v-3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v3"/></svg>
-          <span>${isPinned ? 'Page Break On' : 'Add Page Break'}</span>
-        </button>
+        <span class="pb-btn-group inline-flex items-stretch rounded-md border shrink-0 transition-colors ${isPinned ? 'bg-[var(--primary)] text-[var(--primary-foreground)] border-transparent' : 'border-[var(--border)] bg-[var(--card)]'}">
+          <button type="button" id="stepEditPinBreak" title="${escHtml(pinTooltip)}" aria-pressed="${isPinned ? 'true' : 'false'}" class="pl-3.5 pr-3 py-2 rounded-l-[5px] font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer ${isPinned ? 'hover:bg-[var(--primary-hover)]' : 'hover:bg-[var(--surface-hover)]'}">
+            <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4"/><path d="M10 12h4"/><path d="M17 12h4"/><path d="M6 4v3a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V4"/><path d="M6 20v-3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v3"/></svg>
+            <span>${isPinned ? 'Page Break On' : 'Add Page Break'}</span>
+          </button>
+          <button type="button" id="stepEditPinBreakHelp" aria-label="${escHtml(`What is a Page Break? (${stepShortLabel})`)}" aria-expanded="false" data-pb-help-step="${escHtml(stepShortLabel)}" data-pb-help-pinned="${isPinned ? '1' : '0'}" class="pb-help-btn px-2.5 py-2 rounded-r-[5px] border-l inline-flex items-center justify-center font-bold leading-none transition-colors cursor-pointer ${isPinned ? 'pb-help-btn-pinned' : 'pb-help-btn-default'}">
+            <span aria-hidden="true">?</span>
+          </button>
+        </span>
       </div>
       <div class="pt-3 border-t border-[var(--border)] flex items-center justify-between gap-2 flex-wrap">
         <span class="text-[11px] text-[var(--muted-foreground)]">Want to change the page grid, step order, or paper size?</span>
@@ -9408,6 +9415,14 @@ function renderStepEditModal() {
   body.querySelector('#stepEditPinBreak').onclick = () => {
     toggleStepPageBreak(step, { ch, followToggledStep: true });
   };
+  const pinHelpBtn = body.querySelector('#stepEditPinBreakHelp');
+  if (pinHelpBtn) {
+    pinHelpBtn.onclick = (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      togglePageBreakHelpTooltip(pinHelpBtn);
+    };
+  }
   body.querySelector('#stepEditOpenPageSetup').onclick = () => {
     closeStepEditModal();
     openPageSetupModal();
@@ -9479,8 +9494,105 @@ function getStepShortLabel(step, ch = null) {
   return `Step ${step.num}`;
 }
 
+const pageBreakHelpState = {
+  activeTrigger: null,
+  pinned: false,
+  hideTimer: 0,
+};
+
+function isPageBreakHelpTooltipOpen() {
+  const tip = document.getElementById('pageBreakHelpTooltip');
+  return Boolean(pageBreakHelpState.activeTrigger && tip && !tip.classList.contains('hidden'));
+}
+
+function hidePageBreakHelpTooltip() {
+  if (pageBreakHelpState.hideTimer) {
+    clearTimeout(pageBreakHelpState.hideTimer);
+    pageBreakHelpState.hideTimer = 0;
+  }
+  const prevTrigger = pageBreakHelpState.activeTrigger;
+  if (prevTrigger) {
+    prevTrigger.classList.remove('is-help-open');
+    prevTrigger.setAttribute('aria-expanded', 'false');
+    prevTrigger.removeAttribute('aria-describedby');
+  }
+  pageBreakHelpState.activeTrigger = null;
+  pageBreakHelpState.pinned = false;
+  const tip = document.getElementById('pageBreakHelpTooltip');
+  if (tip) {
+    tip.classList.add('hidden');
+    tip.setAttribute('aria-hidden', 'true');
+  }
+}
+
+function positionPageBreakHelpTooltip(triggerEl) {
+  const tip = document.getElementById('pageBreakHelpTooltip');
+  if (!tip || !triggerEl) return;
+  const anchorRect = triggerEl.getBoundingClientRect();
+  if (anchorRect.width === 0 && anchorRect.height === 0) {
+    hidePageBreakHelpTooltip();
+    return;
+  }
+  const pos = computeHelpTooltipPosition({
+    anchor: anchorRect,
+    tooltip: { width: tip.offsetWidth || 260, height: tip.offsetHeight || 72 },
+    viewport: { width: window.innerWidth, height: window.innerHeight },
+  });
+  tip.style.left = `${pos.left}px`;
+  tip.style.top = `${pos.top}px`;
+  tip.dataset.placement = pos.placement;
+  tip.style.setProperty('--pb-arrow-left', `${pos.arrowLeft}px`);
+}
+
+function showPageBreakHelpTooltip(triggerEl, opts = {}) {
+  const tip = document.getElementById('pageBreakHelpTooltip');
+  const textEl = document.getElementById('pageBreakHelpTooltipText');
+  if (!tip || !textEl || !triggerEl) return;
+  if (pageBreakHelpState.hideTimer) {
+    clearTimeout(pageBreakHelpState.hideTimer);
+    pageBreakHelpState.hideTimer = 0;
+  }
+  if (pageBreakHelpState.activeTrigger && pageBreakHelpState.activeTrigger !== triggerEl) {
+    pageBreakHelpState.activeTrigger.classList.remove('is-help-open');
+    pageBreakHelpState.activeTrigger.setAttribute('aria-expanded', 'false');
+    pageBreakHelpState.activeTrigger.removeAttribute('aria-describedby');
+  }
+  const stepLabel = triggerEl.dataset?.pbHelpStep || '';
+  const isPinnedBreak = triggerEl.dataset?.pbHelpPinned === '1';
+  textEl.textContent = getPageBreakHelpExplanation({ stepLabel, pinned: isPinnedBreak });
+
+  pageBreakHelpState.activeTrigger = triggerEl;
+  pageBreakHelpState.pinned = Boolean(opts.pinned);
+  triggerEl.classList.add('is-help-open');
+  triggerEl.setAttribute('aria-expanded', 'true');
+  triggerEl.setAttribute('aria-describedby', 'pageBreakHelpTooltip');
+
+  tip.classList.remove('hidden');
+  tip.setAttribute('aria-hidden', 'false');
+  positionPageBreakHelpTooltip(triggerEl);
+}
+
+function togglePageBreakHelpTooltip(triggerEl) {
+  if (!triggerEl) return;
+  if (isPageBreakHelpTooltipOpen() && pageBreakHelpState.activeTrigger === triggerEl && pageBreakHelpState.pinned) {
+    hidePageBreakHelpTooltip();
+    return;
+  }
+  showPageBreakHelpTooltip(triggerEl, { pinned: true });
+}
+
+function scheduleHidePageBreakHelpTooltip() {
+  if (pageBreakHelpState.pinned) return;
+  if (pageBreakHelpState.hideTimer) clearTimeout(pageBreakHelpState.hideTimer);
+  pageBreakHelpState.hideTimer = window.setTimeout(() => {
+    pageBreakHelpState.hideTimer = 0;
+    if (!pageBreakHelpState.pinned) hidePageBreakHelpTooltip();
+  }, 130);
+}
+
 function toggleStepPageBreak(step, opts = {}) {
   if (!step) return;
+  hidePageBreakHelpTooltip();
   const { ch = null, followToggledStep = false, refreshOverview = false } = opts;
   const currentPage = state.pages[state.pageIdx];
   const anchorStepId = state.selectedStepId || currentPage?.slots?.[0]?.step?.id || null;
@@ -10007,6 +10119,7 @@ function stopOverviewThumbQueue() {
 }
 
 function closeOverviewModal() {
+  hidePageBreakHelpTooltip();
   stopOverviewThumbQueue();
   document.getElementById('overviewModal')?.classList.add('hidden');
 }
@@ -10654,6 +10767,7 @@ function syncBomSetupUI() {
 function renderOverviewModal(opts = {}) {
   const list = document.getElementById('overviewList');
   if (!list) return;
+  hidePageBreakHelpTooltip();
   const prevScrollTop = list.scrollTop;
   stopOverviewThumbQueue();
   const jobId = overviewThumbRenderJobId;
@@ -10670,10 +10784,18 @@ function renderOverviewModal(opts = {}) {
 
   const breakCount = countStepPageBreaks(state.model?.chapters, state.overrides);
 
+  const pinsBar = document.getElementById('overviewPinsBar');
+  const pinsStatus = document.getElementById('overviewPinsStatus');
   const clearBtn = document.getElementById('btnClearAllPins');
+  if (pinsBar) pinsBar.classList.toggle('hidden', breakCount === 0);
+  if (pinsStatus) {
+    pinsStatus.innerHTML = breakCount > 0
+      ? `<span class="text-[var(--primary)] inline-flex items-center">${pageBreakSvg}</span><span>${breakCount} active page break${breakCount === 1 ? '' : 's'}</span>`
+      : '';
+  }
   if (clearBtn) {
     if (breakCount > 0) {
-      clearBtn.textContent = `Clear ${breakCount}`;
+      clearBtn.textContent = 'Clear All';
       clearBtn.title = `Remove all ${breakCount} page break${breakCount === 1 ? '' : 's'}`;
       clearBtn.classList.remove('hidden');
       clearBtn.onclick = () => {
@@ -11008,8 +11130,9 @@ function renderOverviewModal(opts = {}) {
       if (isStepActive) stepRow.dataset.active = 'true';
       stepRow.className = `flex items-center justify-between gap-2 px-3 py-2 cursor-pointer transition ${inSelRange ? 'bg-[var(--primary-soft)] ring-1 ring-inset ring-[var(--primary-border)]' : (isStepActive ? 'bg-[var(--primary-soft)]' : 'hover:bg-black/[0.03] dark:hover:bg-white/[0.04]')}`;
 
+      const stepShortLabel = getStepShortLabel(step, slot.ch);
       const breakTitle = getStepBreakTooltip({
-        stepLabel: getStepShortLabel(step, slot.ch),
+        stepLabel: stepShortLabel,
         pinned: hasBreak,
         slotIndex: slotIdx,
       });
@@ -11109,7 +11232,7 @@ function renderOverviewModal(opts = {}) {
       rightWrap.className = 'flex items-center gap-1 shrink-0';
       rightWrap.innerHTML = isSeqCont
         ? '<span class="px-2 py-0.5 rounded-md text-xs font-medium text-[var(--muted-foreground)] bg-black/5 dark:bg-white/10">Continued</span>'
-        : `<button type="button" title="${escHtml(breakTitle)}" aria-label="${escHtml(`Page break before Step ${step.num}`)}" aria-pressed="${hasBreak ? 'true' : 'false'}" class="ov-step-pin px-2 py-1 sm:px-2.5 rounded-md text-xs font-semibold border inline-flex items-center gap-1 transition ${hasBreak ? 'bg-[var(--primary)] text-[var(--primary-foreground)] border-transparent' : 'border-[var(--border)] bg-[var(--card)] hover:border-[var(--primary-border)]'}">${pageBreakSvg}<span>Page Break</span></button>`;
+        : `<span class="pb-btn-group inline-flex items-stretch rounded-md text-xs font-semibold border transition ${hasBreak ? 'bg-[var(--primary)] text-[var(--primary-foreground)] border-transparent' : 'border-[var(--border)] bg-[var(--card)] hover:border-[var(--primary-border)]'}"><button type="button" title="${escHtml(breakTitle)}" aria-label="${escHtml(`Page break before Step ${step.num}`)}" aria-pressed="${hasBreak ? 'true' : 'false'}" class="ov-step-pin pl-2 pr-1.5 py-1 sm:pl-2.5 sm:pr-2 rounded-l-[5px] inline-flex items-center gap-1 transition-colors cursor-pointer ${hasBreak ? 'hover:bg-[var(--primary-hover)]' : 'hover:bg-[var(--surface-hover)]'}">${pageBreakSvg}<span>Page Break</span></button><button type="button" aria-label="${escHtml(`What is a Page Break? (${stepShortLabel})`)}" aria-expanded="false" data-pb-help-step="${escHtml(stepShortLabel)}" data-pb-help-pinned="${hasBreak ? '1' : '0'}" class="pb-help-btn px-1.5 sm:px-2 py-1 rounded-r-[5px] border-l inline-flex items-center justify-center font-bold leading-none transition-colors cursor-pointer ${hasBreak ? 'pb-help-btn-pinned' : 'pb-help-btn-default'}"><span aria-hidden="true">?</span></button></span>`;
 
       stepRow.appendChild(leftWrap);
       stepRow.appendChild(rightWrap);
@@ -11127,6 +11250,14 @@ function renderOverviewModal(opts = {}) {
         pinBtn.onclick = (e) => {
           e.stopPropagation();
           toggleStepPageBreak(step, { ch: slot.ch, refreshOverview: true });
+        };
+      }
+      const pinHelpBtn = stepRow.querySelector('.pb-help-btn');
+      if (pinHelpBtn) {
+        pinHelpBtn.onclick = (e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          togglePageBreakHelpTooltip(pinHelpBtn);
         };
       }
 
@@ -15059,7 +15190,9 @@ document.getElementById('themeImportInput').onchange = async (e) => {
 
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
-  if (isBricksLibraryModalOpen()) {
+  if (isPageBreakHelpTooltipOpen()) {
+    hidePageBreakHelpTooltip();
+  } else if (isBricksLibraryModalOpen()) {
     closeBricksLibraryModal();
   } else if (isStepEditModalOpen()) {
     closeStepEditModal();
@@ -15070,6 +15203,92 @@ document.addEventListener('keydown', (e) => {
   } else if (stylePopEl && !stylePopEl.classList.contains('hidden')) {
     setStylePopoverOpen(false);
   }
+});
+
+// Delegated hover, keyboard focus, and outside-click handlers for Page Break `?` help buttons
+document.addEventListener('pointerover', (e) => {
+  if (e.pointerType === 'touch') return;
+  const target = e.target;
+  if (!(target instanceof Element)) return;
+  if (target.closest('#pageBreakHelpTooltip')) {
+    if (pageBreakHelpState.hideTimer) {
+      clearTimeout(pageBreakHelpState.hideTimer);
+      pageBreakHelpState.hideTimer = 0;
+    }
+    return;
+  }
+  const trigger = target.closest('.pb-help-btn');
+  if (!trigger) return;
+  if (pageBreakHelpState.hideTimer) {
+    clearTimeout(pageBreakHelpState.hideTimer);
+    pageBreakHelpState.hideTimer = 0;
+  }
+  if (pageBreakHelpState.pinned && pageBreakHelpState.activeTrigger !== trigger) return;
+  if (!isPageBreakHelpTooltipOpen() || pageBreakHelpState.activeTrigger !== trigger) {
+    showPageBreakHelpTooltip(trigger, {
+      pinned: pageBreakHelpState.pinned && pageBreakHelpState.activeTrigger === trigger,
+    });
+  }
+});
+
+document.addEventListener('pointerout', (e) => {
+  if (e.pointerType === 'touch') return;
+  if (!isPageBreakHelpTooltipOpen() || pageBreakHelpState.pinned) return;
+  const target = e.target;
+  if (!(target instanceof Element)) return;
+  const fromHelp = target.closest('.pb-help-btn') || target.closest('#pageBreakHelpTooltip');
+  if (!fromHelp) return;
+  const related = e.relatedTarget;
+  if (
+    related instanceof Element
+    && (related.closest('.pb-help-btn') === pageBreakHelpState.activeTrigger || related.closest('#pageBreakHelpTooltip'))
+  ) {
+    return;
+  }
+  scheduleHidePageBreakHelpTooltip();
+});
+
+document.addEventListener('focusin', (e) => {
+  const target = e.target;
+  if (!(target instanceof Element)) return;
+  const trigger = target.closest('.pb-help-btn');
+  if (!trigger) {
+    if (isPageBreakHelpTooltipOpen() && !pageBreakHelpState.pinned && !target.closest('#pageBreakHelpTooltip')) {
+      hidePageBreakHelpTooltip();
+    }
+    return;
+  }
+  let isKeyboardFocus = false;
+  try { isKeyboardFocus = trigger.matches(':focus-visible'); } catch {}
+  if (!isKeyboardFocus) return;
+  if (pageBreakHelpState.pinned && pageBreakHelpState.activeTrigger !== trigger) return;
+  showPageBreakHelpTooltip(trigger, {
+    pinned: pageBreakHelpState.pinned && pageBreakHelpState.activeTrigger === trigger,
+  });
+});
+
+document.addEventListener('focusout', (e) => {
+  if (!isPageBreakHelpTooltipOpen() || pageBreakHelpState.pinned) return;
+  const target = e.target;
+  if (!(target instanceof Element)) return;
+  if (!target.closest('.pb-help-btn')) return;
+  const related = e.relatedTarget;
+  if (related instanceof Element && related.closest('#pageBreakHelpTooltip')) return;
+  hidePageBreakHelpTooltip();
+});
+
+const dismissPageBreakHelpOnOutside = (e) => {
+  if (!isPageBreakHelpTooltipOpen()) return;
+  const target = e.target;
+  if (target instanceof Element && (target.closest('#pageBreakHelpTooltip') || target.closest('.pb-help-btn'))) {
+    return;
+  }
+  hidePageBreakHelpTooltip();
+};
+document.addEventListener('pointerdown', dismissPageBreakHelpOnOutside, true);
+document.addEventListener('click', dismissPageBreakHelpOnOutside, true);
+window.addEventListener('resize', () => {
+  if (isPageBreakHelpTooltipOpen()) hidePageBreakHelpTooltip();
 });
 
 document.getElementById('btnPageOverview').onclick = () => {
@@ -15083,11 +15302,20 @@ document.getElementById('overviewModal').onclick = (e) => {
 };
 const overviewListEl = document.getElementById('overviewList');
 if (overviewListEl) {
-  overviewListEl.addEventListener('scroll', syncOverviewScrollButtons, { passive: true });
+  overviewListEl.addEventListener('scroll', () => {
+    syncOverviewScrollButtons();
+    if (isPageBreakHelpTooltipOpen()) hidePageBreakHelpTooltip();
+  }, { passive: true });
   if (typeof ResizeObserver === 'function') {
     const overviewRo = new ResizeObserver(() => syncOverviewScrollButtons());
     overviewRo.observe(overviewListEl);
   }
+}
+const stepEditBodyEl = document.getElementById('stepEditBody');
+if (stepEditBodyEl) {
+  stepEditBodyEl.addEventListener('scroll', () => {
+    if (isPageBreakHelpTooltipOpen()) hidePageBreakHelpTooltip();
+  }, { passive: true });
 }
 const btnOverviewJumpTop = document.getElementById('btnOverviewJumpTop');
 if (btnOverviewJumpTop) {

@@ -26,7 +26,7 @@ Replaces one-way "Apply Angle to Following" with a visual range-picker modal:
 1. **Minifigure Instruction Style** *(Scope: `All minifigure steps`)*
 2. **Step Display & Framing** *(Scope: `This step`)* — Camera Framing, 3D Model Size, Parts Box Size, and `Rotate in 3D →`.
 3. **Subassembly Layout** *(Scope: `This step`)* — Inline Callout Box vs. Separate Full Pages, Side-by-Side vs. Stacked Vertically.
-4. **Pagination & Page Break** *(Scope: `This step`)* — Pinned page breaks + `Open Page Setup…`.
+4. **Pagination & Page Break** *(Scope: `This step`)* — Pinned page break toggle button with an integrated `?` help tooltip trigger (hover/click/focus explanation, no inline instruction copy) + `Open Page Setup…`.
 5. **Step Notes & Images** *(Scope: `This step`)* — Custom callouts are bound to `step.id` (`state.stepInserts[step.id]`) rather than `page.id`, so they stay attached to their exact step even when pagination changes, render inside the step slot in both live previews and PDF exports, and include inline corner placement (`TL / TR / BL / BR`), scale (`− / % / +`), and `Delete` controls (with automatic backward-compatible migration of legacy `pageInserts`).
 
 ### 4. Main Drawer Menu Reorganization
@@ -37,7 +37,7 @@ Replaces one-way "Apply Angle to Following" with a visual range-picker modal:
 
 ### 5. Pages & Steps Overview (`#overviewModal`) Live Step & Page Previews
 Every entry in the Pages & Steps list includes a theme-backed miniature preview on the left:
-- **Step rows**: HiDPI 4:3 3D snapshot (`computeOverviewThumbDimensions(resScale)`) rendered on the page's active theme background (including custom Step Range Group themes), respecting each step's camera angle, model scale, part offsets, highlight/fade settings, minifigure pose indicators, and sequential minifigure sub-step slices. In **Select Range** mode, selected rows overlay a compact `✓` badge on the preview corner so row layout never shifts.
+- **Step rows**: HiDPI 4:3 3D snapshot (`computeOverviewThumbDimensions(resScale)`) rendered on the page's active theme background (including custom Step Range Group themes), respecting each step's camera angle, model scale, part offsets, highlight/fade settings, minifigure pose indicators, and sequential minifigure sub-step slices. In **Select Range** mode, selected rows overlay a compact `✓` badge on the preview corner so row layout never shifts. Each step row's `Page Break` button includes an integrated `?` help trigger that opens a viewport-aware floating explanation tooltip (`#pageBreakHelpTooltip`) on hover, focus, or click/tap without toggling the break or jumping to the step; when one or more breaks are active, a compact conditional `#overviewPinsBar` shows the count and a `Clear All` action.
 - **Non-step pages**: 3D previews for Cover, Build Complete, Section Dividers, and Submodel Pages; a 2×2 sample parts mini-grid for Parts List (`bom`) pages; and themed miniature glyphs for Divider and Back Cover pages.
 - **Visibility-first lazy rendering & content-addressed caching**: `IntersectionObserver` rooted on `#overviewList` plus a viewport-prioritized `requestAnimationFrame` batch queue renders currently visible steps first (even when opening directly at a deep page) and cancels immediately on modal close. A bounded LRU cache keyed by O(N) cumulative step signatures, camera, offsets, display flags, slice, and library epoch makes range selection and page-break toggles synchronous and flicker-free without ever showing stale thumbnails.
 

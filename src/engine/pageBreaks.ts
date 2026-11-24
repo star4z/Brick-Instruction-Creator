@@ -181,3 +181,84 @@ export function getStepBreakFeedbackMessage(opts: {
   }
   return `Added page break before ${stepLabel} — earlier edits won't shift later pages.`;
 }
+
+export interface TooltipRectLike {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+  width: number;
+  height: number;
+}
+
+export interface HelpTooltipPosition {
+  left: number;
+  top: number;
+  placement: 'top' | 'bottom';
+  arrowLeft: number;
+}
+
+/**
+ * Builds the explanation shown in the Page Break `?` help tooltip.
+ */
+export function getPageBreakHelpExplanation(opts?: {
+  stepLabel?: string | null;
+  pinned?: boolean;
+}): string {
+  const label = opts?.stepLabel?.trim();
+  if (label) {
+    if (opts?.pinned) {
+      return `${label} is locked to the start of a new page so earlier edits won’t shift later pages. Click Page Break to remove it.`;
+    }
+    return `Locks ${label} to the start of a new page so adding, splitting, or merging earlier steps won’t shift later pages.`;
+  }
+  return 'Locks a step to the start of a new page so adding, splitting, or merging earlier steps won’t shift later pages.';
+}
+
+/**
+ * Computes fixed viewport coordinates and directional caret offset for a floating
+ * help tooltip anchored to a `?` button so it never clips inside scroll containers
+ * or overflows screen edges.
+ */
+export function computeHelpTooltipPosition(opts: {
+  anchor: TooltipRectLike;
+  tooltip: { width: number; height: number };
+  viewport: { width: number; height: number };
+  margin?: number;
+  gap?: number;
+}): HelpTooltipPosition {
+  const margin = Number.isFinite(opts.margin) ? Math.max(4, opts.margin!) : 12;
+  const gap = Number.isFinite(opts.gap) ? Math.max(0, opts.gap!) : 8;
+  const vw = Math.max(0, opts.viewport.width);
+  const vh = Math.max(0, opts.viewport.height);
+  const tw = Math.max(0, opts.tooltip.width);
+  const th = Math.max(0, opts.tooltip.height);
+
+  const anchorCenterX = opts.anchor.left + opts.anchor.width / 2;
+
+  const topAbove = opts.anchor.top - th - gap;
+  const topBelow = opts.anchor.bottom + gap;
+  const spaceAbove = opts.anchor.top - margin;
+  const spaceBelow = vh - opts.anchor.bottom - margin;
+
+  let placement: 'top' | 'bottom' = 'top';
+  let rawTop = topAbove;
+  if (topAbove < margin && spaceBelow >= spaceAbove) {
+    placement = 'bottom';
+    rawTop = topBelow;
+  }
+
+  const maxTop = Math.max(margin, vh - th - margin);
+  const top = Math.round(Math.min(maxTop, Math.max(margin, rawTop)));
+
+  const maxLeft = Math.max(margin, vw - tw - margin);
+  const idealLeft = anchorCenterX - tw / 2;
+  const left = Math.round(Math.min(maxLeft, Math.max(margin, idealLeft)));
+
+  const arrowInset = Math.min(14, Math.max(6, Math.floor(tw / 4)));
+  const maxArrow = Math.max(arrowInset, tw - arrowInset);
+  const arrowLeft = Math.round(Math.min(maxArrow, Math.max(arrowInset, anchorCenterX - left)));
+
+  return { left, top, placement, arrowLeft };
+}
+

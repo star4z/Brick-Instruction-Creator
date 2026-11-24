@@ -573,3 +573,55 @@ body {
   box-shadow: 0 2px 0 0 var(--primary);
 }
 
+/* Integrated Page Break button + `?` help trigger and floating tooltip */
+.pb-btn-group > button:focus-visible {
+  position: relative;
+  z-index: 1;
+}
+
+.pb-help-btn-default {
+  border-color: var(--border);
+  color: var(--muted-foreground);
+}
+.pb-help-btn-default:hover,
+.pb-help-btn-default.is-help-open {
+  color: var(--primary);
+  background-color: var(--primary-soft);
+}
+
+.pb-help-btn-pinned {
+  border-color: color-mix(in srgb, currentColor 24%, transparent);
+  color: currentColor;
+}
+.pb-help-btn-pinned:hover,
+.pb-help-btn-pinned.is-help-open {
+  background-color: color-mix(in srgb, currentColor 18%, transparent);
+}
+
+#pageBreakHelpTooltip:not(.hidden) {
+  animation: pressReveal 140ms var(--ease-press);
+}
+
+.pb-tooltip-arrow {
+  position: absolute;
+  left: calc(var(--pb-arrow-left, 50%) - 5px);
+  width: 10px;
+  height: 10px;
+  background-color: var(--ink-bar);
+  transform: rotate(45deg);
+  pointer-events: none;
+}
+
+#pageBreakHelpTooltip[data-placement="top"] .pb-tooltip-arrow {
+  bottom: -5px;
+  border-right: 1px solid rgba(255, 255, 255, 0.15);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+#pageBreakHelpTooltip[data-placement="bottom"] .pb-tooltip-arrow {
+  top: -5px;
+  border-top: 1px solid rgba(255, 255, 255, 0.15);
+  border-left: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+
