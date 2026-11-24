@@ -182,7 +182,7 @@ export function normalizeLibraryPartId(raw: string): string {
 }
 
 const PRIMITIVE_NAME_RE =
-  /^(?:stud\w*|box\d[\w-]*|rect\w*|tri\d*|quad\d*|disc\d*|ring\w*|peghol\w*|axlehol\w*|axleend\w*|connhol\w*|connect\w*|chrd\w*|ndis\w*|cyl[ioc]\w*|edge\w*|empty|\d+-\d+(?:cyli|cylo|cylc|disc|edge|ring\d*|rin\d*|chrd|ndis|con\d*|sphe|tor\w*|tang\w*)|t\d+[a-z]\d+)$/i;
+  /^(?:stud[\w-]*|stug[\w-]*|box(?:\d|j)[\w-]*|rect\w*|tri\d*|quad\d*|disc\d*|ring\w*|peghol\w*|axl\d*hol\w*|axlehol\w*|axleend\w*|connhol\w*|connect\w*|confric\w*|clip\d+[\w-]*|bump\d+[\w-]*|chrd\w*|ndis\w*|cyl[iocjsabh][\w-]*|edge\w*|empty|\d+-\d+(?:cyli|cylo|cylc|cyls|cyla|disc|edge|ring\d*|rin\d*|chrd|ndis|con\d*|sphe|tor\w*|tang\w*)|t\d+[a-z]\d+)$/i;
 
 /**
  * Classifies an LDraw `.dat` entry as a user-facing `part`, an internal `subpart`,
@@ -196,6 +196,7 @@ export function classifyDatEntryKind(
   const k = normalizeLibraryPartId(key);
 
   if (lines && lines.length > 0) {
+    let namePathKind: DatEntryKind | null = null;
     const maxScan = Math.min(lines.length, 16);
     for (let i = 0; i < maxScan; i++) {
       const line = lines[i].trim();
@@ -206,7 +207,25 @@ export function classifyDatEntryKind(
         if (title && title.trim().startsWith('~')) return 'subpart';
         return 'part';
       }
+      // BrickLink Studio strips `!LDRAW_ORG` and flattens `0 FILE` paths in `model2.ldr`,
+      // but preserves the original LDraw subfolder (`48\`, `8\`, `p\`, `s\`) in `0 Name:`.
+      if (!namePathKind) {
+        const mName = line.match(/^0\s+Name:\s*(.+)$/i);
+        if (mName) {
+          const normName = mName[1].trim().replace(/\\/g, '/').toLowerCase().replace(/^ldraw\//, '');
+          if (normName.startsWith('s/') || normName.startsWith('parts/s/')) {
+            namePathKind = 'subpart';
+          } else if (
+            normName.startsWith('48/') ||
+            normName.startsWith('8/') ||
+            normName.startsWith('p/')
+          ) {
+            namePathKind = 'primitive';
+          }
+        }
+      }
     }
+    if (namePathKind) return namePathKind;
   }
 
   if (k.startsWith('s/')) return 'subpart';
@@ -338,6 +357,37 @@ function collectCanonicalMapKeys(map: ReadonlyMap<string, readonly string[]>): S
   return canonicalKeys;
 }
 
+/**
+ * Collects all subfile IDs referenced via type-1 lines inside embedded `.dat` definitions.
+ * Any embedded `.dat` that is not directly placed in the model (`modelPartIds`) and is only
+ * referenced as a child of another embedded `.dat` is an internal subpart/primitive dependency.
+ */
+function collectEmbeddedChildRefs(
+  embeddedDatRaw: ReadonlyMap<string, readonly string[]>,
+  embeddedCanonical: ReadonlySet<string>,
+): Set<string> {
+  const refs = new Set<string>();
+  for (const k of embeddedCanonical) {
+    const lines = embeddedDatRaw.get(k);
+    if (!lines) continue;
+    for (const raw of lines) {
+      const tr = raw.trim();
+      if (!tr.startsWith('1 ')) continue;
+      const tokens = tr.split(/\s+/);
+      if (tokens.length < 15) continue;
+      const refRaw = tokens.slice(14).join(' ').trim();
+      const normRef = normalizeLibraryPartId(refRaw);
+      if (!normRef) continue;
+      refs.add(normRef);
+      const slashIdx = normRef.lastIndexOf('/');
+      if (slashIdx >= 0) {
+        refs.add(normRef.slice(slashIdx + 1));
+      }
+    }
+  }
+  return refs;
+}
+
 export function buildLibraryIndex(input: BuildLibraryIndexInput): BuildLibraryIndexResult {
   const {
     userLibRaw,
@@ -355,6 +405,10 @@ export function buildLibraryIndex(input: BuildLibraryIndexInput): BuildLibraryIn
 
   const savedCanonical = collectCanonicalMapKeys(userLibRaw);
   const embeddedCanonical = collectCanonicalMapKeys(embeddedDatRaw);
+  const embeddedChildRefs =
+    embeddedCanonical.size > 0 && modelPartIds.size > 0
+      ? collectEmbeddedChildRefs(embeddedDatRaw, embeddedCanonical)
+      : null;
 
   let savedParts = 0;
   let savedHelpers = 0;
@@ -368,13 +422,14 @@ export function buildLibraryIndex(input: BuildLibraryIndexInput): BuildLibraryIn
     source: LibraryPartSource | null,
     lines: readonly string[] | null,
     explicitTitle: string | null,
+    explicitKind?: DatEntryKind,
   ) => {
     const id = normalizeLibraryPartId(rawId);
     if (!id) return;
     const existing = byId.get(id);
-    const kind = lines
-      ? classifyDatEntryKind(id, lines, explicitTitle)
-      : existing?.kind ?? 'part';
+    const kind =
+      explicitKind ??
+      (lines ? classifyDatEntryKind(id, lines, explicitTitle) : existing?.kind ?? 'part');
     const name = existing?.name || resolveName(id);
     const inCurrentModel = modelPartIds.has(id);
     const isMissingInModel = missingShapePartIds.has(id);
@@ -421,10 +476,18 @@ export function buildLibraryIndex(input: BuildLibraryIndexInput): BuildLibraryIn
   for (const k of embeddedCanonical) {
     const lines = embeddedDatRaw.get(k) || null;
     const title = embeddedDatTitles.get(k) || null;
-    const kind = classifyDatEntryKind(k, lines, title);
+    let kind = classifyDatEntryKind(k, lines, title);
+    if (
+      kind === 'part' &&
+      embeddedChildRefs &&
+      !modelPartIds.has(k) &&
+      embeddedChildRefs.has(k)
+    ) {
+      kind = 'subpart';
+    }
     if (kind === 'part') embeddedParts++;
     else embeddedHelpers++;
-    upsert(k, 'embedded', lines, title);
+    upsert(k, 'embedded', lines, title, kind);
   }
 
   for (const k of savedCanonical) {
@@ -433,7 +496,7 @@ export function buildLibraryIndex(input: BuildLibraryIndexInput): BuildLibraryIn
     const kind = classifyDatEntryKind(k, lines, title);
     if (kind === 'part') savedParts++;
     else savedHelpers++;
-    upsert(k, 'saved', lines, title);
+    upsert(k, 'saved', lines, title, kind);
   }
 
   const builtInKeys = Object.keys(builtInCatalog);

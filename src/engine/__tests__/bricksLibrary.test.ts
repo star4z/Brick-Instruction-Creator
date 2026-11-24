@@ -30,9 +30,47 @@ describe('bricksLibrary engine', () => {
       expect(classifyDatEntryKind('box5', [])).toBe('primitive');
       expect(classifyDatEntryKind('4-4edge', [])).toBe('primitive');
       expect(classifyDatEntryKind('stud2a', [])).toBe('primitive');
+      expect(classifyDatEntryKind('stug-1x4', [])).toBe('primitive');
+      expect(classifyDatEntryKind('stug2-2x2', [])).toBe('primitive');
+      expect(classifyDatEntryKind('cylj4x6', [])).toBe('primitive');
+      expect(classifyDatEntryKind('boxjcyl4', [])).toBe('primitive');
+      expect(classifyDatEntryKind('clip13', [])).toBe('primitive');
+      expect(classifyDatEntryKind('bump5000', [])).toBe('primitive');
+      expect(classifyDatEntryKind('1-4cyls', [])).toBe('primitive');
       expect(classifyDatEntryKind('3001', ['0 Brick 2 x 4'])).toBe('part');
       expect(classifyDatEntryKind('3069b', ['0 Tile 1 x 2'])).toBe('part');
       expect(classifyDatEntryKind('helper', ['0 ~Moved to 3069b'], '~Moved to 3069b')).toBe('subpart');
+    });
+
+    it('detects Studio-flattened 48/, 8/, p/, and s/ paths from 0 Name: headers when !LDRAW_ORG is stripped', () => {
+      expect(
+        classifyDatEntryKind('confric5', [
+          '0 Hi-Res Technic Friction Pin 1.0',
+          '0 Name: 48\\confric5.dat',
+          '0 IsSubModel False',
+        ]),
+      ).toBe('primitive');
+      expect(
+        classifyDatEntryKind('axl2hole', [
+          '0 Hi-Res Technic Axle Hole Reduced Closed',
+          '0 Name: 48\\axl2hole.dat',
+          '0 IsSubModel False',
+        ]),
+      ).toBe('primitive');
+      expect(
+        classifyDatEntryKind('customprim', [
+          '0 Custom Primitive',
+          '0 Name: 8\\customprim.dat',
+          '0 IsSubModel False',
+        ]),
+      ).toBe('primitive');
+      expect(
+        classifyDatEntryKind('17485s01', [
+          '0 Brick 2 x 2 Round Subpart',
+          '0 Name: s\\17485s01.dat',
+          '0 IsSubModel False',
+        ]),
+      ).toBe('subpart');
     });
   });
 
@@ -87,6 +125,54 @@ describe('bricksLibrary engine', () => {
       const missing = items.find((x) => x.id === '99999');
       expect(missing?.primarySource).toBe('missing');
       expect(missing?.isMissingInModel).toBe(true);
+    });
+
+    it('classifies unplaced internal embedded .io subfile dependencies as helpers rather than embedded parts', () => {
+      const embeddedDatRaw = new Map<string, string[]>([
+        [
+          '3001',
+          [
+            '0 Brick 2 x 4',
+            '0 IsSubModel False',
+            '0 BL_Item_No 3001',
+            '1 16 0 0 0 1 0 0 0 1 0 0 0 1 stug-2x4.dat',
+            '1 16 0 0 0 1 0 0 0 1 0 0 0 1 custom_internal_helper.dat',
+          ],
+        ],
+        [
+          'stug-2x4',
+          ['0 Stud Group 2 x 4', '0 Name: stug-2x4.dat', '0 IsSubModel False'],
+        ],
+        [
+          'custom_internal_helper',
+          ['0 Internal Geometry Helper', '0 Name: custom_internal_helper.dat', '0 IsSubModel False'],
+        ],
+      ]);
+      const embeddedDatTitles = new Map<string, string>([
+        ['3001', 'Brick 2 x 4'],
+        ['stug-2x4', 'Stud Group 2 x 4'],
+        ['custom_internal_helper', 'Internal Geometry Helper'],
+      ]);
+
+      const { items, stats } = buildLibraryIndex({
+        userLibRaw: new Map(),
+        userLibTitles: new Map(),
+        embeddedDatRaw,
+        embeddedDatTitles,
+        builtInCatalog: {},
+        modelPartIds: new Set(['3001']),
+        missingShapePartIds: new Set(),
+        missingExactDatPartIds: new Set(),
+        resolveName: (id) => embeddedDatTitles.get(id) || id,
+      });
+
+      expect(stats.modelUniqueParts).toBe(1);
+      expect(stats.embeddedParts).toBe(1);
+      expect(stats.embeddedHelpers).toBe(2);
+      expect(filterLibraryItems(items, { scope: 'embedded' }).map((i) => i.id)).toEqual(['3001']);
+      expect(
+        filterLibraryItems(items, { scope: 'embedded', includeHelpers: true }).map((i) => i.id).sort(),
+      ).toEqual(['3001', 'custom_internal_helper', 'stug-2x4']);
     });
   });
 
