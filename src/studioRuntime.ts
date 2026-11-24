@@ -10723,7 +10723,20 @@ function renderBomSetupPreview(bc) {
 
   const theme = getActiveTheme();
   const { dims, contentWidthIn, contentHeightIn } = getBomUsableAreaInches();
-  const box = computePaperPreviewBox(dims.widthIn, dims.heightIn, 176, 122);
+  const isCompactViewport = typeof window !== 'undefined' && window.innerWidth < 460;
+  const cDiv = state.customUnit === 'cm' ? 2.54 : 1;
+  const cWIn = Math.max(2, (Number(state.customWidth) || 10) / cDiv);
+  const cHIn = Math.max(2, (Number(state.customHeight) || 8) / cDiv);
+  const screenAspect = dims.widthIn / Math.max(0.01, dims.heightIn);
+  const box = computePaperPreviewBox({
+    paperFormat: state.paperFormat,
+    orientation: state.orientation,
+    customWidthIn: cWIn,
+    customHeightIn: cHIn,
+    screenAspect,
+    maxWidthPx: isCompactViewport ? 142 : 176,
+    maxHeightPx: isCompactViewport ? 104 : 118,
+  });
   const enabledFields = getEnabledBomFields(bc);
   const bomPages = state.pages.filter(p => p.kind === 'bom');
   const firstBom = bomPages[0];
@@ -10731,7 +10744,7 @@ function renderBomSetupPreview(bc) {
   if (bc.format === 'table') {
     const rowsPerPage = firstBom?.bomTableRowsPerPage || (bc.tableRowsMode === 'custom' ? bc.tableRowsPerPage : 18);
     const visRows = Math.min(8, Math.max(4, Math.round(rowsPerPage / 3)));
-    const tCols = computeBomTableColumns(enabledFields, box.w - 14, 14);
+    const tCols = computeBomTableColumns(enabledFields, Math.max(40, box.widthPx - 14), 14);
     if (captionEl) captionEl.textContent = `Table · ${enabledFields.length} column${enabledFields.length === 1 ? '' : 's'} · ${rowsPerPage} rows/page`;
     if (metricsEl) {
       metricsEl.textContent = bomPages.length > 0
@@ -10750,7 +10763,7 @@ function renderBomSetupPreview(bc) {
       return `<div class="flex items-center flex-1 border-b" style="border-color:${theme.pliBorder};opacity:0.9;background:${ri % 2 === 1 ? 'rgba(127,127,127,0.08)' : 'transparent'}">${cells}</div>`;
     }).join('');
 
-    previewEl.innerHTML = `<div class="rounded-md border shadow-xs flex flex-col overflow-hidden" style="width:${box.w}px;height:${box.h}px;padding:6px;border-color:${theme.pliBorder};color:${theme.text}">
+    previewEl.innerHTML = `<div class="rounded-md border shadow-xs flex flex-col overflow-hidden" style="width:${box.widthPx}px;height:${box.heightPx}px;padding:6px;border-color:${theme.pliBorder};color:${theme.text}">
       <div class="shrink-0 flex items-center justify-between pb-1 mb-1 border-b" style="border-color:${theme.pliBorder};font-size:7px;font-weight:800"><span>Parts List</span><span style="color:${theme.muted};font-size:6px">Table</span></div>
       <div class="flex-1 min-h-0 flex flex-col overflow-hidden">
         <div class="shrink-0 flex items-center py-0.5 border-b" style="background:${theme.pliBg};border-color:${theme.pliBorder};color:${theme.muted}">${headCols}</div>
@@ -10762,16 +10775,16 @@ function renderBomSetupPreview(bc) {
 
     // Sample row anatomy
     const sampleRowCells = enabledFields.map((id) => {
-      if (id === 'image') return '<span class="px-1.5 py-1 rounded bg-[#c91a09]/15 text-[#c91a09] font-bold text-[10px]">🧱</span>';
+      if (id === 'image') return '<span class="px-1.5 py-0.5 rounded bg-[#c91a09]/15 text-[#c91a09] font-bold text-[10px]">🧱</span>';
       if (id === 'qty') return '<span class="font-extrabold text-[11px]">4×</span>';
       if (id === 'name') return '<span class="font-medium text-[10px] truncate">Brick 2×4</span>';
       if (id === 'partId') return '<span class="font-mono text-[10px] text-[var(--muted-foreground)]">3001</span>';
       return '<span class="inline-flex items-center gap-1 text-[10px]"><span class="w-2 h-2 rounded-full bg-[#c91a09] inline-block"></span>Red</span>';
     }).join('<span class="text-[var(--border-strong)]">│</span>');
-    anatomyEl.innerHTML = `<div class="p-2.5 rounded-lg border border-[var(--border)] bg-[var(--card)] space-y-1.5">
+    anatomyEl.innerHTML = `<div class="p-2 rounded-lg border border-[var(--border)] bg-[var(--card)] space-y-1">
       <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Row Column Order</div>
-      <div class="flex flex-wrap items-center gap-1.5 py-1.5 px-2 rounded border border-[var(--border)] bg-[var(--surface-sunken)]">${sampleRowCells}</div>
-      <div class="text-[10px] text-[var(--muted-foreground)] leading-snug">Left-to-right column sequence from the list below.</div>
+      <div class="flex flex-wrap items-center gap-1 py-1 px-1.5 rounded border border-[var(--border)] bg-[var(--surface-sunken)]">${sampleRowCells}</div>
+      <div class="text-[10px] text-[var(--muted-foreground)] leading-snug">Left-to-right column sequence.</div>
     </div>`;
   } else {
     const actualCols = firstBom?.bomCols || (bc.gridMode === 'custom' ? bc.customCols : 6);
@@ -10824,7 +10837,7 @@ function renderBomSetupPreview(bc) {
       return `<div class="absolute flex items-center justify-center rounded-[2px] border font-mono font-bold leading-none overflow-hidden" style="left:calc(${(c.xFrac * 100).toFixed(2)}% + 1px);top:calc(${(c.yFrac * 100).toFixed(2)}% + 1px);width:calc(${(c.wFrac * 100).toFixed(2)}% - 2px);height:calc(${(c.hFrac * 100).toFixed(2)}% - 2px);background:${bg};color:${fg};border-color:${isFirst ? theme.accent : theme.pliBorder};font-size:${isSpan ? '6.5px' : '7.5px'}">${label}</div>`;
     }).join('');
 
-    previewEl.innerHTML = `<div class="rounded-md border shadow-xs flex flex-col overflow-hidden" style="width:${box.w}px;height:${box.h}px;padding:6px;border-color:${theme.pliBorder};color:${theme.text}">
+    previewEl.innerHTML = `<div class="rounded-md border shadow-xs flex flex-col overflow-hidden" style="width:${box.widthPx}px;height:${box.heightPx}px;padding:6px;border-color:${theme.pliBorder};color:${theme.text}">
       <div class="shrink-0 flex items-center justify-between pb-1 mb-1 border-b" style="border-color:${theme.pliBorder};font-size:7px;font-weight:800"><span>Parts List</span><span class="font-mono" style="color:${theme.muted};font-size:6.5px">${actualCols}×${actualRows}</span></div>
       <div class="relative flex-1 min-h-0 w-full">${cellsHtml}</div>
     </div>`;
@@ -10834,8 +10847,8 @@ function renderBomSetupPreview(bc) {
     // Sample Grid cell anatomy showing exact field order
     const cellLines = enabledFields.map((id) => {
       if (id === 'image') {
-        return `<div class="w-full h-9 rounded flex items-center justify-center border border-dashed" style="border-color:${theme.pliBorder};background:${theme.pliBg}">
-          <svg class="w-6 h-6 text-[#c91a09]" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M4 9l8-4 8 4v7l-8 4-8-4V9z" opacity="0.9"/><path d="M12 5l8 4-8 4-8-4 8-4z" fill="#ef4444"/></svg>
+        return `<div class="w-full h-8 rounded flex items-center justify-center border border-dashed" style="border-color:${theme.pliBorder};background:${theme.pliBg}">
+          <svg class="w-5 h-5 text-[#c91a09]" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M4 9l8-4 8 4v7l-8 4-8-4V9z" opacity="0.9"/><path d="M12 5l8 4-8 4-8-4 8-4z" fill="#ef4444"/></svg>
         </div>`;
       }
       if (id === 'qty') return `<div class="font-extrabold text-[11px] leading-tight" style="color:${theme.text}">4×</div>`;
@@ -10843,9 +10856,9 @@ function renderBomSetupPreview(bc) {
       if (id === 'partId') return `<div class="font-mono text-[9.5px] leading-tight" style="color:${theme.muted}">3001</div>`;
       return `<div class="inline-flex items-center justify-center gap-1 text-[9.5px] leading-tight" style="color:${theme.muted}"><span class="w-2 h-2 rounded-full bg-[#c91a09] inline-block border border-black/20"></span>Red</div>`;
     }).join('');
-    anatomyEl.innerHTML = `<div class="p-2.5 rounded-lg border border-[var(--border)] bg-[var(--card)] space-y-1.5">
+    anatomyEl.innerHTML = `<div class="p-2 rounded-lg border border-[var(--border)] bg-[var(--card)] space-y-1">
       <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Grid Cell Format</div>
-      <div id="bomSampleCellInner" class="rounded-md border p-2 flex flex-col items-center text-center gap-1" style="border-color:${theme.pliBorder}">${cellLines}</div>
+      <div id="bomSampleCellInner" class="rounded-md border p-1.5 flex flex-col items-center text-center gap-0.5" style="border-color:${theme.pliBorder}">${cellLines}</div>
     </div>`;
     const sampleInner = anatomyEl.querySelector('#bomSampleCellInner');
     if (sampleInner) {
@@ -18171,6 +18184,9 @@ window.addEventListener('resize', () => {
   if (state.model) renderAll();
   if (impState.parsed && !document.getElementById('importModal').classList.contains('hidden')) {
     drawImportPreviewFrame();
+  }
+  if (isBomSetupModalOpen()) {
+    renderBomSetupPreview(normalizeBomConfig(state.bomConfig));
   }
   updateStylePopoverTail();
 });

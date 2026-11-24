@@ -1260,8 +1260,8 @@
     <!-- PARTS LIST SETUP PAGE MODAL                                      -->
     <!-- ================================================================ -->
     <div id="bomSetupModal" class="no-print hidden fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4">
-      <div class="w-full max-w-2xl max-h-[88vh] rounded-t-xl sm:rounded-xl studio-sheet flex flex-col overflow-hidden text-xs">
-        <div class="px-5 py-4 border-b border-[var(--border)] bg-[var(--chrome)] flex items-center justify-between gap-3 shrink-0">
+      <div class="w-full max-w-2xl max-h-[92vh] sm:max-h-[88vh] rounded-t-xl sm:rounded-xl studio-sheet flex flex-col overflow-hidden text-xs">
+        <div class="px-5 py-3.5 sm:py-4 border-b border-[var(--border)] bg-[var(--chrome)] flex items-center justify-between gap-3 shrink-0">
           <div class="min-w-0">
             <div class="flex items-center gap-2 flex-wrap">
               <h2 class="text-base font-bold tracking-tight">Parts List Setup</h2>
@@ -1274,29 +1274,30 @@
           </button>
         </div>
 
-        <div class="flex-1 min-h-0 overflow-y-auto overscroll-contain p-5 space-y-5">
-          <!-- Theme ownership banner -->
-          <div class="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)]">
-            <div class="flex items-center gap-2 min-w-0">
-              <span id="bomThemeSwatch" class="w-3.5 h-3.5 rounded-full border border-black/20 shrink-0"></span>
-              <span class="text-[11px] text-[var(--muted-foreground)] truncate">
-                Saved with theme: <strong id="bomThemeName" class="text-[var(--foreground)] font-semibold">Classic Blue</strong>
-                <span id="bomThemeBuiltInNote" class="hidden"> · Changes create a custom copy</span>
-              </span>
+        <!-- Sticky Live Layout Preview: stays pinned while scrolling settings below -->
+        <div id="bomSetupPreviewHeader" class="shrink-0 px-4 sm:px-5 py-2.5 sm:py-3 border-b border-[var(--border)] bg-[var(--surface-sunken)] space-y-2">
+          <div class="flex items-center justify-between gap-2 min-w-0">
+            <div class="flex items-center gap-1.5 min-w-0">
+              <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)] shrink-0">Live Layout Preview</span>
+              <span class="hidden sm:inline text-[var(--border-strong)] shrink-0" aria-hidden="true">·</span>
+              <span id="bomPreviewCaption" class="hidden sm:inline font-mono text-[11px] text-[var(--muted-foreground)] truncate">Grid · Left → Right · Top → Bottom</span>
             </div>
             <span id="bomLiveMetrics" class="font-mono text-[11px] font-semibold text-[var(--primary)] shrink-0">Auto</span>
           </div>
+          <div class="flex flex-row items-center justify-center gap-3 sm:gap-4">
+            <div id="bomLayoutPreview" class="flex items-center justify-center shrink-0" aria-label="Parts list page preview"></div>
+            <div id="bomCellAnatomyPreview" class="flex-1 min-w-0 max-w-[180px] sm:flex-none sm:w-44 shrink-0" aria-label="Sample part item format preview"></div>
+          </div>
+        </div>
 
-          <!-- Live Visual Preview: Miniature Page + Item Anatomy -->
-          <div class="p-3.5 rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] space-y-2.5">
-            <div class="flex items-center justify-between gap-2">
-              <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Live Layout Preview</span>
-              <span id="bomPreviewCaption" class="font-mono text-[11px] text-[var(--muted-foreground)] truncate">Grid · Left → Right · Top → Bottom</span>
-            </div>
-            <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
-              <div id="bomLayoutPreview" class="flex items-center justify-center shrink-0" aria-label="Parts list page preview"></div>
-              <div id="bomCellAnatomyPreview" class="w-full sm:w-44 shrink-0" aria-label="Sample part item format preview"></div>
-            </div>
+        <div id="bomSetupScroll" class="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 sm:p-5 space-y-5">
+          <!-- Theme ownership banner -->
+          <div class="flex items-center gap-2 px-3 py-2 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)]">
+            <span id="bomThemeSwatch" class="w-3.5 h-3.5 rounded-full border border-black/20 shrink-0"></span>
+            <span class="text-[11px] text-[var(--muted-foreground)] truncate">
+              Saved with theme: <strong id="bomThemeName" class="text-[var(--foreground)] font-semibold">Classic Blue</strong>
+              <span id="bomThemeBuiltInNote" class="hidden"> · Changes create a custom copy</span>
+            </span>
           </div>
 
           <!-- Format Switcher: Grid vs Table -->

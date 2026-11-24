@@ -229,5 +229,44 @@ describe('studioRuntime safety checks', () => {
     expect(sourceText).not.toContain('openStepEditModal');
     expect(sourceText).not.toContain('closeStepEditModal');
   });
+
+  it('keeps the Parts List live layout preview pinned above the scroll pane with valid paper preview dimensions', () => {
+    const html = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf8');
+    const runtime = fs.readFileSync(path.resolve(process.cwd(), 'src/studioRuntime.ts'), 'utf8');
+
+    const modalStart = html.indexOf('id="bomSetupModal"');
+    const previewHeaderIdx = html.indexOf('id="bomSetupPreviewHeader"', modalStart);
+    const scrollIdx = html.indexOf('id="bomSetupScroll"', modalStart);
+    const layoutPreviewIdx = html.indexOf('id="bomLayoutPreview"', modalStart);
+    const anatomyPreviewIdx = html.indexOf('id="bomCellAnatomyPreview"', modalStart);
+    const liveMetricsIdx = html.indexOf('id="bomLiveMetrics"', modalStart);
+
+    expect(modalStart).toBeGreaterThan(-1);
+    expect(previewHeaderIdx).toBeGreaterThan(modalStart);
+    expect(scrollIdx).toBeGreaterThan(previewHeaderIdx);
+    // All live preview pieces stay inside the pinned header before the scrollable settings container
+    expect(layoutPreviewIdx).toBeGreaterThan(previewHeaderIdx);
+    expect(layoutPreviewIdx).toBeLessThan(scrollIdx);
+    expect(anatomyPreviewIdx).toBeGreaterThan(previewHeaderIdx);
+    expect(anatomyPreviewIdx).toBeLessThan(scrollIdx);
+    expect(liveMetricsIdx).toBeGreaterThan(previewHeaderIdx);
+    expect(liveMetricsIdx).toBeLessThan(scrollIdx);
+
+    const headerChunk = html.slice(previewHeaderIdx, scrollIdx);
+    expect(headerChunk).toContain('shrink-0');
+
+    const fnStart = runtime.indexOf('function renderBomSetupPreview(');
+    const fnEnd = runtime.indexOf('function syncBomSetupUI(', fnStart);
+    expect(fnStart).toBeGreaterThan(-1);
+    expect(fnEnd).toBeGreaterThan(fnStart);
+    const fnBody = runtime.slice(fnStart, fnEnd);
+
+    expect(fnBody).toContain('computePaperPreviewBox({');
+    expect(fnBody).toContain('box.widthPx');
+    expect(fnBody).toContain('box.heightPx');
+    expect(fnBody).not.toContain('box.w ');
+    expect(fnBody).not.toContain('${box.w}');
+    expect(fnBody).not.toContain('${box.h}');
+  });
 });
 
