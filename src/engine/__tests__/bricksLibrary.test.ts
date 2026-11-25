@@ -363,7 +363,44 @@ describe('bricksLibrary engine', () => {
           catalogOfficialParts: 0,
           catalogUnofficialParts: 0,
         }),
-      ).toBe('3 missing · 15 saved');
+      ).toBe('3 missing · 15 downloaded');
+    });
+
+    it('extracts direct subfile refs and filters specifically to referenced subfiles including helpers', () => {
+      const userLibRaw = new Map<string, string[]>([
+        [
+          '3001',
+          [
+            '0 Brick 2 x 4',
+            '0 !LDRAW_ORG Part',
+            '1 16 0 0 0 1 0 0 0 1 0 0 0 1 s\\3001s01.dat',
+            '1 16 0 0 0 1 0 0 0 1 0 0 0 1 stud.dat',
+          ],
+        ],
+        ['s/3001s01', ['0 ~Brick 2 x 4 Subpart', '0 !LDRAW_ORG Subpart']],
+        ['stud', ['0 Stud', '0 !LDRAW_ORG Primitive']],
+        ['3005', ['0 Brick 1 x 1', '0 !LDRAW_ORG Part']],
+      ]);
+      const { items } = buildLibraryIndex({
+        userLibRaw,
+        userLibTitles: new Map(),
+        embeddedDatRaw: new Map(),
+        embeddedDatTitles: new Map(),
+        builtInCatalog: {},
+        modelPartIds: new Set(),
+        missingShapePartIds: new Set(),
+        missingExactDatPartIds: new Set(),
+        resolveName: (id) => id,
+      });
+      const b3001 = items.find((it) => it.id === '3001');
+      expect(b3001?.subfileRefs).toEqual(['s/3001s01', 'stud']);
+
+      // Filtering by onlyIds shows referenced subparts & primitives even when includeHelpers is false
+      const subfiles = filterLibraryItems(items, {
+        includeHelpers: false,
+        onlyIds: new Set(b3001?.subfileRefs || []),
+      });
+      expect(subfiles.map((it) => it.id).sort()).toEqual(['s/3001s01', 'stud']);
     });
 
     it('classifies categories sensibly', () => {

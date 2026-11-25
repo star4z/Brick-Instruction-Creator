@@ -2161,6 +2161,7 @@
                   </button>
                 </div>
               </div>
+              <div id="libSubfileFilterBanner" class="hidden p-3 rounded-lg border border-[var(--primary-border)] bg-[var(--primary-soft)] flex items-center justify-between gap-2.5 flex-wrap"></div>
               <div id="libSearchFetchBanner" class="hidden p-3.5 rounded-lg border border-[var(--primary-border)] bg-[var(--primary-soft)] flex items-center justify-between gap-2.5 flex-wrap"></div>
               <div id="libBrowseGrid" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5"></div>
               <div id="libLoadMoreWrap" class="hidden py-3 text-center">
@@ -2282,17 +2283,17 @@
             </div>
           </section>
 
-          <!-- Section 4: Saved Library Storage -->
+          <!-- Section 4: Downloaded Cache Storage -->
           <section class="pt-5 border-t border-[var(--border)] space-y-3">
             <div class="space-y-1">
-              <h3 id="libStorageSummary" class="text-sm font-bold text-[var(--danger)]">0 saved files in browser storage</h3>
+              <h3 id="libStorageSummary" class="text-sm font-bold text-[var(--danger)]">0 downloaded files in browser storage</h3>
               <p class="text-xs text-[var(--muted-foreground)] leading-relaxed">
-                Clearing deletes all parts fetched online or imported from <strong class="font-mono text-[var(--foreground)]">.zip</strong> / <strong class="font-mono text-[var(--foreground)]">.dat</strong> files out of your browser&rsquo;s saved Bricks Library. Your currently loaded model, embedded <strong class="font-mono text-[var(--foreground)]">.io</strong> shapes, and built-in shapes remain intact.
+                Clearing deletes all parts downloaded on demand or imported from <strong class="font-mono text-[var(--foreground)]">.zip</strong> / <strong class="font-mono text-[var(--foreground)]">.dat</strong> files out of your browser&rsquo;s downloaded cache. Your currently loaded model, embedded <strong class="font-mono text-[var(--foreground)]">.io</strong> shapes, and built-in library remain intact.
               </p>
             </div>
             <div class="flex items-center gap-2 flex-wrap">
               <button id="libClearSavedBtn" type="button" disabled class="px-4 py-2.5 rounded-md border border-[var(--danger)]/40 bg-[var(--danger-soft)] text-[var(--danger)] font-semibold disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer">
-                Clear Entire Saved Library
+                Clear Downloaded Cache
               </button>
             </div>
           </section>
@@ -2300,7 +2301,7 @@
 
         <!-- Modal Footer -->
         <div class="px-5 py-3.5 border-t border-[var(--border)] bg-[var(--chrome)] flex items-center justify-between gap-3 shrink-0">
-          <span id="libFooterHint" class="text-xs text-[var(--muted-foreground)] truncate">Saved parts stay cached locally in this browser.</span>
+          <span id="libFooterHint" class="text-xs text-[var(--muted-foreground)] truncate">Downloaded parts stay cached locally in this browser.</span>
           <button id="bricksLibDoneBtn" type="button" class="px-5 py-2.5 rounded-md bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] font-semibold shrink-0 transition-colors cursor-pointer">Done</button>
         </div>
       </div>

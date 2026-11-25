@@ -838,11 +838,11 @@ export function getLibraryRemovePartConfirmDialog(input: {
   hasEmbeddedCopy: boolean;
 }): PermanentActionConfirmSpec {
   return {
-    title: `Remove ${input.partId}.dat from Saved Library?`,
-    message: `Permanently removes ${input.partId}.dat from browser storage. This cannot be undone.`,
+    title: `Remove ${input.partId}.dat from Downloaded Cache?`,
+    message: `Removes ${input.partId}.dat from browser storage. Built-in parts can be re-downloaded automatically whenever needed.`,
     detail:
       input.usedInModel && !input.hasEmbeddedCopy
-        ? 'Your open model currently renders this part from Saved Library — removing it switches those parts to simplified shapes until re-fetched.'
+        ? 'Your open model currently renders this part from your downloaded cache — removing it switches those parts to simplified shapes until re-downloaded.'
         : undefined,
     confirmLabel: 'Remove Part',
     cancelLabel: 'Cancel',
@@ -850,8 +850,8 @@ export function getLibraryRemovePartConfirmDialog(input: {
 }
 
 /**
- * Permanent 5: Bricks Library → Clear Entire Saved Library (`#libClearSavedBtn`).
- * Returns null when nothing is saved; otherwise asks for confirmation with exact counts
+ * Permanent 5: Bricks Library → Clear Downloaded Cache (`#libClearSavedBtn`).
+ * Returns null when nothing is downloaded; otherwise asks for confirmation with exact counts
  * and open-model impact details.
  */
 export function getLibraryClearSavedConfirmDialog(input: {
@@ -864,17 +864,17 @@ export function getLibraryClearSavedConfirmDialog(input: {
   if (files + textures <= 0) return null;
 
   const countParts: string[] = [];
-  if (files > 0) countParts.push(plural(files, 'saved file'));
+  if (files > 0) countParts.push(plural(files, 'downloaded file'));
   if (textures > 0) countParts.push(plural(textures, 'texture'));
 
   return {
-    title: 'Clear Entire Saved Library?',
-    message: `Permanently deletes all ${countParts.join(' and ')} from browser storage. Your loaded model, embedded .io shapes, and built-in shapes stay intact, but this cannot be undone.`,
+    title: 'Clear Downloaded Cache?',
+    message: `Deletes all ${countParts.join(' and ')} from browser storage. Your loaded model, embedded .io shapes, and built-in library stay intact.`,
     detail:
       input.modelReliantSavedCount > 0
-        ? `Your open model currently renders ${plural(input.modelReliantSavedCount, 'part')} from Saved Library — clearing switches them to simplified shapes until re-fetched.`
+        ? `Your open model currently renders ${plural(input.modelReliantSavedCount, 'part')} from your downloaded cache — clearing switches them to simplified shapes until re-downloaded.`
         : undefined,
-    confirmLabel: 'Clear Saved Library',
+    confirmLabel: 'Clear Downloaded Cache',
     cancelLabel: 'Cancel',
   };
 }

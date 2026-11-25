@@ -41,6 +41,7 @@ import {
   normalizeMpdSubfileKey,
   parseLDrawColorToken,
 } from './engine/ldrLibrary';
+import { createOnSitePartsChunkLoader } from './engine/partsChunks';
 import {
   classifyDetachedPart,
   computeGroundPlaneY,
@@ -14238,7 +14239,10 @@ const libUiState = {
   visibleLimit: 48,
   mobilePreviewPageActive: false,
   browseScrollTop: 0,
+  subfileFilter: null, // { parentId, parentName, refIds: Set<string> } | null
 };
+
+const onSitePartsChunks = createOnSitePartsChunkLoader();
 
 const LIB_PAGE_BATCH_SIZE = 48;
 let libCachedSnapshot = null;
@@ -14653,6 +14657,7 @@ async function autoFetchMissingPartsForParsed(parsed, displayName = '') {
       mirrors,
       getDirectLoadedLines: getDirectLoadedDatLines,
       getFallbacks: getPartIdFallbacks,
+      resolveOnSiteDat: (k, sig) => onSitePartsChunks.resolveDat(k, sig),
       hasTexture: (texName) => Boolean(textureStore.lookupByName(texName)),
       notFoundCache: notFoundDatCache,
       onDatLoaded: (storeKey, _reqKey, text) => {
@@ -14857,6 +14862,7 @@ async function fetchPartsOnline(opts = {}) {
       getDirectLoadedLines: getDirectLoadedDatLines,
       getFallbacks: getPartIdFallbacks,
       preferUnofficial: isCatalogUnofficialPart,
+      resolveOnSiteDat: (k, sig) => onSitePartsChunks.resolveDat(k, sig),
       hasTexture: (texName) => Boolean(textureStore.lookupByName(texName)),
       notFoundCache: notFoundDatCache,
       onDatLoaded: (storeKey, _reqKey, text) => {
@@ -15230,6 +15236,7 @@ async function pumpLibThumbFetchQueue() {
       getDirectLoadedLines: getDirectLoadedDatLines,
       getFallbacks: getPartIdFallbacks,
       preferUnofficial: isCatalogUnofficialPart,
+      resolveOnSiteDat: (k, sig) => onSitePartsChunks.resolveDat(k, sig),
       hasTexture: (texName) => Boolean(textureStore.lookupByName(texName)),
       notFoundCache: notFoundDatCache,
       onDatLoaded: (storeKey, _reqKey, text) => {
@@ -15874,7 +15881,7 @@ function renderLibPreviewInspector() {
 
   const sourceLabels = [];
   if (item.sources.includes('embedded')) sourceLabels.push('<span class="px-2 py-0.5 rounded-md text-xs font-bold bg-purple-500/15 text-purple-700 dark:text-purple-300">Embedded (.io)</span>');
-  if (item.sources.includes('saved')) sourceLabels.push('<span class="px-2 py-0.5 rounded-md text-xs font-bold bg-[var(--primary-soft)] text-[var(--primary)]">Cached LDraw .dat</span>');
+  if (item.sources.includes('saved')) sourceLabels.push('<span class="px-2 py-0.5 rounded-md text-xs font-bold bg-[var(--primary-soft)] text-[var(--primary)]">Downloaded</span>');
   if (item.sources.includes('builtin')) sourceLabels.push('<span class="px-2 py-0.5 rounded-md text-xs font-semibold bg-black/6 dark:bg-white/10 text-[var(--muted-foreground)]">Built-in Shape</span>');
   if (item.sources.includes('official')) sourceLabels.push('<span class="px-2 py-0.5 rounded-md text-xs font-semibold bg-sky-500/12 text-sky-700 dark:text-sky-300">Official LDraw</span>');
   if (item.sources.includes('unofficial')) sourceLabels.push('<span class="px-2 py-0.5 rounded-md text-xs font-semibold bg-amber-500/15 text-amber-700 dark:text-amber-300">Unofficial &amp; Studio</span>');
@@ -15934,8 +15941,15 @@ function renderLibPreviewInspector() {
           ? 'Loading exact 3D shape…'
           : libThumbFetchNetworkBlocked
             ? 'Offline — connect to the internet or import complete.zip to preview this part.'
-            : 'Exact 3D shape could not be loaded from the configured mirrors.'
+            : 'Exact 3D shape could not be loaded.'
       }</div>`
+    : '';
+
+  const subfileRefCount = item.subfileRefs && item.subfileRefs.length > 0 ? item.subfileRefs.length : item.subpartRefCount;
+  const subfileRefsHtml = subfileRefCount > 0
+    ? item.subfileRefs && item.subfileRefs.length > 0
+      ? `<button type="button" id="libInspectorSubfilesBtn" class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-[var(--border)] bg-[var(--card)] hover:border-[var(--primary)] hover:text-[var(--primary)] text-[var(--foreground)] font-semibold transition cursor-pointer" title="Filter Bricks Library to show these referenced subfiles"><span>${item.subpartRefCount} subfile ref${item.subpartRefCount === 1 ? '' : 's'}</span><svg class="w-3 h-3 opacity-70" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg></button>`
+      : `<span>· ${item.subpartRefCount} subfile ref${item.subpartRefCount === 1 ? '' : 's'}</span>`
     : '';
 
   metaEl.innerHTML = `
@@ -15955,7 +15969,7 @@ function renderLibPreviewInspector() {
         <span>${escHtml(colorName)}</span>
         <span class="font-mono text-[10px] text-[var(--muted-foreground)]">#${effectiveColor}</span>
       </button>
-      ${item.subpartRefCount > 0 ? `<span>· ${item.subpartRefCount} subfile ref${item.subpartRefCount === 1 ? '' : 's'}</span>` : ''}
+      ${subfileRefsHtml}
     </div>
   `;
 
@@ -15979,43 +15993,55 @@ function renderLibPreviewInspector() {
       setLibColorPickerOpen(true, inspColorBtn);
     };
   }
+  const subfilesBtn = metaEl.querySelector('#libInspectorSubfilesBtn');
+  if (subfilesBtn && item.subfileRefs && item.subfileRefs.length > 0) {
+    subfilesBtn.onclick = () => {
+      const refSet = new Set();
+      for (const ref of item.subfileRefs) {
+        refSet.add(ref);
+        if (ref.includes('/')) {
+          const base = ref.split('/').pop();
+          if (base) refSet.add(base);
+        }
+      }
+      libUiState.subfileFilter = {
+        parentId: item.id,
+        parentName: item.name,
+        refIds: refSet,
+      };
+      libUiState.query = '';
+      const searchEl = document.getElementById('libSearchInput');
+      const clearBtn = document.getElementById('libSearchClearBtn');
+      if (searchEl) searchEl.value = '';
+      if (clearBtn) clearBtn.classList.add('hidden');
+      closeLibPartPreview();
+      renderLibBrowseTab(true);
+    };
+  }
 
   const actionButtons = [];
-  if (item.sources.includes('embedded') && !item.sources.includes('saved')) {
-    actionButtons.push(`
-      <button id="libPreviewSaveEmbeddedBtn" class="w-full py-2 px-3 rounded-xl bg-[var(--primary)] text-[var(--primary-foreground)] font-semibold hover:opacity-95 transition cursor-pointer">
-        Save ${escHtml(item.id)}.dat to Local Library
-      </button>
-    `);
-  } else if (!item.sources.includes('saved')) {
+  if (onlineOnly && (libThumbFetchNetworkBlocked || notFoundDatCache.has(item.id))) {
     actionButtons.push(`
       <button id="libPreviewFetchBtn" class="w-full py-2 px-3 rounded-xl bg-[var(--primary)] text-[var(--primary-foreground)] font-semibold hover:opacity-95 transition cursor-pointer">
-        Fetch Exact ${escHtml(item.id)}.dat Online
+        Retry Downloading ${escHtml(item.id)}.dat
       </button>
     `);
   }
   if (item.sources.includes('saved')) {
     actionButtons.push(`
       <button id="libPreviewRemoveBtn" class="w-full py-2.5 px-3 rounded-md border border-[var(--danger)]/40 bg-[var(--danger-soft)] text-[var(--danger)] hover:bg-[var(--danger)] hover:text-white font-semibold transition-colors cursor-pointer">
-        Remove ${escHtml(item.id)}.dat from Saved Library
+        Remove ${escHtml(item.id)}.dat from Downloaded Cache
       </button>
     `);
   }
   actionsEl.innerHTML = actionButtons.join('');
+  actionsEl.classList.toggle('hidden', actionButtons.length === 0);
 
-  const saveEmbeddedBtn = actionsEl.querySelector('#libPreviewSaveEmbeddedBtn');
-  if (saveEmbeddedBtn) {
-    saveEmbeddedBtn.onclick = async () => {
-      const savedCount = await saveEmbeddedPartToLocalLibrary(item.id);
-      if (savedCount > 0) {
-        showToast(`Saved ${item.id}.dat${savedCount > 1 ? ` (+${savedCount - 1} subfiles)` : ''} to Local Bricks Library.`);
-      }
-      renderBricksLibraryModal(false);
-    };
-  }
   const fetchOneBtn = actionsEl.querySelector('#libPreviewFetchBtn');
   if (fetchOneBtn) {
     fetchOneBtn.onclick = async () => {
+      libThumbFetchNetworkBlocked = false;
+      notFoundDatCache.delete(item.id);
       await fetchPartsOnline({
         mode: 'custom_ids',
         partIds: [item.id],
@@ -16051,7 +16077,7 @@ function renderLibPreviewInspector() {
         computeModelDiagnostics();
         renderAll();
       }
-      showToast(`Removed ${item.id}.dat from Saved Bricks Library.`);
+      showToast(`Removed ${item.id}.dat from downloaded cache.`);
       renderBricksLibraryModal(false);
     };
   }
@@ -16113,7 +16139,7 @@ function renderLibBrowseTab(resetLimit = false) {
       { id: 'builtin', label: `Built-in (${stats.builtInParts.toLocaleString()})`, show: true },
       { id: 'official', label: `Official LDraw (${stats.catalogOfficialParts.toLocaleString()})`, show: stats.catalogOfficialParts > 0 },
       { id: 'unofficial', label: `Unofficial & Studio (${stats.catalogUnofficialParts.toLocaleString()})`, show: stats.catalogUnofficialParts > 0 },
-      { id: 'saved', label: `Saved (${stats.savedParts.toLocaleString()})`, show: true },
+      { id: 'saved', label: `Downloaded (${stats.savedParts.toLocaleString()})`, show: true },
       { id: 'embedded', label: `Embedded .io (${stats.embeddedParts.toLocaleString()})`, show: stats.embeddedParts > 0 },
       { id: 'model', label: `In Model (${stats.modelUniqueParts})`, show: Boolean(state.model) },
       { id: 'missing', label: `Missing (${stats.modelMissingShapeCount})`, show: stats.modelMissingShapeCount > 0 },
@@ -16124,15 +16150,43 @@ function renderLibBrowseTab(resetLimit = false) {
     }
 
     scopeBar.innerHTML = scopeDefs.map((s) => {
-      const active = libUiState.scope === s.id;
+      const active = !libUiState.subfileFilter && libUiState.scope === s.id;
       return `<button type="button" data-lib-scope="${s.id}" class="px-2.5 py-1 rounded-md border text-xs font-semibold whitespace-nowrap transition ${active ? 'bg-[var(--primary)] text-[var(--primary-foreground)] border-[var(--primary)]' : 'bg-[var(--background)] border-[var(--border)] hover:border-[var(--primary-border)]'}">${escHtml(s.label)}</button>`;
     }).join('');
     scopeBar.querySelectorAll('button[data-lib-scope]').forEach((btn) => {
       btn.onclick = () => {
+        libUiState.subfileFilter = null;
         libUiState.scope = btn.getAttribute('data-lib-scope') || 'all';
         renderLibBrowseTab(true);
       };
     });
+  }
+
+  const subfileBannerEl = document.getElementById('libSubfileFilterBanner');
+  if (subfileBannerEl) {
+    const sf = libUiState.subfileFilter;
+    if (sf && sf.refIds && sf.refIds.size > 0) {
+      subfileBannerEl.classList.remove('hidden');
+      subfileBannerEl.innerHTML = `
+        <div class="text-xs min-w-0">
+          <div class="font-bold text-[var(--primary)]">Showing subfiles referenced by <span class="font-mono">${escHtml(sf.parentId)}.dat</span></div>
+          <div class="text-[var(--muted-foreground)] truncate">${escHtml(sf.parentName || '')}</div>
+        </div>
+        <button id="libClearSubfileFilterBtn" type="button" class="px-3 py-1.5 rounded-md border border-[var(--border)] bg-[var(--card)] hover:border-[var(--primary)] text-xs font-semibold shrink-0 transition cursor-pointer">
+          Show all parts
+        </button>
+      `;
+      const clearSfBtn = subfileBannerEl.querySelector('#libClearSubfileFilterBtn');
+      if (clearSfBtn) {
+        clearSfBtn.onclick = () => {
+          libUiState.subfileFilter = null;
+          renderLibBrowseTab(true);
+        };
+      }
+    } else {
+      subfileBannerEl.classList.add('hidden');
+      subfileBannerEl.innerHTML = '';
+    }
   }
 
   const filtered = filterLibraryItems(items, {
@@ -16140,7 +16194,8 @@ function renderLibBrowseTab(resetLimit = false) {
     scope: libUiState.scope,
     category: libUiState.category,
     includeHelpers: libUiState.includeHelpers,
-    availableColorId: libUiState.colorFilter,
+    availableColorId: libUiState.subfileFilter ? null : libUiState.colorFilter,
+    onlyIds: libUiState.subfileFilter ? libUiState.subfileFilter.refIds : null,
   });
 
   const summaryEl = document.getElementById('libBrowseSummary');
@@ -16151,7 +16206,7 @@ function renderLibBrowseTab(resetLimit = false) {
   if (!gridEl) return;
 
   const activeFilterColName =
-    libUiState.colorFilter !== null
+    !libUiState.subfileFilter && libUiState.colorFilter !== null
       ? (COLORS[libUiState.colorFilter]?.name || `Color ${libUiState.colorFilter}`)
       : null;
 
@@ -16160,6 +16215,8 @@ function renderLibBrowseTab(resetLimit = false) {
       summaryEl.textContent = activeFilterColName
         ? `No matching parts available in ${activeFilterColName}`
         : 'No matching parts';
+    } else if (libUiState.subfileFilter) {
+      summaryEl.textContent = `${filtered.length.toLocaleString()} subfile${filtered.length === 1 ? '' : 's'}`;
     } else if (activeFilterColName) {
       summaryEl.textContent = `${filtered.length.toLocaleString()} part${filtered.length === 1 ? '' : 's'} available in ${activeFilterColName}`;
     } else {
@@ -16378,8 +16435,8 @@ function renderLibManageTab() {
   if (fetchAllBtn) {
     fetchAllBtn.disabled = allPackRemaining.length === 0 || fetchPartsInFlight;
     fetchAllBtn.textContent = allPackRemaining.length === 0
-      ? `All ${allPackIds.length} Starter Parts Saved ✓`
-      : `Fetch All Starter Packs (${allPackRemaining.length} remaining)`;
+      ? `All ${allPackIds.length} Starter Parts Downloaded ✓`
+      : `Download All Starter Packs (${allPackRemaining.length} remaining)`;
   }
 
   const packsGrid = document.getElementById('libStarterPacksGrid');
@@ -16392,12 +16449,12 @@ function renderLibManageTab() {
           <div class="space-y-1">
             <div class="flex items-center justify-between gap-2">
               <span class="font-bold text-[12px]">${escHtml(pack.name)}</span>
-              <span class="px-2 py-0.5 rounded-md text-xs font-bold ${done ? 'bg-[var(--success-soft)] text-[var(--success)]' : 'bg-black/6 dark:bg-white/10 text-[var(--muted-foreground)]'}">${prog.savedCount} / ${prog.totalCount} saved</span>
+              <span class="px-2 py-0.5 rounded-md text-xs font-bold ${done ? 'bg-[var(--success-soft)] text-[var(--success)]' : 'bg-black/6 dark:bg-white/10 text-[var(--muted-foreground)]'}">${prog.savedCount} / ${prog.totalCount} downloaded</span>
             </div>
             <p class="text-xs text-[var(--muted-foreground)] leading-snug">${escHtml(pack.description)}</p>
           </div>
           <button type="button" data-fetch-pack="${escHtml(pack.id)}" ${done || fetchPartsInFlight ? 'disabled' : ''} class="w-full py-1.5 px-3 rounded-xl font-semibold transition ${done ? 'border border-[var(--success)]/35 bg-[var(--success-soft)] text-[var(--success)] cursor-default' : 'border border-[var(--primary-border)] bg-[var(--primary-soft)] text-[var(--primary)] hover:bg-[var(--primary-soft)] disabled:opacity-45'}">
-            ${done ? 'Saved in Library ✓' : `Fetch ${prog.missingIds.length} Part${prog.missingIds.length === 1 ? '' : 's'}`}
+            ${done ? 'Downloaded ✓' : `Download ${prog.missingIds.length} Part${prog.missingIds.length === 1 ? '' : 's'}`}
           </button>
         </div>
       `;
@@ -16420,13 +16477,13 @@ function renderLibManageTab() {
     });
   }
 
-  // 3. Saved Library Storage (Danger Zone — clearly separated from Import!)
+  // 3. Downloaded Cache Storage (Danger Zone — clearly separated from Import!)
   const storageEl = document.getElementById('libStorageSummary');
   const clearBtn = document.getElementById('libClearSavedBtn');
   const totalStored = stats.savedTotalFiles + stats.savedTextures;
   if (storageEl) {
     if (totalStored === 0) {
-      storageEl.textContent = '0 saved files in browser storage';
+      storageEl.textContent = '0 downloaded files in browser storage';
     } else {
       const partsLabel = `${stats.savedParts.toLocaleString()} part${stats.savedParts === 1 ? '' : 's'}`;
       const helpersLabel = stats.savedHelpers > 0 ? ` + ${stats.savedHelpers.toLocaleString()} subpart${stats.savedHelpers === 1 ? '' : 's'}/primitive${stats.savedHelpers === 1 ? '' : 's'}` : '';
@@ -16448,7 +16505,7 @@ function renderBricksLibraryModal(resetLimit = false) {
       ? `${stats.builtInParts.toLocaleString()} built-in (${stats.catalogOfficialParts.toLocaleString()} official · ${stats.catalogUnofficialParts.toLocaleString()} unofficial)`
       : `${stats.builtInParts.toLocaleString()} built-in${onlinePartsCatalogPromise ? ' · loading full official & unofficial library…' : ''}`;
     const savedSummary = stats.savedParts > 0
-      ? ` · ${stats.savedParts.toLocaleString()} cached locally`
+      ? ` · ${stats.savedParts.toLocaleString()} downloaded`
       : '';
     const embeddedSummary = stats.embeddedParts > 0
       ? ` · ${stats.embeddedParts.toLocaleString()} embedded (.io)`
@@ -16472,7 +16529,7 @@ function renderBricksLibraryModal(resetLimit = false) {
   if (statsPillsEl) {
     const pills = [];
     if (stats.savedParts > 0) {
-      pills.push(`<span class="px-2 py-0.5 rounded-md bg-[var(--primary-soft)] text-[var(--primary)] font-semibold">${stats.savedParts.toLocaleString()} saved</span>`);
+      pills.push(`<span class="px-2 py-0.5 rounded-md bg-[var(--primary-soft)] text-[var(--primary)] font-semibold">${stats.savedParts.toLocaleString()} downloaded</span>`);
     }
     if (stats.embeddedParts > 0) {
       pills.push(`<span class="px-2 py-0.5 rounded-md bg-purple-500/12 text-purple-700 dark:text-purple-300 font-semibold">${stats.embeddedParts.toLocaleString()} embedded (.io)</span>`);

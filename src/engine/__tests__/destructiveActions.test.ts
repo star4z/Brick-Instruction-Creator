@@ -518,14 +518,14 @@ describe('destructiveActions engine', () => {
       expect(withRefs?.detail).toContain('Detail Steps and Roof');
     });
 
-    it('Bricks Library Remove Part and Clear Saved Library return clear confirmation dialogs with model impact', () => {
+    it('Bricks Library Remove Part and Clear Downloaded Cache return clear confirmation dialogs with model impact', () => {
       const inUse = getLibraryRemovePartConfirmDialog({
         partId: '3001',
         usedInModel: true,
         hasEmbeddedCopy: false,
       });
-      expect(inUse.title).toBe('Remove 3001.dat from Saved Library?');
-      expect(inUse.message).toContain('cannot be undone');
+      expect(inUse.title).toBe('Remove 3001.dat from Downloaded Cache?');
+      expect(inUse.message).toContain('browser storage');
       expect(inUse.detail).toContain('simplified shapes');
       expect(inUse.confirmLabel).toBe('Remove Part');
 
@@ -549,17 +549,17 @@ describe('destructiveActions engine', () => {
         savedTextureCount: 3,
         modelReliantSavedCount: 5,
       });
-      expect(clearWithImpact?.title).toBe('Clear Entire Saved Library?');
-      expect(clearWithImpact?.message).toContain('42 saved files and 3 textures');
+      expect(clearWithImpact?.title).toBe('Clear Downloaded Cache?');
+      expect(clearWithImpact?.message).toContain('42 downloaded files and 3 textures');
       expect(clearWithImpact?.detail).toContain('5 parts');
-      expect(clearWithImpact?.confirmLabel).toBe('Clear Saved Library');
+      expect(clearWithImpact?.confirmLabel).toBe('Clear Downloaded Cache');
 
       const clearNoImpact = getLibraryClearSavedConfirmDialog({
         savedFileCount: 10,
         savedTextureCount: 0,
         modelReliantSavedCount: 0,
       });
-      expect(clearNoImpact?.message).toContain('10 saved files');
+      expect(clearNoImpact?.message).toContain('10 downloaded files');
       expect(clearNoImpact?.detail).toBeUndefined();
     });
   });

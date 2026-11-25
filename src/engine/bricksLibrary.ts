@@ -39,6 +39,8 @@ export interface LibraryPartItem {
   isMissingInModel: boolean;
   hasExactDat: boolean;
   subpartRefCount: number;
+  /** Deduplicated normalized direct subfile references from type-1 lines (when exact `.dat` is loaded). */
+  subfileRefs: string[];
   /** Precomputed normalized search haystack (memoized by `filterLibraryItems`). */
   searchText?: string;
   /** Sorted real-world LDraw color IDs this part is actually produced in (when indexed). */
@@ -324,6 +326,24 @@ export function normalizeLibrarySearchText(text: string): string {
     .trim();
 }
 
+export function extractDirectSubfileRefs(lines?: readonly string[] | null): string[] {
+  if (!lines) return [];
+  const refs = new Set<string>();
+  for (const raw of lines) {
+    let tr = raw.trim();
+    if (/^0\s+!:\s+1\s/.test(tr)) {
+      tr = tr.replace(/^0\s+!:\s+/, '');
+    }
+    if (!tr.startsWith('1 ')) continue;
+    const tokens = tr.split(/\s+/);
+    if (tokens.length < 15) continue;
+    const refRaw = tokens.slice(14).join(' ').trim();
+    const normRef = normalizeLibraryPartId(refRaw);
+    if (normRef) refs.add(normRef);
+  }
+  return Array.from(refs);
+}
+
 function countSubpartRefs(lines?: readonly string[] | null): number {
   if (!lines) return 0;
   let count = 0;
@@ -462,6 +482,7 @@ export function buildLibraryIndex(input: BuildLibraryIndexInput): BuildLibraryIn
         isMissingInModel,
         hasExactDat,
         subpartRefCount: countSubpartRefs(lines),
+        subfileRefs: extractDirectSubfileRefs(lines),
       });
     } else {
       if (source && !existing.sources.includes(source)) {
@@ -479,6 +500,9 @@ export function buildLibraryIndex(input: BuildLibraryIndexInput): BuildLibraryIn
         existing.kind = kind;
         if (existing.subpartRefCount === 0) {
           existing.subpartRefCount = countSubpartRefs(lines);
+        }
+        if (existing.subfileRefs.length === 0) {
+          existing.subfileRefs = extractDirectSubfileRefs(lines);
         }
       }
       existing.hasExactDat = existing.hasExactDat || hasExactDat;
@@ -544,6 +568,7 @@ export function buildLibraryIndex(input: BuildLibraryIndexInput): BuildLibraryIn
         isMissingInModel: missingShapePartIds.has(id),
         hasExactDat: false,
         subpartRefCount: 0,
+        subfileRefs: [],
         searchText: entry.searchText,
       });
     }
@@ -596,6 +621,8 @@ export interface FilterLibraryOptions {
   includeHelpers?: boolean;
   /** When set to an LDraw color ID, only return parts actually produced in that color. */
   availableColorId?: number | null;
+  /** Optional explicit set of normalized part/subfile IDs to filter down to (e.g. clicking subfile refs). */
+  onlyIds?: ReadonlySet<string> | null;
 }
 
 export function filterLibraryItems(
@@ -608,13 +635,14 @@ export function filterLibraryItems(
     category = 'all',
     includeHelpers = false,
     availableColorId = null,
+    onlyIds = null,
   } = options;
 
   const filterColor =
     typeof availableColorId === 'number' && Number.isFinite(availableColorId)
       ? availableColorId
       : null;
-
+  const hasOnlyIds = Boolean(onlyIds && onlyIds.size > 0);
   const normQuery = normalizeLibrarySearchText(query);
   const queryTokens = normQuery ? normQuery.split(' ').filter(Boolean) : [];
   const rawQueryLower = query.trim().toLowerCase().replace(/\.dat$/i, '');
@@ -622,17 +650,24 @@ export function filterLibraryItems(
   const scored: Array<{ item: LibraryPartItem; score: number }> = [];
 
   for (const item of items) {
-    if (!includeHelpers && item.kind !== 'part') continue;
+    if (hasOnlyIds && onlyIds) {
+      const baseId = item.id.includes('/') ? item.id.slice(item.id.lastIndexOf('/') + 1) : item.id;
+      if (!onlyIds.has(item.id) && !onlyIds.has(baseId)) continue;
+    } else if (!includeHelpers && item.kind !== 'part') {
+      continue;
+    }
 
-    if (scope === 'saved' && !item.sources.includes('saved')) continue;
-    if (scope === 'embedded' && !item.sources.includes('embedded')) continue;
-    if (scope === 'builtin' && !isBuiltInLibraryItem(item)) continue;
-    if (scope === 'official' && !item.sources.includes('official')) continue;
-    if (scope === 'unofficial' && !item.sources.includes('unofficial')) continue;
-    if (scope === 'model' && !item.inCurrentModel) continue;
-    if (scope === 'missing' && !item.isMissingInModel) continue;
+    if (!hasOnlyIds) {
+      if (scope === 'saved' && !item.sources.includes('saved')) continue;
+      if (scope === 'embedded' && !item.sources.includes('embedded')) continue;
+      if (scope === 'builtin' && !isBuiltInLibraryItem(item)) continue;
+      if (scope === 'official' && !item.sources.includes('official')) continue;
+      if (scope === 'unofficial' && !item.sources.includes('unofficial')) continue;
+      if (scope === 'model' && !item.inCurrentModel) continue;
+      if (scope === 'missing' && !item.isMissingInModel) continue;
 
-    if (category !== 'all' && item.category !== category) continue;
+      if (category !== 'all' && item.category !== category) continue;
+    }
 
     if (filterColor !== null) {
       if (!item.availableColors || !item.availableColors.includes(filterColor)) continue;
@@ -700,10 +735,10 @@ export function computeStarterPackProgress(
 
 export function formatLibraryMenuSummary(stats: LibraryStats): string {
   if (stats.modelMissingShapeCount > 0) {
-    return `${stats.modelMissingShapeCount} missing${stats.savedParts > 0 ? ` · ${stats.savedParts.toLocaleString()} saved` : ''}`;
+    return `${stats.modelMissingShapeCount} missing${stats.savedParts > 0 ? ` · ${stats.savedParts.toLocaleString()} downloaded` : ''}`;
   }
   if (stats.savedParts > 0) {
-    return `${stats.savedParts.toLocaleString()} part${stats.savedParts === 1 ? '' : 's'} saved`;
+    return `${stats.savedParts.toLocaleString()} part${stats.savedParts === 1 ? '' : 's'} downloaded`;
   }
   if (stats.embeddedParts > 0) {
     return `${stats.embeddedParts.toLocaleString()} embedded (.io)`;

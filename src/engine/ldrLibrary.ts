@@ -464,6 +464,8 @@ export interface FetchGraphOptions {
   getFallbacks: (normKey: string) => string[];
   /** Optional hint that a part ID is known to come from an unofficial catalog (probed first). */
   preferUnofficial?: (normKey: string) => boolean;
+  /** Optional first-party on-site chunk resolver checked before any external third-party mirror. */
+  resolveOnSiteDat?: (normKey: string, signal?: AbortSignal) => Promise<string | null>;
   hasTexture?: (texName: string) => boolean;
   notFoundCache?: Set<string>;
   onDatLoaded: (storeKey: string, requestedKey: string, text: string) => void;
@@ -502,6 +504,7 @@ export async function fetchLDrawDependencyGraph(
     getDirectLoadedLines,
     getFallbacks,
     preferUnofficial,
+    resolveOnSiteDat,
     hasTexture,
     notFoundCache,
     onDatLoaded,
@@ -607,6 +610,18 @@ export async function fetchLDrawDependencyGraph(
 
     const results = await Promise.all(
       batch.map(async (k) => {
+        if (resolveOnSiteDat) {
+          try {
+            const onSiteText = await resolveOnSiteDat(k, signal);
+            if (onSiteText) {
+              return { k, text: onSiteText, resolvedKey: k, networkBlocked: false, notFound: false };
+            }
+          } catch (err) {
+            if ((err as { name?: string })?.name === 'AbortError' || signal?.aborted) {
+              throw err;
+            }
+          }
+        }
         const res = await fetchDatFromMirrors(
           k,
           mirrors,
