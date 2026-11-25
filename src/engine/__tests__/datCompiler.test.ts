@@ -678,18 +678,20 @@ describe('compileDatEntry — smooth circular studs & crease-angle vertex normal
       () => null,
     );
     expect(solidStud).not.toBeNull();
-    // 24 segments: 24 * 2 side tris + 24 top cap tris = 72 tris, 24 rim edges
+    // 24 segments: 24 * 2 side tris + 24 top cap tris = 72 tris, 48 rim edges (24 top + 24 base), 24 vertical silhouette condEdges
     expect(solidStud!.tris.length / 9).toBe(72);
-    expect(solidStud!.edges.length / 6).toBe(24);
+    expect(solidStud!.edges.length / 6).toBe(48);
+    expect(solidStud!.condEdges?.length ?? 0).toBe(24 * 12);
 
     const hollowStud = compileDatEntry(
       { key: 'stud_hollow', lines: ['1 16 0 0 0 1 0 0 0 1 0 0 0 1 stud2.dat'] },
       () => null,
     );
     expect(hollowStud).not.toBeNull();
-    // 24 segments: 24 * (2 outer + 2 top rim + 2 inner) = 144 tris, 24 rim edges
+    // 24 segments: 24 * (2 outer + 2 top rim + 2 inner) = 144 tris, 48 rim edges (24 top + 24 base), 24 vertical silhouette condEdges
     expect(hollowStud!.tris.length / 9).toBe(144);
-    expect(hollowStud!.edges.length / 6).toBe(24);
+    expect(hollowStud!.edges.length / 6).toBe(48);
+    expect(hollowStud!.condEdges?.length ?? 0).toBe(24 * 12);
 
     // 16x16 baseplate (256 studs) steps down to 16 segments to stay well inside budgets
     const baseplateLines: string[] = [];

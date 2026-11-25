@@ -177,6 +177,12 @@ describe('theme style options, recents & naming', () => {
     expect(m.getThemeStyleOptions(BUILT_IN_THEMES.blue)).toEqual(m.DEFAULT_THEME_STYLE_OPTIONS);
     expect(m.DEFAULT_THEME_STYLE_OPTIONS.highQualityStepRender).toBe(false);
     expect(m.DEFAULT_THEME_STYLE_OPTIONS.starkBlackOutlines).toBe(false);
+    expect(m.DEFAULT_THEME_STYLE_OPTIONS.highlightLineWeight).toBe('medium');
+    expect(m.DEFAULT_THEME_STYLE_OPTIONS.outlineLineWeight).toBe('medium');
+    expect(m.getLineWeightTapOffsets('light', 1600, 1200)).toHaveLength(1);
+    expect(m.getLineWeightTapOffsets('medium', 1600, 1200).length).toBeGreaterThan(1);
+    expect(m.getLineWeightTapOffsets('heavy', 1600, 1200).length).toBeGreaterThan(m.getLineWeightTapOffsets('medium', 1600, 1200).length);
+    expect(m.getLineWeightTapOffsets('extra-heavy', 1600, 1200).length).toBeGreaterThan(m.getLineWeightTapOffsets('heavy', 1600, 1200).length);
     const t = normalizeCustomTheme({
       name: 'Bold',
       showStepBorders: false,
@@ -185,6 +191,8 @@ describe('theme style options, recents & naming', () => {
       highlightColor: 'red;}',
       highQualityStepRender: true,
       starkBlackOutlines: true,
+      highlightLineWeight: 'extra-heavy',
+      outlineLineWeight: 'light',
     })!;
     expect(t.showStepBorders).toBe(false);
     expect(t.minifigStyle).toBe('sequential');
@@ -193,13 +201,19 @@ describe('theme style options, recents & naming', () => {
     expect(t.highlightColor).toBe('#ff2d55');
     expect(t.highQualityStepRender).toBe(true);
     expect(t.starkBlackOutlines).toBe(true);
+    expect(t.highlightLineWeight).toBe('extra-heavy');
+    expect(t.outlineLineWeight).toBe('light');
     const [back] = parseImportedThemesJson(serializeThemeExport(t));
     expect(m.themeStyleOptionsEqual(m.getThemeStyleOptions(back), m.getThemeStyleOptions(t))).toBe(true);
     expect(back.highQualityStepRender).toBe(true);
     expect(back.starkBlackOutlines).toBe(true);
+    expect(back.highlightLineWeight).toBe('extra-heavy');
+    expect(back.outlineLineWeight).toBe('light');
     expect(createThemeDraftFromBase(t).showStepBorders).toBe(false);
     expect(createThemeDraftFromBase(t).highQualityStepRender).toBe(true);
     expect(createThemeDraftFromBase(t).starkBlackOutlines).toBe(true);
+    expect(createThemeDraftFromBase(t).highlightLineWeight).toBe('extra-heavy');
+    expect(createThemeDraftFromBase(t).outlineLineWeight).toBe('light');
 
     // Legacy themes saved with fadePrev=false and a lower fadeOpacity migrate to Full (1.0)
     const legacyNoFade = m.normalizeThemeStyleOptions({ fadePrev: false, fadeOpacity: 0.65 });

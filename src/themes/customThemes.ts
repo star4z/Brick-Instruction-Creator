@@ -145,6 +145,63 @@ export function applyThemeFontsToElement(
 }
 
 export type ThemeMinifigStyle = 'exploded' | 'sequential' | 'classic';
+export type LineWeightId = 'light' | 'medium' | 'heavy' | 'extra-heavy';
+
+export function sanitizeLineWeight(value: unknown, fallback: LineWeightId = 'medium'): LineWeightId {
+  return value === 'light' || value === 'medium' || value === 'heavy' || value === 'extra-heavy'
+    ? value
+    : fallback;
+}
+
+/**
+ * Returns clip-space (NDC) multi-tap offsets for crisp resolution-scaled WebGL line weights
+ * (`light` | `medium` | `heavy` | `extra-heavy`) that bypass ANGLE/WebGL `gl.lineWidth(1)` limits.
+ */
+export function getLineWeightTapOffsets(
+  weight: LineWeightId | string | undefined,
+  width: number,
+  height: number,
+): Array<[number, number]> {
+  const w = Math.max(1, width || 1);
+  const h = Math.max(1, height || 1);
+  const mode = sanitizeLineWeight(weight, 'medium');
+  if (mode === 'light') return [[0, 0]];
+
+  const scale = Math.max(0.75, Math.min(1.65, w / 1500));
+  const toNdc = (px: number, py: number): [number, number] => [(2 * px) / w, (2 * py) / h];
+
+  if (mode === 'medium') {
+    const r = 0.78 * scale;
+    return [[0, 0], toNdc(r, 0), toNdc(-r, 0), toNdc(0, r), toNdc(0, -r)];
+  }
+
+  if (mode === 'heavy') {
+    const r1 = 0.85 * scale;
+    const r2 = 1.55 * scale;
+    const d2 = r2 * 0.7071;
+    return [
+      [0, 0],
+      toNdc(r1, 0), toNdc(-r1, 0), toNdc(0, r1), toNdc(0, -r1),
+      toNdc(r2, 0), toNdc(-r2, 0), toNdc(0, r2), toNdc(0, -r2),
+      toNdc(d2, d2), toNdc(-d2, d2), toNdc(d2, -d2), toNdc(-d2, -d2),
+    ];
+  }
+
+  // extra-heavy: filled multi-ring disk for bold, gap-free outlines
+  const r1 = 0.95 * scale;
+  const r2 = 1.85 * scale;
+  const r3 = 2.65 * scale;
+  const d2 = r2 * 0.7071;
+  const d3 = r3 * 0.7071;
+  return [
+    [0, 0],
+    toNdc(r1, 0), toNdc(-r1, 0), toNdc(0, r1), toNdc(0, -r1),
+    toNdc(r2, 0), toNdc(-r2, 0), toNdc(0, r2), toNdc(0, -r2),
+    toNdc(d2, d2), toNdc(-d2, d2), toNdc(d2, -d2), toNdc(-d2, -d2),
+    toNdc(r3, 0), toNdc(-r3, 0), toNdc(0, r3), toNdc(0, -r3),
+    toNdc(d3, d3), toNdc(-d3, d3), toNdc(d3, -d3), toNdc(-d3, -d3),
+  ];
+}
 
 /**
  * Step display options that belong to a theme (formerly loose Style popover
@@ -154,10 +211,12 @@ export type ThemeMinifigStyle = 'exploded' | 'sequential' | 'classic';
 export interface ThemeStyleOptions {
   highlightNew: boolean;
   highlightColor: string;
+  highlightLineWeight: LineWeightId;
   fadePrev: boolean;
   fadeOpacity: number;
   highQualityStepRender: boolean;
   starkBlackOutlines: boolean;
+  outlineLineWeight: LineWeightId;
   showRotCues: boolean;
   showSizeGuides: boolean;
   minifigStyle: ThemeMinifigStyle;
@@ -170,10 +229,12 @@ export interface ThemeStyleOptions {
 export const THEME_STYLE_OPTION_KEYS: Array<keyof ThemeStyleOptions> = [
   'highlightNew',
   'highlightColor',
+  'highlightLineWeight',
   'fadePrev',
   'fadeOpacity',
   'highQualityStepRender',
   'starkBlackOutlines',
+  'outlineLineWeight',
   'showRotCues',
   'showSizeGuides',
   'minifigStyle',
@@ -186,10 +247,12 @@ export const THEME_STYLE_OPTION_KEYS: Array<keyof ThemeStyleOptions> = [
 export const DEFAULT_THEME_STYLE_OPTIONS: ThemeStyleOptions = {
   highlightNew: true,
   highlightColor: '#ff2d55',
+  highlightLineWeight: 'medium',
   fadePrev: true,
   fadeOpacity: 0.82,
   highQualityStepRender: false,
   starkBlackOutlines: false,
+  outlineLineWeight: 'medium',
   showRotCues: true,
   showSizeGuides: true,
   minifigStyle: 'exploded',
@@ -225,10 +288,12 @@ export function normalizeThemeStyleOptions(
   return {
     highlightNew: bool('highlightNew'),
     highlightColor: sanitizeHexColor(r.highlightColor, sanitizeHexColor(fb.highlightColor, '#ff2d55')),
+    highlightLineWeight: sanitizeLineWeight(r.highlightLineWeight, sanitizeLineWeight(fb.highlightLineWeight, 'medium')),
     fadePrev,
     fadeOpacity: fade,
     highQualityStepRender: bool('highQualityStepRender'),
     starkBlackOutlines: bool('starkBlackOutlines'),
+    outlineLineWeight: sanitizeLineWeight(r.outlineLineWeight, sanitizeLineWeight(fb.outlineLineWeight, 'medium')),
     showRotCues: bool('showRotCues'),
     showSizeGuides: bool('showSizeGuides'),
     minifigStyle: mf,
@@ -277,10 +342,12 @@ export interface ManualTheme {
   // Step display & Parts List style options (see ThemeStyleOptions)
   highlightNew?: boolean;
   highlightColor?: string;
+  highlightLineWeight?: LineWeightId;
   fadePrev?: boolean;
   fadeOpacity?: number;
   highQualityStepRender?: boolean;
   starkBlackOutlines?: boolean;
+  outlineLineWeight?: LineWeightId;
   showRotCues?: boolean;
   showSizeGuides?: boolean;
   minifigStyle?: ThemeMinifigStyle;

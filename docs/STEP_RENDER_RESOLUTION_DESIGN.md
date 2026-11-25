@@ -29,9 +29,9 @@ Models rendered on instruction step pages (both on-screen in the Studio editor a
 Both options live under **Styles → Step Display** and are saved per theme (`.biwtheme`), per project (`.biw`), and in session preferences:
 - **Studio High-Quality Render (`highQualityStepRender`)**:
   - Runs the cover's photorealistic multi-pass `StudioPhotoRenderer` (micro-beveled ABS bricks, 3× RGBA-packed softbox shadow maps, GGX Cook-Torrance PBR, procedural studio softbox reflections, ACES filmic tone mapping, and SSAO crevice occlusion) in orthographic step projection (`computeStudioOrthoCamera`) across live step pages, real-time drag-to-orbit (`#liveRotateCanvas`), zoom-aware sharpening, and PDF export.
-- **Stark Black Outlines & Studs (`starkBlackOutlines`)**:
-  - Renders crisp official LEGO-style pure black (`#000000`) outlines on all brick edges, Technic holes, and **both top rim and base ring** of every stud (automatically switching to crisp light-gray `#ccd4de` on near-black bricks with perceived luminance `< 56` so dark parts stay sharp and readable).
-  - Applies a resolution-scaled screen-space multi-tap line pass (`uLineOffset` in both `WebGLBrickEngine` and `StudioPhotoRenderer`) so outlines remain bold and evenly weighted even at `2400–3600px` supersampled resolutions where WebGL `gl.lineWidth` is clamped to `1.0`.
+- **Black Outlines (`starkBlackOutlines`) & Independent Line Weights (`highlightLineWeight`, `outlineLineWeight`)**:
+  - Renders crisp official LEGO-style pure black (`#000000`) outlines on all brick edges, Technic holes, **complete top & base stud rings**, and **GPU-evaluated conditional silhouette lines (`VS_COND_LINE`) along the vertical sides of every stud and cylinder** (automatically switching to crisp light-gray `#ccd4de` on near-black bricks with perceived luminance `< 56`).
+  - Separates new-piece highlight outlines from regular/black outlines so each has its own configurable weight (**Light**, **Medium**, **Heavy**, **X-Heavy**) via resolution-scaled multi-tap screen-space offsets (`getLineWeightTapOffsets`) and a mobile 16-bit depth-buffer-safe Z-bias (`-0.0014` + `polygonOffset(2.0, 2.5)`) so stud top rings never clip even on 32×32 baseplates.
   - Applies consistently across step models, subassembly callouts, Parts Box (PLI) thumbnails, BOM thumbnails, and PDF export.
 
 ### 4. Full Cover & Build Complete Camera Support (`src/cover/coverLayout.ts`, `src/studioRuntime.ts`)

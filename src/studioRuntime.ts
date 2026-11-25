@@ -287,6 +287,8 @@ import {
   saveCustomThemesToStorage,
   saveThemeRecentsToStorage,
   serializeThemeExport,
+  getLineWeightTapOffsets,
+  sanitizeLineWeight,
   themeCanvasFont,
   themeStyleOptionsEqual,
   toHexColor,
@@ -622,10 +624,12 @@ function selectTheme(id) {
   if (nameEl && document.activeElement === nameEl) nameEl.blur();
   const prevStark = Boolean(state.starkBlackOutlines);
   const prevHq = Boolean(state.highQualityStepRender);
+  const prevOutW = state.outlineLineWeight;
+  const prevHlW = state.highlightLineWeight;
   state.themeId = resolveThemeById(id, customThemes).id;
   applyActiveThemeStyleToState();
-  if (prevStark !== Boolean(state.starkBlackOutlines)) pliThumbCache.clear();
-  if (prevStark !== Boolean(state.starkBlackOutlines) || prevHq !== Boolean(state.highQualityStepRender)) {
+  if (prevStark !== Boolean(state.starkBlackOutlines) || prevOutW !== state.outlineLineWeight) pliThumbCache.clear();
+  if (prevStark !== Boolean(state.starkBlackOutlines) || prevHq !== Boolean(state.highQualityStepRender) || prevOutW !== state.outlineLineWeight || prevHlW !== state.highlightLineWeight) {
     overviewThumbCache.bumpEpoch();
   }
   renderAll();
@@ -1357,6 +1361,10 @@ function buildMeshBuffers(prevParts, newParts, opts) {
   const opPos = new FloatBuf(totalParts * 180), opNorm = new FloatBuf(totalParts * 180), opCol = new ByteBuf(totalParts * 240);
   const trPos = new FloatBuf(2048), trNorm = new FloatBuf(2048), trCol = new ByteBuf(2048);
   const lnPos = new FloatBuf(totalParts * 60), lnCol = new ByteBuf(totalParts * 80);
+  const hlLnPos = new FloatBuf(Math.max(256, newParts.length * 60)), hlLnCol = new ByteBuf(Math.max(256, newParts.length * 80));
+  const cPos = new FloatBuf(totalParts * 48), cOther = new FloatBuf(totalParts * 48), cC1 = new FloatBuf(totalParts * 48), cC2 = new FloatBuf(totalParts * 48), cCol = new ByteBuf(totalParts * 64);
+  const hlCPos = new FloatBuf(Math.max(256, newParts.length * 48)), hlCOther = new FloatBuf(Math.max(256, newParts.length * 48)), hlCC1 = new FloatBuf(Math.max(256, newParts.length * 48)), hlCC2 = new FloatBuf(Math.max(256, newParts.length * 48)), hlCCol = new ByteBuf(Math.max(256, newParts.length * 64));
+  let activeLineHighlighted = false;
   const texGroups = new Map();
 
   const smoothCurves = true;
@@ -1398,8 +1406,19 @@ function buildMeshBuffers(prevParts, newParts, opts) {
     C.push12(col[0], col[1], col[2], aByte);
   };
   const pushEdge = (a, b, col, aByte) => {
-    lnPos.push3(a[0],a[1],a[2]); lnPos.push3(b[0],b[1],b[2]);
-    lnCol.push4(col[0],col[1],col[2],aByte); lnCol.push4(col[0],col[1],col[2],aByte);
+    const P = activeLineHighlighted ? hlLnPos : lnPos;
+    const C = activeLineHighlighted ? hlLnCol : lnCol;
+    P.push3(a[0],a[1],a[2]); P.push3(b[0],b[1],b[2]);
+    C.push4(col[0],col[1],col[2],aByte); C.push4(col[0],col[1],col[2],aByte);
+  };
+  const pushCondEdge = (a, b, ctrl1, ctrl2, col, aByte) => {
+    const P = activeLineHighlighted ? hlCPos : cPos;
+    const O = activeLineHighlighted ? hlCOther : cOther;
+    const C1 = activeLineHighlighted ? hlCC1 : cC1;
+    const C2 = activeLineHighlighted ? hlCC2 : cC2;
+    const Col = activeLineHighlighted ? hlCCol : cCol;
+    P.push3(a[0],a[1],a[2]); O.push3(b[0],b[1],b[2]); C1.push3(ctrl1[0],ctrl1[1],ctrl1[2]); C2.push3(ctrl2[0],ctrl2[1],ctrl2[2]); Col.push4(col[0],col[1],col[2],aByte);
+    P.push3(b[0],b[1],b[2]); O.push3(a[0],a[1],a[2]); C1.push3(ctrl1[0],ctrl1[1],ctrl1[2]); C2.push3(ctrl2[0],ctrl2[1],ctrl2[2]); Col.push4(col[0],col[1],col[2],aByte);
   };
 
   const addBox = (cx, cy, cz, w, h, d, m, ox, oy, oz, hinge, col, eCol, aByte, eAlpha = aByte) => {
@@ -1504,13 +1523,23 @@ function buildMeshBuffers(prevParts, newParts, opts) {
     const bev = useBevel ? Math.min(0.42, rTop * 0.12, h * 0.16) : 0;
     const sideTopY = hh - bev;
     const capR = rTop - bev;
+    const topRimPts = [];
+    const botRimPts = [];
     for (let i = 0; i < effSegs; i++) {
+      const a0 = (i/effSegs)*Math.PI*2;
+      const c0 = Math.cos(a0), s0 = Math.sin(a0);
+      topRimPts.push(xformPt(mk(c0*(useBevel ? capR : rTop), s0*(useBevel ? capR : rTop), hh), m, ox, oy, oz, hinge));
+      botRimPts.push(xformPt(mk(c0*rBot, s0*rBot, -hh), m, ox, oy, oz, hinge));
+    }
+    for (let i = 0; i < effSegs; i++) {
+      const next = (i + 1) % effSegs;
+      const prev = (i + effSegs - 1) % effSegs;
       const a0 = (i/effSegs)*Math.PI*2, a1 = ((i+1)/effSegs)*Math.PI*2;
       const c0 = Math.cos(a0), s0 = Math.sin(a0), c1 = Math.cos(a1), s1 = Math.sin(a1);
       const t0 = xformPt(mk(c0*rTop, s0*rTop, sideTopY), m, ox, oy, oz, hinge);
       const t1 = xformPt(mk(c1*rTop, s1*rTop, sideTopY), m, ox, oy, oz, hinge);
-      const b0 = xformPt(mk(c0*rBot, s0*rBot, -hh), m, ox, oy, oz, hinge);
-      const b1 = xformPt(mk(c1*rBot, s1*rBot, -hh), m, ox, oy, oz, hinge);
+      const b0 = botRimPts[i];
+      const b1 = botRimPts[next];
       if (smoothCurves) {
         const sn0 = mkN(c0, s0, 0);
         const sn1 = mkN(c1, s1, 0);
@@ -1522,8 +1551,8 @@ function buildMeshBuffers(prevParts, newParts, opts) {
         pushTri(b0, b1, t1, sn, col, aByte); pushTri(b0, t1, t0, sn, col, aByte);
       }
       if (useBevel) {
-        const ct0 = xformPt(mk(c0*capR, s0*capR, hh), m, ox, oy, oz, hinge);
-        const ct1 = xformPt(mk(c1*capR, s1*capR, hh), m, ox, oy, oz, hinge);
+        const ct0 = topRimPts[i];
+        const ct1 = topRimPts[next];
         const bn0 = mkN(c0 * 0.7071, s0 * 0.7071, 0.7071);
         const bn1 = mkN(c1 * 0.7071, s1 * 0.7071, 0.7071);
         pushTriSmooth(t0, t1, ct1, bn0, bn1, bn1, col, aByte);
@@ -1534,8 +1563,12 @@ function buildMeshBuffers(prevParts, newParts, opts) {
       }
       if (rBot > 0.05) pushTri(botC, b1, b0, nBot, col, aByte);
       if (emitProcEdges) {
-        if (rTop > 0.05) pushEdge(t0, t1, eCol, starkBlack ? 255 : aByte);
+        const ea = starkBlack ? 255 : aByte;
+        if (rTop > 0.05) pushEdge(topRimPts[i], topRimPts[next], eCol, ea);
         if (starkBlack && rBot > 0.05) pushEdge(b0, b1, eCol, 255);
+        if (rTop > 0.05 && rBot > 0.05) {
+          pushCondEdge(topRimPts[i], b0, topRimPts[prev], topRimPts[next], eCol, ea);
+        }
       }
     }
   };
@@ -2039,6 +2072,7 @@ function buildMeshBuffers(prevParts, newParts, opts) {
         ? Math.round(255 * (cInfo.alpha || 0.7) * (isFaded ? Math.max(0.55, opts.fadeOpacity) : 1))
         : 255;
     const edgeAlpha = isGhost ? 185 : (starkBlack ? 255 : aByte);
+    activeLineHighlighted = Boolean(shouldHighlight || isSelected);
     const m = leafPart.m || R_ID;
     const ox = leafPart.x + offX, oy = leafPart.y + offY, oz = leafPart.z + offZ;
 
@@ -2131,6 +2165,17 @@ function buildMeshBuffers(prevParts, newParts, opts) {
           pushEdge(a, b, edgeCol, edgeAlpha);
         }
       }
+      const CE = compiled.condEdges;
+      if ((includeEdges || isNew || isSelected || isGhost) && CE && CE.length > 0) {
+        for (let i = 0; i < CE.length; i += 12) {
+          const a = xformPt([CE[i],CE[i+1],CE[i+2]], m, ox, oy, oz, hingeRad);
+          const b = xformPt([CE[i+3],CE[i+4],CE[i+5]], m, ox, oy, oz, hingeRad);
+          const c1 = xformPt([CE[i+6],CE[i+7],CE[i+8]], m, ox, oy, oz, hingeRad);
+          const c2 = xformPt([CE[i+9],CE[i+10],CE[i+11]], m, ox, oy, oz, hingeRad);
+          pushCondEdge(a, b, c1, c2, edgeCol, edgeAlpha);
+        }
+      }
+      activeLineHighlighted = false;
       return;
     }
 
@@ -2397,6 +2442,7 @@ function buildMeshBuffers(prevParts, newParts, opts) {
       addBox(0,-h/2,0, w,h,d, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte,edgeAlpha);
       addTopStuds(def, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
     }
+    activeLineHighlighted = false;
   };
 
   const emitPart = (part, isNew) => {
@@ -2538,6 +2584,18 @@ function buildMeshBuffers(prevParts, newParts, opts) {
     texDraws,
     linePos: new Float32Array(lnPos.slice()),
     lineCol: new Uint8Array(lnCol.slice()),
+    hlLinePos: new Float32Array(hlLnPos.slice()),
+    hlLineCol: new Uint8Array(hlLnCol.slice()),
+    condPos: new Float32Array(cPos.slice()),
+    condOther: new Float32Array(cOther.slice()),
+    condC1: new Float32Array(cC1.slice()),
+    condC2: new Float32Array(cC2.slice()),
+    condCol: new Uint8Array(cCol.slice()),
+    hlCondPos: new Float32Array(hlCPos.slice()),
+    hlCondOther: new Float32Array(hlCOther.slice()),
+    hlCondC1: new Float32Array(hlCC1.slice()),
+    hlCondC2: new Float32Array(hlCC2.slice()),
+    hlCondCol: new Uint8Array(hlCCol.slice()),
     center: targetCenter,
     radius: viewRadius,
     fullRadius,
@@ -2734,13 +2792,15 @@ class WebGLBrickEngine {
         }
         gl_FragColor = shadeAbsPlastic(baseRgb, vCol.a, vPos, vNorm, uHeroMode, uEyePos, uKeyDir, uFillDir, uRimDir, uCamUp);
       }`;
-    const vsLine = `attribute vec3 aPos; attribute vec4 aCol; uniform mat4 uMVP; uniform vec2 uLineOffset; varying vec4 vCol; void main(){ gl_Position = uMVP * vec4(aPos,1.0); gl_Position.xy += uLineOffset * gl_Position.w; gl_Position.z -= 0.00024 * gl_Position.w; vCol = aCol; }`;
+    const vsLine = `attribute vec3 aPos; attribute vec4 aCol; uniform mat4 uMVP; uniform vec2 uLineOffset; varying vec4 vCol; void main(){ gl_Position = uMVP * vec4(aPos,1.0); gl_Position.xy += uLineOffset * gl_Position.w; gl_Position.z -= 0.0014 * gl_Position.w; vCol = aCol; }`;
+    const vsCondLine = `attribute vec3 aPos; attribute vec3 aOther; attribute vec3 aCtrl1; attribute vec3 aCtrl2; attribute vec4 aCol; uniform mat4 uMVP; uniform vec2 uLineOffset; varying vec4 vCol; void main(){ vec4 p1 = uMVP * vec4(aPos, 1.0); vec4 p2 = uMVP * vec4(aOther, 1.0); vec4 c1 = uMVP * vec4(aCtrl1, 1.0); vec4 c2 = uMVP * vec4(aCtrl2, 1.0); vec2 s1 = p1.xy / max(0.0001, abs(p1.w)); vec2 s2 = p2.xy / max(0.0001, abs(p2.w)); vec2 sc1 = c1.xy / max(0.0001, abs(c1.w)); vec2 sc2 = c2.xy / max(0.0001, abs(c2.w)); vec2 d = s2 - s1; float cr1 = d.x * (sc1.y - s1.y) - d.y * (sc1.x - s1.x); float cr2 = d.x * (sc2.y - s1.y) - d.y * (sc2.x - s1.x); if (cr1 * cr2 > 0.0) { p1.xy += uLineOffset * p1.w; p1.z -= 0.0014 * p1.w; gl_Position = p1; vCol = aCol; } else { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); vCol = vec4(0.0); } }`;
     const fsLine = `precision mediump float; uniform float uLineAlpha; varying vec4 vCol; void main(){ gl_FragColor = vec4(vCol.rgb, vCol.a * uLineAlpha); }`;
     const cmp = (t, s) => { const sh = gl.createShader(t); gl.shaderSource(sh, s); gl.compileShader(sh); return sh; };
     const lnk = (v, f) => { const p = gl.createProgram(); gl.attachShader(p, cmp(gl.VERTEX_SHADER, v)); gl.attachShader(p, cmp(gl.FRAGMENT_SHADER, f)); gl.linkProgram(p); return p; };
     this.triProg = lnk(vsTri, fsTri);
     this.texProg = lnk(vsTex, fsTex);
     this.lineProg = lnk(vsLine, fsLine);
+    this.condProg = lnk(vsCondLine, fsLine);
     this.loc = {
       tMVP: gl.getUniformLocation(this.triProg, 'uMVP'),
       tHeroMode: gl.getUniformLocation(this.triProg, 'uHeroMode'),
@@ -2771,10 +2831,21 @@ class WebGLBrickEngine {
       lAlpha: gl.getUniformLocation(this.lineProg, 'uLineAlpha'),
       lPos: gl.getAttribLocation(this.lineProg, 'aPos'),
       lCol: gl.getAttribLocation(this.lineProg, 'aCol'),
+      cMVP: gl.getUniformLocation(this.condProg, 'uMVP'),
+      cOffset: gl.getUniformLocation(this.condProg, 'uLineOffset'),
+      cAlpha: gl.getUniformLocation(this.condProg, 'uLineAlpha'),
+      cPos: gl.getAttribLocation(this.condProg, 'aPos'),
+      cOther: gl.getAttribLocation(this.condProg, 'aOther'),
+      cCtrl1: gl.getAttribLocation(this.condProg, 'aCtrl1'),
+      cCtrl2: gl.getAttribLocation(this.condProg, 'aCtrl2'),
+      cCol: gl.getAttribLocation(this.condProg, 'aCol'),
     };
     this.bTriPos = gl.createBuffer(); this.bTriNorm = gl.createBuffer(); this.bTriCol = gl.createBuffer();
     this.bTexPos = gl.createBuffer(); this.bTexNorm = gl.createBuffer(); this.bTexUv = gl.createBuffer(); this.bTexCol = gl.createBuffer();
     this.bLinePos = gl.createBuffer(); this.bLineCol = gl.createBuffer();
+    this.bHlLinePos = gl.createBuffer(); this.bHlLineCol = gl.createBuffer();
+    this.bCondPos = gl.createBuffer(); this.bCondOther = gl.createBuffer(); this.bCondC1 = gl.createBuffer(); this.bCondC2 = gl.createBuffer(); this.bCondCol = gl.createBuffer();
+    this.bHlCondPos = gl.createBuffer(); this.bHlCondOther = gl.createBuffer(); this.bHlCondC1 = gl.createBuffer(); this.bHlCondC2 = gl.createBuffer(); this.bHlCondCol = gl.createBuffer();
     this.emptyTex = gl.createTexture();
     if (this.emptyTex) {
       gl.bindTexture(gl.TEXTURE_2D, this.emptyTex);
@@ -2824,6 +2895,24 @@ class WebGLBrickEngine {
     gl.bindBuffer(gl.ARRAY_BUFFER, this.bTriCol); gl.bufferData(gl.ARRAY_BUFFER, mesh.triCol, gl.STATIC_DRAW);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.bLinePos); gl.bufferData(gl.ARRAY_BUFFER, mesh.linePos, gl.STATIC_DRAW);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.bLineCol); gl.bufferData(gl.ARRAY_BUFFER, mesh.lineCol, gl.STATIC_DRAW);
+    if (mesh.hlLinePos && mesh.hlLinePos.length > 0) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.bHlLinePos); gl.bufferData(gl.ARRAY_BUFFER, mesh.hlLinePos, gl.STATIC_DRAW);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.bHlLineCol); gl.bufferData(gl.ARRAY_BUFFER, mesh.hlLineCol, gl.STATIC_DRAW);
+    }
+    if (mesh.condPos && mesh.condPos.length > 0) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.bCondPos); gl.bufferData(gl.ARRAY_BUFFER, mesh.condPos, gl.STATIC_DRAW);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.bCondOther); gl.bufferData(gl.ARRAY_BUFFER, mesh.condOther, gl.STATIC_DRAW);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.bCondC1); gl.bufferData(gl.ARRAY_BUFFER, mesh.condC1, gl.STATIC_DRAW);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.bCondC2); gl.bufferData(gl.ARRAY_BUFFER, mesh.condC2, gl.STATIC_DRAW);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.bCondCol); gl.bufferData(gl.ARRAY_BUFFER, mesh.condCol, gl.STATIC_DRAW);
+    }
+    if (mesh.hlCondPos && mesh.hlCondPos.length > 0) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.bHlCondPos); gl.bufferData(gl.ARRAY_BUFFER, mesh.hlCondPos, gl.STATIC_DRAW);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.bHlCondOther); gl.bufferData(gl.ARRAY_BUFFER, mesh.hlCondOther, gl.STATIC_DRAW);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.bHlCondC1); gl.bufferData(gl.ARRAY_BUFFER, mesh.hlCondC1, gl.STATIC_DRAW);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.bHlCondC2); gl.bufferData(gl.ARRAY_BUFFER, mesh.hlCondC2, gl.STATIC_DRAW);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.bHlCondCol); gl.bufferData(gl.ARRAY_BUFFER, mesh.hlCondCol, gl.STATIC_DRAW);
+    }
     this.uploadedMesh = mesh;
   }
   computeMVP(mesh, w, h, azDeg, elDeg, zoom = 1, fixedHalfH = 0, tightFit = false, fixedCenter = null, panX = 0, panY = 0) {
@@ -2885,7 +2974,7 @@ class WebGLBrickEngine {
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL);
     gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-    gl.enable(gl.POLYGON_OFFSET_FILL); gl.polygonOffset(1.0, 1.0);
+    gl.enable(gl.POLYGON_OFFSET_FILL); gl.polygonOffset(2.0, 2.5);
 
     const tightFit = Boolean(drawOpts?.tightFit);
     const heroShading = Boolean(drawOpts?.heroShading);
@@ -2977,24 +3066,53 @@ class WebGLBrickEngine {
       gl.drawArrays(gl.TRIANGLES, mesh.opaqueCount, mesh.transCount);
       gl.depthMask(true);
     }
-    if (mesh.linePos.length > 0 && lineAlpha > 0.01) {
-      gl.useProgram(this.lineProg);
-      gl.uniformMatrix4fv(this.loc.lMVP, false, mvp);
-      gl.uniform1f(this.loc.lAlpha, lineAlpha);
-      gl.bindBuffer(gl.ARRAY_BUFFER, this.bLinePos); gl.enableVertexAttribArray(this.loc.lPos); gl.vertexAttribPointer(this.loc.lPos, 3, gl.FLOAT, false, 0, 0);
-      gl.bindBuffer(gl.ARRAY_BUFFER, this.bLineCol); gl.enableVertexAttribArray(this.loc.lCol); gl.vertexAttribPointer(this.loc.lCol, 4, gl.UNSIGNED_BYTE, true, 0, 0);
-      const lineVerts = mesh.linePos.length / 3;
-      if (drawOpts?.boldLines || drawOpts?.starkBlackOutlines) {
-        const stepPx = Math.max(0.65, Math.min(1.4, dw / 1600));
-        const ox = (2 * stepPx) / dw;
-        const oy = (2 * stepPx) / dh;
-        for (const [tx, ty] of [[0, 0], [ox, 0], [0, oy], [-ox, 0]]) {
+    if (lineAlpha > 0.01) {
+      const outlineWeight = drawOpts?.outlineLineWeight ?? ((drawOpts?.boldLines || drawOpts?.starkBlackOutlines) ? 'medium' : 'light');
+      const hlWeight = drawOpts?.highlightLineWeight ?? 'medium';
+      const outlineTaps = getLineWeightTapOffsets(outlineWeight, dw, dh);
+      const hlTaps = getLineWeightTapOffsets(hlWeight, dw, dh);
+
+      const drawHard = (posBuf, colBuf, count, taps, alpha) => {
+        if (count <= 0) return;
+        gl.useProgram(this.lineProg);
+        gl.uniformMatrix4fv(this.loc.lMVP, false, mvp);
+        gl.uniform1f(this.loc.lAlpha, alpha);
+        gl.bindBuffer(gl.ARRAY_BUFFER, posBuf); gl.enableVertexAttribArray(this.loc.lPos); gl.vertexAttribPointer(this.loc.lPos, 3, gl.FLOAT, false, 0, 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, colBuf); gl.enableVertexAttribArray(this.loc.lCol); gl.vertexAttribPointer(this.loc.lCol, 4, gl.UNSIGNED_BYTE, true, 0, 0);
+        for (const [tx, ty] of taps) {
           gl.uniform2f(this.loc.lOffset, tx, ty);
-          gl.drawArrays(gl.LINES, 0, lineVerts);
+          gl.drawArrays(gl.LINES, 0, count);
         }
-      } else {
-        gl.uniform2f(this.loc.lOffset, 0, 0);
-        gl.drawArrays(gl.LINES, 0, lineVerts);
+      };
+
+      const drawCond = (posBuf, otherBuf, c1Buf, c2Buf, colBuf, count, taps, alpha) => {
+        if (count <= 0) return;
+        gl.useProgram(this.condProg);
+        gl.uniformMatrix4fv(this.loc.cMVP, false, mvp);
+        gl.uniform1f(this.loc.cAlpha, alpha);
+        gl.bindBuffer(gl.ARRAY_BUFFER, posBuf); gl.enableVertexAttribArray(this.loc.cPos); gl.vertexAttribPointer(this.loc.cPos, 3, gl.FLOAT, false, 0, 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, otherBuf); gl.enableVertexAttribArray(this.loc.cOther); gl.vertexAttribPointer(this.loc.cOther, 3, gl.FLOAT, false, 0, 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, c1Buf); gl.enableVertexAttribArray(this.loc.cCtrl1); gl.vertexAttribPointer(this.loc.cCtrl1, 3, gl.FLOAT, false, 0, 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, c2Buf); gl.enableVertexAttribArray(this.loc.cCtrl2); gl.vertexAttribPointer(this.loc.cCtrl2, 3, gl.FLOAT, false, 0, 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, colBuf); gl.enableVertexAttribArray(this.loc.cCol); gl.vertexAttribPointer(this.loc.cCol, 4, gl.UNSIGNED_BYTE, true, 0, 0);
+        for (const [tx, ty] of taps) {
+          gl.uniform2f(this.loc.cOffset, tx, ty);
+          gl.drawArrays(gl.LINES, 0, count);
+        }
+        gl.disableVertexAttribArray(this.loc.cOther);
+        gl.disableVertexAttribArray(this.loc.cCtrl1);
+        gl.disableVertexAttribArray(this.loc.cCtrl2);
+      };
+
+      drawHard(this.bLinePos, this.bLineCol, mesh.linePos.length / 3, outlineTaps, lineAlpha);
+      if (mesh.condPos && mesh.condPos.length > 0) {
+        drawCond(this.bCondPos, this.bCondOther, this.bCondC1, this.bCondC2, this.bCondCol, mesh.condPos.length / 3, outlineTaps, lineAlpha);
+      }
+      if (mesh.hlLinePos && mesh.hlLinePos.length > 0) {
+        drawHard(this.bHlLinePos, this.bHlLineCol, mesh.hlLinePos.length / 3, hlTaps, 1.0);
+      }
+      if (mesh.hlCondPos && mesh.hlCondPos.length > 0) {
+        drawCond(this.bHlCondPos, this.bHlCondOther, this.bHlCondC1, this.bHlCondC2, this.bHlCondCol, mesh.hlCondPos.length / 3, hlTaps, 1.0);
       }
     }
     return mvp;
@@ -3040,11 +3158,12 @@ function isDarkHexColor(hex) {
 
 function getPliThumb(part) {
   const sb = Boolean(state.starkBlackOutlines);
-  const key = `${part.p}:${part.c}${sb ? ':sb' : ''}`;
+  const outW = sb ? sanitizeLineWeight(state.outlineLineWeight, 'medium') : 'light';
+  const key = `${part.p}:${part.c}${sb ? `:sb_${outW}` : ''}`;
   if (pliThumbCache.has(key)) return pliThumbCache.get(key);
   const samplePart = normalizeCompositeThumbPart(part, (pid) => resolvePart(pid).name, computeWorldBox);
   const mesh = buildMeshBuffers([], [samplePart], { highlightNew:false, fadePrev:false, showArrows:false, accent:'#1a73e8', starkBlackOutlines: sb });
-  snapshotEngine.draw(mesh, 420, 420, 32, 22, 1.08, 0, sb ? { boldLines: true } : null);
+  snapshotEngine.draw(mesh, 420, 420, 32, 22, 1.08, 0, sb ? { outlineLineWeight: outW } : null);
   const url = snapshotCanvas.toDataURL('image/png');
   if (pliThumbCache.size > 360) pliThumbCache.clear();
   pliThumbCache.set(key, url);
@@ -3056,7 +3175,8 @@ function getBomPartThumb(part, colSpan = 1, rowSpan = 1) {
   const rs = Math.max(1, Math.round(rowSpan || 1));
   if (cs === 1 && rs === 1) return getPliThumb(part);
   const sb = Boolean(state.starkBlackOutlines);
-  const key = `${part.p}:${part.c}:bom_${cs}x${rs}${sb ? ':sb' : ''}`;
+  const outW = sb ? sanitizeLineWeight(state.outlineLineWeight, 'medium') : 'light';
+  const key = `${part.p}:${part.c}:bom_${cs}x${rs}${sb ? `:sb_${outW}` : ''}`;
   if (pliThumbCache.has(key)) return pliThumbCache.get(key);
   const maxSpan = Math.max(cs, rs);
   const basePx = Math.min(560, Math.round(280 * Math.min(2.0, 0.85 + maxSpan * 0.45)));
@@ -3064,7 +3184,7 @@ function getBomPartThumb(part, colSpan = 1, rowSpan = 1) {
   const rh = Math.max(200, Math.round((basePx * rs) / maxSpan));
   const samplePart = normalizeCompositeThumbPart(part, (pid) => resolvePart(pid).name, computeWorldBox);
   const mesh = buildMeshBuffers([], [samplePart], { highlightNew:false, fadePrev:false, showArrows:false, accent:'#1a73e8', starkBlackOutlines: sb });
-  snapshotEngine.draw(mesh, rw, rh, 32, 22, 1.04, 0, { tightFit: true, boldLines: sb });
+  snapshotEngine.draw(mesh, rw, rh, 32, 22, 1.04, 0, { tightFit: true, outlineLineWeight: outW });
   const url = snapshotCanvas.toDataURL('image/png');
   if (pliThumbCache.size > 360) pliThumbCache.clear();
   pliThumbCache.set(key, url);
@@ -3090,6 +3210,8 @@ function renderStepWithStudioPhoto(mesh, az, el, w, h, zoom, opts) {
     showFloor: false,
     lineAlpha: typeof opts?.lineAlpha === 'number' ? opts.lineAlpha : 1.0,
     boldLines: Boolean(opts?.starkBlackOutlines || opts?.boldLines),
+    outlineLineWeight: opts?.outlineLineWeight ?? (opts?.starkBlackOutlines ? 'medium' : 'light'),
+    highlightLineWeight: opts?.highlightLineWeight ?? 'medium',
     darkBackground: Boolean(opts?.darkBackground),
     getTextureImage: (texKey) => textureStore.getDecodedImage(texKey),
   });
@@ -6414,10 +6536,12 @@ const state = {
   detectDuplicates: true,  // auto-detect explicit + geometric duplicate submodels
   highlightNew: true,
   highlightColor: '#ff2d55',
+  highlightLineWeight: 'medium',
   fadePrev: true,
   fadeOpacity: 0.82,
   highQualityStepRender: false,
   starkBlackOutlines: false,
+  outlineLineWeight: 'medium',
   showRotCues: true,
   showSizeGuides: true,
   minifigStyle: 'exploded', // 'exploded' (IMG_0316) | 'sequential' (IMG_0315) | 'classic'
@@ -8089,6 +8213,7 @@ function renderAll() {
       accent: theme.accent,
       highQualityStepRender: state.highQualityStepRender,
       starkBlackOutlines: state.starkBlackOutlines,
+      outlineLineWeight: state.starkBlackOutlines ? state.outlineLineWeight : 'light',
       darkBackground: isDarkHexColor(toHexColor(theme.bgColor || '#ffffff', '#ffffff')),
     });
     const pgNumText = formatPageNumber(page.num, state.pages.length);
@@ -8335,9 +8460,11 @@ function renderAll() {
       const darkThemeBg = isDarkHexColor(toHexColor(theme.bgColor || '#ffffff', '#ffffff'));
       const opts = {
         highlightNew: state.highlightNew, highlightColor: state.highlightColor,
+        highlightLineWeight: state.highlightLineWeight,
         fadePrev: state.fadePrev, fadeOpacity: state.fadeOpacity,
         highQualityStepRender: state.highQualityStepRender,
         starkBlackOutlines: state.starkBlackOutlines,
+        outlineLineWeight: state.starkBlackOutlines ? state.outlineLineWeight : 'light',
         darkBackground: darkThemeBg,
         showArrows: true, accent: theme.accent, ov,
         partOffsets: effectivePartOffsets,
@@ -8443,6 +8570,7 @@ function renderAll() {
             accent: theme.accent,
             highQualityStepRender: state.highQualityStepRender,
             starkBlackOutlines: state.starkBlackOutlines,
+            outlineLineWeight: state.starkBlackOutlines ? state.outlineLineWeight : 'light',
             darkBackground: darkThemeBg,
           }).url
         : null;
@@ -9042,6 +9170,8 @@ function bindStepPageInteractions(page) {
             showFloor: false,
             lineAlpha: typeof liveDrawOpts?.lineAlpha === 'number' ? liveDrawOpts.lineAlpha : 1.0,
             boldLines: Boolean(liveDrawOpts?.starkBlackOutlines || liveDrawOpts?.boldLines),
+            outlineLineWeight: liveDrawOpts?.outlineLineWeight ?? (liveDrawOpts?.starkBlackOutlines ? 'medium' : 'light'),
+            highlightLineWeight: liveDrawOpts?.highlightLineWeight ?? 'medium',
             darkBackground: Boolean(liveDrawOpts?.darkBackground),
             getTextureImage: (texKey) => textureStore.getDecodedImage(texKey),
           });
@@ -11549,6 +11679,18 @@ function syncMenuControls() {
     b.className = `fade-chip flex flex-col items-center gap-1 py-1.5 px-1 rounded-md border font-semibold text-xs transition cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
   });
   syncFadeVisibilityPreview();
+  const hlWrap = document.getElementById('highlightWeightWrap');
+  if (hlWrap) hlWrap.classList.toggle('opacity-45', !state.highlightNew);
+  document.querySelectorAll('.hl-weight-chip').forEach(b => {
+    const act = b.getAttribute('data-hl-weight') === sanitizeLineWeight(state.highlightLineWeight, 'medium');
+    b.className = `hl-weight-chip py-1.5 px-1 rounded-md border font-semibold text-[11px] leading-tight transition cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
+  });
+  const outWrap = document.getElementById('outlineWeightWrap');
+  if (outWrap) outWrap.classList.toggle('opacity-45', !state.starkBlackOutlines);
+  document.querySelectorAll('.outline-weight-chip').forEach(b => {
+    const act = b.getAttribute('data-outline-weight') === sanitizeLineWeight(state.outlineLineWeight, 'medium');
+    b.className = `outline-weight-chip py-1.5 px-1 rounded-md border font-semibold text-[11px] leading-tight transition cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
+  });
 
   syncStylePanel();
   syncKeyboardShortcutsMenuSummary();
@@ -15256,8 +15398,9 @@ function scheduleSaveSessionPrefs() {
       density: state.density, layout: state.layout,
       layoutConfig: state.layoutConfig, layoutGroups: state.layoutGroups,
       detectDuplicates: state.detectDuplicates, highlightNew: state.highlightNew, highlightColor: state.highlightColor,
+      highlightLineWeight: state.highlightLineWeight,
       fadePrev: state.fadePrev, fadeOpacity: state.fadeOpacity, highQualityStepRender: state.highQualityStepRender,
-      starkBlackOutlines: state.starkBlackOutlines, showRotCues: state.showRotCues,
+      starkBlackOutlines: state.starkBlackOutlines, outlineLineWeight: state.outlineLineWeight, showRotCues: state.showRotCues,
       showSizeGuides: state.showSizeGuides, minifigStyle: state.minifigStyle, showMinifig1to1: state.showMinifig1to1, showStepBorders: state.showStepBorders,
       showPageTitle: state.showPageTitle, wordlessMode: state.wordlessMode, bomShowTextFields: state.bomShowTextFields,
       pageNumberFormat: state.pageNumberFormat,
@@ -16705,9 +16848,11 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
         });
         const snap = renderSnapshot(prev, step.parts, cam.az, cam.el, pdfStepDims.width, pdfStepDims.height, modelScale, {
           highlightNew: state.highlightNew, highlightColor: state.highlightColor,
+          highlightLineWeight: state.highlightLineWeight,
           fadePrev: state.fadePrev, fadeOpacity: state.fadeOpacity,
           highQualityStepRender: state.highQualityStepRender,
           starkBlackOutlines: state.starkBlackOutlines,
+          outlineLineWeight: state.starkBlackOutlines ? state.outlineLineWeight : 'light',
           darkBackground: isDarkHexColor(toHexColor(theme.bgColor || '#ffffff', '#ffffff')),
           showArrows: true, accent: theme.accent, ov, partOffsets: effectivePartOffsets,
           ...(mfPrep ? {
@@ -18651,6 +18796,19 @@ document.querySelectorAll('.fade-chip').forEach(b => {
   b.onclick = () => {
     const val = parseFloat(b.getAttribute('data-fade'));
     patchActiveTheme({ fadeOpacity: val, fadePrev: val < 0.99 });
+  };
+});
+document.querySelectorAll('.hl-weight-chip').forEach(b => {
+  b.onclick = () => {
+    overviewThumbCache.bumpEpoch();
+    patchActiveTheme({ highlightLineWeight: sanitizeLineWeight(b.getAttribute('data-hl-weight'), 'medium') });
+  };
+});
+document.querySelectorAll('.outline-weight-chip').forEach(b => {
+  b.onclick = () => {
+    pliThumbCache.clear();
+    overviewThumbCache.bumpEpoch();
+    patchActiveTheme({ outlineLineWeight: sanitizeLineWeight(b.getAttribute('data-outline-weight'), 'medium') });
   };
 });
 

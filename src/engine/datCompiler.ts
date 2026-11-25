@@ -44,6 +44,8 @@ export interface CompiledDatMesh {
   tris: Float32Array;
   norms: Float32Array;
   edges: Float32Array;
+  /** Optional LDraw type-5 / cylinder silhouette conditional lines (12 floats per segment: p1, p2, c1, c2). */
+  condEdges?: Float32Array;
   triCols: Int32Array | null;
   /** Textured decal batches from BrickLink Studio PE_TEX_INFO or LDraw !TEXMAP. */
   texBatches?: CompiledTexBatch[];
@@ -61,8 +63,10 @@ export interface TextureLookupResult {
 export interface CompileDatOptions {
   /** Maximum triangle float entries (9 floats per triangle). Default: 450,000 (50,000 triangles). */
   maxTriFloats?: number;
-  /** Maximum edge float entries (6 floats per edge). Default: 48,000 (8,000 edges). */
+  /** Maximum edge float entries (6 floats per edge). Default: 240,000 (40,000 edges). */
   maxEdgeFloats?: number;
+  /** Maximum conditional edge float entries (12 floats per segment). Default: 360,000 (30,000 segments). */
+  maxCondFloats?: number;
   /** Maximum subfile recursion depth. Default: 16. */
   maxDepth?: number;
   /** Triangle floats reserved per remaining sibling subfile so dense prints never starve later parts (e.g. arms/hands/toruses). */
@@ -74,10 +78,11 @@ export interface CompileDatOptions {
 }
 
 export const DEFAULT_MAX_TRI_FLOATS = 450000; // 50,000 triangles (9 floats each)
-export const DEFAULT_MAX_EDGE_FLOATS = 48000; // 8,000 edges (6 floats each)
+export const DEFAULT_MAX_EDGE_FLOATS = 240000; // 40,000 edges (6 floats each) — supports 48x48 baseplates without clipping stud tops
+export const DEFAULT_MAX_COND_FLOATS = 360000; // 30,000 conditional silhouette lines (12 floats each)
 export const DEFAULT_MAX_DEPTH = 16;
 export const DEFAULT_SUB_TRI_RESERVE = 18000; // 2,000 triangles reserved per heavy sibling
-export const DEFAULT_SUB_EDGE_RESERVE = 3000; // 500 edges reserved per sibling
+export const DEFAULT_SUB_EDGE_RESERVE = 6000; // 1,000 edges reserved per sibling
 
 export function normalizeDatRef(raw: string): string {
   return String(raw || '')
@@ -779,6 +784,7 @@ export function compileDatEntry(
 ): CompiledDatMesh | null {
   const maxTriFloats = options.maxTriFloats ?? DEFAULT_MAX_TRI_FLOATS;
   const maxEdgeFloats = options.maxEdgeFloats ?? DEFAULT_MAX_EDGE_FLOATS;
+  const maxCondFloats = options.maxCondFloats ?? DEFAULT_MAX_COND_FLOATS;
   const maxDepth = options.maxDepth ?? DEFAULT_MAX_DEPTH;
   const subTriReserve = options.subTriReserve ?? DEFAULT_SUB_TRI_RESERVE;
   const subEdgeReserve = options.subEdgeReserve ?? DEFAULT_SUB_EDGE_RESERVE;
@@ -787,6 +793,7 @@ export function compileDatEntry(
   const tris: number[] = [];
   const norms: number[] = [];
   const edges: number[] = [];
+  const condEdges: number[] = [];
   const triCols: number[] = [];
   let hasSubColor = false;
   let totalTriFloats = 0;
@@ -951,7 +958,14 @@ export function compileDatEntry(
     emitTri(la, lb, lc, colId);
   };
 
-  // Circular cylinder stud (flush seated, with top rim & inner wall for hollow stud2/stud2a).
+  const emitCondEdge = (la: Vec3, lb: Vec3, lc1: Vec3, lc2: Vec3) => {
+    if (condEdges.length >= maxCondFloats) return;
+    const a = ld2gl(la), b = ld2gl(lb), c1 = ld2gl(lc1), c2 = ld2gl(lc2);
+    condEdges.push(a[0], a[1], a[2], b[0], b[1], b[2], c1[0], c1[1], c1[2], c2[0], c2[1], c2[2]);
+  };
+
+  // Circular cylinder stud (flush seated, with complete top rim, base rim, vertical side
+  // silhouette conditional lines, and inner wall for hollow stud2/stud2a).
   // Defaults to 24 segments so studs render smoothly circular even zoomed in on mobile,
   // stepping down gracefully only on huge baseplates (>128 studs) to stay within mesh budgets.
   const emitFastStud = (
@@ -963,21 +977,29 @@ export function compileDatEntry(
       return [px + v[0], py + v[1], pz + v[2]];
     };
     const topC = tp(0, -4, 0);
+    const topPts: Vec3[] = [];
+    const basePts: Vec3[] = [];
+    const botPts: Vec3[] = [];
     for (let i = 0; i < segs; i++) {
-      const a0 = (i / segs) * Math.PI * 2, a1 = ((i + 1) / segs) * Math.PI * 2;
-      const c0 = Math.cos(a0), s0 = Math.sin(a0);
-      const c1 = Math.cos(a1), s1 = Math.sin(a1);
-      const t0 = tp(c0 * r, -4, s0 * r);
-      const t1 = tp(c1 * r, -4, s1 * r);
-      const b0 = tp(c0 * r, 0.4, s0 * r);
-      const b1 = tp(c1 * r, 0.4, s1 * r);
+      const a = (i / segs) * Math.PI * 2;
+      const ca = Math.cos(a), sa = Math.sin(a);
+      topPts.push(tp(ca * r, -4, sa * r));
+      basePts.push(tp(ca * r, 0, sa * r));
+      botPts.push(tp(ca * r, 0.4, sa * r));
+    }
+    for (let i = 0; i < segs; i++) {
+      const next = (i + 1) % segs;
+      const prev = (i + segs - 1) % segs;
+      const t0 = topPts[i], t1 = topPts[next];
+      const b0 = botPts[i], b1 = botPts[next];
       emitTri(b0, b1, t1, colId);
       emitTri(b0, t1, t0, colId);
       if (hollow) {
-        const it0 = tp(c0 * rIn, -4, s0 * rIn);
-        const it1 = tp(c1 * rIn, -4, s1 * rIn);
-        const ib0 = tp(c0 * rIn, 0, s0 * rIn);
-        const ib1 = tp(c1 * rIn, 0, s1 * rIn);
+        const a0 = (i / segs) * Math.PI * 2, a1 = ((i + 1) / segs) * Math.PI * 2;
+        const it0 = tp(Math.cos(a0) * rIn, -4, Math.sin(a0) * rIn);
+        const it1 = tp(Math.cos(a1) * rIn, -4, Math.sin(a1) * rIn);
+        const ib0 = tp(Math.cos(a0) * rIn, 0, Math.sin(a0) * rIn);
+        const ib1 = tp(Math.cos(a1) * rIn, 0, Math.sin(a1) * rIn);
         emitTri(it0, t0, t1, colId);
         emitTri(it0, t1, it1, colId);
         emitTri(ib0, it1, ib1, colId);
@@ -985,7 +1007,11 @@ export function compileDatEntry(
       } else {
         emitTri(topC, t0, t1, colId);
       }
-      if (edges.length < edgeLimit) emitEdge(t0, t1);
+      if (edges.length < edgeLimit) {
+        emitEdge(t0, t1);
+        emitEdge(basePts[i], basePts[next]);
+      }
+      emitCondEdge(t0, basePts[i], topPts[prev], topPts[next]);
     }
   };
 
@@ -1488,6 +1514,25 @@ export function compileDatEntry(
             emitEdge([px + a[0], py + a[1], pz + a[2]], [px + b[0], py + b[1], pz + b[2]]);
           }
         }
+      } else if (isLineKind(raw, '5')) {
+        pendingPePath = null;
+        pendingNextShear = false;
+        if (condEdges.length >= maxCondFloats) continue;
+        const t = raw.split(/\s+/);
+        if (t.length >= 14) {
+          const a = mat3Vec(pm, +t[2], +t[3], +t[4]);
+          const b = mat3Vec(pm, +t[5], +t[6], +t[7]);
+          const c1 = mat3Vec(pm, +t[8], +t[9], +t[10]);
+          const c2 = mat3Vec(pm, +t[11], +t[12], +t[13]);
+          if (Number.isFinite(a[0]) && Number.isFinite(b[0]) && Number.isFinite(c1[0]) && Number.isFinite(c2[0])) {
+            emitCondEdge(
+              [px + a[0], py + a[1], pz + a[2]],
+              [px + b[0], py + b[1], pz + b[2]],
+              [px + c1[0], py + c1[1], pz + c1[2]],
+              [px + c2[0], py + c2[1], pz + c2[2]],
+            );
+          }
+        }
       } else if (isLineKind(raw, '1')) {
         pendingPePath = null;
         pendingNextShear = false;
@@ -1640,6 +1685,7 @@ export function compileDatEntry(
     tris: trisArr,
     norms: normsArr,
     edges: edgesArr,
+    ...(condEdges.length > 0 ? { condEdges: new Float32Array(condEdges) } : {}),
     triCols: hasSubColor ? new Int32Array(triCols) : null,
     ...(texBatches.length > 0 ? { texBatches } : {}),
     ...(subBoxes ? { subBoxes } : {}),

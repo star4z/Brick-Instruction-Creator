@@ -260,11 +260,16 @@ describe('studioRuntime safety checks', () => {
     const popChunk = html.slice(popStart, popEnd);
     expect(popChunk).toContain('id="toggleHighQualitySteps"');
     expect(popChunk).toContain('id="toggleStarkBlackOutlines"');
+    expect(popChunk).toContain('Black Outlines');
+    expect(popChunk).toContain('data-hl-weight="extra-heavy"');
+    expect(popChunk).toContain('data-outline-weight="extra-heavy"');
 
     expect(runtime).toContain("getElementById('toggleHighQualitySteps')");
     expect(runtime).toContain("getElementById('toggleStarkBlackOutlines')");
     expect(runtime).toContain('function renderStepWithStudioPhoto(');
     expect(runtime).toContain('starkBlackOutlines');
+    expect(runtime).toContain('highlightLineWeight');
+    expect(runtime).toContain('outlineLineWeight');
   });
 
   it('keeps the Parts List live layout preview pinned above the scroll pane with valid paper preview dimensions', () => {

@@ -7,6 +7,7 @@
 //   5. Screen-Space Ambient Occlusion (SSAO) + depth-aware bilateral smooth composite
 
 import { computeCameraBasis } from './coverLayout';
+import { getLineWeightTapOffsets, type LineWeightId } from '../themes/customThemes';
 
 export interface StudioTexDraw {
   texKey: string;
@@ -26,6 +27,18 @@ export interface StudioMeshData {
   texDraws?: StudioTexDraw[];
   linePos: Float32Array;
   lineCol: Uint8Array;
+  hlLinePos?: Float32Array;
+  hlLineCol?: Uint8Array;
+  condPos?: Float32Array;
+  condOther?: Float32Array;
+  condC1?: Float32Array;
+  condC2?: Float32Array;
+  condCol?: Uint8Array;
+  hlCondPos?: Float32Array;
+  hlCondOther?: Float32Array;
+  hlCondC1?: Float32Array;
+  hlCondC2?: Float32Array;
+  hlCondCol?: Uint8Array;
   center: [number, number, number];
   radius: number;
   fullRadius: number;
@@ -70,8 +83,12 @@ export interface StudioRenderOptions {
   showFloor?: boolean;
   /** Line/outline opacity (defaults to 0.16 for subtle cover seams; pass 1.0 for crisp step outlines). */
   lineAlpha?: number;
-  /** When true, draws multi-tap screen-space thickened outlines (e.g. LEGO-style stark black outlines & studs). */
+  /** Legacy flag: when true and outlineLineWeight is omitted, uses 'medium' weight. */
   boldLines?: boolean;
+  /** Weight for regular / black outlines ('light' | 'medium' | 'heavy' | 'extra-heavy'). */
+  outlineLineWeight?: LineWeightId;
+  /** Weight for new-piece highlight outlines ('light' | 'medium' | 'heavy' | 'extra-heavy'). */
+  highlightLineWeight?: LineWeightId;
   getTextureImage?: (texKey: string) => TexImageSource | null;
 }
 
@@ -758,8 +775,41 @@ varying vec4 vCol;
 void main() {
   gl_Position = uMVP * vec4(aPos, 1.0);
   gl_Position.xy += uLineOffset * gl_Position.w;
-  gl_Position.z -= 0.00024 * gl_Position.w;
+  gl_Position.z -= 0.0014 * gl_Position.w;
   vCol = aCol;
+}
+`;
+
+const VS_COND_LINE = `
+attribute vec3 aPos;
+attribute vec3 aOther;
+attribute vec3 aCtrl1;
+attribute vec3 aCtrl2;
+attribute vec4 aCol;
+uniform mat4 uMVP;
+uniform vec2 uLineOffset;
+varying vec4 vCol;
+void main() {
+  vec4 p1 = uMVP * vec4(aPos, 1.0);
+  vec4 p2 = uMVP * vec4(aOther, 1.0);
+  vec4 c1 = uMVP * vec4(aCtrl1, 1.0);
+  vec4 c2 = uMVP * vec4(aCtrl2, 1.0);
+  vec2 s1 = p1.xy / max(0.0001, abs(p1.w));
+  vec2 s2 = p2.xy / max(0.0001, abs(p2.w));
+  vec2 sc1 = c1.xy / max(0.0001, abs(c1.w));
+  vec2 sc2 = c2.xy / max(0.0001, abs(c2.w));
+  vec2 d = s2 - s1;
+  float cr1 = d.x * (sc1.y - s1.y) - d.y * (sc1.x - s1.x);
+  float cr2 = d.x * (sc2.y - s1.y) - d.y * (sc2.x - s1.x);
+  if (cr1 * cr2 > 0.0) {
+    p1.xy += uLineOffset * p1.w;
+    p1.z -= 0.0014 * p1.w;
+    gl_Position = p1;
+    vCol = aCol;
+  } else {
+    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+    vCol = vec4(0.0);
+  }
 }
 `;
 
@@ -932,6 +982,7 @@ export class StudioPhotoRenderer {
   private pbrProg: WebGLProgram | null = null;
   private floorProg: WebGLProgram | null = null;
   private seamProg: WebGLProgram | null = null;
+  private condProg: WebGLProgram | null = null;
   private ssaoProg: WebGLProgram | null = null;
 
   private bTriPos: WebGLBuffer | null = null;
@@ -943,6 +994,18 @@ export class StudioPhotoRenderer {
   private bDecalCol: WebGLBuffer | null = null;
   private bLinePos: WebGLBuffer | null = null;
   private bLineCol: WebGLBuffer | null = null;
+  private bHlLinePos: WebGLBuffer | null = null;
+  private bHlLineCol: WebGLBuffer | null = null;
+  private bCondPos: WebGLBuffer | null = null;
+  private bCondOther: WebGLBuffer | null = null;
+  private bCondC1: WebGLBuffer | null = null;
+  private bCondC2: WebGLBuffer | null = null;
+  private bCondCol: WebGLBuffer | null = null;
+  private bHlCondPos: WebGLBuffer | null = null;
+  private bHlCondOther: WebGLBuffer | null = null;
+  private bHlCondC1: WebGLBuffer | null = null;
+  private bHlCondC2: WebGLBuffer | null = null;
+  private bHlCondCol: WebGLBuffer | null = null;
   private bFloorPos: WebGLBuffer | null = null;
   private bQuadPos: WebGLBuffer | null = null;
 
@@ -992,9 +1055,10 @@ export class StudioPhotoRenderer {
     this.pbrProg = linkProgram(gl, VS_PBR, FS_PBR);
     this.floorProg = linkProgram(gl, VS_FLOOR, FS_FLOOR);
     this.seamProg = linkProgram(gl, VS_SEAM, FS_SEAM);
+    this.condProg = linkProgram(gl, VS_COND_LINE, FS_SEAM);
     this.ssaoProg = linkProgram(gl, VS_QUAD, FS_SSAO_COMPOSITE);
 
-    if (!this.depthProg || !this.viewDepthProg || !this.pbrProg || !this.floorProg || !this.seamProg || !this.ssaoProg) {
+    if (!this.depthProg || !this.viewDepthProg || !this.pbrProg || !this.floorProg || !this.seamProg || !this.condProg || !this.ssaoProg) {
       return;
     }
 
@@ -1007,6 +1071,18 @@ export class StudioPhotoRenderer {
     this.bDecalCol = gl.createBuffer();
     this.bLinePos = gl.createBuffer();
     this.bLineCol = gl.createBuffer();
+    this.bHlLinePos = gl.createBuffer();
+    this.bHlLineCol = gl.createBuffer();
+    this.bCondPos = gl.createBuffer();
+    this.bCondOther = gl.createBuffer();
+    this.bCondC1 = gl.createBuffer();
+    this.bCondC2 = gl.createBuffer();
+    this.bCondCol = gl.createBuffer();
+    this.bHlCondPos = gl.createBuffer();
+    this.bHlCondOther = gl.createBuffer();
+    this.bHlCondC1 = gl.createBuffer();
+    this.bHlCondC2 = gl.createBuffer();
+    this.bHlCondCol = gl.createBuffer();
     this.bFloorPos = gl.createBuffer();
     this.bQuadPos = gl.createBuffer();
 
@@ -1099,6 +1175,36 @@ export class StudioPhotoRenderer {
     gl.bufferData(gl.ARRAY_BUFFER, mesh.linePos, gl.STATIC_DRAW);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.bLineCol);
     gl.bufferData(gl.ARRAY_BUFFER, mesh.lineCol, gl.STATIC_DRAW);
+    if (mesh.hlLinePos && mesh.hlLinePos.length > 0 && mesh.hlLineCol) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.bHlLinePos);
+      gl.bufferData(gl.ARRAY_BUFFER, mesh.hlLinePos, gl.STATIC_DRAW);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.bHlLineCol);
+      gl.bufferData(gl.ARRAY_BUFFER, mesh.hlLineCol, gl.STATIC_DRAW);
+    }
+    if (mesh.condPos && mesh.condPos.length > 0 && mesh.condOther && mesh.condC1 && mesh.condC2 && mesh.condCol) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.bCondPos);
+      gl.bufferData(gl.ARRAY_BUFFER, mesh.condPos, gl.STATIC_DRAW);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.bCondOther);
+      gl.bufferData(gl.ARRAY_BUFFER, mesh.condOther, gl.STATIC_DRAW);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.bCondC1);
+      gl.bufferData(gl.ARRAY_BUFFER, mesh.condC1, gl.STATIC_DRAW);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.bCondC2);
+      gl.bufferData(gl.ARRAY_BUFFER, mesh.condC2, gl.STATIC_DRAW);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.bCondCol);
+      gl.bufferData(gl.ARRAY_BUFFER, mesh.condCol, gl.STATIC_DRAW);
+    }
+    if (mesh.hlCondPos && mesh.hlCondPos.length > 0 && mesh.hlCondOther && mesh.hlCondC1 && mesh.hlCondC2 && mesh.hlCondCol) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.bHlCondPos);
+      gl.bufferData(gl.ARRAY_BUFFER, mesh.hlCondPos, gl.STATIC_DRAW);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.bHlCondOther);
+      gl.bufferData(gl.ARRAY_BUFFER, mesh.hlCondOther, gl.STATIC_DRAW);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.bHlCondC1);
+      gl.bufferData(gl.ARRAY_BUFFER, mesh.hlCondC1, gl.STATIC_DRAW);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.bHlCondC2);
+      gl.bufferData(gl.ARRAY_BUFFER, mesh.hlCondC2, gl.STATIC_DRAW);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.bHlCondCol);
+      gl.bufferData(gl.ARRAY_BUFFER, mesh.hlCondCol, gl.STATIC_DRAW);
+    }
     this.uploadedMesh = mesh;
   }
 
@@ -1299,7 +1405,7 @@ export class StudioPhotoRenderer {
       const prog = this.pbrProg!;
       gl.useProgram(prog);
       gl.enable(gl.POLYGON_OFFSET_FILL);
-      gl.polygonOffset(1.0, 1.0);
+      gl.polygonOffset(2.0, 2.5);
       gl.uniformMatrix4fv(gl.getUniformLocation(prog, 'uMVP'), false, cam.mvp);
       gl.uniformMatrix4fv(gl.getUniformLocation(prog, 'uKeyMVP'), false, keyMvp);
       gl.uniformMatrix4fv(gl.getUniformLocation(prog, 'uFillMVP'), false, fillMvp);
@@ -1402,35 +1508,89 @@ export class StudioPhotoRenderer {
       gl.disable(gl.POLYGON_OFFSET_FILL);
     }
 
-    // 3c. Seam & outline lines (0.16 subtle seams on cover, or 1.0 crisp / multi-tap bold outlines on steps)
+    // 3c. Outlines & conditional silhouette lines (separate configurable weights for black outlines vs new-piece highlights)
     const lineAlpha = typeof options.lineAlpha === 'number' ? options.lineAlpha : 0.16;
-    if (mesh.linePos.length > 0 && lineAlpha > 0.01) {
-      const prog = this.seamProg!;
-      gl.useProgram(prog);
-      gl.uniformMatrix4fv(gl.getUniformLocation(prog, 'uMVP'), false, cam.mvp);
-      gl.uniform1f(gl.getUniformLocation(prog, 'uAlpha'), lineAlpha);
-      const ofsLoc = gl.getUniformLocation(prog, 'uLineOffset');
-      const pLoc = gl.getAttribLocation(prog, 'aPos');
-      const cLoc = gl.getAttribLocation(prog, 'aCol');
-      gl.bindBuffer(gl.ARRAY_BUFFER, this.bLinePos);
-      gl.enableVertexAttribArray(pLoc);
-      gl.vertexAttribPointer(pLoc, 3, gl.FLOAT, false, 0, 0);
-      gl.bindBuffer(gl.ARRAY_BUFFER, this.bLineCol);
-      gl.enableVertexAttribArray(cLoc);
-      gl.vertexAttribPointer(cLoc, 4, gl.UNSIGNED_BYTE, true, 0, 0);
-      const vertCount = mesh.linePos.length / 3;
-      if (options.boldLines) {
-        const stepPx = Math.max(0.65, Math.min(1.4, w / 1600));
-        const ox = (2 * stepPx) / w;
-        const oy = (2 * stepPx) / h;
-        const taps: Array<[number, number]> = [[0, 0], [ox, 0], [0, oy], [-ox, 0]];
+    if (lineAlpha > 0.01) {
+      const outlineWeight: LineWeightId = options.outlineLineWeight ?? (options.boldLines ? 'medium' : 'light');
+      const hlWeight: LineWeightId = options.highlightLineWeight ?? 'medium';
+      const outlineTaps = getLineWeightTapOffsets(outlineWeight, w, h);
+      const hlTaps = getLineWeightTapOffsets(hlWeight, w, h);
+
+      const drawHardLines = (posBuf: WebGLBuffer | null, colBuf: WebGLBuffer | null, count: number, taps: Array<[number, number]>, alpha: number) => {
+        if (!posBuf || !colBuf || count <= 0) return;
+        const prog = this.seamProg!;
+        gl.useProgram(prog);
+        gl.uniformMatrix4fv(gl.getUniformLocation(prog, 'uMVP'), false, cam.mvp);
+        gl.uniform1f(gl.getUniformLocation(prog, 'uAlpha'), alpha);
+        const ofsLoc = gl.getUniformLocation(prog, 'uLineOffset');
+        const pLoc = gl.getAttribLocation(prog, 'aPos');
+        const cLoc = gl.getAttribLocation(prog, 'aCol');
+        gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
+        gl.enableVertexAttribArray(pLoc);
+        gl.vertexAttribPointer(pLoc, 3, gl.FLOAT, false, 0, 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, colBuf);
+        gl.enableVertexAttribArray(cLoc);
+        gl.vertexAttribPointer(cLoc, 4, gl.UNSIGNED_BYTE, true, 0, 0);
         for (const [tx, ty] of taps) {
           gl.uniform2f(ofsLoc, tx, ty);
-          gl.drawArrays(gl.LINES, 0, vertCount);
+          gl.drawArrays(gl.LINES, 0, count);
         }
-      } else {
-        gl.uniform2f(ofsLoc, 0, 0);
-        gl.drawArrays(gl.LINES, 0, vertCount);
+      };
+
+      const drawCondLines = (
+        posBuf: WebGLBuffer | null,
+        otherBuf: WebGLBuffer | null,
+        c1Buf: WebGLBuffer | null,
+        c2Buf: WebGLBuffer | null,
+        colBuf: WebGLBuffer | null,
+        count: number,
+        taps: Array<[number, number]>,
+        alpha: number,
+      ) => {
+        if (!posBuf || !otherBuf || !c1Buf || !c2Buf || !colBuf || count <= 0) return;
+        const prog = this.condProg!;
+        gl.useProgram(prog);
+        gl.uniformMatrix4fv(gl.getUniformLocation(prog, 'uMVP'), false, cam.mvp);
+        gl.uniform1f(gl.getUniformLocation(prog, 'uAlpha'), alpha);
+        const ofsLoc = gl.getUniformLocation(prog, 'uLineOffset');
+        const pLoc = gl.getAttribLocation(prog, 'aPos');
+        const oLoc = gl.getAttribLocation(prog, 'aOther');
+        const c1Loc = gl.getAttribLocation(prog, 'aCtrl1');
+        const c2Loc = gl.getAttribLocation(prog, 'aCtrl2');
+        const colLoc = gl.getAttribLocation(prog, 'aCol');
+        gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
+        gl.enableVertexAttribArray(pLoc);
+        gl.vertexAttribPointer(pLoc, 3, gl.FLOAT, false, 0, 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, otherBuf);
+        gl.enableVertexAttribArray(oLoc);
+        gl.vertexAttribPointer(oLoc, 3, gl.FLOAT, false, 0, 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, c1Buf);
+        gl.enableVertexAttribArray(c1Loc);
+        gl.vertexAttribPointer(c1Loc, 3, gl.FLOAT, false, 0, 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, c2Buf);
+        gl.enableVertexAttribArray(c2Loc);
+        gl.vertexAttribPointer(c2Loc, 3, gl.FLOAT, false, 0, 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, colBuf);
+        gl.enableVertexAttribArray(colLoc);
+        gl.vertexAttribPointer(colLoc, 4, gl.UNSIGNED_BYTE, true, 0, 0);
+        for (const [tx, ty] of taps) {
+          gl.uniform2f(ofsLoc, tx, ty);
+          gl.drawArrays(gl.LINES, 0, count);
+        }
+        gl.disableVertexAttribArray(oLoc);
+        gl.disableVertexAttribArray(c1Loc);
+        gl.disableVertexAttribArray(c2Loc);
+      };
+
+      drawHardLines(this.bLinePos, this.bLineCol, mesh.linePos.length / 3, outlineTaps, lineAlpha);
+      if (mesh.condPos && mesh.condPos.length > 0) {
+        drawCondLines(this.bCondPos, this.bCondOther, this.bCondC1, this.bCondC2, this.bCondCol, mesh.condPos.length / 3, outlineTaps, lineAlpha);
+      }
+      if (mesh.hlLinePos && mesh.hlLinePos.length > 0) {
+        drawHardLines(this.bHlLinePos, this.bHlLineCol, mesh.hlLinePos.length / 3, hlTaps, 1.0);
+      }
+      if (mesh.hlCondPos && mesh.hlCondPos.length > 0) {
+        drawCondLines(this.bHlCondPos, this.bHlCondOther, this.bHlCondC1, this.bHlCondC2, this.bHlCondCol, mesh.hlCondPos.length / 3, hlTaps, 1.0);
       }
     }
 
