@@ -26,7 +26,7 @@ The Style dialog (`#stylePopover`) is now the only place to choose and edit them
 | Option | Default |
 | --- | --- |
 | `highlightNew` / `highlightColor` (Outline New Parts) | `true` / `#ff2d55` |
-| `fadePrev` / `fadeOpacity` (Fade Earlier Parts, Earlier Piece Visibility) | `true` / `0.82` |
+| `fadeOpacity` / `fadePrev` (Earlier Piece Visibility: Soft `0.45`, Medium `0.65`, Clear `0.82`, Full `1.0` = no fade; includes swatch chips and live stacked-brick preview) | `0.82` / `true` (`fadePrev` derived from `fadeOpacity < 0.99`) |
 | `showRotCues` (Rotation Badges) | `true` |
 | `showSizeGuides` (1:1 Axle & Beam Guides) | `true` |
 | `minifigStyle` (Minifigure Steps) | `exploded` |

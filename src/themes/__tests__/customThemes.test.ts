@@ -189,6 +189,7 @@ describe('theme style options, recents & naming', () => {
     expect(t.showStepBorders).toBe(false);
     expect(t.minifigStyle).toBe('sequential');
     expect(t.fadeOpacity).toBe(1);
+    expect(t.fadePrev).toBe(false);
     expect(t.highlightColor).toBe('#ff2d55');
     expect(t.highQualityStepRender).toBe(true);
     expect(t.starkBlackOutlines).toBe(true);
@@ -199,6 +200,14 @@ describe('theme style options, recents & naming', () => {
     expect(createThemeDraftFromBase(t).showStepBorders).toBe(false);
     expect(createThemeDraftFromBase(t).highQualityStepRender).toBe(true);
     expect(createThemeDraftFromBase(t).starkBlackOutlines).toBe(true);
+
+    // Legacy themes saved with fadePrev=false and a lower fadeOpacity migrate to Full (1.0)
+    const legacyNoFade = m.normalizeThemeStyleOptions({ fadePrev: false, fadeOpacity: 0.65 });
+    expect(legacyNoFade.fadeOpacity).toBe(1);
+    expect(legacyNoFade.fadePrev).toBe(false);
+    const softFade = m.normalizeThemeStyleOptions({ fadeOpacity: 0.45 });
+    expect(softFade.fadeOpacity).toBe(0.45);
+    expect(softFade.fadePrev).toBe(true);
   });
 
   it('orders themes current-first, then by last use, then default order', async () => {

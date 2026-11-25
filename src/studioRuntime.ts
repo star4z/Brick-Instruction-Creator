@@ -11454,13 +11454,48 @@ function syncMenuControls() {
 
   syncBomSetupUI();
 
+  const effectiveFade = state.fadePrev ? state.fadeOpacity : 1.0;
   document.querySelectorAll('.fade-chip').forEach(b => {
-    const act = Math.abs(parseFloat(b.getAttribute('data-fade')) - state.fadeOpacity) < 0.05;
-    b.className = `fade-chip py-1 rounded-md border font-semibold transition ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
+    const act = Math.abs(parseFloat(b.getAttribute('data-fade')) - effectiveFade) < 0.05;
+    b.className = `fade-chip flex flex-col items-center gap-1 py-1.5 px-1 rounded-md border font-semibold text-xs transition cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
   });
+  syncFadeVisibilityPreview();
 
   syncStylePanel();
   syncKeyboardShortcutsMenuSummary();
+}
+
+function syncFadeVisibilityPreview(opts = null) {
+  const fadePrev = opts ? Boolean(opts.fadePrev) : Boolean(state.fadePrev);
+  const fadeOpacity = opts ? Number(opts.fadeOpacity) : Number(state.fadeOpacity);
+  const highlightNew = opts ? Boolean(opts.highlightNew) : Boolean(state.highlightNew);
+  const highlightColor = (opts && opts.highlightColor) || state.highlightColor || '#ff2d55';
+  const effectiveOpacity = fadePrev ? fadeOpacity : 1.0;
+  const fadeMix = effectiveOpacity < 0.99
+    ? Math.max(0, Math.min(0.76, (1.0 - effectiveOpacity) * 0.95 + 0.16))
+    : 0;
+  const earlierFill = hexToRgb255('#c91a09', fadeMix);
+  const earlierStroke = hexToRgb255('#6b1108', fadeMix * 0.85);
+  const earlierEl = document.getElementById('fadePreviewEarlier');
+  if (earlierEl) {
+    earlierEl.setAttribute('fill', `rgb(${earlierFill[0]},${earlierFill[1]},${earlierFill[2]})`);
+    earlierEl.setAttribute('stroke', `rgb(${earlierStroke[0]},${earlierStroke[1]},${earlierStroke[2]})`);
+  }
+  const newEl = document.getElementById('fadePreviewNew');
+  if (newEl) {
+    newEl.setAttribute('stroke', highlightNew ? highlightColor : '#6b1108');
+    newEl.setAttribute('stroke-width', highlightNew ? '1.35' : '1');
+  }
+  const statusEl = document.getElementById('fadePreviewStatus');
+  if (statusEl) {
+    statusEl.textContent = effectiveOpacity >= 0.99
+      ? 'No fade'
+      : effectiveOpacity <= 0.55
+        ? 'Heavy fade'
+        : effectiveOpacity <= 0.74
+          ? 'Medium fade'
+          : 'Subtle fade';
+  }
 }
 
 let overviewThumbObserver = null;
@@ -15221,7 +15256,6 @@ async function restoreLastSessionOnStart() {
     if (backChk) backChk.checked = state.showBackCover;
     document.getElementById('toggleHighlight').checked = state.highlightNew;
     document.getElementById('highlightColor').value = state.highlightColor;
-    document.getElementById('toggleFade').checked = state.fadePrev;
     const hqEl = document.getElementById('toggleHighQualitySteps');
     if (hqEl) hqEl.checked = Boolean(state.highQualityStepRender);
     const sbEl = document.getElementById('toggleStarkBlackOutlines');
@@ -17058,7 +17092,7 @@ function syncStylePanel() {
   const opts = getThemeStyleOptions(t);
   const setChk = (id, val) => { const el = document.getElementById(id); if (el) el.checked = Boolean(val); };
   setChk('toggleHighlight', opts.highlightNew);
-  setChk('toggleFade', opts.fadePrev);
+  syncFadeVisibilityPreview(opts);
   setChk('toggleHighQualitySteps', opts.highQualityStepRender);
   setChk('toggleStarkBlackOutlines', opts.starkBlackOutlines);
   setChk('toggleRotCues', opts.showRotCues);
@@ -18510,7 +18544,12 @@ document.querySelectorAll('.pgnum-btn').forEach(b => {
     renderAll();
   };
 });
-document.querySelectorAll('.fade-chip').forEach(b => { b.onclick = () => patchActiveTheme({ fadeOpacity: parseFloat(b.getAttribute('data-fade')) }); });
+document.querySelectorAll('.fade-chip').forEach(b => {
+  b.onclick = () => {
+    const val = parseFloat(b.getAttribute('data-fade'));
+    patchActiveTheme({ fadeOpacity: val, fadePrev: val < 0.99 });
+  };
+});
 
 // Parts List Setup controls (saved with active theme; built-ins auto-fork on edit)
 document.querySelectorAll('.bom-format-btn').forEach(b => {
@@ -18677,7 +18716,6 @@ for (const [btnId, kind] of [
 // Step display options are part of the active theme (built-ins fork on first edit)
 document.getElementById('toggleHighlight').onchange = (e) => patchActiveTheme({ highlightNew: e.target.checked });
 document.getElementById('highlightColor').oninput = (e) => patchActiveTheme({ highlightColor: e.target.value });
-document.getElementById('toggleFade').onchange = (e) => patchActiveTheme({ fadePrev: e.target.checked });
 const hqStepsToggleEl = document.getElementById('toggleHighQualitySteps');
 if (hqStepsToggleEl) hqStepsToggleEl.onchange = (e) => {
   overviewThumbCache.bumpEpoch();

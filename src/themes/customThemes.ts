@@ -214,16 +214,18 @@ export function normalizeThemeStyleOptions(
     bomConfig: normalizeBomConfig(fallback.bomConfig, DEFAULT_BOM_CONFIG),
   };
   const bool = (k: keyof ThemeStyleOptions) => (typeof r[k] === 'boolean' ? (r[k] as boolean) : (fb[k] as boolean));
-  const fade = typeof r.fadeOpacity === 'number' && Number.isFinite(r.fadeOpacity)
+  const rawFade = typeof r.fadeOpacity === 'number' && Number.isFinite(r.fadeOpacity)
     ? Math.max(0.2, Math.min(1, r.fadeOpacity))
     : fb.fadeOpacity;
+  const fade = r.fadePrev === false ? 1 : rawFade;
+  const fadePrev = fade < 0.99;
   const mf = r.minifigStyle === 'exploded' || r.minifigStyle === 'sequential' || r.minifigStyle === 'classic'
     ? r.minifigStyle
     : fb.minifigStyle;
   return {
     highlightNew: bool('highlightNew'),
     highlightColor: sanitizeHexColor(r.highlightColor, sanitizeHexColor(fb.highlightColor, '#ff2d55')),
-    fadePrev: bool('fadePrev'),
+    fadePrev,
     fadeOpacity: fade,
     highQualityStepRender: bool('highQualityStepRender'),
     starkBlackOutlines: bool('starkBlackOutlines'),
