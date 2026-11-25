@@ -2059,7 +2059,7 @@
     <!-- BRICKS LIBRARY SCREEN MODAL (Browse/Search + Fetch/Manage)       -->
     <!-- ================================================================ -->
     <div id="bricksLibraryModal" role="dialog" aria-label="Bricks Library" class="no-print hidden fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4">
-      <div class="w-full max-w-4xl h-[92vh] sm:h-[86vh] rounded-t-xl sm:rounded-xl studio-sheet flex flex-col overflow-hidden text-xs">
+      <div class="relative w-full max-w-4xl h-[92vh] sm:h-[86vh] rounded-t-xl sm:rounded-xl studio-sheet flex flex-col overflow-hidden text-xs">
         <!-- Modal Header -->
         <div class="px-5 py-4 border-b border-[var(--border)] bg-[var(--chrome)] flex items-center justify-between gap-3 shrink-0">
           <div class="min-w-0">
@@ -2075,7 +2075,7 @@
         </div>
 
         <!-- Top Segmented Tabs -->
-        <div class="px-5 py-3 border-b border-[var(--border)] flex items-center justify-between gap-2.5 flex-wrap shrink-0 bg-[var(--surface-sunken)]">
+        <div id="libTopTabsBar" class="px-5 py-3 border-b border-[var(--border)] flex items-center justify-between gap-2.5 flex-wrap shrink-0 bg-[var(--surface-sunken)]">
           <div class="inline-flex p-1 rounded-lg border border-[var(--border)] bg-[var(--card)] gap-1">
             <button data-lib-tab="browse" type="button" class="lib-tab-btn px-3.5 py-1.5 rounded-md font-semibold flex items-center gap-1.5 transition-colors cursor-pointer">
               <span>Browse &amp; Search</span>
@@ -2106,7 +2106,7 @@
         <!-- TAB 1: BROWSE & SEARCH PARTS LIBRARY -->
         <div id="libTabBrowse" class="flex-1 min-h-0 flex flex-col overflow-hidden">
           <!-- Search & Filter Controls -->
-          <div class="px-5 py-3.5 border-b border-[var(--border)] space-y-3 shrink-0">
+          <div id="libBrowseFiltersBar" class="px-5 py-3.5 border-b border-[var(--border)] space-y-3 shrink-0">
             <div class="flex items-center gap-2.5 flex-wrap">
               <div class="relative flex-1 min-w-[200px]">
                 <svg class="w-4 h-4 text-[var(--muted-foreground)] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
@@ -2158,21 +2158,21 @@
               </div>
             </div>
 
-            <!-- Selected Part 3D Preview Inspector -->
-            <aside id="libPreviewPane" class="hidden md:flex absolute inset-0 z-10 md:static md:z-auto md:w-[300px] shrink-0 md:border-l border-[var(--border)] bg-[var(--chrome)] flex-col overflow-y-auto overscroll-contain p-5 space-y-4">
+            <!-- Selected Part 3D Preview Inspector (dedicated page on mobile, side pane on desktop) -->
+            <aside id="libPreviewPane" class="hidden md:flex flex-1 min-h-0 md:flex-none md:w-[300px] shrink-0 md:border-l border-[var(--border)] bg-[var(--chrome)] flex-col overflow-y-auto overscroll-contain p-5 space-y-4">
               <div class="flex items-center justify-between gap-2">
-                <span class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Part Preview</span>
-                <button id="btnCloseLibPreview" type="button" class="md:hidden px-3 py-1.5 rounded-md border border-[var(--border)] bg-[var(--card)] text-xs font-semibold inline-flex items-center gap-1 cursor-pointer">
+                <button id="btnCloseLibPreview" type="button" class="md:hidden px-3 py-1.5 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] text-xs font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer">
                   <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
                   <span>Back to Parts</span>
                 </button>
+                <span class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Part Preview</span>
               </div>
               <div id="libPreviewEmpty" class="py-12 text-center space-y-3 text-[var(--muted-foreground)]">
                 <svg class="w-7 h-7 mx-auto opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3 3 7.5 12 12l9-4.5L12 3Z"/><path d="m3 12 9 4.5 9-4.5"/><path d="m3 16.5 9 4.5 9-4.5"/></svg>
                 <p class="text-xs leading-relaxed">Select any part from the list to inspect its 3D shape, drag to orbit, and view library details.</p>
               </div>
               <div id="libPreviewDetail" class="hidden space-y-3.5">
-                <div id="libPreviewStage" title="Drag to orbit · Double-click to reset view" class="aspect-square w-full max-w-[240px] mx-auto rounded-lg border border-[var(--border)] bg-[radial-gradient(circle_at_50%_40%,var(--card)_0%,var(--surface-sunken)_100%)] flex items-center justify-center p-3 overflow-hidden relative cursor-grab active:cursor-grabbing select-none touch-none">
+                <div id="libPreviewStage" title="Drag to orbit · Double-click to reset view" class="aspect-square w-full max-w-[280px] md:max-w-[240px] mx-auto rounded-lg border border-[var(--border)] bg-[radial-gradient(circle_at_50%_40%,var(--card)_0%,var(--surface-sunken)_100%)] flex items-center justify-center p-3 overflow-hidden relative cursor-grab active:cursor-grabbing select-none touch-none">
                   <canvas id="libPreviewCanvas" width="480" height="480" aria-label="Interactive 3D part preview (drag to orbit)" class="w-full h-full object-contain drop-shadow-[0_6px_12px_rgba(15,23,42,0.14)] pointer-events-none"></canvas>
                   <div id="libPreviewLoading" class="hidden absolute inset-0 flex flex-col items-center justify-center gap-1.5 text-xs text-[var(--muted-foreground)] pointer-events-none">
                     <svg viewBox="0 0 24 24" class="w-7 h-7 opacity-60 animate-pulse" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 8.5a4 4 0 0 1-.5 7.97"/><path d="M12 12v8"/><path d="m9 17 3 3 3-3"/></svg>

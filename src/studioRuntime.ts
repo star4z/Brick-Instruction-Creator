@@ -14069,6 +14069,8 @@ const libUiState = {
   previewEl: 24,
   selectedId: null,
   visibleLimit: 48,
+  mobilePreviewPageActive: false,
+  browseScrollTop: 0,
 };
 
 const LIB_PAGE_BATCH_SIZE = 48;
@@ -15222,10 +15224,15 @@ function formatColorReadoutHtml(colorMode) {
   return `<span class="inline-flex items-center gap-1.5 min-w-0"><span class="w-3 h-3 rounded-full border border-black/25 dark:border-white/25 shrink-0" style="${getSwatchStyleAttr(col)}"></span><span class="font-semibold text-[var(--foreground)] truncate">${escHtml(col?.name || `Color ${colId}`)}</span></span><span class="font-mono shrink-0">#${colId}${escHtml(countNote)}</span>`;
 }
 
-function positionLibColorPopover() {
+let libColorPickerAnchorEl = null;
+
+function positionLibColorPopover(anchorEl = null) {
   if (!libUiState.colorPickerOpen) return;
   const popover = document.getElementById('libColorPopover');
-  const btn = document.getElementById('libColorPickerBtn');
+  const gridBtn = document.getElementById('libColorPickerBtn');
+  const inspectorBtn = document.getElementById('libInspectorColorBtn');
+  const candidates = [anchorEl, libColorPickerAnchorEl, gridBtn, inspectorBtn];
+  const btn = candidates.find((el) => el && el.isConnected && el.offsetParent !== null) || gridBtn || inspectorBtn;
   if (!popover || !btn) return;
   const rect = btn.getBoundingClientRect();
   const vv = window.visualViewport;
@@ -15252,15 +15259,16 @@ function positionLibColorPopover() {
   }
 }
 
-function setLibColorPickerOpen(open) {
+function setLibColorPickerOpen(open, anchorEl = null) {
   libUiState.colorPickerOpen = Boolean(open);
+  libColorPickerAnchorEl = libUiState.colorPickerOpen ? anchorEl : null;
   const popover = document.getElementById('libColorPopover');
   const btn = document.getElementById('libColorPickerBtn');
   if (popover) popover.classList.toggle('hidden', !libUiState.colorPickerOpen);
   if (btn) btn.setAttribute('aria-expanded', libUiState.colorPickerOpen ? 'true' : 'false');
   if (libUiState.colorPickerOpen) {
     renderLibColorSwatches();
-    positionLibColorPopover();
+    positionLibColorPopover(anchorEl);
     const searchEl = document.getElementById('libColorSearchInput');
     if (searchEl) {
       searchEl.value = libUiState.colorQuery;
@@ -15374,6 +15382,59 @@ function renderLibColorSwatches() {
   });
 }
 
+function syncLibMobilePreviewPageState(isPreviewActive) {
+  const active = Boolean(isPreviewActive) && libUiState.tab === 'browse';
+  const tabsBar = document.getElementById('libTopTabsBar');
+  const filtersBar = document.getElementById('libBrowseFiltersBar');
+  const gridWrap = document.getElementById('libBrowseGridWrap');
+  const previewPane = document.getElementById('libPreviewPane');
+
+  if (active && !libUiState.mobilePreviewPageActive && gridWrap) {
+    libUiState.browseScrollTop = gridWrap.scrollTop;
+  }
+  const returningToList = !active && libUiState.mobilePreviewPageActive;
+  libUiState.mobilePreviewPageActive = active;
+
+  if (tabsBar) {
+    tabsBar.classList.toggle('hidden', active);
+    tabsBar.classList.toggle('flex', !active);
+    tabsBar.classList.toggle('md:flex', active);
+  }
+  if (filtersBar) {
+    filtersBar.classList.toggle('hidden', active);
+    filtersBar.classList.toggle('md:block', active);
+  }
+  if (gridWrap) {
+    gridWrap.classList.toggle('hidden', active);
+    gridWrap.classList.toggle('md:block', active);
+  }
+  if (previewPane) {
+    previewPane.classList.toggle('hidden', !active);
+    previewPane.classList.toggle('flex', active);
+    previewPane.classList.add('md:flex');
+    if (active) previewPane.scrollTop = 0;
+  }
+  if (returningToList && gridWrap && libUiState.browseScrollTop > 0) {
+    const savedScroll = libUiState.browseScrollTop;
+    requestAnimationFrame(() => {
+      gridWrap.scrollTop = savedScroll;
+    });
+  }
+}
+
+function closeLibPartPreview() {
+  libUiState.selectedId = null;
+  setLibColorPickerOpen(false);
+  const gridEl = document.getElementById('libBrowseGrid');
+  if (gridEl) {
+    gridEl.querySelectorAll('button[data-lib-part]').forEach((card) => {
+      card.classList.remove('border-[var(--primary)]', 'ring-2', 'ring-[var(--primary-border)]', 'bg-[var(--primary-soft)]');
+      card.classList.add('border-[var(--border)]', 'bg-[var(--background)]');
+    });
+  }
+  renderLibPreviewInspector();
+}
+
 function renderLibPreviewInspector() {
   const pane = document.getElementById('libPreviewPane');
   const emptyEl = document.getElementById('libPreviewEmpty');
@@ -15391,14 +15452,11 @@ function renderLibPreviewInspector() {
   if (!item) {
     emptyEl.classList.remove('hidden');
     detailEl.classList.add('hidden');
-    // On mobile, keep inspector collapsed when nothing is selected
-    pane.classList.add('hidden');
-    pane.classList.add('md:flex');
+    syncLibMobilePreviewPageState(false);
     return;
   }
 
-  pane.classList.remove('hidden');
-  pane.classList.add('flex');
+  syncLibMobilePreviewPageState(true);
   emptyEl.classList.add('hidden');
   detailEl.classList.remove('hidden');
 
@@ -15494,7 +15552,7 @@ function renderLibPreviewInspector() {
   if (inspColorBtn) {
     inspColorBtn.onclick = (e) => {
       e.stopPropagation();
-      setLibColorPickerOpen(true);
+      setLibColorPickerOpen(true, inspColorBtn);
     };
   }
 
@@ -15998,6 +16056,7 @@ function renderBricksLibraryModal(resetLimit = false) {
     renderLibBrowseTab(resetLimit);
     renderLibPreviewInspector();
   } else {
+    syncLibMobilePreviewPageState(false);
     stopLibThumbQueue();
     renderLibManageTab();
   }
@@ -19484,6 +19543,10 @@ function handleGlobalEscapeKey() {
     setLibColorPickerOpen(false);
     return true;
   }
+  if (isBricksLibraryModalOpen() && libUiState.mobilePreviewPageActive && window.innerWidth < 768) {
+    closeLibPartPreview();
+    return true;
+  }
   if (isBricksLibraryModalOpen()) {
     closeBricksLibraryModal();
     return true;
@@ -21245,11 +21308,13 @@ document.getElementById('bricksLibraryModal').onclick = (e) => {
     return;
   }
   if (libUiState.colorPickerOpen) {
-    const wrap = document.getElementById('libColorPickerWrap');
     const popover = document.getElementById('libColorPopover');
-    const insideTrigger = wrap && wrap.contains(e.target);
+    const pickerBtn = document.getElementById('libColorPickerBtn');
+    const inspectorBtn = document.getElementById('libInspectorColorBtn');
     const insidePopover = popover && popover.contains(e.target);
-    if (!insideTrigger && !insidePopover) {
+    const insidePickerBtn = pickerBtn && pickerBtn.contains(e.target);
+    const insideInspectorBtn = inspectorBtn && inspectorBtn.contains(e.target);
+    if (!insidePopover && !insidePickerBtn && !insideInspectorBtn) {
       setLibColorPickerOpen(false);
     }
   }
@@ -21258,7 +21323,7 @@ const libColorPickerBtnEl = document.getElementById('libColorPickerBtn');
 if (libColorPickerBtnEl) {
   libColorPickerBtnEl.onclick = (e) => {
     e.stopPropagation();
-    setLibColorPickerOpen(!libUiState.colorPickerOpen);
+    setLibColorPickerOpen(!libUiState.colorPickerOpen, libColorPickerBtnEl);
   };
 }
 const libColorPopoverCloseEl = document.getElementById('libColorPopoverClose');
@@ -21347,9 +21412,7 @@ if (libLoadMoreBtnEl) {
 const btnCloseLibPreviewEl = document.getElementById('btnCloseLibPreview');
 if (btnCloseLibPreviewEl) {
   btnCloseLibPreviewEl.onclick = () => {
-    libUiState.selectedId = null;
-    renderLibBrowseTab(false);
-    renderLibPreviewInspector();
+    closeLibPartPreview();
   };
 }
 

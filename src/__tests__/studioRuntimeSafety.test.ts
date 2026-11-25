@@ -926,6 +926,44 @@ describe('studioRuntime safety checks', () => {
     expect(runtime).toContain('function openPageSetupFromImportWizard(');
     expect(runtime).not.toContain('imp-wordless-btn');
   });
+
+  it('opens Bricks Library Part Preview as a dedicated mobile page without browse filters and hoists color popover to sheet level', () => {
+    const html = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf8');
+    const runtime = fs.readFileSync(path.resolve(process.cwd(), 'src/studioRuntime.ts'), 'utf8');
+
+    const modalStart = html.indexOf('id="bricksLibraryModal"');
+    const modalEnd = html.indexOf('id="shortcutsModal"', modalStart);
+    expect(modalStart).toBeGreaterThan(-1);
+    expect(modalEnd).toBeGreaterThan(modalStart);
+    const modalHtml = html.slice(modalStart, modalEnd);
+
+    expect(modalHtml).toContain('id="libTopTabsBar"');
+    expect(modalHtml).toContain('id="libBrowseFiltersBar"');
+    expect(modalHtml).toContain('id="libPreviewPane"');
+    expect(modalHtml).toContain('id="btnCloseLibPreview"');
+
+    // #libColorPopover must live outside #libBrowseGridWrap so it remains usable on the Part Preview page
+    const gridWrapStart = modalHtml.indexOf('id="libBrowseGridWrap"');
+    const previewPaneStart = modalHtml.indexOf('id="libPreviewPane"', gridWrapStart);
+    const colorPopoverPos = modalHtml.indexOf('id="libColorPopover"');
+    expect(gridWrapStart).toBeGreaterThan(-1);
+    expect(previewPaneStart).toBeGreaterThan(gridWrapStart);
+    expect(colorPopoverPos).toBeGreaterThan(previewPaneStart);
+
+    // Runtime syncs mobile page visibility for tabs, filters, grid, and preview pane
+    const syncStart = runtime.indexOf('function syncLibMobilePreviewPageState(');
+    const syncEnd = runtime.indexOf('function closeLibPartPreview(', syncStart);
+    expect(syncStart).toBeGreaterThan(-1);
+    expect(syncEnd).toBeGreaterThan(syncStart);
+    const syncBody = runtime.slice(syncStart, syncEnd);
+    expect(syncBody).toContain("getElementById('libTopTabsBar')");
+    expect(syncBody).toContain("getElementById('libBrowseFiltersBar')");
+    expect(syncBody).toContain("getElementById('libBrowseGridWrap')");
+    expect(syncBody).toContain("getElementById('libPreviewPane')");
+    expect(syncBody).toContain("tabsBar.classList.toggle('hidden', active)");
+    expect(syncBody).toContain("filtersBar.classList.toggle('hidden', active)");
+    expect(syncBody).toContain("gridWrap.classList.toggle('hidden', active)");
+  });
 });
 
 
