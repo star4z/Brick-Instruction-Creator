@@ -8753,7 +8753,7 @@ function bindHeroCameraInteractions(page) {
   const info = currentCoverHeroInfo;
   if (!liveCanvas || !info || !info.mesh) return;
   const isCover = page.kind === 'cover';
-  const meta = isCover ? state.coverMeta : state.completeMeta;
+  const getHeroMeta = () => (isCover ? state.coverMeta : state.completeMeta);
   const darkBg = isDarkHexColor(toHexColor(info.theme?.bgColor || '#ffffff', '#ffffff'));
   const w = info.w || 1200;
   const h = info.h || 900;
@@ -8769,7 +8769,8 @@ function bindHeroCameraInteractions(page) {
   }
 
   const drawLiveHero = (curAz, curEl, interactive) => {
-    const safeZoom = clampCoverZoom(meta.zoom ?? 1.0);
+    const curMeta = getHeroMeta();
+    const safeZoom = clampCoverZoom(curMeta?.zoom ?? 1.0);
     if (useStudioLive && photo && ctx2d) {
       const maxEdge = interactive ? 960 : Math.min(Math.max(w, h), photo.getMaxDimension() || 4096);
       const scale = Math.min(1, maxEdge / Math.max(w, h, 1));
@@ -8799,13 +8800,15 @@ function bindHeroCameraInteractions(page) {
     }
   };
 
-  let az = meta.az;
-  let el = meta.el;
+  const initialMeta = getHeroMeta();
+  let az = initialMeta.az;
+  let el = initialMeta.el;
   drawLiveHero(az, el, false);
 
   let dragging = false, moved = false, pushedUndo = false, startX = 0, startY = 0, lx = 0, ly = 0;
   let dragRaf = 0;
   liveCanvas.onpointerdown = (e) => {
+    e.preventDefault();
     e.stopPropagation();
     dragging = true;
     moved = false;
@@ -8831,8 +8834,11 @@ function bindHeroCameraInteractions(page) {
     el = clampCoverElevation(el + dy * 0.5);
     const roundedAz = ((Math.round(az) % 360) + 360) % 360;
     const roundedEl = Math.round(el);
-    meta.az = roundedAz;
-    meta.el = roundedEl;
+    const curMeta = getHeroMeta();
+    if (curMeta) {
+      curMeta.az = roundedAz;
+      curMeta.el = roundedEl;
+    }
     info.az = roundedAz;
     info.el = roundedEl;
     const readout = document.getElementById('heroCamReadout');

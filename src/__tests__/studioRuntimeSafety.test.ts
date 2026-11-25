@@ -232,6 +232,16 @@ describe('studioRuntime safety checks', () => {
     expect(sourceText.match(/Drag 3D model to orbit/g)?.length).toBe(2);
     expect(sourceText).not.toContain('openStepEditModal');
     expect(sourceText).not.toContain('closeStepEditModal');
+
+    // Regression guard: renderContextOverlay replaces state.coverMeta / state.completeMeta via normalize*Meta
+    // right after bindHeroCameraInteractions runs, so drag-to-orbit must always read/write the live state ref.
+    const heroFnStart = sourceText.indexOf('function bindHeroCameraInteractions(');
+    const heroFnEnd = sourceText.indexOf('function bindStepPageInteractions(', heroFnStart);
+    expect(heroFnStart).toBeGreaterThan(-1);
+    expect(heroFnEnd).toBeGreaterThan(heroFnStart);
+    const heroFnBody = sourceText.slice(heroFnStart, heroFnEnd);
+    expect(heroFnBody).toContain('const getHeroMeta = () => (isCover ? state.coverMeta : state.completeMeta);');
+    expect(heroFnBody).not.toContain('const meta = isCover ? state.coverMeta : state.completeMeta;');
   });
 
   it('wires Studio High-Quality Step Render and Stark Black Outlines toggles inside Styles -> Step Display', () => {
