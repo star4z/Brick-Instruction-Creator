@@ -67,6 +67,14 @@ export function isExtraPageEnabled(
   }
 }
 
+export function canOpenExtraPageSettings(
+  config: ExtraPagesConfig,
+  kind: ExtraPageKind,
+  hasModel: boolean,
+): boolean {
+  return Boolean(hasModel) && isExtraPageEnabled(config, kind);
+}
+
 /**
  * Describes how Page Setup's per-page "Settings" link opens settings for an
  * enabled booklet page:

@@ -753,6 +753,32 @@ describe('studioRuntime safety checks', () => {
     expect(exportHead).toContain('const iosWarning = getIosHtmlExportWarningDialog();');
     expect(exportHead).toContain('if (iosWarning && !(await openConfirmActionDialog(iosWarning))) return;');
   });
+
+  it('prevents opening settings for disabled extra pages from Menu, Style popover, Page Setup, and shortcuts', () => {
+    const html = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf8');
+    const runtime = fs.readFileSync(path.resolve(process.cwd(), 'src/studioRuntime.ts'), 'utf8');
+
+    expect(html).toContain('id="styleBomSection"');
+    expect(runtime).toContain('showPartsList: Boolean(state.showPartsList)');
+    expect(runtime).toContain("document.getElementById('styleBomSection')");
+    expect(runtime).toContain('if (!state.showPartsList && isBomSetupModalOpen())');
+
+    const openBomStart = runtime.indexOf('function openBomSetupModal()');
+    const openBomEnd = runtime.indexOf('function closePageSetupModal()', openBomStart);
+    expect(openBomStart).toBeGreaterThan(-1);
+    expect(openBomEnd).toBeGreaterThan(openBomStart);
+    expect(runtime.slice(openBomStart, openBomEnd)).toContain(
+      "if (!canOpenExtraPageSettings(state, 'bom', Boolean(state.model))) return;",
+    );
+
+    const openExtraStart = runtime.indexOf('const openExtraPageSettings =');
+    const openExtraEnd = runtime.indexOf("for (const [chkId, key] of [", openExtraStart);
+    expect(openExtraStart).toBeGreaterThan(-1);
+    expect(openExtraEnd).toBeGreaterThan(openExtraStart);
+    const openExtraBody = runtime.slice(openExtraStart, openExtraEnd);
+    expect(openExtraBody).toContain('if (!canOpenExtraPageSettings(state, kind, Boolean(state.model))) return;');
+    expect(openExtraBody).toContain('if (idx < 0) return;');
+  });
 });
 
 

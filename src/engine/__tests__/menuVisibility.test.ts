@@ -107,6 +107,20 @@ describe('computeMenuVisibility', () => {
     );
     expect(fetching.showFetchLibrary).toBe(true);
   });
+
+  it('hides Parts List Setup in the menu when Parts List pages are disabled', () => {
+    const enabled = computeMenuVisibility(
+      baseState({ hasModel: true, pageCount: 6, showPartsList: true }),
+    );
+    expect(enabled.showBomSetup).toBe(true);
+
+    const disabled = computeMenuVisibility(
+      baseState({ hasModel: true, pageCount: 6, showPartsList: false }),
+    );
+    expect(disabled.showBomSetup).toBe(false);
+    expect(disabled.showPageSetup).toBe(true);
+    expect(disabled.showPagePrintSection).toBe(true);
+  });
 });
 
 describe('canInsertDividerAfterPage', () => {

@@ -100,6 +100,8 @@ export interface ShortcutActionDef {
   allowedPageKinds?: readonly string[];
   /** When true, requires Parts mode with at least one selected part */
   requiresSelectedParts?: boolean;
+  /** When true, requires the Parts List page to be enabled in Page Setup */
+  requiresPartsList?: boolean;
   /** Surfaces where this shortcut may fire (defaults to ['none']) */
   allowedSurfaces?: readonly ShortcutBlockingSurface[];
 }
@@ -135,6 +137,8 @@ export interface ShortcutMatchContext {
   pageKind: string | null;
   mode: string;
   selectedPartCount: number;
+  /** Whether the Parts List page is enabled in Page Setup (defaults to true when omitted). */
+  showPartsList?: boolean;
   isRepeat?: boolean;
   isMac?: boolean;
 }
@@ -465,6 +469,7 @@ export const SHORTCUT_ACTIONS: readonly ShortcutActionDef[] = [
     defaultCombo: 'L',
     allowRepeat: false,
     requiresModel: true,
+    requiresPartsList: true,
     allowedSurfaces: ['none', 'menu', 'bomSetup'],
   },
   {
@@ -1049,6 +1054,10 @@ export function canRunShortcutAction(
 
   if (def.requiresSelectedParts) {
     if (ctx.mode !== 'parts' || ctx.selectedPartCount <= 0) return false;
+  }
+
+  if (def.requiresPartsList && ctx.showPartsList === false && ctx.blockingSurface !== 'bomSetup') {
+    return false;
   }
 
   return true;

@@ -272,6 +272,19 @@ describe('resolveShortcutActionForEvent & context gating', () => {
     expect(canRunShortcutAction('openPageSetup', stepPageContext({ blockingSurface: 'pageSetup' }))).toBe(true);
     expect(canRunShortcutAction('toggleMenu', stepPageContext({ blockingSurface: 'menu' }))).toBe(true);
     expect(canRunShortcutAction('pageNext', stepPageContext({ blockingSurface: 'menu' }))).toBe(false);
+
+    // Parts List Setup shortcut is blocked when Parts List page is disabled (except closing if already open)
+    expect(canRunShortcutAction('openBomSetup', stepPageContext({ showPartsList: true }))).toBe(true);
+    expect(canRunShortcutAction('openBomSetup', stepPageContext({ showPartsList: false }))).toBe(false);
+    expect(
+      resolveShortcutActionForEvent({ key: 'l' }, {}, stepPageContext({ showPartsList: false })),
+    ).toBeNull();
+    expect(
+      canRunShortcutAction(
+        'openBomSetup',
+        stepPageContext({ blockingSurface: 'bomSetup', showPartsList: false }),
+      ),
+    ).toBe(true);
   });
 });
 

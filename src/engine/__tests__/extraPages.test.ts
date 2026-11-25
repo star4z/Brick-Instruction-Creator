@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  canOpenExtraPageSettings,
   createDefaultExtraPagesConfig,
   getExtraPageSettingsAction,
   isExtraPageEnabled,
@@ -56,6 +57,21 @@ describe('extraPages', () => {
     expect(isExtraPageEnabled(cfg, 'complete')).toBe(false);
     expect(isExtraPageEnabled(cfg, 'bom')).toBe(true);
     expect(isExtraPageEnabled(cfg, 'back')).toBe(false);
+  });
+
+  it('blocks opening settings for disabled pages or when no model is loaded', () => {
+    const cfg = {
+      showCover: true,
+      showBuildComplete: false,
+      showPartsList: false,
+      showBackCover: true,
+    };
+    expect(canOpenExtraPageSettings(cfg, 'cover', true)).toBe(true);
+    expect(canOpenExtraPageSettings(cfg, 'complete', true)).toBe(false);
+    expect(canOpenExtraPageSettings(cfg, 'bom', true)).toBe(false);
+    expect(canOpenExtraPageSettings(cfg, 'back', true)).toBe(true);
+    expect(canOpenExtraPageSettings(cfg, 'cover', false)).toBe(false);
+    expect(canOpenExtraPageSettings(cfg, 'back', false)).toBe(false);
   });
 
   it('routes Cover, Build Complete, and Back Cover links to page mode and Parts List to the BOM modal', () => {

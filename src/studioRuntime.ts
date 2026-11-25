@@ -134,6 +134,7 @@ import {
   withDerivedStepsPerPage,
 } from './engine/pageLayout';
 import {
+  canOpenExtraPageSettings,
   createDefaultExtraPagesConfig,
   getExtraPageSettingsAction,
   normalizeExtraPagesConfig,
@@ -11310,7 +11311,12 @@ function syncMenuControls() {
     savedLibraryCount: userLibRaw.size,
     hasMissingPartsToFetch: hasModel ? hasMissingPartsToFetch() : false,
     isFetchingLibrary: fetchPartsInFlight,
+    showPartsList: Boolean(state.showPartsList),
   });
+
+  if (!state.showPartsList && isBomSetupModalOpen()) {
+    closeBomSetupModal();
+  }
 
   const setVisible = (id, show) => {
     const el = document.getElementById(id);
@@ -11425,10 +11431,19 @@ function syncMenuControls() {
   setChk('toggleShowComplete', state.showBuildComplete);
   setChk('toggleShowPartsList', state.showPartsList);
   setChk('toggleShowBackCover', state.showBackCover);
-  setVisible('btnOpenCoverSettings', Boolean(state.model && state.showCover));
-  setVisible('btnOpenCompleteSettings', Boolean(state.model && state.showBuildComplete));
-  setVisible('btnOpenPartsListSettings', Boolean(state.model && state.showPartsList));
-  setVisible('btnOpenBackCoverSettings', Boolean(state.model && state.showBackCover));
+  for (const [btnId, kind] of [
+    ['btnOpenCoverSettings', 'cover'],
+    ['btnOpenCompleteSettings', 'complete'],
+    ['btnOpenPartsListSettings', 'bom'],
+    ['btnOpenBackCoverSettings', 'back'],
+  ]) {
+    const canOpen = canOpenExtraPageSettings(state, kind, hasModel);
+    const btn = document.getElementById(btnId);
+    if (btn) {
+      btn.classList.toggle('hidden', !canOpen);
+      btn.disabled = !canOpen;
+    }
+  }
   setChk('toggleDetectDuplicates', state.detectDuplicates);
   setChk('toggleMinifig1to1', state.showMinifig1to1);
   const curMfStyleGlobal = normalizeMinifigStepStyle(state.minifigStyle);
@@ -15055,6 +15070,7 @@ function isBomSetupModalOpen() {
 }
 
 function openBomSetupModal() {
+  if (!canOpenExtraPageSettings(state, 'bom', Boolean(state.model))) return;
   closeMenu();
   document.getElementById('stylePopover')?.classList.add('hidden');
   syncMenuControls();
@@ -17074,6 +17090,11 @@ function syncStylePanel() {
   const effBc = resolveEffectiveBomConfig(bc, Boolean(state.bomShowTextFields));
   const styleBomSum = document.getElementById('styleBomSummary');
   if (styleBomSum) styleBomSum.textContent = summarizeBomConfig(effBc);
+  const canOpenBom = canOpenExtraPageSettings(state, 'bom', Boolean(state.model));
+  const styleBomSec = document.getElementById('styleBomSection');
+  if (styleBomSec) styleBomSec.classList.toggle('hidden', !canOpenBom);
+  const styleBomBtn = document.getElementById('btnStyleOpenBomSetup');
+  if (styleBomBtn) styleBomBtn.disabled = !canOpenBom;
 }
 
 function populateThemeFontSelect(elId) {
@@ -17928,7 +17949,7 @@ function executeShortcutAction(actionId) {
     }
     case 'openBomSetup':
       if (isBomSetupModalOpen()) closeBomSetupModal();
-      else openBomSetupModal();
+      else if (canOpenExtraPageSettings(state, 'bom', Boolean(state.model))) openBomSetupModal();
       return;
     case 'openBricksLibrary':
       if (isBricksLibraryModalOpen()) closeBricksLibraryModal();
@@ -18032,6 +18053,7 @@ document.addEventListener('keydown', (e) => {
     pageKind: curPage?.kind || null,
     mode: state.mode,
     selectedPartCount: state.selectedPartIds.size,
+    showPartsList: Boolean(state.showPartsList),
     isRepeat: Boolean(e.repeat),
     isMac: isMacShortcutsPlatform,
   });
@@ -18497,6 +18519,7 @@ document.querySelectorAll('.bom-format-btn').forEach(b => {
 const btnStyleOpenBomSetup = document.getElementById('btnStyleOpenBomSetup');
 if (btnStyleOpenBomSetup) {
   btnStyleOpenBomSetup.onclick = () => {
+    if (!canOpenExtraPageSettings(state, 'bom', Boolean(state.model))) return;
     setStylePopoverOpen(false);
     openBomSetupModal();
   };
@@ -18606,6 +18629,9 @@ const toggleExtraPage = (key, checked) => {
   if (state.model) pushUndo();
   const prevPageId = state.pages[state.pageIdx]?.id || null;
   state[key] = Boolean(checked);
+  if (key === 'showPartsList' && !state.showPartsList && isBomSetupModalOpen()) {
+    closeBomSetupModal();
+  }
   rebuildPages();
   if (prevPageId) {
     const keptIdx = state.pages.findIndex(p => p.id === prevPageId);
@@ -18615,18 +18641,17 @@ const toggleExtraPage = (key, checked) => {
   renderAll();
 };
 const openExtraPageSettings = (kind) => {
-  closePageSetupModal();
-  if (!state.model) { showToast('Import a model first.'); return; }
+  if (!canOpenExtraPageSettings(state, kind, Boolean(state.model))) return;
   const action = getExtraPageSettingsAction(kind);
   const idx = state.pages.findIndex(p => p.kind === action.pageKind);
-  if (idx >= 0) {
-    state.pageIdx = idx;
-    state.mode = action.targetMode;
-    state.selectedPartIds.clear();
-    state.selectedArrangeEl = null;
-    resetZoom();
-    renderAll();
-  }
+  if (idx < 0) return;
+  closePageSetupModal();
+  state.pageIdx = idx;
+  state.mode = action.targetMode;
+  state.selectedPartIds.clear();
+  state.selectedArrangeEl = null;
+  resetZoom();
+  renderAll();
   if (action.openBomModal) {
     openBomSetupModal();
   }

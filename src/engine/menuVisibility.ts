@@ -15,6 +15,8 @@ export interface MenuVisibilityState {
   savedLibraryCount: number;
   hasMissingPartsToFetch: boolean;
   isFetchingLibrary: boolean;
+  /** Whether Parts List pages are currently enabled in Page Setup (defaults to true). */
+  showPartsList?: boolean;
 }
 
 export interface MenuVisibility {
@@ -61,7 +63,7 @@ export function computeMenuVisibility(input: MenuVisibilityState): MenuVisibilit
   const showModelIssues = hasModel && input.diagnosticCount > 0;
 
   const showPageSetup = hasModel;
-  const showBomSetup = hasModel;
+  const showBomSetup = hasModel && input.showPartsList !== false;
   const showPrintPdf = hasPages;
   const showPagePrintSection = showPageSetup || showBomSetup || showPrintPdf;
 
