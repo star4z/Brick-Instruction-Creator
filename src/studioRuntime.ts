@@ -5258,7 +5258,7 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount, outPrebui
             Array.from(pocketRem).filter(i => {
               if (placedInStep.has(i)) return false;
               if (Math.abs(boxes[i].max[1] - anchorTopY) > 12) return false;
-              if (aboveMap[i].some(u => pocketRem.has(u) && !placedInStep.has(u))) return false;
+              if (aboveMap[i].some(u => pocketRem.has(u))) return false;
               return isCandidateConnectedForStep(i, anchorConnectedToPrev, adj, placedBeforeStep, placedInStep);
             }),
           modelBounds: subModelBounds,
@@ -5783,7 +5783,7 @@ function assignAutoPlacementOffsets(chapters) {
         step.isStandaloneFigure ||
         step.isMinifigPoseStep ||
         step.attachedMinifig ||
-        step.attachedSubmodel?.isSectionAttach ||
+        step.attachedSubmodel ||
         hasStructuralOffsets,
       );
       return {

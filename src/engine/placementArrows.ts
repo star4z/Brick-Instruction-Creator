@@ -72,7 +72,7 @@ export const CONTRAST_ARROW_GREEN = '#16a34a';
 export const CONTRAST_ARROW_BLUE = '#2563eb';
 
 const CONTACT_EPS = 6;
-const COLOR_NEIGHBOR_EPS = 10;
+const COLOR_NEIGHBOR_EPS = CONTACT_EPS;
 const SAME_COLOR_DIST_THRESHOLD = 42;
 const ARROW_CONTRAST_DIST_THRESHOLD = 75;
 const MAX_FIRST_STEP_OFFSETS = 6;
@@ -456,12 +456,50 @@ function computeHorizontalFrontOverhangDist(
   return Number.isFinite(tExit) ? Math.max(0, tExit) : 0;
 }
 
+function expandBoxMargin(b: PlacementAABB, margin: number): PlacementAABB {
+  return {
+    min: [b.min[0] - margin, b.min[1] - margin, b.min[2] - margin],
+    max: [b.max[0] + margin, b.max[1] + margin, b.max[2] + margin],
+    center: [b.center[0], b.center[1], b.center[2]],
+  };
+}
+
+/**
+ * Builds the swept withdrawal corridor strictly ahead of `box` along `(axis, sign)`
+ * up to `mag` LDU so a brick can never teleport through a blocking sibling or wall.
+ */
+function buildSweptCorridorBox(
+  box: PlacementAABB,
+  axis: number,
+  sign: number,
+  mag: number,
+): PlacementAABB {
+  const min: Vec3 = [box.min[0], box.min[1], box.min[2]];
+  const max: Vec3 = [box.max[0], box.max[1], box.max[2]];
+  if (sign > 0) {
+    min[axis] = box.max[axis];
+    max[axis] = box.max[axis] + mag;
+  } else {
+    min[axis] = box.min[axis] - mag;
+    max[axis] = box.min[axis];
+  }
+  return {
+    min,
+    max,
+    center: [(min[0] + max[0]) * 0.5, (min[1] + max[1]) * 0.5, (min[2] + max[2]) * 0.5],
+  };
+}
+
 /**
  * Picks a clean, collision-free offset vector along the physical insertion axis.
  * - Guarantees a crisp open air gap past any coaxial obstacle tip (`arrowTo`).
+ * - Rejects directions whose swept withdrawal corridor passes through a blocking
+ *   sibling part or non-coaxial solid obstacle.
  * - Anchors arrows directly over the actual contact/stud overlap (`arrowBox`).
  * - For vertical lifts, accounts for orthographic camera elevation so a wide
  *   overhanging plate never blocks the camera's view of its arrows or attaching studs.
+ * - Returns `null` when every candidate direction is blocked/colliding so trapped
+ *   bricks remain cleanly seated instead of colliding or clipping through neighbors.
  */
 function resolveOffsetAlongAxis(
   part: PlacementPartInput,
@@ -470,7 +508,8 @@ function resolveOffsetAlongAxis(
   obstacles: ReadonlyArray<PlacementPartInput>,
   camera?: { az: number; el: number },
   touchingRefs: ReadonlyArray<PlacementPartInput> = [],
-): AutoPartOffset {
+  siblingObstacles: ReadonlyArray<PlacementPartInput> = [],
+): AutoPartOffset | null {
   const s = boxSize(part.box);
   const dirs: Vec3[] = [preferredDir, ...fallbackDirs];
 
@@ -499,6 +538,7 @@ function resolveOffsetAlongAxis(
     const arrowAnchor = arrowBox ? arrowBox.center : part.box.center;
 
     // Find any coaxial / corridor obstacle directly along the insertion path (e.g., vertical axle inside a bush)
+    // Only existing `obstacles` (never same-step siblings) can act as coaxial pins/axles to lift past.
     let corridorObsTip: number | null = null;
     for (let i = 0; i < obstacles.length; i++) {
       const obs = obstacles[i];
@@ -507,7 +547,8 @@ function resolveOffsetAlongAxis(
       const ovA = overlap1D(part.box.min[perpA], part.box.max[perpA], ob.min[perpA], ob.max[perpA]);
       const ovB = overlap1D(part.box.min[perpB], part.box.max[perpB], ob.min[perpB], ob.max[perpB]);
       if (ovA <= 1.5 || ovB <= 1.5) continue;
-      // Check if obstacle overlaps part along the insertion axis or protrudes past part's center in `dir`
+      // Check if obstacle coaxially overlaps part along the insertion axis or protrudes past part's center in `dir`
+      if (!boxesIntersectStrict(part.box, ob, 1.5)) continue;
       if (sign > 0) {
         if (ob.max[axis] > part.box.min[axis] + 1 && ob.min[axis] < part.box.max[axis] + 24) {
           if (corridorObsTip === null || ob.max[axis] > corridorObsTip) corridorObsTip = ob.max[axis];
@@ -520,12 +561,37 @@ function resolveOffsetAlongAxis(
     }
 
     const baseMag = computeBaseMag(dir, arrowAnchor);
+    let corridorBlockedDir = false;
     for (let extra = 0; extra <= 96; extra += 8) {
       const mag = baseMag + extra;
       const dx = Math.round(dir[0] * mag);
       const dy = Math.round(dir[1] * mag);
       const dz = Math.round(dir[2] * mag);
       const shifted = shiftBox(part.box, dx, dy, dz);
+      const corridor = buildSweptCorridorBox(part.box, axis, sign, mag);
+
+      // Reject this direction if any sibling part or non-coaxial solid obstacle sits inside
+      // the swept withdrawal corridor ahead of `part` (prevents jumping through stacked bricks/ceilings).
+      for (let i = 0; i < siblingObstacles.length; i++) {
+        const obs = siblingObstacles[i];
+        if (obs.id === part.id) continue;
+        if (boxesIntersectStrict(corridor, obs.box, 1.5)) {
+          corridorBlockedDir = true;
+          break;
+        }
+      }
+      if (corridorBlockedDir) break;
+
+      for (let i = 0; i < obstacles.length; i++) {
+        const obs = obstacles[i];
+        if (obs.id === part.id) continue;
+        if (boxesIntersectStrict(part.box, obs.box, 1.5)) continue; // coaxial pin/axle handled via corridorObsTip
+        if (boxesIntersectStrict(corridor, obs.box, 1.5)) {
+          corridorBlockedDir = true;
+          break;
+        }
+      }
+      if (corridorBlockedDir) break;
 
       // Ensure crisp open air gap past any coaxial obstacle tip (e.g., bush lifted above axle tip)
       if (corridorObsTip !== null) {
@@ -540,6 +606,15 @@ function resolveOffsetAlongAxis(
         if (boxesIntersectStrict(shifted, obstacles[i].box, 1.5)) {
           collides = true;
           break;
+        }
+      }
+      if (!collides) {
+        for (let i = 0; i < siblingObstacles.length; i++) {
+          if (siblingObstacles[i].id === part.id) continue;
+          if (boxesIntersectStrict(shifted, siblingObstacles[i].box, 1.5)) {
+            collides = true;
+            break;
+          }
         }
       }
       if (!collides) {
@@ -561,14 +636,7 @@ function resolveOffsetAlongAxis(
     }
   }
 
-  const mag = computeBaseMag(preferredDir, part.box.center);
-  return {
-    x: Math.round(preferredDir[0] * mag),
-    y: Math.round(preferredDir[1] * mag),
-    z: Math.round(preferredDir[2] * mag),
-    tilt: 0,
-    arrow: true,
-  };
+  return null;
 }
 
 function chooseInsertionDirs(
@@ -618,7 +686,8 @@ function chooseInsertionDirs(
 
 /**
  * Computes Step 1 offsets: keeps the physical base piece(s) grounded and
- * offsets the attached piece(s) along their insertion axes with red arrows.
+ * offsets independent attached piece(s) along their insertion axes with red arrows.
+ * Never offsets two or more physically touching/stacked pieces together as a cluster.
  */
 function computeFirstStepOffsets(
   step: PlacementStepInput,
@@ -699,20 +768,57 @@ function computeFirstStepOffsets(
   const attachedParts = parts.filter((p) => !baseSet.has(p.id));
   if (attachedParts.length === 0) return {};
 
-  // Cap on unusually large Step 1 (e.g. imported file with 12+ parts in Step 1)
-  const selected =
-    attachedParts.length <= MAX_FIRST_STEP_OFFSETS
-      ? attachedParts
-      : [...attachedParts]
-          .sort((a, b) => boxVolume(a.box) - boxVolume(b.box))
-          .slice(0, MAX_FIRST_STEP_OFFSETS);
+  // Evaluate outermost, non-supporting pieces first (smaller volume as tie-breaker) so multi-layer
+  // stacks keep lower layers grounded and lift only unblocked individual leaf piece(s).
+  const orderedAttached = [...attachedParts].sort((a, b) => {
+    const supDiff = (supportCount.get(a.id) || 0) - (supportCount.get(b.id) || 0);
+    if (supDiff !== 0) return supDiff;
+    const outerDiff = isBottomView
+      ? a.box.min[1] - b.box.min[1]
+      : b.box.max[1] - a.box.max[1];
+    if (Math.abs(outerDiff) > 2) return outerDiff;
+    return boxVolume(a.box) - boxVolume(b.box);
+  });
 
   const out: Record<string, AutoPartOffset> = {};
-  for (const p of selected) {
-    const contacts = analyzeContacts(p, baseParts);
+  const acceptedParts: PlacementPartInput[] = [];
+  const acceptedShiftedBoxes: PlacementAABB[] = [];
+  const acceptedShiftedObstacles: PlacementPartInput[] = [];
+
+  for (const p of orderedAttached) {
+    if (acceptedParts.length >= MAX_FIRST_STEP_OFFSETS) break;
+    // Never offset two physically touching bricks together as a floating cluster
+    if (acceptedParts.some((acc) => boxesWithinMargin(p.box, acc.box, CONTACT_EPS))) continue;
+
+    const seatedRefs = parts.filter((q) => q.id !== p.id && !out[q.id]);
+    const contacts = analyzeContacts(p, seatedRefs);
+    if (contacts.touchingRefs.length === 0) continue;
+
     const isLateral = contacts.lateralCount > 0 && !contacts.supportedFromBelow && !contacts.supportedFromAbove;
     const { preferred, fallbacks } = chooseInsertionDirs(contacts, cameraSide, isLateral);
-    out[p.id] = resolveOffsetAlongAxis(p, preferred, fallbacks, baseParts, step.camera, contacts.touchingRefs);
+    const otherSiblings = parts.filter((q) => q.id !== p.id && !baseSet.has(q.id));
+    const resolved = resolveOffsetAlongAxis(
+      p,
+      preferred,
+      fallbacks,
+      baseParts,
+      step.camera,
+      contacts.touchingRefs,
+      [...otherSiblings, ...acceptedShiftedObstacles],
+    );
+    if (!resolved) continue;
+
+    const shifted = shiftBox(p.box, resolved.x, resolved.y, resolved.z);
+    if (acceptedShiftedBoxes.some((sb) => boxesWithinMargin(shifted, sb, CONTACT_EPS))) continue;
+
+    out[p.id] = resolved;
+    acceptedParts.push(p);
+    acceptedShiftedBoxes.push(shifted);
+    acceptedShiftedObstacles.push({
+      id: `__shifted_${p.id}`,
+      box: expandBoxMargin(shifted, CONTACT_EPS * 0.5),
+      rgb: p.rgb,
+    });
   }
   return out;
 }
@@ -726,7 +832,17 @@ interface NoticeabilityCandidate {
 
 /**
  * Evaluates a subsequent step (`prevParts.length > 0`) and returns offsets for
- * pieces that would be hard to notice without highlighting.
+ * individual pieces that would be hard to notice without highlighting.
+ *
+ * Strict anti-cluster invariants:
+ * - Only loose pieces that directly contact `prevParts` (and do not stack onto
+ *   another new piece placed in the same step) are eligible.
+ * - Never pulls a piece out from underneath a sibling in the same step that
+ *   depends on it for support.
+ * - Never offsets two or more physically touching pieces together as a floating
+ *   cluster (checked in both seated and shifted positions).
+ * - Rejects any offset whose swept withdrawal corridor passes through a sibling
+ *   piece or non-coaxial obstacle.
  */
 function computeSubsequentStepOffsets(
   step: PlacementStepInput,
@@ -736,10 +852,60 @@ function computeSubsequentStepOffsets(
   if (step.parts.length === 0 || prevParts.length === 0 || !builtBounds) return {};
 
   const cameraSide = step.camera.side === 'bottom' ? 'bottom' : 'top';
+  const isBottomView = cameraSide === 'bottom';
   const builtDiag = Math.max(20, boxDiag(builtBounds));
+  const contactsById = new Map<string, ContactSummary>();
+  for (const part of step.parts) {
+    contactsById.set(part.id, analyzeContacts(part, prevParts));
+  }
+
   const candidates: NoticeabilityCandidate[] = [];
 
   for (const part of step.parts) {
+    const contacts = contactsById.get(part.id)!;
+    // Must directly attach to the already-built model; pieces resting solely on
+    // another new piece in this same step belong to an in-step stack, not a solo offset.
+    if (contacts.touchingRefs.length === 0) continue;
+
+    // Never pull `part` away if another sibling in this step touches `part` and has
+    // no direct contact with `prevParts` (pulling `part` would leave that sibling floating).
+    let hasDependentSibling = false;
+    let stackedOnSibling = false;
+    for (const sib of step.parts) {
+      if (sib.id === part.id) continue;
+      if (!boxesWithinMargin(part.box, sib.box, CONTACT_EPS)) continue;
+      const sibContacts = contactsById.get(sib.id)!;
+      if (sibContacts.touchingRefs.length === 0) {
+        hasDependentSibling = true;
+        break;
+      }
+      // Check if `sib` vertically supports `part` along the build axis while `part` lacks
+      // vertical support from `prevParts` on that same side (i.e. stacked onto a same-step brick).
+      const ovX = overlap1D(part.box.min[0], part.box.max[0], sib.box.min[0], sib.box.max[0]);
+      const ovZ = overlap1D(part.box.min[2], part.box.max[2], sib.box.min[2], sib.box.max[2]);
+      if (ovX > 2 && ovZ > 2) {
+        if (
+          isBottomView &&
+          !contacts.supportedFromAbove &&
+          sib.box.min[1] >= part.box.max[1] - CONTACT_EPS &&
+          sib.box.min[1] <= part.box.max[1] + CONTACT_EPS
+        ) {
+          stackedOnSibling = true;
+          break;
+        }
+        if (
+          !isBottomView &&
+          !contacts.supportedFromBelow &&
+          part.box.min[1] >= sib.box.max[1] - CONTACT_EPS &&
+          part.box.min[1] <= sib.box.max[1] + CONTACT_EPS
+        ) {
+          stackedOnSibling = true;
+          break;
+        }
+      }
+    }
+    if (hasDependentSibling || stackedOnSibling) continue;
+
     const s = boxSize(part.box);
     const diag = boxDiag(part.box);
     const vol = boxVolume(part.box);
@@ -748,7 +914,6 @@ function computeSubsequentStepOffsets(
     const minHoriz = Math.min(s[0], s[2]);
     const height = s[1];
 
-    const contacts = analyzeContacts(part, prevParts);
     const isLateral =
       contacts.lateralCount > 0 &&
       !contacts.supportedFromBelow &&
@@ -774,7 +939,9 @@ function computeSubsequentStepOffsets(
       if (d < minColorDist) minColorDist = d;
     }
     const isSlenderOrModest =
-      minHoriz <= 22 || height <= 10 || relDiag < 0.42;
+      minHoriz <= 22 ||
+      (height <= 10 && minHoriz <= 44 && maxHoriz <= 84 && relDiag < 0.42) ||
+      relDiag < 0.30;
     if (
       contacts.touchingRefs.length > 0 &&
       minColorDist < SAME_COLOR_DIST_THRESHOLD &&
@@ -799,18 +966,47 @@ function computeSubsequentStepOffsets(
 
   if (candidates.length === 0) return {};
 
-  // Sort highest noticeability need first; cap to avoid clutter on large steps
+  // Sort highest noticeability need first; greedily pick isolated single-brick offsets
   candidates.sort((a, b) => b.score - a.score);
-  const chosen = candidates.slice(0, MAX_SUBSEQUENT_STEP_OFFSETS);
-
-  const chosenIds = new Set(chosen.map((c) => c.part.id));
-  const nonOffsetSiblings = step.parts.filter((p) => !chosenIds.has(p.id));
-  const obstacles: PlacementPartInput[] = [...prevParts, ...nonOffsetSiblings];
 
   const out: Record<string, AutoPartOffset> = {};
-  for (const c of chosen) {
+  const acceptedParts: PlacementPartInput[] = [];
+  const acceptedShiftedBoxes: PlacementAABB[] = [];
+  const acceptedShiftedObstacles: PlacementPartInput[] = [];
+
+  for (const c of candidates) {
+    if (acceptedParts.length >= MAX_SUBSEQUENT_STEP_OFFSETS) break;
+    // Never offset two or more physically touching bricks together as a cluster
+    if (acceptedParts.some((acc) => boxesWithinMargin(c.part.box, acc.box, CONTACT_EPS))) {
+      continue;
+    }
+
     const { preferred, fallbacks } = chooseInsertionDirs(c.contacts, cameraSide, c.isLateral);
-    out[c.part.id] = resolveOffsetAlongAxis(c.part, preferred, fallbacks, obstacles, step.camera, c.contacts.touchingRefs);
+    const otherSiblings = step.parts.filter((p) => p.id !== c.part.id);
+    const resolved = resolveOffsetAlongAxis(
+      c.part,
+      preferred,
+      fallbacks,
+      prevParts,
+      step.camera,
+      c.contacts.touchingRefs,
+      [...otherSiblings, ...acceptedShiftedObstacles],
+    );
+    if (!resolved) continue;
+
+    const shifted = shiftBox(c.part.box, resolved.x, resolved.y, resolved.z);
+    if (acceptedShiftedBoxes.some((sb) => boxesWithinMargin(shifted, sb, CONTACT_EPS))) {
+      continue;
+    }
+
+    out[c.part.id] = resolved;
+    acceptedParts.push(c.part);
+    acceptedShiftedBoxes.push(shifted);
+    acceptedShiftedObstacles.push({
+      id: `__shifted_${c.part.id}`,
+      box: expandBoxMargin(shifted, CONTACT_EPS * 0.5),
+      rgb: c.part.rgb,
+    });
   }
   return out;
 }

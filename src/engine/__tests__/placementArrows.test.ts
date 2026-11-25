@@ -523,4 +523,136 @@ describe('placementArrows — LEGO-style automatic placement arrows & offsets', 
     expect(segs[0].to[0]).toBeCloseTo(50, 2);
     expect(segs[1].to[0]).toBeCloseTo(-50, 2);
   });
+
+  it('never offsets a multi-brick stacked underside cluster together (keeps stacked plates seated and avoids through-plate false camouflage)', () => {
+    // Upside-down underside step adding a 4-part touching/stacked cluster onto a red/black deck:
+    // - red_4x6 attaches under the black deck at Y=[-8..0]
+    // - black_4x4 and yellow_round_4x4 stack directly underneath red_4x6 at Y=[-16..-8]
+    // - red_2x2 attaches under the red side rail at Y=[-8..0]
+    const steps: PlacementStepInput[] = [
+      {
+        id: 's1',
+        skip: true,
+        camera: { az: 38, el: 28, side: 'top' },
+        parts: [
+          makePart('deck_black_center', 0, 0, 0, 80, 8, 120, BLACK),
+          makePart('deck_red_rail_l', -50, 0, 0, 20, 8, 160, RED),
+          makePart('deck_red_rail_r', 50, 0, 0, 20, 8, 160, RED),
+          makePart('deck_red_front', 0, 0, 90, 120, 8, 60, RED),
+          makePart('deck_black_back', 0, 0, -90, 80, 8, 60, BLACK),
+        ],
+      },
+      {
+        id: 's5',
+        camera: { az: 38, el: -30, side: 'bottom' },
+        parts: [
+          makePart('red_4x6', 0, -8, 0, 80, 8, 120, RED),
+          makePart('red_2x2', -60, -8, -40, 40, 8, 40, RED),
+          makePart('black_4x4', 0, -16, -20, 80, 8, 80, BLACK),
+          makePart('yellow_round_4x4', 0, -16, 60, 80, 8, 80, YELLOW),
+        ],
+      },
+    ];
+
+    const res = computeAutoPlacementOffsetsForSequence(steps);
+    const offs = res.get('s5') ?? {};
+    // None of the stacked cluster bricks (red_4x6 supporting black_4x4/yellow_round_4x4, or those stacked children) may be offset
+    expect(offs['red_4x6']).toBeUndefined();
+    expect(offs['black_4x4']).toBeUndefined();
+    expect(offs['yellow_round_4x4']).toBeUndefined();
+    // At most 1 isolated unblocked piece (red_2x2) may be offset — never a multi-brick cluster
+    expect(Object.keys(offs).length).toBeLessThanOrEqual(1);
+  });
+
+  it('never offsets two physically touching sibling parts together on a subsequent step', () => {
+    // Two touching 1x4 light-blue plates side-by-side on a light-blue base (both would individually score for color camouflage)
+    const steps: PlacementStepInput[] = [
+      {
+        id: 's1',
+        camera: { az: 38, el: 28, side: 'top' },
+        parts: [
+          makePart('b1', 0, 0, 0, 80, 8, 80, LIGHT_BLUE),
+          makePart('b2', 80, 0, 0, 80, 8, 80, LIGHT_BLUE),
+          makePart('b3', 0, 0, 80, 80, 8, 80, LIGHT_BLUE),
+          makePart('b4', 80, 0, 80, 80, 8, 80, LIGHT_BLUE),
+        ],
+      },
+      {
+        id: 's2',
+        camera: { az: 38, el: 28, side: 'top' },
+        parts: [
+          makePart('strip_a', 40, 8, 20, 80, 8, 20, LIGHT_BLUE), // z in [10, 30]
+          makePart('strip_b', 40, 8, 40, 80, 8, 20, LIGHT_BLUE), // z in [30, 50] — touches strip_a at z=30
+        ],
+      },
+    ];
+
+    const res = computeAutoPlacementOffsetsForSequence(steps);
+    const offs = res.get('s2') ?? {};
+    // Must never lift both touching plates together as a floating 2-brick cluster
+    expect(Object.keys(offs).length).toBeLessThanOrEqual(1);
+  });
+
+  it('never offsets a stacked or touching multi-brick cluster together on Step 1', () => {
+    // 3-brick vertical stack on Step 1: base -> mid -> top
+    const stackStep1: PlacementStepInput = {
+      id: 's1_stack',
+      camera: { az: 38, el: 28, side: 'top' },
+      parts: [
+        makePart('base_2x4', 0, 0, 0, 80, 8, 40, DARK_GRAY),
+        makePart('mid_2x2', 0, 8, 0, 40, 8, 40, RED),
+        makePart('top_1x2', 0, 16, 0, 40, 8, 20, YELLOW),
+      ],
+    };
+    const stackRes = computeAutoPlacementOffsetsForSequence([stackStep1]).get('s1_stack') ?? {};
+    expect(stackRes['base_2x4']).toBeUndefined();
+    expect(stackRes['mid_2x2']).toBeUndefined();
+    expect(stackRes['top_1x2']).toBeDefined();
+    expect(stackRes['top_1x2'].y).toBeGreaterThanOrEqual(24);
+    expect(Object.keys(stackRes)).toHaveLength(1);
+
+    // Two side-by-side touching plates atop a base on Step 1
+    const pairStep1: PlacementStepInput = {
+      id: 's1_pair',
+      camera: { az: 38, el: 28, side: 'top' },
+      parts: [
+        makePart('base_2x4', 0, 0, 0, 80, 8, 40, DARK_GRAY),
+        makePart('top_a', 0, 8, -10, 80, 8, 20, YELLOW), // z in [-20, 0]
+        makePart('top_b', 0, 8, 10, 80, 8, 20, TAN),     // z in [0, 20] — touches top_a at z=0
+      ],
+    };
+    const pairRes = computeAutoPlacementOffsetsForSequence([pairStep1]).get('s1_pair') ?? {};
+    expect(pairRes['base_2x4']).toBeUndefined();
+    // Never float both touching upper plates together as a glued cluster
+    expect(Object.keys(pairRes)).toHaveLength(1);
+  });
+
+  it('leaves a brick cleanly seated instead of forcing a colliding offset when blocked in all withdrawal directions', () => {
+    // Small brick enclosed between a floor below, ceiling above, and solid walls on all 4 sides
+    const steps: PlacementStepInput[] = [
+      {
+        id: 's1',
+        skip: true,
+        camera: { az: 38, el: 28, side: 'top' },
+        parts: [
+          makePart('floor', 0, 0, 0, 120, 8, 120, DARK_GRAY),
+          makePart('ceiling', 0, 32, 0, 120, 8, 120, DARK_GRAY),
+          makePart('wall_px', 30, 8, 0, 20, 24, 120, DARK_GRAY),
+          makePart('wall_nx', -30, 8, 0, 20, 24, 120, DARK_GRAY),
+          makePart('wall_pz', 0, 8, 30, 120, 24, 20, DARK_GRAY),
+          makePart('wall_nz', 0, 8, -30, 120, 24, 20, DARK_GRAY),
+        ],
+      },
+      {
+        id: 's2',
+        camera: { az: 38, el: 28, side: 'top' },
+        parts: [
+          makePart('trapped_1x1', 0, 8, 0, 20, 24, 20, DARK_GRAY),
+        ],
+      },
+    ];
+
+    const res = computeAutoPlacementOffsetsForSequence(steps);
+    expect(res.get('s2')).toBeUndefined();
+  });
 });
