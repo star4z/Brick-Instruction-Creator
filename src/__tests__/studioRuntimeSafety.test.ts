@@ -432,13 +432,17 @@ describe('studioRuntime safety checks', () => {
     }
   });
 
-  it('uses physical Smart Auto Grid packing (no 1–2 step cap) and wires page-size readability warnings', () => {
+  it('uses physical Smart Auto Grid packing (no 1–2 step cap) and surfaces page-size warnings as regular diagnostics', () => {
     const html = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf8');
     const runtime = fs.readFileSync(path.resolve(process.cwd(), 'src/studioRuntime.ts'), 'utf8');
 
     // Old 1–2 step auto copy is gone
     expect(html).not.toContain('fits 1–2 steps per page');
     expect(runtime).not.toContain('chooses 1–2 steps per page');
+
+    // Intrusive floating canvas overlay banner is removed
+    expect(html).not.toContain('id="pageSizeWarningBanner"');
+    expect(runtime).not.toContain("'pageSizeWarningBanner'");
 
     // Physical Smart Auto Grid & page-size warning engine are wired into pagination, DOM, and PDF export
     expect(runtime).toContain('buildSmartAutoPageContext(');
@@ -448,15 +452,19 @@ describe('studioRuntime safety checks', () => {
     expect(runtime).toContain('computePageSlotRects(slots.length, pageSpec, dims.isLandscape, gridW, gridH, gapPx, page.autoGrid)');
     expect(runtime).toContain('computePageSlotRects(slots.length, pageSpec, isLand, availW, availH, gap, page.autoGrid)');
 
-    // Warning surfaces exist in index.html and are synced in studioRuntime.ts
+    // Regular warning integration in Model Issues + non-blocking Page Setup / menu indicators
+    expect(runtime).toContain('function buildLayoutDiagnostic(');
+    expect(runtime).toContain('function syncLayoutDiagnostic(');
+    expect(runtime).toContain("category: 'layout'");
+    expect(runtime).toContain('Page Layout (');
+    expect(runtime).toContain('#errApplyLargerSizeQuick');
+    expect(runtime).toContain('#errOpenPageSetupQuick');
+
     for (const id of [
-      'pageSizeWarningBanner',
-      'pageSizeWarningText',
-      'btnApplySuggestedPageSize',
-      'btnOpenPageSetupFromWarning',
-      'btnDismissPageSizeWarning',
       'pageSizeFitWarning',
       'menuPageSetupWarnDot',
+      'menuErrorsIcon',
+      'errorBannerDot',
     ]) {
       expect(html).toContain(`id="${id}"`);
       expect(runtime).toContain(`'${id}'`);

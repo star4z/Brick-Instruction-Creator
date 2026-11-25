@@ -37,6 +37,7 @@ import {
   acknowledgeDiagnostics,
   deserializeSeenDiagnosticKeys,
   formatMenuIconErrorBadge,
+  getDiagnosticKey,
   getMenuIconErrorBadgeCount,
   pruneSeenDiagnosticKeys,
   serializeSeenDiagnosticKeys,
@@ -6858,6 +6859,7 @@ function rebuildPages() {
   if (!state.model) {
     state.pages = [];
     state.pageSizeWarning = null;
+    syncLayoutDiagnostic();
     return;
   }
   renumberContinuousSteps(state.model);
@@ -7166,6 +7168,7 @@ function rebuildPages() {
     currentPageHeightIn: dims.heightIn,
     density: state.density,
   });
+  syncLayoutDiagnostic();
 
   // 1. Build Complete celebration page BEFORE Parts List
   if (state.showBuildComplete) {
@@ -7734,7 +7737,8 @@ function renderAll() {
     document.getElementById('contextOverlay').classList.add('hidden');
     syncSideMenuLayout();
     syncMenuControls();
-    syncPageSizeWarningUI(null);
+    syncPageSizeWarningUI();
+    updateErrorIndicators();
     return;
   }
 
@@ -8699,7 +8703,7 @@ function renderAll() {
 
   renderContextOverlay(page);
   syncMenuControls();
-  syncPageSizeWarningUI(page);
+  syncPageSizeWarningUI();
   applyStageTransform();
 }
 
@@ -10271,12 +10275,12 @@ function renderContextOverlay(page) {
         </div>
 
         ${pgWarn ? `
-          <div role="alert" data-tone="warning" class="destructive-notice destructive-notice-compact flex-wrap items-center justify-between">
-            <div class="flex items-start gap-1.5 min-w-0 flex-1">
-              ${DESTRUCTIVE_ALERT_SVG}
-              <span class="min-w-0 flex-1">${escHtml(pgWarnText)}</span>
+          <div role="alert" data-tone="warning" class="destructive-notice destructive-notice-compact">
+            ${DESTRUCTIVE_ALERT_SVG}
+            <div class="min-w-0 flex-1 space-y-1.5">
+              <div>${escHtml(pgWarnText)}</div>
+              ${pgWarnAction ? `<button id="pageCardApplyLargerSizeBtn" type="button" class="px-2.5 py-1 rounded-md bg-[var(--warning)] text-white hover:opacity-90 font-semibold text-[11px] transition-opacity cursor-pointer">${escHtml(pgWarnAction.buttonLabel)}</button>` : ''}
             </div>
-            ${pgWarnAction ? `<button id="pageCardApplyLargerSizeBtn" type="button" class="px-2 py-1 rounded-md bg-[var(--warning)] text-white hover:opacity-90 font-semibold whitespace-nowrap shrink-0 cursor-pointer">${escHtml(pgWarnAction.buttonLabel)}</button>` : ''}
           </div>` : ''}
 
         <!-- Page Breaks & Page Inserts (affects later pages) -->
@@ -10897,22 +10901,6 @@ function renderPaperFormatPreviewUI() {
   }
 }
 
-let dismissedPageSizeWarningKey = '';
-
-function getPageSizeWarningKey(warn) {
-  if (!warn || !warn.hasWarning) return '';
-  return [
-    state.model?.title || '',
-    state.paperFormat,
-    state.orientation,
-    state.customWidth,
-    state.customHeight,
-    state.customUnit,
-    state.density,
-    warn.affectedStepCount,
-  ].join('|');
-}
-
 function getPrimaryPageSizeAction(warn) {
   if (!warn || !warn.hasWarning) return null;
   if (warn.suggestedFormats && warn.suggestedFormats.length > 0) {
@@ -10942,7 +10930,6 @@ function applySuggestedPageSize(action) {
   if (action.kind === 'format') {
     state.paperFormat = action.formatId;
     if (action.orientation) state.orientation = action.orientation;
-    dismissedPageSizeWarningKey = '';
     resetZoom();
     renderAll();
     showToast(`Switched page size to ${action.label}.`);
@@ -10955,21 +10942,20 @@ function applySuggestedPageSize(action) {
       state.customWidth = +action.widthIn.toFixed(1);
       state.customHeight = +action.heightIn.toFixed(1);
     }
-    dismissedPageSizeWarningKey = '';
     resetZoom();
     renderAll();
     showToast(`Switched to Custom page size (${state.customWidth} × ${state.customHeight} ${state.customUnit}).`);
   }
 }
 
-function syncPageSizeWarningUI(currentPage = null) {
+function syncPageSizeWarningUI() {
   const warn = state.model && state.pageSizeWarning?.hasWarning ? state.pageSizeWarning : null;
   const action = warn ? getPrimaryPageSizeAction(warn) : null;
 
   const menuDot = document.getElementById('menuPageSetupWarnDot');
   if (menuDot) menuDot.classList.toggle('hidden', !warn);
 
-  // 1. Inline warning inside Page Setup modal (always shown when active, never dismissed)
+  // Contextual inline warning inside Page Setup modal (non-blocking, only shown when a physical print size is too small)
   const setupEl = document.getElementById('pageSizeFitWarning');
   if (setupEl) {
     if (!warn) {
@@ -10987,30 +10973,6 @@ function syncPageSizeWarningUI(currentPage = null) {
       setupEl.classList.remove('hidden');
       const setupBtn = setupEl.querySelector('#btnSetupApplySuggestedPageSize');
       if (setupBtn && action) setupBtn.onclick = () => applySuggestedPageSize(action);
-    }
-  }
-
-  // 2. Floating non-print workspace banner (dismissible per paper size / model state)
-  const banner = document.getElementById('pageSizeWarningBanner');
-  if (banner) {
-    const warnKey = getPageSizeWarningKey(warn);
-    if (!warn || (warnKey && dismissedPageSizeWarningKey === warnKey)) {
-      banner.classList.add('hidden');
-    } else {
-      const txtEl = document.getElementById('pageSizeWarningText');
-      if (txtEl) txtEl.textContent = formatPageSizeWarningForPage(warn, currentPage?.id || null);
-      const applyBtn = document.getElementById('btnApplySuggestedPageSize');
-      if (applyBtn) {
-        if (action) {
-          applyBtn.textContent = action.buttonLabel;
-          applyBtn.classList.remove('hidden');
-          applyBtn.onclick = () => applySuggestedPageSize(action);
-        } else {
-          applyBtn.classList.add('hidden');
-          applyBtn.onclick = null;
-        }
-      }
-      banner.classList.remove('hidden');
     }
   }
 }
@@ -11333,7 +11295,7 @@ function syncPageLayoutControlsUI() {
   }
 
   renderLayoutGroupsList();
-  syncPageSizeWarningUI(state.pages[state.pageIdx] || null);
+  syncPageSizeWarningUI();
 }
 
 function syncMenuControls() {
@@ -14700,6 +14662,49 @@ state.diagnostics = [];
 state.seenDiagnosticKeys = new Set();
 let errFilter = 'all', errorBannerTimer = null;
 
+function buildLayoutDiagnostic(warn) {
+  if (!state.model || !warn || !warn.hasWarning) return null;
+  const v = warn.worstViolation || null;
+  const count = warn.affectedStepCount || (warn.violations?.length || 0);
+  const title = v && v.reason === 'area'
+    ? (count > 0 ? `Page size too small for step area (${count} step${count === 1 ? '' : 's'})` : 'Page size too small for step area')
+    : count === 1 && v
+      ? `Page size too small for Step ${v.stepNum} (${v.studSizeCm.toFixed(2)} cm/stud)`
+      : `Page size too small (${count} step${count === 1 ? '' : 's'}${v ? `, min ${v.studSizeCm.toFixed(2)} cm/stud` : ''})`;
+  return {
+    category: 'layout',
+    severity: 'warning',
+    title,
+    detail: warn.message,
+    stepNum: v?.stepNum ?? null,
+    stepAbsNum: v?.absStepNum ?? null,
+    stepId: v?.stepId || null,
+  };
+}
+
+function syncLayoutDiagnostic() {
+  if (!state.model) {
+    if (state.diagnostics.some(d => d.category === 'layout')) {
+      state.diagnostics = state.diagnostics.filter(d => d.category !== 'layout');
+      state.seenDiagnosticKeys = pruneSeenDiagnosticKeys(state.diagnostics, state.seenDiagnosticKeys);
+    }
+    updateErrorIndicators();
+    return;
+  }
+  const nonLayout = state.diagnostics.filter(d => d.category !== 'layout');
+  const layoutDiag = buildLayoutDiagnostic(state.pageSizeWarning);
+  const next = layoutDiag ? [...nonLayout, layoutDiag] : nonLayout;
+  state.diagnostics = next;
+  state.seenDiagnosticKeys = pruneSeenDiagnosticKeys(next, state.seenDiagnosticKeys);
+  const errModalEl = document.getElementById('errorsModal');
+  const isErrorsModalOpen = Boolean(errModalEl && !errModalEl.classList.contains('hidden'));
+  if (isErrorsModalOpen) {
+    state.seenDiagnosticKeys = acknowledgeDiagnostics(next, state.seenDiagnosticKeys);
+  }
+  updateErrorIndicators();
+  if (isErrorsModalOpen) renderErrorsModal();
+}
+
 function computeModelDiagnostics() {
   const diags = [];
   if (!state.model) {
@@ -14785,8 +14790,17 @@ function computeModelDiagnostics() {
     });
   }
 
+  // Preserve active page-size layout warning when pagination has already run for this model
+  const layoutDiag = buildLayoutDiagnostic(state.pageSizeWarning);
+  if (layoutDiag) diags.push(layoutDiag);
+
+  const pendingLayoutKeys = state.pageSizeWarning === null
+    ? Array.from(state.seenDiagnosticKeys).filter(k => typeof k === 'string' && k.startsWith('layout:'))
+    : [];
+
   state.diagnostics = diags;
   state.seenDiagnosticKeys = pruneSeenDiagnosticKeys(diags, state.seenDiagnosticKeys);
+  for (const k of pendingLayoutKeys) state.seenDiagnosticKeys.add(k);
   const errModalEl = document.getElementById('errorsModal');
   const isErrorsModalOpen = Boolean(errModalEl && !errModalEl.classList.contains('hidden'));
   if (isErrorsModalOpen) {
@@ -14810,20 +14824,31 @@ function acknowledgeCurrentDiagnostics() {
 function updateErrorIndicators() {
   const totalCount = state.diagnostics.length;
   const badgeCount = getMenuIconErrorBadgeCount(state.diagnostics, state.seenDiagnosticKeys);
+  const hasAnyError = state.diagnostics.some(d => d.severity === 'error');
+  const hasUnseenError = state.diagnostics.some(
+    d => d.severity === 'error' && !state.seenDiagnosticKeys.has(getDiagnosticKey(d)),
+  );
   const menuDot = document.getElementById('menuBtnErrorBadge');
   const menuBtn = document.getElementById('menuErrorsBtn');
+  const menuIcon = document.getElementById('menuErrorsIcon');
   const menuPill = document.getElementById('menuErrorCountBadge');
   if (menuDot) {
     const showDot = badgeCount > 0 && getSideMenuLayout().showMenuButtonErrorBadge;
     menuDot.textContent = formatMenuIconErrorBadge(badgeCount);
     menuDot.classList.toggle('hidden', !showDot);
+    menuDot.classList.toggle('bg-[var(--danger)]', hasUnseenError);
+    menuDot.classList.toggle('bg-[var(--warning)]', !hasUnseenError);
   }
   if (menuBtn) {
     menuBtn.classList.toggle('hidden', !state.model || totalCount === 0);
   }
+  if (menuIcon) {
+    menuIcon.classList.toggle('text-[var(--danger)]', hasAnyError);
+    menuIcon.classList.toggle('text-[var(--warning)]', !hasAnyError);
+  }
   if (menuPill) {
     menuPill.textContent = String(totalCount);
-    menuPill.className = 'px-2 py-0.5 rounded-md text-xs font-bold bg-red-600 text-white';
+    menuPill.className = `px-2 py-0.5 rounded font-mono text-xs font-semibold text-white ${hasAnyError ? 'bg-[var(--danger)]' : 'bg-[var(--warning)]'}`;
   }
 }
 
@@ -14848,8 +14873,15 @@ function dismissErrorBanner(immediate = false) {
 function showImportErrorBanner() {
   const n = state.diagnostics.length;
   if (n === 0) { dismissErrorBanner(true); return; }
+  const hasAnyError = state.diagnostics.some(d => d.severity === 'error');
+  const noun = hasAnyError ? 'issue' : 'warning';
   const txt = document.getElementById('errorBannerText');
-  if (txt) txt.textContent = n === 1 ? 'There is 1 issue.' : `There are ${n} issues.`;
+  if (txt) txt.textContent = n === 1 ? `There is 1 ${noun}.` : `There are ${n} ${noun}s.`;
+  const dot = document.getElementById('errorBannerDot');
+  if (dot) {
+    dot.classList.toggle('bg-[var(--primary)]', hasAnyError);
+    dot.classList.toggle('bg-[var(--warning)]', !hasAnyError);
+  }
   const el = document.getElementById('errorBanner');
   clearTimeout(errorBannerTimer);
   clearTimeout(errorBannerFadeTimer);
@@ -14868,6 +14900,7 @@ function renderErrorsModal() {
     missing_shape: diags.filter(d => d.category === 'missing_shape').length,
     floating: diags.filter(d => d.category === 'floating').length,
     color: diags.filter(d => d.category === 'color').length,
+    layout: diags.filter(d => d.category === 'layout').length,
   };
   if (!Object.prototype.hasOwnProperty.call(counts, errFilter)) errFilter = 'all';
 
@@ -14880,6 +14913,7 @@ function renderErrorsModal() {
     { id: 'missing_shape', label: `Missing Shapes (${counts.missing_shape})` },
     { id: 'floating', label: `Disconnected (${counts.floating})` },
     { id: 'color', label: `Colors (${counts.color})` },
+    { id: 'layout', label: `Page Layout (${counts.layout})` },
   ];
   const bar = document.getElementById('errFilterBar');
   bar.innerHTML = tabs.map(t => `
@@ -14926,6 +14960,22 @@ function renderErrorsModal() {
       </div>`;
   }
 
+  const activeLayoutWarn = state.pageSizeWarning?.hasWarning ? state.pageSizeWarning : null;
+  const activeLayoutAction = activeLayoutWarn ? getPrimaryPageSizeAction(activeLayoutWarn) : null;
+  if (counts.layout > 0 && activeLayoutWarn && (errFilter === 'all' || errFilter === 'layout')) {
+    html += `
+      <div class="p-3 rounded-2xl bg-[var(--warning-soft)] border border-[var(--warning)]/35 flex items-center justify-between gap-2 flex-wrap">
+        <div class="text-xs min-w-0 flex-1 basis-[200px]">
+          <div class="font-bold text-[var(--warning)]">Page size below readability target</div>
+          <div class="text-[var(--muted-foreground)]">Choose a larger print paper size (or Screen Fit) so every step keeps at least 1″ × 1″ area and 0.5 cm/stud.</div>
+        </div>
+        <div class="flex items-center gap-1.5 shrink-0 flex-wrap">
+          ${activeLayoutAction ? `<button id="errApplyLargerSizeQuick" type="button" class="px-3 py-1.5 rounded-md bg-[var(--warning)] text-white hover:opacity-90 font-semibold cursor-pointer">${escHtml(activeLayoutAction.buttonLabel)}</button>` : ''}
+          <button id="errOpenPageSetupQuick" type="button" class="px-3 py-1.5 rounded-md border border-[var(--warning)]/40 text-[var(--warning)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold cursor-pointer">Page Setup</button>
+        </div>
+      </div>`;
+  }
+
   html += filtered.map(d => {
     const isErr = d.severity === 'error';
     return `
@@ -14959,6 +15009,15 @@ function renderErrorsModal() {
     document.getElementById('errorsModal').classList.add('hidden');
     openBricksLibraryModal('manage');
     document.getElementById('libImportInput').click();
+  };
+  const quickLargerSize = body.querySelector('#errApplyLargerSizeQuick');
+  if (quickLargerSize && activeLayoutAction) quickLargerSize.onclick = () => {
+    applySuggestedPageSize(activeLayoutAction);
+  };
+  const quickPageSetup = body.querySelector('#errOpenPageSetupQuick');
+  if (quickPageSetup) quickPageSetup.onclick = () => {
+    document.getElementById('errorsModal').classList.add('hidden');
+    openPageSetupModal();
   };
   body.querySelectorAll('.jump-step-btn').forEach(btn => {
     btn.onclick = () => {
@@ -18244,23 +18303,10 @@ document.getElementById('btnZoomOut').onclick = () => setZoom(state.zoom * 0.82)
 document.getElementById('btnZoomFit').onclick = resetZoom;
 
 // Print & Page Setup + Parts List Setup
-const btnOpenPageSetupFromWarningEl = document.getElementById('btnOpenPageSetupFromWarning');
-if (btnOpenPageSetupFromWarningEl) {
-  btnOpenPageSetupFromWarningEl.onclick = () => openPageSetupModal();
-}
-const btnDismissPageSizeWarningEl = document.getElementById('btnDismissPageSizeWarning');
-if (btnDismissPageSizeWarningEl) {
-  btnDismissPageSizeWarningEl.onclick = () => {
-    dismissedPageSizeWarningKey = getPageSizeWarningKey(state.pageSizeWarning);
-    const banner = document.getElementById('pageSizeWarningBanner');
-    if (banner) banner.classList.add('hidden');
-  };
-}
 const paperFormatSelectEl = document.getElementById('paperFormatSelect');
 if (paperFormatSelectEl) {
   paperFormatSelectEl.onchange = (e) => {
     state.paperFormat = e.target.value;
-    dismissedPageSizeWarningKey = '';
     resetZoom();
     renderAll();
   };
@@ -19296,6 +19342,7 @@ async function handleIncomingProjectFile(f) {
     syncLegacyLayoutFlag();
     state.pageIdx = 0; state.undoStack = []; state.redoStack = [];
     state.seenDiagnosticKeys = new Set();
+    state.pageSizeWarning = null;
     errFilter = 'all';
     lastSourceRecord = { kind: 'project', fileName: f.name };
     computeModelDiagnostics();
@@ -20390,6 +20437,7 @@ function finishImport(parsed, mode, subdivisionPlan = null, isPostImport = false
     lastSourceRecord = { ...lastSourceRecord, importMode: mode, subdivisionPlan: subdivisionPlan || null };
     dbPut('lastModel', lastSourceRecord);
   }
+  state.pageSizeWarning = null;
   computeModelDiagnostics();
   resetZoom(); renderAll();
   const steps = getAllSteps(state.model);
@@ -20776,7 +20824,6 @@ async function closeCurrentModel() {
     'importModal',
     'missingPartsModal',
     'errorBanner',
-    'pageSizeWarningBanner',
   ]) {
     const el = document.getElementById(modalId);
     if (el) el.classList.add('hidden');
@@ -20807,7 +20854,6 @@ async function closeCurrentModel() {
   state.pages = [];
   state.pageIdx = 0;
   state.pageSizeWarning = null;
-  dismissedPageSizeWarningKey = '';
   state.mode = 'pan';
   state.stepSubTab = 'camera';
   state.selectedStepId = null;

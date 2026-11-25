@@ -46,12 +46,12 @@ When the grid is left on Auto (`cols: 'auto'`, `rows: 'auto'`, `mixedLayout: 'ev
    - Packs as many consecutive eligible steps onto each page as simultaneously satisfy both constraints (respecting page breaks, group boundaries, sequential minifig pages, full-page submodel callouts, and keeping minifigure Pose + Place pairs together).
    - Evaluates all tight `(cols, rows)` grids (up to `MAX_SMART_AUTO_GRID_TRACKS = 24`) and picks the grid that maximizes rendered piece scale with balanced cell aspect ratios and minimal unused corners. Stores `page.autoGrid` on every smart-auto page so live DOM previews and PDF exports share identical grids.
 4. **Larger Page Size Warnings (`analyzePageSizeFit` + `formatPageSizeWarningForPage`)**:
+   - Applies only to **physical print paper formats** (`letter`, `a4`, `a5`, `b5`, `half_letter`, `legal`, `tabloid`, `a3`, `square`, `custom`). Default **`Screen Fit` (`screen`)** has no fixed physical sheet size and supports interactive zoom, so it never triggers a physical print-size warning while still using Smart Auto Grid packing.
    - Evaluates every step at `1×1` (full-page 1-up allocation). Whenever a step cannot satisfy the minimum `1″ × 1″ (+ margins)` step area or `1 stud ≥ 0.5 cm` even at 1 step per page, computes the smallest larger standard paper format(s) (or minimum Custom sheet dimensions when larger than A3/Tabloid) that satisfy every step.
-   - Surfaces actionable non-print warnings with one-click larger-page switching across:
-     - **Floating workspace banner** (`#pageSizeWarningBanner`, page-aware and dismissible per paper size/model state),
-     - **Page Setup modal** (`#pageSizeFitWarning`, always visible while triggered),
-     - **Floating Page contextual card** (`Page` mode), and
-     - **Menu drawer indicator** (`#menuPageSetupWarnDot`).
+   - Surfaces unobtrusively through the app's **regular warning & diagnostics pipeline** (never as a floating canvas overlay):
+     - **Model Issues (`state.diagnostics`)**: Emits a `category: 'layout'`, `severity: 'warning'` entry synchronized on every pagination pass (`syncLayoutDiagnostic()`), surfaced via the amber warning badge on `#btnOpenMenu` / `Model Issues` drawer row and the `Page Layout` filter tab inside `#errorsModal` with quick actions (`Use <Suggested Size>`, `Page Setup`, and `Step N →` jump).
+     - **Page Setup modal** (`#pageSizeFitWarning`) & **Menu drawer dot** (`#menuPageSetupWarnDot`): Contextual inline warning right below Paper Size / Orientation with one-click switching.
+     - **Page Mode contextual card** (`Page` mode): Cleanly stacked inline notice when viewing Page layout tools.
 
 ## Live & PDF Rendering Parity
 - `computePageSlotRects(slotCount, spec, isLandscape, contentW, contentH, gap, resolvedGridOverride)` computes deterministic non-overlapping rectangles `{ x, y, w, h, isFeatured, isCompact }[]`, honoring `page.autoGrid` when Smart Auto Grid is active.

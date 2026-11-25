@@ -389,6 +389,39 @@ describe('pageLayout engine', () => {
     expect(resolved.hasWarning).toBe(false);
   });
 
+  it('never emits a physical page-size warning on default Screen Fit (even for huge models)', () => {
+    const trainSteps: SmartAutoStepMetric[] = [
+      { stepId: 'bogie_1', stepNum: 1, viewRadiusLdu: 60, pliUniqueCount: 2 },
+      { stepId: 'bogie_2', stepNum: 2, viewRadiusLdu: 65, pliUniqueCount: 2 },
+      { stepId: 'bogie_3', stepNum: 3, viewRadiusLdu: 70, pliUniqueCount: 2 },
+      { stepId: 'bogie_4', stepNum: 4, viewRadiusLdu: 75, pliUniqueCount: 2 },
+      { stepId: 'full_train', stepNum: 156, viewRadiusLdu: 700, pliUniqueCount: 4 },
+    ];
+
+    // On Screen Fit (e.g., portrait mobile canonical 7.71" × 12.44"), Smart Auto still packs
+    // early small steps dynamically (>2/page) and gives giant steps 1/page, with zero print-size warning.
+    const mobileScreenCtx = buildSmartAutoPageContext({
+      pageWidthIn: 7.71,
+      pageHeightIn: 12.44,
+      density: 'balanced',
+    });
+    expect(packSmartAutoPage(trainSteps.slice(0, 4), mobileScreenCtx).count).toBeGreaterThanOrEqual(4);
+    expect(packSmartAutoPage([trainSteps[4]], mobileScreenCtx).count).toBe(1);
+
+    const screenCheck = analyzePageSizeFit({
+      stepChecks: trainSteps.map((metric, idx) => ({ metric, pageId: `pg_${idx}`, pageNum: idx + 1 })),
+      currentFormatId: 'screen',
+      currentOrientation: 'portrait',
+      currentPageWidthIn: 7.71,
+      currentPageHeightIn: 12.44,
+      density: 'balanced',
+    });
+    expect(screenCheck.hasWarning).toBe(false);
+    expect(screenCheck.violations).toEqual([]);
+    expect(screenCheck.affectedStepCount).toBe(0);
+    expect(screenCheck.message).toBe('');
+  });
+
   it('supports Smart Auto resolvedGridOverride > 6 tracks in computePageSlotRects with zero overlap', () => {
     const autoSpec = createDefaultPageLayoutSpec();
     const rects = computePageSlotRects(28, autoSpec, true, 1400, 900, 8, { cols: 7, rows: 4 });

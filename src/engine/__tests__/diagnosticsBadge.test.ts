@@ -120,4 +120,35 @@ describe('Menu icon error badge acknowledgement', () => {
     expect(formatMenuIconErrorBadge(99)).toBe('99');
     expect(formatMenuIconErrorBadge(100)).toBe('99+');
   });
+
+  it('tracks page-size layout warnings cleanly across acknowledgement, format switch, and resolution', () => {
+    const a5LayoutWarning: ModelDiagnosticLike = {
+      category: 'layout',
+      severity: 'warning',
+      title: 'Page size too small (4 steps, min 0.34 cm/stud)',
+      detail: '4 steps cannot fit at A5 while keeping 1 stud >= 0.5 cm. Try US Letter.',
+      stepNum: 12,
+    };
+    const halfLetterWarning: ModelDiagnosticLike = {
+      category: 'layout',
+      severity: 'warning',
+      title: 'Page size too small (4 steps, min 0.31 cm/stud)',
+      detail: '4 steps cannot fit at Half Letter while keeping 1 stud >= 0.5 cm. Try US Letter.',
+      stepNum: 12,
+    };
+
+    // New layout warning shows on badge until Model Issues is viewed
+    expect(getMenuIconErrorBadgeCount([a5LayoutWarning], new Set())).toBe(1);
+    let seen = acknowledgeDiagnostics([a5LayoutWarning], new Set());
+    expect(getMenuIconErrorBadgeCount([a5LayoutWarning], seen)).toBe(0);
+
+    // Switching to another too-small paper size re-alerts with a distinct key
+    seen = pruneSeenDiagnosticKeys([halfLetterWarning], seen);
+    expect(getMenuIconErrorBadgeCount([halfLetterWarning], seen)).toBe(1);
+
+    // Switching to a fitting paper size (or Screen Fit) resolves and prunes the warning
+    seen = pruneSeenDiagnosticKeys([], seen);
+    expect(seen.size).toBe(0);
+    expect(getMenuIconErrorBadgeCount([], seen)).toBe(0);
+  });
 });

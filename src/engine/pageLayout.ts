@@ -1323,11 +1323,14 @@ function getFormatDisplayName(
 }
 
 /**
- * Checks every step in the manual against the active page size at 1 step per page
+ * Checks every step in the manual against the active physical page size at 1 step per page
  * (the largest possible allocation on the current sheet). Whenever any step fails
  * the minimum step area (`1" × 1"` + margins) or minimum piece size (`1 stud ≥ 0.5 cm`),
  * computes the smallest larger standard paper format(s) — or minimum Custom size —
  * that can fit every step cleanly.
+ *
+ * `screen` ("Screen Fit") has no fixed physical paper dimensions and supports interactive
+ * zoom, so physical print-size warnings are never emitted for `'screen'`.
  */
 export function analyzePageSizeFit(params: {
   stepChecks: readonly PageSizeStepCheck[];
@@ -1344,6 +1347,24 @@ export function analyzePageSizeFit(params: {
   const specs = params.paperFormatSpecs ?? PAPER_FORMAT_SPECS;
   const curW = Math.max(0.5, Number.isFinite(params.currentPageWidthIn) ? params.currentPageWidthIn : 11);
   const curH = Math.max(0.5, Number.isFinite(params.currentPageHeightIn) ? params.currentPageHeightIn : 8.5);
+
+  // Screen Fit adapts to the display viewport (with interactive zoom) and is not a fixed
+  // physical print sheet, so never nag the user to pick a larger physical paper size.
+  if (params.currentFormatId === 'screen') {
+    return {
+      hasWarning: false,
+      affectedStepCount: 0,
+      affectedPageIds: [],
+      violations: [],
+      worstViolation: null,
+      suggestedFormats: [],
+      minRequiredPageWidthIn: curW,
+      minRequiredPageHeightIn: curH,
+      message: '',
+      shortMessage: '',
+    };
+  }
+
   const curOrient: 'landscape' | 'portrait' =
     params.currentOrientation === 'portrait' ? 'portrait' : 'landscape';
 
@@ -1607,7 +1628,7 @@ export function analyzePageSizeFit(params: {
 }
 
 /**
- * Formats a concise page-aware warning string for the floating workspace banner.
+ * Formats a concise page-aware warning string for contextual page-layout warnings.
  * When the user is viewing an affected page, calls out the step(s) on that page;
  * otherwise returns the manual-wide summary.
  */
