@@ -26,6 +26,7 @@ export interface MenuVisibility {
   showModelIssues: boolean;
   showPagePrintSection: boolean;
   showPageSetup: boolean;
+  showStyle: boolean;
   showBomSetup: boolean;
   showPrintPdf: boolean;
   showFetchLibrary: boolean;
@@ -63,9 +64,10 @@ export function computeMenuVisibility(input: MenuVisibilityState): MenuVisibilit
   const showModelIssues = hasModel && input.diagnosticCount > 0;
 
   const showPageSetup = hasModel;
+  const showStyle = hasModel;
   const showBomSetup = hasModel && input.showPartsList !== false;
   const showPrintPdf = hasPages;
-  const showPagePrintSection = showPageSetup || showBomSetup || showPrintPdf;
+  const showPagePrintSection = showPageSetup || showStyle || showBomSetup || showPrintPdf;
 
   const showFetchLibrary = hasModel && (input.hasMissingPartsToFetch || input.isFetchingLibrary);
   const showClearLibrary = input.savedLibraryCount > 0;
@@ -81,6 +83,7 @@ export function computeMenuVisibility(input: MenuVisibilityState): MenuVisibilit
     showModelIssues,
     showPagePrintSection,
     showPageSetup,
+    showStyle,
     showBomSetup,
     showPrintPdf,
     showFetchLibrary,

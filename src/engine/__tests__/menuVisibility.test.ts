@@ -28,6 +28,7 @@ describe('computeMenuVisibility', () => {
       showModelIssues: false,
       showPagePrintSection: false,
       showPageSetup: false,
+      showStyle: false,
       showBomSetup: false,
       showPrintPdf: false,
       showFetchLibrary: false,
@@ -119,6 +120,7 @@ describe('computeMenuVisibility', () => {
     );
     expect(disabled.showBomSetup).toBe(false);
     expect(disabled.showPageSetup).toBe(true);
+    expect(disabled.showStyle).toBe(true);
     expect(disabled.showPagePrintSection).toBe(true);
   });
 });

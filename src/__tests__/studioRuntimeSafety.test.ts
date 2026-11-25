@@ -655,6 +655,8 @@ describe('studioRuntime safety checks', () => {
     expect(drawerHtml).toContain('id="desktopModelChip"');
     expect(drawerHtml).toContain('Brick Instruction Works');
     expect(drawerHtml).toContain('id="menuDrawerPanel"');
+    expect(drawerHtml).toContain('id="menuStyleBtn"');
+    expect(drawerHtml).toContain('id="menuStyleSummary"');
     // No separate close-button/dark-rail replacement header
     expect(drawerHtml).not.toContain('id="btnCloseMenu"');
     expect(html).not.toContain('id="menuDismissArea"');
@@ -674,6 +676,9 @@ describe('studioRuntime safety checks', () => {
     expect(runtime).toContain('closeSideMenuOverlayState(');
     expect(runtime).toContain('computeWorkspaceViewportSize(');
     expect(runtime).toContain('function syncSideMenuLayout(');
+    expect(runtime).toContain("setVisible('menuStyleBtn', vis.showStyle)");
+    expect(runtime).toContain("setTitle('menuStyleBtn', 'toggleStyle'");
+    expect(runtime).toContain('menuStyleBtnEl.contains(t)');
   });
 
   it('switches the bottom mode pill back to Pan when clicking blank stage space outside #pageFrame', () => {

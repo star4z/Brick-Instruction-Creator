@@ -4,7 +4,7 @@
 
 ## 1. Goals
 
-1. **Expanded by Default on Desktop (`>= 1024px`)**: Desktop users immediately have access to model summary, file import/export, Page Setup, Parts List Setup, Step Generation, Bricks Library, and Page Inserts without first opening a hidden drawer.
+1. **Expanded by Default on Desktop (`>= 1024px`)**: Desktop users immediately have access to model summary, file import/export, Page Setup, Style, Parts List Setup, Step Generation, Bricks Library, and Keyboard Shortcuts without first opening a hidden drawer.
 2. **Unified Menu Button & Site Title**: Instead of a separate modal drawer sliding over and replacing the top-left menu button (`#btnOpenMenu`) and site title (`Brick Instruction Works`) with a dark header bar and close (`×`) button, the side menu **combines directly with** the top-left menu button and site title in one continuous `#menuDrawer` surface.
 3. **Clean Brand Identity**: No `"Instruction Studio"` subtitle appears in the side menu header — only the 3-plume emblem and `"Brick Instruction Works"`.
 4. **Non-Obstructing Docked Workspace**: When expanded on desktop, the side menu docks cleanly at the left edge (`12px` inset, `328px` wide) without a dark backdrop scrim, and `#workspaceArea` reserves `340px` on the left so the welcome sheet, manual page stage, zoom/pan framing, contextual overlays, bottom dock, error banner, and toast notifications remain centered and fully interactive.

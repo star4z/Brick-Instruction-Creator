@@ -12239,7 +12239,12 @@ function syncMenuControls() {
   setVisible('menuErrorsBtn', vis.showModelIssues);
   setVisible('menuPagePrintSection', vis.showPagePrintSection);
   setVisible('menuPageSetupBtn', vis.showPageSetup);
+  setVisible('menuStyleBtn', vis.showStyle);
   setVisible('menuBomSetupBtn', vis.showBomSetup);
+  const menuStyleSum = document.getElementById('menuStyleSummary');
+  if (menuStyleSum) {
+    menuStyleSum.textContent = getActiveTheme().name;
+  }
   setVisible('menuPrintBtn', vis.showPrintPdf);
   setVisible('menuExportHtmlBtn', vis.showPrintPdf);
   setVisible('menuFetchLibWrap', vis.showFetchLibrary);
@@ -18233,6 +18238,7 @@ if (menuBackdropEl) menuBackdropEl.onclick = closeMenu;
 
 const stylePopEl = document.getElementById('stylePopover');
 const btnStylePopEl = document.getElementById('btnStylePop');
+const menuStyleBtnEl = document.getElementById('menuStyleBtn');
 
 function updateStylePopoverTail() {
   if (!stylePopEl || !btnStylePopEl || stylePopEl.classList.contains('hidden')) return;
@@ -18250,6 +18256,7 @@ function setStylePopoverOpen(open) {
     stylePopEl.classList.add('hidden');
     btnStylePopEl.classList.remove('style-chip-open');
     btnStylePopEl.setAttribute('aria-expanded', 'false');
+    menuStyleBtnEl?.setAttribute('aria-expanded', 'false');
     closeThemeFontPicker();
     returnToImportWizard();
     return;
@@ -18259,6 +18266,7 @@ function setStylePopoverOpen(open) {
   stylePopEl.classList.toggle('hidden', !open);
   btnStylePopEl.classList.toggle('style-chip-open', Boolean(open && !isWizardStyle));
   btnStylePopEl.setAttribute('aria-expanded', open && !isWizardStyle ? 'true' : 'false');
+  menuStyleBtnEl?.setAttribute('aria-expanded', open && !isWizardStyle ? 'true' : 'false');
   if (open) {
     syncMenuControls();
     if (!isWizardStyle) updateStylePopoverTail();
@@ -18270,6 +18278,13 @@ function setStylePopoverOpen(open) {
 btnStylePopEl.onclick = () => {
   setStylePopoverOpen(stylePopEl.classList.contains('hidden'));
 };
+if (menuStyleBtnEl) {
+  menuStyleBtnEl.onclick = () => {
+    const shouldOpen = Boolean(stylePopEl && stylePopEl.classList.contains('hidden'));
+    closeMenu();
+    setStylePopoverOpen(shouldOpen);
+  };
+}
 const btnBackStyleWizardEl = document.getElementById('btnBackStyleWizard');
 if (btnBackStyleWizardEl) btnBackStyleWizardEl.onclick = () => setStylePopoverOpen(false);
 const btnCloseStyleWizardEl = document.getElementById('btnCloseStyleWizard');
@@ -18287,7 +18302,7 @@ document.addEventListener('pointerdown', (e) => {
   if (!stylePopEl || stylePopEl.classList.contains('hidden')) return;
   if (importWizardState.active && importWizardState.subpage === 'style') return;
   const t = e.target;
-  if (t instanceof Node && (stylePopEl.contains(t) || (btnStylePopEl && btnStylePopEl.contains(t)))) return;
+  if (t instanceof Node && (stylePopEl.contains(t) || (btnStylePopEl && btnStylePopEl.contains(t)) || (menuStyleBtnEl && menuStyleBtnEl.contains(t)))) return;
   suppressedBlankResetEvent = e;
   setStylePopoverOpen(false);
 }, true);
@@ -18393,6 +18408,9 @@ function syncStylePanel() {
   const t = getActiveTheme();
   const isBuiltIn = Boolean(t.builtIn || BUILT_IN_THEME_IDS.has(t.id));
   renderThemeStrip();
+
+  const menuStyleSum = document.getElementById('menuStyleSummary');
+  if (menuStyleSum) menuStyleSum.textContent = t.name;
 
   const nameInput = document.getElementById('themeNameInput');
   if (nameInput && document.activeElement !== nameInput && nameInput.value !== t.name) nameInput.value = t.name;
@@ -19074,6 +19092,7 @@ function syncShortcutTooltips() {
   setTitle('menuImportBtn', 'importFile', 'Import Model or Project');
   setTitle('menuSaveProj', 'exportProject', 'Export project (.biw)');
   setTitle('menuPageSetupBtn', 'openPageSetup', 'Page Setup');
+  setTitle('menuStyleBtn', 'toggleStyle', 'Style & Themes');
   setTitle('menuBomSetupBtn', 'openBomSetup', 'Parts List Setup');
   setTitle('menuPrintBtn', 'openExport', 'Print / Export PDF');
   setTitle('menuBricksLibBtn', 'openBricksLibrary', 'Bricks Library');
