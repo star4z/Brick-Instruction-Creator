@@ -292,10 +292,10 @@ function buildStaticFallbackHtml(payload: InteractiveHtmlPayload, safeEditorUrl:
   const pgLabel = (n: number) => (wordless ? String(n) : `Page ${n}`);
   const rotSvg = (kind?: string) => {
     if (kind === 'flip_vertical') {
-      return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="10.2" width="8" height="3.6" rx="0.9" fill="currentColor" stroke="none"/><path d="M5.5 9.5C6.2 5.6 8.9 3.6 12 3.6c3.2 0 5.9 2.1 6.6 5.9"/><polyline points="16 7.5 18.8 10 21 7.2"/><path d="M18.5 14.5c-.7 3.9-3.4 5.9-6.5 5.9-3.2 0-5.9-2.1-6.6-5.9"/><polyline points="8 16.5 5.2 14 3 16.8"/></svg>';
+      return '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 10C5.3 5.7 8.4 3.5 12 3.5c3.4 0 6.3 2 7.2 5.6"/><polyline points="16.4 7.3 19.3 9.4 21.1 6.2"/><path d="M19.5 14c-.8 4.3-3.9 6.5-7.5 6.5-3.4 0-6.3-2-7.2-5.6"/><polyline points="7.6 16.7 4.7 14.6 2.9 17.8"/></svg>';
     }
     const mirror = kind === 'yaw_90_ccw' ? ' transform="translate(24 0) scale(-1 1)"' : '';
-    return `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><g${mirror}><path d="M20.5 11.5A8.5 8.5 0 0 0 6.2 5.4L4 7.6"/><polyline points="4 3.5 4 7.6 8.1 7.6"/><path d="M3.5 12.5A8.5 8.5 0 0 0 17.8 18.6L20 16.4"/><polyline points="20 20.5 20 16.4 15.9 16.4"/></g></svg>`;
+    return `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><g${mirror}><path d="M19.8 10.2A8.2 8.2 0 0 0 6.1 6.3L4.4 8"/><polyline points="4.4 4.2 4.4 8 8.2 8"/><path d="M4.2 13.8A8.2 8.2 0 0 0 17.9 17.7L19.6 16"/><polyline points="19.6 19.8 19.6 16 15.8 16"/></g></svg>`;
   };
   const partsIconSvg = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.6"/></svg>';
   const brickIconSvg = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="9" width="18" height="11" rx="2"/><path d="M6.5 9V6.2A1.2 1.2 0 0 1 7.7 5h2.6a1.2 1.2 0 0 1 1.2 1.2V9"/><path d="M12.5 9V6.2A1.2 1.2 0 0 1 13.7 5h2.6a1.2 1.2 0 0 1 1.2 1.2V9"/></svg>';
@@ -690,12 +690,12 @@ ${customFontFacesCss}  :root {
     font-size: 13px; font-weight: 800; box-shadow: 0 3px 10px rgba(0,0,0,0.16);
   }
   .step-cue {
-    display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px 4px 5px; border-radius: 999px;
+    display: inline-flex; align-items: center; gap: 7px; padding: 4px 13px 4px 5px; border-radius: 999px;
     background: #ffffff; color: #18181b; border: 2px solid var(--accent);
-    font-size: 12px; font-weight: 800; width: fit-content; box-shadow: 0 3px 10px rgba(0,0,0,0.18);
+    font-size: 13px; font-weight: 800; width: fit-content; box-shadow: 0 3px 10px rgba(0,0,0,0.18);
   }
   .step-cue-icon {
-    width: 24px; height: 24px; border-radius: 999px; background: var(--accent); color: #ffffff;
+    width: 30px; height: 30px; border-radius: 999px; background: var(--accent); color: #ffffff;
     display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
   }
 
@@ -1644,10 +1644,10 @@ ${staticFallbackHtml}
     const isWordless = Boolean(DATA.wordless);
     const rotIconSvg = (kind) => {
       if (kind === 'flip_vertical') {
-        return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="10.2" width="8" height="3.6" rx="0.9" fill="currentColor" stroke="none"/><path d="M5.5 9.5C6.2 5.6 8.9 3.6 12 3.6c3.2 0 5.9 2.1 6.6 5.9"/><polyline points="16 7.5 18.8 10 21 7.2"/><path d="M18.5 14.5c-.7 3.9-3.4 5.9-6.5 5.9-3.2 0-5.9-2.1-6.6-5.9"/><polyline points="8 16.5 5.2 14 3 16.8"/></svg>';
+        return '<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 10C5.3 5.7 8.4 3.5 12 3.5c3.4 0 6.3 2 7.2 5.6"/><polyline points="16.4 7.3 19.3 9.4 21.1 6.2"/><path d="M19.5 14c-.8 4.3-3.9 6.5-7.5 6.5-3.4 0-6.3-2-7.2-5.6"/><polyline points="7.6 16.7 4.7 14.6 2.9 17.8"/></svg>';
       }
       const mirror = kind === 'yaw_90_ccw' ? ' transform="translate(24 0) scale(-1 1)"' : '';
-      return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><g' + mirror + '><path d="M20.5 11.5A8.5 8.5 0 0 0 6.2 5.4L4 7.6"/><polyline points="4 3.5 4 7.6 8.1 7.6"/><path d="M3.5 12.5A8.5 8.5 0 0 0 17.8 18.6L20 16.4"/><polyline points="20 20.5 20 16.4 15.9 16.4"/></g></svg>';
+      return '<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><g' + mirror + '><path d="M19.8 10.2A8.2 8.2 0 0 0 6.1 6.3L4.4 8"/><polyline points="4.4 4.2 4.4 8 8.2 8"/><path d="M4.2 13.8A8.2 8.2 0 0 0 17.9 17.7L19.6 16"/><polyline points="19.6 19.8 19.6 16 15.8 16"/></g></svg>';
     };
 
     if (pg.kind === 'steps' && step) {

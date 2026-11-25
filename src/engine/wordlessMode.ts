@@ -331,14 +331,24 @@ export function buildMinifigPoseIconSvg(kind: MinifigIndicatorKind | string, siz
   return `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="width:${s}px;height:${s}px;flex-shrink:0">${body}</svg>`;
 }
 
-/** Vertical flip-over icon inner SVG (brick silhouette + top/bottom flip arcs) for wordless rotation badge. */
+/** Vertical flip-over icon inner SVG (clean opposing flip arcs with open center, no center dash). */
 export function buildFlipVerticalIconInnerSvg(): string {
   return `
-    <rect x="8" y="10.2" width="8" height="3.6" rx="0.9" fill="currentColor" stroke="none"/>
-    <path d="M5.5 9.5C6.2 5.6 8.9 3.6 12 3.6c3.2 0 5.9 2.1 6.6 5.9"/>
-    <polyline points="16 7.5 18.8 10 21 7.2"/>
-    <path d="M18.5 14.5c-.7 3.9-3.4 5.9-6.5 5.9-3.2 0-5.9-2.1-6.6-5.9"/>
-    <polyline points="8 16.5 5.2 14 3 16.8"/>`;
+    <path d="M4.5 10C5.3 5.7 8.4 3.5 12 3.5c3.4 0 6.3 2 7.2 5.6"/>
+    <polyline points="16.4 7.3 19.3 9.4 21.1 6.2"/>
+    <path d="M19.5 14c-.8 4.3-3.9 6.5-7.5 6.5-3.4 0-6.3-2-7.2-5.6"/>
+    <polyline points="7.6 16.7 4.7 14.6 2.9 17.8"/>`;
+}
+
+/** Horizontal yaw rotation icon inner SVG (spacious opposing circular arcs with open center). */
+export function buildYawRotateIconInnerSvg(ccw = false): string {
+  const mirror = ccw ? ' transform="translate(24 0) scale(-1 1)"' : '';
+  return `<g${mirror}>
+    <path d="M19.8 10.2A8.2 8.2 0 0 0 6.1 6.3L4.4 8"/>
+    <polyline points="4.4 4.2 4.4 8 8.2 8"/>
+    <path d="M4.2 13.8A8.2 8.2 0 0 0 17.9 17.7L19.6 16"/>
+    <polyline points="19.6 19.8 19.6 16 15.8 16"/>
+  </g>`;
 }
 
 // =========================================================================

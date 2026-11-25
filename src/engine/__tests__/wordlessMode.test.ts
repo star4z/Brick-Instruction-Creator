@@ -195,7 +195,8 @@ describe('Wordless Instructions Mode Engine', () => {
     }
 
     const flipInner = buildFlipVerticalIconInnerSvg();
-    expect(flipInner).toContain('<rect');
     expect(flipInner).toContain('<path');
+    expect(flipInner).toContain('<polyline');
+    expect(flipInner).not.toContain('<rect');
   });
 });

@@ -417,6 +417,7 @@ import {
   buildPoseAdjustIconSvg,
   buildStepHintIconSvg,
   buildStepsBookletIconSvg,
+  buildYawRotateIconInnerSvg,
   classifyStepHintAction,
   drawAttachArrowIconCanvas,
   drawBrickGlyphCanvas,
@@ -435,6 +436,10 @@ import {
   resolveEffectiveBomConfig,
   resolvePageNumberFormatForMode,
 } from './engine/wordlessMode';
+import {
+  computeRotationBadgeMetrics,
+  computeRotationBadgePlacement,
+} from './engine/rotationBadgeLayout';
 
 const BRAND_LOGO_ROTATION_DEG = 12;
 const BRAND_LOGO_PATHS: ReadonlyArray<readonly [string, string]> = [
@@ -8527,77 +8532,52 @@ function renderRotationCueBadgeHtml(cue, theme, typo, isTightSlot = false, wordl
   if (!cue || cue === 'none') return '';
   const disp = getRotationCueDisplay(cue, wordless);
   const label = disp.text;
-  const medallionPx = Math.max(isTightSlot ? 24 : 30, Math.round(typo.pt(isTightSlot ? 20 : 26)));
-  const svgPx = Math.max(15, Math.round(medallionPx * 0.66));
-  const fontPx = Math.max(isTightSlot ? 10 : 12, Math.round(typo.pt(isTightSlot ? 9 : 11)));
-  const padY = Math.max(3, Math.round(typo.pt(isTightSlot ? 2.5 : 3.5)));
-  const padL = Math.max(3, Math.round(typo.pt(isTightSlot ? 2.5 : 3.5)));
-  const padR = Math.max(9, Math.round(typo.pt(isTightSlot ? 7.5 : 10.5)));
-  const gapPx = Math.max(5, Math.round(typo.pt(isTightSlot ? 4.5 : 6)));
-  const borderPx = Math.max(2, Math.round(typo.pt(2.2)));
-
-  let svgInner = '';
-  if (cue === 'flip_vertical') {
-    svgInner = wordless
-      ? buildFlipVerticalIconInnerSvg()
-      : `
-      <path d="M5 10.5C5 6.3 8.1 3.5 12 3.5c3.9 0 7 2.8 7 7"/>
-      <polyline points="16.2 8.2 19 11 21.8 8.2"/>
-      <path d="M19 13.5c0 4.2-3.1 7-7 7-3.9 0-7-2.8-7-7"/>
-      <polyline points="7.8 15.8 5 13 2.2 15.8"/>`;
-  } else {
-    const mirror = cue === 'yaw_90_ccw' ? ' transform="translate(24 0) scale(-1 1)"' : '';
-    const pivotDot = cue === 'yaw_180' ? '<circle cx="12" cy="12" r="2.2" fill="currentColor" stroke="none"/>' : '';
-    svgInner = `<g${mirror}>
-      <path d="M20.5 11.5A8.5 8.5 0 0 0 6.2 5.4L4 7.6"/>
-      <polyline points="4 3.5 4 7.6 8.1 7.6"/>
-      <path d="M3.5 12.5A8.5 8.5 0 0 0 17.8 18.6L20 16.4"/>
-      <polyline points="20 20.5 20 16.4 15.9 16.4"/>
-      ${pivotDot}
-    </g>`;
-  }
+  const m = computeRotationBadgeMetrics((p) => typo.pt(p), isTightSlot, disp);
+  const svgInner = cue === 'flip_vertical'
+    ? buildFlipVerticalIconInnerSvg()
+    : buildYawRotateIconInnerSvg(cue === 'yaw_90_ccw');
 
   if (disp.iconOnly) {
-    const outerPx = medallionPx + padY * 2;
-    const iconSvgPx = Math.max(17, Math.round(medallionPx * 0.72));
-    return `<span class="inline-flex items-center justify-center rounded-full bg-white shrink-0" style="width:${outerPx}px;height:${outerPx}px;border:${borderPx}px solid ${theme.accent};box-shadow:0 3px 10px rgba(0,0,0,0.18)" title="${escHtml(disp.ariaLabel)}" aria-label="${escHtml(disp.ariaLabel)}">
-      <span class="rounded-full flex items-center justify-center shrink-0" style="width:${medallionPx}px;height:${medallionPx}px;background:${theme.accent};color:#ffffff">
-        <svg style="width:${iconSvgPx}px;height:${iconSvgPx}px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${svgInner}</svg>
+    return `<span class="inline-flex items-center justify-center rounded-full bg-white shrink-0" style="width:${m.outerH}px;height:${m.outerH}px;border:${m.borderPx}px solid ${theme.accent};box-shadow:0 3px 12px rgba(0,0,0,0.16)" title="${escHtml(disp.ariaLabel)}" aria-label="${escHtml(disp.ariaLabel)}">
+      <span class="rounded-full flex items-center justify-center shrink-0" style="width:${m.medallionPx}px;height:${m.medallionPx}px;background:${theme.accent};color:#ffffff">
+        <svg style="width:${m.svgPx}px;height:${m.svgPx}px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.05" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${svgInner}</svg>
       </span>
     </span>`;
   }
 
-  return `<span class="inline-flex items-center font-extrabold rounded-full bg-white text-[#18181b] whitespace-nowrap shrink-0" style="gap:${gapPx}px;border:${borderPx}px solid ${theme.accent};font-size:${fontPx}px;padding:${padY}px ${padR}px ${padY}px ${padL}px;box-shadow:0 3px 10px rgba(0,0,0,0.18)" title="${escHtml(disp.ariaLabel)}">
-    <span class="rounded-full flex items-center justify-center shrink-0" style="width:${medallionPx}px;height:${medallionPx}px;background:${theme.accent};color:#ffffff">
-      <svg style="width:${svgPx}px;height:${svgPx}px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${svgInner}</svg>
+  return `<span class="inline-flex items-center font-extrabold rounded-full bg-white text-[#18181b] whitespace-nowrap shrink-0" style="gap:${m.gapPx}px;border:${m.borderPx}px solid ${theme.accent};font-size:${m.fontPx}px;padding:${m.padY}px ${m.padR}px ${m.padY}px ${m.padL}px;box-shadow:0 3px 12px rgba(0,0,0,0.16)" title="${escHtml(disp.ariaLabel)}">
+    <span class="rounded-full flex items-center justify-center shrink-0" style="width:${m.medallionPx}px;height:${m.medallionPx}px;background:${theme.accent};color:#ffffff">
+      <svg style="width:${m.svgPx}px;height:${m.svgPx}px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${svgInner}</svg>
     </span>
     <span class="tracking-tight leading-none">${escHtml(label)}</span>
   </span>`;
 }
 
-function drawRotationCueBadgeCanvas(ctx, cue, rightX, topY, theme, typo, isTightSlot, drawRRect, wordless = Boolean(state.wordlessMode)) {
-  if (!cue || cue === 'none') return rightX;
+function measureRotationCueBadgeCanvas(ctx, cue, theme, typo, isTightSlot, wordless = Boolean(state.wordlessMode)) {
   const disp = getRotationCueDisplay(cue, wordless);
+  const m = computeRotationBadgeMetrics((p) => typo.pt(p), isTightSlot, disp);
+  ctx.save();
+  ctx.font = themeCanvasFont(theme, 800, m.fontPx);
+  const textW = disp.iconOnly ? 0 : Math.ceil(ctx.measureText(disp.text).width);
+  ctx.restore();
+  const cueH = m.medallionPx + m.padY * 2;
+  const cueW = disp.iconOnly ? cueH : (m.padL + m.medallionPx + m.gapPx + textW + m.padR);
+  return { disp, m, cueW, cueH };
+}
+
+function drawRotationCueBadgeCanvasAt(ctx, cue, cueX, cueY, theme, typo, isTightSlot, drawRRect, wordless = Boolean(state.wordlessMode)) {
+  if (!cue || cue === 'none') return;
+  const { disp, m, cueW, cueH } = measureRotationCueBadgeCanvas(ctx, cue, theme, typo, isTightSlot, wordless);
   const label = disp.text;
-  const medallionD = Math.max(isTightSlot ? 24 : 30, Math.round(typo.pt(isTightSlot ? 20 : 26)));
-  const cueFont = Math.max(isTightSlot ? 10 : 12, Math.round(typo.pt(isTightSlot ? 9 : 11)));
-  const padY = Math.max(3, Math.round(typo.pt(isTightSlot ? 2.5 : 3.5)));
-  const padL = Math.max(3, Math.round(typo.pt(isTightSlot ? 2.5 : 3.5)));
-  const padR = Math.max(10, Math.round(typo.pt(isTightSlot ? 8 : 11)));
-  const gap = Math.max(5, Math.round(typo.pt(isTightSlot ? 4.5 : 6)));
+  const medallionD = m.medallionPx;
 
   ctx.save();
-  ctx.font = themeCanvasFont(theme, 800, cueFont);
-  const textW = disp.iconOnly ? 0 : Math.ceil(ctx.measureText(label).width);
-  const cueH = medallionD + padY * 2;
-  const cueW = disp.iconOnly ? cueH : (padL + medallionD + gap + textW + padR);
-  const cueX = rightX - cueW;
-  const cueY = topY;
+  ctx.font = themeCanvasFont(theme, 800, m.fontPx);
 
   // Pill or circular medallion body with crisp drop shadow and accent border
   ctx.save();
-  ctx.shadowColor = 'rgba(0, 0, 0, 0.18)';
-  ctx.shadowBlur = 8;
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.16)';
+  ctx.shadowBlur = 10;
   ctx.shadowOffsetY = 2;
   drawRRect(cueX, cueY, cueW, cueH, cueH / 2);
   ctx.fillStyle = '#ffffff';
@@ -8606,11 +8586,11 @@ function drawRotationCueBadgeCanvas(ctx, cue, rightX, topY, theme, typo, isTight
 
   drawRRect(cueX, cueY, cueW, cueH, cueH / 2);
   ctx.strokeStyle = theme.accent;
-  ctx.lineWidth = Math.max(2, typo.pt(2.2));
+  ctx.lineWidth = m.borderPx;
   ctx.stroke();
 
   // Solid accent circular medallion
-  const cx = disp.iconOnly ? (cueX + cueW / 2) : (cueX + padL + medallionD / 2);
+  const cx = disp.iconOnly ? (cueX + cueW / 2) : (cueX + m.padL + medallionD / 2);
   const cy = cueY + cueH / 2;
   const r = medallionD / 2;
   ctx.beginPath();
@@ -8618,68 +8598,57 @@ function drawRotationCueBadgeCanvas(ctx, cue, rightX, topY, theme, typo, isTight
   ctx.fillStyle = theme.accent;
   ctx.fill();
 
-  // Bold white dual curved arrows inside medallion
+  // Clean, spacious white dual curved arrows inside medallion (no center dash)
   ctx.save();
   ctx.translate(cx, cy);
   if (cue === 'yaw_90_ccw') ctx.scale(-1, 1);
   ctx.strokeStyle = '#ffffff';
   ctx.fillStyle = '#ffffff';
-  ctx.lineWidth = Math.max(2, medallionD * 0.1);
+  ctx.lineWidth = Math.max(1.8, medallionD * 0.082);
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
 
-  const ar = r * 0.56;
-  const drawArrowHead = (ax, ay, angle) => {
-    const hs = Math.max(3.2, medallionD * 0.16);
-    ctx.save();
-    ctx.translate(ax, ay);
-    ctx.rotate(angle);
+  const ar = r * 0.6;
+  const drawChevronHead = (ax, ay, tangentAngle) => {
+    const hs = Math.max(3.4, medallionD * 0.145);
+    const spread = Math.PI * 0.24;
     ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.lineTo(-hs, -hs * 0.65);
-    ctx.lineTo(-hs, hs * 0.65);
-    ctx.closePath();
-    ctx.fill();
-    ctx.restore();
+    ctx.moveTo(ax - Math.cos(tangentAngle - spread) * hs, ay - Math.sin(tangentAngle - spread) * hs);
+    ctx.lineTo(ax, ay);
+    ctx.lineTo(ax - Math.cos(tangentAngle + spread) * hs, ay - Math.sin(tangentAngle + spread) * hs);
+    ctx.stroke();
   };
 
   if (cue === 'flip_vertical') {
-    if (wordless) {
-      // Centered brick bar + top/bottom flip arcs (LEGO-style vertical flip icon)
-      const bw = r * 0.62;
-      const bh = Math.max(2.6, r * 0.28);
-      ctx.beginPath();
-      if (ctx.roundRect) ctx.roundRect(-bw / 2, -bh / 2, bw, bh, bh * 0.35);
-      else ctx.rect(-bw / 2, -bh / 2, bw, bh);
-      ctx.fill();
-    }
-    // Top arch right + bottom arch left
+    // Clean opposing top & bottom flip arches with wide open center
     ctx.beginPath();
-    ctx.arc(0, -ar * 0.18, ar * 0.96, Math.PI * 1.12, Math.PI * 1.88, false);
+    ctx.arc(0, -ar * 0.14, ar * 0.96, Math.PI * 1.14, Math.PI * 1.88, false);
     ctx.stroke();
-    drawArrowHead(Math.cos(Math.PI * 1.88) * ar * 0.96, -ar * 0.18 + Math.sin(Math.PI * 1.88) * ar * 0.96, Math.PI * 0.42);
+    drawChevronHead(
+      Math.cos(Math.PI * 1.88) * ar * 0.96,
+      -ar * 0.14 + Math.sin(Math.PI * 1.88) * ar * 0.96,
+      Math.PI * 0.38,
+    );
 
     ctx.beginPath();
-    ctx.arc(0, ar * 0.18, ar * 0.96, Math.PI * 0.12, Math.PI * 0.88, false);
+    ctx.arc(0, ar * 0.14, ar * 0.96, Math.PI * 0.14, Math.PI * 0.88, false);
     ctx.stroke();
-    drawArrowHead(Math.cos(Math.PI * 0.88) * ar * 0.96, ar * 0.18 + Math.sin(Math.PI * 0.88) * ar * 0.96, -Math.PI * 0.58);
+    drawChevronHead(
+      Math.cos(Math.PI * 0.88) * ar * 0.96,
+      ar * 0.14 + Math.sin(Math.PI * 0.88) * ar * 0.96,
+      -Math.PI * 0.62,
+    );
   } else {
-    // Dual opposing rotation arcs
+    // Spacious dual opposing rotation arcs
     ctx.beginPath();
-    ctx.arc(0, 0, ar, Math.PI * 1.15, Math.PI * 1.92, false);
+    ctx.arc(0, 0, ar, Math.PI * 1.16, Math.PI * 1.9, false);
     ctx.stroke();
-    drawArrowHead(Math.cos(Math.PI * 1.92) * ar, Math.sin(Math.PI * 1.92) * ar, Math.PI * 0.42);
+    drawChevronHead(Math.cos(Math.PI * 1.9) * ar, Math.sin(Math.PI * 1.9) * ar, Math.PI * 0.4);
 
     ctx.beginPath();
-    ctx.arc(0, 0, ar, Math.PI * 0.15, Math.PI * 0.92, false);
+    ctx.arc(0, 0, ar, Math.PI * 0.16, Math.PI * 0.9, false);
     ctx.stroke();
-    drawArrowHead(Math.cos(Math.PI * 0.92) * ar, Math.sin(Math.PI * 0.92) * ar, -Math.PI * 0.58);
-
-    if (cue === 'yaw_180') {
-      ctx.beginPath();
-      ctx.arc(0, 0, Math.max(1.8, medallionD * 0.08), 0, Math.PI * 2);
-      ctx.fill();
-    }
+    drawChevronHead(Math.cos(Math.PI * 0.9) * ar, Math.sin(Math.PI * 0.9) * ar, -Math.PI * 0.6);
   }
   ctx.restore();
 
@@ -8688,10 +8657,9 @@ function drawRotationCueBadgeCanvas(ctx, cue, rightX, topY, theme, typo, isTight
     ctx.fillStyle = '#18181b';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText(label, cueX + padL + medallionD + gap, cy + 0.5);
+    ctx.fillText(label, cueX + m.padL + medallionD + m.gapPx, cy + 0.5);
   }
   ctx.restore();
-  return cueX - 8;
 }
 
 function getThemeForPage(page) {
@@ -9572,9 +9540,28 @@ function renderAll() {
             const rotBadgeHtml = state.showRotCues && effectiveCue && effectiveCue !== 'none'
               ? renderRotationCueBadgeHtml(effectiveCue, theme, typo, isTightSlot, wordless)
               : '';
-            const hasHeaderBadges = Boolean(staticHeaderBadgesHtml || rotBadgeHtml);
-            const headerBadgesInnerHtml = `${staticHeaderBadgesHtml}<span data-rot-cue-host="${step.id}" class="${rotBadgeHtml ? 'inline-flex' : 'hidden'} items-center shrink-0">${rotBadgeHtml}</span>`;
+            const hasHeaderBadges = Boolean(staticHeaderBadgesHtml);
+            const headerBadgesInnerHtml = staticHeaderBadgesHtml;
             const stackHeaderBadges = hasHeaderBadges && (isTightSlot || estSlotW < typo.pt(250));
+            const rotInitPos = (() => {
+              if (!rotBadgeHtml) return { leftPct: 80, topPct: 4 };
+              const disp = getRotationCueDisplay(effectiveCue, wordless);
+              const bm = computeRotationBadgeMetrics((p) => typo.pt(p), isTightSlot, disp);
+              const estVisW = Math.max(80, estSlotW - st.slotPad * 2);
+              const estVisH = Math.max(80, estSlotH - st.slotPad * 2 - Math.round(stepNumPx * 1.4));
+              return computeRotationBadgePlacement({
+                containerW: estVisW,
+                containerH: estVisH,
+                badgeW: bm.estWidth,
+                badgeH: bm.outerH,
+                snapW: snap?.w || estVisW,
+                snapH: snap?.h || estVisH,
+                mvp: !isOfficialMfStyle ? snap?.mvp : null,
+                triPos: !isOfficialMfStyle ? snap?.mesh?.triPos : null,
+                texDraws: !isOfficialMfStyle ? snap?.mesh?.texDraws : null,
+                bounds: !isOfficialMfStyle ? snap?.mesh?.bounds : null,
+              });
+            })();
 
             return `
               <div data-step="${step.id}" class="step-slot absolute flex flex-col min-h-0 overflow-hidden transition ${isArrangeMode && slots.length > 1 ? 'cursor-pointer' : ''}" style="left:${slotLeftPct.toFixed(4)}%;top:${slotTopPct.toFixed(4)}%;width:${slotWidthPct.toFixed(4)}%;height:${slotHeightPct.toFixed(4)}%;border-radius:${typo.borderRadius}px;padding:${isOfficialMfStyle ? Math.round(st.slotPad * 0.5) : (isTightSlot ? Math.max(4, Math.round(st.slotPad * 0.72)) : st.slotPad)}px;border:${slotBorderStyle};background:${slotBgStyle}">
@@ -9628,7 +9615,7 @@ function renderAll() {
                       <img src="${subImg}" class="w-full flex-1 min-h-0 object-contain pointer-events-none" />
                     </div>` : ''}
 
-                  <div class="flex-1 min-w-0 min-h-0 w-full h-full flex items-center justify-center relative overflow-hidden">
+                  <div data-step-visual="${step.id}" class="flex-1 min-w-0 min-h-0 w-full h-full flex items-center justify-center relative overflow-hidden">
                     ${showLive3D
                       ? `<canvas id="liveRotateCanvas" class="absolute inset-0 w-full h-full object-contain cursor-grab active:cursor-grabbing" style="touch-action:none;"></canvas>`
                       : isMfExploded && mfExploded
@@ -9642,7 +9629,8 @@ function renderAll() {
                             </div>`
                           : `<img data-pick-step="${step.id}" src="${snap.url}" class="step-render-img absolute inset-0 w-full h-full object-contain ${isPartsMode ? 'cursor-crosshair' : 'pointer-events-none'}" />`
                     }
-                    ${step.isSubmodelFinal ? `<span class="absolute rounded-full font-black text-white shadow-md pointer-events-none" style="bottom:${Math.round(typo.pt(5))}px;right:${Math.round(typo.pt(5))}px;padding:${Math.round(typo.pt(3))}px ${Math.round(typo.pt(9))}px;font-size:${st.subFinalFont}px;background:${theme.accent}">×${step.submodelRepeat || 2}</span>` : ''}
+                    <span data-rot-cue-host="${step.id}" class="${rotBadgeHtml ? 'inline-flex' : 'hidden'} items-center absolute z-10 pointer-events-none" style="left:${rotInitPos.leftPct.toFixed(3)}%;top:${rotInitPos.topPct.toFixed(3)}%">${rotBadgeHtml}</span>
+                    ${step.isSubmodelFinal ? `<span data-submodel-final-pill="${step.id}" class="absolute rounded-full font-black text-white shadow-md pointer-events-none" style="bottom:${Math.round(typo.pt(5))}px;right:${Math.round(typo.pt(5))}px;padding:${Math.round(typo.pt(3))}px ${Math.round(typo.pt(9))}px;font-size:${st.subFinalFont}px;background:${theme.accent}">×${step.submodelRepeat || 2}</span>` : ''}
                   </div>
 
                   ${mf1to1 ? (() => {
@@ -9706,6 +9694,7 @@ function renderAll() {
       </div>`;
 
     bindStepPageInteractions(page);
+    positionVisibleStepRotationBadges();
   }
 
   if ((page.kind === 'cover' || page.kind === 'complete') && state.mode === 'camera') {
@@ -9722,6 +9711,64 @@ function renderAll() {
 // =========================================================================
 // 7. DIRECT CANVAS INTERACTIONS (Part Picking, Step Orbit, Notes Drag)
 // =========================================================================
+function positionStepRotationBadge(sid, sInfo, frame) {
+  if (!frame || !sInfo) return;
+  const host = frame.querySelector(`[data-rot-cue-host="${sid}"]`);
+  const visual = frame.querySelector(`[data-step-visual="${sid}"]`);
+  if (!host || !visual || host.classList.contains('hidden')) return;
+
+  const containerW = visual.clientWidth || sInfo.estSlotW || 0;
+  const containerH = visual.clientHeight || sInfo.estSlotH || 0;
+  if (containerW <= 4 || containerH <= 4) return;
+
+  const disp = getRotationCueDisplay(sInfo.lastEffectiveCue, sInfo.wordless);
+  const bm = computeRotationBadgeMetrics((p) => sInfo.typo.pt(p), sInfo.isTightSlot, disp);
+  const badgeW = host.offsetWidth || bm.estWidth;
+  const badgeH = host.offsetHeight || bm.outerH;
+
+  const obstacles = [];
+  const subPill = visual.querySelector(`[data-submodel-final-pill="${sid}"]`);
+  if (subPill) {
+    const pw = subPill.offsetWidth || 0;
+    const ph = subPill.offsetHeight || 0;
+    if (pw > 0 && ph > 0) {
+      obstacles.push({
+        x: subPill.offsetLeft,
+        y: subPill.offsetTop,
+        w: pw,
+        h: ph,
+      });
+    }
+  }
+
+  const isOfficialMf = Boolean(sInfo.isMfExploded || sInfo.isMfSeq);
+  const activeMvp = sInfo.liveMvp || sInfo.snap?.mvp || null;
+  const pos = computeRotationBadgePlacement({
+    containerW,
+    containerH,
+    badgeW,
+    badgeH,
+    snapW: sInfo.snap?.w || containerW,
+    snapH: sInfo.snap?.h || containerH,
+    mvp: !isOfficialMf ? activeMvp : null,
+    triPos: !isOfficialMf ? sInfo.snap?.mesh?.triPos : null,
+    texDraws: !isOfficialMf ? sInfo.snap?.mesh?.texDraws : null,
+    bounds: !isOfficialMf ? sInfo.snap?.mesh?.bounds : null,
+    obstacles,
+  });
+
+  host.style.left = `${pos.x.toFixed(1)}px`;
+  host.style.top = `${pos.y.toFixed(1)}px`;
+}
+
+function positionVisibleStepRotationBadges() {
+  const frame = document.getElementById('pageFrame');
+  if (!frame || currentSlotRenderInfo.size === 0) return;
+  for (const [sid, sInfo] of currentSlotRenderInfo.entries()) {
+    positionStepRotationBadge(sid, sInfo, frame);
+  }
+}
+
 function syncVisibleStepRotationBadges() {
   const frame = document.getElementById('pageFrame');
   if (!frame || currentSlotRenderInfo.size === 0) return;
@@ -9731,30 +9778,24 @@ function syncVisibleStepRotationBadges() {
     const sid = el.getAttribute('data-rot-cue-host');
     if (sid) hosts.set(sid, el);
   });
-  const wraps = new Map();
-  frame.querySelectorAll('[data-step-badges]').forEach((el) => {
-    const sid = el.getAttribute('data-step-badges');
-    if (sid) wraps.set(sid, el);
-  });
 
   for (const [sid, sInfo] of currentSlotRenderInfo.entries()) {
     const nextCue = getEffectiveStepCue(sInfo.ch, sInfo.step);
-    if (nextCue === sInfo.lastEffectiveCue) continue;
-    sInfo.lastEffectiveCue = nextCue;
-    const badgeHtml = state.showRotCues && nextCue && nextCue !== 'none'
-      ? renderRotationCueBadgeHtml(nextCue, sInfo.theme, sInfo.typo, sInfo.isTightSlot, sInfo.wordless)
-      : '';
-    const host = hosts.get(sid);
-    if (host) {
-      host.innerHTML = badgeHtml;
-      host.classList.toggle('inline-flex', Boolean(badgeHtml));
-      host.classList.toggle('hidden', !badgeHtml);
+    const cueChanged = nextCue !== sInfo.lastEffectiveCue;
+    if (cueChanged) {
+      sInfo.lastEffectiveCue = nextCue;
+      const badgeHtml = state.showRotCues && nextCue && nextCue !== 'none'
+        ? renderRotationCueBadgeHtml(nextCue, sInfo.theme, sInfo.typo, sInfo.isTightSlot, sInfo.wordless)
+        : '';
+      const host = hosts.get(sid);
+      if (host) {
+        host.innerHTML = badgeHtml;
+        host.classList.toggle('inline-flex', Boolean(badgeHtml));
+        host.classList.toggle('hidden', !badgeHtml);
+      }
     }
-    const wrap = wraps.get(sid);
-    if (wrap) {
-      const hasAny = Boolean(badgeHtml || sInfo.hasStaticBadges);
-      wrap.classList.toggle('flex', hasAny);
-      wrap.classList.toggle('hidden', !hasAny);
+    if (cueChanged || sInfo.liveMvp) {
+      positionStepRotationBadge(sid, sInfo, frame);
     }
   }
 }
@@ -10016,7 +10057,8 @@ function bindStepPageInteractions(page) {
             ctx2d.drawImage(rendered, 0, 0, rendered.width, rendered.height, 0, 0, w, h);
           }
         } else if (activeLiveEngine) {
-          activeLiveEngine.draw(info.snap.mesh, w, h, curAz, curEl, info.modelScale, fixedHalfH, liveDrawOpts);
+          const liveMvp = activeLiveEngine.draw(info.snap.mesh, w, h, curAz, curEl, info.modelScale, fixedHalfH, liveDrawOpts);
+          if (liveMvp) info.liveMvp = liveMvp;
         }
       };
 
@@ -18384,9 +18426,6 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
 
       let badgeRightX = sx + slotW - 10;
       const effectiveCue = getEffectiveStepCue(ch, step);
-      if (state.showRotCues && effectiveCue && effectiveCue !== 'none') {
-        badgeRightX = drawRotationCueBadgeCanvas(ctx, effectiveCue, badgeRightX, sy + 10, theme, typo, slots.length > 2, drawRRect, wordless);
-      }
 
       if (step.minifigPrep) {
         if (wordless) {
@@ -18477,6 +18516,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
         mf1CardInfo = { mf1, cardPad, headerH, mfHeaderLabel, cardW, cardH, cardX, cardY, cardRadius };
       }
 
+      let renderedStepSnap = null;
       if (isMfExploded) {
         const expDims = computeMinifigDiagramRenderSize({
           kind: 'exploded',
@@ -18537,8 +18577,36 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
             highlightOnlyPartIds: new Set(mfPrep.rotatedPartIds || []),
           } : {}),
         });
+        renderedStepSnap = snap;
         const stepImg = await loadImgPromise(snap.url);
         drawContain(ctx, stepImg, sx + st.slotPad, renderTopY, mainAvailW, renderAvailH);
+      }
+
+      if (state.showRotCues && effectiveCue && effectiveCue !== 'none') {
+        const { cueW, cueH } = measureRotationCueBadgeCanvas(ctx, effectiveCue, theme, typo, slots.length > 2, wordless);
+        const rotPos = computeRotationBadgePlacement({
+          containerW: mainAvailW,
+          containerH: renderAvailH,
+          badgeW: cueW,
+          badgeH: cueH,
+          snapW: renderedStepSnap?.w || mainAvailW,
+          snapH: renderedStepSnap?.h || renderAvailH,
+          mvp: renderedStepSnap?.mvp || null,
+          triPos: renderedStepSnap?.mesh?.triPos || null,
+          texDraws: renderedStepSnap?.mesh?.texDraws || null,
+          bounds: renderedStepSnap?.mesh?.bounds || null,
+        });
+        drawRotationCueBadgeCanvasAt(
+          ctx,
+          effectiveCue,
+          sx + st.slotPad + rotPos.x,
+          renderTopY + rotPos.y,
+          theme,
+          typo,
+          slots.length > 2,
+          drawRRect,
+          wordless,
+        );
       }
 
       if (mf1CardInfo) {
