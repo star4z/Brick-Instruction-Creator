@@ -580,10 +580,10 @@ export function computeStep1ConnectionFacingCost(
   const vx = Math.sin(azRad);
   const vz = Math.cos(azRad);
 
-  // Positive alignment => attaching studs on lower piece face toward camera (good -> negative cost)
-  // Negative alignment => attaching studs on lower piece face away from camera (bad -> positive cost)
+  // Positive alignment => upper piece is closer to camera than lower piece (overhang blocks seam -> bad)
+  // Negative alignment => lower piece is closer to camera than upper piece (seam faces camera -> good)
   const alignment = ux * vx + uz * vz;
-  return -0.35 * alignment;
+  return 0.85 * alignment;
 }
 
 /**
