@@ -189,12 +189,14 @@ import {
   clearStepArrangeOverride,
   clearStepCameraOverride,
   computePaperPreviewBox,
+  computeStageOverlayClearance,
   findMatchingCameraPreset,
   getCameraAngleLabel,
   getEditModeButtonLabel,
   getFocusModeDescription,
   getVisibleModeTabs,
   isBlankStageClickTarget,
+  isLiveCameraOverlayMode,
   migratePageInsertsToSteps,
   resolveModeForPage,
   resolveStepToolbarCapabilities,
@@ -6565,6 +6567,7 @@ const state = {
   pageSizeWarning: null,   // PageSizeWarningSummary from analyzePageSizeFit()
   mode: 'pan',             // pan | parts | camera | step | page
   stepSubTab: 'camera',    // camera | layout | notes
+  cameraMobileExpanded: false,
   selectedStepId: null,
   selectedPartIds: new Set(),
   selectedArrangeEl: null, // legacy / optional dragged element state
@@ -7405,10 +7408,45 @@ function getActiveStepObj() {
 // =========================================================================
 // 5. ZOOM & PAN ENGINE (Hardware-Accelerated CSS Transform — Zero Crash!)
 // =========================================================================
-let stageRafId = 0, lastZoomText = '', currentPageFitScale = 1;
+let stageRafId = 0, lastZoomText = '', currentPageFitScale = 1, basePageFitScale = 1;
+let currentPageCanonicalWidth = 0, currentPageCanonicalHeight = 0;
 let zoomHiResTimer = 0, lastZoomRendered = 1;
 function getEffectiveStageScale() {
   return Math.max(0.1, currentPageFitScale * state.zoom);
+}
+function syncStageOverlayClearance(page) {
+  const stage = document.getElementById('stageViewport');
+  const box = document.getElementById('contextOverlay');
+  if (!stage) return;
+  const isCameraOverlayOpen = Boolean(
+    page
+    && box
+    && !box.classList.contains('hidden')
+    && isLiveCameraOverlayMode(page.kind, state.mode, state.stepSubTab),
+  );
+  const cs = getComputedStyle(stage);
+  const padTop = parseFloat(cs.paddingTop) || 0;
+  const padX = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
+  const overlayH = isCameraOverlayOpen ? box.getBoundingClientRect().height : 0;
+  const overlayBottomOffset = isCameraOverlayOpen
+    ? (parseFloat(getComputedStyle(box).bottom) || 114)
+    : 114;
+  const clearance = computeStageOverlayClearance({
+    isCameraOverlayOpen,
+    stageHeight: stage.clientHeight || window.innerHeight,
+    stageWidth: stage.clientWidth || window.innerWidth,
+    stagePaddingTop: padTop,
+    stagePaddingX: padX,
+    defaultPaddingBottom: 112,
+    overlayBottomOffset,
+    overlayHeight: overlayH,
+    pageWidth: currentPageCanonicalWidth,
+    pageHeight: currentPageCanonicalHeight,
+    baseFitScale: basePageFitScale,
+    gapPx: 10,
+  });
+  stage.style.paddingBottom = clearance.paddingBottomPx !== null ? `${clearance.paddingBottomPx}px` : '';
+  currentPageFitScale = clearance.fitScale;
 }
 let currentCoverHeroInfo = null;
 function refreshStepModelsForZoom() {
@@ -7914,6 +7952,7 @@ function renderAll() {
     if (fileTypeEl) { fileTypeEl.textContent = 'Import a model below to get started.'; fileTypeEl.classList.remove('hidden'); }
     if (statsEl) { statsEl.innerHTML = ''; statsEl.classList.add('hidden'); }
     document.getElementById('contextOverlay').classList.add('hidden');
+    syncStageOverlayClearance(null);
     syncSideMenuLayout();
     syncMenuControls();
     syncPageSizeWarningUI();
@@ -7980,7 +8019,10 @@ function renderAll() {
   // Apply Canonical Physical Print / Screen Proportions & Unified Typography to Live Page Frame!
   const frame = document.getElementById('pageFrame');
   const dims = computePageFrameDimensions();
+  basePageFitScale = dims.fitScale;
   currentPageFitScale = dims.fitScale;
+  currentPageCanonicalWidth = dims.width;
+  currentPageCanonicalHeight = dims.height;
   const typo = computePageTypography({
     widthIn: dims.widthIn,
     heightIn: dims.heightIn,
@@ -8885,6 +8927,7 @@ function renderAll() {
   }
 
   renderContextOverlay(page);
+  syncStageOverlayClearance(page);
   syncMenuControls();
   syncPageSizeWarningUI();
   applyStageTransform();
@@ -9011,6 +9054,9 @@ function bindHeroCameraInteractions(page) {
       pushUndo();
       pushedUndo = true;
     }
+    if (!moved) {
+      document.getElementById('contextOverlay')?.classList.add('is-orbit-dragging');
+    }
     moved = true;
     az = (((az - dx * 0.7) % 360) + 360) % 360;
     el = clampCoverElevation(el + dy * 0.5);
@@ -9023,14 +9069,14 @@ function bindHeroCameraInteractions(page) {
     }
     info.az = roundedAz;
     info.el = roundedEl;
-    const readout = document.getElementById('heroCamReadout');
-    if (readout) readout.textContent = `${roundedAz}° / ${roundedEl}°`;
+    const readoutText = `${roundedAz}° / ${roundedEl}°`;
+    document.querySelectorAll('.hero-cam-readout').forEach((elNode) => { elNode.textContent = readoutText; });
     const isBottom = roundedEl < 0;
     const topBtn = document.getElementById('heroCamTop');
     const botBtn = document.getElementById('heroCamBot');
     if (topBtn && botBtn) {
-      topBtn.className = `px-2 py-1 rounded inline-flex items-center gap-1 transition-colors cursor-pointer ${!isBottom ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'hover:bg-[var(--surface-hover)]'}`;
-      botBtn.className = `px-2 py-1 rounded inline-flex items-center gap-1 transition-colors cursor-pointer ${isBottom ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'hover:bg-[var(--surface-hover)]'}`;
+      topBtn.className = `px-1.5 sm:px-2 py-1 rounded inline-flex items-center gap-1 transition-colors cursor-pointer ${!isBottom ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'hover:bg-[var(--surface-hover)]'}`;
+      botBtn.className = `px-1.5 sm:px-2 py-1 rounded inline-flex items-center gap-1 transition-colors cursor-pointer ${isBottom ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'hover:bg-[var(--surface-hover)]'}`;
     }
     if (useStudioLive) {
       if (!dragRaf) {
@@ -9047,6 +9093,7 @@ function bindHeroCameraInteractions(page) {
     if (!dragging) return;
     e.stopPropagation();
     dragging = false;
+    document.getElementById('contextOverlay')?.classList.remove('is-orbit-dragging');
     if (dragRaf) { cancelAnimationFrame(dragRaf); dragRaf = 0; }
     if (moved) {
       overviewThumbCache.bumpEpoch();
@@ -9213,6 +9260,9 @@ function bindStepPageInteractions(page) {
           pushUndo();
           pushedUndo = true;
         }
+        if (!moved) {
+          document.getElementById('contextOverlay')?.classList.add('is-orbit-dragging');
+        }
         moved = true;
         az = (((az - dx * 0.7) % 360) + 360) % 360;
         el = Math.max(-75, Math.min(75, el + dy * 0.5));
@@ -9230,8 +9280,8 @@ function bindStepPageInteractions(page) {
         else delete nextOv.corner;
         state.overrides[info.step.id] = nextOv;
         info.cam = getStepCamera(info.step);
-        const readout = document.getElementById('stepCamReadout');
-        if (readout) readout.textContent = `${roundedAz}° / ${roundedEl}°`;
+        const readoutText = `${roundedAz}° / ${roundedEl}°`;
+        document.querySelectorAll('.step-cam-readout').forEach((elNode) => { elNode.textContent = readoutText; });
         syncVisibleStepRotationBadges();
         if (useStudioLive) {
           if (!dragRaf) {
@@ -9248,6 +9298,7 @@ function bindStepPageInteractions(page) {
         if (!dragging) return;
         e.stopPropagation();
         dragging = false;
+        document.getElementById('contextOverlay')?.classList.remove('is-orbit-dragging');
         if (dragRaf) { cancelAnimationFrame(dragRaf); dragRaf = 0; }
         if (moved) {
           renderAll();
@@ -9511,6 +9562,7 @@ function insertDividerAfterCurrentPage(page) {
 function renderContextOverlay(page) {
   const box = document.getElementById('contextOverlay');
   box.innerHTML = '';
+  box.classList.remove('is-orbit-dragging');
 
   // PARTS LIST: Edited directly via the bottom mode pill ("Customize Parts List" -> #bomSetupModal)
   if (page.kind === 'bom') {
@@ -9538,36 +9590,39 @@ function renderContextOverlay(page) {
     const zoomPct = Math.round(clampedZoom * 100);
     const customized = isHeroCameraCustomized(meta, defaults);
     const isBottom = meta.el < 0;
+    const heroReadoutText = `${((Math.round(meta.az) % 360) + 360) % 360}° / ${Math.round(meta.el)}°`;
 
     box.innerHTML = `
-      <div class="pointer-events-auto studio-surface rounded-xl p-3.5 w-full space-y-2.5 text-xs">
-        <div class="flex items-center justify-between gap-2 flex-wrap">
+      <div class="pointer-events-auto studio-surface rounded-xl p-2.5 sm:p-3.5 w-full space-y-1.5 sm:space-y-2.5 text-xs">
+        <div class="hidden sm:flex items-center justify-between gap-2 flex-wrap">
           <div class="flex items-center gap-2 flex-wrap min-w-0">
             <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[var(--primary-soft)] border border-[var(--primary-border)] text-[var(--foreground)] font-extrabold text-xs tracking-tight">
               ${icoOrbit}
               <span>Drag 3D model to orbit</span>
             </span>
             ${renderScopeBadge('local', isCover ? 'Cover Page' : 'Build Complete')}
-            <span id="heroCamReadout" class="font-mono text-[11px] font-semibold text-[var(--muted-foreground)] tabular-nums shrink-0">${((Math.round(meta.az) % 360) + 360) % 360}° / ${Math.round(meta.el)}°</span>
-          </div>
-          <div class="flex items-center gap-1.5 shrink-0">
-            <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">View</span>
-            <div class="inline-flex rounded-md bg-[var(--surface-sunken)] p-0.5 text-xs font-semibold gap-0.5">
-              <button type="button" id="heroCamTop" title="Look down from above" class="px-2 py-1 rounded inline-flex items-center gap-1 transition-colors cursor-pointer ${!isBottom ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'hover:bg-[var(--surface-hover)]'}">${buildCameraViewSvg('top')}<span>Top</span></button>
-              <button type="button" id="heroCamBot" title="Look up from underneath" class="px-2 py-1 rounded inline-flex items-center gap-1 transition-colors cursor-pointer ${isBottom ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'hover:bg-[var(--surface-hover)]'}">${buildCameraViewSvg('bottom')}<span>Bottom</span></button>
-            </div>
+            <span id="heroCamReadout" class="hero-cam-readout font-mono text-[11px] font-semibold text-[var(--muted-foreground)] tabular-nums shrink-0">${heroReadoutText}</span>
           </div>
         </div>
-        <div class="flex items-center gap-1.5 flex-wrap">
-          <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)] mr-0.5">Rotate</span>
-          ${CAMERA_ROTATION_STEPS.map(r => `<button type="button" data-hero-rotate="${r.deltaDeg}" title="${escHtml(r.title)}" class="hero-rotate-btn px-2 py-1 rounded-md text-xs font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] active:bg-[var(--primary-soft)] active:text-[var(--primary)]">${buildCameraRotateSvg(r.icon)}<span class="font-mono">${r.label}</span></button>`).join('')}
+        <div class="flex items-center gap-1.5 overflow-x-auto no-scrollbar sm:flex-wrap">
+          <span class="hidden sm:inline text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">View</span>
+          <div class="inline-flex rounded-md bg-[var(--surface-sunken)] p-0.5 text-[11px] sm:text-xs font-semibold gap-0.5 shrink-0">
+            <button type="button" id="heroCamTop" title="Look down from above" class="px-1.5 sm:px-2 py-1 rounded inline-flex items-center gap-1 transition-colors cursor-pointer ${!isBottom ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'hover:bg-[var(--surface-hover)]'}">${buildCameraViewSvg('top')}<span>Top</span></button>
+            <button type="button" id="heroCamBot" title="Look up from underneath" class="px-1.5 sm:px-2 py-1 rounded inline-flex items-center gap-1 transition-colors cursor-pointer ${isBottom ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'hover:bg-[var(--surface-hover)]'}">${buildCameraViewSvg('bottom')}<span class="sm:hidden">Bot</span><span class="hidden sm:inline">Bottom</span></button>
+          </div>
+          <div class="w-px h-4 bg-[var(--border)] shrink-0 sm:hidden" aria-hidden="true"></div>
+          <span class="hidden sm:inline text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)] ml-1 mr-0.5">Rotate</span>
+          ${CAMERA_ROTATION_STEPS.map(r => `<button type="button" data-hero-rotate="${r.deltaDeg}" title="${escHtml(r.title)}" class="hero-rotate-btn px-1.5 sm:px-2 py-1 rounded-md text-[11px] sm:text-xs font-semibold inline-flex items-center gap-1 shrink-0 transition-colors cursor-pointer bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] active:bg-[var(--primary-soft)] active:text-[var(--primary)]"><span class="hidden sm:inline-flex">${buildCameraRotateSvg(r.icon)}</span><span class="font-mono">${r.label}</span></button>`).join('')}
         </div>
-        <div class="flex items-center justify-between gap-2 flex-wrap pt-2 border-t border-[var(--border)]">
-          <div class="flex items-center gap-2">
+        <div class="flex items-center justify-between gap-2 pt-1.5 sm:pt-2 border-t border-[var(--border)]">
+          <div class="flex items-center gap-1.5 sm:gap-2">
             <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Zoom</span>
             ${renderZoomStepperHtml({ downId: 'heroZoomOut', upId: 'heroZoomIn', pct: zoomPct, downLabel: 'Zoom model out', upLabel: 'Zoom model in' })}
           </div>
-          ${customized ? `<button id="heroResetCam" type="button" class="px-2.5 py-1 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] text-xs font-semibold cursor-pointer">Reset Camera</button>` : ''}
+          <div class="flex items-center gap-2 shrink-0">
+            <span class="sm:hidden hero-cam-readout font-mono text-[10px] font-semibold text-[var(--muted-foreground)] tabular-nums">${heroReadoutText}</span>
+            ${customized ? `<button id="heroResetCam" type="button" class="px-2 sm:px-2.5 py-1 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] text-[11px] sm:text-xs font-semibold cursor-pointer"><span class="sm:hidden">Reset</span><span class="hidden sm:inline">Reset Camera</span></button>` : ''}
+          </div>
         </div>
       </div>`;
 
@@ -10007,6 +10062,9 @@ function renderContextOverlay(page) {
   // =========================================================================
   if (state.mode === 'step') {
     const subTab = state.stepSubTab || 'camera';
+    const camExpanded = Boolean(state.cameraMobileExpanded);
+    const stepCamForHeader = subTab === 'camera' ? getStepCamera(step) : null;
+    const stepReadoutText = stepCamForHeader ? `${((Math.round(stepCamForHeader.az) % 360) + 360) % 360}° / ${Math.round(stepCamForHeader.el)}°` : '';
     const absNum = getAbsStepNum(step);
     const stepHeaderLeft = slots.length > 1
       ? `<div class="inline-flex items-center gap-0.5 rounded-md bg-[var(--surface-sunken)] p-0.5 text-xs font-bold overflow-x-auto no-scrollbar max-w-full">
@@ -10015,19 +10073,23 @@ function renderContextOverlay(page) {
       : `<div class="flex items-center gap-1.5 min-w-0">
           <span class="font-bold truncate">${escHtml(getStepShortLabel(step, ch))}</span>
           ${absNum !== step.num ? `<span class="px-1 py-0.5 rounded border border-[var(--border)] font-mono text-[10px] font-semibold text-[var(--muted-foreground)]" title="Absolute step number">#${absNum}</span>` : ''}
+          ${subTab === 'camera' ? `<span class="sm:hidden step-cam-readout font-mono text-[10px] font-semibold text-[var(--muted-foreground)] tabular-nums shrink-0">${stepReadoutText}</span>` : ''}
         </div>`;
 
     const subTabsHtml = `
-      <div class="inline-flex items-center gap-0.5 rounded-md bg-[var(--surface-sunken)] p-0.5 text-xs font-semibold shrink-0" role="tablist" aria-label="Step control sections">
-        <button type="button" role="tab" aria-selected="${subTab === 'camera'}" data-step-subtab="camera" class="step-subtab-btn px-2.5 py-1 rounded transition-colors cursor-pointer ${subTab === 'camera' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--surface-hover)]'}">Camera</button>
-        <button type="button" role="tab" aria-selected="${subTab === 'layout'}" data-step-subtab="layout" class="step-subtab-btn px-2.5 py-1 rounded transition-colors cursor-pointer ${subTab === 'layout' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--surface-hover)]'}">Layout</button>
-        <button type="button" role="tab" aria-selected="${subTab === 'notes'}" data-step-subtab="notes" class="step-subtab-btn px-2.5 py-1 rounded transition-colors cursor-pointer inline-flex items-center gap-1 ${subTab === 'notes' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--surface-hover)]'}"><span>Notes</span>${stepInserts.length > 0 ? `<span class="font-mono text-[10px] px-1 rounded ${subTab === 'notes' ? 'bg-white/20' : 'bg-[var(--card)] border border-[var(--border)]'}">${stepInserts.length}</span>` : ''}</button>
+      <div class="inline-flex items-center gap-1 shrink-0">
+        <div class="inline-flex items-center gap-0.5 rounded-md bg-[var(--surface-sunken)] p-0.5 text-[11px] sm:text-xs font-semibold shrink-0" role="tablist" aria-label="Step control sections">
+          <button type="button" role="tab" aria-selected="${subTab === 'camera'}" data-step-subtab="camera" class="step-subtab-btn px-2 sm:px-2.5 py-0.5 sm:py-1 rounded transition-colors cursor-pointer ${subTab === 'camera' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--surface-hover)]'}">Camera</button>
+          <button type="button" role="tab" aria-selected="${subTab === 'layout'}" data-step-subtab="layout" class="step-subtab-btn px-2 sm:px-2.5 py-0.5 sm:py-1 rounded transition-colors cursor-pointer ${subTab === 'layout' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--surface-hover)]'}">Layout</button>
+          <button type="button" role="tab" aria-selected="${subTab === 'notes'}" data-step-subtab="notes" class="step-subtab-btn px-2 sm:px-2.5 py-0.5 sm:py-1 rounded transition-colors cursor-pointer inline-flex items-center gap-1 ${subTab === 'notes' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--surface-hover)]'}"><span>Notes</span>${stepInserts.length > 0 ? `<span class="font-mono text-[10px] px-1 rounded ${subTab === 'notes' ? 'bg-white/20' : 'bg-[var(--card)] border border-[var(--border)]'}">${stepInserts.length}</span>` : ''}</button>
+        </div>
+        ${subTab === 'camera' ? `<button type="button" id="btnToggleStepCamMore" aria-expanded="${camExpanded}" title="${camExpanded ? 'Hide extra camera options' : 'Show zoom, framing, and step range options'}" class="sm:hidden inline-flex items-center gap-0.5 px-2 py-1 rounded-md text-[11px] font-semibold transition-colors cursor-pointer ${camExpanded ? 'bg-[var(--primary-soft)] text-[var(--primary)] ring-1 ring-[var(--primary)]' : 'bg-[var(--surface-sunken)] text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--surface-hover)]'}"><span>${camExpanded ? 'Less' : 'More'}</span><svg class="w-3 h-3 transition-transform ${camExpanded ? 'rotate-180' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>` : ''}
       </div>`;
 
     let bodyHtml = '';
 
     if (subTab === 'camera') {
-      const cam = getStepCamera(step);
+      const cam = stepCamForHeader;
       const isMfStep = isMfBuild || Boolean(step.isMinifigPoseStep);
       const mfDefaultCam = step.isMinifigPoseStep
         ? { side: 'top', corner: step.corner || MINIFIG_POSE_CAMERA.corner, az: step.az ?? MINIFIG_POSE_CAMERA.az, el: step.el ?? MINIFIG_POSE_CAMERA.el }
@@ -10037,56 +10099,57 @@ function renderContextOverlay(page) {
       const fMode = ov.focusMode || 'auto';
 
       bodyHtml = `
-        <div class="space-y-2">
-          <div class="flex items-center justify-between gap-2 flex-wrap">
+        <div class="space-y-1.5 sm:space-y-2">
+          <div class="hidden sm:flex items-center justify-between gap-2 flex-wrap">
             <div class="flex items-center gap-2 flex-wrap">
               <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[var(--primary-soft)] border border-[var(--primary-border)] text-[var(--foreground)] font-extrabold text-xs tracking-tight">
                 ${icoOrbit}
                 <span>Drag 3D model to orbit</span>
               </span>
               ${renderScopeBadge('local', 'This Step')}
-              <span id="stepCamReadout" class="font-mono text-[11px] font-semibold text-[var(--muted-foreground)] tabular-nums">${((Math.round(cam.az) % 360) + 360) % 360}° / ${Math.round(cam.el)}°</span>
-            </div>
-            <div class="flex items-center gap-1.5 shrink-0">
-              <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">View</span>
-              <div class="inline-flex rounded-md bg-[var(--surface-sunken)] p-0.5 text-xs font-semibold gap-0.5">
-                <button type="button" id="camTop" title="Look down from above" class="px-2 py-1 rounded inline-flex items-center gap-1 transition-colors cursor-pointer ${cam.side === 'top' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'hover:bg-[var(--surface-hover)]'}">${buildCameraViewSvg('top')}<span>Top</span></button>
-                <button type="button" id="camBot" title="Look up from underneath" class="px-2 py-1 rounded inline-flex items-center gap-1 transition-colors cursor-pointer ${cam.side === 'bottom' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'hover:bg-[var(--surface-hover)]'}">${buildCameraViewSvg('bottom')}<span>Bottom</span></button>
-              </div>
+              <span id="stepCamReadout" class="step-cam-readout font-mono text-[11px] font-semibold text-[var(--muted-foreground)] tabular-nums">${stepReadoutText}</span>
             </div>
           </div>
 
-          <div class="flex items-center gap-1.5 flex-wrap">
-            <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)] mr-0.5">Rotate</span>
-            ${isMfStep ? `<button type="button" id="btnMfFront34" class="px-2.5 py-1 rounded-md text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer ${isFront34 ? 'bg-[var(--primary-soft)] text-[var(--primary)] ring-1 ring-[var(--primary)]' : 'bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)]'}"><span>3/4 Pose</span></button>` : ''}
-            ${CAMERA_ROTATION_STEPS.map(r => `<button type="button" data-step-rotate="${r.deltaDeg}" title="${escHtml(r.title)}" class="step-rotate-btn px-2 py-1 rounded-md text-xs font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] active:bg-[var(--primary-soft)] active:text-[var(--primary)]">${buildCameraRotateSvg(r.icon)}<span class="font-mono">${r.label}</span></button>`).join('')}
+          <div class="flex items-center gap-1.5 overflow-x-auto no-scrollbar sm:flex-wrap">
+            <span class="hidden sm:inline text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">View</span>
+            <div class="inline-flex rounded-md bg-[var(--surface-sunken)] p-0.5 text-[11px] sm:text-xs font-semibold gap-0.5 shrink-0">
+              <button type="button" id="camTop" title="Look down from above" class="px-1.5 sm:px-2 py-1 rounded inline-flex items-center gap-1 transition-colors cursor-pointer ${cam.side === 'top' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'hover:bg-[var(--surface-hover)]'}">${buildCameraViewSvg('top')}<span>Top</span></button>
+              <button type="button" id="camBot" title="Look up from underneath" class="px-1.5 sm:px-2 py-1 rounded inline-flex items-center gap-1 transition-colors cursor-pointer ${cam.side === 'bottom' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'hover:bg-[var(--surface-hover)]'}">${buildCameraViewSvg('bottom')}<span class="sm:hidden">Bot</span><span class="hidden sm:inline">Bottom</span></button>
+            </div>
+            <div class="w-px h-4 bg-[var(--border)] shrink-0 sm:hidden" aria-hidden="true"></div>
+            <span class="hidden sm:inline text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)] ml-1 mr-0.5">Rotate</span>
+            ${isMfStep ? `<button type="button" id="btnMfFront34" class="px-2 sm:px-2.5 py-1 rounded-md text-[11px] sm:text-xs font-semibold inline-flex items-center gap-1 shrink-0 transition-colors cursor-pointer ${isFront34 ? 'bg-[var(--primary-soft)] text-[var(--primary)] ring-1 ring-[var(--primary)]' : 'bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)]'}"><span>3/4</span><span class="hidden sm:inline">Pose</span></button>` : ''}
+            ${CAMERA_ROTATION_STEPS.map(r => `<button type="button" data-step-rotate="${r.deltaDeg}" title="${escHtml(r.title)}" class="step-rotate-btn px-1.5 sm:px-2 py-1 rounded-md text-[11px] sm:text-xs font-semibold inline-flex items-center gap-1 shrink-0 transition-colors cursor-pointer bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] active:bg-[var(--primary-soft)] active:text-[var(--primary)]"><span class="hidden sm:inline-flex">${buildCameraRotateSvg(r.icon)}</span><span class="font-mono">${r.label}</span></button>`).join('')}
           </div>
 
-          <div class="flex items-center justify-between gap-2 flex-wrap">
-            <div class="flex items-center gap-2 flex-wrap">
-              <div class="flex items-center gap-1.5">
-                <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Zoom</span>
-                ${renderZoomStepperHtml({ downId: 'stepCamZoomDown', upId: 'stepCamZoomUp', pct: modelScalePct, downLabel: 'Zoom step model out', upLabel: 'Zoom step model in' })}
-              </div>
-              <div class="flex items-center gap-1.5">
-                <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Framing</span>
-                <div class="inline-flex rounded-md bg-[var(--surface-sunken)] p-0.5 gap-0.5">
-                  ${FOCUS_MODE_OPTIONS.map(opt => `<button type="button" data-step-focus="${opt.id}" title="${escHtml(opt.description)}" class="step-focus-btn px-2 py-1 rounded text-[11px] font-semibold transition-colors cursor-pointer ${fMode === opt.id ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'hover:bg-[var(--surface-hover)]'}">${escHtml(opt.label)}</button>`).join('')}
+          <div class="${camExpanded ? 'block' : 'hidden'} sm:block space-y-2 pt-1.5 sm:pt-0 border-t sm:border-t-0 border-[var(--border)]">
+            <div class="flex items-center justify-between gap-2 flex-wrap">
+              <div class="flex items-center gap-2 flex-wrap">
+                <div class="flex items-center gap-1.5">
+                  <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Zoom</span>
+                  ${renderZoomStepperHtml({ downId: 'stepCamZoomDown', upId: 'stepCamZoomUp', pct: modelScalePct, downLabel: 'Zoom step model out', upLabel: 'Zoom step model in' })}
+                </div>
+                <div class="flex items-center gap-1.5">
+                  <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Framing</span>
+                  <div class="inline-flex rounded-md bg-[var(--surface-sunken)] p-0.5 gap-0.5">
+                    ${FOCUS_MODE_OPTIONS.map(opt => `<button type="button" data-step-focus="${opt.id}" title="${escHtml(opt.description)}" class="step-focus-btn px-2 py-1 rounded text-[11px] font-semibold transition-colors cursor-pointer ${fMode === opt.id ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'hover:bg-[var(--surface-hover)]'}">${escHtml(opt.label)}</button>`).join('')}
+                  </div>
                 </div>
               </div>
+              ${caps.hasCustomCameraAny ? `<button type="button" id="btnResetCam" class="px-2.5 py-1 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] text-xs font-semibold cursor-pointer">Reset</button>` : ''}
             </div>
-            ${caps.hasCustomCameraAny ? `<button type="button" id="btnResetCam" class="px-2.5 py-1 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] text-xs font-semibold cursor-pointer">Reset</button>` : ''}
-          </div>
-        </div>
 
-        ${caps.canApplyAngleToRange ? `
-          <div class="flex items-center justify-between gap-2 flex-wrap pt-2 border-t border-[var(--border)]">
-            <div class="flex items-center gap-2 min-w-0">
-              ${renderScopeBadge('range', 'Step Range')}
-              <span class="text-[11px] text-[var(--muted-foreground)] truncate">Share this camera across steps</span>
-            </div>
-            <button type="button" id="btnApplyAngleRange" class="px-3 py-1.5 rounded-md bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] text-xs font-semibold shrink-0 cursor-pointer">Apply Camera to Steps…</button>
-          </div>` : ''}`;
+            ${caps.canApplyAngleToRange ? `
+              <div class="flex items-center justify-between gap-2 flex-wrap pt-2 border-t border-[var(--border)]">
+                <div class="flex items-center gap-2 min-w-0">
+                  ${renderScopeBadge('range', 'Step Range')}
+                  <span class="text-[11px] text-[var(--muted-foreground)] truncate">Share this camera across steps</span>
+                </div>
+                <button type="button" id="btnApplyAngleRange" class="px-3 py-1.5 rounded-md bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] text-xs font-semibold shrink-0 cursor-pointer">Apply Camera to Steps…</button>
+              </div>` : ''}
+          </div>
+        </div>`;
     } else if (subTab === 'layout') {
       const pliScalePct = Math.round((ov.pliScale || 1.0) * 100);
       const prevStep = stepIdxInCh > 0 ? ch.steps[stepIdxInCh - 1] : null;
@@ -10249,8 +10312,8 @@ function renderContextOverlay(page) {
     }
 
     box.innerHTML = `
-      <div class="pointer-events-auto studio-surface rounded-xl p-3.5 w-full max-h-[46vh] overflow-y-auto space-y-2.5 text-xs">
-        <div class="flex items-center justify-between gap-2 flex-wrap pb-2 border-b border-[var(--border)]">
+      <div class="pointer-events-auto studio-surface rounded-xl p-2.5 sm:p-3.5 w-full max-h-[40vh] sm:max-h-[46vh] overflow-y-auto space-y-1.5 sm:space-y-2.5 text-xs">
+        <div class="flex items-center justify-between gap-2 flex-wrap pb-1.5 sm:pb-2 border-b border-[var(--border)]">
           ${stepHeaderLeft}
           ${subTabsHtml}
         </div>
@@ -10276,6 +10339,15 @@ function renderContextOverlay(page) {
         }
       };
     });
+    const toggleStepCamMoreBtn = box.querySelector('#btnToggleStepCamMore');
+    if (toggleStepCamMoreBtn) {
+      toggleStepCamMoreBtn.onclick = () => {
+        state.cameraMobileExpanded = !state.cameraMobileExpanded;
+        renderContextOverlay(page);
+        syncStageOverlayClearance(page);
+        applyStageTransform();
+      };
+    }
 
     if (subTab === 'camera') {
       const isMfStep = isMfBuild || Boolean(step.isMinifigPoseStep);

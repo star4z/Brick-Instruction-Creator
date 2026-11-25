@@ -266,6 +266,15 @@ body {
   -webkit-user-select: none;
 }
 
+#contextOverlay {
+  transition: opacity 150ms ease;
+}
+
+#contextOverlay.is-orbit-dragging {
+  opacity: 0.14;
+  pointer-events: none;
+}
+
 /* Calibrated Proofing Table surface */
 .proofing-stage {
   position: relative;

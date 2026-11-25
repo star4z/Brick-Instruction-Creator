@@ -681,3 +681,105 @@ export function migratePageInsertsToSteps(
   }
   return out;
 }
+
+export interface StageOverlayClearanceInput {
+  /** Whether a live camera panel is currently open over the stage. */
+  isCameraOverlayOpen: boolean;
+  /** Viewport height in CSS pixels (#stageViewport clientHeight). */
+  stageHeight: number;
+  /** Viewport width in CSS pixels (#stageViewport clientWidth). */
+  stageWidth: number;
+  /** Current top padding of #stageViewport (e.g. 104 on mobile, 64 on desktop). */
+  stagePaddingTop: number;
+  /** Current horizontal padding sum of #stageViewport (paddingLeft + paddingRight). */
+  stagePaddingX: number;
+  /** Default bottom padding of #stageViewport when no camera overlay is active (112px / pb-28). */
+  defaultPaddingBottom: number;
+  /** Distance from viewport bottom to the bottom edge of #contextOverlay (114px). */
+  overlayBottomOffset: number;
+  /** Measured height of #contextOverlay in CSS pixels (0 if hidden). */
+  overlayHeight: number;
+  /** Canonical (unscaled) page frame width in px. */
+  pageWidth: number;
+  /** Canonical (unscaled) page frame height in px. */
+  pageHeight: number;
+  /** Base fitScale computed from computeCanonicalPageMetrics. */
+  baseFitScale: number;
+  /** Visual breathing gap in px between the scaled page bottom and the top of #contextOverlay. */
+  gapPx?: number;
+}
+
+export interface StageOverlayClearanceResult {
+  /** Whether a bottom clearance override should be applied to #stageViewport. */
+  active: boolean;
+  /** CSS paddingBottom (px) to apply to #stageViewport, or null to restore stylesheet default. */
+  paddingBottomPx: number | null;
+  /** Effective fitScale for #stageContainer so the full page remains visible above #contextOverlay. */
+  fitScale: number;
+}
+
+/**
+ * Returns true when the current page + editor mode + step sub-tab displays
+ * a live 3D camera overlay over the stage (Step -> Camera, Cover -> Camera,
+ * or Build Complete -> Camera).
+ */
+export function isLiveCameraOverlayMode(
+  pageKind: string | null | undefined,
+  mode: string | null | undefined,
+  stepSubTab: string | null | undefined,
+): boolean {
+  if (pageKind === 'steps') {
+    return mode === 'step' && (stepSubTab || 'camera') === 'camera';
+  }
+  if (pageKind === 'cover' || pageKind === 'complete') {
+    return mode === 'camera';
+  }
+  return false;
+}
+
+/**
+ * Computes #stageViewport bottom padding and scaled page fit so the active page
+ * (and its 3D model) sits cleanly above the floating Camera control card instead
+ * of being occluded behind it on mobile and compact screens.
+ */
+export function computeStageOverlayClearance(
+  input: StageOverlayClearanceInput,
+): StageOverlayClearanceResult {
+  const baseFitScale = Math.max(0.1, Number(input.baseFitScale) || 1);
+  if (
+    !input.isCameraOverlayOpen
+    || !Number.isFinite(input.overlayHeight)
+    || input.overlayHeight <= 0
+    || !Number.isFinite(input.stageHeight)
+    || input.stageHeight <= 0
+    || !Number.isFinite(input.pageWidth)
+    || input.pageWidth <= 0
+    || !Number.isFinite(input.pageHeight)
+    || input.pageHeight <= 0
+  ) {
+    return { active: false, paddingBottomPx: null, fitScale: baseFitScale };
+  }
+
+  const gapPx = Math.max(0, Number.isFinite(input.gapPx) ? Number(input.gapPx) : 10);
+  const defaultPadB = Math.max(0, Number(input.defaultPaddingBottom) || 0);
+  const padTop = Math.max(0, Number(input.stagePaddingTop) || 0);
+  const padX = Math.max(0, Number(input.stagePaddingX) || 0);
+  const overlayBottomOffset = Math.max(0, Number(input.overlayBottomOffset) || 0);
+
+  const desiredPadB = Math.max(defaultPadB, Math.ceil(overlayBottomOffset + input.overlayHeight + gapPx));
+  const minStageContentH = 140;
+  const maxPadB = Math.max(defaultPadB, Math.floor(input.stageHeight - padTop - minStageContentH));
+  const paddingBottomPx = Math.min(desiredPadB, maxPadB);
+
+  const availW = Math.max(120, input.stageWidth - padX);
+  const availH = Math.max(120, input.stageHeight - padTop - paddingBottomPx);
+  const clearanceFitScale = Math.min(availW / input.pageWidth, availH / input.pageHeight);
+  const fitScale = Math.max(0.15, Math.min(baseFitScale, clearanceFitScale));
+
+  return {
+    active: true,
+    paddingBottomPx,
+    fitScale,
+  };
+}
+

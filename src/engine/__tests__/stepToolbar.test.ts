@@ -12,12 +12,14 @@ import {
   clearStepArrangeOverride,
   clearStepCameraOverride,
   computePaperPreviewBox,
+  computeStageOverlayClearance,
   findMatchingCameraPreset,
   getCameraAngleLabel,
   getEditModeButtonLabel,
   getFocusModeDescription,
   getVisibleModeTabs,
   isBlankStageClickTarget,
+  isLiveCameraOverlayMode,
   isModalEditPageKind,
   migratePageInsertsToSteps,
   resolveModeForPage,
@@ -510,4 +512,77 @@ describe('Step Toolbar & Scope-Based Editor Capabilities', () => {
     expect(shouldResetModeOnBlankStageClick({ ...base, wasMultiTouch: true })).toBe(false);
     expect(shouldResetModeOnBlankStageClick({ ...base, dismissedTransientOverlay: true })).toBe(false);
   });
+
+  it('identifies live camera overlay modes across Step, Cover, and Build Complete pages', () => {
+    expect(isLiveCameraOverlayMode('steps', 'step', 'camera')).toBe(true);
+    expect(isLiveCameraOverlayMode('steps', 'step', undefined)).toBe(true);
+    expect(isLiveCameraOverlayMode('steps', 'step', 'layout')).toBe(false);
+    expect(isLiveCameraOverlayMode('steps', 'step', 'notes')).toBe(false);
+    expect(isLiveCameraOverlayMode('steps', 'pan', 'camera')).toBe(false);
+    expect(isLiveCameraOverlayMode('steps', 'parts', 'camera')).toBe(false);
+    expect(isLiveCameraOverlayMode('cover', 'camera', 'camera')).toBe(true);
+    expect(isLiveCameraOverlayMode('complete', 'camera', 'camera')).toBe(true);
+    expect(isLiveCameraOverlayMode('cover', 'page', 'camera')).toBe(false);
+    expect(isLiveCameraOverlayMode('bom', 'page', 'camera')).toBe(false);
+  });
+
+  it('computes mobile stage clearance so the entire page fits unobstructed above the camera overlay', () => {
+    // Simulated iPhone portrait viewport (390x664) with compact 92px camera bar
+    const mobileCompact = computeStageOverlayClearance({
+      isCameraOverlayOpen: true,
+      stageWidth: 390,
+      stageHeight: 664,
+      stagePaddingTop: 104,
+      stagePaddingX: 24,
+      defaultPaddingBottom: 112,
+      overlayBottomOffset: 114,
+      overlayHeight: 92,
+      pageWidth: 740,
+      pageHeight: 960,
+      baseFitScale: 0.48,
+      gapPx: 10,
+    });
+    expect(mobileCompact.active).toBe(true);
+    expect(mobileCompact.paddingBottomPx).toBe(216);
+    // Remaining height = 664 - 104 - 216 = 344px; scaled page height <= 344px!
+    expect(mobileCompact.fitScale * 960).toBeLessThanOrEqual(344.5);
+    expect(mobileCompact.fitScale).toBeGreaterThan(0.34);
+
+    // When expanded on mobile (220px overlay), page scales down further to stay unobstructed
+    const mobileExpanded = computeStageOverlayClearance({
+      isCameraOverlayOpen: true,
+      stageWidth: 390,
+      stageHeight: 664,
+      stagePaddingTop: 104,
+      stagePaddingX: 24,
+      defaultPaddingBottom: 112,
+      overlayBottomOffset: 114,
+      overlayHeight: 220,
+      pageWidth: 740,
+      pageHeight: 960,
+      baseFitScale: 0.48,
+      gapPx: 10,
+    });
+    expect(mobileExpanded.active).toBe(true);
+    expect(mobileExpanded.paddingBottomPx).toBe(344);
+    expect(mobileExpanded.fitScale).toBeLessThan(mobileCompact.fitScale);
+    expect(mobileExpanded.fitScale * 960).toBeLessThanOrEqual(216.5);
+
+    // When camera overlay is closed, restores default stylesheet padding and baseFitScale
+    const closed = computeStageOverlayClearance({
+      isCameraOverlayOpen: false,
+      stageWidth: 390,
+      stageHeight: 664,
+      stagePaddingTop: 104,
+      stagePaddingX: 24,
+      defaultPaddingBottom: 112,
+      overlayBottomOffset: 114,
+      overlayHeight: 92,
+      pageWidth: 740,
+      pageHeight: 960,
+      baseFitScale: 0.48,
+    });
+    expect(closed).toEqual({ active: false, paddingBottomPx: null, fitScale: 0.48 });
+  });
 });
+
