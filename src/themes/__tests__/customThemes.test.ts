@@ -248,9 +248,11 @@ describe('theme style options, recents & naming', () => {
   it('stores step display options on themes with safe defaults and round-trips them', async () => {
     const m = await import('../customThemes');
     expect(m.getThemeStyleOptions(BUILT_IN_THEMES.blue)).toEqual(m.DEFAULT_THEME_STYLE_OPTIONS);
-    expect(m.DEFAULT_THEME_STYLE_OPTIONS.stepLighting).toBe('standard');
+    expect(m.DEFAULT_THEME_STYLE_OPTIONS.stepLighting).toBe('none');
     expect(m.DEFAULT_THEME_STYLE_OPTIONS.highQualityStepRender).toBe(false);
-    expect(m.DEFAULT_THEME_STYLE_OPTIONS.starkBlackOutlines).toBe(false);
+    expect(m.DEFAULT_THEME_STYLE_OPTIONS.starkBlackOutlines).toBe(true);
+    expect(m.DEFAULT_THEME_STYLE_OPTIONS.fadePrev).toBe(false);
+    expect(m.DEFAULT_THEME_STYLE_OPTIONS.fadeOpacity).toBe(1);
     expect(m.DEFAULT_THEME_STYLE_OPTIONS.highlightLineWeight).toBe('medium');
     expect(m.DEFAULT_THEME_STYLE_OPTIONS.outlineLineWeight).toBe('medium');
     expect(m.DEFAULT_THEME_STYLE_OPTIONS.arrowStyle).toBe('flat');
@@ -269,7 +271,7 @@ describe('theme style options, recents & naming', () => {
       fadeOpacity: 7,
       highlightColor: 'red;}',
       highQualityStepRender: true,
-      starkBlackOutlines: true,
+      starkBlackOutlines: false,
       highlightLineWeight: 'extra-heavy',
       outlineLineWeight: 'light',
       arrowStyle: '3d',
@@ -283,7 +285,7 @@ describe('theme style options, recents & naming', () => {
     expect(t.highlightColor).toBe('#ff2d55');
     expect(t.stepLighting).toBe('studio');
     expect(t.highQualityStepRender).toBe(true);
-    expect(t.starkBlackOutlines).toBe(true);
+    expect(t.starkBlackOutlines).toBe(false);
     expect(t.highlightLineWeight).toBe('extra-heavy');
     expect(t.outlineLineWeight).toBe('light');
     expect(t.arrowStyle).toBe('3d');
@@ -293,7 +295,7 @@ describe('theme style options, recents & naming', () => {
     expect(m.themeStyleOptionsEqual(m.getThemeStyleOptions(back), m.getThemeStyleOptions(t))).toBe(true);
     expect(back.stepLighting).toBe('studio');
     expect(back.highQualityStepRender).toBe(true);
-    expect(back.starkBlackOutlines).toBe(true);
+    expect(back.starkBlackOutlines).toBe(false);
     expect(back.highlightLineWeight).toBe('extra-heavy');
     expect(back.outlineLineWeight).toBe('light');
     expect(back.arrowStyle).toBe('3d');
@@ -302,14 +304,14 @@ describe('theme style options, recents & naming', () => {
     expect(createThemeDraftFromBase(t).showStepBorders).toBe(false);
     expect(createThemeDraftFromBase(t).stepLighting).toBe('studio');
     expect(createThemeDraftFromBase(t).highQualityStepRender).toBe(true);
-    expect(createThemeDraftFromBase(t).starkBlackOutlines).toBe(true);
+    expect(createThemeDraftFromBase(t).starkBlackOutlines).toBe(false);
     expect(createThemeDraftFromBase(t).highlightLineWeight).toBe('extra-heavy');
     expect(createThemeDraftFromBase(t).outlineLineWeight).toBe('light');
     expect(createThemeDraftFromBase(t).arrowStyle).toBe('3d');
     expect(createThemeDraftFromBase(t).arrowOutlines).toBe(true);
     expect(createThemeDraftFromBase(t).arrowLighting).toBe(true);
 
-    // Flat / No Lighting mode round-trips cleanly and clears highQualityStepRender
+    // Flat / No Lighting and Standard Lighting modes round-trip cleanly and clear highQualityStepRender
     const flatTheme = normalizeCustomTheme({
       name: 'Flat Print',
       stepLighting: 'none',
@@ -320,6 +322,17 @@ describe('theme style options, recents & naming', () => {
     const [flatBack] = parseImportedThemesJson(serializeThemeExport(flatTheme));
     expect(flatBack.stepLighting).toBe('none');
     expect(flatBack.highQualityStepRender).toBe(false);
+    const stdTheme = normalizeCustomTheme({
+      name: 'Standard Lit',
+      stepLighting: 'standard',
+      highQualityStepRender: true,
+    })!;
+    expect(stdTheme.stepLighting).toBe('standard');
+    expect(stdTheme.highQualityStepRender).toBe(false);
+    const [stdBack] = parseImportedThemesJson(serializeThemeExport(stdTheme));
+    expect(stdBack.stepLighting).toBe('standard');
+    expect(stdBack.highQualityStepRender).toBe(false);
+    expect(m.sanitizeStepLightingMode('invalid')).toBe('none');
     expect(m.sanitizeStepLightingMode('invalid', 'standard')).toBe('standard');
 
     // Legacy themes saved with fadePrev=false and a lower fadeOpacity migrate to Full (1.0)

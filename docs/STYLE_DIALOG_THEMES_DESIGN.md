@@ -26,10 +26,10 @@ The Style dialog (`#stylePopover`) is now the only place to choose and edit them
 
 | Option | Default |
 | --- | --- |
-| `stepLighting` / `highQualityStepRender` (Lighting: `none` flat uniform unlit colors, `standard` 3-point ABS plastic shading, `studio` cover-quality bevels & soft shadows) | `'standard'` / `false` (`highQualityStepRender` derived from `stepLighting === 'studio'`; legacy `highQualityStepRender: true` migrates to `'studio'`) |
-| `highlightNew` / `highlightColor` / `highlightLineWeight` (Outline New Parts & line weight) | `true` / `#ff2d55` / `'medium'` |
-| `starkBlackOutlines` / `outlineLineWeight` (Outline All Parts & outline weight) | `false` / `'medium'` |
-| `fadeOpacity` / `fadePrev` (Fade Earlier Pieces: Off `1.0`, Subtle `0.82`, Medium `0.65`, Heavy `0.45`; includes swatch chips and live stacked-brick preview) | `0.82` / `true` (`fadePrev` derived from `fadeOpacity < 0.99`) |
+| `stepLighting` / `highQualityStepRender` (Lighting: `none` flat uniform unlit colors, `standard` 3-point ABS plastic shading, `studio` cover-quality bevels & soft shadows) | `'none'` / `false` (`highQualityStepRender` derived from `stepLighting === 'studio'`; legacy `highQualityStepRender: true` migrates to `'studio'`) |
+| `highlightNew` / `highlightColor` / `highlightLineWeight` (Outline New Parts & line weight) | `false` / `#ff2d55` / `'medium'` |
+| `starkBlackOutlines` / `outlineLineWeight` (Outline All Parts & outline weight) | `true` / `'medium'` |
+| `fadeOpacity` / `fadePrev` (Fade Earlier Pieces: Off `1.0`, Subtle `0.82`, Medium `0.65`, Heavy `0.45`; includes swatch chips and live stacked-brick preview) | `1.0` / `false` (`fadePrev` derived from `fadeOpacity < 0.99`) |
 | `showRotCues` (Rotation Badges) | `true` |
 | `showSizeGuides` (1:1 Axle & Beam Guides) | `true` |
 | `minifigStyle` (Minifigure Steps) | `exploded` |

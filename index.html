@@ -621,7 +621,7 @@
           <div class="space-y-1.5">
             <div class="flex items-center justify-between gap-2">
               <span class="font-medium">Lighting</span>
-              <span id="stepLightingHint" class="text-[11px] text-[var(--muted-foreground)] truncate">3-point brick shading</span>
+              <span id="stepLightingHint" class="text-[11px] text-[var(--muted-foreground)] truncate">Flat uniform colors</span>
             </div>
             <div class="grid grid-cols-3 gap-1.5">
               <button data-step-lighting="none" type="button" class="step-lighting-chip py-1.5 px-2 rounded-md border font-semibold text-xs transition cursor-pointer" title="No lighting at all — flat, uniform part colors with zero shading or highlights">None</button>
@@ -673,7 +673,7 @@
           </div>
           <label class="flex items-center justify-between gap-2 cursor-pointer">
             <span class="font-medium">Outline All Parts</span>
-            <input id="toggleStarkBlackOutlines" type="checkbox" class="w-4 h-4 accent-[var(--primary)] cursor-pointer" />
+            <input id="toggleStarkBlackOutlines" type="checkbox" checked class="w-4 h-4 accent-[var(--primary)] cursor-pointer" />
           </label>
           <div id="outlineWeightWrap" class="space-y-1.5">
             <div class="text-xs text-[var(--muted-foreground)]">Outline Weight</div>
@@ -689,16 +689,16 @@
               <span class="font-medium">Fade Earlier Pieces</span>
               <span id="fadeVisibilityPreview" class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-[var(--surface-sunken)] border border-[var(--border)] text-[11px] font-medium text-[var(--muted-foreground)] shrink-0" title="Visual preview: earlier piece (bottom) vs. new piece (top)">
                 <svg viewBox="0 0 34 20" class="w-[30px] h-[18px] shrink-0 overflow-visible" aria-hidden="true">
-                  <g id="fadePreviewEarlier" fill="#cf5b52" stroke="#7c3d38" stroke-width="1">
+                  <g id="fadePreviewEarlier" fill="#c91a09" stroke="#6b1108" stroke-width="1">
                     <rect x="5" y="9" width="6.5" height="2.4" rx="0.9" />
                     <rect x="2" y="11" width="28" height="7.5" rx="1.4" />
                   </g>
-                  <g id="fadePreviewNew" fill="#c91a09" stroke="#ff2d55" stroke-width="1.35">
+                  <g id="fadePreviewNew" fill="#c91a09" stroke="#6b1108" stroke-width="1">
                     <rect x="20.25" y="1.5" width="6.5" height="2.4" rx="0.9" />
                     <rect x="16.5" y="3.5" width="14" height="7.5" rx="1.4" />
                   </g>
                 </svg>
-                <span id="fadePreviewStatus">Subtle fade</span>
+                <span id="fadePreviewStatus">No fade</span>
               </span>
             </div>
             <div class="grid grid-cols-4 gap-1.5">

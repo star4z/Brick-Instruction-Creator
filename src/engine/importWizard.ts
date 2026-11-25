@@ -212,7 +212,7 @@ export function formatWizardRenderingSummary(input: {
   highlightLineWeight?: string;
   fadeOpacity: number;
 }): { value: string; detail: string } {
-  const lighting = input.stepLighting ?? (input.highQualityStepRender ? 'studio' : 'standard');
+  const lighting = input.stepLighting ?? (input.highQualityStepRender ? 'studio' : 'none');
   const value =
     lighting === 'none'
       ? 'Flat (No Lighting)'

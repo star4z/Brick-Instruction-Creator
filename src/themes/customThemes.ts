@@ -126,7 +126,7 @@ export const STEP_LIGHTING_MODES: StepLightingMode[] = ['none', 'standard', 'stu
 
 export function sanitizeStepLightingMode(
   raw: unknown,
-  fallback: StepLightingMode = 'standard',
+  fallback: StepLightingMode = 'none',
 ): StepLightingMode {
   if (raw === 'none' || raw === 'standard' || raw === 'studio') return raw;
   return fallback;
@@ -208,11 +208,11 @@ export const DEFAULT_THEME_STYLE_OPTIONS: ThemeStyleOptions = {
   highlightNew: false,
   highlightColor: '#ff2d55',
   highlightLineWeight: 'medium',
-  fadePrev: true,
-  fadeOpacity: 0.82,
-  stepLighting: 'standard',
+  fadePrev: false,
+  fadeOpacity: 1.0,
+  stepLighting: 'none',
   highQualityStepRender: false,
-  starkBlackOutlines: false,
+  starkBlackOutlines: true,
   outlineLineWeight: 'medium',
   showRotCues: true,
   showSizeGuides: true,
@@ -250,7 +250,7 @@ export function normalizeThemeStyleOptions(
   const fbLighting: StepLightingMode =
     fb.stepLighting === 'none' || fb.stepLighting === 'standard' || fb.stepLighting === 'studio'
       ? fb.stepLighting
-      : (fb.highQualityStepRender ? 'studio' : 'standard');
+      : (fb.highQualityStepRender ? 'studio' : 'none');
   let stepLighting: StepLightingMode;
   if (r.stepLighting === 'none' || r.stepLighting === 'standard' || r.stepLighting === 'studio') {
     stepLighting = r.stepLighting;

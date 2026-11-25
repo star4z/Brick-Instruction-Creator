@@ -697,13 +697,13 @@ function selectTheme(id) {
   const nameEl = document.getElementById('themeNameInput');
   if (nameEl && document.activeElement === nameEl) nameEl.blur();
   const prevStark = Boolean(state.starkBlackOutlines);
-  const prevLighting = sanitizeStepLightingMode(state.stepLighting, state.highQualityStepRender ? 'studio' : 'standard');
+  const prevLighting = sanitizeStepLightingMode(state.stepLighting, state.highQualityStepRender ? 'studio' : 'none');
   const prevOutW = state.outlineLineWeight;
   const prevHlW = state.highlightLineWeight;
   const prevArrowSig = `${state.autoPlacementArrows !== false}|${state.arrowColor}|${state.arrowStyle}|${Boolean(state.arrowOutlines)}|${Boolean(state.arrowLighting)}`;
   state.themeId = resolveThemeById(id, customThemes).id;
   applyActiveThemeStyleToState();
-  const nextLighting = sanitizeStepLightingMode(state.stepLighting, state.highQualityStepRender ? 'studio' : 'standard');
+  const nextLighting = sanitizeStepLightingMode(state.stepLighting, state.highQualityStepRender ? 'studio' : 'none');
   const nextArrowSig = `${state.autoPlacementArrows !== false}|${state.arrowColor}|${state.arrowStyle}|${Boolean(state.arrowOutlines)}|${Boolean(state.arrowLighting)}`;
   if (prevStark !== Boolean(state.starkBlackOutlines) || prevOutW !== state.outlineLineWeight || prevLighting !== nextLighting) {
     pliThumbCache.clear();
@@ -7303,11 +7303,11 @@ const state = {
   highlightNew: false,
   highlightColor: '#ff2d55',
   highlightLineWeight: 'medium',
-  fadePrev: true,
-  fadeOpacity: 0.82,
-  stepLighting: 'standard',
+  fadePrev: false,
+  fadeOpacity: 1.0,
+  stepLighting: 'none',
   highQualityStepRender: false,
-  starkBlackOutlines: false,
+  starkBlackOutlines: true,
   outlineLineWeight: 'medium',
   showRotCues: true,
   showSizeGuides: true,
@@ -12842,7 +12842,7 @@ function syncArrowStyleUI(opts = state) {
 }
 
 function syncStepLightingUI(mode = state.stepLighting) {
-  const activeMode = sanitizeStepLightingMode(mode, state.highQualityStepRender ? 'studio' : 'standard');
+  const activeMode = sanitizeStepLightingMode(mode, state.highQualityStepRender ? 'studio' : 'none');
   document.querySelectorAll('.step-lighting-chip').forEach(b => {
     const act = b.getAttribute('data-step-lighting') === activeMode;
     b.className = `step-lighting-chip py-1.5 px-2 rounded-md border font-semibold text-xs transition cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
@@ -15243,7 +15243,7 @@ const LIB_INSPECTOR_SIZE = 880;
 function getLibRenderStyleState() {
   const stepLighting = sanitizeStepLightingMode(
     state.stepLighting,
-    state.highQualityStepRender ? 'studio' : 'standard',
+    state.highQualityStepRender ? 'studio' : 'none',
   );
   const starkBlackOutlines = Boolean(state.starkBlackOutlines);
   const outlineLineWeight = starkBlackOutlines
@@ -21144,7 +21144,7 @@ document.querySelectorAll('.pgnum-btn').forEach(b => {
 });
 document.querySelectorAll('.step-lighting-chip').forEach(b => {
   b.onclick = () => {
-    const mode = sanitizeStepLightingMode(b.getAttribute('data-step-lighting'), 'standard');
+    const mode = sanitizeStepLightingMode(b.getAttribute('data-step-lighting'), 'none');
     pliThumbCache.clear();
     submodelThumbCache.clear();
     minifigDiagramCache.clear();
@@ -23345,7 +23345,7 @@ function renderImportWizardUI() {
     autoPlacementArrows: state.autoPlacementArrows !== false,
     highlightNew: Boolean(state.highlightNew),
     highlightLineWeight: state.highlightLineWeight,
-    fadeOpacity: Number(state.fadeOpacity ?? 0.82),
+    fadeOpacity: Number(state.fadeOpacity ?? 1.0),
     wordlessMode: Boolean(state.wordlessMode),
     paperFormat: state.paperFormat,
     paperFormatLabel: activeFmt.shortName || activeFmt.name,

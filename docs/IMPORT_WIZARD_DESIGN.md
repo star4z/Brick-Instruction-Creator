@@ -9,7 +9,7 @@
    - **Text & Labels** (**Wordless (LEGO-Style)** vs. **With Text Labels**) belongs in **Page Setup** (`#pageSetupModal`), not in Step Generation.
 2. **Import Wizard (`#importWizardModal`) is distinct from editing pages**:
    - Shown on fresh model imports (`.io`, `.ldr`, `.mpd`) after the optional Missing Parts check.
-   - Initializes clean, built-in project defaults via `getFreshImportWizardDefaults()` (`Classic Blue` built-in theme with Standard Lighting, `Screen Fit` / `Landscape`, `Auto` grid, `Balanced` margins, `Wordless (LEGO-Style)`, duplicate detection on, all included pages on) so prior session overrides (such as a custom theme or Portrait print layout) do not bleed into a new import.
+   - Initializes clean, built-in project defaults via `getFreshImportWizardDefaults()` (`Classic Blue` built-in theme with Flat / No Lighting, Outline All Parts, and No Fade, `Screen Fit` / `Landscape`, `Auto` grid, `Balanced` margins, `Wordless (LEGO-Style)`, duplicate detection on, all included pages on) so prior session overrides (such as a custom theme or Portrait print layout) do not bleed into a new import.
    - Displays a **read-only summary** of the project-level defaults selected for the new manual — no inline inputs, toggles, or dropdowns on the main wizard page.
    - Each summary row links directly to the editable **project-level** setup page that modifies it, with a **top-left back arrow (`←`)** in the header and a `Back to Import Wizard` button in the footer, returning to the main wizard page's single primary `Generate Manual` action.
 3. **All wizard sub-pages are strictly project-level**:
@@ -24,7 +24,7 @@
 | **Slicing** | Recommended subdivision sections, `Single Continuous Build`, or `Keep Existing File Steps` + duplicate submodel status | **Step Generation** (`#importModal` in wizard mode) | Top |
 | **Theme** | Active theme name (`Classic Blue` by default) + live color swatch (background, text, accent) + built-in/custom status | **Style & Themes** (`#stylePopover` in centered wizard modal mode) | Top (`Themes`) |
 | **Text & Labels** | `Wordless (LEGO-Style)` (default) or `With Text Labels` | **Page Setup** (`#pageSetupModal` in wizard mode) | `#pageSetupWordlessSection` |
-| **Rendering Style** | `Standard Lighting` (default), `Flat (No Lighting)`, or `Studio Lighting` + outline mode/weight + earlier-piece fade level | **Style & Themes** (`#stylePopover` in centered wizard modal mode) | `#styleStepDisplaySection` |
+| **Rendering Style** | `Flat (No Lighting)` (default), `Standard Lighting`, or `Studio Lighting` + outline mode/weight + earlier-piece fade level | **Style & Themes** (`#stylePopover` in centered wizard modal mode) | `#styleStepDisplaySection` |
 | **Page Format** | `Screen Fit` (default) or paper size & orientation (`Landscape` default) + default grid & margin density | **Page Setup** (`#pageSetupModal` in wizard mode) | `#pageSetupFormatSection` (top) |
 
 ## 3. Project-Level Visibility Rules During Import Wizard

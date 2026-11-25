@@ -22,12 +22,13 @@ function baseInput(overrides: Partial<ImportWizardSummaryInput> = {}): ImportWiz
     themeBgType: 'gradient',
     themeAccent: '#1a73e8',
     themeText: '#172536',
+    stepLighting: 'none',
     highQualityStepRender: false,
-    starkBlackOutlines: false,
+    starkBlackOutlines: true,
     outlineLineWeight: 'medium',
-    highlightNew: true,
+    highlightNew: false,
     highlightLineWeight: 'medium',
-    fadeOpacity: 0.82,
+    fadeOpacity: 1.0,
     wordlessMode: true,
     paperFormat: 'screen',
     paperFormatLabel: 'Screen Fit',
@@ -86,9 +87,9 @@ describe('Import Wizard Engine', () => {
     expect(byId.rendering.targetSubpage).toBe('style');
     expect(byId.rendering.targetSection).toBe('rendering');
     expect(byId.rendering.targetPageLabel).toBe('Style & Themes');
-    expect(byId.rendering.value).toBe('Standard Lighting');
-    expect(byId.rendering.detail).toContain('Outline new parts (Medium)');
-    expect(byId.rendering.detail).toContain('Subtle fade');
+    expect(byId.rendering.value).toBe('Flat (No Lighting)');
+    expect(byId.rendering.detail).toContain('Outline all parts (Medium)');
+    expect(byId.rendering.detail).toContain('No fade');
 
     expect(byId.format.targetSubpage).toBe('pageSetup');
     expect(byId.format.targetSection).toBe('format');
@@ -150,6 +151,20 @@ describe('Import Wizard Engine', () => {
     ).toEqual({
       value: 'Studio Lighting',
       detail: 'Outline all parts (Heavy) · No fade',
+    });
+
+    expect(
+      formatWizardRenderingSummary({
+        stepLighting: 'standard',
+        highQualityStepRender: false,
+        starkBlackOutlines: false,
+        highlightNew: true,
+        highlightLineWeight: 'medium',
+        fadeOpacity: 0.82,
+      }),
+    ).toEqual({
+      value: 'Standard Lighting',
+      detail: 'Outline new parts (Medium) · Subtle fade',
     });
 
     expect(

@@ -320,6 +320,11 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     await page.locator('#btnCloseFontPicker').click();
     await expect(page.locator('#themeFontPickerPanel')).toBeHidden();
 
+    // Verify default rendering style: lighting off, outline all parts on, fade earlier pieces off
+    await expect(page.locator('#stepLightingHint')).toHaveText('Flat uniform colors');
+    await expect(page.locator('#toggleStarkBlackOutlines')).toBeChecked();
+    await expect(page.locator('#fadePreviewStatus')).toHaveText('No fade');
+
     // Verify Placement Arrow Style controls (default: Flat 2D, no outlines, no lighting) & customization
     await expect(page.locator('#arrowStyleWrap')).toBeVisible();
     await expect(page.locator('#toggleArrowOutlines')).not.toBeChecked();
