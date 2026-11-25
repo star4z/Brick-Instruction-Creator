@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { DEMO_MODELS } from '../data/demoModels';
 import { THEME_PRESETS } from '../data/themePresets';
-import { optimizeCameraSequence } from '../engine/cameraOptimizer';
+import { recomputeStepRotationCues } from '../engine/cameraOptimizer';
 import { buildConnectivityGraph } from '../engine/connectivity';
 import { buildPagePlans } from '../engine/layoutEngine';
 import { parseLDrawSource, parseModelFile } from '../engine/ldrawParser';
@@ -30,7 +30,6 @@ import type {
   InstructionPlan,
   PacingPreset,
   PagePlan,
-  PartInstance,
   PresentationTransform,
   ReimportDiffReport,
   StepOverride,
@@ -458,25 +457,21 @@ export const useManualStore = create<ManualState>((set, get) => {
         [stepId]: { ...(overrides[stepId] ?? {}), ...patch },
       };
 
-      // If cameraViewOverride changed, re-run Viterbi optimizer on that chapter so rotation cues stay accurate!
+      // If any camera angle override (preset or free orbit) changed, recompute rotation cues across that chapter!
       let nextPlan = plan;
-      if ('cameraViewOverride' in patch) {
+      if (
+        'cameraViewOverride' in patch ||
+        'customAzimuthDeg' in patch ||
+        'customElevationDeg' in patch
+      ) {
         const step = plan.steps[stepId];
         if (step) {
           const ch = plan.chapters.find((c) => c.id === step.chapterId);
           if (ch) {
-            const partsById: Record<string, PartInstance> = Object.fromEntries(
-              model.parts.map((p) => [p.id, p]),
-            );
             const ordered = ch.stepIds.map((id) => plan.steps[id]).filter(Boolean);
-            const reOpt = optimizeCameraSequence(
-              ordered,
-              partsById,
-              nextOverrides,
-              (subId) => plan.subassemblies[subId]?.instancePartIdGroups.flat() ?? [],
-            );
+            const updated = recomputeStepRotationCues(ordered, nextOverrides);
             const nextSteps = { ...plan.steps };
-            for (const s of reOpt) nextSteps[s.id] = s;
+            for (const s of updated) nextSteps[s.id] = s;
             nextPlan = { ...plan, steps: nextSteps };
           }
         }
@@ -507,12 +502,34 @@ export const useManualStore = create<ManualState>((set, get) => {
     resetStepOverride: (stepId) => {
       const { model, plan, overrides, theme, cover, back, bom } = get();
       const undoStack = pushHistory();
+      const prevOv = overrides[stepId];
       const nextOverrides = { ...overrides };
       delete nextOverrides[stepId];
+
+      let nextPlan = plan;
+      if (
+        prevOv &&
+        (prevOv.cameraViewOverride !== undefined ||
+          prevOv.customAzimuthDeg !== undefined ||
+          prevOv.customElevationDeg !== undefined)
+      ) {
+        const step = plan.steps[stepId];
+        if (step) {
+          const ch = plan.chapters.find((c) => c.id === step.chapterId);
+          if (ch) {
+            const ordered = ch.stepIds.map((id) => plan.steps[id]).filter(Boolean);
+            const updated = recomputeStepRotationCues(ordered, nextOverrides);
+            const nextSteps = { ...plan.steps };
+            for (const s of updated) nextSteps[s.id] = s;
+            nextPlan = { ...plan, steps: nextSteps };
+          }
+        }
+      }
+
       technicalRenderer.clearStepCache();
       const { pages, currentPageIndex } = recomputePages(
         model,
-        plan,
+        nextPlan,
         nextOverrides,
         theme,
         cover,
@@ -520,7 +537,7 @@ export const useManualStore = create<ManualState>((set, get) => {
         bom,
         stepId,
       );
-      set({ overrides: nextOverrides, pages, currentPageIndex, undoStack, redoStack: [] });
+      set({ plan: nextPlan, overrides: nextOverrides, pages, currentPageIndex, undoStack, redoStack: [] });
       scheduleAutosave(get);
     },
 

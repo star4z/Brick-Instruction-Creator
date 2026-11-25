@@ -17,12 +17,15 @@ import {
   STEP_VISIBILITY_DEADBAND,
   computeStepCameraFraming,
   evaluateStepOcclusionVisibility,
+  findPreviousStudioModelStep,
   isStrictUndersidePlacement,
   optimizeStudioStepCameraSequence,
+  resolveEffectiveStudioStepCue,
+  resolveStudioStepCamera,
   stepVisibilityPenalty,
   type OptimizableStepCameraInput,
 } from '../stepCamera';
-import { optimizeCameraSequence } from '../cameraOptimizer';
+import { optimizeCameraSequence, recomputeStepRotationCues } from '../cameraOptimizer';
 import { DEMO_MODELS } from '../../data/demoModels';
 import { buildConnectivityGraph } from '../connectivity';
 import { parseLDrawSource } from '../ldrawParser';
@@ -444,5 +447,119 @@ describe('Step Camera Stability & Steady Framing', () => {
       compareFrontierCandidates(a, b, 'front_right', refBounds),
     );
     expect(sorted[0].index).toBe(1);
+  });
+
+  it('resolves free-orbit step camera angles and rotation indicators for both the orbited step and the following step', () => {
+    const s1 = { id: 's1', side: 'top', corner: 'front_right', az: 38, el: 30, cue: 'none' };
+    const s2 = { id: 's2', side: 'top', corner: 'front_right', az: 38, el: 30, cue: 'none' };
+    const s3 = { id: 's3', side: 'top', corner: 'front_right', az: 38, el: 30, cue: 'none' };
+    const ch = { id: 'ch1', kind: 'main', sectionId: 'sec_1', steps: [s1, s2, s3] };
+    const chapters = [ch];
+
+    // Free-orbit s2 horizontally off-preset (90° CW -> az 128°, no preset corner match)
+    const cwOverrides = { s2: { side: 'top', az: 128, el: 24 } };
+    expect(resolveEffectiveStudioStepCue(chapters, ch, s1, cwOverrides)).toBe('none');
+    expect(resolveEffectiveStudioStepCue(chapters, ch, s2, cwOverrides)).toBe('yaw_90_cw');
+    expect(resolveEffectiveStudioStepCue(chapters, ch, s3, cwOverrides)).toBe('yaw_90_ccw');
+
+    // Free-orbit s2 to the back (~180° -> az 215°)
+    const backOverrides = { s2: { side: 'top', az: 215, el: 28 } };
+    expect(resolveEffectiveStudioStepCue(chapters, ch, s2, backOverrides)).toBe('yaw_180');
+    expect(resolveEffectiveStudioStepCue(chapters, ch, s3, backOverrides)).toBe('yaw_180');
+
+    // Free-orbit s2 underneath via negative elevation even if side is omitted
+    const flipOverrides = { s2: { az: 45, el: -28 } };
+    expect(resolveStudioStepCamera(s2, flipOverrides.s2)).toMatchObject({
+      side: 'bottom',
+      az: 45,
+      el: -28,
+    });
+    expect(resolveEffectiveStudioStepCue(chapters, ch, s2, flipOverrides)).toBe('flip_vertical');
+    expect(resolveEffectiveStudioStepCue(chapters, ch, s3, flipOverrides)).toBe('flip_vertical');
+
+    // Free-orbit s1 wraps around 0°/360° -> s1 stays 'none', s2 rotates from s1's custom angle
+    const wrapOverrides = { s1: { side: 'top', az: -10, el: 25 }, s2: { side: 'top', az: 80, el: 25 } };
+    expect(resolveStudioStepCamera(s1, wrapOverrides.s1).az).toBe(350);
+    expect(resolveEffectiveStudioStepCue(chapters, ch, s1, wrapOverrides)).toBe('none');
+    expect(resolveEffectiveStudioStepCue(chapters, ch, s2, wrapOverrides)).toBe('yaw_90_cw');
+
+    // Small <40° free-orbit tweak produces no rotation badge
+    const smallTweak = { s2: { side: 'top', az: 65, el: 35 } };
+    expect(resolveEffectiveStudioStepCue(chapters, ch, s2, smallTweak)).toBe('none');
+    expect(resolveEffectiveStudioStepCue(chapters, ch, s3, smallTweak)).toBe('none');
+  });
+
+  it('tracks free-orbit rotation indicators across multi-chapter sections (bags & submodel splits) while isolating submodels and skipping pose steps', () => {
+    const m1 = { id: 'm1', side: 'top', corner: 'front_right', az: 38, el: 30, cue: 'none' };
+    const sub1 = { id: 'sub1', side: 'top', corner: 'front_right', az: 38, el: 30, cue: 'none' };
+    const sub2 = { id: 'sub2', side: 'top', corner: 'front_right', az: 38, el: 30, cue: 'none' };
+    const pose = { id: 'pose', side: 'top', corner: 'front_right', az: 20, el: 18, cue: 'none', isMinifigPoseStep: true };
+    const m2 = { id: 'm2', side: 'top', corner: 'front_right', az: 38, el: 30, cue: 'none' };
+
+    const chMain1 = { id: 'ch_m1', kind: 'main', sectionId: 'sec_1', steps: [m1] };
+    const chSub = { id: 'ch_sub', kind: 'submodel', sectionId: 'subsec_1', steps: [sub1, sub2] };
+    const chMain2 = { id: 'ch_m2', kind: 'main', sectionId: 'sec_1', steps: [pose, m2] };
+    const chapters = [chMain1, chSub, chMain2];
+
+    // m2's preceding model step is m1 across the submodel & pose step
+    expect(findPreviousStudioModelStep(chapters, chMain2, m2)?.id).toBe('m1');
+    expect(findPreviousStudioModelStep(chapters, chSub, sub1)).toBeNull();
+    expect(findPreviousStudioModelStep(chapters, chSub, sub2)?.id).toBe('sub1');
+
+    // Free-orbiting m2 (first model step of chMain2) must show a cue relative to m1
+    expect(
+      resolveEffectiveStudioStepCue(chapters, chMain2, m2, {
+        m2: { side: 'top', az: 130, el: 22 },
+      }),
+    ).toBe('yaw_90_cw');
+
+    // Free-orbiting m1 (last step of chMain1) must trigger a return cue on m2
+    expect(
+      resolveEffectiveStudioStepCue(chapters, chMain2, m2, {
+        m1: { side: 'bottom', az: 38, el: -35 },
+      }),
+    ).toBe('flip_vertical');
+
+    // Submodel step 1 stays 'none' even when free-orbited; submodel step 2 compares against sub1
+    const subOverrides = { sub1: { side: 'top', az: 200, el: 30 } };
+    expect(resolveEffectiveStudioStepCue(chapters, chSub, sub1, subOverrides)).toBe('none');
+    expect(resolveEffectiveStudioStepCue(chapters, chSub, sub2, subOverrides)).toBe('yaw_180');
+  });
+
+  it('respects free-orbit customAzimuthDeg/customElevationDeg overrides in modular optimizeCameraSequence', () => {
+    const cottage = DEMO_MODELS.find((d) => d.id === 'alpine-cottage')!;
+    const model = parseLDrawSource(cottage.ldrawSource, 'cottage.ldr', 'demo');
+    const graph = buildConnectivityGraph(model.parts);
+    const plan = generateInstructionPlan(model, graph, 'standard', 'regenerate_all', {});
+
+    const steps = plan.chapters[0].stepIds.map((id) => plan.steps[id]);
+    expect(steps.length).toBeGreaterThanOrEqual(3);
+    const partsById = Object.fromEntries(model.parts.map((p) => [p.id, p]));
+
+    // Free-orbit step 0, step 1, and step 2 to distinct custom angles without setting cameraViewOverride
+    const freeYaw = optimizeCameraSequence(steps, partsById, {
+      [steps[0].id]: { customAzimuthDeg: 40, customElevationDeg: 32 },
+      [steps[1].id]: { customAzimuthDeg: 220, customElevationDeg: 28 },
+      [steps[2].id]: { customAzimuthDeg: 130, customElevationDeg: 30 },
+    });
+    expect(freeYaw[0].rotationCue).toBe('none');
+    expect(freeYaw[1].rotationCue).toBe('yaw_180');
+    expect(freeYaw[2].rotationCue).toBe('yaw_90_ccw');
+
+    // Recomputing rotation cues after free-orbiting ONLY step 1 underneath keeps neighboring steps upright and shows both flip cues
+    const freeFlip = recomputeStepRotationCues(steps, {
+      [steps[1].id]: { customAzimuthDeg: 40, customElevationDeg: -32 },
+    });
+    expect(freeFlip[0].rotationCue).toBe('none');
+    expect(freeFlip[1].rotationCue).toBe('flip_vertical');
+    expect(freeFlip[2].rotationCue).toBe('flip_vertical');
+
+    // Recomputing rotation cues after free-orbiting ONLY step 1 horizontally by 90° CW shows CW in and CCW back out
+    const singleStepOrbit = recomputeStepRotationCues(steps, {
+      [steps[1].id]: { customAzimuthDeg: 130, customElevationDeg: 26 },
+    });
+    expect(singleStepOrbit[0].rotationCue).toBe('none');
+    expect(singleStepOrbit[1].rotationCue).toBe('yaw_90_cw');
+    expect(singleStepOrbit[2].rotationCue).toBe('yaw_90_ccw');
   });
 });

@@ -78,6 +78,8 @@ import {
 import {
   computeStepCameraFraming,
   optimizeStudioStepCameraSequence,
+  resolveEffectiveStudioStepCue,
+  resolveStudioStepCamera,
 } from './engine/stepCamera';
 import {
   buildPhysicalVerticalPrereqMap,
@@ -6869,41 +6871,11 @@ function rebuildPages() {
 }
 
 function getStepCamera(step) {
-  const ov = state.overrides[step.id] || {};
-  const side = ov.side || step.side || 'top';
-  const corner = ov.corner || step.corner || 'front_right';
-  const cObj = CORNERS.find(c => c.id === corner) || CORNERS[0];
-  return {
-    side,
-    corner,
-    az: ov.az ?? (typeof step.az === 'number' ? step.az : cObj.az),
-    el: ov.el ?? (typeof step.el === 'number' ? step.el : (side === 'bottom' ? -30 : 30)),
-  };
+  return resolveStudioStepCamera(step, step?.id ? state.overrides[step.id] : undefined);
 }
 
 function getEffectiveStepCue(ch, step) {
-  if (!step || step.isStandaloneFigure || step.isMinifigPoseStep) return 'none';
-  const steps = ch?.steps;
-  if (Array.isArray(steps)) {
-    const idx = steps.indexOf(step);
-    if (idx > 0) {
-      let prevStep = null;
-      for (let i = idx - 1; i >= 0; i--) {
-        if (!steps[i]?.isStandaloneFigure && !steps[i]?.isMinifigPoseStep) {
-          prevStep = steps[i];
-          break;
-        }
-      }
-      const hasCamOverride = (s) => {
-        const o = state.overrides[s?.id];
-        return Boolean(o && (o.side != null || o.corner != null || typeof o.az === 'number' || typeof o.el === 'number'));
-      };
-      if (prevStep && (hasCamOverride(step) || hasCamOverride(prevStep))) {
-        return computeStudioRotationCue(getStepCamera(prevStep), getStepCamera(step));
-      }
-    }
-  }
-  return step.cue || 'none';
+  return resolveEffectiveStudioStepCue(state.model?.chapters, ch, step, state.overrides);
 }
 
 function getActiveStepObj() {
@@ -6963,7 +6935,7 @@ function refreshStepModelsForZoom() {
   if (pg.kind !== 'steps' || currentSlotRenderInfo.size === 0) return;
 
   for (const [stepId, info] of currentSlotRenderInfo.entries()) {
-    if (state.mode === 'rotate' && state.selectedStepId === stepId) continue;
+    if (state.mode === 'step' && state.stepSubTab === 'camera' && state.selectedStepId === stepId) continue;
     if (info.isMfExploded) {
       const expSize = computeMinifigDiagramRenderSize({
         kind: 'exploded',
@@ -7946,6 +7918,10 @@ function renderAll() {
         }));
       }
 
+      const isTightSlot = slotRect.isCompact || estSlotH < typo.pt(250) || estSlotW < typo.pt(230);
+      const effectiveCue = getEffectiveStepCue(ch, step);
+      const hasStaticBadges = Boolean(step.stepHint || step.minifigPrep);
+
       currentSlotRenderInfo.set(step.id, {
         ch,
         step,
@@ -7963,7 +7939,12 @@ function renderAll() {
         slotCount: slots.length,
         isFeatured: Boolean(slotRect.isFeatured),
         isCompact: Boolean(slotRect.isCompact),
+        isTightSlot,
         theme,
+        typo,
+        wordless,
+        hasStaticBadges,
+        lastEffectiveCue: effectiveCue,
         mfExplodedW: mfExploded?.w || 0,
         mfExplodedH: mfExploded?.h || 0,
       });
@@ -8133,7 +8114,7 @@ function renderAll() {
             const effectiveCue = getEffectiveStepCue(ch, step);
             const iconBadgeOuterPx = Math.max(isTightSlot ? 24 : 28, Math.round(typo.pt(isTightSlot ? 22 : 26)));
             const iconBadgeSvgPx = Math.max(13, Math.round(iconBadgeOuterPx * 0.58));
-            const headerBadgesHtml = [
+            const staticHeaderBadgesHtml = [
               step.stepHint
                 ? (wordless
                   ? `<span class="inline-flex items-center justify-center rounded-full bg-white shadow-xs shrink-0" style="width:${iconBadgeOuterPx}px;height:${iconBadgeOuterPx}px;border:1.8px solid ${theme.accent};color:${theme.accent}" title="${escHtml(step.stepHint)}" aria-label="${escHtml(step.stepHint)}">${buildStepHintIconSvg(classifyStepHintAction(step.stepHint), iconBadgeSvgPx)}</span>`
@@ -8144,9 +8125,13 @@ function renderAll() {
                   ? `<span class="inline-flex items-center justify-center rounded-full bg-white shadow-xs shrink-0" style="width:${iconBadgeOuterPx}px;height:${iconBadgeOuterPx}px;border:1.8px solid ${theme.accent};color:${theme.accent}" title="Prepare minifigure pose" aria-label="Prepare minifigure pose">${buildPoseAdjustIconSvg(iconBadgeSvgPx)}</span>`
                   : `<span class="font-bold rounded-full bg-white text-[#202124] shadow-xs whitespace-nowrap max-w-full truncate" style="border:1.5px solid ${theme.accent};font-size:${st.cueFont}px;padding:${Math.round(typo.pt(2))}px ${Math.round(typo.pt(6))}px">↻ Prepare</span>`)
                 : '',
-              state.showRotCues && effectiveCue && effectiveCue !== 'none' ? renderRotationCueBadgeHtml(effectiveCue, theme, typo, isTightSlot, wordless) : '',
             ].filter(Boolean).join('');
-            const stackHeaderBadges = Boolean(headerBadgesHtml) && (isTightSlot || estSlotW < typo.pt(250));
+            const rotBadgeHtml = state.showRotCues && effectiveCue && effectiveCue !== 'none'
+              ? renderRotationCueBadgeHtml(effectiveCue, theme, typo, isTightSlot, wordless)
+              : '';
+            const hasHeaderBadges = Boolean(staticHeaderBadgesHtml || rotBadgeHtml);
+            const headerBadgesInnerHtml = `${staticHeaderBadgesHtml}<span data-rot-cue-host="${step.id}" class="${rotBadgeHtml ? 'inline-flex' : 'hidden'} items-center shrink-0">${rotBadgeHtml}</span>`;
+            const stackHeaderBadges = hasHeaderBadges && (isTightSlot || estSlotW < typo.pt(250));
 
             return `
               <div data-step="${step.id}" class="step-slot absolute flex flex-col min-h-0 overflow-hidden transition ${isArrangeMode && slots.length > 1 ? 'cursor-pointer' : ''}" style="left:${slotLeftPct.toFixed(4)}%;top:${slotTopPct.toFixed(4)}%;width:${slotWidthPct.toFixed(4)}%;height:${slotHeightPct.toFixed(4)}%;border-radius:${typo.borderRadius}px;padding:${isOfficialMfStyle ? Math.round(st.slotPad * 0.5) : (isTightSlot ? Math.max(4, Math.round(st.slotPad * 0.72)) : st.slotPad)}px;border:${slotBorderStyle};background:${slotBgStyle}">
@@ -8158,14 +8143,14 @@ function renderAll() {
                     : '';
                   if (isOfficialMfStyle) {
                     const showMfLabel = !wordless && (ch.steps.length > 1 || slots.length > 1);
-                    if (!showMfLabel && !pinBadgeHtml && !headerBadgesHtml) return '';
+                    if (!showMfLabel && !pinBadgeHtml && !hasHeaderBadges) return '';
                     return `
                 <div class="relative z-10 shrink-0 flex items-center justify-between gap-1.5 px-1 min-w-0">
                   <div class="flex items-center gap-1.5 min-w-0">
                     ${showMfLabel ? `<span class="font-bold tracking-tight opacity-75 truncate" style="font-size:${st.pliSubNameFont}px">${escHtml(step.minifigName || `Minifigure ${step.num}`)}</span>` : ''}
                     ${pinBadgeHtml}
                   </div>
-                  ${headerBadgesHtml ? `<div class="flex items-center gap-1.5 shrink-0">${headerBadgesHtml}</div>` : ''}
+                  <div data-step-badges="${step.id}" class="${hasHeaderBadges ? 'flex' : 'hidden'} items-center gap-1.5 shrink-0">${headerBadgesInnerHtml}</div>
                 </div>`;
                   }
                   return stackHeaderBadges ? `
@@ -8175,7 +8160,7 @@ function renderAll() {
                       <span class="font-extrabold leading-none shrink-0" style="font-size:${stepNumPx}px">${step.num}</span>
                       ${pinBadgeHtml}
                     </div>
-                    <div class="flex items-center min-w-0 max-w-[82%] justify-end" style="gap:${Math.round(typo.pt(4))}px">${headerBadgesHtml}</div>
+                    <div data-step-badges="${step.id}" class="${hasHeaderBadges ? 'flex' : 'hidden'} items-center min-w-0 max-w-[82%] justify-end" style="gap:${Math.round(typo.pt(4))}px">${headerBadgesInnerHtml}</div>
                   </div>
                   ${pliBoxHtml ? `<div class="min-w-0 max-w-full">${pliBoxHtml}</div>` : ''}
                 </div>` : `
@@ -8185,7 +8170,7 @@ function renderAll() {
                     ${pinBadgeHtml}
                     ${pliBoxHtml}
                   </div>
-                  ${headerBadgesHtml ? `<div class="flex items-center shrink-0 flex-wrap justify-end max-w-[55%]" style="gap:${Math.round(typo.pt(4))}px">${headerBadgesHtml}</div>` : ''}
+                  <div data-step-badges="${step.id}" class="${hasHeaderBadges ? 'flex' : 'hidden'} items-center shrink-0 flex-wrap justify-end max-w-[55%]" style="gap:${Math.round(typo.pt(4))}px">${headerBadgesInnerHtml}</div>
                 </div>`;
                 })()}
 
@@ -8288,6 +8273,43 @@ function renderAll() {
 // =========================================================================
 // 7. DIRECT CANVAS INTERACTIONS (Part Picking, Step Orbit, Notes Drag)
 // =========================================================================
+function syncVisibleStepRotationBadges() {
+  const frame = document.getElementById('pageFrame');
+  if (!frame || currentSlotRenderInfo.size === 0) return;
+
+  const hosts = new Map();
+  frame.querySelectorAll('[data-rot-cue-host]').forEach((el) => {
+    const sid = el.getAttribute('data-rot-cue-host');
+    if (sid) hosts.set(sid, el);
+  });
+  const wraps = new Map();
+  frame.querySelectorAll('[data-step-badges]').forEach((el) => {
+    const sid = el.getAttribute('data-step-badges');
+    if (sid) wraps.set(sid, el);
+  });
+
+  for (const [sid, sInfo] of currentSlotRenderInfo.entries()) {
+    const nextCue = getEffectiveStepCue(sInfo.ch, sInfo.step);
+    if (nextCue === sInfo.lastEffectiveCue) continue;
+    sInfo.lastEffectiveCue = nextCue;
+    const badgeHtml = state.showRotCues && nextCue && nextCue !== 'none'
+      ? renderRotationCueBadgeHtml(nextCue, sInfo.theme, sInfo.typo, sInfo.isTightSlot, sInfo.wordless)
+      : '';
+    const host = hosts.get(sid);
+    if (host) {
+      host.innerHTML = badgeHtml;
+      host.classList.toggle('inline-flex', Boolean(badgeHtml));
+      host.classList.toggle('hidden', !badgeHtml);
+    }
+    const wrap = wraps.get(sid);
+    if (wrap) {
+      const hasAny = Boolean(badgeHtml || sInfo.hasStaticBadges);
+      wrap.classList.toggle('flex', hasAny);
+      wrap.classList.toggle('hidden', !hasAny);
+    }
+  }
+}
+
 function bindStepPageInteractions(page) {
   const frame = document.getElementById('pageFrame');
   const isPartsMode = state.mode === 'parts';
@@ -8398,21 +8420,25 @@ function bindStepPageInteractions(page) {
           pushedUndo = true;
         }
         moved = true;
-        az = (az - dx * 0.7 + 360) % 360;
+        az = (((az - dx * 0.7) % 360) + 360) % 360;
         el = Math.max(-75, Math.min(75, el + dy * 0.5));
         const nextSide = el < 0 ? 'bottom' : 'top';
         const matchedPreset = findMatchingCameraPreset(az);
-        const roundedAz = Math.round(az) % 360;
+        const roundedAz = ((Math.round(az) % 360) + 360) % 360;
         const roundedEl = Math.round(el);
-        state.overrides[info.step.id] = {
+        const nextOv = {
           ...(state.overrides[info.step.id] || {}),
           side: nextSide,
-          ...(matchedPreset ? { corner: matchedPreset.id } : {}),
           az: roundedAz,
           el: roundedEl,
         };
+        if (matchedPreset) nextOv.corner = matchedPreset.id;
+        else delete nextOv.corner;
+        state.overrides[info.step.id] = nextOv;
+        info.cam = getStepCamera(info.step);
         const readout = document.getElementById('stepCamReadout');
         if (readout) readout.textContent = `${roundedAz}° / ${roundedEl}°`;
+        syncVisibleStepRotationBadges();
         activeLiveEngine.draw(info.snap.mesh, w, h, az, el, info.modelScale, fixedHalfH, liveDrawOpts);
       };
       const endOrbit = (e) => {
@@ -8420,7 +8446,7 @@ function bindStepPageInteractions(page) {
         e.stopPropagation();
         dragging = false;
         if (moved) {
-          renderContextOverlay(page);
+          renderAll();
         }
       };
       liveCanvas.onpointerup = endOrbit;
@@ -9220,16 +9246,23 @@ function renderContextOverlay(page) {
       const setCam = (patch) => {
         pushUndo();
         const cur = state.overrides[step.id] || {};
-        const nextSide = patch.side ?? cur.side ?? step.side ?? 'top';
+        const curCam = getStepCamera(step);
+        const nextSide = patch.side ?? curCam.side ?? 'top';
         const nextCorner = patch.corner ?? cur.corner ?? step.corner ?? 'front_right';
         const cObj = CORNERS.find(c => c.id === nextCorner) || CORNERS[0];
-        state.overrides[step.id] = {
+        const nextAz = patch.az ?? (patch.corner !== undefined ? cObj.az : curCam.az);
+        const nextEl = patch.el ?? (nextSide === 'bottom' ? -30 : 30);
+        const matched = findMatchingCameraPreset(nextAz);
+        const nextOv = {
           ...cur,
           side: nextSide,
-          corner: nextCorner,
-          az: patch.az ?? cObj.az,
-          el: patch.el ?? (nextSide === 'bottom' ? -30 : 30),
+          az: nextAz,
+          el: nextEl,
         };
+        if (patch.corner !== undefined) nextOv.corner = nextCorner;
+        else if (matched) nextOv.corner = matched.id;
+        else delete nextOv.corner;
+        state.overrides[step.id] = nextOv;
         renderAll();
       };
       box.querySelector('#camTop').onclick = () => setCam({ side: 'top' });

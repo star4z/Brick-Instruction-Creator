@@ -763,3 +763,164 @@ export function computeStepCameraFraming(input: StepFramingInput): StepFramingRe
     isZoomedIn: radius < fullRadius * 0.92,
   };
 }
+
+export interface StudioStepCameraSource {
+  id?: string;
+  side?: 'top' | 'bottom' | string;
+  corner?: StudioCornerId | string;
+  az?: number;
+  el?: number;
+  cue?: StudioRotationCue | string;
+  isStandaloneFigure?: boolean;
+  isMinifigPoseStep?: boolean;
+}
+
+export interface StudioStepCameraOverrideLike {
+  side?: 'top' | 'bottom' | string;
+  corner?: StudioCornerId | string;
+  az?: number;
+  el?: number;
+}
+
+export interface StudioStepChapterLike<
+  TStep extends StudioStepCameraSource = StudioStepCameraSource,
+> {
+  id?: string;
+  kind?: string;
+  sectionId?: string;
+  steps?: ReadonlyArray<TStep>;
+}
+
+/**
+ * Resolves a step's effective 3D camera pose `(side, corner, az, el)`, combining
+ * automatic optimizer defaults with any user preset or free-orbit override.
+ */
+export function resolveStudioStepCamera(
+  step: StudioStepCameraSource | null | undefined,
+  override?: StudioStepCameraOverrideLike | null,
+): StudioCameraPose {
+  const ov = override || {};
+  const hasOvEl = typeof ov.el === 'number' && Number.isFinite(ov.el);
+  const hasStepEl = typeof step?.el === 'number' && Number.isFinite(step.el);
+  const rawSide =
+    ov.side === 'top' || ov.side === 'bottom'
+      ? ov.side
+      : hasOvEl
+        ? (ov.el! < 0 ? 'bottom' : 'top')
+        : step?.side === 'top' || step?.side === 'bottom'
+          ? step.side
+          : hasStepEl
+            ? (step!.el! < 0 ? 'bottom' : 'top')
+            : 'top';
+  const side: 'top' | 'bottom' = rawSide === 'bottom' ? 'bottom' : 'top';
+
+  const hasOvCorner = typeof ov.corner === 'string' && ov.corner.length > 0;
+  const rawCorner = hasOvCorner ? ov.corner : step?.corner || 'front_right';
+  const cornerSpec =
+    STUDIO_CORNERS.find((c) => c.id === rawCorner) || STUDIO_CORNERS[0];
+
+  const rawAz =
+    typeof ov.az === 'number' && Number.isFinite(ov.az)
+      ? ov.az
+      : hasOvCorner
+        ? cornerSpec.az
+        : typeof step?.az === 'number' && Number.isFinite(step.az)
+          ? step.az
+          : cornerSpec.az;
+  const az = ((rawAz % 360) + 360) % 360;
+
+  const el = hasOvEl
+    ? ov.el!
+    : ov.side === 'top' || ov.side === 'bottom'
+      ? side === 'bottom'
+        ? -30
+        : 30
+      : hasStepEl
+        ? step!.el!
+        : side === 'bottom'
+          ? -30
+          : 30;
+
+  return {
+    side,
+    corner: cornerSpec.id,
+    az,
+    el,
+  };
+}
+
+/**
+ * Finds the immediately preceding model build step in the same continuous build
+ * sequence as `step` (matching `optimizeManualStepCameras` and `getPreviousPartsForStep`):
+ * - Standalone minifigure and minifigure-pose steps are skipped.
+ * - Submodel chapters stay isolated in their own local frame.
+ * - Main / numbered-bag / join chapters sharing a `sectionId` form one continuous sequence.
+ */
+export function findPreviousStudioModelStep<TStep extends StudioStepCameraSource>(
+  chapters: ReadonlyArray<StudioStepChapterLike<TStep>> | null | undefined,
+  chapter: StudioStepChapterLike<TStep> | null | undefined,
+  step: TStep | null | undefined,
+): TStep | null {
+  if (!step || step.isStandaloneFigure || step.isMinifigPoseStep) return null;
+  if (!chapter || chapter.kind === 'minifigure') return null;
+
+  const isModelStep = (s: TStep | null | undefined): s is TStep =>
+    Boolean(s && !s.isStandaloneFigure && !s.isMinifigPoseStep);
+  const isSameStep = (s: TStep) =>
+    s === step || (step.id != null && s.id === step.id);
+
+  if (
+    chapter.kind === 'submodel' ||
+    !Array.isArray(chapters) ||
+    chapters.length === 0
+  ) {
+    const steps = chapter.steps || [];
+    let prev: TStep | null = null;
+    for (const s of steps) {
+      if (isSameStep(s)) return prev;
+      if (isModelStep(s)) prev = s;
+    }
+    return null;
+  }
+
+  const secKey = chapter.sectionId || chapter.id;
+  let prev: TStep | null = null;
+  for (const ch of chapters) {
+    if (ch.kind === 'submodel' || ch.kind === 'minifigure') continue;
+    if ((ch.sectionId || ch.id) !== secKey) continue;
+    const steps = ch.steps || [];
+    for (const s of steps) {
+      if (isSameStep(s)) return prev;
+      if (isModelStep(s)) prev = s;
+    }
+    if (ch === chapter || (chapter.id != null && ch.id === chapter.id)) {
+      break;
+    }
+  }
+  return null;
+}
+
+/**
+ * Computes the effective rotation indicator cue for `step` relative to its preceding
+ * model step in the same continuous section/submodel, always taking both preset and
+ * free-orbit camera overrides into account.
+ */
+export function resolveEffectiveStudioStepCue<TStep extends StudioStepCameraSource>(
+  chapters: ReadonlyArray<StudioStepChapterLike<TStep>> | null | undefined,
+  chapter: StudioStepChapterLike<TStep> | null | undefined,
+  step: TStep | null | undefined,
+  overrides?: Readonly<Record<string, StudioStepCameraOverrideLike | undefined>> | null,
+): StudioRotationCue {
+  if (!step || step.isStandaloneFigure || step.isMinifigPoseStep) return 'none';
+  const prevStep = findPreviousStudioModelStep(chapters, chapter, step);
+  if (!prevStep) return 'none';
+  const prevCam = resolveStudioStepCamera(
+    prevStep,
+    prevStep.id ? overrides?.[prevStep.id] : undefined,
+  );
+  const currCam = resolveStudioStepCamera(
+    step,
+    step.id ? overrides?.[step.id] : undefined,
+  );
+  return computeStudioRotationCue(prevCam, currCam);
+}

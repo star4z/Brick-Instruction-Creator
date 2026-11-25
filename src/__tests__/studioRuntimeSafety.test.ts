@@ -271,5 +271,24 @@ describe('studioRuntime safety checks', () => {
     expect(fnBody).not.toContain('${box.w}');
     expect(fnBody).not.toContain('${box.h}');
   });
-});
 
+  it('updates rotation indicators live during free-orbit dragging and commits renderAll on endOrbit', () => {
+    const runtime = fs.readFileSync(path.resolve(process.cwd(), 'src/studioRuntime.ts'), 'utf8');
+
+    expect(runtime).toContain('resolveStudioStepCamera(');
+    expect(runtime).toContain('resolveEffectiveStudioStepCue(');
+    expect(runtime).toContain('data-rot-cue-host=');
+    expect(runtime).toContain('data-step-badges=');
+    expect(runtime).toContain('function syncVisibleStepRotationBadges()');
+
+    const orbitStart = runtime.indexOf("const liveCanvas = document.getElementById('liveRotateCanvas');");
+    const orbitEnd = runtime.indexOf('liveCanvas.onpointercancel = endOrbit;', orbitStart);
+    expect(orbitStart).toBeGreaterThan(-1);
+    expect(orbitEnd).toBeGreaterThan(orbitStart);
+    const orbitBody = runtime.slice(orbitStart, orbitEnd);
+
+    expect(orbitBody).toContain('syncVisibleStepRotationBadges();');
+    expect(orbitBody).toContain('renderAll();');
+    expect(orbitBody).not.toContain('renderContextOverlay(page);');
+  });
+});

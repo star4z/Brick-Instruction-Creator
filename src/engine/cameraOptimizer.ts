@@ -8,6 +8,7 @@ import type {
 } from '../types/manual';
 import { computePartWorldAabb, type WorldAabb } from './connectivity';
 import { vec3Dot, vec3Normalize } from './math';
+import { computeStudioRotationCue } from './minifigCamera';
 import { stepVisibilityPenalty } from './stepCamera';
 
 export interface CanonicalViewSpec {
@@ -160,10 +161,51 @@ export function computeRotationCue(
   return 'none';
 }
 
+export function nearestCanonicalViewForAngles(
+  azimuthDeg: number,
+  elevationDeg: number,
+): CanonicalViewId {
+  const isBottom = elevationDeg < 0;
+  const normAz = ((azimuthDeg % 360) + 360) % 360;
+  let best: CanonicalViewSpec = isBottom ? CANONICAL_VIEWS[4] : CANONICAL_VIEWS[0];
+  let bestDist = Infinity;
+  for (const view of CANONICAL_VIEWS) {
+    if (view.isBottom !== isBottom) continue;
+    const raw = Math.abs(normAz - view.azimuthDeg);
+    const dist = Math.min(raw, 360 - raw);
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = view;
+    }
+  }
+  return best.id;
+}
+
+export function resolveEffectiveStepCameraPose(
+  viewId: CanonicalViewId,
+  override?: StepOverride,
+): { side: 'top' | 'bottom'; az: number; el: number } {
+  const base = CANONICAL_VIEW_MAP[override?.cameraViewOverride ?? viewId] ?? CANONICAL_VIEWS[0];
+  const az =
+    typeof override?.customAzimuthDeg === 'number' && Number.isFinite(override.customAzimuthDeg)
+      ? ((override.customAzimuthDeg % 360) + 360) % 360
+      : base.azimuthDeg;
+  const el =
+    typeof override?.customElevationDeg === 'number' && Number.isFinite(override.customElevationDeg)
+      ? override.customElevationDeg
+      : base.elevationDeg;
+  return {
+    side: el < 0 ? 'bottom' : 'top',
+    az,
+    el,
+  };
+}
+
 /**
  * Global Viterbi Dynamic Programming camera/rotation optimizer.
  * Minimizes: sum_t [ (1 - Visibility(t, v_t)) + TransitionCost(v_{t-1} -> v_t) ]
- * Respects any manual user cameraViewOverride as a hard constraint.
+ * Respects any manual user cameraViewOverride or free-orbit (customAzimuthDeg / customElevationDeg)
+ * override as a hard constraint, and computes rotation cues from effective camera poses.
  */
 export function optimizeCameraSequence(
   steps: StepNode[],
@@ -209,7 +251,20 @@ export function optimizeCameraSequence(
 
   for (let t = 0; t < T; t++) {
     const step = steps[t];
-    const pinnedView = overrides[step.id]?.cameraViewOverride;
+    const ov = overrides[step.id];
+    const hasCustomOrbit =
+      (typeof ov?.customAzimuthDeg === 'number' && Number.isFinite(ov.customAzimuthDeg)) ||
+      (typeof ov?.customElevationDeg === 'number' && Number.isFinite(ov.customElevationDeg));
+    const pinnedView: CanonicalViewId | undefined = ov?.cameraViewOverride
+      ? ov.cameraViewOverride
+      : hasCustomOrbit
+        ? nearestCanonicalViewForAngles(
+            ov?.customAzimuthDeg ??
+              (CANONICAL_VIEW_MAP[step.cameraView] ?? CANONICAL_VIEWS[0]).azimuthDeg,
+            ov?.customElevationDeg ??
+              (CANONICAL_VIEW_MAP[step.cameraView] ?? CANONICAL_VIEWS[0]).elevationDeg,
+          )
+        : undefined;
 
     for (let v = 0; v < V; v++) {
       const view = CANONICAL_VIEWS[v];
@@ -265,9 +320,38 @@ export function optimizeCameraSequence(
     curr = backptr[t][curr];
   }
 
+  const effectivePoses = steps.map((step, idx) =>
+    resolveEffectiveStepCameraPose(chosen[idx], overrides[step.id]),
+  );
+
   return steps.map((step, idx) => ({
     ...step,
     cameraView: chosen[idx],
-    rotationCue: computeRotationCue(idx === 0 ? null : chosen[idx - 1], chosen[idx]),
+    rotationCue:
+      idx === 0
+        ? 'none'
+        : computeStudioRotationCue(effectivePoses[idx - 1], effectivePoses[idx]),
+  }));
+}
+
+/**
+ * Recomputes `rotationCue` across an ordered chapter step sequence using each step's
+ * effective camera pose (preset override, free-orbit angles, or automatic `cameraView`),
+ * without retroactively altering the camera angle of neighboring steps.
+ */
+export function recomputeStepRotationCues(
+  steps: StepNode[],
+  overrides: Record<string, StepOverride> = {},
+): StepNode[] {
+  if (steps.length === 0) return [];
+  const effectivePoses = steps.map((step) =>
+    resolveEffectiveStepCameraPose(step.cameraView, overrides[step.id]),
+  );
+  return steps.map((step, idx) => ({
+    ...step,
+    rotationCue:
+      idx === 0
+        ? 'none'
+        : computeStudioRotationCue(effectivePoses[idx - 1], effectivePoses[idx]),
   }));
 }
