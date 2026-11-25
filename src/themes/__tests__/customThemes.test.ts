@@ -318,8 +318,8 @@ describe('theme style options, recents & naming', () => {
     const { orderThemesByRecent, touchThemeRecent } = await import('../customThemes');
     const all = Object.values(BUILT_IN_THEMES);
     const ids = (r: string[], cur: string) => orderThemesByRecent(all, r, cur).map((t) => t.id);
-    expect(ids([], 'dark')).toEqual(['dark', 'blue', 'white', 'blueprint']);
-    expect(ids(['white', 'blueprint', 'gone'], 'dark')).toEqual(['dark', 'white', 'blueprint', 'blue']);
+    expect(ids([], 'dark')).toEqual(['dark', 'blue', 'white', 'blueprint', 'gray']);
+    expect(ids(['white', 'blueprint', 'gone'], 'dark')).toEqual(['dark', 'white', 'blueprint', 'blue', 'gray']);
     expect(touchThemeRecent(['a', 'b', 'c'], 'c')).toEqual(['c', 'a', 'b']);
   });
 

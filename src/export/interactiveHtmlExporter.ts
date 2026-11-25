@@ -1277,14 +1277,21 @@ ${staticFallbackHtml}
     if (!scene || !Array.isArray(scene.arrows) || scene.arrows.length === 0) return null;
     if (arrowGpuCache.has(scene)) return arrowGpuCache.get(scene);
     const pos = [], norm = [], col = [];
+    let activeArrowBytes = arrowColBytes;
     const pushT = (a, b, c, n) => {
       pos.push(a[0],a[1],a[2], b[0],b[1],b[2], c[0],c[1],c[2]);
       norm.push(n[0],n[1],n[2], n[0],n[1],n[2], n[0],n[1],n[2]);
-      for (let k = 0; k < 3; k++) col.push(arrowColBytes[0], arrowColBytes[1], arrowColBytes[2], 255);
+      for (let k = 0; k < 3; k++) col.push(activeArrowBytes[0], activeArrowBytes[1], activeArrowBytes[2], 255);
     };
     for (const arr of scene.arrows) {
       const s = arr.from, t = arr.to;
       if (!s || !t) continue;
+      if (arr.color) {
+        const c01 = hexToRgb01(arr.color);
+        activeArrowBytes = [Math.round(c01[0] * 255), Math.round(c01[1] * 255), Math.round(c01[2] * 255), 255];
+      } else {
+        activeArrowBytes = arrowColBytes;
+      }
       const dx = t[0]-s[0], dy = t[1]-s[1], dz = t[2]-s[2];
       const len = Math.hypot(dx, dy, dz);
       if (len < 6) continue;
@@ -1293,7 +1300,7 @@ ${staticFallbackHtml}
       let bx = uy*rz - uz*ry, by = uz*rx - ux*rz, bz = ux*ry - uy*rx;
       const bl = Math.hypot(bx, by, bz) || 1; bx/=bl; by/=bl; bz/=bl;
       const cx = by*uz - bz*uy, cy = bz*ux - bx*uz, cz = bx*uy - by*ux;
-      const headLen = Math.min(9.5, len * 0.42);
+      const headLen = arr.isGuideLine ? 0 : Math.min(9.5, len * 0.42);
       const shaftEnd = [t[0] - ux*headLen, t[1] - uy*headLen, t[2] - uz*headLen];
       const segs = 10;
       const ring = (ctr, r, ang) => [
@@ -1750,22 +1757,57 @@ ${staticFallbackHtml}
       const bomSummaryHtml = isWordless
         ? '<span style="font-size:12px;color:var(--muted);font-weight:700;display:inline-flex;align-items:center;gap:5px">' + brickSvg + '<span>' + DATA.totalPieces + '</span></span>'
         : '<span style="font-size:12px;color:var(--muted);font-weight:600">Tap parts to check them off · ' + DATA.totalPieces + ' total pcs</span>';
+      const partStepMap = new Map();
+      viewerItems.forEach((vi, vIdx) => {
+        if (vi.kind === 'step' && vi.step && Array.isArray(vi.step.pli)) {
+          vi.step.pli.forEach((entry) => {
+            const pid = String(entry.partId || '').toLowerCase();
+            if (pid && !partStepMap.has(pid)) partStepMap.set(pid, { vIdx, stepNum: vi.step.num });
+          });
+        }
+      });
+      const findPlaceholder = isWordless ? '#' : 'Find part ID or name…';
       flatEl.innerHTML =
         '<div class="flat-inner">' +
           '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">' +
             bomHeadingHtml +
-            bomSummaryHtml +
+            '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">' +
+              '<input id="bomFindInput" type="search" placeholder="' + esc(findPlaceholder) + '" aria-label="Find part" style="padding:4px 9px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:12px;width:150px;" />' +
+              bomSummaryHtml +
+            '</div>' +
           '</div>' +
           bodyHtml +
         '</div>';
       flatEl.classList.add('open');
-      flatEl.querySelectorAll('[data-bom]').forEach((card) => {
+      flatEl.querySelectorAll('[data-bom]').forEach((card, bi) => {
+        const b = items[bi];
+        const hit = b ? partStepMap.get(String(b.partId || '').toLowerCase()) : null;
+        if (b) card.setAttribute('data-bom-search', (String(b.partId || '') + ' ' + String(b.name || '')).toLowerCase());
+        if (hit && card.tagName === 'DIV') {
+          const jump = document.createElement('button');
+          jump.type = 'button';
+          jump.textContent = '→ ' + hit.stepNum;
+          jump.title = isWordless ? String(hit.stepNum) : ('Jump to Step ' + hit.stepNum);
+          jump.style.cssText = 'margin-top:2px;font-size:10px;font-weight:800;padding:1px 6px;border-radius:999px;border:1px solid var(--border);background:var(--surface);color:var(--accent);cursor:pointer;';
+          jump.onclick = (ev) => { ev.stopPropagation(); curIdx = hit.vIdx; renderView(); };
+          card.appendChild(jump);
+        }
         card.onclick = () => {
           const k = card.getAttribute('data-bom');
           if (checkedBom.has(k)) checkedBom.delete(k); else checkedBom.add(k);
           card.classList.toggle('checked', checkedBom.has(k));
         };
       });
+      const bomFindInput = document.getElementById('bomFindInput');
+      if (bomFindInput) {
+        bomFindInput.oninput = () => {
+          const q = bomFindInput.value.trim().toLowerCase();
+          flatEl.querySelectorAll('[data-bom]').forEach((el) => {
+            const hay = el.getAttribute('data-bom-search') || '';
+            el.style.display = !q || hay.includes(q) ? '' : 'none';
+          });
+        };
+      }
     } else {
       const divTitle = pg.title !== undefined ? pg.title : (isWordless ? '' : pg.label);
       flatEl.innerHTML =

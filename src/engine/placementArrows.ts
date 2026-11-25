@@ -31,6 +31,10 @@ export interface AutoPartOffset {
   arrowTo?: [number, number, number];
   /** Optional contact-overlap box (matching the lifted part's thickness along the offset axis, clipped perpendicularly to the actual attaching stud/contact overlap). */
   arrowBox?: PlacementAABB;
+  /** Optional through-hole alignment guide endpoint extending cleanly through the destination hole/beam. */
+  throughGuideTo?: [number, number, number];
+  /** Optional perceptual contrast-adapted arrow hex color (e.g. green on red bricks). */
+  arrowColorOverride?: string;
 }
 
 export interface PlacementPartInput {
@@ -55,13 +59,20 @@ export interface PlacementStepInput {
 export interface PlacementArrowSegment {
   from: [number, number, number];
   to: [number, number, number];
+  /** True for a thin pass-through alignment guide line (no cone arrowhead, e.g. pin/beam through-hole guide). */
+  isGuideLine?: boolean;
+  /** Optional contrast-adapted hex color override for this segment. */
+  color?: string;
 }
 
 export const DEFAULT_ARROW_COLOR = '#dc2626';
+export const CONTRAST_ARROW_GREEN = '#16a34a';
+export const CONTRAST_ARROW_BLUE = '#2563eb';
 
 const CONTACT_EPS = 6;
 const COLOR_NEIGHBOR_EPS = 10;
 const SAME_COLOR_DIST_THRESHOLD = 42;
+const ARROW_CONTRAST_DIST_THRESHOLD = 75;
 const MAX_FIRST_STEP_OFFSETS = 6;
 const MAX_SUBSEQUENT_STEP_OFFSETS = 4;
 
@@ -850,6 +861,7 @@ export function computePlacementArrowSegments(
   box: PlacementAABB,
   offset: readonly [number, number, number],
   arrowTo?: readonly [number, number, number] | null,
+  throughGuideTo?: readonly [number, number, number] | null,
 ): PlacementArrowSegment[] {
   const ox = offset[0];
   const oy = offset[1];
@@ -914,7 +926,7 @@ export function computePlacementArrowSegments(
       : [0];
 
   const c = box.center;
-  return lateralOffsets.map((lat) => {
+  const segments: PlacementArrowSegment[] = lateralOffsets.map((lat) => {
     const base: Vec3 = [c[0], c[1], c[2]];
     base[longAxis] += lat;
     return {
@@ -930,4 +942,85 @@ export function computePlacementArrowSegments(
       ],
     };
   });
+
+  // Optional through-hole pass-through alignment guide (e.g., beam sliding onto multiple pins or pin through beam)
+  if (throughGuideTo) {
+    const projGuide =
+      (throughGuideTo[0] - c[0]) * ux +
+      (throughGuideTo[1] - c[1]) * uy +
+      (throughGuideTo[2] - c[2]) * uz;
+    if (toDist - projGuide >= 6) {
+      for (const lat of lateralOffsets) {
+        const base: Vec3 = [c[0], c[1], c[2]];
+        base[longAxis] += lat;
+        segments.push({
+          from: [
+            base[0] + ux * toDist,
+            base[1] + uy * toDist,
+            base[2] + uz * toDist,
+          ],
+          to: [
+            base[0] + ux * projGuide,
+            base[1] + uy * projGuide,
+            base[2] + uz * projGuide,
+          ],
+          isGuideLine: true,
+        });
+      }
+    }
+  }
+
+  return segments;
 }
+
+function parseHexToRgb255(hex: string): [number, number, number] {
+  const clean = (hex || DEFAULT_ARROW_COLOR).replace('#', '').trim();
+  const full = clean.length === 3
+    ? `${clean[0]}${clean[0]}${clean[1]}${clean[1]}${clean[2]}${clean[2]}`
+    : clean.padEnd(6, '0').slice(0, 6);
+  return [
+    parseInt(full.slice(0, 2), 16) || 0,
+    parseInt(full.slice(2, 4), 16) || 0,
+    parseInt(full.slice(4, 6), 16) || 0,
+  ];
+}
+
+/**
+ * Perceptual contrast-adaptive placement arrow color (matching official LEGO manuals):
+ * when the base arrow color (default crimson red `#dc2626`) has low perceptual contrast
+ * against the moved brick or its touching destination neighbor(s) (e.g. red/orange brick),
+ * automatically switches to high-contrast green (`#16a34a`), or blue (`#2563eb`) if the
+ * user's base arrow color is already green.
+ */
+export function resolveContrastArrowColor(
+  baseArrowHex: string,
+  targetRgb: readonly [number, number, number],
+  neighborRgbs: ReadonlyArray<readonly [number, number, number]> = [],
+): string {
+  const baseHex = baseArrowHex || DEFAULT_ARROW_COLOR;
+  const baseRgb = parseHexToRgb255(baseHex);
+  const samples: Array<readonly [number, number, number]> = [targetRgb, ...neighborRgbs];
+
+  let minDist = Infinity;
+  for (const s of samples) {
+    const d = perceptualRgbDistance(baseRgb, s);
+    if (d < minDist) minDist = d;
+  }
+  if (minDist >= ARROW_CONTRAST_DIST_THRESHOLD) return baseHex;
+
+  // Choose whichever high-contrast fallback (green vs blue) has greater minimum distance
+  const greenRgb = parseHexToRgb255(CONTRAST_ARROW_GREEN);
+  const blueRgb = parseHexToRgb255(CONTRAST_ARROW_BLUE);
+  let minGreen = Infinity;
+  let minBlue = Infinity;
+  for (const s of samples) {
+    minGreen = Math.min(minGreen, perceptualRgbDistance(greenRgb, s));
+    minBlue = Math.min(minBlue, perceptualRgbDistance(blueRgb, s));
+  }
+  // Prefer official LEGO green whenever it clears the contrast threshold (and base isn't already green)
+  if (minGreen >= ARROW_CONTRAST_DIST_THRESHOLD && perceptualRgbDistance(baseRgb, greenRgb) > 45) {
+    return CONTRAST_ARROW_GREEN;
+  }
+  return minBlue >= minGreen ? CONTRAST_ARROW_BLUE : CONTRAST_ARROW_GREEN;
+}
+

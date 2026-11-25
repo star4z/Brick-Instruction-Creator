@@ -155,6 +155,7 @@ export interface ThemeStyleOptions {
   showMinifig1to1: boolean;
   showStepBorders: boolean;
   showPageTitle: boolean;
+  showProgressBar: boolean;
   bomConfig: BomConfig;
 }
 
@@ -176,6 +177,7 @@ export const THEME_STYLE_OPTION_KEYS: Array<keyof ThemeStyleOptions> = [
   'showMinifig1to1',
   'showStepBorders',
   'showPageTitle',
+  'showProgressBar',
   'bomConfig',
 ];
 
@@ -197,6 +199,7 @@ export const DEFAULT_THEME_STYLE_OPTIONS: ThemeStyleOptions = {
   showMinifig1to1: false,
   showStepBorders: true,
   showPageTitle: true,
+  showProgressBar: true,
   bomConfig: createDefaultBomConfig(),
 };
 
@@ -254,6 +257,7 @@ export function normalizeThemeStyleOptions(
     showMinifig1to1: bool('showMinifig1to1'),
     showStepBorders: bool('showStepBorders'),
     showPageTitle: bool('showPageTitle'),
+    showProgressBar: bool('showProgressBar'),
     bomConfig: normalizeBomConfig(r.bomConfig, fb.bomConfig),
   };
 }
@@ -311,6 +315,7 @@ export interface ManualTheme {
   showMinifig1to1?: boolean;
   showStepBorders?: boolean;
   showPageTitle?: boolean;
+  showProgressBar?: boolean;
   bomConfig?: BomConfig;
   createdAt?: string;
   updatedAt?: string;
@@ -504,6 +509,27 @@ export const BUILT_IN_THEMES: Record<string, ManualTheme> = {
     calloutBg: 'rgba(8,33,58,0.9)',
     calloutBorder: '#64dfdf',
     bp: true,
+    headingFont: 'public-sans',
+    bodyFont: 'public-sans',
+    ...DEFAULT_THEME_STYLE_OPTIONS,
+  },
+  gray: {
+    id: 'gray',
+    name: 'Technical Gray',
+    builtIn: true,
+    bgType: 'solid',
+    bgColor: '#e3e4e5',
+    bgColorEnd: '#d8dade',
+    bgAngle: 180,
+    bg: '#e3e4e5',
+    text: '#111827',
+    muted: '#4b5563',
+    pliBg: '#cbe2f6',
+    pliBorder: '#1e293b',
+    accent: '#1d4ed8',
+    calloutBg: '#fff5cc',
+    calloutBorder: '#1e293b',
+    bp: false,
     headingFont: 'public-sans',
     bodyFont: 'public-sans',
     ...DEFAULT_THEME_STYLE_OPTIONS,

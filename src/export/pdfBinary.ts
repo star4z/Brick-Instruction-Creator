@@ -19,6 +19,8 @@ export interface PdfJpegPage {
   pxW: number;
   pxH: number;
   links?: PdfLinkRect[];
+  /** Optional searchable tokens (e.g. LDraw part IDs and step numbers) embedded as invisible PDF text for Ctrl+F lookup. */
+  searchableText?: string[];
 }
 
 /**
@@ -53,7 +55,9 @@ function escapePdfLiteralString(str: string): string {
     .replace(/\\/g, '\\\\')
     .replace(/\(/g, '\\(')
     .replace(/\)/g, '\\)')
-    .replace(/[\r\n]/g, '');
+    .replace(/[\r\n]/g, '')
+    // Restrict invisible search tokens to safe printable ASCII for standard Type1 WinAnsiEncoding
+    .replace(/[^\x20-\x7e]/g, ' ');
 }
 
 export function buildPdfBinary(
@@ -74,8 +78,11 @@ export function buildPdfBinary(
   push(new Uint8Array([0x25, 0xe2, 0xe3, 0xcf, 0xd3, 0x0a]));
   const offsets: number[] = [0]; // 1-indexed object offsets
 
+  const hasAnySearchText = jpegPages.some((p) => Array.isArray(p.searchableText) && p.searchableText.length > 0);
+  const fontObj = hasAnySearchText ? 3 : 0;
+
   // Pre-assign object numbers:
-  // Obj 1: Catalog, Obj 2: Pages
+  // Obj 1: Catalog, Obj 2: Pages, (Optional Obj 3: Standard Helvetica Type1 Font for invisible search metadata)
   // For each page: pgObj, imgObj, cntObj, plus 1 annotObj per clickable link
   const pageLayouts: Array<{
     pgObj: number;
@@ -84,7 +91,7 @@ export function buildPdfBinary(
     annotObjs: Array<{ objNum: number; link: PdfLinkRect }>;
   }> = [];
 
-  let nextObj = 3;
+  let nextObj = hasAnySearchText ? 4 : 3;
   for (let i = 0; i < jpegPages.length; i++) {
     const pgObj = nextObj++;
     const imgObj = nextObj++;
@@ -106,19 +113,31 @@ export function buildPdfBinary(
     `2 0 obj\n<< /Type /Pages /Kids [${pageLayouts.map((p) => `${p.pgObj} 0 R`).join(' ')}] /Count ${pageLayouts.length} >>\nendobj\n`,
   );
 
+  // Optional Obj 3: Standard Helvetica Type1 Font (zero font-embedding bloat)
+  if (hasAnySearchText) {
+    offsets.push(offset);
+    pushStr(
+      `${fontObj} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n`,
+    );
+  }
+
   for (let i = 0; i < jpegPages.length; i++) {
     const { pgObj, imgObj, cntObj, annotObjs } = pageLayouts[i];
-    const { bytes, pxW, pxH } = jpegPages[i];
+    const { bytes, pxW, pxH, searchableText } = jpegPages[i];
 
     const annotsEntry =
       annotObjs.length > 0
         ? ` /Annots [${annotObjs.map((a) => `${a.objNum} 0 R`).join(' ')}]`
         : '';
+    const pageSearchTokens = Array.isArray(searchableText)
+      ? searchableText.map((s) => String(s || '').trim()).filter(Boolean)
+      : [];
+    const fontResEntry = pageSearchTokens.length > 0 ? ` /Font << /F1 ${fontObj} 0 R >>` : '';
 
     // Page object
     offsets.push(offset);
     pushStr(
-      `${pgObj} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWpt} ${pageHpt}] /Resources << /XObject << /Im0 ${imgObj} 0 R >> >> /Contents ${cntObj} 0 R${annotsEntry} >>\nendobj\n`,
+      `${pgObj} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWpt} ${pageHpt}] /Resources << /XObject << /Im0 ${imgObj} 0 R >>${fontResEntry} >> /Contents ${cntObj} 0 R${annotsEntry} >>\nendobj\n`,
     );
 
     // JPEG Image XObject
@@ -129,12 +148,19 @@ export function buildPdfBinary(
     push(bytes);
     pushStr('\nendstream\nendobj\n');
 
-    // Content Stream
-    const contentStr = `q ${pageWpt} 0 0 ${pageHpt} 0 0 cm /Im0 Do Q\n`;
+    // Content Stream (image + optional invisible Ctrl+F searchable text metadata via `3 Tr`)
+    let contentStr = `q ${pageWpt} 0 0 ${pageHpt} 0 0 cm /Im0 Do Q\n`;
+    if (pageSearchTokens.length > 0) {
+      const joined = escapePdfLiteralString(pageSearchTokens.join(' '));
+      contentStr += `BT /F1 1 Tf 3 Tr 4 4 Td (${joined}) Tj ET\n`;
+    }
+    const contentBytes = enc(contentStr);
     offsets.push(offset);
     pushStr(
-      `${cntObj} 0 obj\n<< /Length ${contentStr.length} >>\nstream\n${contentStr}endstream\nendobj\n`,
+      `${cntObj} 0 obj\n<< /Length ${contentBytes.length} >>\nstream\n`,
     );
+    push(contentBytes);
+    pushStr('endstream\nendobj\n');
 
     // Clickable URI Link Annotations
     for (const { objNum, link } of annotObjs) {

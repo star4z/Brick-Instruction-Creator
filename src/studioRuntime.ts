@@ -127,7 +127,20 @@ import {
   DEFAULT_ARROW_COLOR,
   computeAutoPlacementOffsetsForSequence,
   computePlacementArrowSegments,
+  resolveContrastArrowColor,
 } from './engine/placementArrows';
+import {
+  build1to1SilhouetteSvg,
+  buildCoaxialPositionCalloutSvg,
+  buildLengthBadgeSvg,
+  classifyPartLengthBadge,
+  detectCoaxialPositionCallout,
+} from './engine/lengthBadges';
+import {
+  buildProgressBarHtml,
+  computeBagProgressFraction,
+  drawProgressBarCanvas,
+} from './engine/buildRoadmap';
 import {
   buildPhysicalVerticalPrereqMap,
   classifySidewaysCapability,
@@ -624,8 +637,10 @@ function resolveColorInfo(colorId) {
     const rgb = colorId & 0xffffff;
     const r = (rgb >> 16) & 255, g = (rgb >> 8) & 255, b = rgb & 255;
     const hex = '#' + rgb.toString(16).padStart(6, '0');
-    const er = Math.round(r * 0.58), eg = Math.round(g * 0.58), eb = Math.round(b * 0.58);
-    const edge = '#' + ((er << 16) | (eg << 8) | eb).toString(16).padStart(6, '0');
+    const luma = 0.299 * r + 0.587 * g + 0.114 * b;
+    const edge = luma < 54
+      ? '#cbd5e1'
+      : '#' + ((Math.round(r * 0.58) << 16) | (Math.round(g * 0.58) << 8) | Math.round(b * 0.58)).toString(16).padStart(6, '0');
     return { name: `RGB ${hex.toUpperCase()}`, hex, edge };
   }
   return null;
@@ -1101,16 +1116,18 @@ function resolvePart(pid) {
   return { name: friendly, sx: 1, sz: 1, h: 24, studs: true };
 }
 
-// Detect 1:1 Actual-Size Guide length (in studs / L) for axles, bars, beams
+// Detect 1:1 Actual-Size Guide length (in studs / L) and official badge shape (circle vs square) for axles, bars, liftarms, beams
 function getActualSizeGuide(pid) {
   const k = normId(pid);
   const cat = PARTS_CATALOG[k] || PARTS_CATALOG[k.replace(/[a-z].*$/, '')];
-  if (cat?.lengthL && cat.lengthL >= 2) return { lengthL: cat.lengthL, kind: /axle/i.test(cat.name) ? 'axle' : 'bar' };
-  const title = (embeddedDatTitles.get(k) || userLibTitles.get(k) || '').toLowerCase();
-  const mAx = title.match(/(?:axle|bar|hose)[^0-9]*(\d+(?:\.\d+)?)\s*l\b/i);
-  if (mAx && parseFloat(mAx[1]) >= 2) return { lengthL: parseFloat(mAx[1]), kind: title.includes('axle') ? 'axle' : 'bar' };
-  const mBm = title.match(/(?:liftarm|technic,?\s*plate|technic,?\s*brick)[^0-9]*1\s*x\s*(\d+)/i);
-  if (mBm && parseInt(mBm[1], 10) >= 3) return { lengthL: parseInt(mBm[1], 10), kind: 'beam' };
+  const title = embeddedDatTitles.get(k) || userLibTitles.get(k) || cat?.name || '';
+  const classified = classifyPartLengthBadge(title, k);
+  if (classified) return classified;
+  if (cat?.lengthL && cat.lengthL >= 2) {
+    const kind = /axle/i.test(cat.name) ? 'axle' : /beam|liftarm/i.test(cat.name) ? 'liftarm' : 'bar';
+    const label = Math.abs(cat.lengthL - Math.round(cat.lengthL)) < 0.01 ? String(Math.round(cat.lengthL)) : String(cat.lengthL);
+    return { lengthL: cat.lengthL, label, shape: kind === 'liftarm' ? 'square' : 'circle', kind, mm: cat.lengthL * 8.0 };
+  }
   return null;
 }
 
@@ -2150,13 +2167,20 @@ function buildMeshBuffers(prevParts, newParts, opts) {
         : hexToRgb255(baseHex, fadeMix);
     const baseLuma = 0.299 * baseCol[0] + 0.587 * baseCol[1] + 0.114 * baseCol[2];
     const starkEdgeCol = baseLuma < 56 ? [204, 212, 222] : [0, 0, 0];
+    const standardEdgeCol = baseLuma < 52
+      ? [
+          Math.round(204 * (1 - fadeMix * 0.35) + 148 * (fadeMix * 0.35)),
+          Math.round(212 * (1 - fadeMix * 0.35) + 163 * (fadeMix * 0.35)),
+          Math.round(222 * (1 - fadeMix * 0.35) + 184 * (fadeMix * 0.35)),
+        ]
+      : hexToRgb255(cInfo.edge, fadeMix * 0.85);
     const edgeCol = isGhost
       ? [51, 65, 85]
       : isSelected
         ? [255, 255, 255]
         : overrideHex
           ? hexToRgb255('#1e293b', isDimmed ? 0.72 : 0.25)
-          : (shouldHighlight ? hexToRgb255(hlColorHex, 0) : (starkBlack ? starkEdgeCol : hexToRgb255(cInfo.edge, fadeMix * 0.85)));
+          : (shouldHighlight ? hexToRgb255(hlColorHex, 0) : (starkBlack ? starkEdgeCol : standardEdgeCol));
     const aByte = isGhost
       ? 82
       : isRealTrans
@@ -2593,10 +2617,18 @@ function buildMeshBuffers(prevParts, newParts, opts) {
     const arrowEnabled = pOv ? (pOv.arrow !== false) : (opts.showArrows !== false);
     if (isNew && hasOffset && arrowEnabled) {
       const box = computeWorldBox(part);
-      const arrowRgb = hexToRgb255(opts.arrowColor || DEFAULT_ARROW_COLOR, 0);
-      const segments = computePlacementArrowSegments(pOv?.arrowBox || box, [offX, offY, offZ], pOv?.arrowTo || null);
+      const partColorInfo = resolveColorInfo(part.c) || COLORS[71];
+      const partRgb = hexToRgb255(partColorInfo.hex, 0);
+      const baseArrowHex = pOv?.arrowColorOverride || opts.arrowColor || DEFAULT_ARROW_COLOR;
+      const adaptiveHex = resolveContrastArrowColor(baseArrowHex, partRgb);
+      const arrowRgb = hexToRgb255(adaptiveHex, 0);
+      const segments = computePlacementArrowSegments(pOv?.arrowBox || box, [offX, offY, offZ], pOv?.arrowTo || null, pOv?.throughGuideTo || null);
       for (const seg of segments) {
-        addArrow3D(seg.from, seg.to, arrowRgb);
+        if (seg.isGuideLine) {
+          pushEdge(seg.from, seg.to, arrowRgb, 255);
+        } else {
+          addArrow3D(seg.from, seg.to, arrowRgb);
+        }
       }
     }
   };
@@ -7250,6 +7282,7 @@ const state = {
   showMinifig1to1: false,
   showStepBorders: true,
   showPageTitle: true,
+  showProgressBar: true,
   wordlessMode: DEFAULT_WORDLESS_MODE, // LEGO-style icon/number-only instructions (no translation needed)
   bomShowTextFields: initialWordlessDefaults.bomShowTextFields,
   pageNumberFormat: initialWordlessDefaults.pageNumberFormat, // 'number' | 'page_n' | 'n_of_total' | 'none'
@@ -9508,16 +9541,24 @@ function renderAll() {
                         <img src="${thumb}" style="width:${pliThumbPx}px;height:${pliThumbPx}px" class="shrink-0 object-contain pointer-events-none" />
                         <span>${item.qty}×</span>
                       </div>
-                      ${state.showSizeGuides && item.guide ? (wordless ? `
-                        <div class="flex items-center font-extrabold rounded-full bg-black/10 dark:bg-white/15" style="gap:${Math.round(typo.pt(3))}px;font-size:${st.pliGuideFont}px;padding:${Math.round(typo.pt(0.8))}px ${Math.round(typo.pt(3.5))}px">
-                          <span>1:1</span>
-                          <span class="inline-block rounded-full bg-current" style="height:${Math.max(2, Math.round(typo.pt(2.5)))}px;width:${Math.min(34, Math.round(item.guide.lengthL * typo.pt(3)))}px"></span>
-                          <span class="inline-flex items-center justify-center rounded-full border border-current leading-none" style="min-width:${guideRingPx}px;height:${guideRingPx}px;padding:0 ${Math.round(typo.pt(2))}px">${item.guide.lengthL}</span>
-                        </div>` : `
-                        <div class="flex items-center font-extrabold rounded-full bg-black/10 dark:bg-white/15" style="gap:${Math.round(typo.pt(3))}px;font-size:${st.pliGuideFont}px;padding:0 ${Math.round(typo.pt(3.5))}px">
-                          <span class="inline-block rounded-full bg-current" style="height:${Math.max(2, Math.round(typo.pt(2.5)))}px;width:${Math.min(34, Math.round(item.guide.lengthL * typo.pt(3)))}px"></span>
-                          <span>1:1 ${item.guide.lengthL}L</span>
-                        </div>`) : ''}
+                      ${state.showSizeGuides && item.guide ? (() => {
+                        const guideColor = (resolveColorInfo(item.part.c) || COLORS[71]).hex;
+                        const silW = Math.min(48, Math.max(18, Math.round(item.guide.lengthL * typo.pt(4.2))));
+                        const silH = Math.max(8, Math.round(typo.pt(item.guide.kind === 'liftarm' || item.guide.kind === 'technic_brick' ? 8.5 : 5.5)));
+                        const silSvg = build1to1SilhouetteSvg(item.guide, silW, silH, guideColor);
+                        const badgeSvg = buildLengthBadgeSvg(item.guide, guideRingPx);
+                        return wordless
+                          ? `<div class="flex items-center font-extrabold rounded-full bg-black/8 dark:bg-white/15" style="gap:${Math.round(typo.pt(3))}px;font-size:${st.pliGuideFont}px;padding:${Math.round(typo.pt(1.2))}px ${Math.round(typo.pt(4))}px">
+                              ${silSvg}
+                              ${badgeSvg}
+                              <span>1:1</span>
+                            </div>`
+                          : `<div class="flex items-center font-extrabold rounded-full bg-black/8 dark:bg-white/15" style="gap:${Math.round(typo.pt(3))}px;font-size:${st.pliGuideFont}px;padding:${Math.round(typo.pt(1.2))}px ${Math.round(typo.pt(4))}px">
+                              ${silSvg}
+                              ${badgeSvg}
+                              <span>1:1 ${item.guide.label || item.guide.lengthL}L</span>
+                            </div>`;
+                      })() : ''}
                     </button>`;
                   }).join('')}
                 </div>` : '');
@@ -9686,11 +9727,24 @@ function renderAll() {
           }).join('')}
         </div>
 
-        <!-- Page Footer -->
-        <div class="absolute flex justify-between font-medium pointer-events-none" style="bottom:${footerPadBottom}px;left:${padPx}px;right:${padPx}px;font-size:${typo.footerFont}px;color:${theme.muted}">
-          <span class="truncate">${showFooterTitle ? escHtml(page.chapterName) : ''}</span>
-          <span style="color:${theme.text}" class="font-bold shrink-0">${escHtml(pgNumText)}</span>
-        </div>
+        <!-- Page Footer (+ Official-Style Bottom Build Progress Bar) -->
+        ${(() => {
+          const chSteps = page.chapter?.steps || [];
+          const lastStepOnPage = page.steps[page.steps.length - 1];
+          const idxInCh = lastStepOnPage ? chSteps.findIndex((s) => s.id === lastStepOnPage.id) : -1;
+          const progFrac = idxInCh >= 0 && chSteps.length > 1
+            ? computeBagProgressFraction(idxInCh, chSteps.length)
+            : (state.pages.length > 1 ? Math.max(0, Math.min(1, page.num / state.pages.length)) : 1);
+          const showBar = state.showProgressBar !== false;
+          const barHtml = showBar
+            ? buildProgressBarHtml(progFrac, { accent: theme.accent, heightPx: Math.max(3, Math.round(typo.pt(3))) })
+            : '';
+          return `<div class="absolute flex items-center justify-between font-medium pointer-events-none" style="gap:${Math.round(typo.pt(10))}px;bottom:${footerPadBottom}px;left:${padPx}px;right:${padPx}px;font-size:${typo.footerFont}px;color:${theme.muted}">
+            ${showFooterTitle ? `<span class="truncate shrink-0 max-w-[32%]">${escHtml(page.chapterName)}</span>` : ''}
+            ${barHtml}
+            <span style="color:${theme.text}" class="font-bold shrink-0">${escHtml(pgNumText)}</span>
+          </div>`;
+        })()}
       </div>`;
 
     bindStepPageInteractions(page);
@@ -12569,6 +12623,7 @@ function syncMenuControls() {
   setChk('toggleStepBordersSetup', state.showStepBorders);
   setChk('togglePageTitle', state.showPageTitle);
   setChk('togglePageTitleSetup', state.showPageTitle);
+  setChk('toggleProgressBar', state.showProgressBar !== false);
   const covShowText = normalizeCoverMeta(state.coverMeta, !state.wordlessMode).showText !== false;
   const compShowText = state.completeMeta.showText !== false;
   const menuEditsSummary = getCurrentManualEditsSummary();
@@ -17360,17 +17415,31 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
   const pgNumText = formatPageNumber(page.num, state.pages.length);
   const wordless = Boolean(state.wordlessMode);
   const showFooterTitle = !wordless && Boolean(state.showPageTitle);
-  const drawFooter = (leftLabel) => {
+  const drawFooter = (leftLabel, progressFrac = null) => {
+    let barLeft = pad;
     if (showFooterTitle && leftLabel) {
       ctx.fillStyle = theme.muted;
       ctx.font = themeCanvasFont(theme, 600, typo.footerFont);
       ctx.fillText(leftLabel, pad, footerTextY);
+      barLeft = pad + Math.min(pxW * 0.32, ctx.measureText(leftLabel).width + Math.round(typo.pt(12)));
     }
+    let barRight = pxW - pad;
     if (pgNumText) {
       ctx.fillStyle = theme.text; ctx.textAlign = 'right';
       ctx.font = themeCanvasFont(theme, 700, typo.footerFont);
       ctx.fillText(pgNumText, pxW - pad, footerTextY);
+      barRight = pxW - pad - ctx.measureText(pgNumText).width - Math.round(typo.pt(12));
       ctx.textAlign = 'left';
+    }
+    if (typeof progressFrac === 'number' && state.showProgressBar !== false && barRight - barLeft > 40) {
+      drawProgressBarCanvas(
+        ctx,
+        barLeft,
+        footerTextY + typo.footerFont * 0.52,
+        barRight - barLeft,
+        progressFrac,
+        { accent: theme.accent, barHeight: Math.max(3, Math.round(typo.pt(3.2))) },
+      );
     }
   };
   ctx.fillStyle = theme.text;
@@ -18755,8 +18824,32 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       }
     }
 
-    drawFooter(page.chapterName || '');
+    const chStepsPdf = page.chapter?.steps || [];
+    const lastStepPdf = page.steps[page.steps.length - 1];
+    const idxInChPdf = lastStepPdf ? chStepsPdf.findIndex((s) => s.id === lastStepPdf.id) : -1;
+    const progFracPdf = idxInChPdf >= 0 && chStepsPdf.length > 1
+      ? computeBagProgressFraction(idxInChPdf, chStepsPdf.length)
+      : (state.pages.length > 1 ? Math.max(0, Math.min(1, page.num / state.pages.length)) : 1);
+    drawFooter(page.chapterName || '', progFracPdf);
   }
+
+  // Build invisible Ctrl+F searchable metadata tokens (step numbers & LDraw part IDs) for this PDF page
+  const searchableSet = new Set();
+  if (page.kind === 'steps' && Array.isArray(page.steps)) {
+    for (const s of page.steps) {
+      if (s?.num != null) searchableSet.add(`Step ${s.num}`);
+      if (Array.isArray(s?.parts)) {
+        for (const p of s.parts) {
+          if (p?.p) searchableSet.add(normId(p.p));
+        }
+      }
+    }
+  } else if (page.kind === 'bom' && Array.isArray(page.bomItems)) {
+    for (const it of page.bomItems) {
+      if (it?.p) searchableSet.add(normId(it.p));
+    }
+  }
+  const searchableText = Array.from(searchableSet);
 
   const jpegQuality = page.kind === 'cover' ? 0.94 : 0.92;
   const dataUrl = canvas.toDataURL('image/jpeg', jpegQuality);
@@ -18764,7 +18857,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
   const binStr = atob(b64);
   const bytes = new Uint8Array(binStr.length);
   for (let i = 0; i < binStr.length; i++) bytes[i] = binStr.charCodeAt(i);
-  return { bytes, pxW, pxH, dataUrl, links };
+  return { bytes, pxW, pxH, dataUrl, links, searchableText };
 }
 
 let lastGeneratedPdfBlob = null, lastGeneratedPdfUrl = null, lastGeneratedPdfName = 'manual.pdf';
@@ -19154,6 +19247,7 @@ function syncStylePanel() {
   setChk('toggleStepBordersSetup', opts.showStepBorders);
   setChk('togglePageTitle', opts.showPageTitle);
   setChk('togglePageTitleSetup', opts.showPageTitle);
+  setChk('toggleProgressBar', opts.showProgressBar !== false);
   const wordlessOn = Boolean(state.wordlessMode);
   for (const [chkId, lblId, noteId] of [
     ['togglePageTitle', 'togglePageTitleLabel', 'pageTitleWordlessNote'],
@@ -21117,6 +21211,8 @@ document.getElementById('toggleStepBordersSetup').onchange = setStepBorders;
 const setPageTitle = (e) => patchActiveTheme({ showPageTitle: e.target.checked });
 document.getElementById('togglePageTitle').onchange = setPageTitle;
 document.getElementById('togglePageTitleSetup').onchange = setPageTitle;
+const toggleProgressBarEl = document.getElementById('toggleProgressBar');
+if (toggleProgressBarEl) toggleProgressBarEl.onchange = (e) => patchActiveTheme({ showProgressBar: e.target.checked });
 const toggleWordlessEl = document.getElementById('toggleWordlessMode');
 if (toggleWordlessEl) {
   toggleWordlessEl.onchange = (e) => applyWordlessMode(e.target.checked);

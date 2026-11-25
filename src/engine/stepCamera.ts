@@ -56,6 +56,12 @@ export interface StepFramingResult {
   center: Vec3;
   radius: number;
   isZoomedIn: boolean;
+  /** Normalized 0..1 regional crop center & radius within the full model (for optional locator inset). */
+  locator?: {
+    cxNorm: number;
+    czNorm: number;
+    radiusNorm: number;
+  };
 }
 
 export interface CanonicalStudioView extends StudioCameraPose {
@@ -794,21 +800,32 @@ export function computeStepCameraFraming(input: StepFramingInput): StepFramingRe
     };
   }
 
-  if (mode === 'focus') {
-    const blend = 0.08;
+  if (mode === 'focus' || mode === 'regional') {
+    const isRegional = mode === 'regional';
+    const blend = isRegional ? 0.14 : 0.08;
     const center: Vec3 = [
       newCenter[0] + (fullCenter[0] - newCenter[0]) * blend,
       newCenter[1] + (fullCenter[1] - newCenter[1]) * blend,
       newCenter[2] + (fullCenter[2] - newCenter[2]) * blend,
     ];
-    const radius = Math.min(
-      fullRadius * 0.85,
-      Math.max(newRadius * 2.25, fullRadius * 0.26, 72),
-    );
+    const radius = isRegional
+      ? Math.min(fullRadius * 0.72, Math.max(newRadius * 2.6, fullRadius * 0.34, 110))
+      : Math.min(fullRadius * 0.85, Math.max(newRadius * 2.25, fullRadius * 0.26, 72));
+    const isZoomedIn = radius < fullRadius * 0.86;
+    const invSpan = 1 / Math.max(1, fullRadius * 2);
     return {
       center,
       radius,
-      isZoomedIn: radius < fullRadius * 0.86,
+      isZoomedIn,
+      ...(isZoomedIn
+        ? {
+            locator: {
+              cxNorm: clamp(0.5 + (center[0] - fullCenter[0]) * invSpan, 0.08, 0.92),
+              czNorm: clamp(0.5 + (center[2] - fullCenter[2]) * invSpan, 0.08, 0.92),
+              radiusNorm: clamp(radius / Math.max(1, fullRadius), 0.18, 0.95),
+            },
+          }
+        : {}),
     };
   }
 
@@ -838,11 +855,22 @@ export function computeStepCameraFraming(input: StepFramingInput): StepFramingRe
     fullCenter[1] + (newCenter[1] - fullCenter[1]) * centerShift,
     fullCenter[2] + (newCenter[2] - fullCenter[2]) * centerShift,
   ];
+  const isZoomedIn = radius < fullRadius * 0.92;
+  const invSpan = 1 / Math.max(1, fullRadius * 2);
 
   return {
     center,
     radius,
-    isZoomedIn: radius < fullRadius * 0.92,
+    isZoomedIn,
+    ...(isZoomedIn
+      ? {
+          locator: {
+            cxNorm: clamp(0.5 + (center[0] - fullCenter[0]) * invSpan, 0.08, 0.92),
+            czNorm: clamp(0.5 + (center[2] - fullCenter[2]) * invSpan, 0.08, 0.92),
+            radiusNorm: clamp(radius / Math.max(1, fullRadius), 0.18, 0.95),
+          },
+        }
+      : {}),
   };
 }
 

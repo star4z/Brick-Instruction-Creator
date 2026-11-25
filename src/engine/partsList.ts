@@ -1362,3 +1362,171 @@ export function summarizeBomConfig(cfg: BomConfig): string {
     : `${cfg.customCols}×${cfg.customRows}`;
   return `Grid · ${sizeLabel} · ${sortNames[cfg.sortPrimary] || 'Color'}`;
 }
+
+export interface BomRelativeScaleInput {
+  key: string;
+  /** Physical isometric projected width & height in LDU (from `projectPartDimensionsLdu`). */
+  projW: number;
+  projH: number;
+}
+
+export interface BomRelativeScaleEntry {
+  key: string;
+  /** Rendered thumbnail scale factor (0.36..1.0) relative to its cell's available image box. */
+  scaleFactor: number;
+  /** Preferred column width in pixels for variable-width masonry packing. */
+  preferredWidthPx: number;
+  /** Preferred item height in pixels (thumbnail + labels) for variable-width masonry packing. */
+  preferredHeightPx: number;
+}
+
+/**
+ * Computes consistent physical relative-scale thumbnail factors across a Parts List
+ * (matching official LEGO BOMs such as 31172 p. 106 and 75192 p. 464), so a 1×1 stud
+ * is visually smaller than a 1×16 beam or 8×8 plate while preserving legibility bounds.
+ */
+export function computeRelativeBomScales(
+  items: ReadonlyArray<BomRelativeScaleInput>,
+  basePxPerLdu = 0.42,
+  labelHeightPx = 22,
+): Map<string, BomRelativeScaleEntry> {
+  const out = new Map<string, BomRelativeScaleEntry>();
+  if (items.length === 0) return out;
+
+  const maxSpan = items.reduce(
+    (m, it) => Math.max(m, Math.max(it.projW, it.projH)),
+    60,
+  );
+  // Reference LDU span that fills 100% of a standard cell (clamped so huge baseplates don't crush 1x1 studs)
+  const refLdu = Math.max(80, Math.min(220, maxSpan * 0.65));
+
+  for (const it of items) {
+    const diag = Math.max(it.projW, it.projH, 16);
+    // Gentle sub-linear compression (pow 0.72) preserves authentic physical hierarchy without making tiny pins microscopic
+    const rawScale = Math.pow(diag / refLdu, 0.72);
+    const scaleFactor = roundTo(clamp(rawScale, 0.38, 1.0), 3);
+    const preferredWidthPx = Math.round(clamp(it.projW * basePxPerLdu + 14, 44, 172));
+    const preferredHeightPx = Math.round(clamp(it.projH * basePxPerLdu + labelHeightPx + 10, 48, 152));
+    out.set(it.key, {
+      key: it.key,
+      scaleFactor,
+      preferredWidthPx,
+      preferredHeightPx,
+    });
+  }
+  return out;
+}
+
+export interface VariableWidthBomColumn<T> {
+  colIndex: number;
+  xPx: number;
+  widthPx: number;
+  items: Array<{
+    item: T;
+    yPx: number;
+    heightPx: number;
+    scaleFactor: number;
+  }>;
+}
+
+export interface VariableWidthBomPage<T> {
+  pageIndex: number;
+  columns: Array<VariableWidthBomColumn<T>>;
+}
+
+/**
+ * Packs Parts List items into official LEGO-style variable-width vertical masonry columns
+ * (matching 75192 p. 464 and 31172 p. 106): narrow columns for small pins/studs and wider
+ * columns for long beams/plates, flowing top-to-bottom within each column and left-to-right
+ * across pages with zero wasted horizontal whitespace.
+ */
+export function packVariableWidthBomColumns<T>(
+  items: ReadonlyArray<T>,
+  getKey: (item: T) => string,
+  scales: ReadonlyMap<string, BomRelativeScaleEntry>,
+  contentWidthPx: number,
+  contentHeightPx: number,
+  gapPx = 8,
+): Array<VariableWidthBomPage<T>> {
+  if (items.length === 0) return [];
+  const usableW = Math.max(120, contentWidthPx);
+  const usableH = Math.max(120, contentHeightPx);
+
+  // Step 1: Group items sequentially into vertical columns that fit within `usableH`
+  const rawCols: Array<{
+    widthPx: number;
+    entries: Array<{ item: T; yPx: number; heightPx: number; scaleFactor: number }>;
+  }> = [];
+
+  let curEntries: Array<{ item: T; yPx: number; heightPx: number; scaleFactor: number }> = [];
+  let curY = 0;
+  let curMaxW = 48;
+
+  for (const item of items) {
+    const sc = scales.get(getKey(item)) || {
+      key: getKey(item),
+      scaleFactor: 0.75,
+      preferredWidthPx: 68,
+      preferredHeightPx: 68,
+    };
+    const itemH = Math.min(usableH, sc.preferredHeightPx);
+    if (curEntries.length > 0 && curY + itemH > usableH) {
+      rawCols.push({ widthPx: curMaxW, entries: curEntries });
+      curEntries = [];
+      curY = 0;
+      curMaxW = 48;
+    }
+    curEntries.push({
+      item,
+      yPx: curY,
+      heightPx: itemH,
+      scaleFactor: sc.scaleFactor,
+    });
+    curY += itemH + gapPx;
+    curMaxW = Math.max(curMaxW, Math.min(usableW * 0.42, sc.preferredWidthPx));
+  }
+  if (curEntries.length > 0) {
+    rawCols.push({ widthPx: curMaxW, entries: curEntries });
+  }
+
+  // Step 2: Pack variable-width columns onto pages that fit within `usableW`
+  const pages: Array<VariableWidthBomPage<T>> = [];
+  let pageCols: typeof rawCols = [];
+  let pageW = 0;
+
+  const flushPage = () => {
+    if (pageCols.length === 0) return;
+    const totalGaps = Math.max(0, pageCols.length - 1) * gapPx;
+    const rawSum = pageCols.reduce((s, c) => s + c.widthPx, 0);
+    // Gently distribute leftover horizontal space proportionally across columns
+    const expand = rawSum > 0 ? Math.min(1.35, (usableW - totalGaps) / rawSum) : 1;
+    let x = 0;
+    const columns: Array<VariableWidthBomColumn<T>> = pageCols.map((c, idx) => {
+      const w = roundTo(c.widthPx * expand, 1);
+      const col: VariableWidthBomColumn<T> = {
+        colIndex: idx,
+        xPx: roundTo(x, 1),
+        widthPx: w,
+        items: c.entries,
+      };
+      x += w + gapPx;
+      return col;
+    });
+    pages.push({ pageIndex: pages.length, columns });
+    pageCols = [];
+    pageW = 0;
+  };
+
+  for (const col of rawCols) {
+    const needed = pageCols.length === 0 ? col.widthPx : col.widthPx + gapPx;
+    if (pageCols.length > 0 && pageW + needed > usableW) {
+      flushPage();
+    }
+    pageCols.push(col);
+    pageW += pageCols.length === 1 ? col.widthPx : col.widthPx + gapPx;
+  }
+  flushPage();
+
+  return pages;
+}
+

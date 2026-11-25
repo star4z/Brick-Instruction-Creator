@@ -222,10 +222,13 @@ export function buildPartMeshGroup(
       isNew && theme.highlightNewParts ? theme.highlightIntensity * 0.14 : 0,
   });
 
+  const baseC = new THREE.Color(colorInfo.hex);
+  const baseLuma = 0.299 * baseC.r + 0.587 * baseC.g + 0.114 * baseC.b;
+  const adaptiveEdgeHex = baseLuma < 0.2 ? '#cbd5e1' : colorInfo.edgeHex;
   const edgeColor =
     isNew && theme.highlightNewParts
       ? new THREE.Color(theme.highlightColor)
-      : new THREE.Color(colorInfo.edgeHex);
+      : new THREE.Color(adaptiveEdgeHex);
 
   const edgeMat = theme.showEdgeLines
     ? new THREE.LineBasicMaterial({
