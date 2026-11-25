@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ui-audit-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   ui-audit:
     runs-on: ubuntu-latest
@@ -31,8 +35,20 @@ jobs:
       - name: Build static bundle
         run: npm run build
 
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
       - name: Install Playwright Chromium
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: npx playwright install chromium --with-deps
+
+      - name: Install Playwright system deps (cached browser)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
 
       - name: Run Desktop & Mobile UI E2E audit
         run: npm run test:e2e
