@@ -69,19 +69,32 @@ describe('studioRuntime safety checks', () => {
     expect(unhandled).toEqual([]);
   });
 
-  it('renders Bricks Library previews with heroQuality, heroShading, and tightFit', () => {
+  it('applies Style Rendering Style (lighting, outlines, outline weight) to Bricks Library thumbnails and 3D inspector', () => {
     const runtimePath = path.resolve(process.cwd(), 'src/studioRuntime.ts');
     const sourceText = fs.readFileSync(runtimePath, 'utf8');
 
-    const fnStart = sourceText.indexOf('function renderPartPreviewDataUrl(');
+    const fnStart = sourceText.indexOf('function getLibRenderStyleState(');
     const fnEnd = sourceText.indexOf('function stopLibThumbQueue(', fnStart);
     expect(fnStart).toBeGreaterThan(-1);
     expect(fnEnd).toBeGreaterThan(fnStart);
     const fnBody = sourceText.slice(fnStart, fnEnd);
 
-    expect(fnBody).toContain('heroQuality: true');
-    expect(fnBody).toContain('heroShading: true');
+    expect(fnBody).toContain('function buildLibThumbCacheKey(');
+    expect(fnBody).toContain('function drawLibPartMesh(');
+    expect(fnBody).toContain('sanitizeStepLightingMode(');
+    expect(fnBody).toContain('photo.renderToCanvas(mesh');
+    expect(fnBody).toContain("unlit: style.stepLighting === 'none'");
+    expect(fnBody).toContain('starkBlackOutlines: style.starkBlackOutlines');
+    expect(fnBody).toContain('outlineLineWeight: style.outlineLineWeight');
+    expect(fnBody).toContain('heroQuality: true, includeHeroEdges: true');
     expect(fnBody).toContain('tightFit: true');
+
+    // Enqueue lookup must share the style-aware cache key helper
+    const enqStart = sourceText.indexOf('function enqueueLibThumbImg(');
+    const enqEnd = sourceText.indexOf('function observeLibThumbImgs(', enqStart);
+    expect(enqStart).toBeGreaterThan(-1);
+    expect(enqEnd).toBeGreaterThan(enqStart);
+    expect(sourceText.slice(enqStart, enqEnd)).toContain('buildLibThumbCacheKey(');
   });
 
   it('uses camera-relative primary and secondary light sources in WebGLBrickEngine', () => {

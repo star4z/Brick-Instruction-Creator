@@ -667,11 +667,14 @@ function selectTheme(id) {
     pliThumbCache.clear();
     submodelThumbCache.clear();
     clearMinifigDiagramCaches();
+    libThumbCache.clear();
+    libPreviewMeshCache = { key: '', mesh: null };
   }
   if (prevStark !== Boolean(state.starkBlackOutlines) || prevLighting !== nextLighting || prevOutW !== state.outlineLineWeight || prevHlW !== state.highlightLineWeight) {
     overviewThumbCache.bumpEpoch();
   }
   renderAll();
+  if (isBricksLibraryModalOpen()) renderBricksLibraryModal(false);
 }
 
 /** Creates (and selects) a new custom theme copied from `base`, with optional overrides. */
@@ -14764,24 +14767,92 @@ const LIB_THUMB_AZ = 34;
 const LIB_THUMB_EL = 22;
 const LIB_INSPECTOR_SIZE = 880;
 
+function getLibRenderStyleState() {
+  const stepLighting = sanitizeStepLightingMode(
+    state.stepLighting,
+    state.highQualityStepRender ? 'studio' : 'standard',
+  );
+  const starkBlackOutlines = Boolean(state.starkBlackOutlines);
+  const outlineLineWeight = starkBlackOutlines
+    ? sanitizeLineWeight(state.outlineLineWeight, 'medium')
+    : 'light';
+  return {
+    stepLighting,
+    starkBlackOutlines,
+    outlineLineWeight,
+    styleKey: `${stepLighting}:${starkBlackOutlines ? `sb_${outlineLineWeight}` : 'def'}`,
+  };
+}
+
+function buildLibThumbCacheKey(
+  partId,
+  colorId,
+  size = LIB_THUMB_SIZE,
+  az = LIB_THUMB_AZ,
+  el = LIB_THUMB_EL,
+  styleKey = getLibRenderStyleState().styleKey,
+) {
+  return `${partId}:${colorId}:${size}:${az}:${el}:${styleKey}`;
+}
+
+function drawLibPartMesh(mesh, size, az, el, style = getLibRenderStyleState()) {
+  if (style.stepLighting === 'studio') {
+    const photo = getStudioPhotoEngine();
+    if (photo && photo.isAvailable()) {
+      const maxDim = Math.max(512, Math.min(4096, photo.getMaxDimension() || 4096));
+      const clamped = clampRenderDimensions(size, size, maxDim, maxDim * maxDim, 128);
+      const rendered = photo.renderToCanvas(mesh, {
+        projection: 'ortho',
+        azDeg: az,
+        elDeg: el,
+        width: clamped.width,
+        height: clamped.height,
+        zoom: 1.08,
+        showFloor: false,
+        lineAlpha: 1.0,
+        boldLines: style.starkBlackOutlines,
+        outlineLineWeight: style.outlineLineWeight,
+        highlightLineWeight: 'medium',
+        darkBackground: false,
+        getTextureImage: (texKey) => textureStore.getDecodedImage(texKey),
+      });
+      if (rendered) return rendered;
+    }
+    snapshotEngine.draw(mesh, size, size, az, el, 1.0, 0, {
+      tightFit: true,
+      heroShading: true,
+      starkBlackOutlines: style.starkBlackOutlines,
+      outlineLineWeight: style.outlineLineWeight,
+      lineAlpha: style.starkBlackOutlines ? 1.0 : 0.52,
+    });
+    return snapshotCanvas;
+  }
+  snapshotEngine.draw(mesh, size, size, az, el, 1.0, 0, {
+    tightFit: true,
+    unlit: style.stepLighting === 'none',
+    starkBlackOutlines: style.starkBlackOutlines,
+    outlineLineWeight: style.outlineLineWeight,
+  });
+  return snapshotCanvas;
+}
+
 function renderPartPreviewDataUrl(partId, colorId, size = LIB_THUMB_SIZE, az = 38, el = 24) {
-  const cacheKey = `${partId}:${colorId}:${size}:${az}:${el}`;
+  const style = getLibRenderStyleState();
+  const cacheKey = buildLibThumbCacheKey(partId, colorId, size, az, el, style.styleKey);
   if (libThumbCache.has(cacheKey)) return libThumbCache.get(cacheKey);
   const rawPart = { id: `lib_${partId}`, p: partId, c: colorId, x: 0, y: 0, z: 0, r: R_ID };
   const samplePart = normalizeCompositeThumbPart(rawPart, (pid) => resolvePart(pid).name, computeWorldBox);
+  const isStudio = style.stepLighting === 'studio';
   const mesh = buildMeshBuffers([], [samplePart], {
     highlightNew: false,
     fadePrev: false,
     showArrows: false,
-    heroQuality: true,
+    starkBlackOutlines: style.starkBlackOutlines,
+    ...(isStudio ? { heroQuality: true, includeHeroEdges: true } : {}),
     accent: '#1a73e8',
   });
-  snapshotEngine.draw(mesh, size, size, az, el, 1.0, 0, {
-    tightFit: true,
-    heroShading: true,
-    lineAlpha: 0.24,
-  });
-  const url = snapshotCanvas.toDataURL('image/png');
+  const srcCanvas = drawLibPartMesh(mesh, size, az, el, style);
+  const url = srcCanvas.toDataURL('image/png');
   if (libThumbCache.size > 320) {
     const oldestKey = libThumbCache.keys().next().value;
     if (oldestKey !== undefined) libThumbCache.delete(oldestKey);
@@ -14790,8 +14861,9 @@ function renderPartPreviewDataUrl(partId, colorId, size = LIB_THUMB_SIZE, az = 3
   return url;
 }
 
-function getOrBuildLibPreviewMesh(partId, colorId) {
-  const key = `${partId}:${colorId}`;
+function getOrBuildLibPreviewMesh(partId, colorId, style = getLibRenderStyleState()) {
+  const isStudio = style.stepLighting === 'studio';
+  const key = `${partId}:${colorId}:${isStudio ? 'studio' : 'std'}:${style.starkBlackOutlines ? 'sb' : 'def'}`;
   if (libPreviewMeshCache.key === key && libPreviewMeshCache.mesh) {
     return libPreviewMeshCache.mesh;
   }
@@ -14801,7 +14873,8 @@ function getOrBuildLibPreviewMesh(partId, colorId) {
     highlightNew: false,
     fadePrev: false,
     showArrows: false,
-    heroQuality: true,
+    starkBlackOutlines: style.starkBlackOutlines,
+    ...(isStudio ? { heroQuality: true, includeHeroEdges: true } : {}),
     accent: '#1a73e8',
   });
   libPreviewMeshCache = { key, mesh };
@@ -14814,18 +14887,17 @@ function drawLibPreviewCanvas(partId, colorId, hiRes = true) {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
   const renderSize = hiRes ? LIB_INSPECTOR_SIZE : 440;
-  const mesh = getOrBuildLibPreviewMesh(partId, colorId);
-  snapshotEngine.draw(mesh, renderSize, renderSize, libUiState.previewAz, libUiState.previewEl, 1.0, 0, {
-    tightFit: true,
-    heroShading: true,
-    lineAlpha: 0.24,
-  });
+  const style = getLibRenderStyleState();
+  const mesh = getOrBuildLibPreviewMesh(partId, colorId, style);
+  const srcCanvas = drawLibPartMesh(mesh, renderSize, libUiState.previewAz, libUiState.previewEl, style);
   if (canvas.width !== renderSize || canvas.height !== renderSize) {
     canvas.width = renderSize;
     canvas.height = renderSize;
   }
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.drawImage(snapshotCanvas, 0, 0, renderSize, renderSize, 0, 0, canvas.width, canvas.height);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(srcCanvas, 0, 0, srcCanvas.width, srcCanvas.height, 0, 0, canvas.width, canvas.height);
 }
 
 function hasLocalLibGeometry(pid) {
@@ -15050,7 +15122,7 @@ function enqueueLibThumbImg(imgEl) {
   if (!pid) return;
   const rawCol = Number(imgEl.dataset.colorId);
   const col = Number.isFinite(rawCol) ? rawCol : getEffectivePreviewColorForPart(pid);
-  const cacheKey = `${pid}:${col}:${LIB_THUMB_SIZE}:${LIB_THUMB_AZ}:${LIB_THUMB_EL}`;
+  const cacheKey = buildLibThumbCacheKey(pid, col, LIB_THUMB_SIZE, LIB_THUMB_AZ, LIB_THUMB_EL);
   if (libThumbCache.has(cacheKey)) {
     imgEl.src = libThumbCache.get(cacheKey);
     imgEl.dataset.loaded = '1';
@@ -20089,8 +20161,11 @@ document.querySelectorAll('.step-lighting-chip').forEach(b => {
     pliThumbCache.clear();
     submodelThumbCache.clear();
     minifigDiagramCache.clear();
+    libThumbCache.clear();
+    libPreviewMeshCache = { key: '', mesh: null };
     overviewThumbCache.bumpEpoch();
     patchActiveTheme({ stepLighting: mode, highQualityStepRender: mode === 'studio' });
+    if (isBricksLibraryModalOpen()) renderBricksLibraryModal(false);
   };
 });
 document.querySelectorAll('.fade-chip').forEach(b => {
@@ -20109,8 +20184,11 @@ document.querySelectorAll('.outline-weight-chip').forEach(b => {
   b.onclick = () => {
     pliThumbCache.clear();
     clearMinifigDiagramCaches();
+    libThumbCache.clear();
+    libPreviewMeshCache = { key: '', mesh: null };
     overviewThumbCache.bumpEpoch();
     patchActiveTheme({ outlineLineWeight: sanitizeLineWeight(b.getAttribute('data-outline-weight'), 'medium') });
+    if (isBricksLibraryModalOpen()) renderBricksLibraryModal(false);
   };
 });
 
@@ -20287,8 +20365,11 @@ const starkBlackToggleEl = document.getElementById('toggleStarkBlackOutlines');
 if (starkBlackToggleEl) starkBlackToggleEl.onchange = (e) => {
   pliThumbCache.clear();
   clearMinifigDiagramCaches();
+  libThumbCache.clear();
+  libPreviewMeshCache = { key: '', mesh: null };
   overviewThumbCache.bumpEpoch();
   patchActiveTheme({ starkBlackOutlines: e.target.checked });
+  if (isBricksLibraryModalOpen()) renderBricksLibraryModal(false);
 };
 document.getElementById('toggleRotCues').onchange = (e) => patchActiveTheme({ showRotCues: e.target.checked });
 document.getElementById('toggleSizeGuides').onchange = (e) => patchActiveTheme({ showSizeGuides: e.target.checked });
