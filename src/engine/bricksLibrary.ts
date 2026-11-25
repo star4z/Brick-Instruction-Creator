@@ -45,6 +45,8 @@ export interface LibraryPartItem {
   searchText?: string;
   /** Sorted real-world LDraw color IDs this part is actually produced in (when indexed). */
   availableColors?: readonly number[];
+  /** True when this entry is only a subpart/primitive/unplaced template inside the loaded `.io` bundle. */
+  embeddedIsHelper?: boolean;
 }
 
 /** Minimal catalog entry shape consumed by `buildLibraryIndex` (see `partsCatalog.ts`). */
@@ -378,47 +380,23 @@ export interface BuildLibraryIndexResult {
 
 /**
  * Deduplicates canonical keys vs `BL_Item_No` aliases that share the same lines array reference.
+ * When `preferredKeys` is provided (e.g. `modelPartIds`), prefer a key present in `preferredKeys`
+ * so aliased embedded `.dat` entries match the exact part ID placed in the model.
  */
-function collectCanonicalMapKeys(map: ReadonlyMap<string, readonly string[]>): Set<string> {
-  const seenArrays = new Set<readonly string[]>();
-  const canonicalKeys = new Set<string>();
-  for (const [key, lines] of map.entries()) {
-    if (seenArrays.has(lines)) continue;
-    seenArrays.add(lines);
-    canonicalKeys.add(key);
-  }
-  return canonicalKeys;
-}
-
-/**
- * Collects all subfile IDs referenced via type-1 lines inside embedded `.dat` definitions.
- * Any embedded `.dat` that is not directly placed in the model (`modelPartIds`) and is only
- * referenced as a child of another embedded `.dat` is an internal subpart/primitive dependency.
- */
-function collectEmbeddedChildRefs(
-  embeddedDatRaw: ReadonlyMap<string, readonly string[]>,
-  embeddedCanonical: ReadonlySet<string>,
+function collectCanonicalMapKeys(
+  map: ReadonlyMap<string, readonly string[]>,
+  preferredKeys?: ReadonlySet<string>,
 ): Set<string> {
-  const refs = new Set<string>();
-  for (const k of embeddedCanonical) {
-    const lines = embeddedDatRaw.get(k);
-    if (!lines) continue;
-    for (const raw of lines) {
-      const tr = raw.trim();
-      if (!tr.startsWith('1 ')) continue;
-      const tokens = tr.split(/\s+/);
-      if (tokens.length < 15) continue;
-      const refRaw = tokens.slice(14).join(' ').trim();
-      const normRef = normalizeLibraryPartId(refRaw);
-      if (!normRef) continue;
-      refs.add(normRef);
-      const slashIdx = normRef.lastIndexOf('/');
-      if (slashIdx >= 0) {
-        refs.add(normRef.slice(slashIdx + 1));
-      }
+  const chosenByLines = new Map<readonly string[], string>();
+  for (const [key, lines] of map.entries()) {
+    const prev = chosenByLines.get(lines);
+    if (!prev) {
+      chosenByLines.set(lines, key);
+    } else if (preferredKeys && !preferredKeys.has(prev) && preferredKeys.has(key)) {
+      chosenByLines.set(lines, key);
     }
   }
-  return refs;
+  return new Set(chosenByLines.values());
 }
 
 export function buildLibraryIndex(input: BuildLibraryIndexInput): BuildLibraryIndexResult {
@@ -438,11 +416,7 @@ export function buildLibraryIndex(input: BuildLibraryIndexInput): BuildLibraryIn
   } = input;
 
   const savedCanonical = collectCanonicalMapKeys(userLibRaw);
-  const embeddedCanonical = collectCanonicalMapKeys(embeddedDatRaw);
-  const embeddedChildRefs =
-    embeddedCanonical.size > 0 && modelPartIds.size > 0
-      ? collectEmbeddedChildRefs(embeddedDatRaw, embeddedCanonical)
-      : null;
+  const embeddedCanonical = collectCanonicalMapKeys(embeddedDatRaw, modelPartIds);
 
   let savedParts = 0;
   let savedHelpers = 0;
@@ -515,17 +489,19 @@ export function buildLibraryIndex(input: BuildLibraryIndexInput): BuildLibraryIn
     const lines = embeddedDatRaw.get(k) || null;
     const title = embeddedDatTitles.get(k) || null;
     let kind = classifyDatEntryKind(k, lines, title);
-    if (
-      kind === 'part' &&
-      embeddedChildRefs &&
-      !modelPartIds.has(k) &&
-      embeddedChildRefs.has(k)
-    ) {
+    // Any embedded `.dat` bundled in a `.io`/`.mpd` archive that is not directly placed
+    // in the model (internal subparts, primitives, or unposed assembly templates left behind
+    // alongside posed FlexibleBrick copies) is an embedded helper rather than an embedded part.
+    if (kind === 'part' && modelPartIds.size > 0 && !modelPartIds.has(k)) {
       kind = 'subpart';
     }
     if (kind === 'part') embeddedParts++;
     else embeddedHelpers++;
     upsert(k, 'embedded', lines, title, kind);
+    if (kind !== 'part') {
+      const entry = byId.get(normalizeLibraryPartId(k));
+      if (entry) entry.embeddedIsHelper = true;
+    }
   }
 
   for (const k of savedCanonical) {
@@ -555,6 +531,9 @@ export function buildLibraryIndex(input: BuildLibraryIndexInput): BuildLibraryIn
       const existing = byId.get(id);
       if (existing) {
         upsert(id, entry.origin, null, null);
+        if (!entry.helper && existing.embeddedIsHelper && existing.kind !== 'part') {
+          existing.kind = 'part';
+        }
         continue;
       }
       byId.set(id, {
@@ -659,7 +638,10 @@ export function filterLibraryItems(
 
     if (!hasOnlyIds) {
       if (scope === 'saved' && !item.sources.includes('saved')) continue;
-      if (scope === 'embedded' && !item.sources.includes('embedded')) continue;
+      if (scope === 'embedded') {
+        if (!item.sources.includes('embedded')) continue;
+        if (!includeHelpers && item.embeddedIsHelper) continue;
+      }
       if (scope === 'builtin' && !isBuiltInLibraryItem(item)) continue;
       if (scope === 'official' && !item.sources.includes('official')) continue;
       if (scope === 'unofficial' && !item.sources.includes('unofficial')) continue;
@@ -697,9 +679,9 @@ export function filterLibraryItems(
     // Prioritize missing / model / saved / embedded / builtin parts naturally
     if (item.isMissingInModel) score += 40;
     if (item.inCurrentModel) score += 25;
-    if (item.primarySource === 'embedded') score += 15;
-    else if (item.primarySource === 'saved') score += 12;
-    else if (item.primarySource === 'builtin') score += 6;
+    if (item.primarySource === 'embedded' && !item.embeddedIsHelper) score += 15;
+    else if (item.sources.includes('saved')) score += 12;
+    else if (item.sources.includes('builtin')) score += 6;
     if (item.kind === 'part') score += 10;
 
     scored.push({ item, score });

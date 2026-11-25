@@ -178,6 +178,83 @@ describe('bricksLibrary engine', () => {
         filterLibraryItems(items, { scope: 'embedded', includeHelpers: true }).map((i) => i.id).sort(),
       ).toEqual(['3001', 'custom_internal_helper', 'stug-2x4']);
     });
+
+    it('never counts unplaced embedded templates (e.g. unposed assembly .dat) as embedded parts and keeps Embedded .io filter count aligned when overlapping with saved parts', () => {
+      const torsoLines = ['0 Minifig Torso', '0 IsSubModel False', '0 BL_Item_No 973pb3546'];
+      const unposedAsmLines = [
+        '0 Minifig Torso Assembly',
+        '0 IsSubModel False',
+        '0 BL_Item_No 973pb3546c01',
+        '1 16 0 0 0 1 0 0 0 1 0 0 0 1 973pb3546.dat',
+      ];
+      const hipsLines = ['0 Minifig Hips', '0 IsSubModel False', '0 BL_Item_No 970'];
+      const legsAsmLines = [
+        '0 Minifig Hips and Legs',
+        '0 IsSubModel False',
+        '0 BL_Item_No 970c00',
+        '1 16 0 0 0 1 0 0 0 1 0 0 0 1 970.dat',
+      ];
+      const embeddedDatRaw = new Map<string, string[]>([
+        // Placed leaf part (from posed FlexibleBrick copy) + aliased key
+        ['bl_973pb3546', torsoLines],
+        ['973pb3546', torsoLines],
+        // Unplaced unposed assembly template bundled by Studio in model2.ldr
+        ['973pb3546c01', unposedAsmLines],
+        // Placed legs assembly + its unplaced internal child subpart
+        ['970c00', legsAsmLines],
+        ['970', hipsLines],
+      ]);
+      const embeddedDatTitles = new Map<string, string>([
+        ['bl_973pb3546', 'Minifig Torso'],
+        ['973pb3546', 'Minifig Torso'],
+        ['973pb3546c01', 'Minifig Torso Assembly'],
+        ['970c00', 'Minifig Hips and Legs'],
+        ['970', 'Minifig Hips'],
+      ]);
+      // User also has `970` downloaded in their browser library!
+      const userLibRaw = new Map<string, string[]>([
+        ['970', ['0 Minifig Hips', '0 !LDRAW_ORG Part']],
+      ]);
+      const userLibTitles = new Map<string, string>([['970', 'Minifig Hips']]);
+
+      const { items, stats } = buildLibraryIndex({
+        userLibRaw,
+        userLibTitles,
+        embeddedDatRaw,
+        embeddedDatTitles,
+        builtInCatalog: {},
+        modelPartIds: new Set(['973pb3546', '970c00']),
+        missingShapePartIds: new Set(),
+        missingExactDatPartIds: new Set(),
+        resolveName: (id) => embeddedDatTitles.get(id) || userLibTitles.get(id) || id,
+      });
+
+      // Only the 2 placed model parts are counted as embeddedParts (never > modelUniqueParts)
+      expect(stats.modelUniqueParts).toBe(2);
+      expect(stats.embeddedParts).toBe(2);
+      expect(stats.embeddedHelpers).toBe(2);
+      expect(stats.savedParts).toBe(1);
+
+      // Embedded .io scope matches stats.embeddedParts exactly (does not leak `970` or `973pb3546c01`)
+      const embeddedFiltered = filterLibraryItems(items, { scope: 'embedded' });
+      expect(embeddedFiltered.map((i) => i.id).sort()).toEqual(['970c00', '973pb3546']);
+
+      // Downloaded scope still includes `970` as a normal saved part
+      const savedFiltered = filterLibraryItems(items, { scope: 'saved' });
+      expect(savedFiltered.map((i) => i.id)).toEqual(['970']);
+
+      // Checking "Show subparts & primitives" reveals the embedded helpers too
+      const embeddedWithHelpers = filterLibraryItems(items, {
+        scope: 'embedded',
+        includeHelpers: true,
+      });
+      expect(embeddedWithHelpers.map((i) => i.id).sort()).toEqual([
+        '970',
+        '970c00',
+        '973pb3546',
+        '973pb3546c01',
+      ]);
+    });
   });
 
   describe('search & filtering', () => {
