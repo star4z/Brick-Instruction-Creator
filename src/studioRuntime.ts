@@ -10440,7 +10440,6 @@ function syncMenuControls() {
   setVisible('menuBomSetupBtn', vis.showBomSetup);
   setVisible('menuPrintBtn', vis.showPrintPdf);
   setVisible('menuExportHtmlBtn', vis.showPrintPdf);
-  setVisible('pageSetupPrintBtn', vis.showPrintPdf);
   setVisible('bomSetupJumpBtn', vis.showBomSetup);
   setVisible('menuFetchLibWrap', vis.showFetchLibrary);
   setVisible('menuClearLibBtn', vis.showClearLibrary);
@@ -17218,7 +17217,6 @@ document.getElementById('menuPageSetupBtn').onclick = openPageSetupModal;
 const closePageSetupModal = () => { closeLayoutGroupEditor(); document.getElementById('pageSetupModal').classList.add('hidden'); };
 document.getElementById('btnClosePageSetup').onclick = closePageSetupModal;
 document.getElementById('pageSetupDoneBtn').onclick = closePageSetupModal;
-document.getElementById('pageSetupPrintBtn').onclick = openExportModal;
 document.getElementById('pageSetupModal').onclick = (e) => { if (e.target.id === 'pageSetupModal') closePageSetupModal(); };
 
 document.getElementById('menuBomSetupBtn').onclick = openBomSetupModal;

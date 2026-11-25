@@ -339,4 +339,20 @@ describe('studioRuntime safety checks', () => {
       expect(runtime).toContain(fnName);
     }
   });
+
+  it('does not include a Print / Save PDF button in the Page Setup dialog', () => {
+    const html = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf8');
+    const runtime = fs.readFileSync(path.resolve(process.cwd(), 'src/studioRuntime.ts'), 'utf8');
+
+    const modalStart = html.indexOf('id="pageSetupModal"');
+    const modalEnd = html.indexOf('id="bomSetupModal"', modalStart);
+    expect(modalStart).toBeGreaterThan(-1);
+    expect(modalEnd).toBeGreaterThan(modalStart);
+
+    const pageSetupHtml = html.slice(modalStart, modalEnd);
+    expect(pageSetupHtml).not.toContain('pageSetupPrintBtn');
+    expect(pageSetupHtml).not.toContain('Print / Save PDF');
+    expect(pageSetupHtml).toContain('id="pageSetupDoneBtn"');
+    expect(runtime).not.toContain('pageSetupPrintBtn');
+  });
 });
