@@ -605,7 +605,7 @@
           </div>
           <div class="space-y-1.5">
             <div class="flex items-center justify-between gap-2">
-              <span class="font-medium">Earlier Piece Visibility</span>
+              <span class="font-medium">Fade Earlier Pieces</span>
               <span id="fadeVisibilityPreview" class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-[var(--surface-sunken)] border border-[var(--border)] text-[11px] font-medium text-[var(--muted-foreground)] shrink-0" title="Visual preview: earlier piece (bottom) vs. new piece (top)">
                 <svg viewBox="0 0 34 20" class="w-[30px] h-[18px] shrink-0 overflow-visible" aria-hidden="true">
                   <g id="fadePreviewEarlier" fill="#cf5b52" stroke="#7c3d38" stroke-width="1">
@@ -621,21 +621,21 @@
               </span>
             </div>
             <div class="grid grid-cols-4 gap-1.5">
-              <button data-fade="0.45" type="button" class="fade-chip flex flex-col items-center gap-1 py-1.5 px-1 rounded-md border font-semibold text-xs transition cursor-pointer" title="Heavy fade on earlier pieces">
-                <span class="block w-6 h-2 rounded-sm ring-1 ring-black/20" style="background:#d5a09d" aria-hidden="true"></span>
-                <span>Soft</span>
-              </button>
-              <button data-fade="0.65" type="button" class="fade-chip flex flex-col items-center gap-1 py-1.5 px-1 rounded-md border font-semibold text-xs transition cursor-pointer" title="Moderate fade on earlier pieces">
-                <span class="block w-6 h-2 rounded-sm ring-1 ring-black/20" style="background:#d17b75" aria-hidden="true"></span>
-                <span>Medium</span>
+              <button data-fade="1.0" type="button" class="fade-chip flex flex-col items-center gap-1 py-1.5 px-1 rounded-md border font-semibold text-xs transition cursor-pointer" title="No fade — earlier pieces at full color">
+                <span class="block w-6 h-2 rounded-sm ring-1 ring-black/20" style="background:#c91a09" aria-hidden="true"></span>
+                <span>Off</span>
               </button>
               <button data-fade="0.82" type="button" class="fade-chip flex flex-col items-center gap-1 py-1.5 px-1 rounded-md border font-semibold text-xs transition cursor-pointer" title="Subtle fade on earlier pieces">
                 <span class="block w-6 h-2 rounded-sm ring-1 ring-black/20" style="background:#cf5b52" aria-hidden="true"></span>
-                <span>Clear</span>
+                <span>Subtle</span>
               </button>
-              <button data-fade="1.0" type="button" class="fade-chip flex flex-col items-center gap-1 py-1.5 px-1 rounded-md border font-semibold text-xs transition cursor-pointer" title="No fade — earlier pieces at full color">
-                <span class="block w-6 h-2 rounded-sm ring-1 ring-black/20" style="background:#c91a09" aria-hidden="true"></span>
-                <span>Full</span>
+              <button data-fade="0.65" type="button" class="fade-chip flex flex-col items-center gap-1 py-1.5 px-1 rounded-md border font-semibold text-xs transition cursor-pointer" title="Medium fade on earlier pieces">
+                <span class="block w-6 h-2 rounded-sm ring-1 ring-black/20" style="background:#d17b75" aria-hidden="true"></span>
+                <span>Medium</span>
+              </button>
+              <button data-fade="0.45" type="button" class="fade-chip flex flex-col items-center gap-1 py-1.5 px-1 rounded-md border font-semibold text-xs transition cursor-pointer" title="Heavy fade on earlier pieces">
+                <span class="block w-6 h-2 rounded-sm ring-1 ring-black/20" style="background:#d5a09d" aria-hidden="true"></span>
+                <span>Heavy</span>
               </button>
             </div>
           </div>
