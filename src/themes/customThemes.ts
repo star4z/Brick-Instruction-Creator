@@ -120,10 +120,22 @@ export function getLineWeightTapOffsets(
   ];
 }
 
+export type StepLightingMode = 'none' | 'standard' | 'studio';
+
+export const STEP_LIGHTING_MODES: StepLightingMode[] = ['none', 'standard', 'studio'];
+
+export function sanitizeStepLightingMode(
+  raw: unknown,
+  fallback: StepLightingMode = 'standard',
+): StepLightingMode {
+  if (raw === 'none' || raw === 'standard' || raw === 'studio') return raw;
+  return fallback;
+}
+
 /**
- * Step display options that belong to a theme (formerly loose Style popover
- * toggles). Field names intentionally match the studio runtime `state` keys so
- * the active theme can be mirrored into state with a simple copy.
+ * Step rendering and display options that belong to a theme (formerly loose
+ * Style popover toggles). Field names intentionally match the studio runtime
+ * `state` keys so the active theme can be mirrored into state with a simple copy.
  */
 export interface ThemeStyleOptions {
   highlightNew: boolean;
@@ -131,6 +143,7 @@ export interface ThemeStyleOptions {
   highlightLineWeight: LineWeightId;
   fadePrev: boolean;
   fadeOpacity: number;
+  stepLighting: StepLightingMode;
   highQualityStepRender: boolean;
   starkBlackOutlines: boolean;
   outlineLineWeight: LineWeightId;
@@ -149,6 +162,7 @@ export const THEME_STYLE_OPTION_KEYS: Array<keyof ThemeStyleOptions> = [
   'highlightLineWeight',
   'fadePrev',
   'fadeOpacity',
+  'stepLighting',
   'highQualityStepRender',
   'starkBlackOutlines',
   'outlineLineWeight',
@@ -167,6 +181,7 @@ export const DEFAULT_THEME_STYLE_OPTIONS: ThemeStyleOptions = {
   highlightLineWeight: 'medium',
   fadePrev: true,
   fadeOpacity: 0.82,
+  stepLighting: 'standard',
   highQualityStepRender: false,
   starkBlackOutlines: false,
   outlineLineWeight: 'medium',
@@ -202,13 +217,27 @@ export function normalizeThemeStyleOptions(
   const mf = r.minifigStyle === 'exploded' || r.minifigStyle === 'sequential' || r.minifigStyle === 'classic'
     ? r.minifigStyle
     : fb.minifigStyle;
+  const fbLighting: StepLightingMode =
+    fb.stepLighting === 'none' || fb.stepLighting === 'standard' || fb.stepLighting === 'studio'
+      ? fb.stepLighting
+      : (fb.highQualityStepRender ? 'studio' : 'standard');
+  let stepLighting: StepLightingMode;
+  if (r.stepLighting === 'none' || r.stepLighting === 'standard' || r.stepLighting === 'studio') {
+    stepLighting = r.stepLighting;
+  } else if (typeof r.highQualityStepRender === 'boolean') {
+    stepLighting = r.highQualityStepRender ? 'studio' : (fbLighting === 'none' ? 'none' : 'standard');
+  } else {
+    stepLighting = fbLighting;
+  }
+  const highQualityStepRender = stepLighting === 'studio';
   return {
     highlightNew: bool('highlightNew'),
     highlightColor: sanitizeHexColor(r.highlightColor, sanitizeHexColor(fb.highlightColor, '#ff2d55')),
     highlightLineWeight: sanitizeLineWeight(r.highlightLineWeight, sanitizeLineWeight(fb.highlightLineWeight, 'medium')),
     fadePrev,
     fadeOpacity: fade,
-    highQualityStepRender: bool('highQualityStepRender'),
+    stepLighting,
+    highQualityStepRender,
     starkBlackOutlines: bool('starkBlackOutlines'),
     outlineLineWeight: sanitizeLineWeight(r.outlineLineWeight, sanitizeLineWeight(fb.outlineLineWeight, 'medium')),
     showRotCues: bool('showRotCues'),
@@ -256,12 +285,13 @@ export interface ManualTheme {
   headingFont?: ThemeFontId;
   /** Font for labels, part names & body text (defaults to `public-sans`). */
   bodyFont?: ThemeFontId;
-  // Step display & Parts List style options (see ThemeStyleOptions)
+  // Rendering style, step display & Parts List style options (see ThemeStyleOptions)
   highlightNew?: boolean;
   highlightColor?: string;
   highlightLineWeight?: LineWeightId;
   fadePrev?: boolean;
   fadeOpacity?: number;
+  stepLighting?: StepLightingMode;
   highQualityStepRender?: boolean;
   starkBlackOutlines?: boolean;
   outlineLineWeight?: LineWeightId;

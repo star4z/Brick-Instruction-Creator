@@ -248,6 +248,7 @@ describe('theme style options, recents & naming', () => {
   it('stores step display options on themes with safe defaults and round-trips them', async () => {
     const m = await import('../customThemes');
     expect(m.getThemeStyleOptions(BUILT_IN_THEMES.blue)).toEqual(m.DEFAULT_THEME_STYLE_OPTIONS);
+    expect(m.DEFAULT_THEME_STYLE_OPTIONS.stepLighting).toBe('standard');
     expect(m.DEFAULT_THEME_STYLE_OPTIONS.highQualityStepRender).toBe(false);
     expect(m.DEFAULT_THEME_STYLE_OPTIONS.starkBlackOutlines).toBe(false);
     expect(m.DEFAULT_THEME_STYLE_OPTIONS.highlightLineWeight).toBe('medium');
@@ -272,21 +273,37 @@ describe('theme style options, recents & naming', () => {
     expect(t.fadeOpacity).toBe(1);
     expect(t.fadePrev).toBe(false);
     expect(t.highlightColor).toBe('#ff2d55');
+    expect(t.stepLighting).toBe('studio');
     expect(t.highQualityStepRender).toBe(true);
     expect(t.starkBlackOutlines).toBe(true);
     expect(t.highlightLineWeight).toBe('extra-heavy');
     expect(t.outlineLineWeight).toBe('light');
     const [back] = parseImportedThemesJson(serializeThemeExport(t));
     expect(m.themeStyleOptionsEqual(m.getThemeStyleOptions(back), m.getThemeStyleOptions(t))).toBe(true);
+    expect(back.stepLighting).toBe('studio');
     expect(back.highQualityStepRender).toBe(true);
     expect(back.starkBlackOutlines).toBe(true);
     expect(back.highlightLineWeight).toBe('extra-heavy');
     expect(back.outlineLineWeight).toBe('light');
     expect(createThemeDraftFromBase(t).showStepBorders).toBe(false);
+    expect(createThemeDraftFromBase(t).stepLighting).toBe('studio');
     expect(createThemeDraftFromBase(t).highQualityStepRender).toBe(true);
     expect(createThemeDraftFromBase(t).starkBlackOutlines).toBe(true);
     expect(createThemeDraftFromBase(t).highlightLineWeight).toBe('extra-heavy');
     expect(createThemeDraftFromBase(t).outlineLineWeight).toBe('light');
+
+    // Flat / No Lighting mode round-trips cleanly and clears highQualityStepRender
+    const flatTheme = normalizeCustomTheme({
+      name: 'Flat Print',
+      stepLighting: 'none',
+      highQualityStepRender: true,
+    })!;
+    expect(flatTheme.stepLighting).toBe('none');
+    expect(flatTheme.highQualityStepRender).toBe(false);
+    const [flatBack] = parseImportedThemesJson(serializeThemeExport(flatTheme));
+    expect(flatBack.stepLighting).toBe('none');
+    expect(flatBack.highQualityStepRender).toBe(false);
+    expect(m.sanitizeStepLightingMode('invalid', 'standard')).toBe('standard');
 
     // Legacy themes saved with fadePrev=false and a lower fadeOpacity migrate to Full (1.0)
     const legacyNoFade = m.normalizeThemeStyleOptions({ fadePrev: false, fadeOpacity: 0.65 });

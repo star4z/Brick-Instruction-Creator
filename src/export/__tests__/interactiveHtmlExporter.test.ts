@@ -200,6 +200,7 @@ describe('interactiveHtmlExporter font stacks', () => {
     expect(html).toContain('<th class="col-partId">Part ID</th><th class="col-qty">Qty</th><th class="col-color">Color</th><th class="col-name">Part Name</th>');
     expect(html).toContain('#c91a09');
     expect(html).toContain('3001');
+    expect(html).toContain('uniform float uUnlit;');
     const scriptMatch = html.match(/<script>([\s\S]*?)<\/script>/);
     expect(scriptMatch).toBeTruthy();
     expect(() => new Function(scriptMatch![1])).not.toThrow();

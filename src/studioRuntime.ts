@@ -308,6 +308,7 @@ import {
   serializeThemeExport,
   getLineWeightTapOffsets,
   sanitizeLineWeight,
+  sanitizeStepLightingMode,
   themeCanvasFont,
   themeStyleOptionsEqual,
   toHexColor,
@@ -643,13 +644,18 @@ function selectTheme(id) {
   const nameEl = document.getElementById('themeNameInput');
   if (nameEl && document.activeElement === nameEl) nameEl.blur();
   const prevStark = Boolean(state.starkBlackOutlines);
-  const prevHq = Boolean(state.highQualityStepRender);
+  const prevLighting = sanitizeStepLightingMode(state.stepLighting, state.highQualityStepRender ? 'studio' : 'standard');
   const prevOutW = state.outlineLineWeight;
   const prevHlW = state.highlightLineWeight;
   state.themeId = resolveThemeById(id, customThemes).id;
   applyActiveThemeStyleToState();
-  if (prevStark !== Boolean(state.starkBlackOutlines) || prevOutW !== state.outlineLineWeight) { pliThumbCache.clear(); clearMinifigDiagramCaches(); }
-  if (prevStark !== Boolean(state.starkBlackOutlines) || prevHq !== Boolean(state.highQualityStepRender) || prevOutW !== state.outlineLineWeight || prevHlW !== state.highlightLineWeight) {
+  const nextLighting = sanitizeStepLightingMode(state.stepLighting, state.highQualityStepRender ? 'studio' : 'standard');
+  if (prevStark !== Boolean(state.starkBlackOutlines) || prevOutW !== state.outlineLineWeight || prevLighting !== nextLighting) {
+    pliThumbCache.clear();
+    submodelThumbCache.clear();
+    clearMinifigDiagramCaches();
+  }
+  if (prevStark !== Boolean(state.starkBlackOutlines) || prevLighting !== nextLighting || prevOutW !== state.outlineLineWeight || prevHlW !== state.highlightLineWeight) {
     overviewThumbCache.bumpEpoch();
   }
   renderAll();
@@ -2802,6 +2808,7 @@ class WebGLBrickEngine {
     `;
     const fsTri = `precision mediump float;
       uniform float uHeroMode;
+      uniform float uUnlit;
       uniform vec3 uEyePos;
       uniform vec3 uKeyDir;
       uniform vec3 uFillDir;
@@ -2812,11 +2819,16 @@ class WebGLBrickEngine {
       varying vec4 vCol;
       ${absPbrGlsl}
       void main(){
+        if (uUnlit > 0.5) {
+          gl_FragColor = vec4(vCol.rgb, vCol.a);
+          return;
+        }
         gl_FragColor = shadeAbsPlastic(vCol.rgb, vCol.a, vPos, vNorm, uHeroMode, uEyePos, uKeyDir, uFillDir, uRimDir, uCamUp);
       }`;
     const vsTex = `attribute vec3 aPos; attribute vec3 aNorm; attribute vec2 aUv; attribute vec4 aCol; uniform mat4 uMVP; varying vec3 vPos; varying vec3 vNorm; varying vec2 vUv; varying vec4 vCol; void main(){ gl_Position = uMVP * vec4(aPos,1.0); vPos = aPos; vNorm = aNorm; vUv = aUv; vCol = aCol; }`;
     const fsTex = `precision mediump float;
       uniform float uHeroMode;
+      uniform float uUnlit;
       uniform vec3 uEyePos;
       uniform vec3 uKeyDir;
       uniform vec3 uFillDir;
@@ -2837,6 +2849,10 @@ class WebGLBrickEngine {
           vec3 decalRgb = mix(decal.rgb, vec3(0.855, 0.871, 0.894), uFadeMix);
           baseRgb = mix(baseRgb, decalRgb, decal.a);
         }
+        if (uUnlit > 0.5) {
+          gl_FragColor = vec4(baseRgb, vCol.a);
+          return;
+        }
         gl_FragColor = shadeAbsPlastic(baseRgb, vCol.a, vPos, vNorm, uHeroMode, uEyePos, uKeyDir, uFillDir, uRimDir, uCamUp);
       }`;
     const vsLine = `attribute vec3 aPos; attribute vec4 aCol; uniform mat4 uMVP; uniform vec2 uLineOffset; varying vec4 vCol; void main(){ gl_Position = uMVP * vec4(aPos,1.0); gl_Position.xy += uLineOffset * gl_Position.w; gl_Position.z -= 0.0014 * gl_Position.w; vCol = aCol; }`;
@@ -2851,6 +2867,7 @@ class WebGLBrickEngine {
     this.loc = {
       tMVP: gl.getUniformLocation(this.triProg, 'uMVP'),
       tHeroMode: gl.getUniformLocation(this.triProg, 'uHeroMode'),
+      tUnlit: gl.getUniformLocation(this.triProg, 'uUnlit'),
       tEyePos: gl.getUniformLocation(this.triProg, 'uEyePos'),
       tKeyDir: gl.getUniformLocation(this.triProg, 'uKeyDir'),
       tFillDir: gl.getUniformLocation(this.triProg, 'uFillDir'),
@@ -2861,6 +2878,7 @@ class WebGLBrickEngine {
       tCol: gl.getAttribLocation(this.triProg, 'aCol'),
       xMVP: gl.getUniformLocation(this.texProg, 'uMVP'),
       xHeroMode: gl.getUniformLocation(this.texProg, 'uHeroMode'),
+      xUnlit: gl.getUniformLocation(this.texProg, 'uUnlit'),
       xEyePos: gl.getUniformLocation(this.texProg, 'uEyePos'),
       xKeyDir: gl.getUniformLocation(this.texProg, 'uKeyDir'),
       xFillDir: gl.getUniformLocation(this.texProg, 'uFillDir'),
@@ -3025,6 +3043,7 @@ class WebGLBrickEngine {
 
     const tightFit = Boolean(drawOpts?.tightFit);
     const heroShading = Boolean(drawOpts?.heroShading);
+    const unlit = !heroShading && Boolean(drawOpts?.unlit || drawOpts?.stepLighting === 'none');
     const lineAlpha = typeof drawOpts?.lineAlpha === 'number' ? drawOpts.lineAlpha : (heroShading ? 0.52 : 1.0);
     const fixedCenter = drawOpts?.fixedCenter || null;
     const panX = typeof drawOpts?.panX === 'number' ? drawOpts.panX : 0;
@@ -3044,6 +3063,7 @@ class WebGLBrickEngine {
     gl.useProgram(this.triProg);
     gl.uniformMatrix4fv(this.loc.tMVP, false, mvp);
     gl.uniform1f(this.loc.tHeroMode, heroShading ? 1.0 : 0.0);
+    gl.uniform1f(this.loc.tUnlit, unlit ? 1.0 : 0.0);
     gl.uniform3f(this.loc.tEyePos, eyePos[0], eyePos[1], eyePos[2]);
     gl.uniform3f(this.loc.tKeyDir, lights.key[0], lights.key[1], lights.key[2]);
     gl.uniform3f(this.loc.tFillDir, lights.fill[0], lights.fill[1], lights.fill[2]);
@@ -3061,6 +3081,7 @@ class WebGLBrickEngine {
       gl.useProgram(this.texProg);
       gl.uniformMatrix4fv(this.loc.xMVP, false, mvp);
       gl.uniform1f(this.loc.xHeroMode, heroShading ? 1.0 : 0.0);
+      gl.uniform1f(this.loc.xUnlit, unlit ? 1.0 : 0.0);
       gl.uniform3f(this.loc.xEyePos, eyePos[0], eyePos[1], eyePos[2]);
       gl.uniform3f(this.loc.xKeyDir, lights.key[0], lights.key[1], lights.key[2]);
       gl.uniform3f(this.loc.xFillDir, lights.fill[0], lights.fill[1], lights.fill[2]);
@@ -3206,11 +3227,12 @@ function isDarkHexColor(hex) {
 function getPliThumb(part) {
   const sb = Boolean(state.starkBlackOutlines);
   const outW = sb ? sanitizeLineWeight(state.outlineLineWeight, 'medium') : 'light';
-  const key = `${part.p}:${part.c}${sb ? `:sb_${outW}` : ''}`;
+  const unlit = state.stepLighting === 'none';
+  const key = `${part.p}:${part.c}${sb ? `:sb_${outW}` : ''}${unlit ? ':unlit' : ''}`;
   if (pliThumbCache.has(key)) return pliThumbCache.get(key);
   const samplePart = normalizeCompositeThumbPart(part, (pid) => resolvePart(pid).name, computeWorldBox);
   const mesh = buildMeshBuffers([], [samplePart], { highlightNew:false, fadePrev:false, showArrows:false, accent:'#1a73e8', starkBlackOutlines: sb });
-  snapshotEngine.draw(mesh, 420, 420, 32, 22, 1.08, 0, sb ? { outlineLineWeight: outW } : null);
+  snapshotEngine.draw(mesh, 420, 420, 32, 22, 1.08, 0, { ...(sb ? { outlineLineWeight: outW } : {}), unlit });
   const url = snapshotCanvas.toDataURL('image/png');
   if (pliThumbCache.size > 360) pliThumbCache.clear();
   pliThumbCache.set(key, url);
@@ -3223,7 +3245,8 @@ function getBomPartThumb(part, colSpan = 1, rowSpan = 1) {
   if (cs === 1 && rs === 1) return getPliThumb(part);
   const sb = Boolean(state.starkBlackOutlines);
   const outW = sb ? sanitizeLineWeight(state.outlineLineWeight, 'medium') : 'light';
-  const key = `${part.p}:${part.c}:bom_${cs}x${rs}${sb ? `:sb_${outW}` : ''}`;
+  const unlit = state.stepLighting === 'none';
+  const key = `${part.p}:${part.c}:bom_${cs}x${rs}${sb ? `:sb_${outW}` : ''}${unlit ? ':unlit' : ''}`;
   if (pliThumbCache.has(key)) return pliThumbCache.get(key);
   const maxSpan = Math.max(cs, rs);
   const basePx = Math.min(560, Math.round(280 * Math.min(2.0, 0.85 + maxSpan * 0.45)));
@@ -3231,7 +3254,7 @@ function getBomPartThumb(part, colSpan = 1, rowSpan = 1) {
   const rh = Math.max(200, Math.round((basePx * rs) / maxSpan));
   const samplePart = normalizeCompositeThumbPart(part, (pid) => resolvePart(pid).name, computeWorldBox);
   const mesh = buildMeshBuffers([], [samplePart], { highlightNew:false, fadePrev:false, showArrows:false, accent:'#1a73e8', starkBlackOutlines: sb });
-  snapshotEngine.draw(mesh, rw, rh, 32, 22, 1.04, 0, { tightFit: true, outlineLineWeight: outW });
+  snapshotEngine.draw(mesh, rw, rh, 32, 22, 1.04, 0, { tightFit: true, outlineLineWeight: outW, unlit });
   const url = snapshotCanvas.toDataURL('image/png');
   if (pliThumbCache.size > 360) pliThumbCache.clear();
   pliThumbCache.set(key, url);
@@ -3273,7 +3296,8 @@ function renderStepWithStudioPhoto(mesh, az, el, w, h, zoom, opts) {
 }
 
 function renderSnapshot(prev, next, az, el, w, h, zoom, opts) {
-  const useStudio = Boolean(opts?.highQualityStepRender) && Boolean(getStudioPhotoEngine()?.isAvailable());
+  const lightingMode = opts?.stepLighting ?? (opts?.highQualityStepRender ? 'studio' : 'standard');
+  const useStudio = lightingMode === 'studio' && Boolean(getStudioPhotoEngine()?.isAvailable());
   const meshOpts = useStudio
     ? { ...opts, heroQuality: true, includeHeroEdges: true }
     : opts;
@@ -3282,7 +3306,8 @@ function renderSnapshot(prev, next, az, el, w, h, zoom, opts) {
     const hq = renderStepWithStudioPhoto(mesh, az, el, w, h, zoom, opts);
     if (hq) return hq;
   }
-  const mvp = snapshotEngine.draw(mesh, w, h, az, el, zoom, opts?.fixedHalfH || 0, opts);
+  const drawOpts = lightingMode === 'none' ? { ...(opts || {}), unlit: true } : opts;
+  const mvp = snapshotEngine.draw(mesh, w, h, az, el, zoom, opts?.fixedHalfH || 0, drawOpts);
   return {
     url: snapshotCanvas.toDataURL('image/png'),
     mesh,
@@ -3293,11 +3318,13 @@ function renderSnapshot(prev, next, az, el, w, h, zoom, opts) {
 }
 
 function renderMeshSnapshot(mesh, az, el, w, h, zoom, opts) {
-  if (opts?.highQualityStepRender) {
+  const lightingMode = opts?.stepLighting ?? (opts?.highQualityStepRender ? 'studio' : 'standard');
+  if (lightingMode === 'studio') {
     const hq = renderStepWithStudioPhoto(mesh, az, el, w, h, zoom, opts);
     if (hq) return hq;
   }
-  const mvp = snapshotEngine.draw(mesh, w, h, az, el, zoom, opts?.fixedHalfH || 0, opts);
+  const drawOpts = lightingMode === 'none' ? { ...(opts || {}), unlit: true } : opts;
+  const mvp = snapshotEngine.draw(mesh, w, h, az, el, zoom, opts?.fixedHalfH || 0, drawOpts);
   return {
     url: snapshotCanvas.toDataURL('image/png'),
     mesh,
@@ -3468,7 +3495,10 @@ function renderMinifigOneToOne(parts, pagePxH, pageHIn, maxPxW, maxPxH, accent =
   const aspect = layout.worldSpanW / Math.max(1, layout.worldSpanH);
   const rh = Math.max(240, Math.min(960, Math.round(layout.displayPxH * 3.0)));
   const rw = Math.max(140, Math.round(rh * aspect));
-  snapshotEngine.draw(mesh, rw, rh, 0, 0, 1.0, layout.fixedHalfH, sb ? { starkBlackOutlines: true, outlineLineWeight: outW } : null);
+  snapshotEngine.draw(mesh, rw, rh, 0, 0, 1.0, layout.fixedHalfH, {
+    ...(sb ? { starkBlackOutlines: true, outlineLineWeight: outW } : {}),
+    unlit: state.stepLighting === 'none',
+  });
   return { url: snapshotCanvas.toDataURL('image/png'), ...layout };
 }
 
@@ -3677,8 +3707,9 @@ function renderMinifigExplodedDiagram(step, cam, w, h, theme, zoom = 1.0) {
   const darkBg = isDarkHexColor(bgHex);
   const sb = Boolean(state.starkBlackOutlines);
   const outW = sb ? sanitizeLineWeight(state.outlineLineWeight, 'medium') : 'light';
-  const mfDrawOpts = sb ? { tightFit: true, starkBlackOutlines: true, outlineLineWeight: outW } : { tightFit: true };
-  const cacheKey = `exp|${step.id}|${(step.parts || []).length}|${Math.round(cam.az)}|${Math.round(cam.el)}|${Math.round(zoom * 100)}|${rw}x${rh}|${darkBg ? 'd' : 'l'}|${sb ? outW : 'n'}`;
+  const unlit = state.stepLighting === 'none';
+  const mfDrawOpts = sb ? { tightFit: true, starkBlackOutlines: true, outlineLineWeight: outW, unlit } : { tightFit: true, unlit };
+  const cacheKey = `exp|${step.id}|${(step.parts || []).length}|${Math.round(cam.az)}|${Math.round(cam.el)}|${Math.round(zoom * 100)}|${rw}x${rh}|${darkBg ? 'd' : 'l'}|${sb ? outW : 'n'}${unlit ? '|u' : ''}`;
   if (minifigDiagramCache.has(cacheKey)) return minifigDiagramCache.get(cacheKey);
 
   const plan = buildMinifigExplodedPlan(step.parts || [], (pid) => resolvePart(pid).name, computeWorldBox);
@@ -3922,7 +3953,8 @@ function renderMinifigSequentialStage(step, stage, plan, cam, w, h, theme, zoom 
   const textColor = theme?.text || (darkBg ? '#f8fafc' : '#1f2937');
   const sb = Boolean(state.starkBlackOutlines);
   const outW = sb ? sanitizeLineWeight(state.outlineLineWeight, 'medium') : 'light';
-  const cacheKey = `seq|${step.id}|s${stage.stepNumber}|${(step.parts || []).length}|${Math.round(cam.az)}|${Math.round(cam.el)}|${Math.round(zoom * 100)}|${rw}x${rh}|${bgHex}|${textColor}|${sb ? outW : 'n'}`;
+  const unlit = state.stepLighting === 'none';
+  const cacheKey = `seq|${step.id}|s${stage.stepNumber}|${(step.parts || []).length}|${Math.round(cam.az)}|${Math.round(cam.el)}|${Math.round(zoom * 100)}|${rw}x${rh}|${bgHex}|${textColor}|${sb ? outW : 'n'}${unlit ? '|u' : ''}`;
   if (minifigDiagramCache.has(cacheKey)) return minifigDiagramCache.get(cacheKey);
 
   const comp = document.createElement('canvas');
@@ -3963,7 +3995,7 @@ function renderMinifigSequentialStage(step, stage, plan, cam, w, h, theme, zoom 
     cam.el,
     Math.max(0.65, Math.min(1.6, zoom)),
     plan.sharedHalfH,
-    sb ? { fixedCenter: plan.sharedCenter, starkBlackOutlines: true, outlineLineWeight: outW } : { fixedCenter: plan.sharedCenter },
+    sb ? { fixedCenter: plan.sharedCenter, starkBlackOutlines: true, outlineLineWeight: outW, unlit } : { fixedCenter: plan.sharedCenter, unlit },
   );
 
   // 1. Celebratory starburst behind completed minifigure on the final sub-step (IMG_0315 Step 6!)
@@ -4060,7 +4092,7 @@ function renderMinifigSequentialStage(step, stage, plan, cam, w, h, theme, zoom 
       cam.el,
       1.0,
       0,
-      sb ? { tightFit: true, starkBlackOutlines: true, outlineLineWeight: outW } : { tightFit: true },
+      sb ? { tightFit: true, starkBlackOutlines: true, outlineLineWeight: outW, unlit } : { tightFit: true, unlit },
       2.0,
     );
 
@@ -6832,6 +6864,7 @@ const state = {
   highlightLineWeight: 'medium',
   fadePrev: true,
   fadeOpacity: 0.82,
+  stepLighting: 'standard',
   highQualityStepRender: false,
   starkBlackOutlines: false,
   outlineLineWeight: 'medium',
@@ -7053,18 +7086,20 @@ const submodelThumbCache = new Map();
 function getSubmodelThumb(subObj, w = 220, h = 150) {
   if (!subObj || !subObj.canonicalParts?.length) return '';
   if (submodelThumbCache.size > 120) submodelThumbCache.clear();
-  const k = `${subObj.id || subObj.name}_${w}x${h}`;
+  const unlit = state.stepLighting === 'none';
+  const k = `${subObj.id || subObj.name}_${w}x${h}${unlit ? '_u' : ''}`;
   if (submodelThumbCache.has(k)) return submodelThumbCache.get(k);
-  const snap = renderSnapshot([], subObj.canonicalParts, 38, 28, w, h, 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:'#1a73e8' });
+  const snap = renderSnapshot([], subObj.canonicalParts, 38, 28, w, h, 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:'#1a73e8', unlit });
   submodelThumbCache.set(k, snap.url);
   return snap.url;
 }
 function getMinifigThumb(partsList, cacheKey, az = MINIFIG_BUILD_CAMERA.az, el = MINIFIG_BUILD_CAMERA.el, w = 140, h = 140) {
   if (!partsList?.length) return '';
   if (submodelThumbCache.size > 140) submodelThumbCache.clear();
-  const k = `mf_${cacheKey}_${az}_${el}_${w}x${h}`;
+  const unlit = state.stepLighting === 'none';
+  const k = `mf_${cacheKey}_${az}_${el}_${w}x${h}${unlit ? '_u' : ''}`;
   if (submodelThumbCache.has(k)) return submodelThumbCache.get(k);
-  const snap = renderSnapshot([], partsList, az, el, w, h, 1.04, { highlightNew:false, fadePrev:false, showArrows:false, accent:'#1a73e8' });
+  const snap = renderSnapshot([], partsList, az, el, w, h, 1.04, { highlightNew:false, fadePrev:false, showArrows:false, accent:'#1a73e8', unlit });
   submodelThumbCache.set(k, snap.url);
   return snap.url;
 }
@@ -8543,6 +8578,7 @@ function renderAll() {
       fadePrev: false,
       showArrows: false,
       accent: theme.accent,
+      stepLighting: state.stepLighting,
       highQualityStepRender: state.highQualityStepRender,
       starkBlackOutlines: state.starkBlackOutlines,
       outlineLineWeight: state.starkBlackOutlines ? state.outlineLineWeight : 'light',
@@ -8590,7 +8626,17 @@ function renderAll() {
       3_800_000,
       480,
     );
-    const snap = renderSnapshot([], sub.buildParts, 38, 30, subPageSize.width, subPageSize.height, 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent });
+    const snap = renderSnapshot([], sub.buildParts, 38, 30, subPageSize.width, subPageSize.height, 1.0, {
+      highlightNew: false,
+      fadePrev: false,
+      showArrows: false,
+      accent: theme.accent,
+      stepLighting: state.stepLighting,
+      highQualityStepRender: state.highQualityStepRender,
+      starkBlackOutlines: state.starkBlackOutlines,
+      outlineLineWeight: state.starkBlackOutlines ? state.outlineLineWeight : 'light',
+      darkBackground: isDarkHexColor(toHexColor(theme.bgColor || '#ffffff', '#ffffff')),
+    });
     const pgNumText = formatPageNumber(page.num, state.pages.length);
     frame.innerHTML = `
       <div class="relative w-full h-full flex flex-col justify-between overflow-hidden" style="padding:${padPx}px;padding-bottom:${padPx + footerH}px">
@@ -8794,6 +8840,8 @@ function renderAll() {
         highlightNew: state.highlightNew, highlightColor: state.highlightColor,
         highlightLineWeight: state.highlightLineWeight,
         fadePrev: state.fadePrev, fadeOpacity: state.fadeOpacity,
+        stepLighting: state.stepLighting,
+        unlit: state.stepLighting === 'none',
         highQualityStepRender: state.highQualityStepRender,
         starkBlackOutlines: state.starkBlackOutlines,
         outlineLineWeight: state.starkBlackOutlines ? state.outlineLineWeight : 'light',
@@ -8900,6 +8948,7 @@ function renderAll() {
             fadePrev: false,
             showArrows: false,
             accent: theme.accent,
+            stepLighting: state.stepLighting,
             highQualityStepRender: state.highQualityStepRender,
             starkBlackOutlines: state.starkBlackOutlines,
             outlineLineWeight: state.starkBlackOutlines ? state.outlineLineWeight : 'light',
@@ -11213,6 +11262,7 @@ function renderApplyAngleModal(scrollToSource = false) {
           highlightColor: state.highlightColor,
           fadePrev: state.fadePrev,
           fadeOpacity: state.fadeOpacity,
+          unlit: state.stepLighting === 'none',
           showArrows: false,
           accent: theme.accent,
           ov: state.overrides[step.id] || {},
@@ -12041,6 +12091,7 @@ function syncMenuControls() {
     b.className = `fade-chip flex flex-col items-center gap-1 py-1.5 px-1 rounded-md border font-semibold text-xs transition cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
   });
   syncFadeVisibilityPreview();
+  syncStepLightingUI(state.stepLighting);
   const hlWrap = document.getElementById('highlightWeightWrap');
   if (hlWrap) hlWrap.classList.toggle('opacity-45', !state.highlightNew);
   document.querySelectorAll('.hl-weight-chip').forEach(b => {
@@ -12056,6 +12107,22 @@ function syncMenuControls() {
 
   syncStylePanel();
   syncKeyboardShortcutsMenuSummary();
+}
+
+function syncStepLightingUI(mode = state.stepLighting) {
+  const activeMode = sanitizeStepLightingMode(mode, state.highQualityStepRender ? 'studio' : 'standard');
+  document.querySelectorAll('.step-lighting-chip').forEach(b => {
+    const act = b.getAttribute('data-step-lighting') === activeMode;
+    b.className = `step-lighting-chip py-1.5 px-2 rounded-md border font-semibold text-xs transition cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
+  });
+  const hintEl = document.getElementById('stepLightingHint');
+  if (hintEl) {
+    hintEl.textContent = activeMode === 'none'
+      ? 'Flat uniform colors'
+      : activeMode === 'studio'
+        ? 'Studio bevels & shadows'
+        : '3-point brick shading';
+  }
 }
 
 function syncFadeVisibilityPreview(opts = null) {
@@ -12149,6 +12216,7 @@ function renderOverviewThumbTask(task) {
         highlightColor: state.highlightColor,
         fadePrev: state.fadePrev,
         fadeOpacity: state.fadeOpacity,
+        unlit: state.stepLighting === 'none',
         showArrows: false,
         accent,
         ov,
@@ -12189,6 +12257,7 @@ function renderOverviewThumbTask(task) {
         showArrows: false,
         tightFit: Boolean(task.tightFit),
         heroShading: Boolean(task.heroShading),
+        unlit: !task.heroShading && state.stepLighting === 'none',
         accent: task.accent,
       });
       url = snap.url;
@@ -15761,7 +15830,7 @@ function scheduleSaveSessionPrefs() {
       layoutConfig: state.layoutConfig, layoutGroups: state.layoutGroups,
       detectDuplicates: state.detectDuplicates, highlightNew: state.highlightNew, highlightColor: state.highlightColor,
       highlightLineWeight: state.highlightLineWeight,
-      fadePrev: state.fadePrev, fadeOpacity: state.fadeOpacity, highQualityStepRender: state.highQualityStepRender,
+      fadePrev: state.fadePrev, fadeOpacity: state.fadeOpacity, stepLighting: state.stepLighting, highQualityStepRender: state.highQualityStepRender,
       starkBlackOutlines: state.starkBlackOutlines, outlineLineWeight: state.outlineLineWeight, showRotCues: state.showRotCues,
       showSizeGuides: state.showSizeGuides, minifigStyle: state.minifigStyle, showMinifig1to1: state.showMinifig1to1, showStepBorders: state.showStepBorders,
       showPageTitle: state.showPageTitle, wordlessMode: state.wordlessMode, bomShowTextFields: state.bomShowTextFields,
@@ -15889,8 +15958,7 @@ async function restoreLastSessionOnStart() {
     if (backChk) backChk.checked = state.showBackCover;
     document.getElementById('toggleHighlight').checked = state.highlightNew;
     document.getElementById('highlightColor').value = state.highlightColor;
-    const hqEl = document.getElementById('toggleHighQualitySteps');
-    if (hqEl) hqEl.checked = Boolean(state.highQualityStepRender);
+    syncStepLightingUI(state.stepLighting);
     const sbEl = document.getElementById('toggleStarkBlackOutlines');
     if (sbEl) sbEl.checked = Boolean(state.starkBlackOutlines);
     document.getElementById('toggleRotCues').checked = state.showRotCues;
@@ -16399,7 +16467,17 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       mode: 'pdf',
       gpuMaxDim: snapshotEngine.maxDim,
     });
-    const snap = renderSnapshot([], sub.buildParts || [], 38, 30, subDims.width, subDims.height, 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent });
+    const snap = renderSnapshot([], sub.buildParts || [], 38, 30, subDims.width, subDims.height, 1.0, {
+      highlightNew: false,
+      fadePrev: false,
+      showArrows: false,
+      accent: theme.accent,
+      stepLighting: state.stepLighting,
+      highQualityStepRender: state.highQualityStepRender,
+      starkBlackOutlines: state.starkBlackOutlines,
+      outlineLineWeight: state.starkBlackOutlines ? state.outlineLineWeight : 'light',
+      darkBackground: isDarkHexColor(toHexColor(theme.bgColor || '#ffffff', '#ffffff')),
+    });
     const img = await loadImgPromise(snap.url);
     drawContain(ctx, img, pad, imgTop, subAvailW, subAvailH);
     drawFooter(page.chapterName || state.model.title);
@@ -16481,7 +16559,17 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       mode: 'pdf',
       gpuMaxDim: snapshotEngine.maxDim,
     });
-    const snap = renderSnapshot([], page.previewParts || [], 38, 28, divDims.width, divDims.height, 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent });
+    const snap = renderSnapshot([], page.previewParts || [], 38, 28, divDims.width, divDims.height, 1.0, {
+      highlightNew: false,
+      fadePrev: false,
+      showArrows: false,
+      accent: theme.accent,
+      stepLighting: state.stepLighting,
+      highQualityStepRender: state.highQualityStepRender,
+      starkBlackOutlines: state.starkBlackOutlines,
+      outlineLineWeight: state.starkBlackOutlines ? state.outlineLineWeight : 'light',
+      darkBackground: isDarkHexColor(toHexColor(theme.bgColor || '#ffffff', '#ffffff')),
+    });
     const img = await loadImgPromise(snap.url);
     drawContain(ctx, img, pad, imgTop, divAvailW, divAvailH);
     drawFooter(state.model.title);
@@ -17222,6 +17310,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
           highlightNew: state.highlightNew, highlightColor: state.highlightColor,
           highlightLineWeight: state.highlightLineWeight,
           fadePrev: state.fadePrev, fadeOpacity: state.fadeOpacity,
+          stepLighting: state.stepLighting,
           highQualityStepRender: state.highQualityStepRender,
           starkBlackOutlines: state.starkBlackOutlines,
           outlineLineWeight: state.starkBlackOutlines ? state.outlineLineWeight : 'light',
@@ -17725,7 +17814,7 @@ function syncStylePanel() {
   const setChk = (id, val) => { const el = document.getElementById(id); if (el) el.checked = Boolean(val); };
   setChk('toggleHighlight', opts.highlightNew);
   syncFadeVisibilityPreview(opts);
-  setChk('toggleHighQualitySteps', opts.highQualityStepRender);
+  syncStepLightingUI(opts.stepLighting);
   setChk('toggleStarkBlackOutlines', opts.starkBlackOutlines);
   setChk('toggleRotCues', opts.showRotCues);
   setChk('toggleSizeGuides', opts.showSizeGuides);
@@ -19437,6 +19526,16 @@ document.querySelectorAll('.pgnum-btn').forEach(b => {
     renderAll();
   };
 });
+document.querySelectorAll('.step-lighting-chip').forEach(b => {
+  b.onclick = () => {
+    const mode = sanitizeStepLightingMode(b.getAttribute('data-step-lighting'), 'standard');
+    pliThumbCache.clear();
+    submodelThumbCache.clear();
+    minifigDiagramCache.clear();
+    overviewThumbCache.bumpEpoch();
+    patchActiveTheme({ stepLighting: mode, highQualityStepRender: mode === 'studio' });
+  };
+});
 document.querySelectorAll('.fade-chip').forEach(b => {
   b.onclick = () => {
     const val = parseFloat(b.getAttribute('data-fade'));
@@ -19620,14 +19719,9 @@ for (const [btnId, kind] of [
   const el = document.getElementById(btnId);
   if (el) el.onclick = () => openExtraPageSettings(kind);
 }
-// Step display options are part of the active theme (built-ins fork on first edit)
+// Rendering style & step display options are part of the active theme (built-ins fork on first edit)
 document.getElementById('toggleHighlight').onchange = (e) => patchActiveTheme({ highlightNew: e.target.checked });
 document.getElementById('highlightColor').oninput = (e) => patchActiveTheme({ highlightColor: e.target.value });
-const hqStepsToggleEl = document.getElementById('toggleHighQualitySteps');
-if (hqStepsToggleEl) hqStepsToggleEl.onchange = (e) => {
-  overviewThumbCache.bumpEpoch();
-  patchActiveTheme({ highQualityStepRender: e.target.checked });
-};
 const starkBlackToggleEl = document.getElementById('toggleStarkBlackOutlines');
 if (starkBlackToggleEl) starkBlackToggleEl.onchange = (e) => {
   pliThumbCache.clear();
@@ -19803,6 +19897,8 @@ async function runInteractiveHtmlExport() {
           highlightColor: state.highlightColor,
           fadePrev: state.fadePrev,
           fadeOpacity: state.fadeOpacity,
+          stepLighting: state.stepLighting,
+          unlit: state.stepLighting === 'none',
           showArrows: false,
           accent: theme.accent,
           ...extraOpts,
@@ -20057,6 +20153,7 @@ async function runInteractiveHtmlExport() {
       highlightColor: state.highlightColor,
       fadePrev: state.fadePrev,
       fadeOpacity: state.fadeOpacity,
+      unlit: state.stepLighting === 'none',
       prototypes,
       textures,
       parts: exportedParts,

@@ -249,7 +249,7 @@ describe('studioRuntime safety checks', () => {
     expect(heroFnBody).not.toContain('const meta = isCover ? state.coverMeta : state.completeMeta;');
   });
 
-  it('wires Studio High-Quality Step Render and Stark Black Outlines toggles inside Styles -> Step Display', () => {
+  it('wires Rendering Style lighting (None/Standard/Studio), outlines, and fades inside Style popover', () => {
     const html = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf8');
     const runtime = fs.readFileSync(path.resolve(process.cwd(), 'src/studioRuntime.ts'), 'utf8');
 
@@ -258,15 +258,27 @@ describe('studioRuntime safety checks', () => {
     expect(popStart).toBeGreaterThan(-1);
     expect(popEnd).toBeGreaterThan(popStart);
     const popChunk = html.slice(popStart, popEnd);
-    expect(popChunk).toContain('id="toggleHighQualitySteps"');
-    expect(popChunk).toContain('id="toggleStarkBlackOutlines"');
-    expect(popChunk).toContain('Outline All Parts');
-    expect(popChunk).toContain('data-hl-weight="extra-heavy"');
-    expect(popChunk).toContain('data-outline-weight="extra-heavy"');
+    const renderStyleIdx = popChunk.indexOf('>Rendering Style<');
+    const stepDisplayIdx = popChunk.indexOf('>Step Display<');
+    expect(renderStyleIdx).toBeGreaterThan(-1);
+    expect(stepDisplayIdx).toBeGreaterThan(renderStyleIdx);
+    const renderStyleChunk = popChunk.slice(renderStyleIdx, stepDisplayIdx);
 
-    expect(runtime).toContain("getElementById('toggleHighQualitySteps')");
+    expect(renderStyleChunk).toContain('data-step-lighting="none"');
+    expect(renderStyleChunk).toContain('data-step-lighting="standard"');
+    expect(renderStyleChunk).toContain('data-step-lighting="studio"');
+    expect(renderStyleChunk).toContain('id="toggleHighlight"');
+    expect(renderStyleChunk).toContain('id="toggleStarkBlackOutlines"');
+    expect(renderStyleChunk).toContain('Outline All Parts');
+    expect(renderStyleChunk).toContain('data-hl-weight="extra-heavy"');
+    expect(renderStyleChunk).toContain('data-outline-weight="extra-heavy"');
+    expect(renderStyleChunk).toContain('Fade Earlier Pieces');
+
+    expect(runtime).toContain("querySelectorAll('.step-lighting-chip')");
     expect(runtime).toContain("getElementById('toggleStarkBlackOutlines')");
     expect(runtime).toContain('function renderStepWithStudioPhoto(');
+    expect(runtime).toContain('uniform float uUnlit;');
+    expect(runtime).toContain('stepLighting');
     expect(runtime).toContain('starkBlackOutlines');
     expect(runtime).toContain('highlightLineWeight');
     expect(runtime).toContain('outlineLineWeight');

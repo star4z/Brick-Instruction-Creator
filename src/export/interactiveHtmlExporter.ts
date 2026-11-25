@@ -215,6 +215,8 @@ export interface InteractiveHtmlPayload {
   highlightColor: string;
   fadePrev: boolean;
   fadeOpacity: number;
+  /** When true, renders instruction steps with flat unlit colors (no lighting or specular shading). */
+  unlit?: boolean;
   prototypes: InteractivePartPrototype[];
   textures: Record<string, string>;
   parts: InteractivePartPlacement[];
@@ -1007,12 +1009,16 @@ ${staticFallbackHtml}
     }\`;
   const fsTri = \`
     precision mediump float;
-    uniform float uHeroMode; uniform float uFadeMix; uniform vec3 uViewDir;
+    uniform float uHeroMode; uniform float uUnlit; uniform float uFadeMix; uniform vec3 uViewDir;
     varying vec3 vNorm; varying vec4 vCol;
     void main() {
       vec3 n = normalize(vNorm);
       if (!gl_FrontFacing) n = -n;
       vec3 base = mix(vCol.rgb, vec3(0.855, 0.871, 0.894), uFadeMix);
+      if (uUnlit > 0.5) {
+        gl_FragColor = vec4(base, vCol.a);
+        return;
+      }
       if (uHeroMode > 0.5) {
         vec3 v = normalize(uViewDir);
         vec3 keyDir = normalize(vec3(0.42, 0.86, 0.52));
@@ -1039,7 +1045,7 @@ ${staticFallbackHtml}
     }\`;
   const fsTex = \`
     precision mediump float;
-    uniform sampler2D uTex; uniform float uUseTex; uniform float uFadeMix; uniform float uHeroMode; uniform vec3 uViewDir;
+    uniform sampler2D uTex; uniform float uUseTex; uniform float uFadeMix; uniform float uHeroMode; uniform float uUnlit; uniform vec3 uViewDir;
     varying vec3 vNorm; varying vec2 vUv; varying vec4 vCol;
     void main() {
       vec3 n = normalize(vNorm);
@@ -1049,6 +1055,10 @@ ${staticFallbackHtml}
         vec4 d = texture2D(uTex, vUv);
         vec3 dr = mix(d.rgb, vec3(0.855, 0.871, 0.894), uFadeMix);
         base = mix(base, dr, d.a);
+      }
+      if (uUnlit > 0.5) {
+        gl_FragColor = vec4(base, vCol.a);
+        return;
       }
       float key = max(dot(n, normalize(vec3(0.55, 0.85, 0.55))), 0.0);
       float fill = max(dot(n, normalize(vec3(-0.7, 0.35, -0.5))), 0.0);
@@ -1084,6 +1094,7 @@ ${staticFallbackHtml}
       model: gl.getUniformLocation(triProg, 'uModel'),
       nmat: gl.getUniformLocation(triProg, 'uNormMat'),
       hero: gl.getUniformLocation(triProg, 'uHeroMode'),
+      unlit: gl.getUniformLocation(triProg, 'uUnlit'),
       fade: gl.getUniformLocation(triProg, 'uFadeMix'),
       vdir: gl.getUniformLocation(triProg, 'uViewDir'),
       pos: gl.getAttribLocation(triProg, 'aPos'),
@@ -1096,6 +1107,7 @@ ${staticFallbackHtml}
       model: gl.getUniformLocation(texProg, 'uModel'),
       nmat: gl.getUniformLocation(texProg, 'uNormMat'),
       hero: gl.getUniformLocation(texProg, 'uHeroMode'),
+      unlit: gl.getUniformLocation(texProg, 'uUnlit'),
       fade: gl.getUniformLocation(texProg, 'uFadeMix'),
       vdir: gl.getUniformLocation(texProg, 'uViewDir'),
       tex: gl.getUniformLocation(texProg, 'uTex'),
@@ -1309,6 +1321,7 @@ ${staticFallbackHtml}
 
     const vdir = [Math.sin(az)*Math.cos(el), Math.sin(el), Math.cos(az)*Math.cos(el)];
     const isHero = activeScene.hero ? 1.0 : 0.0;
+    const isUnlit = (DATA.unlit && !activeScene.hero) ? 1.0 : 0.0;
     const prevIdx = activeScene.prevPartIdx || [];
     const newIdx = activeScene.newPartIdx || [];
 
@@ -1322,6 +1335,7 @@ ${staticFallbackHtml}
     gl.useProgram(progs.tri.p);
     gl.uniformMatrix4fv(progs.tri.vp, false, vp);
     gl.uniform1f(progs.tri.hero, isHero);
+    gl.uniform1f(progs.tri.unlit, isUnlit);
     gl.uniform3f(progs.tri.vdir, vdir[0], vdir[1], vdir[2]);
     resetAttribs([progs.tri.pos, progs.tri.norm, progs.tri.col]);
 
@@ -1348,6 +1362,7 @@ ${staticFallbackHtml}
     gl.useProgram(progs.tex.p);
     gl.uniformMatrix4fv(progs.tex.vp, false, vp);
     gl.uniform1f(progs.tex.hero, isHero);
+    gl.uniform1f(progs.tex.unlit, isUnlit);
     gl.uniform3f(progs.tex.vdir, vdir[0], vdir[1], vdir[2]);
     gl.uniform1i(progs.tex.tex, 0);
     resetAttribs([progs.tex.pos, progs.tex.norm, progs.tex.uv, progs.tex.col]);
