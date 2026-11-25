@@ -34,6 +34,8 @@ export interface OptimizableStepCameraInput {
   builtBoundsBefore: WorldBox | null;
   /** True for large section/roof attachment steps that should stay extra steady. */
   isSectionAttach?: boolean;
+  /** Optional hard side constraint (e.g. 'bottom' during an upside-down underside assembly phase). */
+  forceSide?: 'top' | 'bottom';
 }
 
 export interface OptimizeStepCameraOptions {
@@ -567,9 +569,16 @@ export function optimizeStudioStepCameraSequence(
     const spanZ = builtBounds ? builtBounds.max[2] - builtBounds.min[2] : 0;
     const isTinyEarlyBase = occCount < 4 || (Math.max(spanX, spanZ) < 80 && spanY < 40);
 
+    const forceBottom = step.forceSide === 'bottom';
+    const forceTop = step.forceSide === 'top';
+
     // Evaluate all 4 top canonical views first
     let bestTopVis = 0;
     for (let v = 0; v < 4; v++) {
+      if (forceBottom) {
+        visTable[t][v] = -1;
+        continue;
+      }
       if (isTinyEarlyBase || step.stepBoxes.length === 0) {
         visTable[t][v] = 1;
       } else {
@@ -585,16 +594,21 @@ export function optimizeStudioStepCameraSequence(
       if (visTable[t][v] > bestTopVis) bestTopVis = visTable[t][v];
     }
 
-    // Only allow bottom views when bricks are genuinely tucked directly underneath AND hidden from top
+    // Allow bottom views when explicitly required (upside-down underside phase)
+    // or when bricks are genuinely tucked directly underneath AND hidden from top
     const allowBottom =
-      !isTinyEarlyBase &&
-      !step.isSectionAttach &&
-      bestTopVis < UNDERSIDE_TOP_OCCLUSION_THRESHOLD &&
-      isStrictUndersidePlacement(step.stepBoxes, step.occludersBefore, builtBounds, occCount);
+      forceBottom ||
+      (!forceTop &&
+        !isTinyEarlyBase &&
+        !step.isSectionAttach &&
+        bestTopVis < UNDERSIDE_TOP_OCCLUSION_THRESHOLD &&
+        isStrictUndersidePlacement(step.stepBoxes, step.occludersBefore, builtBounds, occCount));
 
     for (let v = 4; v < V; v++) {
       if (!allowBottom) {
         visTable[t][v] = -1;
+      } else if (step.stepBoxes.length === 0 || occCount === 0) {
+        visTable[t][v] = 1;
       } else {
         const view = CANONICAL_STUDIO_VIEWS[v];
         visTable[t][v] = evaluateStepVisibilityWithProj(
@@ -612,9 +626,10 @@ export function optimizeStudioStepCameraSequence(
     for (let v = 0; v < V; v++) {
       const view = CANONICAL_STUDIO_VIEWS[v];
       if (view.isBottom && !allowBottom) continue;
+      if (!view.isBottom && forceBottom) continue;
 
       const vis = visTable[t][v];
-      const uprightBias = view.isBottom ? 0.12 : 0;
+      const uprightBias = view.isBottom ? (forceBottom ? 0 : 0.12) : 0;
       const startAnchorBias =
         t === 0 && !initialCam && !view.isBottom && view.corner === DEFAULT_STUDIO_CAMERA.corner
           ? -0.08

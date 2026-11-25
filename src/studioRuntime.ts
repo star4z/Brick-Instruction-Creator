@@ -107,6 +107,11 @@ import {
   transformLocalBox6ToWorld,
 } from './engine/partContact';
 import {
+  analyzeUndersideAssembly,
+  buildInvertedVerticalPrereqMap,
+  collectCapInnerAttachments,
+} from './engine/undersideAssembly';
+import {
   buildMinifigExplodedPlan,
   buildMinifigSequentialPlan,
   normalizeMinifigStepStyle,
@@ -4790,8 +4795,15 @@ function buildVerticalPrereqMap(boxes, adj, roles, claddingFlags, activeIndices,
   return buildPhysicalVerticalPrereqMap(boxes, adj, roles, claddingFlags, activeIndices, subBoxes);
 }
 
-// Build bottom-up zero-floating steps for 1 canonical copy of a duplicate submodel or modular section
-function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount) {
+// Build bottom-up zero-floating steps for 1 canonical copy of a duplicate submodel or modular section.
+// When a large section has a broad Primary Structural Deck sitting above isolated suspended underside
+// pockets (e.g. hanging nose/belly structures or captured Technic axle mechanisms), it automatically:
+//   0. Pre-builds any multi-part Technic axle/bar mechanisms as standalone sub-chapters
+//   1. Builds the rigid Primary Structural Deck right-side up
+//   2. Flips upside down (side: 'bottom', cue: 'flip_vertical') to insert pre-built Technic mechanisms
+//      into deck holes and stack underside bricks & retaining caps in inverted-gravity order
+//   3. Flips right-side up (side: 'top', cue: 'flip_vertical') and builds the upper structure bottom-up
+function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount, outPrebuiltSubChapters = null) {
   const n = canonicalParts.length;
   const boxes = canonicalParts.map(p => computeWorldBox(p));
   const subBoxes = canonicalParts.map(p => computeWorldSubBoxes(p));
@@ -4819,6 +4831,219 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount) {
   const remaining = new Set(Array.from({ length: n }, (_, i) => i));
   const steps = [];
   let sNum = 0;
+
+  const undersideInputs = canonicalParts.map((p, i) => {
+    const def = resolvePart(p.p);
+    return {
+      index: i,
+      partId: normId(p.p),
+      partName: def?.name || '',
+      shape: def?.shape,
+      hasStuds: def?.studs,
+      role: roles[i],
+      box: boxes[i],
+      isCladding: claddingFlags[i],
+    };
+  });
+  const undersidePlan = analyzeUndersideAssembly(undersideInputs, adj);
+
+  if (undersidePlan.hasSuspendedUnderside) {
+    // Phase 0: Pre-build any multi-part Technic axle/bar mechanisms as standalone sub-chapters
+    const mechSubMap = new Map();
+    if (Array.isArray(outPrebuiltSubChapters)) {
+      for (const mech of undersidePlan.mechanisms) {
+        const mechSubId = `${groupId}_${mech.id}`;
+        const mechCanonical = normalizeCanonicalSubParts(
+          mech.partIndices.map(i => canonicalParts[i]),
+          mechSubId,
+        );
+        const mechSteps = buildLocalSubmodelSteps(mechCanonical, mechSubId, 1);
+        outPrebuiltSubChapters.push({
+          id: mechSubId,
+          name: mech.name,
+          pieceCount: mech.partIndices.length,
+          canonicalParts: mechCanonical,
+          steps: mechSteps,
+        });
+        mechSubMap.set(mech.id, {
+          id: `${mechSubId}_c0`,
+          name: mech.name,
+          repeatCount: 1,
+          totalRepeatCount: 1,
+          canonicalParts: mechCanonical,
+        });
+      }
+    }
+
+    // Phase 1: Build the Primary Structural Deck right-side up before flipping
+    const deckRem = new Set(undersidePlan.deckPartIndices);
+    while (deckRem.size > 0) {
+      const placedBeforeStep = new Set(placed);
+      let frontier;
+      if (placed.size === 0) {
+        const pool = Array.from(deckRem);
+        pool.sort((a, b) => layerY[a] - layerY[b]);
+        const minY = layerY[pool[0]];
+        const lowBand = pool.filter(i => layerY[i] <= minY + 16);
+        lowBand.sort((a, b) => {
+          const sa = (roles[a] === 'structural' ? 50 : 0) + adj[a].length * 6 - (layerY[a] - minY) * 0.8;
+          const sb = (roles[b] === 'structural' ? 50 : 0) + adj[b].length * 6 - (layerY[b] - minY) * 0.8;
+          return sb - sa;
+        });
+        frontier = lowBand;
+      } else {
+        const rawFrontier = Array.from(deckRem).filter(i => adj[i].some(nb => placedBeforeStep.has(nb)));
+        frontier = rawFrontier.length > 0 ? rawFrontier : Array.from(deckRem).sort((a, b) => layerY[a] - layerY[b]);
+        const skuCountsInBand = new Map();
+        for (const idx of frontier) {
+          const sku = subDescriptors[idx].sku;
+          skuCountsInBand.set(sku, (skuCountsInBand.get(sku) || 0) + 1);
+        }
+        const refBounds = builtBounds || subModelBounds;
+        frontier.sort((a, b) => compareFrontierCandidates(subDescriptors[a], subDescriptors[b], activeCam.corner, refBounds, skuCountsInBand));
+      }
+      const anchor = frontier[0];
+      const anchorY = layerY[anchor];
+      const anchorConnectedToPrev = placedBeforeStep.size > 0 && adj[anchor].some(nb => placedBeforeStep.has(nb));
+      const stepIdx = selectDynamicStepIndices({
+        anchor,
+        parts: subDescriptors,
+        getEligibleCandidates: (placedInStep) =>
+          Array.from(deckRem).filter(i => {
+            if (placedInStep.has(i)) return false;
+            if (Math.abs(layerY[i] - anchorY) > 12) return false;
+            return isCandidateConnectedForStep(i, anchorConnectedToPrev, adj, placedBeforeStep, placedInStep);
+          }),
+        modelBounds: subModelBounds,
+        builtBounds,
+        activeCam,
+        isFirstStep: sNum === 0,
+        totalPartsInScope: n,
+        isSubmodel: true,
+      });
+      for (const i of stepIdx) { deckRem.delete(i); remaining.delete(i); placed.add(i); }
+      const stepBoxes = stepIdx.map(i => boxes[i]);
+      const camChoice = chooseStickyStepCamera(stepBoxes, builtBoxes, builtBounds, activeCam);
+      activeCam = { side: camChoice.side, corner: camChoice.corner, az: camChoice.az, el: camChoice.el };
+      for (const b of stepBoxes) {
+        builtBounds = expandBoundsWithBox(builtBounds, b);
+        builtBoxes.push(b);
+      }
+      sNum++;
+      steps.push({
+        id: `${groupId}_s${sNum}`,
+        num: sNum,
+        side: camChoice.side,
+        corner: camChoice.corner,
+        az: camChoice.az,
+        el: camChoice.el,
+        cue: sNum === 1 ? 'none' : camChoice.cue,
+        parts: stepIdx.map(i => canonicalParts[i]),
+        isSubmodelStep: true,
+      });
+    }
+
+    // Phase 2: Flip upside down (side: 'bottom') and build suspended underside pockets
+    // in inverted-gravity order (Technic axle mechanisms first, then descending world-Y bricks & caps)
+    activeCam = { side: 'bottom', corner: activeCam.corner, az: activeCam.az, el: -30 };
+    let isFirstUpsideDownStep = true;
+    for (const pocket of undersidePlan.pockets) {
+      // 2a. Insert pre-built Technic axle/bar mechanisms into the upside-down deck FIRST
+      for (const mech of pocket.mechanisms) {
+        const mechIndices = mech.partIndices.filter(i => remaining.has(i));
+        if (mechIndices.length === 0) continue;
+        for (const i of mechIndices) { remaining.delete(i); placed.add(i); }
+        const stepBoxes = mechIndices.map(i => boxes[i]);
+        for (const b of stepBoxes) {
+          builtBounds = expandBoundsWithBox(builtBounds, b);
+          builtBoxes.push(b);
+        }
+        sNum++;
+        const attachedSub = mechSubMap.get(mech.id) || null;
+        steps.push({
+          id: `${groupId}_s${sNum}`,
+          num: sNum,
+          side: 'bottom',
+          corner: activeCam.corner,
+          az: activeCam.az,
+          el: -30,
+          cue: isFirstUpsideDownStep ? 'flip_vertical' : 'none',
+          isUpsideDownUndersideStep: true,
+          attachedSubmodel: attachedSub || undefined,
+          parts: mechIndices.map(i => canonicalParts[i]),
+          isSubmodelStep: true,
+        });
+        isFirstUpsideDownStep = false;
+      }
+
+      // 2b. Stack remaining pocket parts in inverted-gravity order (highest world Y first -> lowest cap last)
+      const pocketRem = new Set(pocket.structuralIndices.filter(i => remaining.has(i)));
+      const aboveMap = buildInvertedVerticalPrereqMap(boxes, adj, roles, claddingFlags, Array.from(pocketRem), placed);
+      while (pocketRem.size > 0) {
+        const placedBeforeStep = new Set(placed);
+        const rawFrontier = Array.from(pocketRem).filter(i => adj[i].some(nb => placedBeforeStep.has(nb)));
+        const unblocked = rawFrontier.filter(i => !aboveMap[i].some(u => pocketRem.has(u)));
+        let frontier = unblocked.length > 0 ? unblocked : (rawFrontier.length > 0 ? rawFrontier : Array.from(pocketRem));
+        // Inverted gravity: highest world Y (closest to the inverted deck) comes FIRST, wheels last
+        frontier.sort((a, b) => {
+          const wa = roles[a] === 'wheel' ? 1 : 0;
+          const wb = roles[b] === 'wheel' ? 1 : 0;
+          if (wa !== wb) return wa - wb;
+          const dy = boxes[b].max[1] - boxes[a].max[1];
+          if (Math.abs(dy) > 4) return dy;
+          return boxes[b].center[1] - boxes[a].center[1];
+        });
+        const anchor = frontier[0];
+        const anchorTopY = boxes[anchor].max[1];
+        const anchorConnectedToPrev = adj[anchor].some(nb => placedBeforeStep.has(nb));
+        let stepIdx = selectDynamicStepIndices({
+          anchor,
+          parts: subDescriptors,
+          getEligibleCandidates: (placedInStep) =>
+            Array.from(pocketRem).filter(i => {
+              if (placedInStep.has(i)) return false;
+              if (Math.abs(boxes[i].max[1] - anchorTopY) > 12) return false;
+              if (aboveMap[i].some(u => pocketRem.has(u) && !placedInStep.has(u))) return false;
+              return isCandidateConnectedForStep(i, anchorConnectedToPrev, adj, placedBeforeStep, placedInStep);
+            }),
+          modelBounds: subModelBounds,
+          builtBounds,
+          activeCam,
+          isFirstStep: false,
+          totalPartsInScope: n,
+          isSubmodel: true,
+        });
+        // Pull in any inner-face cap attachments (e.g. tiles/round-hole retainers clutched to the cap plate)
+        const capExtras = collectCapInnerAttachments(stepIdx, pocketRem, boxes, adj, roles);
+        if (capExtras.length > 0) {
+          stepIdx = [...stepIdx, ...capExtras];
+        }
+        for (const i of stepIdx) { pocketRem.delete(i); remaining.delete(i); placed.add(i); }
+        const stepBoxes = stepIdx.map(i => boxes[i]);
+        for (const b of stepBoxes) {
+          builtBounds = expandBoundsWithBox(builtBounds, b);
+          builtBoxes.push(b);
+        }
+        sNum++;
+        steps.push({
+          id: `${groupId}_s${sNum}`,
+          num: sNum,
+          side: 'bottom',
+          corner: activeCam.corner,
+          az: activeCam.az,
+          el: -30,
+          cue: isFirstUpsideDownStep ? 'flip_vertical' : 'none',
+          isUpsideDownUndersideStep: true,
+          parts: stepIdx.map(i => canonicalParts[i]),
+          isSubmodelStep: true,
+        });
+        isFirstUpsideDownStep = false;
+      }
+    }
+    // Phase 3 resumes upright ('top') in the main bottom-up loop below;
+    // optimizeManualStepCameras will emit the matching flip_vertical cue automatically.
+    activeCam = { side: 'top', corner: activeCam.corner, az: activeCam.az, el: 30 };
+  }
 
   while (remaining.size > 0) {
     const placedBeforeStep = new Set(placed);
@@ -5244,6 +5469,7 @@ function optimizeManualStepCameras(chapters) {
           occluderCountBefore,
           builtBoundsBefore,
           isSectionAttach: Boolean(step.attachedSubmodel?.isSectionAttach),
+          forceSide: step.isUpsideDownUndersideStep ? 'bottom' : undefined,
         });
 
         for (let k = 0; k < stepOccs.length; k++) {
@@ -5750,7 +5976,20 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
         const repeatCount = sec.cleanRepeatGroups.length;
         const subId = `mod_${mIdx + 1}_${sec.id}`;
         const canonicalParts = normalizeCanonicalSubParts(sec.cleanIndices.map(i => parts[i]), subId);
-        const subSteps = buildLocalSubmodelSteps(canonicalParts, subId, repeatCount);
+        const prebuiltMechChapters = [];
+        const subSteps = buildLocalSubmodelSteps(canonicalParts, subId, repeatCount, prebuiltMechChapters);
+        for (const mechCh of prebuiltMechChapters) {
+          chapters.push({
+            id: `subch_${++chSeq}_${mechCh.id}`,
+            name: mechCh.name,
+            kind: 'submodel',
+            sectionId: `subsec_${mechCh.id}`,
+            repeatCount: 1,
+            pieceCount: mechCh.pieceCount,
+            canonicalParts: mechCh.canonicalParts,
+            steps: mechCh.steps,
+          });
+        }
         // Mark as a standalone section module (uses clean "SECTION · N pcs" banner when repeatCount === 1)
         chapters.push({
           id: `subch_${++chSeq}_${subId}`,

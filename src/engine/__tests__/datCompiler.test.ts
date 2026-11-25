@@ -153,7 +153,7 @@ describe('compileDatEntry — minifigure torso & sibling-fair budgeting', () => 
     expect(Array.from(mesh!.triCols!).filter((c) => c === 14).length).toBe(500);
   });
 
-  it('synthesizes ndis primitives (including 4-4ndis and fractional 1-8ndis) at exact 16-segment LDraw alignment', () => {
+  it('synthesizes ndis primitives (including 4-4ndis and fractional 1-8ndis) with smooth 48-segment resolution', () => {
     const part44: DatEntrySource = {
       key: 'ndis_test',
       lines: [
@@ -162,8 +162,8 @@ describe('compileDatEntry — minifigure torso & sibling-fair budgeting', () => 
     };
     const mesh44 = compileDatEntry(part44, () => null);
     expect(mesh44).not.toBeNull();
-    // Exact 16-segment LDraw circle: 4 quadrants * 4 segments = 16 triangles
-    expect(mesh44!.tris.length).toBe(16 * 9);
+    // High-resolution 48-segment LDraw circle: 4 quadrants * 12 segments = 48 triangles
+    expect(mesh44!.tris.length).toBe(48 * 9);
     expect(mesh44!.min[0]).toBeCloseTo(-5, 3);
     expect(mesh44!.max[0]).toBeCloseTo(5, 3);
 
@@ -173,8 +173,8 @@ describe('compileDatEntry — minifigure torso & sibling-fair budgeting', () => 
     };
     const mesh18 = compileDatEntry(part18, () => null);
     expect(mesh18).not.toBeNull();
-    // 1/8th circle = 2 segments at 22.5° steps
-    expect(mesh18!.tris.length).toBe(2 * 9);
+    // 1/8th circle = 6 segments at 7.5° steps
+    expect(mesh18!.tris.length).toBe(6 * 9);
   });
 
   it('preserves all 4 front forehead & chin torus bevels on high-poly printed minifigure heads even when torus .dat files are absent', () => {
@@ -211,7 +211,7 @@ describe('compileDatEntry — minifigure torso & sibling-fair budgeting', () => 
 
     expect(t08!.tris.length / 9).toBe(16);
     expect(t16!.tris.length / 9).toBe(8);
-    expect(rin3!.tris.length / 9).toBe(2);
+    expect(rin3!.tris.length / 9).toBe(6);
     expect(cone!.tris.length / 9).toBe(4);
     expect(box5!.tris.length / 9).toBe(10);
   });
@@ -742,13 +742,45 @@ describe('compileDatEntry — smooth circular studs & crease-angle vertex normal
         expect(Math.abs(N[i + 1])).toBeLessThan(1e-3);
         const dotAB = N[i] * N[i + 3] + N[i + 1] * N[i + 4] + N[i + 2] * N[i + 5];
         const dotAC = N[i] * N[i + 6] + N[i + 1] * N[i + 7] + N[i + 2] * N[i + 8];
-        if (dotAB < 0.99 || dotAC < 0.99) {
+        if (dotAB < 0.995 || dotAC < 0.995) {
           foundSmoothSideTri = true;
         }
       }
     }
-    expect(checkedCapTris).toBe(16);
+    expect(checkedCapTris).toBe(48);
     expect(foundSmoothSideTri).toBe(true);
+    // 4-4cyli emits 48 vertical silhouette conditional lines
+    expect(cyl!.condEdges?.length ?? 0).toBe(48 * 12);
+  });
+
+  it('upgrades standard 16-segment circular tiles/rings/arcs to 48 segments while preserving explicit 8/ primitives', () => {
+    // Representative 2x2 round tile with hole primitives: top ring + 1/4 outer rim edge + 1/8 outer cylinder wall
+    const roundTile = compileDatEntry(
+      {
+        key: 'round_tile_hole',
+        lines: [
+          '1 16 0 0 0 2 0 0 0 1 0 0 0 2 4-4ring9.dat',
+          '1 16 0 0 0 20 0 0 0 1 0 0 0 20 1-4edge.dat',
+          '1 16 0 0 0 20 0 0 0 7 0 0 0 20 1-8cyli.dat',
+        ],
+      },
+      () => null,
+    );
+    expect(roundTile).not.toBeNull();
+    // 4-4ring9 (48 quads = 96 tris) + 1-8cyli (6 quads = 12 tris) = 108 tris
+    expect(roundTile!.tris.length / 9).toBe(108);
+    // 1-4edge = 12 smooth segments (72 floats)
+    expect(roundTile!.edges.length / 6).toBe(12);
+    // 1-8cyli emits 5 interior vertical silhouette conditional edges
+    expect(roundTile!.condEdges?.length ?? 0).toBe(5 * 12);
+
+    // Explicit low-res 8/ primitive stays 8 segments (8 quads = 16 tris)
+    const oct = compileDatEntry(
+      { key: 'oct_cyli', lines: ['1 16 0 0 0 5 0 0 0 10 0 0 0 5 8/4-4cyli.dat'] },
+      () => null,
+    );
+    expect(oct).not.toBeNull();
+    expect(oct!.tris.length / 9).toBe(16);
   });
 
   it('preserves crisp creases across shallow LDraw type-2 hard edges (e.g. 18-degree slopes)', () => {

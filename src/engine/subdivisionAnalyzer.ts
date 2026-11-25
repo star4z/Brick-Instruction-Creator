@@ -1770,7 +1770,7 @@ function buildCohesiveStrongGroups(
 
 function autoNameEndAssembly(indices: number[], allParts: SubdivisionPartInput[]): string {
   const hasWheels = indices.some((i) => allParts[i].isWheel || allParts[i].isWheelHolder || allParts[i].isBogiePart);
-  if (hasWheels) return 'Middle Bogie';
+  if (hasWheels) return 'Center Wheel Assembly';
   const hasGearOrTurntable = indices.some((i) =>
     /gear|turntable|hub/i.test(allParts[i].partName || ''),
   );
@@ -2527,8 +2527,8 @@ export function buildLongitudinalHalvesProposal(
   if (joinIndices.length > 0 && outputMode === 'modular_chapters') {
     const joinName = hasArticulatedJoint
       ? endAssemblyIndices.length > 0 && pivotRodIndices.length > 0
-        ? endAssemblyName === 'Middle Bogie'
-          ? 'Center Joint & Bogie'
+        ? endAssemblyName === 'Center Wheel Assembly'
+          ? 'Center Joint & Wheels'
           : `Center Joint & ${endAssemblyName}`
         : endAssemblyIndices.length > 0
           ? `${endAssemblyName} & Join`

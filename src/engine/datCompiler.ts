@@ -1024,9 +1024,11 @@ export function compileDatEntry(
     }
   };
 
-  // Synthesize standard LDraw arc & rect primitives at exact LDraw circle resolution
-  // (8/ -> 8, standard -> 16, 48/ -> 48) so cylinders/rings/ndis align vertex-for-vertex
-  // with toruses and printed minifigure face patterns with zero seam cracks!
+  // Synthesize standard LDraw arc & rect primitives with high-resolution circular
+  // substitution (8/ -> 8, standard 16 -> 48, 48/ -> 48). Because 48 = 3 * 16,
+  // every 16-gon arc endpoint (1-16, 1-8, 1-4, 1-2, 3-4, 4-4) lands on the exact
+  // same vertex as 16-sided geometry while rendering smooth circles on round tiles,
+  // plates, bricks, dishes, wheels, and Technic collars.
   const emitSynthPrim = (
     base: string,
     circleRes: 8 | 16 | 48,
@@ -1074,15 +1076,29 @@ export function compileDatEntry(
     if (kind === 'cyli' || kind === 'cylo' || kind === 'cylc') {
       const topC = kind === 'cylc' ? tp(0, 0, 0) : null;
       const botC = kind === 'cylc' ? tp(0, 1, 0) : null;
+      const isFullCircle = frac >= 0.999;
+      const topPts: Vec3[] = new Array(segs + 1);
+      const botPts: Vec3[] = new Array(segs + 1);
+      for (let i = 0; i <= segs; i++) {
+        const a = (i / segs) * maxA;
+        topPts[i] = tp(Math.cos(a), 0, Math.sin(a));
+        botPts[i] = tp(Math.cos(a), 1, Math.sin(a));
+      }
       for (let i = 0; i < segs; i++) {
-        const a0 = (i / segs) * maxA, a1 = ((i + 1) / segs) * maxA;
-        const t0 = tp(Math.cos(a0), 0, Math.sin(a0)), t1 = tp(Math.cos(a1), 0, Math.sin(a1));
-        const b0 = tp(Math.cos(a0), 1, Math.sin(a0)), b1 = tp(Math.cos(a1), 1, Math.sin(a1));
+        const t0 = topPts[i], t1 = topPts[i + 1];
+        const b0 = botPts[i], b1 = botPts[i + 1];
         emitT(t0, t1, b1);
         emitT(t0, b1, b0);
         if (topC && botC) {
           emitT(topC, t0, t1);
           emitT(botC, b1, b0);
+        }
+        if (isFullCircle) {
+          const prev = (i + segs - 1) % segs;
+          const next = (i + 1) % segs;
+          emitCondEdge(t0, b0, topPts[prev], topPts[next]);
+        } else if (i > 0) {
+          emitCondEdge(t0, b0, topPts[i - 1], topPts[i + 1]);
         }
       }
       return true;
@@ -1607,10 +1623,12 @@ export function compileDatEntry(
           continue;
         }
 
-        // Synthesize standard circular/rect primitives at exact LDraw circle resolution
+        // Synthesize standard circular/rect primitives with high-resolution (48-seg) substitution
+        // for standard 16-seg LDraw primitives (keeping explicit 8/ primitives at 8 segments)
         if (canSynthesizePrim(base)) {
           if (totalTriFloats < triLimit) {
-            emitSynthPrim(base, circleRes, nx, ny, nz, nm, childCol, edgeLimit, lineTexmap, primProjList);
+            const synthCircleRes: 8 | 16 | 48 = circleRes === 8 ? 8 : 48;
+            emitSynthPrim(base, synthCircleRes, nx, ny, nz, nm, childCol, edgeLimit, lineTexmap, primProjList);
           }
           continue;
         }
