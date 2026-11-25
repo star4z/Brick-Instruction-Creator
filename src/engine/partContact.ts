@@ -451,20 +451,111 @@ export function transformLocalBox6ToWorld(
 }
 
 /**
+ * Sideways flush-contact capability for non-interlocking (`ov < 1.5` on the contact axis)
+ * grazing checks in `boxesPhysicallyTouchBasic`:
+ * - `'none'` / `false`: Cannot connect via flush side-wall grazing (must use vertical stud
+ *   stacking `ovX >= 3 && ovZ >= 3` or 3-axis interlocking `ovX, ovY, ovZ >= 1.5`).
+ * - `'articulated'` / `true`: True flush/small-clearance connectors (clips, bars, hinges,
+ *   magnets, couplers, buffers, ball/socket joints, Technic pins/axles, wheels, minifigures).
+ * - `'snot_host_synth'`: Procedural-only (non-`.dat`) SNOT brick/bracket whose fallback box
+ *   lacks 4 LDU side-stud geometry; may connect flush ONLY to `'sideways_plate'`, NEVER to
+ *   another upright bracket/SNOT brick or wheel holder.
+ * - `'sideways_plate'`: Sideways-rotated brick/plate/tile (`|m[4]| < 0.5`); may connect flush
+ *   ONLY to `'snot_host_synth'`, NEVER edge-to-edge to another sideways plate/tile.
+ */
+export type SidewaysCap = boolean | 'none' | 'articulated' | 'snot_host_synth' | 'sideways_plate';
+
+export interface SidewaysCapInput {
+  partId: string;
+  partName?: string;
+  shape?: string;
+  role: string;
+  /** True when the part's local +Y stud axis is rotated sideways (`|m[4]| < 0.5`). */
+  isSideways: boolean;
+  /** True when compiled LDraw `.dat` mesh geometry (with real 4 LDU side studs) is available. */
+  hasCompiledMesh: boolean;
+}
+
+/**
+ * Classifies whether a part can participate in flush (non-interlocking) sideways contact.
+ *
+ * Crucially:
+ * - `wheel_holder` parts (e.g. `38339` "Train Wheel Bogie With Pin Slots", `2878` "Train Wheel
+ *   Bogie Single Axle") ALWAYS return `'none'` — wheels attach via the dedicated wheel<->holder
+ *   rule, and Technic pins in motor pin holes engage via 3-axis interlocking (>= 1.5 LDU).
+ * - Compiled `.dat` upright SNOT bricks and brackets (e.g. `44728`, `99207`, `99780`, `99781`,
+ *   `87087`, `4733`) return `'none'` because their 4 LDU side studs already produce 3-axis
+ *   interlocking (`ov >= 1.5`) when a sideways part genuinely snaps onto them, while sitting
+ *   flush side-by-side next to another bracket or wheel holder must NEVER register as connected.
+ */
+export function classifySidewaysCapability(input: SidewaysCapInput): Exclude<SidewaysCap, boolean> {
+  const { role, isSideways, hasCompiledMesh } = input;
+  if (role === 'wheel_holder') return 'none';
+  if (role === 'wheel' || role === 'axle' || role === 'figure') return 'articulated';
+
+  const k = (input.partId || '').toLowerCase();
+  const shape = input.shape || '';
+  const name = (input.partName || '').toLowerCase();
+
+  if (shape === 'clip_h' || shape === 'clip_v' || shape === 'bar' || shape === 'axle') {
+    return 'articulated';
+  }
+  if (
+    /\b(?:clip|hinge|bar|axle|handle|hook|grab|magnet|coupler|buffer|ball|socket|hose|antenna|lever)\b/.test(name) ||
+    (/\bpin\b/.test(name) && !/slot|hole|brick|plate|beam|liftarm|bogie|wheel\s*holder/.test(name))
+  ) {
+    return 'articulated';
+  }
+  if (/^(3937|3938|44302|63868|37494|92582|2429|2430|60475|15712|60470|6019|4085|29085)/.test(k)) {
+    return 'articulated';
+  }
+
+  if (isSideways) return 'sideways_plate';
+
+  if (!hasCompiledMesh) {
+    if (
+      shape === 'snot1' || shape === 'snot4' ||
+      shape === 'bracket' || shape === 'bracket_inv' ||
+      /\b(?:snot|bracket)\b/.test(name) ||
+      /^(4070|87087|4733|47905|22885|99206|99207|99780|99781|44728|36840|36841)/.test(k)
+    ) {
+      return 'snot_host_synth';
+    }
+  }
+  return 'none';
+}
+
+export function canFlushSidewaysConnect(
+  capA: SidewaysCap,
+  capB: SidewaysCap,
+): boolean {
+  if (!capA || !capB || capA === 'none' || capB === 'none') return false;
+  if (capA === true && capB === true) return true;
+  if (capA === 'articulated' && capB === 'articulated') return true;
+  if (
+    (capA === 'snot_host_synth' && capB === 'sideways_plate') ||
+    (capA === 'sideways_plate' && capB === 'snot_host_synth')
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
  * Strict LEGO clutch contact check between two axis-aligned boxes:
  * - Train wheels attach ONLY to wheel holders or Technic axles.
  * - Upright bricks/plates/slopes/tiles connect via vertical stud footprint overlap
  *   (ovX >= 3 && ovZ >= 3), NOT by grazing smooth vertical side walls.
  * - Sideways contacts require either 3-axis interlocking (SNOT studs/pins/clips
- *   engaged >= 1.5 LDU) or BOTH parts having sideways connection capability.
+ *   engaged >= 1.5 LDU) or compatible flush-mating sideways connectors.
  */
 export function boxesPhysicallyTouchBasic(
   a: WorldBox,
   b: WorldBox,
   roleA: string,
   roleB: string,
-  sideCapA = true,
-  sideCapB = true,
+  sideCapA: SidewaysCap = true,
+  sideCapB: SidewaysCap = true,
 ): boolean {
   const isWheelPair = roleA === 'wheel' || roleB === 'wheel';
   const otherIsHolder =
@@ -494,7 +585,7 @@ export function boxesPhysicallyTouchBasic(
   const goodAxes = (ovX >= 1.5 ? 1 : 0) + (ovY >= 1.5 ? 1 : 0) + (ovZ >= 1.5 ? 1 : 0);
   if (goodAxes < 2) return false;
   if (ovX >= 1.5 && ovY >= 1.5 && ovZ >= 1.5) return true;
-  return Boolean(sideCapA && sideCapB);
+  return canFlushSidewaysConnect(sideCapA, sideCapB);
 }
 
 /**
@@ -513,8 +604,8 @@ export function partsPhysicallyTouch(
   subBoxesB: readonly WorldBox[] | null | undefined,
   roleA: string,
   roleB: string,
-  sideCapA = true,
-  sideCapB = true,
+  sideCapA: SidewaysCap = true,
+  sideCapB: SidewaysCap = true,
 ): boolean {
   if (!boxesPhysicallyTouchBasic(boxA, boxB, roleA, roleB, sideCapA, sideCapB)) {
     return false;

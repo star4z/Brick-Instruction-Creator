@@ -92,6 +92,7 @@ import {
 } from './engine/stepCamera';
 import {
   buildPhysicalVerticalPrereqMap,
+  classifySidewaysCapability,
   minSubBoxGap,
   partsPhysicallyTouch,
   transformLocalBox6ToWorld,
@@ -4362,21 +4363,23 @@ function isCladdingWaitingForUpperSupport(idx, claddingFlags, boxes, adj, placed
   return !upperNbs.some(nb => placed.has(nb));
 }
 
-// True ONLY if a part has genuine sideways connection capability (SNOT orientation, side studs,
-// brackets, clips, hinges, Technic pins/holes, bars, axles, window frames/glass, etc.).
-// Two plain upright bricks/plates/slopes/tiles grazing side-by-side do NOT physically stick together!
+// Classify sideways flush-contact capability for non-interlocking grazing checks:
+// - Wheel holders (e.g. 38339/2878) NEVER connect via flush side walls (wheels use wheel<->holder).
+// - Compiled .dat upright SNOT bricks & brackets connect via real 4 LDU side-stud 3-axis interlocking,
+//   NEVER by flush side-by-side grazing next to another bracket or wheel holder.
+// - Two sideways plates/tiles sitting edge-to-edge NEVER connect via flush grazing.
 function canConnectSideways(part, role) {
-  if (!part) return true;
-  if (role === 'wheel' || role === 'axle' || role === 'figure') return true;
+  if (!part) return 'none';
   const m = part.m || R_ID;
-  if (Math.abs(m[4]) < 0.5) return true; // SNOT / sideways-mounted part
-  const k = normId(part.p);
   const def = resolvePart(part.p);
-  const name = (def.name || '').toLowerCase();
-  if (def.shape === 'snot1' || def.shape === 'snot4' || def.shape === 'clip_h' || def.shape === 'clip_v' || def.shape === 'bar' || def.shape === 'axle' || def.shape === 'bracket' || def.shape === 'bracket_inv' || def.shape === 'technic_brick' || def.shape === 'window_frame') return true;
-  if (/snot|bracket|clip|hinge|bar|axle|pin|technic|liftarm|beam|turntable|handle|hook|grab|magnet|coupler|buffer|ball|socket|window|glass|door|fence|rail|ladder|hose|antenna|lever/.test(name)) return true;
-  if (/^(3937|3938|44302|63868|37494|92582|2429|2430|3700|3701|3702|3894|32000|32018|6541|4070|87087|4733|47905|22885|99206|99207|99780|99781|44728|60475|15712|60470|6019|4085|36840|36841|29085|bb892)/.test(k)) return true;
-  return false;
+  return classifySidewaysCapability({
+    partId: normId(part.p),
+    partName: def.name || '',
+    shape: def.shape || '',
+    role,
+    isSideways: Math.abs(m[4]) < 0.5,
+    hasCompiledMesh: Boolean(compileEmbeddedDat(part.p)),
+  });
 }
 
 // Strict LEGO clutch contact check:
@@ -4946,7 +4949,7 @@ function prepareSubdivisionData(parsed) {
       isTile: def.studs === false && def.h <= 10,
       hasTopStuds: def.studs !== false,
       hasEmbeddedAxleHole: hasEmbeddedAxleHole(p.p),
-      isSidewaysCapable: sideCaps[index],
+      isSidewaysCapable: sideCaps[index] !== 'none',
       isUpright,
       isInverted,
     });

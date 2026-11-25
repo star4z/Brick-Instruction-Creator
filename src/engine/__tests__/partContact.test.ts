@@ -8,13 +8,17 @@ import type { Mat3, WorldBox } from '../minifigPose';
 import {
   compareFrontierCandidates,
   computeBoundsFromBoxes,
+  createGroundedPrereqChecker,
   expandBoundsWithBox,
+  isCandidateConnectedForStep,
   selectDynamicStepIndices,
   type DynamicPartDescriptor,
 } from '../dynamicStepSizer';
 import {
   buildLocalSubBoxes,
   buildPhysicalVerticalPrereqMap,
+  canFlushSidewaysConnect,
+  classifySidewaysCapability,
   minSubBoxGap,
   partsPhysicallyTouch,
   transformLocalBox6ToWorld,
@@ -541,5 +545,271 @@ describe('Concave Sub-Box Collider & Zero-Floating Support Rules', () => {
     expect(buildLocalSubBoxes(new Float32Array(0), [0, 0, 0], [20, 8, 20])).toBeUndefined();
     const extra: LocalBox6[] = [[-8, -24, -8, 8, 0, 8]];
     expect(buildLocalSubBoxes(brickCompiled.tris, brickCompiled.min, brickCompiled.max, extra)).toBeUndefined();
+  });
+
+  it('rejects flush side-wall grazing for wheel holders (38339/2878), side-by-side SNOT brackets (44728), and edge-to-edge sideways plates while keeping real SNOT & articulated contacts', () => {
+    const wh38339Cap = classifySidewaysCapability({
+      partId: '38339',
+      partName: 'Train Wheel Bogie With Pin Slots without Wheelset',
+      role: 'wheel_holder',
+      isSideways: false,
+      hasCompiledMesh: true,
+    });
+    const wh2878Cap = classifySidewaysCapability({
+      partId: '2878',
+      partName: 'Train Wheel Bogie Single Axle without Wheelset',
+      role: 'wheel_holder',
+      isSideways: false,
+      hasCompiledMesh: true,
+    });
+    const compiledBracketCap = classifySidewaysCapability({
+      partId: '44728',
+      partName: 'Bracket 1 x 2 - 2 x 2',
+      shape: 'bracket',
+      role: 'structural',
+      isSideways: false,
+      hasCompiledMesh: true,
+    });
+    const synthBracketCap = classifySidewaysCapability({
+      partId: '44728',
+      partName: 'Bracket 1 x 2 - 2 x 2',
+      shape: 'bracket',
+      role: 'structural',
+      isSideways: false,
+      hasCompiledMesh: false,
+    });
+    const synthSnotCap = classifySidewaysCapability({
+      partId: '4733',
+      partName: 'SNOT Brick 1×1 (4 Sides)',
+      shape: 'snot4',
+      role: 'structural',
+      isSideways: false,
+      hasCompiledMesh: false,
+    });
+    const sidewaysPlateCap = classifySidewaysCapability({
+      partId: '3710',
+      partName: 'Plate 1 x 4',
+      role: 'structural',
+      isSideways: true,
+      hasCompiledMesh: true,
+    });
+    const clipCap = classifySidewaysCapability({
+      partId: '4085',
+      partName: 'Plate 1 x 1 with Clip Vertical',
+      shape: 'clip_v',
+      role: 'structural',
+      isSideways: false,
+      hasCompiledMesh: true,
+    });
+    const barCap = classifySidewaysCapability({
+      partId: '30374',
+      partName: 'Bar 4L',
+      shape: 'bar',
+      role: 'detail',
+      isSideways: true,
+      hasCompiledMesh: true,
+    });
+    const couplerCap = classifySidewaysCapability({
+      partId: '29085',
+      partName: 'Train Buffer Beam with Closed Buffer Bottom for Sealed Magnet',
+      role: 'structural',
+      isSideways: false,
+      hasCompiledMesh: true,
+    });
+
+    expect(wh38339Cap).toBe('none');
+    expect(wh2878Cap).toBe('none');
+    expect(compiledBracketCap).toBe('none');
+    expect(synthBracketCap).toBe('snot_host_synth');
+    expect(synthSnotCap).toBe('snot_host_synth');
+    expect(sidewaysPlateCap).toBe('sideways_plate');
+    expect(clipCap).toBe('articulated');
+    expect(barCap).toBe('articulated');
+    expect(couplerCap).toBe('articulated');
+
+    // Flush (non-interlocking) pairs that MUST NOT connect:
+    expect(canFlushSidewaysConnect(wh38339Cap, compiledBracketCap)).toBe(false);
+    expect(canFlushSidewaysConnect(wh38339Cap, synthBracketCap)).toBe(false);
+    expect(canFlushSidewaysConnect(compiledBracketCap, compiledBracketCap)).toBe(false);
+    expect(canFlushSidewaysConnect(synthBracketCap, synthBracketCap)).toBe(false);
+    expect(canFlushSidewaysConnect(sidewaysPlateCap, sidewaysPlateCap)).toBe(false);
+
+    // Legitimate flush pairs that MUST connect:
+    expect(canFlushSidewaysConnect(clipCap, barCap)).toBe(true);
+    expect(canFlushSidewaysConnect(couplerCap, couplerCap)).toBe(true);
+    expect(canFlushSidewaysConnect(synthSnotCap, sidewaysPlateCap)).toBe(true);
+    expect(canFlushSidewaysConnect(synthBracketCap, sidewaysPlateCap)).toBe(true);
+  });
+
+  it('never places side-by-side SNOT brackets hanging in Step 1 next to a Train Wheel Bogie (38339) before the spanning top plate', () => {
+    // Reproduces MUNI Metro LRV4 Front Half Step 1:
+    // - WH1 (38339, x in [-80, 0]): wide housing [-80..-40, 8..36, -60..60], lowered center deck [-40..0, 8..28, -20..20]
+    // - WH2 (38339, x in [80, 160]): mirrored at other end
+    // - B_center (Brick 2x8, x in [-40, 120], y in [-16, 12], z in [-20, 20]): bridges WH1 & WH2 from underneath
+    // - Br1 (44728, x in [-40, 0], z in [-64, -40]): L-bracket sitting flush next to WH1's wide housing (x=-40), outward studs at z=-64..-60
+    // - Br2 (44728, x in [0, 40], z in [-64, -40]): second L-bracket sitting flush next to Br1 (x=0), outward studs at z=-64..-60
+    // - P_side (sideways Plate 1x4, x in [-40, 40], y in [8, 28], z in [-68, -60]): snaps onto Br1 & Br2 outward 4 LDU SNOT studs!
+    // - P_top (spanning Plate 6x8, x in [-60, 100], y in [32, 40], z in [-60, 60]): locks WH1, WH2, Br1, Br2 from above!
+    const whCompiled = compileLines('wh_38339', [
+      ...ldrawBoxQuads(-80, 8, -60, -40, 36, 60),
+      ...ldrawBoxQuads(-40, 8, -20, 0, 28, 20),
+    ])!;
+    // L-shaped Bracket 1x2 - 2x2 (44728) with real 4 LDU outward studs on -Z face (z in [-64, -60])
+    const brCompiled = compileLines('br_44728', [
+      ...ldrawBoxQuads(-20, 28, -60, 20, 36, -40), // horizontal 1x2 top flange + top studs
+      ...ldrawBoxQuads(-20, 8, -64, 20, 32, -56),  // vertical 2x2 wall + 4 LDU outward studs
+    ])!;
+
+    const names = ['WH1', 'WH2', 'B_center', 'Br1', 'Br2', 'P_side', 'P_top'];
+    const roles = ['wheel_holder', 'wheel_holder', 'structural', 'structural', 'structural', 'structural', 'structural'];
+    const partIds = ['38339', '38339', '3007', '44728', '44728', '3710', '3032'];
+    const partNames = [
+      'Train Wheel Bogie With Pin Slots without Wheelset',
+      'Train Wheel Bogie With Pin Slots without Wheelset',
+      'Brick 2 x 8',
+      'Bracket 1 x 2 - 2 x 2',
+      'Bracket 1 x 2 - 2 x 2',
+      'Plate 1 x 4',
+      'Plate 6 x 8',
+    ];
+    const isSideways = [false, false, false, false, false, true, false];
+    const boxes: WorldBox[] = [
+      makeWorldBox(-80, 8, -60, 0, 36, 60),    // 0: WH1
+      makeWorldBox(80, 8, -60, 160, 36, 60),   // 1: WH2
+      makeWorldBox(-40, -16, -20, 120, 12, 20),// 2: B_center
+      makeWorldBox(-40, 8, -64, 0, 36, -40),   // 3: Br1 (flush with WH1 at x=-40)
+      makeWorldBox(0, 8, -64, 40, 36, -40),    // 4: Br2 (flush with Br1 at x=0)
+      makeWorldBox(-40, 8, -68, 40, 28, -60),  // 5: P_side (interlocks 4 LDU with Br1 & Br2 studs)
+      makeWorldBox(-60, 32, -60, 100, 40, 60), // 6: P_top (spans WH1, WH2, Br1, Br2)
+    ];
+    const subBoxes: (WorldBox[] | null)[] = [
+      whCompiled.subBoxes!.map((sb) => transformLocalBox6ToWorld(sb, R_ID, 0, 0, 0)),
+      whCompiled.subBoxes!.map((sb) => transformLocalBox6ToWorld(sb, R_180_Y, 80, 0, 0)),
+      null,
+      brCompiled.subBoxes!.map((sb) => transformLocalBox6ToWorld(sb, R_ID, -20, 0, 0)),
+      brCompiled.subBoxes!.map((sb) => transformLocalBox6ToWorld(sb, R_ID, 20, 0, 0)),
+      null,
+      null,
+    ];
+    const sideCaps = partIds.map((pid, i) =>
+      classifySidewaysCapability({
+        partId: pid,
+        partName: partNames[i],
+        role: roles[i],
+        isSideways: isSideways[i],
+        hasCompiledMesh: true,
+      }),
+    );
+
+    const adj: number[][] = boxes.map(() => []);
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        if (partsPhysicallyTouch(boxes[i], boxes[j], subBoxes[i], subBoxes[j], roles[i], roles[j], sideCaps[i], sideCaps[j])) {
+          adj[i].push(j);
+          adj[j].push(i);
+        }
+      }
+    }
+
+    // Br1 MUST NOT touch WH1 (flush smooth wall) or Br2 (flush side-by-side)!
+    expect(adj[3]).not.toContain(0);
+    expect(adj[3]).not.toContain(4);
+    // Br1 & Br2 MUST connect to P_side (real 4 LDU SNOT stud interlocking) AND P_top (vertical stacking)!
+    expect(adj[3]).toContain(5);
+    expect(adj[3]).toContain(6);
+    expect(adj[4]).toContain(5);
+    expect(adj[4]).toContain(6);
+
+    const { belowMap } = buildPhysicalVerticalPrereqMap(boxes, adj, roles, roles.map(() => false), undefined, subBoxes);
+    const descriptors: DynamicPartDescriptor[] = boxes.map((box, index) => ({
+      index,
+      partId: partIds[index],
+      colorId: 0,
+      sku: `${partIds[index]}|0`,
+      role: roles[index],
+      box,
+      layerY: box.min[1],
+      isCladding: false,
+    }));
+    const modelBounds = computeBoundsFromBoxes(boxes);
+    let builtBounds: WorldBox | null = null;
+    const activeCam: StudioCameraPose = { ...DEFAULT_STUDIO_CAMERA };
+    const placed = new Set<number>();
+    const remaining = new Set<number>(boxes.map((_, i) => i));
+    const stepHistory: number[][] = [];
+
+    while (remaining.size > 0) {
+      const placedBeforeStep = new Set(placed);
+      const isPrereqGrounded = placedBeforeStep.size > 0
+        ? createGroundedPrereqChecker(adj, belowMap, placedBeforeStep, remaining)
+        : null;
+      let frontier: number[];
+      if (placed.size === 0) {
+        const pool = Array.from(remaining).filter((i) => roles[i] !== 'wheel' && !belowMap[i].some((u) => remaining.has(u)));
+        pool.sort((a, b) => descriptors[a].layerY - descriptors[b].layerY);
+        const minY = descriptors[pool[0]].layerY;
+        const lowBand = pool.filter((i) => descriptors[i].layerY <= minY + 32);
+        lowBand.sort((a, b) => {
+          const sa = (roles[a] === 'structural' || roles[a] === 'wheel_holder' ? 50 : 0) + adj[a].length * 6 - (descriptors[a].layerY - minY) * 0.8;
+          const sb = (roles[b] === 'structural' || roles[b] === 'wheel_holder' ? 50 : 0) + adj[b].length * 6 - (descriptors[b].layerY - minY) * 0.8;
+          return sb - sa;
+        });
+        frontier = lowBand;
+      } else {
+        const rawFrontier = Array.from(remaining).filter((i) => adj[i].some((nb) => placedBeforeStep.has(nb)));
+        const unblocked = rawFrontier.filter((i) => !belowMap[i].some((u) => remaining.has(u) && isPrereqGrounded!(u)));
+        frontier = unblocked.length > 0 ? unblocked : rawFrontier;
+        const skuCounts = new Map<string, number>();
+        for (const idx of frontier) skuCounts.set(descriptors[idx].sku, (skuCounts.get(descriptors[idx].sku) ?? 0) + 1);
+        frontier.sort((a, b) => compareFrontierCandidates(descriptors[a], descriptors[b], activeCam.corner, builtBounds ?? modelBounds, skuCounts));
+      }
+
+      const anchor = frontier[0];
+      const anchorY = descriptors[anchor].layerY;
+      const anchorConnectedToPrev = placedBeforeStep.size > 0 && adj[anchor].some((nb) => placedBeforeStep.has(nb));
+      const stepIdx = selectDynamicStepIndices({
+        anchor,
+        parts: descriptors,
+        getEligibleCandidates: (placedInStep) =>
+          Array.from(remaining).filter((i) => {
+            if (placedInStep.has(i)) return false;
+            if (Math.abs(descriptors[i].layerY - anchorY) > 12) return false;
+            if (placedBeforeStep.size > 0) {
+              if (belowMap[i].some((u) => !placedBeforeStep.has(u) && isPrereqGrounded!(u))) return false;
+            } else {
+              if (belowMap[i].length > 0) return false;
+            }
+            return isCandidateConnectedForStep(i, anchorConnectedToPrev, adj, placedBeforeStep, placedInStep);
+          }),
+        modelBounds,
+        builtBounds,
+        activeCam,
+        isFirstStep: stepHistory.length === 0,
+        totalPartsInScope: boxes.length,
+        isSubmodel: false,
+      });
+
+      if (placedBeforeStep.size > 0) {
+        for (const pi of stepIdx) {
+          expect(adj[pi].some((nb) => placedBeforeStep.has(nb)), `${names[pi]} floated in step ${stepHistory.length + 1}`).toBe(true);
+        }
+      }
+      stepHistory.push(stepIdx);
+      for (const pi of stepIdx) {
+        remaining.delete(pi);
+        placed.add(pi);
+        builtBounds = expandBoundsWithBox(builtBounds, boxes[pi]);
+      }
+    }
+
+    const stepOf = (idx: number) => stepHistory.findIndex((s) => s.includes(idx));
+    // Step 1 must NOT contain either hanging SNOT bracket (Br1=3, Br2=4)!
+    expect(stepHistory[0]).not.toContain(3);
+    expect(stepHistory[0]).not.toContain(4);
+    // Spanning top plate (P_top=6) MUST be placed strictly BEFORE Br1, Br2, and P_side!
+    expect(stepOf(6)).toBeLessThan(stepOf(3));
+    expect(stepOf(6)).toBeLessThan(stepOf(4));
+    expect(stepOf(3)).toBeLessThan(stepOf(5));
+    expect(stepOf(4)).toBeLessThan(stepOf(5));
   });
 });
