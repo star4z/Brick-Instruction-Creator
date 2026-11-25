@@ -7,6 +7,7 @@
 //   5. Screen-Space Ambient Occlusion (SSAO) + depth-aware bilateral smooth composite
 
 import { computeCameraBasis } from './coverLayout';
+import { computeStepOrthoFrustum, type WorldBounds3D } from '../engine/stepCamera';
 import { getLineWeightTapOffsets, type LineWeightId } from '../themes/customThemes';
 
 export interface StudioTexDraw {
@@ -281,6 +282,7 @@ export function computeStudioOrthoCamera(
   fixedCenter?: [number, number, number],
   panX = 0,
   panY = 0,
+  bounds?: WorldBounds3D | null,
 ): StudioCameraResult {
   const az = (azDeg * Math.PI) / 180;
   const el = (elDeg * Math.PI) / 180;
@@ -298,13 +300,24 @@ export function computeStudioOrthoCamera(
 
   const aspect = width / Math.max(1, height);
   const safeZoom = Math.max(0.4, zoom);
-  let halfH = fixedHalfH > 0
-    ? (fixedCenter ? fixedHalfH / safeZoom : fixedHalfH)
-    : ((radius * 1.12) / safeZoom);
-  if (fixedHalfH <= 0 && aspect < 1) {
-    halfH = halfH / Math.max(0.5, aspect);
+  let halfW: number;
+  let halfH: number;
+  if (fixedHalfH > 0) {
+    halfH = fixedCenter ? fixedHalfH / safeZoom : fixedHalfH;
+    halfW = halfH * aspect;
+  } else {
+    const frustum = computeStepOrthoFrustum(
+      bounds,
+      fullRadius || radius,
+      radius,
+      azDeg,
+      elDeg,
+      aspect,
+      safeZoom,
+    );
+    halfW = frustum.orthoHalfW;
+    halfH = frustum.orthoHalfH;
   }
-  const halfW = halfH * aspect;
   const pxX = panX * halfW * safeZoom;
   const pxY = panY * halfH * safeZoom;
   const proj = orthoMat4(-halfW - pxX, halfW - pxX, -halfH + pxY, halfH + pxY, near, far);
@@ -1311,6 +1324,7 @@ export class StudioPhotoRenderer {
           options.fixedCenter,
           options.panX ?? 0,
           options.panY ?? 0,
+          mesh.bounds,
         )
       : computeStudioTelephotoCamera(
           mesh.triPos.length >= 9 ? mesh.triPos : mesh.texDraws![0].triPos,

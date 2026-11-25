@@ -104,7 +104,9 @@ import {
   selectDynamicStepIndices,
 } from './engine/dynamicStepSizer';
 import {
+  computeProjectedOrthoHalfExtents,
   computeStepCameraFraming,
+  computeStepOrthoFrustum,
   optimizeStudioStepCameraSequence,
   resolveEffectiveStudioStepCue,
   resolveStudioStepCamera,
@@ -3032,14 +3034,23 @@ class WebGLBrickEngine {
     }
     const aspect = w / Math.max(1, h);
     const safeZoom = Math.max(0.4, zoom);
-    let halfH = fixedHalfH > 0
-      ? (fixedCenter ? fixedHalfH / safeZoom : fixedHalfH)
-      : ((mesh.radius * 1.12) / safeZoom);
-    // Ensure portrait/tall slots never clip wide models horizontally
-    if (fixedHalfH <= 0 && aspect < 1) {
-      halfH = halfH / Math.max(0.5, aspect);
+    let halfW, halfH;
+    if (fixedHalfH > 0) {
+      halfH = fixedCenter ? fixedHalfH / safeZoom : fixedHalfH;
+      halfW = halfH * aspect;
+    } else {
+      const frustum = computeStepOrthoFrustum(
+        mesh.bounds,
+        mesh.fullRadius || mesh.radius,
+        mesh.radius,
+        azDeg,
+        elDeg,
+        aspect,
+        safeZoom,
+      );
+      halfW = frustum.orthoHalfW;
+      halfH = frustum.orthoHalfH;
     }
-    const halfW = halfH * aspect;
     const pxX = panX * halfW * safeZoom;
     const pxY = panY * halfH * safeZoom;
     return mulMat4(orthoMat4(-halfW - pxX, halfW - pxX, -halfH + pxY, halfH + pxY, near, far), view);
@@ -7701,6 +7712,16 @@ function rebuildPages() {
       const viewRadiusLdu = (isMfBuild && mfStyle === 'exploded')
         ? Math.max(framing.radius, 95)
         : framing.radius;
+      const stepCam = getStepCamera(step);
+      const proj = (!isOfficialMfStyle && fullSphere.bounds)
+        ? computeProjectedOrthoHalfExtents(
+            fullSphere.bounds,
+            fullSphere.radius,
+            viewRadiusLdu,
+            stepCam.az,
+            stepCam.el,
+          )
+        : null;
 
       let pliUniqueCount = 0;
       if (!isOfficialMfStyle) {
@@ -7727,6 +7748,8 @@ function rebuildPages() {
         stepNum: step.num,
         absStepNum: getAbsStepNum(step),
         viewRadiusLdu,
+        projHalfWLdu: proj?.halfW,
+        projHalfHLdu: proj?.halfH,
         modelScale: ov.modelScale || 1.0,
         pliUniqueCount,
         hasInlineCallout: Boolean(step.subassembly && !ov.calloutAsPages && !isOfficialMfStyle),

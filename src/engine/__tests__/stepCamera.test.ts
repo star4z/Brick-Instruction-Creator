@@ -15,7 +15,9 @@ import {
 import {
   AUTO_FOCUS_MIN_FULL_RADIUS_LDU,
   STEP_VISIBILITY_DEADBAND,
+  computeProjectedOrthoHalfExtents,
   computeStepCameraFraming,
+  computeStepOrthoFrustum,
   evaluateStepOcclusionVisibility,
   findPreviousStudioModelStep,
   isStrictUndersidePlacement,
@@ -561,5 +563,61 @@ describe('Step Camera Stability & Steady Framing', () => {
     expect(singleStepOrbit[0].rotationCue).toBe('none');
     expect(singleStepOrbit[1].rotationCue).toBe('yaw_90_cw');
     expect(singleStepOrbit[2].rotationCue).toBe('yaw_90_ccw');
+  });
+
+  it('frames elongated and tall models tightly via projected 2D half-extents and keeps adjacent steps at consistent scale', () => {
+    // Elongated model (6×9×64 studs = 120×180×1280 LDU), full bounding sphere radius ~649 LDU
+    const elongatedBounds = {
+      minX: -60,
+      maxX: 60,
+      minY: 0,
+      maxY: 180,
+      minZ: -640,
+      maxZ: 640,
+    };
+    const fullRadius = Math.hypot(60, 90, 640);
+
+    // Full-model step (e.g. joining two large halves: ratio >= 0.24 -> viewRadius = fullRadius)
+    const fullProj = computeProjectedOrthoHalfExtents(elongatedBounds, fullRadius, fullRadius, 38, 28);
+    expect(fullProj.halfW).toBeLessThan(fullRadius * 0.75);
+    expect(fullProj.halfH).toBeLessThan(fullRadius * 0.58);
+
+    // Adjacent step adding a small detail (auto-focus zoom: viewRadius = 0.62 * fullRadius)
+    const detailRadius = fullRadius * 0.62;
+    const detailProj = computeProjectedOrthoHalfExtents(elongatedBounds, fullRadius, detailRadius, 38, 28);
+    // Projected half-extents stay tightly consistent (~10% difference instead of a jarring 1.6x jump)
+    expect(fullProj.halfW / detailProj.halfW).toBeLessThan(1.15);
+    expect(fullProj.halfH).toBeCloseTo(detailProj.halfH, 3);
+
+    // Portrait frustum fits width tightly without bounding-sphere dead space
+    const portraitFrustum = computeStepOrthoFrustum(
+      elongatedBounds,
+      fullRadius,
+      fullRadius,
+      38,
+      28,
+      0.78,
+      1.0,
+    );
+    expect(portraitFrustum.orthoHalfW).toBeCloseTo(fullProj.halfW * 1.12, 3);
+    expect(portraitFrustum.orthoHalfW).toBeLessThan(fullRadius * 0.85);
+
+    // Tall narrow model (6×50×6 studs = 120×1000×120 LDU) is height-limited
+    const tallBounds = {
+      minX: -60,
+      maxX: 60,
+      minY: 0,
+      maxY: 1000,
+      minZ: -60,
+      maxZ: 60,
+    };
+    const tallRadius = Math.hypot(60, 500, 60);
+    const tallProj = computeProjectedOrthoHalfExtents(tallBounds, tallRadius, tallRadius, 38, 28);
+    expect(tallProj.halfH).toBeGreaterThan(tallProj.halfW * 3);
+
+    // Fallback when bounds are omitted preserves exact sphere-radius framing
+    const fallbackFrustum = computeStepOrthoFrustum(null, 200, 200, 38, 28, 1.33, 1.0);
+    expect(fallbackFrustum.orthoHalfH).toBeCloseTo(200 * 1.12, 4);
+    expect(fallbackFrustum.orthoHalfW).toBeCloseTo(200 * 1.12 * 1.33, 4);
   });
 });

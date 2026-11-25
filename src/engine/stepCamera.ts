@@ -779,6 +779,123 @@ export function computeStepCameraFraming(input: StepFramingInput): StepFramingRe
   };
 }
 
+export interface WorldBounds3D {
+  minX: number;
+  minY: number;
+  minZ: number;
+  maxX: number;
+  maxY: number;
+  maxZ: number;
+}
+
+export interface ProjectedOrthoHalfExtents {
+  /** Projected half-width along camera right axis in LDU (bounded by viewRadius). */
+  halfW: number;
+  /** Projected half-height along camera up axis in LDU (bounded by viewRadius). */
+  halfH: number;
+}
+
+export interface StepOrthoFrustum extends ProjectedOrthoHalfExtents {
+  /** Orthographic viewport half-width in LDU after aspect fitting, margin, and zoom. */
+  orthoHalfW: number;
+  /** Orthographic viewport half-height in LDU after aspect fitting, margin, and zoom. */
+  orthoHalfH: number;
+}
+
+/**
+ * Projects a 3D world-space AABB onto the orthographic camera's `(right, up)` plane
+ * at `(azDeg, elDeg)` and bounds each axis by `viewRadius`.
+ *
+ * This eliminates bounding-sphere dead space on elongated, flat, or tall models
+ * (ships, trains, bridges, towers, baseplates) while remaining O(1), strictly
+ * conservative (zero clipping of any AABB corner), and continuous under free orbit.
+ * When `viewRadius < fullRadius` (e.g. Close-Up or massive-model auto-focus), capping
+ * each axis at `viewRadius` keeps framing smooth between adjacent steps and never
+ * clips the zoomed-in target region.
+ */
+export function computeProjectedOrthoHalfExtents(
+  bounds: WorldBounds3D | null | undefined,
+  fullRadius: number,
+  viewRadius: number,
+  azDeg: number,
+  elDeg: number,
+): ProjectedOrthoHalfExtents {
+  const safeViewR = Math.max(12, Number.isFinite(viewRadius) ? viewRadius : 20);
+  const safeFullR = Math.max(safeViewR, Number.isFinite(fullRadius) ? fullRadius : safeViewR);
+  if (
+    !bounds ||
+    !Number.isFinite(bounds.minX) ||
+    !Number.isFinite(bounds.maxX) ||
+    !Number.isFinite(bounds.minY) ||
+    !Number.isFinite(bounds.maxY) ||
+    !Number.isFinite(bounds.minZ) ||
+    !Number.isFinite(bounds.maxZ)
+  ) {
+    return { halfW: safeViewR, halfH: safeViewR };
+  }
+
+  const ex = Math.max(0, (bounds.maxX - bounds.minX) * 0.5);
+  const ey = Math.max(0, (bounds.maxY - bounds.minY) * 0.5);
+  const ez = Math.max(0, (bounds.maxZ - bounds.minZ) * 0.5);
+  const az = (azDeg * Math.PI) / 180;
+  const el = (elDeg * Math.PI) / 180;
+  const cosAz = Math.cos(az);
+  const sinAz = Math.sin(az);
+  const cosEl = Math.cos(el);
+  const sinEl = Math.sin(el);
+
+  // Camera right = [cosAz, 0, -sinAz], up = [-sinAz*sinEl, cosEl, -cosAz*sinEl]
+  const rawHalfW = Math.abs(cosAz) * ex + Math.abs(sinAz) * ez;
+  const rawHalfH =
+    Math.abs(sinAz * sinEl) * ex +
+    Math.abs(cosEl) * ey +
+    Math.abs(cosAz * sinEl) * ez;
+
+  // Clamp by safeFullR so AABB corners never inflate looser than the vertex bounding sphere,
+  // then cap by safeViewR when zoomed in (Close-Up / massive-model auto-focus).
+  const fullHalfW = Math.min(safeFullR, Math.max(12, rawHalfW));
+  const fullHalfH = Math.min(safeFullR, Math.max(12, rawHalfH));
+  return {
+    halfW: Math.min(fullHalfW, safeViewR),
+    halfH: Math.min(fullHalfH, safeViewR),
+  };
+}
+
+/**
+ * Computes the exact aspect-fitted orthographic frustum `(orthoHalfW, orthoHalfH)`
+ * shared 1:1 by `WebGLBrickEngine.computeMVP`, `computeStudioOrthoCamera`, and
+ * `pageLayout.ts` readability checks.
+ */
+export function computeStepOrthoFrustum(
+  bounds: WorldBounds3D | null | undefined,
+  fullRadius: number,
+  viewRadius: number,
+  azDeg: number,
+  elDeg: number,
+  aspect: number,
+  zoom = 1.0,
+  margin = 1.12,
+): StepOrthoFrustum {
+  const safeAspect = Math.max(0.1, Number.isFinite(aspect) ? aspect : 1);
+  const safeZoom = Math.max(0.4, Number.isFinite(zoom) ? zoom : 1);
+  const safeMargin = Math.max(1.0, Number.isFinite(margin) ? margin : 1.12);
+  const { halfW, halfH } = computeProjectedOrthoHalfExtents(
+    bounds,
+    fullRadius,
+    viewRadius,
+    azDeg,
+    elDeg,
+  );
+  let orthoHalfH = (halfH * safeMargin) / safeZoom;
+  let orthoHalfW = orthoHalfH * safeAspect;
+  const reqHalfW = (halfW * safeMargin) / safeZoom;
+  if (reqHalfW > orthoHalfW) {
+    orthoHalfW = reqHalfW;
+    orthoHalfH = orthoHalfW / safeAspect;
+  }
+  return { halfW, halfH, orthoHalfW, orthoHalfH };
+}
+
 export interface StudioStepCameraSource {
   id?: string;
   side?: 'top' | 'bottom' | string;

@@ -38,10 +38,11 @@ Previously, stepping through an auto-generated instruction manual could feel diz
 - One-time non-accumulating corner-alignment tie-breaks (`±0.01`) apply only on actual turns (`u ≠ v`), guaranteeing zero bias accumulation while staying at a clear angle.
 - `chooseStickyStepCamera` (`src/engine/dynamicStepSizer.ts`) and `optimizeCameraSequence` (`src/engine/cameraOptimizer.ts`) share the same occlusion-first & deadband principles, and `compareFrontierCandidates` defers tall foreground panels/windows (`height ≥ 48` LDU) until shorter bricks on the same floor are placed so walls do not prematurely hide interior/rear bricks.
 
-### 4. Steady Auto Step Framing (`computeStepCameraFraming`)
+### 4. Steady Auto Step Framing (`computeStepCameraFraming` + `computeStepOrthoFrustum`)
 - **`full` ("Full Model")**: Always frames the full model built so far.
 - **`focus` ("Close-Up")**: Preserves tight per-step close-up framing when explicitly selected by the user in Edit Step.
 - **`auto` (default)**: Keeps framing rock-steady on the full built model for all normal, medium, and subdivided models (`fullRadius ≤ 340` LDU, ~34+ studs across). Only on truly massive un-subdivided builds (`fullRadius > 340` LDU) with tiny details (`newRadius / fullRadius < 0.24`) does it apply a smooth, cliff-free, context-preserving zoom assist (`radius ≥ 0.62 × fullRadius`, center staying ≥58% anchored to the full model center).
+- **Projected 2D Orthographic Frustum (`computeProjectedOrthoHalfExtents` + `computeStepOrthoFrustum`)**: Rather than sizing the orthographic viewport from the loose isotropic 3D bounding sphere, `WebGLBrickEngine.computeMVP`, `computeStudioOrthoCamera`, and `pageLayout.ts` all project the step's 3D AABB onto the active camera's `(right, up)` plane (O(1), strictly conservative, continuous under free orbit) and cap each axis by `viewRadius`. This eliminates bounding-sphere dead space on elongated, flat, or tall models, keeps adjacent full-model and detail-assist steps at consistent visual scale, and ensures 1:1 parity between live rendering, PDF export, and physical `cm/stud` page-fit checks.
 
 ### 5. Free-Orbit & Continuous-Section Rotation Indicators (`resolveEffectiveStudioStepCue`)
 - `resolveStudioStepCamera()` resolves each step's effective `(side, corner, az, el)` pose from both automatic optimizer outputs and any user preset or free-orbit override (deriving `side` from `el < 0` when omitted and wrapping azimuth cleanly into `[0°, 360°)`).

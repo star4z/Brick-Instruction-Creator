@@ -542,6 +542,28 @@ describe('Photorealistic Studio Camera & Softbox Light Rig', () => {
     // 2x zoom doubles orthographic projection scale
     expect(Math.abs(cam2x.proj[0] / cam1x.proj[0])).toBeCloseTo(2.0, 5);
     expect(Math.abs(cam2x.proj[5] / cam1x.proj[5])).toBeCloseTo(2.0, 5);
+
+    // With elongated bounds, projected orthographic framing scales significantly larger than sphere-only framing
+    const elongatedBounds = { minX: -40, maxX: 40, minY: 0, maxY: 100, minZ: -400, maxZ: 400 };
+    const r = Math.hypot(40, 50, 400);
+    const sphereCam = computeStudioOrthoCamera([0, 50, 0], r, r, 38, 28, 800, 1000, 1.0);
+    const projCam = computeStudioOrthoCamera(
+      [0, 50, 0],
+      r,
+      r,
+      38,
+      28,
+      800,
+      1000,
+      1.0,
+      0,
+      undefined,
+      0,
+      0,
+      elongatedBounds,
+    );
+    expect(Math.abs(projCam.proj[0])).toBeGreaterThan(Math.abs(sphereCam.proj[0]) * 1.35);
+    expect(Math.abs(projCam.proj[5])).toBeGreaterThan(Math.abs(sphereCam.proj[5]) * 1.35);
   });
 
   it('computes normal-offset shadow biases that clear PCF spreads on vertical walls for any model size', () => {

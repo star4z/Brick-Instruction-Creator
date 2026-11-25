@@ -19,6 +19,7 @@
 
 import type { Vec3, WorldBox } from './minifigPose';
 import { computePageTypography, type PageDensity } from './pageTypography';
+import type { WorldBounds3D } from './stepCamera';
 import { PAPER_FORMAT_ORDER, PAPER_FORMAT_SPECS, type PaperFormatSpec } from './stepToolbar';
 
 export type StepFlowDirection = 'row' | 'column';
@@ -619,6 +620,8 @@ export const SMART_AUTO_MIN_STUD_SIZE_CM = 0.5;
 export interface BoundingSphereLdu {
   center: Vec3;
   radius: number;
+  /** Axis-aligned union world bounds of the input boxes (when non-empty). */
+  bounds?: WorldBounds3D;
 }
 
 export interface SmartAutoPageContext {
@@ -650,6 +653,10 @@ export interface SmartAutoStepMetric {
   absStepNum?: number;
   /** Orthographic camera framing radius in LDU (from computeStepCameraFraming). */
   viewRadiusLdu: number;
+  /** Projected half-width along camera right axis in LDU (from computeProjectedOrthoHalfExtents). */
+  projHalfWLdu?: number;
+  /** Projected half-height along camera up axis in LDU (from computeProjectedOrthoHalfExtents). */
+  projHalfHLdu?: number;
   /** User/override step zoom multiplier (default 1.0, clamped >= 0.4). */
   modelScale?: number;
   /** Distinct (partId, colorId) entries rendered in the step's PLI box (0..7). */
@@ -818,6 +825,7 @@ export function computeBoundingSphereFromBoxLists(
   return {
     center: [cx, cy, cz],
     radius: Math.max(minRadius, Math.sqrt(maxR2)),
+    bounds: { minX, minY, minZ, maxX, maxY, maxZ },
   };
 }
 
@@ -874,37 +882,51 @@ export function buildSmartAutoPageContext(params: {
 /**
  * Computes the physical printed length (in cm) of 1 LEGO stud (20 LDU) inside a
  * step's 3D render box `(modelAreaWidthIn × modelAreaHeightIn)` under the exact
- * orthographic projection used by `WebGLBrickEngine.computeMVP` + `object-contain`.
+ * aspect-fitted orthographic projection used by `computeStepOrthoFrustum` /
+ * `WebGLBrickEngine.computeMVP` + `object-contain`.
+ *
+ * When `projHalfWLdu` and `projHalfHLdu` are omitted, falls back to isotropic
+ * `viewRadiusLdu` on both axes.
  */
 export function computeRenderedStudSizeCm(
   modelAreaWidthIn: number,
   modelAreaHeightIn: number,
   viewRadiusLdu: number,
   modelScale = 1.0,
+  projHalfWLdu?: number,
+  projHalfHLdu?: number,
 ): number {
-  const minModelSideIn = Math.max(0, Math.min(modelAreaWidthIn, modelAreaHeightIn));
+  const safeW = Math.max(0, Number.isFinite(modelAreaWidthIn) ? modelAreaWidthIn : 0);
+  const safeH = Math.max(0, Number.isFinite(modelAreaHeightIn) ? modelAreaHeightIn : 0);
   const safeZoom = Math.max(0.4, Number.isFinite(modelScale) ? modelScale : 1.0);
   const safeRadius = Math.max(20, Number.isFinite(viewRadiusLdu) ? viewRadiusLdu : 20);
-  return (
-    (LDU_PER_STUD * CM_PER_INCH * minModelSideIn * safeZoom) /
-    (2 * STEP_CAMERA_RADIUS_MARGIN * safeRadius)
+  const effHalfW = Math.max(
+    12,
+    typeof projHalfWLdu === 'number' && Number.isFinite(projHalfWLdu) ? projHalfWLdu : safeRadius,
   );
+  const effHalfH = Math.max(
+    12,
+    typeof projHalfHLdu === 'number' && Number.isFinite(projHalfHLdu) ? projHalfHLdu : safeRadius,
+  );
+  const inPerLduW = safeW / (2 * STEP_CAMERA_RADIUS_MARGIN * effHalfW);
+  const inPerLduH = safeH / (2 * STEP_CAMERA_RADIUS_MARGIN * effHalfH);
+  return LDU_PER_STUD * CM_PER_INCH * Math.min(inPerLduW, inPerLduH) * safeZoom;
 }
 
 /**
- * Exact inverse of `computeRenderedStudSizeCm`: returns the minimum physical
- * `min(modelAreaWidthIn, modelAreaHeightIn)` in inches required so that 1 stud
- * renders at least `minStudSizeCm` centimeters.
+ * Exact inverse of `computeRenderedStudSizeCm` along a single axis: returns the
+ * minimum physical model-area side (in inches) required for a projected half-extent
+ * `halfExtentLdu` so that 1 stud renders at least `minStudSizeCm` centimeters.
  */
 export function computeRequiredModelSideForStudCm(
-  viewRadiusLdu: number,
+  halfExtentLdu: number,
   modelScale = 1.0,
   minStudSizeCm = SMART_AUTO_MIN_STUD_SIZE_CM,
 ): number {
   const safeZoom = Math.max(0.4, Number.isFinite(modelScale) ? modelScale : 1.0);
-  const safeRadius = Math.max(20, Number.isFinite(viewRadiusLdu) ? viewRadiusLdu : 20);
+  const safeHalf = Math.max(12, Number.isFinite(halfExtentLdu) ? halfExtentLdu : 20);
   return (
-    (Math.max(0.1, minStudSizeCm) * 2 * STEP_CAMERA_RADIUS_MARGIN * safeRadius) /
+    (Math.max(0.1, minStudSizeCm) * 2 * STEP_CAMERA_RADIUS_MARGIN * safeHalf) /
     (LDU_PER_STUD * CM_PER_INCH * safeZoom)
   );
 }
@@ -982,6 +1004,8 @@ export function evaluateStepInSlot(
     modelAreaHeightIn,
     step.viewRadiusLdu,
     modelScale,
+    step.projHalfWLdu,
+    step.projHalfHLdu,
   );
 
   const meetsMinArea =
@@ -990,13 +1014,23 @@ export function evaluateStepInSlot(
   const meetsMinStudSize = studSizeCm >= ctx.minStudSizeCm - 1e-4;
 
   // Minimum slot footprint needed to satisfy both constraints (1-row PLI baseline)
-  const reqModelForStud = computeRequiredModelSideForStudCm(
-    step.viewRadiusLdu,
-    modelScale,
-    ctx.minStudSizeCm,
+  const safeRadius = Math.max(20, Number.isFinite(step.viewRadiusLdu) ? step.viewRadiusLdu : 20);
+  const effHalfW =
+    typeof step.projHalfWLdu === 'number' && Number.isFinite(step.projHalfWLdu)
+      ? Math.max(12, step.projHalfWLdu)
+      : safeRadius;
+  const effHalfH =
+    typeof step.projHalfHLdu === 'number' && Number.isFinite(step.projHalfHLdu)
+      ? Math.max(12, step.projHalfHLdu)
+      : safeRadius;
+  const reqModelW = Math.max(
+    ctx.minStepAreaWidthIn,
+    computeRequiredModelSideForStudCm(effHalfW, modelScale, ctx.minStudSizeCm),
   );
-  const reqModelW = Math.max(ctx.minStepAreaWidthIn, reqModelForStud);
-  const reqModelH = Math.max(ctx.minStepAreaHeightIn, reqModelForStud);
+  const reqModelH = Math.max(
+    ctx.minStepAreaHeightIn,
+    computeRequiredModelSideForStudCm(effHalfH, modelScale, ctx.minStudSizeCm),
+  );
   const reqCalloutW =
     step.hasInlineCallout && !step.isOfficialMinifigStyle && step.calloutDir !== 'vertical'
       ? (115 / 72) * ts + calloutGapIn
@@ -1513,6 +1547,35 @@ export function analyzePageSizeFit(params: {
   };
 
   const candidates: Array<SuggestedPageSize & { area: number }> = [];
+
+  // First check whether simply rotating the current standard paper sheet (e.g. Portrait ↔ Landscape)
+  // satisfies every step — for wide/elongated or tall models this often solves the warning without
+  // requiring a physically larger paper stock.
+  const curFmt = specs[params.currentFormatId];
+  if (
+    curFmt &&
+    curFmt.id !== 'screen' &&
+    curFmt.id !== 'custom' &&
+    curFmt.supportsOrientation
+  ) {
+    const curShort = Math.min(curFmt.wIn, curFmt.hIn);
+    const curLong = Math.max(curFmt.wIn, curFmt.hIn);
+    const altOrient: 'landscape' | 'portrait' = curOrient === 'portrait' ? 'landscape' : 'portrait';
+    const altDims = altOrient === 'portrait' ? [curShort, curLong] : [curLong, curShort];
+    if (allChecksFitAt(altDims[0], altDims[1])) {
+      candidates.push({
+        formatId: curFmt.id,
+        name: curFmt.name,
+        shortName: curFmt.shortName,
+        orientation: altOrient,
+        widthIn: altDims[0],
+        heightIn: altDims[1],
+        label: `${curFmt.shortName} (${altOrient === 'portrait' ? 'Portrait' : 'Landscape'})`,
+        area: curShort * curLong,
+      });
+    }
+  }
+
   for (const fmtId of PAPER_FORMAT_ORDER) {
     if (fmtId === 'screen' || fmtId === 'custom') continue;
     const fmt = specs[fmtId];

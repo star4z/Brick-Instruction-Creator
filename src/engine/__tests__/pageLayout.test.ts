@@ -497,4 +497,70 @@ describe('pageLayout engine', () => {
       expect(r.y + r.h).toBeLessThanOrEqual(84.5);
     }
   });
+
+  it('computes tighter aspect-aware stud sizes using projected half-extents and suggests rotating the same sheet when it resolves the warning', () => {
+    // Elongated low-profile model: full bounding sphere radius 520 LDU,
+    // projected half-width 360 LDU, projected half-height 220 LDU.
+    // On US Letter Portrait (modelArea ~7.4" × 8.5"):
+    //   - Width-limited at 360 LDU -> studSize ~0.46 cm (< 0.50 cm)
+    // On US Letter Landscape (modelArea ~10.0" × 6.2"):
+    //   - Both axes >= 0.50 cm/stud -> fits WITHOUT needing larger paper!
+    const wideStep: SmartAutoStepMetric = {
+      stepId: 's_wide',
+      stepNum: 3,
+      viewRadiusLdu: 520,
+      projHalfWLdu: 360,
+      projHalfHLdu: 220,
+      pliUniqueCount: 1,
+    };
+
+    const portraitStud = computeRenderedStudSizeCm(7.4, 8.5, 520, 1.0, 360, 220);
+    const landscapeStud = computeRenderedStudSizeCm(10.0, 6.2, 520, 1.0, 360, 220);
+    const sphereOnlyStud = computeRenderedStudSizeCm(7.4, 8.5, 520, 1.0);
+    expect(portraitStud).toBeGreaterThan(sphereOnlyStud * 1.35);
+    expect(landscapeStud).toBeGreaterThan(portraitStud);
+    expect(landscapeStud).toBeGreaterThanOrEqual(0.5);
+
+    const portraitWarn = analyzePageSizeFit({
+      stepChecks: [{ metric: wideStep, pageId: 'pg_wide', pageNum: 1 }],
+      currentFormatId: 'letter',
+      currentOrientation: 'portrait',
+      currentPageWidthIn: 8.5,
+      currentPageHeightIn: 11,
+      density: 'balanced',
+    });
+    expect(portraitWarn.hasWarning).toBe(true);
+    expect(portraitWarn.suggestedFormats.length).toBeGreaterThanOrEqual(1);
+    expect(portraitWarn.suggestedFormats[0].formatId).toBe('letter');
+    expect(portraitWarn.suggestedFormats[0].orientation).toBe('landscape');
+    expect(portraitWarn.suggestedFormats[0].label).toBe('US Letter (Landscape)');
+    // Required custom dimensions stay compact instead of inflating height/width to the full bounding sphere
+    expect(portraitWarn.minRequiredPageWidthIn).toBeLessThanOrEqual(9.5);
+    expect(portraitWarn.minRequiredPageHeightIn).toBe(11);
+
+    const landscapeCheck = analyzePageSizeFit({
+      stepChecks: [{ metric: wideStep, pageId: 'pg_wide', pageNum: 1 }],
+      currentFormatId: 'letter',
+      currentOrientation: 'landscape',
+      currentPageWidthIn: 11,
+      currentPageHeightIn: 8.5,
+      density: 'balanced',
+    });
+    expect(landscapeCheck.hasWarning).toBe(false);
+  });
+
+  it('returns union AABB bounds from computeBoundingSphereFromBoxLists', () => {
+    const sphere = computeBoundingSphereFromBoxLists(
+      [{ min: [-40, 0, -200], max: [40, 80, 0], center: [0, 40, -100] }],
+      [{ min: [-40, 0, 0], max: [40, 80, 200], center: [0, 40, 100] }],
+    );
+    expect(sphere.bounds).toEqual({
+      minX: -40,
+      minY: 0,
+      minZ: -200,
+      maxX: 40,
+      maxY: 80,
+      maxZ: 200,
+    });
+  });
 });
