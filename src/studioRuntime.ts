@@ -60,6 +60,13 @@ import {
   resolvePageNavigationTarget,
 } from './engine/pageNavigation';
 import {
+  STAGE_RESET_ANIM_DURATION_MS,
+  createQuickPinchTracker,
+  interpolateStageReset,
+  recordQuickPinchSample,
+  shouldTriggerQuickPinchFit,
+} from './engine/stageGestures';
+import {
   MINIFIG_BUILD_CAMERA,
   MINIFIG_POSE_CAMERA,
   classifyMinifigGroupKind,
@@ -7408,7 +7415,17 @@ function applyStageTransform() {
   if (!stageRafId) stageRafId = requestAnimationFrame(flushStageTransform);
 }
 
+let stageZoomAnimId = 0;
+
+function cancelStageZoomAnimation() {
+  if (stageZoomAnimId) {
+    cancelAnimationFrame(stageZoomAnimId);
+    stageZoomAnimId = 0;
+  }
+}
+
 function setZoom(nextZoom, focalX = null, focalY = null) {
+  cancelStageZoomAnimation();
   const prevZoom = state.zoom;
   const clamped = Math.max(0.45, Math.min(4.5, nextZoom));
   if (focalX !== null && focalY !== null) {
@@ -7423,7 +7440,42 @@ function setZoom(nextZoom, focalX = null, focalY = null) {
   applyStageTransform();
 }
 
-function resetZoom() { state.zoom = 1; state.panX = 0; state.panY = 0; applyStageTransform(); }
+function resetZoom() {
+  cancelStageZoomAnimation();
+  state.zoom = 1;
+  state.panX = 0;
+  state.panY = 0;
+  applyStageTransform();
+}
+
+function animateResetZoom(durationMs = STAGE_RESET_ANIM_DURATION_MS) {
+  cancelStageZoomAnimation();
+  const reducedMotion = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  const alreadyFit =
+    Math.abs(state.zoom - 1) < 0.002 &&
+    Math.abs(state.panX) < 0.5 &&
+    Math.abs(state.panY) < 0.5;
+  if (reducedMotion || alreadyFit || durationMs <= 0) {
+    resetZoom();
+    return;
+  }
+  const from = { zoom: state.zoom, panX: state.panX, panY: state.panY };
+  const startTime = performance.now();
+  const step = (now) => {
+    const progress = Math.min(1, Math.max(0, (now - startTime) / durationMs));
+    const next = interpolateStageReset(from, progress);
+    state.zoom = next.zoom;
+    state.panX = next.panX;
+    state.panY = next.panY;
+    applyStageTransform();
+    if (progress < 1) {
+      stageZoomAnimId = requestAnimationFrame(step);
+    } else {
+      stageZoomAnimId = 0;
+    }
+  };
+  stageZoomAnimId = requestAnimationFrame(step);
+}
 
 function getActivePagePhysicalInches() {
   if (state.paperFormat === 'custom') {
@@ -12752,11 +12804,12 @@ function scrollOverviewListTo(edge) {
 (function setupStageGestures() {
   const stage = document.getElementById('stageViewport');
   const pageFrame = document.getElementById('pageFrame');
-  let modeTouch = null; // 'pan' | 'pinch' | null
+  let modeTouch = null; // 'pan' | 'pinch' | 'pinch-fitted' | null
   let startZoom = 1, startPanX = 0, startPanY = 0;
   let startX = 0, startY = 0, startDist = 0, startMidX = 0, startMidY = 0;
   let lastTapTime = 0, touchMoved = false;
   let blankPress = null;
+  let pinchTracker = null;
 
   // Desktop mouse wheel focal-point zoom
   stage.addEventListener('wheel', (e) => {
@@ -12777,15 +12830,19 @@ function scrollOverviewListTo(edge) {
     }
     if (t.length === 2) {
       e.preventDefault();
+      cancelStageZoomAnimation();
+      lastTapTime = 0;
       modeTouch = 'pinch'; touchMoved = true;
       startZoom = state.zoom; startPanX = state.panX; startPanY = state.panY;
       startDist = Math.max(10, Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY));
       startMidX = (t[0].clientX + t[1].clientX) / 2;
       startMidY = (t[0].clientY + t[1].clientY) / 2;
+      pinchTracker = createQuickPinchTracker(startDist, performance.now());
     } else if (t.length === 1 && isPanGestureEnabled()) {
       e.preventDefault();
+      cancelStageZoomAnimation();
       const now = Date.now();
-      if (now - lastTapTime < 280) { resetZoom(); modeTouch = null; touchMoved = true; return; }
+      if (now - lastTapTime < 280) { animateResetZoom(); modeTouch = null; touchMoved = true; lastTapTime = 0; return; }
       lastTapTime = now;
       modeTouch = 'pan'; touchMoved = false;
       startPanX = state.panX; startPanY = state.panY;
@@ -12802,6 +12859,9 @@ function scrollOverviewListTo(edge) {
       const dist = Math.max(10, Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY));
       const midX = (t[0].clientX + t[1].clientX) / 2;
       const midY = (t[0].clientY + t[1].clientY) / 2;
+      if (pinchTracker) {
+        pinchTracker = recordQuickPinchSample(pinchTracker, dist, performance.now());
+      }
       const nextZoom = Math.max(0.45, Math.min(4.5, startZoom * (dist / startDist)));
       const { cx, cy } = getStageOrigin();
       const ratio = nextZoom / startZoom;
@@ -12820,11 +12880,31 @@ function scrollOverviewListTo(edge) {
 
   const endTouch = (e) => {
     const t = e.touches;
+    const isCancel = e.type === 'touchcancel';
+    if (modeTouch === 'pinch' && t.length < 2) {
+      const shouldFit = !isCancel && shouldTriggerQuickPinchFit(pinchTracker, performance.now());
+      pinchTracker = null;
+      if (shouldFit) {
+        animateResetZoom();
+        modeTouch = t.length > 0 ? 'pinch-fitted' : null;
+        return;
+      }
+    }
+    if (modeTouch === 'pinch-fitted') {
+      if (t.length === 0 || isCancel) modeTouch = null;
+      return;
+    }
+    if (isCancel) {
+      pinchTracker = null;
+      modeTouch = null;
+      return;
+    }
     if (t.length === 1 && isPanGestureEnabled()) {
       modeTouch = 'pan';
       startPanX = state.panX; startPanY = state.panY;
       startX = t[0].clientX; startY = t[0].clientY;
     } else if (t.length === 0) {
+      pinchTracker = null;
       modeTouch = null;
     }
   };
@@ -12837,6 +12917,7 @@ function scrollOverviewListTo(edge) {
   stage.addEventListener('mousedown', (e) => {
     if (!state.model || !isPanGestureEnabled() || e.button !== 0) return;
     if (e.target?.closest?.('a[href]')) return;
+    cancelStageZoomAnimation();
     mouseDragging = true;
     mousePanMoved = false;
     startPanX = state.panX; startPanY = state.panY;
