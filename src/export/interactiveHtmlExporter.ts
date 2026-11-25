@@ -18,6 +18,55 @@
 export const DEFAULT_EDITOR_URL = 'https://star4z.github.io/Brick-Instruction-Creator/';
 export const TOOL_DISPLAY_NAME = 'Brick Instruction Creator';
 
+export interface NavigatorLike {
+  userAgent?: string;
+  platform?: string;
+  maxTouchPoints?: number;
+}
+
+export interface IosHtmlExportWarningSpec {
+  tone: 'warning';
+  title: string;
+  message: string;
+  detail: string;
+  confirmLabel: string;
+  cancelLabel: string;
+}
+
+/**
+ * Returns true on iPhone, iPad, iPod, and iPadOS 13+ desktop-mode Safari
+ * (`platform === 'MacIntel'` with multi-touch).
+ */
+export function isIosDevice(
+  nav: NavigatorLike | null | undefined = typeof navigator !== 'undefined' ? navigator : undefined,
+): boolean {
+  if (!nav) return false;
+  const ua = nav.userAgent || '';
+  if (/iPad|iPhone|iPod/i.test(ua)) return true;
+  if (nav.platform === 'MacIntel' && (nav.maxTouchPoints || 0) > 1) return true;
+  return false;
+}
+
+/**
+ * Builds the warning dialog spec shown on iOS/iPadOS when the user selects
+ * Interactive HTML Export. Returns `null` on non-iOS platforms.
+ */
+export function getIosHtmlExportWarningDialog(
+  nav?: NavigatorLike | null,
+): IosHtmlExportWarningSpec | null {
+  if (!isIosDevice(nav)) return null;
+  return {
+    tone: 'warning',
+    title: 'Not Viewable on iOS',
+    message:
+      'Interactive 3D HTML files cannot be viewed directly on iOS or iPadOS (Files, Mail, Messages, and Safari block scripts in local HTML files).',
+    detail:
+      'You can still export the file to share or open on a Mac, Windows PC, or Android device — or export a PDF to view on iOS.',
+    confirmLabel: 'Export Anyway',
+    cancelLabel: 'Cancel',
+  };
+}
+
 export interface InteractiveTexDraw {
   k: string;   // texture key in payload.textures
   tp: string;  // base64 Float32Array positions

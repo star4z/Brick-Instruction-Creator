@@ -709,5 +709,23 @@ describe('studioRuntime safety checks', () => {
     expect(bomSetupHtml).toContain('id="bomSetupDoneBtn"');
     expect(runtime).not.toContain('bomSetupJumpBtn');
   });
+
+  it('warns iOS users with a dialog when selecting Export HTML before generating the file', () => {
+    const html = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf8');
+    const runtime = fs.readFileSync(path.resolve(process.cwd(), 'src/studioRuntime.ts'), 'utf8');
+
+    expect(html).toContain('id="confirmActionIcon"');
+    expect(runtime).toContain("const isWarning = spec.tone === 'warning';");
+    expect(runtime).toContain("iconEl.classList.toggle('bg-[var(--warning-soft)]', isWarning);");
+
+    const fnStart = runtime.indexOf('async function runInteractiveHtmlExport()');
+    const fnEnd = runtime.indexOf('const htmlDoc = generateInteractiveHtmlDocument(', fnStart);
+    expect(fnStart).toBeGreaterThan(-1);
+    expect(fnEnd).toBeGreaterThan(fnStart);
+    const exportHead = runtime.slice(fnStart, fnEnd);
+    expect(exportHead).toContain('const iosWarning = getIosHtmlExportWarningDialog();');
+    expect(exportHead).toContain('if (iosWarning && !(await openConfirmActionDialog(iosWarning))) return;');
+  });
 });
+
 

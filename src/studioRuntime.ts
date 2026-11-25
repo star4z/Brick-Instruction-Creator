@@ -244,6 +244,8 @@ import {
   buildInteractiveHtmlFilename,
   encodeTypedArrayBase64,
   generateInteractiveHtmlDocument,
+  getIosHtmlExportWarningDialog,
+  isIosDevice,
 } from './export/interactiveHtmlExporter';
 import {
   BUILT_IN_THEMES,
@@ -8891,6 +8893,7 @@ function closeConfirmActionDialog(confirmed = false) {
 function openConfirmActionDialog(spec) {
   if (!spec) return Promise.resolve(true);
   const modal = document.getElementById('confirmActionModal');
+  const iconEl = document.getElementById('confirmActionIcon');
   const titleEl = document.getElementById('confirmActionTitle');
   const msgEl = document.getElementById('confirmActionMessage');
   const detailEl = document.getElementById('confirmActionDetail');
@@ -8901,6 +8904,19 @@ function openConfirmActionDialog(spec) {
   }
   if (confirmActionResolver) closeConfirmActionDialog(false);
   confirmActionPriorFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const isWarning = spec.tone === 'warning';
+  if (iconEl) {
+    iconEl.classList.toggle('bg-[var(--warning-soft)]', isWarning);
+    iconEl.classList.toggle('text-[var(--warning)]', isWarning);
+    iconEl.classList.toggle('bg-[var(--danger-soft)]', !isWarning);
+    iconEl.classList.toggle('text-[var(--danger)]', !isWarning);
+  }
+  confirmBtn.classList.toggle('bg-[var(--primary)]', isWarning);
+  confirmBtn.classList.toggle('hover:bg-[var(--primary-hover)]', isWarning);
+  confirmBtn.classList.toggle('text-[var(--primary-foreground)]', isWarning);
+  confirmBtn.classList.toggle('bg-[var(--danger)]', !isWarning);
+  confirmBtn.classList.toggle('hover:opacity-95', !isWarning);
+  confirmBtn.classList.toggle('text-white', !isWarning);
   titleEl.textContent = spec.title || 'Are you sure?';
   msgEl.textContent = spec.message || '';
   if (detailEl) {
@@ -18289,6 +18305,8 @@ async function runInteractiveHtmlExport() {
     return;
   }
   closeMenu();
+  const iosWarning = getIosHtmlExportWarningDialog();
+  if (iosWarning && !(await openConfirmActionDialog(iosWarning))) return;
   const progWrap = document.getElementById('expProgressWrap');
   const progLbl = document.getElementById('expProgressLabel');
   const progPct = document.getElementById('expProgressPct');
@@ -20504,9 +20522,7 @@ if (emptyStateEl) {
 // iOS/iPadOS Files app greys out unregistered custom extensions when `accept`
 // is set; strip `accept` on Apple touch devices while JS strictly enforces
 // `.biw` and `.biwtheme` extensions on every platform.
-const isAppleTouchDevice =
-  /iPad|iPhone|iPod/.test(navigator.userAgent || '') ||
-  (navigator.platform === 'MacIntel' && (navigator.maxTouchPoints || 0) > 1);
+const isAppleTouchDevice = isIosDevice();
 if (isAppleTouchDevice) {
   document.getElementById('projectLoadInput')?.removeAttribute('accept');
   document.getElementById('themeImportInput')?.removeAttribute('accept');

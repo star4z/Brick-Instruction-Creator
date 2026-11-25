@@ -4,6 +4,8 @@ import {
   DEFAULT_EDITOR_URL,
   encodeTypedArrayBase64,
   generateInteractiveHtmlDocument,
+  getIosHtmlExportWarningDialog,
+  isIosDevice,
   serializeJsonForScriptTag,
   type InteractiveHtmlPayload,
 } from '../interactiveHtmlExporter';
@@ -310,4 +312,78 @@ describe('interactiveHtmlExporter font stacks', () => {
     expect(scriptMatch).toBeTruthy();
     expect(() => new Function(scriptMatch![1])).not.toThrow();
   });
+
+  it('detects iPhone, iPad, iPod, and iPadOS desktop-mode Safari via isIosDevice', () => {
+    expect(isIosDevice({ userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X)' })).toBe(true);
+    expect(isIosDevice({ userAgent: 'Mozilla/5.0 (iPad; CPU OS 17_4 like Mac OS X)' })).toBe(true);
+    expect(isIosDevice({ userAgent: 'Mozilla/5.0 (iPod touch; CPU iPhone OS 15_0 like Mac OS X)' })).toBe(true);
+    // iPadOS 13+ desktop Safari reports MacIntel with touch points
+    expect(
+      isIosDevice({
+        userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15',
+        platform: 'MacIntel',
+        maxTouchPoints: 5,
+      }),
+    ).toBe(true);
+
+    // Non-iOS platforms
+    expect(
+      isIosDevice({
+        userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15',
+        platform: 'MacIntel',
+        maxTouchPoints: 0,
+      }),
+    ).toBe(false);
+    expect(
+      isIosDevice({
+        userAgent: 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36',
+        platform: 'Linux armv8l',
+        maxTouchPoints: 5,
+      }),
+    ).toBe(false);
+    expect(
+      isIosDevice({
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        platform: 'Win32',
+        maxTouchPoints: 0,
+      }),
+    ).toBe(false);
+    expect(isIosDevice(null)).toBe(false);
+  });
+
+  it('returns a warning dialog spec on iOS/iPadOS and null on non-iOS platforms', () => {
+    expect(
+      getIosHtmlExportWarningDialog({
+        userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)',
+        platform: 'MacIntel',
+        maxTouchPoints: 0,
+      }),
+    ).toBeNull();
+    expect(
+      getIosHtmlExportWarningDialog({
+        userAgent: 'Mozilla/5.0 (Linux; Android 14; Pixel 8)',
+        platform: 'Linux armv8l',
+        maxTouchPoints: 5,
+      }),
+    ).toBeNull();
+
+    const iphoneSpec = getIosHtmlExportWarningDialog({
+      userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X)',
+    });
+    expect(iphoneSpec).not.toBeNull();
+    expect(iphoneSpec!.tone).toBe('warning');
+    expect(iphoneSpec!.title).toMatch(/iOS/i);
+    expect(iphoneSpec!.message).toMatch(/cannot be viewed directly on iOS/i);
+    expect(iphoneSpec!.detail).toMatch(/PDF/i);
+    expect(iphoneSpec!.confirmLabel).toBe('Export Anyway');
+    expect(iphoneSpec!.cancelLabel).toBe('Cancel');
+
+    const ipadosSpec = getIosHtmlExportWarningDialog({
+      userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)',
+      platform: 'MacIntel',
+      maxTouchPoints: 5,
+    });
+    expect(ipadosSpec).toEqual(iphoneSpec);
+  });
 });
+
