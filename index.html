@@ -1529,14 +1529,20 @@
         </div>
 
         <div id="bomSetupScroll" class="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 sm:p-5 space-y-5">
-          <!-- Theme ownership banner -->
-          <div class="flex items-center gap-2 px-3 py-2 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)]">
-            <span id="bomThemeSwatch" class="w-3.5 h-3.5 rounded-full border border-black/20 shrink-0"></span>
-            <span class="text-[11px] text-[var(--muted-foreground)] truncate">
-              Saved with theme: <strong id="bomThemeName" class="text-[var(--foreground)] font-semibold">Classic Blue</strong>
-              <span id="bomThemeBuiltInNote" class="hidden"> · Changes create a custom copy</span>
+          <!-- Theme ownership banner (links to Style dialog) -->
+          <button id="btnBomOpenStyle" type="button" title="Open Style settings" class="group w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] hover:border-[var(--primary)] text-left transition-colors cursor-pointer">
+            <span class="flex items-center gap-2 min-w-0">
+              <span id="bomThemeSwatch" class="w-3.5 h-3.5 rounded-full border border-black/20 shrink-0"></span>
+              <span class="text-[11px] text-[var(--muted-foreground)] truncate">
+                Saved with theme: <strong id="bomThemeName" class="text-[var(--foreground)] font-semibold">Classic Blue</strong>
+                <span id="bomThemeBuiltInNote" class="hidden"> · Changes create a custom copy</span>
+              </span>
             </span>
-          </div>
+            <span class="inline-flex items-center gap-1 shrink-0 text-[11px] font-semibold text-[var(--muted-foreground)] group-hover:text-[var(--primary)] transition-colors">
+              <span>Style</span>
+              <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+            </span>
+          </button>
 
           <!-- Format Switcher: Grid vs Table -->
           <div class="space-y-2">

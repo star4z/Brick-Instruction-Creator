@@ -20223,6 +20223,13 @@ if (btnStyleOpenBomSetup) {
     openBomSetupModal();
   };
 }
+const btnBomOpenStyle = document.getElementById('btnBomOpenStyle');
+if (btnBomOpenStyle) {
+  btnBomOpenStyle.onclick = () => {
+    closeBomSetupModal();
+    setStylePopoverOpen(true);
+  };
+}
 
 document.querySelectorAll('.bom-gridmode-btn').forEach(b => {
   b.onclick = () => patchBomConfig({ gridMode: b.getAttribute('data-bom-grid-mode') === 'custom' ? 'custom' : 'auto' }, { immediate: true });

@@ -12,7 +12,7 @@ The Style dialog (`#stylePopover`) is now the only place to choose and edit them
 3. **Page Background**, **Text, Boxes & Accents**, **Typography**: the former editor controls. They apply live.
 4. **Rendering Style**: lighting (`None` / `Standard` / `Studio`), outlines (`Outline New Parts` + color + line weight, `Outline All Parts` + line weight), and `Fade Earlier Pieces`, all stored on the theme.
 5. **Step Display**: rotation badges, 1:1 axle & beam guides, minifigure step style & 1:1 view, step borders, and model title on pages, all stored on the theme.
-6. **Parts List**: a direct link (`#btnStyleOpenBomSetup`) to the **Parts List Setup** dialog (`#bomSetupModal`) with a compact summary of the active theme's Parts List configuration.
+6. **Parts List**: a direct link (`#btnStyleOpenBomSetup`) to the **Parts List Setup** dialog (`#bomSetupModal`) with a compact summary of the active theme's Parts List configuration; `#bomSetupModal`'s **Saved with theme** banner (`#btnBomOpenStyle`) links back to the Style dialog.
 
 ## Editing Model
 

@@ -799,6 +799,35 @@ describe('studioRuntime safety checks', () => {
     expect(runtime).not.toContain('bomSetupJumpBtn');
   });
 
+  it('links the Parts List Setup Saved with theme banner to the Style dialog', () => {
+    const html = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf8');
+    const runtime = fs.readFileSync(path.resolve(process.cwd(), 'src/studioRuntime.ts'), 'utf8');
+
+    const modalStart = html.indexOf('id="bomSetupModal"');
+    const modalEnd = html.indexOf('id="applyAngleModal"', modalStart);
+    expect(modalStart).toBeGreaterThan(-1);
+    expect(modalEnd).toBeGreaterThan(modalStart);
+
+    const bomSetupHtml = html.slice(modalStart, modalEnd);
+    const btnStart = bomSetupHtml.indexOf('<button id="btnBomOpenStyle"');
+    const btnEnd = bomSetupHtml.indexOf('</button>', btnStart);
+    expect(btnStart).toBeGreaterThan(-1);
+    expect(btnEnd).toBeGreaterThan(btnStart);
+
+    const bannerHtml = bomSetupHtml.slice(btnStart, btnEnd);
+    expect(bannerHtml).toContain('Saved with theme:');
+    expect(bannerHtml).toContain('id="bomThemeName"');
+
+    const wireStart = runtime.indexOf("const btnBomOpenStyle = document.getElementById('btnBomOpenStyle');");
+    const wireEnd = runtime.indexOf('document.querySelectorAll(\'.bom-gridmode-btn\')', wireStart);
+    expect(wireStart).toBeGreaterThan(-1);
+    expect(wireEnd).toBeGreaterThan(wireStart);
+
+    const wireBlock = runtime.slice(wireStart, wireEnd);
+    expect(wireBlock).toContain('closeBomSetupModal();');
+    expect(wireBlock).toContain('setStylePopoverOpen(true);');
+  });
+
   it('warns iOS users with a dialog when selecting Export HTML before generating the file', () => {
     const html = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf8');
     const runtime = fs.readFileSync(path.resolve(process.cwd(), 'src/studioRuntime.ts'), 'utf8');
