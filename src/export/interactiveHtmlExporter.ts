@@ -690,13 +690,14 @@ ${customFontFacesCss}  :root {
     font-size: 13px; font-weight: 800; box-shadow: 0 3px 10px rgba(0,0,0,0.16);
   }
   .step-cue {
-    display: inline-flex; align-items: center; gap: 7px; padding: 4px 13px 4px 5px; border-radius: 999px;
-    background: #ffffff; color: #18181b; border: 2px solid var(--accent);
-    font-size: 13px; font-weight: 800; width: fit-content; box-shadow: 0 3px 10px rgba(0,0,0,0.18);
+    display: inline-flex; align-items: center; gap: 7px; padding: 0;
+    background: transparent; color: var(--text); border: none;
+    font-size: 13px; font-weight: 800; width: fit-content; box-shadow: none;
   }
   .step-cue-icon {
     width: 30px; height: 30px; border-radius: 999px; background: var(--accent); color: #ffffff;
     display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+    box-shadow: 0 3px 10px rgba(0,0,0,0.16);
   }
 
   .page-step-tabs { display: flex; flex-wrap: wrap; gap: 4px; }

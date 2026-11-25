@@ -23,15 +23,17 @@ function makeNdcQuad(x0: number, y0: number, x1: number, y1: number): Float32Arr
 describe('computeRotationBadgeMetrics', () => {
   const pt = (p: number) => p * 1.25;
 
-  it('produces spacious, well-proportioned circular medallions for icon-only cues', () => {
+  it('produces spacious, borderless circular medallions for icon-only cues', () => {
     const regular = computeRotationBadgeMetrics(pt, false, { text: '', iconOnly: true });
     const tight = computeRotationBadgeMetrics(pt, true, { text: '', iconOnly: true });
 
-    expect(regular.medallionPx).toBeGreaterThanOrEqual(42);
-    expect(regular.outerH).toBeGreaterThanOrEqual(52);
+    expect(regular.medallionPx).toBeGreaterThanOrEqual(46);
+    expect(regular.borderPx).toBe(0);
+    expect(regular.padY).toBe(0);
+    expect(regular.outerH).toBe(regular.medallionPx);
     expect(regular.estWidth).toBe(regular.outerH);
-    expect(regular.svgPx).toBeGreaterThanOrEqual(30);
-    expect(tight.medallionPx).toBeGreaterThanOrEqual(32);
+    expect(regular.svgPx).toBeGreaterThanOrEqual(32);
+    expect(tight.medallionPx).toBeGreaterThanOrEqual(36);
     expect(tight.medallionPx).toBeLessThan(regular.medallionPx);
   });
 

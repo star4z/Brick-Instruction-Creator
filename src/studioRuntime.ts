@@ -8574,15 +8574,13 @@ function renderRotationCueBadgeHtml(cue, theme, typo, isTightSlot = false, wordl
     : buildYawRotateIconInnerSvg(cue === 'yaw_90_ccw');
 
   if (disp.iconOnly) {
-    return `<span class="inline-flex items-center justify-center rounded-full bg-white shrink-0" style="width:${m.outerH}px;height:${m.outerH}px;border:${m.borderPx}px solid ${theme.accent};box-shadow:0 3px 12px rgba(0,0,0,0.16)" title="${escHtml(disp.ariaLabel)}" aria-label="${escHtml(disp.ariaLabel)}">
-      <span class="rounded-full flex items-center justify-center shrink-0" style="width:${m.medallionPx}px;height:${m.medallionPx}px;background:${theme.accent};color:#ffffff">
-        <svg style="width:${m.svgPx}px;height:${m.svgPx}px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.05" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${svgInner}</svg>
-      </span>
+    return `<span class="inline-flex items-center justify-center rounded-full shrink-0" style="width:${m.medallionPx}px;height:${m.medallionPx}px;background:${theme.accent};color:#ffffff;box-shadow:0 3px 10px rgba(0,0,0,0.16)" title="${escHtml(disp.ariaLabel)}" aria-label="${escHtml(disp.ariaLabel)}">
+      <svg style="width:${m.svgPx}px;height:${m.svgPx}px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.05" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${svgInner}</svg>
     </span>`;
   }
 
-  return `<span class="inline-flex items-center font-extrabold rounded-full bg-white text-[#18181b] whitespace-nowrap shrink-0" style="gap:${m.gapPx}px;border:${m.borderPx}px solid ${theme.accent};font-size:${m.fontPx}px;padding:${m.padY}px ${m.padR}px ${m.padY}px ${m.padL}px;box-shadow:0 3px 12px rgba(0,0,0,0.16)" title="${escHtml(disp.ariaLabel)}">
-    <span class="rounded-full flex items-center justify-center shrink-0" style="width:${m.medallionPx}px;height:${m.medallionPx}px;background:${theme.accent};color:#ffffff">
+  return `<span class="inline-flex items-center font-extrabold whitespace-nowrap shrink-0" style="gap:${m.gapPx}px;font-size:${m.fontPx}px;color:${theme.text || '#18181b'}" title="${escHtml(disp.ariaLabel)}">
+    <span class="rounded-full flex items-center justify-center shrink-0" style="width:${m.medallionPx}px;height:${m.medallionPx}px;background:${theme.accent};color:#ffffff;box-shadow:0 3px 10px rgba(0,0,0,0.16)">
       <svg style="width:${m.svgPx}px;height:${m.svgPx}px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${svgInner}</svg>
     </span>
     <span class="tracking-tight leading-none">${escHtml(label)}</span>
@@ -8596,43 +8594,33 @@ function measureRotationCueBadgeCanvas(ctx, cue, theme, typo, isTightSlot, wordl
   ctx.font = themeCanvasFont(theme, 800, m.fontPx);
   const textW = disp.iconOnly ? 0 : Math.ceil(ctx.measureText(disp.text).width);
   ctx.restore();
-  const cueH = m.medallionPx + m.padY * 2;
-  const cueW = disp.iconOnly ? cueH : (m.padL + m.medallionPx + m.gapPx + textW + m.padR);
+  const cueH = m.medallionPx;
+  const cueW = disp.iconOnly ? cueH : (m.medallionPx + m.gapPx + textW);
   return { disp, m, cueW, cueH };
 }
 
-function drawRotationCueBadgeCanvasAt(ctx, cue, cueX, cueY, theme, typo, isTightSlot, drawRRect, wordless = Boolean(state.wordlessMode)) {
+function drawRotationCueBadgeCanvasAt(ctx, cue, cueX, cueY, theme, typo, isTightSlot, _drawRRect, wordless = Boolean(state.wordlessMode)) {
   if (!cue || cue === 'none') return;
-  const { disp, m, cueW, cueH } = measureRotationCueBadgeCanvas(ctx, cue, theme, typo, isTightSlot, wordless);
+  const { disp, m, cueH } = measureRotationCueBadgeCanvas(ctx, cue, theme, typo, isTightSlot, wordless);
   const label = disp.text;
   const medallionD = m.medallionPx;
 
   ctx.save();
   ctx.font = themeCanvasFont(theme, 800, m.fontPx);
 
-  // Pill or circular medallion body with crisp drop shadow and accent border
+  // Solid accent circular medallion (no outer white/blue circle outlines)
+  const cx = cueX + medallionD / 2;
+  const cy = cueY + cueH / 2;
+  const r = medallionD / 2;
   ctx.save();
   ctx.shadowColor = 'rgba(0, 0, 0, 0.16)';
   ctx.shadowBlur = 10;
   ctx.shadowOffsetY = 2;
-  drawRRect(cueX, cueY, cueW, cueH, cueH / 2);
-  ctx.fillStyle = '#ffffff';
-  ctx.fill();
-  ctx.restore();
-
-  drawRRect(cueX, cueY, cueW, cueH, cueH / 2);
-  ctx.strokeStyle = theme.accent;
-  ctx.lineWidth = m.borderPx;
-  ctx.stroke();
-
-  // Solid accent circular medallion
-  const cx = disp.iconOnly ? (cueX + cueW / 2) : (cueX + m.padL + medallionD / 2);
-  const cy = cueY + cueH / 2;
-  const r = medallionD / 2;
   ctx.beginPath();
   ctx.arc(cx, cy, r, 0, Math.PI * 2);
   ctx.fillStyle = theme.accent;
   ctx.fill();
+  ctx.restore();
 
   // Clean, spacious white dual curved arrows inside medallion (no center dash)
   ctx.save();
@@ -8690,10 +8678,10 @@ function drawRotationCueBadgeCanvasAt(ctx, cue, cueX, cueY, theme, typo, isTight
 
   // Bold label (omitted when iconOnly)
   if (!disp.iconOnly) {
-    ctx.fillStyle = '#18181b';
+    ctx.fillStyle = theme.text || '#18181b';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText(label, cueX + m.padL + medallionD + m.gapPx, cy + 0.5);
+    ctx.fillText(label, cueX + medallionD + m.gapPx, cy + 0.5);
   }
   ctx.restore();
 }

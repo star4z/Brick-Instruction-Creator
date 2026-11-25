@@ -95,20 +95,18 @@ export function computeRotationBadgeMetrics(
   disp: Pick<RotationCueDisplay, 'text' | 'iconOnly'>,
 ): RotationBadgeMetrics {
   const medallionPx = disp.iconOnly
-    ? Math.max(isTightSlot ? 32 : 42, Math.round(pt(isTightSlot ? 28 : 36)))
-    : Math.max(isTightSlot ? 28 : 36, Math.round(pt(isTightSlot ? 24 : 31)));
-  const svgPx = Math.max(20, Math.round(medallionPx * (disp.iconOnly ? 0.72 : 0.7)));
-  const fontPx = Math.max(isTightSlot ? 11 : 13, Math.round(pt(isTightSlot ? 10 : 12)));
-  const padY = Math.max(4, Math.round(pt(isTightSlot ? 3.2 : 4.5)));
-  const padL = padY;
-  const padR = Math.max(11, Math.round(pt(isTightSlot ? 9 : 13)));
-  const gapPx = Math.max(7, Math.round(pt(isTightSlot ? 6 : 8)));
-  const borderPx = Math.max(2, Math.round(pt(2.2)));
-  const outerH = medallionPx + padY * 2 + borderPx * 2;
+    ? Math.max(isTightSlot ? 36 : 46, Math.round(pt(isTightSlot ? 31 : 40)))
+    : Math.max(isTightSlot ? 30 : 38, Math.round(pt(isTightSlot ? 26 : 33)));
+  const svgPx = Math.max(22, Math.round(medallionPx * (disp.iconOnly ? 0.72 : 0.7)));
+  const fontPx = Math.max(isTightSlot ? 11 : 13.5, Math.round(pt(isTightSlot ? 10 : 12.5)));
+  const padY = 0;
+  const padL = 0;
+  const padR = 0;
+  const gapPx = Math.max(6, Math.round(pt(isTightSlot ? 5 : 7)));
+  const borderPx = 0;
+  const outerH = medallionPx;
   const estTextW = disp.iconOnly ? 0 : Math.ceil((disp.text || '').length * fontPx * 0.62);
-  const estWidth = disp.iconOnly
-    ? outerH
-    : padL + medallionPx + gapPx + estTextW + padR + borderPx * 2;
+  const estWidth = disp.iconOnly ? outerH : medallionPx + gapPx + estTextW;
 
   return {
     medallionPx,
