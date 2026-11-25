@@ -409,6 +409,16 @@ describe('Cover Metadata & LEGO-Style Layout Geometry', () => {
     expect(tb!.centerX).toBeCloseTo(0, 2);
     expect(tb!.centerY).toBeCloseTo(0, 2);
   });
+
+  it('includes all vertex buffers when computing tight bounds across untextured and textured meshes', () => {
+    const baseTri = new Float32Array([-20, 0, 0, 20, 0, 0, 0, 20, 0]);
+    const texTri = new Float32Array([-20, -40, 0, 20, -40, 0, 0, -10, 0]);
+    const tb = computeTightCameraBounds([baseTri, texTri], [0, -10, 0], 0, 0, 400, 400, 1.0, 1.0);
+    expect(tb).not.toBeNull();
+    // Combined Y span is [-40..20] = 60 -> halfH = 30
+    expect(tb!.halfH).toBeCloseTo(30, 1);
+    expect(tb!.centerY).toBeCloseTo(0, 1);
+  });
 });
 
 describe('PDF 1.4 Binary Builder with Clickable Link Annotations', () => {

@@ -371,7 +371,7 @@ export function computeCameraBasis(azDeg: number, elDeg: number): CameraBasis {
  * truly fill the cover frame cleanly without bounding-sphere dead space.
  */
 export function computeTightCameraBounds(
-  triPos: Float32Array,
+  triPos: Float32Array | readonly Float32Array[],
   origin: [number, number, number],
   azDeg: number,
   elDeg: number,
@@ -380,7 +380,8 @@ export function computeTightCameraBounds(
   zoom = 1.0,
   marginFactor = 1.06,
 ): TightOrthoBounds | null {
-  if (!triPos || triPos.length < 9) return null;
+  const buffers: readonly Float32Array[] = triPos instanceof Float32Array ? [triPos] : triPos;
+  if (!buffers || buffers.length === 0) return null;
   const { right, up, forward } = computeCameraBasis(azDeg, elDeg);
   const [ox, oy, oz] = origin;
 
@@ -391,19 +392,23 @@ export function computeTightCameraBounds(
   let minZ = Infinity;
   let maxZ = -Infinity;
 
-  for (let i = 0; i < triPos.length; i += 3) {
-    const dx = triPos[i] - ox;
-    const dy = triPos[i + 1] - oy;
-    const dz = triPos[i + 2] - oz;
-    const px = dx * right[0] + dy * right[1] + dz * right[2];
-    const py = dx * up[0] + dy * up[1] + dz * up[2];
-    const pz = dx * forward[0] + dy * forward[1] + dz * forward[2];
-    if (px < minX) minX = px;
-    if (px > maxX) maxX = px;
-    if (py < minY) minY = py;
-    if (py > maxY) maxY = py;
-    if (pz < minZ) minZ = pz;
-    if (pz > maxZ) maxZ = pz;
+  for (let bi = 0; bi < buffers.length; bi++) {
+    const buf = buffers[bi];
+    if (!buf || buf.length < 9) continue;
+    for (let i = 0; i < buf.length; i += 3) {
+      const dx = buf[i] - ox;
+      const dy = buf[i + 1] - oy;
+      const dz = buf[i + 2] - oz;
+      const px = dx * right[0] + dy * right[1] + dz * right[2];
+      const py = dx * up[0] + dy * up[1] + dz * up[2];
+      const pz = dx * forward[0] + dy * forward[1] + dz * forward[2];
+      if (px < minX) minX = px;
+      if (px > maxX) maxX = px;
+      if (py < minY) minY = py;
+      if (py > maxY) maxY = py;
+      if (pz < minZ) minZ = pz;
+      if (pz > maxZ) maxZ = pz;
+    }
   }
 
   if (!Number.isFinite(minX)) return null;

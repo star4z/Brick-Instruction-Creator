@@ -2154,6 +2154,7 @@ function buildMeshBuffers(prevParts, newParts, opts) {
       const T = compiled.tris, N = compiled.norms, E = compiled.edges, TC = compiled.triCols;
       const allowSubCols = !isSelected && !overrideHex && !isGhost;
       const subColCache = allowSubCols ? new Map() : null;
+      const subEdgeColCache = (allowSubCols && !shouldHighlight) ? new Map() : null;
       const resolveSubColor = (cid) => {
         if (!subColCache || cid === 16) return null;
         if (cid === STUD_SIDE_COLOR_FLAG) {
@@ -2186,6 +2187,31 @@ function buildMeshBuffers(prevParts, newParts, opts) {
           cached = null;
         }
         subColCache.set(cid, cached);
+        return cached;
+      };
+      const resolveSubEdgeColor = (cid) => {
+        if (!subEdgeColCache || cid === 16 || cid < 0) return edgeCol;
+        let cached = subEdgeColCache.get(cid);
+        if (cached !== undefined) return cached;
+        const sc = resolveSubColor(cid);
+        if (!sc) {
+          cached = edgeCol;
+        } else if (starkBlack) {
+          const luma = 0.299 * sc.rgb[0] + 0.587 * sc.rgb[1] + 0.114 * sc.rgb[2];
+          cached = luma < 56 ? [204, 212, 222] : [0, 0, 0];
+        } else if (!isDirectRgbColor(cid) && COLORS[cid]?.edge) {
+          cached = hexToRgb255(COLORS[cid].edge, fadeMix * 0.85);
+        } else {
+          const luma = 0.299 * sc.rgb[0] + 0.587 * sc.rgb[1] + 0.114 * sc.rgb[2];
+          cached = luma < 56
+            ? [168, 178, 190]
+            : [
+                Math.max(0, Math.round(sc.rgb[0] * 0.45)),
+                Math.max(0, Math.round(sc.rgb[1] * 0.45)),
+                Math.max(0, Math.round(sc.rgb[2] * 0.45)),
+              ];
+        }
+        subEdgeColCache.set(cid, cached);
         return cached;
       };
       for (let i = 0, ti = 0; i < T.length; i += 9, ti++) {
@@ -2238,21 +2264,25 @@ function buildMeshBuffers(prevParts, newParts, opts) {
           }
         }
       }
+      const EC = compiled.edgeCols;
       if ((includeEdges || isNew || isSelected || isGhost) && E.length > 0) {
-        for (let i = 0; i < E.length; i += 6) {
+        for (let i = 0, ei = 0; i < E.length; i += 6, ei++) {
           const a = xformPt([E[i],E[i+1],E[i+2]], m, ox, oy, oz, hingeRad);
           const b = xformPt([E[i+3],E[i+4],E[i+5]], m, ox, oy, oz, hingeRad);
-          pushEdge(a, b, edgeCol, edgeAlpha);
+          const eRgb = (EC && subEdgeColCache) ? resolveSubEdgeColor(EC[ei]) : edgeCol;
+          pushEdge(a, b, eRgb, edgeAlpha);
         }
       }
       const CE = compiled.condEdges;
+      const CEC = compiled.condEdgeCols;
       if ((includeEdges || isNew || isSelected || isGhost) && CE && CE.length > 0) {
-        for (let i = 0; i < CE.length; i += 12) {
+        for (let i = 0, ci = 0; i < CE.length; i += 12, ci++) {
           const a = xformPt([CE[i],CE[i+1],CE[i+2]], m, ox, oy, oz, hingeRad);
           const b = xformPt([CE[i+3],CE[i+4],CE[i+5]], m, ox, oy, oz, hingeRad);
           const c1 = xformPt([CE[i+6],CE[i+7],CE[i+8]], m, ox, oy, oz, hingeRad);
           const c2 = xformPt([CE[i+9],CE[i+10],CE[i+11]], m, ox, oy, oz, hingeRad);
-          pushCondEdge(a, b, c1, c2, edgeCol, edgeAlpha);
+          const cRgb = (CEC && subEdgeColCache) ? resolveSubEdgeColor(CEC[ci]) : edgeCol;
+          pushCondEdge(a, b, c1, c2, cRgb, edgeAlpha);
         }
       }
       activeLineHighlighted = false;
@@ -3019,25 +3049,40 @@ class WebGLBrickEngine {
     const near = Math.max(1, dist - clipRadius * 2.4);
     const far = dist + clipRadius * 2.4;
     const view = lookAtMat4(eye, center, [0, 1, 0]);
-    const tightPos = mesh.triPos && mesh.triPos.length >= 9
-      ? mesh.triPos
-      : (mesh.texDraws && mesh.texDraws.length > 0 ? mesh.texDraws[0].triPos : null);
-    if (tightFit && fixedHalfH <= 0 && tightPos && tightPos.length >= 9) {
-      const tb = computeTightCameraBounds(tightPos, center, azDeg, elDeg, w, h, zoom, 1.07);
-      if (tb) {
-        // Reserve a small bottom strip (~3.5%) so the soft studio floor shadow never clips
-        const shadowShiftY = tb.halfH * 0.035;
-        return mulMat4(
-          orthoMat4(
-            tb.centerX - tb.halfW,
-            tb.centerX + tb.halfW,
-            tb.centerY - tb.halfH - shadowShiftY,
-            tb.centerY + tb.halfH - shadowShiftY,
-            near,
-            far,
-          ),
-          view,
+    if (tightFit && fixedHalfH <= 0) {
+      const tightArrays = [];
+      if (mesh.triPos && mesh.triPos.length >= 9) tightArrays.push(mesh.triPos);
+      if (mesh.texDraws && mesh.texDraws.length > 0) {
+        for (const td of mesh.texDraws) {
+          if (td.triPos && td.triPos.length >= 9) tightArrays.push(td.triPos);
+        }
+      }
+      if (tightArrays.length > 0) {
+        const tb = computeTightCameraBounds(
+          tightArrays.length === 1 ? tightArrays[0] : tightArrays,
+          center,
+          azDeg,
+          elDeg,
+          w,
+          h,
+          zoom,
+          1.07,
         );
+        if (tb) {
+          // Reserve a small bottom strip (~3.5%) so the soft studio floor shadow never clips
+          const shadowShiftY = tb.halfH * 0.035;
+          return mulMat4(
+            orthoMat4(
+              tb.centerX - tb.halfW,
+              tb.centerX + tb.halfW,
+              tb.centerY - tb.halfH - shadowShiftY,
+              tb.centerY + tb.halfH - shadowShiftY,
+              near,
+              far,
+            ),
+            view,
+          );
+        }
       }
     }
     const aspect = w / Math.max(1, h);

@@ -49,8 +49,12 @@ export interface CompiledDatMesh {
   tris: Float32Array;
   norms: Float32Array;
   edges: Float32Array;
+  /** Optional per-edge inherited LDraw surface color ID (1 Int32 per edge, present when subparts have explicit colors). */
+  edgeCols?: Int32Array | null;
   /** Optional LDraw type-5 / cylinder silhouette conditional lines (12 floats per segment: p1, p2, c1, c2). */
   condEdges?: Float32Array;
+  /** Optional per-conditional-edge inherited LDraw surface color ID (1 Int32 per conditional edge). */
+  condEdgeCols?: Int32Array | null;
   triCols: Int32Array | null;
   /** Textured decal batches from BrickLink Studio PE_TEX_INFO or LDraw !TEXMAP. */
   texBatches?: CompiledTexBatch[];
@@ -799,9 +803,13 @@ export function compileDatEntry(
   const tris: number[] = [];
   const norms: number[] = [];
   const edges: number[] = [];
+  const edgeCols: number[] = [];
   const condEdges: number[] = [];
+  const condEdgeCols: number[] = [];
   const triCols: number[] = [];
   let hasSubColor = false;
+  let hasSubEdgeColor = false;
+  let hasSubCondEdgeColor = false;
   let totalTriFloats = 0;
 
   const texBatchMap = new Map<string, TexBatchBuilder>();
@@ -908,9 +916,11 @@ export function compileDatEntry(
     }
   };
 
-  const emitEdge = (la: Vec3, lb: Vec3) => {
+  const emitEdge = (la: Vec3, lb: Vec3, colId = 16) => {
     const a = ld2gl(la), b = ld2gl(lb);
     edges.push(a[0], a[1], a[2], b[0], b[1], b[2]);
+    edgeCols.push(colId);
+    if (colId !== 16) hasSubEdgeColor = true;
     upd(a); upd(b);
   };
 
@@ -964,10 +974,12 @@ export function compileDatEntry(
     emitTri(la, lb, lc, colId);
   };
 
-  const emitCondEdge = (la: Vec3, lb: Vec3, lc1: Vec3, lc2: Vec3) => {
+  const emitCondEdge = (la: Vec3, lb: Vec3, lc1: Vec3, lc2: Vec3, colId = 16) => {
     if (condEdges.length >= maxCondFloats) return;
     const a = ld2gl(la), b = ld2gl(lb), c1 = ld2gl(lc1), c2 = ld2gl(lc2);
     condEdges.push(a[0], a[1], a[2], b[0], b[1], b[2], c1[0], c1[1], c1[2], c2[0], c2[1], c2[2]);
+    condEdgeCols.push(colId);
+    if (colId !== 16) hasSubCondEdgeColor = true;
   };
 
   // Circular cylinder stud (flush seated, with complete top rim, base rim, vertical side
@@ -1014,15 +1026,15 @@ export function compileDatEntry(
         emitTri(ib0, it1, ib1, innerColId);
         emitTri(ib0, it0, it1, innerColId);
         emitTri(innerBotC, ib0, ib1, innerColId);
-        if (edges.length < edgeLimit) emitEdge(it0, it1);
+        if (edges.length < edgeLimit) emitEdge(it0, it1, colId);
       } else {
         emitTri(topC, t0, t1, colId);
       }
       if (edges.length < edgeLimit) {
-        emitEdge(t0, t1);
-        emitEdge(basePts[i], basePts[next]);
+        emitEdge(t0, t1, colId);
+        emitEdge(basePts[i], basePts[next], colId);
       }
-      emitCondEdge(t0, basePts[i], topPts[prev], topPts[next]);
+      emitCondEdge(t0, basePts[i], topPts[prev], topPts[next], colId);
     }
   };
 
@@ -1075,16 +1087,16 @@ export function compileDatEntry(
         emitTri(ib0, it1, ib1, innerColId);
         emitTri(ib0, it0, it1, innerColId);
         emitTri(innerTopC, it1, it0, innerColId);
-        if (edges.length < edgeLimit) emitEdge(ib0, ib1);
+        if (edges.length < edgeLimit) emitEdge(ib0, ib1, colId);
       } else {
         // Solid pin bottom cap at y = 1 (downward normal +Y LDraw / -Y GL)
         emitTri(botC, b1, b0, colId);
       }
       if (edges.length < edgeLimit) {
-        emitEdge(b0, b1);
-        emitEdge(t0, t1);
+        emitEdge(b0, b1, colId);
+        emitEdge(t0, t1, colId);
       }
-      emitCondEdge(t0, b0, topPts[prev], topPts[next]);
+      emitCondEdge(t0, b0, topPts[prev], topPts[next], colId);
     }
   };
 
@@ -1113,9 +1125,9 @@ export function compileDatEntry(
       emitT(p0, p2, p3);
       if (edges.length < edgeLimit) {
         if (base === 'rect') {
-          emitEdge(p0, p1); emitEdge(p1, p2); emitEdge(p2, p3); emitEdge(p3, p0);
+          emitEdge(p0, p1, colId); emitEdge(p1, p2, colId); emitEdge(p2, p3, colId); emitEdge(p3, p0, colId);
         } else {
-          emitEdge(p0, p1); emitEdge(p2, p3);
+          emitEdge(p0, p1, colId); emitEdge(p2, p3, colId);
         }
       }
       return true;
@@ -1132,7 +1144,7 @@ export function compileDatEntry(
       if (edges.length < edgeLimit) {
         for (let i = 0; i < segs; i++) {
           const a0 = (i / segs) * maxA, a1 = ((i + 1) / segs) * maxA;
-          emitEdge(tp(Math.cos(a0), 0, Math.sin(a0)), tp(Math.cos(a1), 0, Math.sin(a1)));
+          emitEdge(tp(Math.cos(a0), 0, Math.sin(a0)), tp(Math.cos(a1), 0, Math.sin(a1)), colId);
         }
       }
       return true;
@@ -1160,9 +1172,9 @@ export function compileDatEntry(
         if (isFullCircle) {
           const prev = (i + segs - 1) % segs;
           const next = (i + 1) % segs;
-          emitCondEdge(t0, b0, topPts[prev], topPts[next]);
+          emitCondEdge(t0, b0, topPts[prev], topPts[next], colId);
         } else if (i > 0) {
-          emitCondEdge(t0, b0, topPts[i - 1], topPts[i + 1]);
+          emitCondEdge(t0, b0, topPts[i - 1], topPts[i + 1], colId);
         }
       }
       return true;
@@ -1332,9 +1344,9 @@ export function compileDatEntry(
       emitQuad(p111, p11n, pn1n, pn11, colId);
       emitQuad(p111, pn11, pnn1, p1n1, colId);
       if (edges.length < edgeLimit) {
-        emitEdge(p111, pn11);
-        emitEdge(p1n1, pnn1);
-        emitEdge(p11n, pn1n);
+        emitEdge(p111, pn11, colId);
+        emitEdge(p1n1, pnn1, colId);
+        emitEdge(p11n, pn1n, colId);
       }
       return true;
     }
@@ -1348,7 +1360,7 @@ export function compileDatEntry(
         const t0 = tp(x0, 1, z0), t1 = tp(x1, 1, z1);
         emitQuad(b0, b1, t1, t0, colId);
         if (i % 4 !== 0 && edges.length < edgeLimit) {
-          emitEdge(b0, t0);
+          emitEdge(b0, t0, colId);
         }
       }
       return true;
@@ -1362,7 +1374,7 @@ export function compileDatEntry(
           if ((base === 'axlehol2' && isOuter) || (base === 'axlehol9' && !isOuter)) {
             const [x0, z0] = AXLE_PROFILE[i];
             const [x1, z1] = AXLE_PROFILE[(i + 1) % n];
-            emitEdge(tp(x0, 0, z0), tp(x1, 0, z1));
+            emitEdge(tp(x0, 0, z0), tp(x1, 0, z1), colId);
           }
         }
       }
@@ -1606,7 +1618,7 @@ export function compileDatEntry(
           const a = mat3Vec(pm, +t[2], +t[3], +t[4]);
           const b = mat3Vec(pm, +t[5], +t[6], +t[7]);
           if (Number.isFinite(a[0]) && Number.isFinite(b[0])) {
-            emitEdge([px + a[0], py + a[1], pz + a[2]], [px + b[0], py + b[1], pz + b[2]]);
+            emitEdge([px + a[0], py + a[1], pz + a[2]], [px + b[0], py + b[1], pz + b[2]], curColor);
           }
         }
       } else if (isLineKind(raw, '5')) {
@@ -1625,6 +1637,7 @@ export function compileDatEntry(
               [px + b[0], py + b[1], pz + b[2]],
               [px + c1[0], py + c1[1], pz + c1[2]],
               [px + c2[0], py + c2[1], pz + c2[2]],
+              curColor,
             );
           }
         }
@@ -1786,7 +1799,13 @@ export function compileDatEntry(
     tris: trisArr,
     norms: normsArr,
     edges: edgesArr,
-    ...(condEdges.length > 0 ? { condEdges: new Float32Array(condEdges) } : {}),
+    ...(hasSubEdgeColor ? { edgeCols: new Int32Array(edgeCols) } : {}),
+    ...(condEdges.length > 0
+      ? {
+          condEdges: new Float32Array(condEdges),
+          ...(hasSubCondEdgeColor ? { condEdgeCols: new Int32Array(condEdgeCols) } : {}),
+        }
+      : {}),
     triCols: hasSubColor ? new Int32Array(triCols) : null,
     ...(texBatches.length > 0 ? { texBatches } : {}),
     ...(subBoxes ? { subBoxes } : {}),

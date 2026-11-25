@@ -922,5 +922,46 @@ describe('compileDatEntry — smooth circular studs & crease-angle vertex normal
     }
     expect(T.length / 9).toBe(4);
   });
+
+  it('tracks per-edge and per-conditional-edge subpart colors (edgeCols / condEdgeCols) for multi-color parts', () => {
+    const subHand: DatEntrySource = {
+      key: 's/hand_sub',
+      lines: [
+        '3 16 0 0 0  10 0 0  0 10 0',
+        '2 24 0 0 0  10 0 0',
+        '5 24 0 0 0  0 10 0  10 0 0  -10 0 0',
+      ],
+    };
+    const multiColorPart: DatEntrySource = {
+      key: 'multi_color_assembly',
+      lines: [
+        '3 16 0 0 0  20 0 0  0 20 0',
+        '2 24 0 0 0  20 0 0',
+        '5 24 0 0 0  0 20 0  20 0 0  -20 0 0',
+        '1 14 20 0 0  1 0 0  0 1 0  0 0 1  s/hand_sub.dat',
+      ],
+    };
+    const compiled = compileDatEntry(multiColorPart, (ref) => (ref === 's/hand_sub' ? subHand : null));
+    expect(compiled).not.toBeNull();
+    expect(compiled!.edgeCols).toBeInstanceOf(Int32Array);
+    expect(Array.from(compiled!.edgeCols!)).toEqual([16, 14]);
+    expect(compiled!.condEdgeCols).toBeInstanceOf(Int32Array);
+    expect(Array.from(compiled!.condEdgeCols!)).toEqual([16, 14]);
+
+    // Single-color parts inheriting 16 everywhere should not allocate edgeCols / condEdgeCols
+    const singleColorPart: DatEntrySource = {
+      key: 'single_color_brick',
+      lines: [
+        '3 16 0 0 0  20 0 0  0 20 0',
+        '2 24 0 0 0  20 0 0',
+        '5 24 0 0 0  0 20 0  20 0 0  -20 0 0',
+      ],
+    };
+    const singleCompiled = compileDatEntry(singleColorPart, () => null);
+    expect(singleCompiled).not.toBeNull();
+    expect(singleCompiled!.edgeCols).toBeUndefined();
+    expect(singleCompiled!.condEdgeCols).toBeUndefined();
+  });
 });
+
 
