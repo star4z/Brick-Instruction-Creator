@@ -13,7 +13,7 @@
   </head>
   <body class="bg-[var(--background)] text-[var(--foreground)] antialiased select-none">
   <!-- Full-Screen App Shell -->
-  <div class="relative w-full h-full overflow-hidden flex flex-col">
+  <div id="appShell" class="relative w-full h-full overflow-hidden flex">
 
     <!-- Hidden File Inputs -->
     <input id="fileInput" type="file" class="hidden" />
@@ -25,253 +25,46 @@
     <input id="themeImportInput" type="file" accept=".biwtheme" class="hidden" />
 
     <!-- ================================================================ -->
-    <!-- FLOATING TOP-LEFT PILL: Menu ☰ (+ Model Name chip on desktop)    -->
+    <!-- MOBILE / TABLET OVERLAY BACKDROP (hidden on desktop docked mode) -->
     <!-- ================================================================ -->
-    <div class="no-print fixed top-3 left-3 z-40 flex items-center gap-2 max-w-[calc(100vw-300px)]">
-      <button id="btnOpenMenu" type="button" title="Open studio menu" aria-label="Open studio menu" class="relative studio-pill h-10 w-10 rounded-full flex items-center justify-center hover:bg-[var(--surface-hover)] transition-colors shrink-0 cursor-pointer">
-        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-          <line x1="4" x2="20" y1="7" y2="7"/><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="17" y2="17"/>
-        </svg>
-        <span id="menuBtnErrorBadge" class="hidden absolute -top-1 -right-1 min-w-[20px] h-[20px] px-1 rounded-full bg-[var(--danger)] text-white font-mono text-xs font-semibold flex items-center justify-center">0</span>
-      </button>
-
-      <!-- Model & Studio Identity Pill (Desktop — shown when a model is loaded) -->
-      <button id="desktopModelChip" type="button" class="hidden studio-pill h-10 pl-3 pr-4 rounded-full items-center gap-2 text-xs font-semibold max-w-full min-w-0 hover:bg-[var(--surface-hover)] transition-colors cursor-pointer">
-        <svg class="w-5 h-5 shrink-0" viewBox="0 0 64 64" fill="none" aria-hidden="true">
-          <g transform="rotate(12 32 32)">
-            <path d="M24.8 7.8 C14.9 14.8 10.1 24.6 11.6 35.3 L14.9 32.7 Q13.9 38.0 13.3 42.8 Q14.6 45.2 15.8 47.2 L18.2 42.8 Q19.8 48.9 21.1 54.7 Q14.1 52.2 6.7 49.4 L13.1 48.9 C9.6 39.9 8.4 32.5 9.8 26.2 Q9.4 20.7 8.7 14.7 L11.7 19.3 Q17.3 12.2 24.8 7.8 Z" fill="#38bdf8"/>
-            <path d="M31.7 7.1 Q34.8 10.1 37.5 15.7 L40.5 12.6 Q39.4 17.0 38.6 21.0 C40.9 31.5 39.2 44.1 37.2 52.6 L43.4 51.6 Q37.7 54.5 32.1 57.0 Q31.0 52.0 30.1 46.7 L33.7 51.3 Q34.4 49.7 35.3 47.6 Q34.4 43.5 33.2 39.1 L36.2 41.6 Q36.7 38.7 37.0 35.4 Q35.0 30.9 32.5 26.0 L36.9 28.4 C36.7 20.4 35.1 12.5 31.7 7.1 Z" fill="#7c152e"/>
-            <path d="M38.5 8.3 C50.8 15.1 56.3 21.9 55.5 33.5 L60.9 30.3 Q57.1 36.0 53.8 41.3 Q53.3 43.4 52.6 45.4 L58.5 45.0 Q51.8 48.7 45.4 51.9 Q46.2 46.3 47.4 40.3 L49.8 43.9 C53.1 37.2 53.7 31.1 52.3 25.6 Q50.1 22.7 47.5 19.6 L50.0 19.8 Q45.5 13.1 38.5 8.3 Z" fill="#ed7d1f"/>
-          </g>
-        </svg>
-        <span class="text-sm font-bold tracking-tight shrink-0">Brick Instruction Works</span>
-        <span id="desktopModelSep" class="hidden w-px h-4 bg-[var(--border-strong)] shrink-0" aria-hidden="true"></span>
-        <span id="desktopModelName" class="hidden text-xs font-semibold text-[var(--foreground)] truncate min-w-0"></span>
-      </button>
-    </div>
-
-    <!-- Mobile Editor Identity Pill (shown on < md when a model is loaded in the editor view) -->
-    <button id="mobileEditorBrandPill" type="button" title="Open studio menu" class="no-print hidden fixed top-[60px] left-1/2 -translate-x-1/2 z-30 md:hidden studio-pill h-9 w-max max-w-[calc(100vw-24px)] pl-2.5 pr-3.5 rounded-full items-center gap-2 hover:bg-[var(--surface-hover)] transition-colors cursor-pointer">
-      <svg class="w-4 h-4 shrink-0" viewBox="0 0 64 64" fill="none" aria-hidden="true">
-        <g transform="rotate(12 32 32)">
-          <path d="M24.8 7.8 C14.9 14.8 10.1 24.6 11.6 35.3 L14.9 32.7 Q13.9 38.0 13.3 42.8 Q14.6 45.2 15.8 47.2 L18.2 42.8 Q19.8 48.9 21.1 54.7 Q14.1 52.2 6.7 49.4 L13.1 48.9 C9.6 39.9 8.4 32.5 9.8 26.2 Q9.4 20.7 8.7 14.7 L11.7 19.3 Q17.3 12.2 24.8 7.8 Z" fill="#38bdf8"/>
-          <path d="M31.7 7.1 Q34.8 10.1 37.5 15.7 L40.5 12.6 Q39.4 17.0 38.6 21.0 C40.9 31.5 39.2 44.1 37.2 52.6 L43.4 51.6 Q37.7 54.5 32.1 57.0 Q31.0 52.0 30.1 46.7 L33.7 51.3 Q34.4 49.7 35.3 47.6 Q34.4 43.5 33.2 39.1 L36.2 41.6 Q36.7 38.7 37.0 35.4 Q35.0 30.9 32.5 26.0 L36.9 28.4 C36.7 20.4 35.1 12.5 31.7 7.1 Z" fill="#7c152e"/>
-          <path d="M38.5 8.3 C50.8 15.1 56.3 21.9 55.5 33.5 L60.9 30.3 Q57.1 36.0 53.8 41.3 Q53.3 43.4 52.6 45.4 L58.5 45.0 Q51.8 48.7 45.4 51.9 Q46.2 46.3 47.4 40.3 L49.8 43.9 C53.1 37.2 53.7 31.1 52.3 25.6 Q50.1 22.7 47.5 19.6 L50.0 19.8 Q45.5 13.1 38.5 8.3 Z" fill="#ed7d1f"/>
-        </g>
-      </svg>
-      <span class="text-xs font-bold tracking-tight shrink-0">Brick Instruction Works</span>
-      <span id="mobileEditorModelSep" class="hidden w-px h-3.5 bg-[var(--border-strong)] shrink-0" aria-hidden="true"></span>
-      <span id="mobileEditorModelName" class="hidden text-xs text-[var(--muted-foreground)] truncate min-w-0"></span>
-    </button>
+    <div id="menuBackdrop" class="no-print hidden fixed inset-0 z-[46] bg-black/45"></div>
 
     <!-- ================================================================ -->
-    <!-- FLOATING TOP-RIGHT PILLS: Loaded-Model Actions                   -->
+    <!-- UNIFIED MENU, SITE TITLE & SIDE MENU                             -->
+    <!-- Combines top-left menu toggle + site title seamlessly with panel -->
     <!-- ================================================================ -->
-    <div id="topRightPills" class="no-print hidden fixed top-3 right-3 z-40 flex items-center gap-1.5 shrink-0">
-      <div class="studio-pill h-10 rounded-full px-1 inline-flex items-center gap-0.5">
-        <button id="btnUndo" type="button" title="Undo" aria-label="Undo" class="h-8 w-8 rounded-full flex items-center justify-center hover:bg-[var(--surface-hover)] disabled:opacity-35 transition-colors cursor-pointer disabled:cursor-default">
-          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"/></svg>
+    <aside id="menuDrawer" aria-label="Studio menu" data-expanded="false" data-mode="collapsed" data-compact="false" data-has-model="false" class="no-print side-menu-shell">
+      <!-- Unified Header Row: Same menu toggle + logo + site title in collapsed & expanded states -->
+      <div id="menuHeaderBar" class="side-menu-header">
+        <button id="btnOpenMenu" type="button" title="Open menu" aria-label="Open menu" aria-expanded="false" aria-controls="menuDrawerPanel" class="relative h-8 w-8 rounded-full flex items-center justify-center text-[var(--foreground)] hover:bg-[var(--surface-hover)] transition-colors shrink-0 cursor-pointer">
+          <svg class="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+            <line x1="4" x2="20" y1="7" y2="7"/><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="17" y2="17"/>
+          </svg>
+          <span id="menuBtnErrorBadge" class="hidden absolute -top-1.5 -right-1.5 min-w-[20px] h-[20px] px-1 rounded-full bg-[var(--danger)] text-white font-mono text-xs font-semibold flex items-center justify-center">0</span>
         </button>
-        <button id="btnRedo" type="button" title="Redo" aria-label="Redo" class="h-8 w-8 rounded-full flex items-center justify-center hover:bg-[var(--surface-hover)] disabled:opacity-35 transition-colors cursor-pointer disabled:cursor-default">
-          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5A5.5 5.5 0 0 0 9.5 20H13"/></svg>
-        </button>
-      </div>
-      <button id="btnStylePop" type="button" aria-haspopup="true" aria-expanded="false" class="studio-pill h-10 px-3.5 rounded-full hover:bg-[var(--surface-hover)] flex items-center gap-1.5 text-xs font-semibold transition-colors cursor-pointer">
-        <svg class="w-4 h-4 text-[var(--accent-warm)] transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="13.5" cy="6.5" r=".6" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".6" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".6" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".6" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></svg>
-        <span>Style</span>
-      </button>
-      <button id="btnHeaderExport" type="button" title="Print or export" aria-label="Export and print" class="h-10 w-10 sm:w-auto sm:px-3.5 rounded-full bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] shadow-[var(--shadow-surface)] flex items-center justify-center gap-1.5 text-xs font-semibold transition-colors cursor-pointer">
-        <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect width="12" height="8" x="6" y="14"/></svg>
-        <span class="hidden sm:inline">Export</span>
-      </button>
-    </div>
 
-    <!-- ================================================================ -->
-    <!-- FLOATING PAGE-SIZE READABILITY WARNING (non-print)               -->
-    <!-- ================================================================ -->
-    <div id="pageSizeWarningBanner" role="status" aria-live="polite" class="no-print hidden fixed top-[104px] md:top-[60px] left-1/2 -translate-x-1/2 z-30 max-w-[min(94vw,640px)]">
-      <div class="flex items-center gap-2 px-3 py-2 rounded-xl bg-[var(--card)] border border-[var(--warning)]/45 shadow-[var(--shadow-surface)] text-xs text-[var(--foreground)]">
-        <span class="w-6 h-6 rounded-full bg-[var(--warning-soft)] text-[var(--warning)] flex items-center justify-center shrink-0" aria-hidden="true">
-          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
-        </span>
-        <span id="pageSizeWarningText" class="min-w-0 flex-1 leading-snug font-medium"></span>
-        <button id="btnApplySuggestedPageSize" type="button" class="hidden px-2.5 py-1 rounded-md bg-[var(--warning)] text-white hover:opacity-90 font-semibold whitespace-nowrap shrink-0 transition-opacity cursor-pointer"></button>
-        <button id="btnOpenPageSetupFromWarning" type="button" class="px-2.5 py-1 rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer">Page Setup</button>
-        <button id="btnDismissPageSizeWarning" type="button" title="Dismiss warning" aria-label="Dismiss page size warning" class="w-6 h-6 rounded-full hover:bg-[var(--surface-hover)] text-[var(--muted-foreground)] flex items-center justify-center shrink-0 transition-colors cursor-pointer">
-          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
-        </button>
-      </div>
-    </div>
-
-    <!-- ================================================================ -->
-    <!-- EMPTY WELCOME PROOFING SHEET (shown until model is loaded)       -->
-    <!-- ================================================================ -->
-    <section id="emptyState" class="proofing-stage flex-1 min-h-0 flex items-center justify-center pt-16 pb-6 px-4 sm:p-8 overflow-y-auto">
-      <div class="relative z-10 w-full max-w-2xl rounded-xl proof-sheet-frame overflow-hidden">
-        <!-- Primary Welcome Sheet Body (Logo + App Name visible on Mobile & Desktop) -->
-        <div class="p-6 sm:p-8 space-y-4">
-          <div class="flex items-center gap-3.5 sm:gap-4">
-            <svg class="w-12 h-12 sm:w-14 sm:h-14 shrink-0" viewBox="0 0 64 64" fill="none" role="img" aria-label="Brick Instruction Works logo">
-              <g transform="rotate(12 32 32)">
-                <path d="M24.8 7.8 C14.9 14.8 10.1 24.6 11.6 35.3 L14.9 32.7 Q13.9 38.0 13.3 42.8 Q14.6 45.2 15.8 47.2 L18.2 42.8 Q19.8 48.9 21.1 54.7 Q14.1 52.2 6.7 49.4 L13.1 48.9 C9.6 39.9 8.4 32.5 9.8 26.2 Q9.4 20.7 8.7 14.7 L11.7 19.3 Q17.3 12.2 24.8 7.8 Z" fill="#38bdf8"/>
-                <path d="M31.7 7.1 Q34.8 10.1 37.5 15.7 L40.5 12.6 Q39.4 17.0 38.6 21.0 C40.9 31.5 39.2 44.1 37.2 52.6 L43.4 51.6 Q37.7 54.5 32.1 57.0 Q31.0 52.0 30.1 46.7 L33.7 51.3 Q34.4 49.7 35.3 47.6 Q34.4 43.5 33.2 39.1 L36.2 41.6 Q36.7 38.7 37.0 35.4 Q35.0 30.9 32.5 26.0 L36.9 28.4 C36.7 20.4 35.1 12.5 31.7 7.1 Z" fill="#7c152e"/>
-                <path d="M38.5 8.3 C50.8 15.1 56.3 21.9 55.5 33.5 L60.9 30.3 Q57.1 36.0 53.8 41.3 Q53.3 43.4 52.6 45.4 L58.5 45.0 Q51.8 48.7 45.4 51.9 Q46.2 46.3 47.4 40.3 L49.8 43.9 C53.1 37.2 53.7 31.1 52.3 25.6 Q50.1 22.7 47.5 19.6 L50.0 19.8 Q45.5 13.1 38.5 8.3 Z" fill="#ed7d1f"/>
-              </g>
-            </svg>
-            <div class="min-w-0">
-              <h1 class="text-2xl sm:text-3xl font-bold tracking-tight leading-tight text-[var(--foreground)]">Brick Instruction Works</h1>
-              <p class="text-xs sm:text-sm font-medium text-[var(--muted-foreground)] mt-0.5">Set a brick model for print.</p>
-            </div>
-          </div>
-          <p class="text-sm text-[var(--muted-foreground)] leading-relaxed max-w-[56ch]">
-            Convert BrickLink Studio and LDraw files into clean, buildable manuals. Every camera angle, callout, and page break stays bound to its step—so early edits never scramble downstream pages.
-          </p>
-        </div>
-
-        <!-- Interactive Drop & Action Band (flush hairline band, zero nested card) -->
-        <div id="emptyDropZone" class="px-6 sm:px-8 py-5 border-t border-dashed border-[var(--border-strong)] bg-[var(--surface-sunken)]/45 space-y-3.5 transition-colors">
-          <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
-            <button id="emptyImportBtn" type="button" class="sm:flex-1 shrink-0 h-11 px-5 rounded-full bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors cursor-pointer">
-              <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
-              <span>Import Model File</span>
-            </button>
-            <button id="emptyLoadProjBtn" type="button" class="sm:flex-1 shrink-0 h-11 px-5 rounded-full border border-[var(--border-strong)] bg-[var(--card)] hover:bg-[var(--surface-hover)] text-[var(--foreground)] text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors cursor-pointer">
-              <svg class="w-4 h-4 text-[var(--info)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M12 18v-6"/><path d="m9 15 3-3 3 3"/></svg>
-              <span>Import Project</span>
-            </button>
-          </div>
-
-          <p class="text-xs text-[var(--muted-foreground)] leading-relaxed">
-            Drop a <strong class="font-mono text-[var(--foreground)]">.io</strong>, <strong class="font-mono text-[var(--foreground)]">.ldr</strong>, <strong class="font-mono text-[var(--foreground)]">.mpd</strong>, or <strong class="font-mono text-[var(--foreground)]">.biw</strong> file anywhere on this sheet.
-          </p>
-        </div>
-
-        <!-- Clean Non-Wrapping Capability Strip -->
-        <div class="px-6 sm:px-8 py-4 border-t border-[var(--border)] bg-[var(--surface-sunken)] grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-          <div class="flex sm:flex-col justify-between gap-1">
-            <span class="font-semibold text-[var(--foreground)]">Verified Snap Graph</span>
-            <span class="text-[var(--muted-foreground)]">Studs, SNOT, bars &amp; clips</span>
-          </div>
-          <div class="flex sm:flex-col justify-between gap-1">
-            <span class="font-semibold text-[var(--foreground)]">Step-Bound Layout</span>
-            <span class="text-[var(--muted-foreground)]">No cascading page shifts</span>
-          </div>
-          <div class="flex sm:flex-col justify-between gap-1">
-            <span class="font-semibold text-[var(--foreground)]">Client-Side Export</span>
-            <span class="font-mono text-[var(--muted-foreground)]">PDF · HTML · .biw</span>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ================================================================ -->
-    <!-- FULL-SCREEN ZOOMABLE LIVE PAGE STAGE                             -->
-    <!-- ================================================================ -->
-    <main id="stageViewport" class="stage-viewport proofing-stage hidden flex-1 min-h-0 relative w-full h-full overflow-hidden flex items-center justify-center pt-[104px] md:pt-16 pb-28 px-3">
-      <div id="stageContainer" class="relative z-10 w-0 h-0 overflow-visible origin-center will-change-transform flex items-center justify-center">
-        <div id="pageFrame" class="shrink-0 studio-page-frame overflow-hidden relative transition-colors"></div>
-      </div>
-    </main>
-
-    <!-- ================================================================ -->
-    <!-- FLOATING CONTEXTUAL CONTROLS (Mode-specific overlays over page)  -->
-    <!-- ================================================================ -->
-    <div id="contextOverlay" class="no-print hidden fixed left-1/2 -translate-x-1/2 bottom-[114px] z-35 w-[min(95vw,580px)] pointer-events-none flex flex-col items-center gap-2"></div>
-
-    <!-- ================================================================ -->
-    <!-- FLOATING BOTTOM DOCK: Mode Pill + Page & Zoom Pill               -->
-    <!-- ================================================================ -->
-    <div id="bottomDock" class="no-print hidden fixed bottom-3 left-1/2 -translate-x-1/2 z-40 flex flex-col items-center gap-2 max-w-[96vw]">
-      <!-- Mode Pill (Scope-Based Tabs: Pan | Parts | Step | Page on steps; Pan | Camera | Page on cover/complete; Pan | Page on simple pages) -->
-      <div id="modePill" class="studio-pill p-1 rounded-full flex items-center gap-0.5 text-xs font-semibold whitespace-nowrap max-w-full overflow-x-auto no-scrollbar">
-        <button data-mode="pan" type="button" class="mode-btn min-h-[34px] px-2.5 sm:px-3 py-1.5 rounded-full flex items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer">
-          <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9l-3 3 3 3"/><path d="M9 5l3-3 3 3"/><path d="M15 19l-3 3-3-3"/><path d="M19 9l3 3-3 3"/><line x1="2" x2="22" y1="12" y2="12"/><line x1="12" x2="12" y1="2" y2="22"/></svg>
-          <span>Pan</span>
-        </button>
-        <button data-mode="parts" type="button" class="mode-btn min-h-[34px] px-2.5 sm:px-3 py-1.5 rounded-full flex items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer">
-          <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m4 4 7.07 17 2.51-7.39L21 11.07z"/></svg>
-          <span>Parts</span>
-        </button>
-        <button data-mode="camera" type="button" class="mode-btn hidden min-h-[34px] px-2.5 sm:px-3 py-1.5 rounded-full items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer">
-          <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>
-          <span>Camera</span>
-        </button>
-        <button data-mode="step" type="button" class="mode-btn min-h-[34px] px-2.5 sm:px-3 py-1.5 rounded-full flex items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer">
-          <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 7.5 12 12l8-4.5L12 3Z"/><path d="M4 7.5V16.5L12 21l8-4.5V7.5"/><path d="M12 12v9"/></svg>
-          <span>Step</span>
-        </button>
-        <button data-mode="page" type="button" class="mode-btn min-h-[34px] px-2.5 sm:px-3 py-1.5 rounded-full flex items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer">
-          <svg id="modeEditIconDefault" class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" x2="16" y1="13" y2="13"/><line x1="8" x2="13" y1="17" y2="17"/></svg>
-          <svg id="modeEditIconBom" class="hidden w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
-          <span id="modeEditLabel">Page</span>
+        <!-- Site Title (+ inline Model Name when collapsed on tablet/desktop) -->
+        <button id="desktopModelChip" type="button" title="Open menu" class="hidden h-8 pl-1 pr-3 rounded-full items-center gap-2 text-xs font-semibold min-w-0 flex-1 hover:bg-[var(--surface-hover)] transition-colors cursor-pointer text-left">
+          <svg class="w-5 h-5 shrink-0" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+            <g transform="rotate(12 32 32)">
+              <path d="M24.8 7.8 C14.9 14.8 10.1 24.6 11.6 35.3 L14.9 32.7 Q13.9 38.0 13.3 42.8 Q14.6 45.2 15.8 47.2 L18.2 42.8 Q19.8 48.9 21.1 54.7 Q14.1 52.2 6.7 49.4 L13.1 48.9 C9.6 39.9 8.4 32.5 9.8 26.2 Q9.4 20.7 8.7 14.7 L11.7 19.3 Q17.3 12.2 24.8 7.8 Z" fill="#38bdf8"/>
+              <path d="M31.7 7.1 Q34.8 10.1 37.5 15.7 L40.5 12.6 Q39.4 17.0 38.6 21.0 C40.9 31.5 39.2 44.1 37.2 52.6 L43.4 51.6 Q37.7 54.5 32.1 57.0 Q31.0 52.0 30.1 46.7 L33.7 51.3 Q34.4 49.7 35.3 47.6 Q34.4 43.5 33.2 39.1 L36.2 41.6 Q36.7 38.7 37.0 35.4 Q35.0 30.9 32.5 26.0 L36.9 28.4 C36.7 20.4 35.1 12.5 31.7 7.1 Z" fill="#7c152e"/>
+              <path d="M38.5 8.3 C50.8 15.1 56.3 21.9 55.5 33.5 L60.9 30.3 Q57.1 36.0 53.8 41.3 Q53.3 43.4 52.6 45.4 L58.5 45.0 Q51.8 48.7 45.4 51.9 Q46.2 46.3 47.4 40.3 L49.8 43.9 C53.1 37.2 53.7 31.1 52.3 25.6 Q50.1 22.7 47.5 19.6 L50.0 19.8 Q45.5 13.1 38.5 8.3 Z" fill="#ed7d1f"/>
+            </g>
+          </svg>
+          <span class="text-sm font-bold tracking-tight shrink-0 text-[var(--foreground)]">Brick Instruction Works</span>
+          <span id="desktopModelSep" class="hidden w-px h-4 bg-[var(--border-strong)] shrink-0" aria-hidden="true"></span>
+          <span id="desktopModelName" class="hidden text-xs font-semibold text-[var(--muted-foreground)] truncate min-w-0"></span>
         </button>
       </div>
 
-      <!-- Page & Desktop Zoom Pill -->
-      <div class="studio-pill w-[min(94vw,420px)] md:w-[min(94vw,492px)] max-w-full min-w-0 px-1.5 py-1 rounded-full flex items-center gap-1 text-xs font-semibold">
-        <button id="firstPage" type="button" title="First Page" aria-label="First Page" class="h-8 w-8 rounded-full enabled:hover:bg-[var(--surface-hover)] text-[var(--foreground)] flex items-center justify-center disabled:opacity-35 transition-colors shrink-0 cursor-pointer disabled:cursor-default">
-          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m17 18-6-6 6-6"/><path d="M7 6v12"/></svg>
-        </button>
-        <button id="prevPage" type="button" title="Previous Page" aria-label="Previous Page" class="h-8 w-8 rounded-full bg-[var(--primary)] enabled:hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] flex items-center justify-center disabled:opacity-35 transition-colors shrink-0 cursor-pointer disabled:cursor-default">
-          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
-        </button>
-        <button id="btnPageOverview" type="button" class="h-8 px-2 rounded-full hover:bg-[var(--surface-hover)] flex items-center justify-center gap-1.5 min-w-0 flex-1 overflow-hidden transition-colors cursor-pointer">
-          <span id="pageLabelText" class="truncate min-w-0 font-semibold">Page 1</span>
-          <span id="pageCountText" class="shrink-0 font-mono text-xs text-[var(--muted-foreground)] whitespace-nowrap"></span>
-          <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
-        </button>
-        <button id="nextPage" type="button" title="Next Page" aria-label="Next Page" class="h-8 w-8 rounded-full bg-[var(--primary)] enabled:hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] flex items-center justify-center disabled:opacity-35 transition-colors shrink-0 cursor-pointer disabled:cursor-default">
-          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
-        </button>
-        <button id="lastPage" type="button" title="Last Page" aria-label="Last Page" class="h-8 w-8 rounded-full enabled:hover:bg-[var(--surface-hover)] text-[var(--foreground)] flex items-center justify-center disabled:opacity-35 transition-colors shrink-0 cursor-pointer disabled:cursor-default">
-          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 18 6-6-6-6"/><path d="M17 6v12"/></svg>
-        </button>
-
-        <div id="zoomControlsBar" class="hidden md:inline-flex items-center gap-1 shrink-0">
-          <div class="w-px h-5 bg-[var(--border)] mx-0.5 shrink-0" aria-hidden="true"></div>
-          <button id="btnZoomOut" type="button" title="Zoom Page View Out" aria-label="Zoom Page View Out" class="h-8 w-8 rounded-full flex items-center justify-center hover:bg-[var(--surface-hover)] transition-colors shrink-0 cursor-pointer">
-            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="5" x2="19" y1="12" y2="12"/></svg>
-          </button>
-          <button id="btnZoomFit" type="button" title="Reset Page View Zoom" class="h-8 w-12 rounded-full font-mono text-xs font-semibold flex items-center justify-center hover:bg-[var(--surface-hover)] transition-colors shrink-0 cursor-pointer">100%</button>
-          <button id="btnZoomIn" type="button" title="Zoom Page View In" aria-label="Zoom Page View In" class="h-8 w-8 rounded-full flex items-center justify-center hover:bg-[var(--surface-hover)] transition-colors shrink-0 cursor-pointer">
-            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="12" x2="12" y1="5" y2="19"/><line x1="5" x2="19" y1="12" y2="12"/></svg>
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- ================================================================ -->
-    <!-- TOP-LEFT SLIDE-OUT MENU DRAWER                                   -->
-    <!-- ================================================================ -->
-    <div id="menuBackdrop" class="no-print hidden fixed inset-0 z-50 bg-black/45 flex">
-      <aside id="menuDrawer" class="w-[min(88vw,356px)] h-full bg-[var(--card)] border-r border-[var(--border)] shadow-[var(--shadow-sheet)] flex flex-col overflow-hidden">
-        <!-- Drawer Header -->
-        <div class="px-5 py-4 border-b border-[var(--rail-border)] bg-[var(--rail)] text-[var(--rail-foreground)] flex items-center justify-between gap-3 shrink-0">
-          <div class="flex items-center gap-3 min-w-0">
-            <div class="w-9 h-9 rounded-lg bg-[#fcfcfd] flex items-center justify-center shrink-0">
-              <svg class="w-7 h-7 shrink-0" viewBox="0 0 64 64" fill="none" aria-hidden="true">
-                <g transform="rotate(12 32 32)">
-                  <path d="M24.8 7.8 C14.9 14.8 10.1 24.6 11.6 35.3 L14.9 32.7 Q13.9 38.0 13.3 42.8 Q14.6 45.2 15.8 47.2 L18.2 42.8 Q19.8 48.9 21.1 54.7 Q14.1 52.2 6.7 49.4 L13.1 48.9 C9.6 39.9 8.4 32.5 9.8 26.2 Q9.4 20.7 8.7 14.7 L11.7 19.3 Q17.3 12.2 24.8 7.8 Z" fill="#38bdf8"/>
-                  <path d="M31.7 7.1 Q34.8 10.1 37.5 15.7 L40.5 12.6 Q39.4 17.0 38.6 21.0 C40.9 31.5 39.2 44.1 37.2 52.6 L43.4 51.6 Q37.7 54.5 32.1 57.0 Q31.0 52.0 30.1 46.7 L33.7 51.3 Q34.4 49.7 35.3 47.6 Q34.4 43.5 33.2 39.1 L36.2 41.6 Q36.7 38.7 37.0 35.4 Q35.0 30.9 32.5 26.0 L36.9 28.4 C36.7 20.4 35.1 12.5 31.7 7.1 Z" fill="#7c152e"/>
-                  <path d="M38.5 8.3 C50.8 15.1 56.3 21.9 55.5 33.5 L60.9 30.3 Q57.1 36.0 53.8 41.3 Q53.3 43.4 52.6 45.4 L58.5 45.0 Q51.8 48.7 45.4 51.9 Q46.2 46.3 47.4 40.3 L49.8 43.9 C53.1 37.2 53.7 31.1 52.3 25.6 Q50.1 22.7 47.5 19.6 L50.0 19.8 Q45.5 13.1 38.5 8.3 Z" fill="#ed7d1f"/>
-                </g>
-              </svg>
-            </div>
-            <div class="min-w-0">
-              <div class="text-sm font-bold tracking-tight leading-tight">Brick Instruction Works</div>
-              <div class="text-xs text-[var(--rail-muted)] leading-tight mt-0.5">Instruction Studio</div>
-            </div>
-          </div>
-          <button id="btnCloseMenu" type="button" aria-label="Close menu" class="w-10 h-10 sm:w-9 sm:h-9 rounded-md flex items-center justify-center hover:bg-[var(--rail-hover)] shrink-0 transition-colors cursor-pointer">
-            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
-          </button>
-        </div>
-
+      <!-- Collapsible Side Menu Body & Footer -->
+      <div id="menuDrawerPanel" class="hidden flex-1 min-h-0 flex flex-col border-t border-[var(--border)]">
         <!-- Drawer Scrollable Body -->
-        <div id="menuScrollBody" class="flex-1 min-h-0 overflow-y-auto overscroll-contain p-5 flex flex-col gap-6 text-xs">
+        <div id="menuScrollBody" class="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 flex flex-col gap-5 text-xs">
 
           <!-- Active Model Summary Band -->
-          <div id="menuModelCard" class="hidden p-4 rounded-lg bg-[var(--surface-sunken)] space-y-2.5">
+          <div id="menuModelCard" class="hidden p-3.5 rounded-lg bg-[var(--surface-sunken)] space-y-2.5">
             <div id="menuModelName" class="text-sm font-bold leading-snug break-words min-w-0">No model loaded</div>
             <div id="menuModelFileType" class="hidden text-xs text-[var(--muted-foreground)] break-words"></div>
             <div id="menuModelStats" class="hidden flex flex-wrap items-center gap-2 pt-0.5 font-mono text-xs font-medium"></div>
@@ -307,48 +100,48 @@
           </div>
 
           <!-- Page Setup & Export -->
-          <div id="menuPagePrintSection" class="hidden flex flex-col gap-2.5 pt-5 border-t border-[var(--border)]">
+          <div id="menuPagePrintSection" class="hidden flex flex-col gap-2.5 pt-4 border-t border-[var(--border)]">
             <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Page &amp; Export</div>
             <button id="menuPageSetupBtn" type="button" class="w-full py-2.5 px-3.5 rounded-lg border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold text-left flex items-center justify-between gap-2 transition-colors cursor-pointer">
-              <span class="flex items-center gap-2 min-w-0">
+              <span class="flex items-center gap-2 shrink-0 whitespace-nowrap">
                 <svg class="w-4 h-4 text-[var(--primary)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="3" width="16" height="18" rx="2"/><line x1="8" x2="16" y1="8" y2="8"/><line x1="8" x2="16" y1="12" y2="12"/><line x1="8" x2="12" y1="16" y2="16"/></svg>
                 <span>Page Setup</span>
                 <span id="menuPageSetupWarnDot" class="hidden w-2 h-2 rounded-full bg-[var(--warning)] shrink-0" title="Some steps need a larger page size"></span>
               </span>
-              <span class="flex items-center gap-1.5 shrink-0 max-w-[55%]">
+              <span class="flex items-center gap-1.5 min-w-0 justify-end">
                 <span id="menuPageSetupSummary" class="font-mono text-xs text-[var(--muted-foreground)] truncate">Screen Fit</span>
                 <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
               </span>
             </button>
             <button id="menuBomSetupBtn" type="button" class="w-full py-2.5 px-3.5 rounded-lg border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold text-left flex items-center justify-between gap-2 transition-colors cursor-pointer">
-              <span class="flex items-center gap-2 min-w-0">
+              <span class="flex items-center gap-2 shrink-0 whitespace-nowrap">
                 <svg class="w-4 h-4 text-[var(--primary)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
                 <span>Parts List Setup</span>
               </span>
-              <span class="flex items-center gap-1.5 shrink-0 max-w-[52%]">
+              <span class="flex items-center gap-1.5 min-w-0 justify-end">
                 <span id="menuBomSetupSummary" class="font-mono text-xs text-[var(--muted-foreground)] truncate">Balanced · Color</span>
                 <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
               </span>
             </button>
-            <button id="menuExportHtmlBtn" type="button" class="hidden w-full py-2.5 px-4 rounded-lg border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer">
+            <button id="menuExportHtmlBtn" type="button" class="hidden w-full py-2.5 px-3.5 rounded-lg border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer">
               <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 3 7.5 12 12l9-4.5L12 3Z"/><path d="M3 7.5V16.5L12 21l9-4.5V7.5"/><path d="M12 12v9"/></svg>
               <span>Export 3D Interactive Viewer (HTML)</span>
             </button>
-            <button id="menuPrintBtn" type="button" class="hidden w-full py-2.5 px-4 rounded-lg border border-[var(--border-strong)] bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer">
+            <button id="menuPrintBtn" type="button" class="hidden w-full py-2.5 px-3.5 rounded-lg border border-[var(--border-strong)] bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer">
               <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect width="12" height="8" x="6" y="14"/></svg>
               <span>Print / Export PDF</span>
             </button>
           </div>
 
           <!-- Step Generation (above Bricks Library) -->
-          <div id="menuAutoGenSection" class="hidden flex flex-col gap-2.5 pt-5 border-t border-[var(--border)]">
+          <div id="menuAutoGenSection" class="hidden flex flex-col gap-2.5 pt-4 border-t border-[var(--border)]">
             <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Step Generation</div>
             <button id="menuStepGenBtn" type="button" class="w-full py-2.5 px-3.5 rounded-lg border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold text-left flex items-center justify-between gap-2 transition-colors cursor-pointer">
-              <span class="flex items-center gap-2 min-w-0">
+              <span class="flex items-center gap-2 shrink-0 whitespace-nowrap">
                 <svg class="w-4 h-4 text-[var(--primary)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="7" height="16" rx="1.5"/><rect x="14" y="4" width="7" height="16" rx="1.5"/></svg>
                 <span>Step Generation</span>
               </span>
-              <span class="flex items-center gap-1.5 shrink-0 max-w-[52%]">
+              <span class="flex items-center gap-1.5 min-w-0 justify-end">
                 <span id="menuStepGenSummary" class="font-mono text-xs text-[var(--muted-foreground)] truncate">Sections &amp; Steps</span>
                 <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
               </span>
@@ -356,14 +149,14 @@
           </div>
 
           <!-- Bricks Library -->
-          <div id="menuBricksLibSection" class="flex flex-col gap-2.5 pt-5 border-t border-[var(--border)] transition-all">
+          <div id="menuBricksLibSection" class="flex flex-col gap-2.5 pt-4 border-t border-[var(--border)] transition-all">
             <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Bricks Library</div>
             <button id="menuBricksLibBtn" type="button" class="w-full py-2.5 px-3.5 rounded-lg border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold text-left flex items-center justify-between gap-2 transition-colors cursor-pointer">
-              <span class="flex items-center gap-2 min-w-0">
+              <span class="flex items-center gap-2 shrink-0 whitespace-nowrap">
                 <svg class="w-4 h-4 text-[var(--primary)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 3 7.5 12 12l9-4.5L12 3Z"/><path d="m3 12 9 4.5 9-4.5"/><path d="m3 16.5 9 4.5 9-4.5"/></svg>
                 <span>Bricks Library</span>
               </span>
-              <span class="flex items-center gap-1.5 shrink-0 max-w-[56%]">
+              <span class="flex items-center gap-1.5 min-w-0 justify-end">
                 <span id="libStatusText" class="font-mono text-xs text-[var(--muted-foreground)] truncate">Built-in shapes</span>
                 <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
               </span>
@@ -433,7 +226,7 @@
         </div>
 
         <!-- Drawer Footer -->
-        <div class="px-5 py-3.5 border-t border-[var(--border)] shrink-0 bg-[var(--chrome)] text-xs">
+        <div id="menuDrawerFooter" class="px-4 py-3 border-t border-[var(--border)] shrink-0 bg-[var(--chrome)] text-xs">
           <a
             id="menuProvideFeedbackLink"
             href="https://github.com/star4z/Brick-Instruction-Creator/issues/new/choose"
@@ -452,8 +245,219 @@
             </svg>
           </a>
         </div>
-      </aside>
-      <div id="menuDismissArea" class="flex-1"></div>
+      </div>
+    </aside>
+
+    <!-- Mobile Editor Identity Pill (shown on < md when a model is loaded & menu is collapsed) -->
+    <button id="mobileEditorBrandPill" type="button" title="Open menu" class="no-print hidden fixed top-[60px] left-1/2 -translate-x-1/2 z-30 md:hidden studio-pill h-9 w-max max-w-[calc(100vw-24px)] pl-2.5 pr-3.5 rounded-full items-center gap-2 hover:bg-[var(--surface-hover)] transition-colors cursor-pointer">
+      <svg class="w-4 h-4 shrink-0" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+        <g transform="rotate(12 32 32)">
+          <path d="M24.8 7.8 C14.9 14.8 10.1 24.6 11.6 35.3 L14.9 32.7 Q13.9 38.0 13.3 42.8 Q14.6 45.2 15.8 47.2 L18.2 42.8 Q19.8 48.9 21.1 54.7 Q14.1 52.2 6.7 49.4 L13.1 48.9 C9.6 39.9 8.4 32.5 9.8 26.2 Q9.4 20.7 8.7 14.7 L11.7 19.3 Q17.3 12.2 24.8 7.8 Z" fill="#38bdf8"/>
+          <path d="M31.7 7.1 Q34.8 10.1 37.5 15.7 L40.5 12.6 Q39.4 17.0 38.6 21.0 C40.9 31.5 39.2 44.1 37.2 52.6 L43.4 51.6 Q37.7 54.5 32.1 57.0 Q31.0 52.0 30.1 46.7 L33.7 51.3 Q34.4 49.7 35.3 47.6 Q34.4 43.5 33.2 39.1 L36.2 41.6 Q36.7 38.7 37.0 35.4 Q35.0 30.9 32.5 26.0 L36.9 28.4 C36.7 20.4 35.1 12.5 31.7 7.1 Z" fill="#7c152e"/>
+          <path d="M38.5 8.3 C50.8 15.1 56.3 21.9 55.5 33.5 L60.9 30.3 Q57.1 36.0 53.8 41.3 Q53.3 43.4 52.6 45.4 L58.5 45.0 Q51.8 48.7 45.4 51.9 Q46.2 46.3 47.4 40.3 L49.8 43.9 C53.1 37.2 53.7 31.1 52.3 25.6 Q50.1 22.7 47.5 19.6 L50.0 19.8 Q45.5 13.1 38.5 8.3 Z" fill="#ed7d1f"/>
+        </g>
+      </svg>
+      <span class="text-xs font-bold tracking-tight shrink-0">Brick Instruction Works</span>
+      <span id="mobileEditorModelSep" class="hidden w-px h-3.5 bg-[var(--border-strong)] shrink-0" aria-hidden="true"></span>
+      <span id="mobileEditorModelName" class="hidden text-xs text-[var(--muted-foreground)] truncate min-w-0"></span>
+    </button>
+
+    <!-- ================================================================ -->
+    <!-- FLOATING TOP-RIGHT PILLS: Loaded-Model Actions                   -->
+    <!-- ================================================================ -->
+    <div id="topRightPills" class="no-print hidden fixed top-3 right-3 z-40 flex items-center gap-1.5 shrink-0">
+      <div class="studio-pill h-10 rounded-full px-1 inline-flex items-center gap-0.5">
+        <button id="btnUndo" type="button" title="Undo" aria-label="Undo" class="h-8 w-8 rounded-full flex items-center justify-center hover:bg-[var(--surface-hover)] disabled:opacity-35 transition-colors cursor-pointer disabled:cursor-default">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"/></svg>
+        </button>
+        <button id="btnRedo" type="button" title="Redo" aria-label="Redo" class="h-8 w-8 rounded-full flex items-center justify-center hover:bg-[var(--surface-hover)] disabled:opacity-35 transition-colors cursor-pointer disabled:cursor-default">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5A5.5 5.5 0 0 0 9.5 20H13"/></svg>
+        </button>
+      </div>
+      <button id="btnStylePop" type="button" aria-haspopup="true" aria-expanded="false" class="studio-pill h-10 px-3.5 rounded-full hover:bg-[var(--surface-hover)] flex items-center gap-1.5 text-xs font-semibold transition-colors cursor-pointer">
+        <svg class="w-4 h-4 text-[var(--accent-warm)] transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="13.5" cy="6.5" r=".6" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".6" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".6" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".6" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></svg>
+        <span>Style</span>
+      </button>
+      <button id="btnHeaderExport" type="button" title="Print or export" aria-label="Export and print" class="h-10 w-10 sm:w-auto sm:px-3.5 rounded-full bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] shadow-[var(--shadow-surface)] flex items-center justify-center gap-1.5 text-xs font-semibold transition-colors cursor-pointer">
+        <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect width="12" height="8" x="6" y="14"/></svg>
+        <span class="hidden sm:inline">Export</span>
+      </button>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- MAIN PROOFING WORKSPACE (shifts cleanly when desktop menu open)  -->
+    <!-- ================================================================ -->
+    <div id="workspaceArea" data-menu-docked="false" class="workspace-area relative flex-1 min-w-0 h-full overflow-hidden flex flex-col">
+      <!-- ================================================================ -->
+      <!-- FLOATING PAGE-SIZE READABILITY WARNING (non-print)               -->
+      <!-- ================================================================ -->
+      <div id="pageSizeWarningBanner" role="status" aria-live="polite" class="no-print hidden absolute top-[104px] md:top-[60px] left-1/2 -translate-x-1/2 z-30 max-w-[min(calc(100%-24px),640px)]">
+        <div class="flex items-center gap-2 px-3 py-2 rounded-xl bg-[var(--card)] border border-[var(--warning)]/45 shadow-[var(--shadow-surface)] text-xs text-[var(--foreground)]">
+          <span class="w-6 h-6 rounded-full bg-[var(--warning-soft)] text-[var(--warning)] flex items-center justify-center shrink-0" aria-hidden="true">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+          </span>
+          <span id="pageSizeWarningText" class="min-w-0 flex-1 leading-snug font-medium"></span>
+          <button id="btnApplySuggestedPageSize" type="button" class="hidden px-2.5 py-1 rounded-md bg-[var(--warning)] text-white hover:opacity-90 font-semibold whitespace-nowrap shrink-0 transition-opacity cursor-pointer"></button>
+          <button id="btnOpenPageSetupFromWarning" type="button" class="px-2.5 py-1 rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer">Page Setup</button>
+          <button id="btnDismissPageSizeWarning" type="button" title="Dismiss warning" aria-label="Dismiss page size warning" class="w-6 h-6 rounded-full hover:bg-[var(--surface-hover)] text-[var(--muted-foreground)] flex items-center justify-center shrink-0 transition-colors cursor-pointer">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- ================================================================ -->
+      <!-- EMPTY WELCOME PROOFING SHEET (shown until model is loaded)       -->
+      <!-- ================================================================ -->
+      <section id="emptyState" class="proofing-stage flex-1 min-h-0 flex items-center justify-center pt-16 pb-6 px-4 sm:p-8 overflow-y-auto">
+        <div class="relative z-10 w-full max-w-2xl rounded-xl proof-sheet-frame overflow-hidden">
+          <!-- Primary Welcome Sheet Body (Logo + App Name visible on Mobile & Desktop) -->
+          <div class="p-6 sm:p-8 space-y-4">
+            <div class="flex items-center gap-3.5 sm:gap-4">
+              <svg class="w-12 h-12 sm:w-14 sm:h-14 shrink-0" viewBox="0 0 64 64" fill="none" role="img" aria-label="Brick Instruction Works logo">
+                <g transform="rotate(12 32 32)">
+                  <path d="M24.8 7.8 C14.9 14.8 10.1 24.6 11.6 35.3 L14.9 32.7 Q13.9 38.0 13.3 42.8 Q14.6 45.2 15.8 47.2 L18.2 42.8 Q19.8 48.9 21.1 54.7 Q14.1 52.2 6.7 49.4 L13.1 48.9 C9.6 39.9 8.4 32.5 9.8 26.2 Q9.4 20.7 8.7 14.7 L11.7 19.3 Q17.3 12.2 24.8 7.8 Z" fill="#38bdf8"/>
+                  <path d="M31.7 7.1 Q34.8 10.1 37.5 15.7 L40.5 12.6 Q39.4 17.0 38.6 21.0 C40.9 31.5 39.2 44.1 37.2 52.6 L43.4 51.6 Q37.7 54.5 32.1 57.0 Q31.0 52.0 30.1 46.7 L33.7 51.3 Q34.4 49.7 35.3 47.6 Q34.4 43.5 33.2 39.1 L36.2 41.6 Q36.7 38.7 37.0 35.4 Q35.0 30.9 32.5 26.0 L36.9 28.4 C36.7 20.4 35.1 12.5 31.7 7.1 Z" fill="#7c152e"/>
+                  <path d="M38.5 8.3 C50.8 15.1 56.3 21.9 55.5 33.5 L60.9 30.3 Q57.1 36.0 53.8 41.3 Q53.3 43.4 52.6 45.4 L58.5 45.0 Q51.8 48.7 45.4 51.9 Q46.2 46.3 47.4 40.3 L49.8 43.9 C53.1 37.2 53.7 31.1 52.3 25.6 Q50.1 22.7 47.5 19.6 L50.0 19.8 Q45.5 13.1 38.5 8.3 Z" fill="#ed7d1f"/>
+                </g>
+              </svg>
+              <div class="min-w-0">
+                <h1 class="text-2xl sm:text-3xl font-bold tracking-tight leading-tight text-[var(--foreground)]">Brick Instruction Works</h1>
+                <p class="text-xs sm:text-sm font-medium text-[var(--muted-foreground)] mt-0.5">Set a brick model for print.</p>
+              </div>
+            </div>
+            <p class="text-sm text-[var(--muted-foreground)] leading-relaxed max-w-[56ch]">
+              Convert BrickLink Studio and LDraw files into clean, buildable manuals. Every camera angle, callout, and page break stays bound to its step—so early edits never scramble downstream pages.
+            </p>
+          </div>
+
+          <!-- Interactive Drop & Action Band (flush hairline band, zero nested card) -->
+          <div id="emptyDropZone" class="px-6 sm:px-8 py-5 border-t border-dashed border-[var(--border-strong)] bg-[var(--surface-sunken)]/45 space-y-3.5 transition-colors">
+            <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+              <button id="emptyImportBtn" type="button" class="sm:flex-1 shrink-0 h-11 px-5 rounded-full bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors cursor-pointer">
+                <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
+                <span>Import Model File</span>
+              </button>
+              <button id="emptyLoadProjBtn" type="button" class="sm:flex-1 shrink-0 h-11 px-5 rounded-full border border-[var(--border-strong)] bg-[var(--card)] hover:bg-[var(--surface-hover)] text-[var(--foreground)] text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors cursor-pointer">
+                <svg class="w-4 h-4 text-[var(--info)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M12 18v-6"/><path d="m9 15 3-3 3 3"/></svg>
+                <span>Import Project</span>
+              </button>
+            </div>
+
+            <p class="text-xs text-[var(--muted-foreground)] leading-relaxed">
+              Drop a <strong class="font-mono text-[var(--foreground)]">.io</strong>, <strong class="font-mono text-[var(--foreground)]">.ldr</strong>, <strong class="font-mono text-[var(--foreground)]">.mpd</strong>, or <strong class="font-mono text-[var(--foreground)]">.biw</strong> file anywhere on this sheet.
+            </p>
+          </div>
+
+          <!-- Clean Non-Wrapping Capability Strip -->
+          <div class="px-6 sm:px-8 py-4 border-t border-[var(--border)] bg-[var(--surface-sunken)] grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+            <div class="flex sm:flex-col justify-between gap-1">
+              <span class="font-semibold text-[var(--foreground)]">Verified Snap Graph</span>
+              <span class="text-[var(--muted-foreground)]">Studs, SNOT, bars &amp; clips</span>
+            </div>
+            <div class="flex sm:flex-col justify-between gap-1">
+              <span class="font-semibold text-[var(--foreground)]">Step-Bound Layout</span>
+              <span class="text-[var(--muted-foreground)]">No cascading page shifts</span>
+            </div>
+            <div class="flex sm:flex-col justify-between gap-1">
+              <span class="font-semibold text-[var(--foreground)]">Client-Side Export</span>
+              <span class="font-mono text-[var(--muted-foreground)]">PDF · HTML · .biw</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================================================================ -->
+      <!-- FULL-SCREEN ZOOMABLE LIVE PAGE STAGE                             -->
+      <!-- ================================================================ -->
+      <main id="stageViewport" class="stage-viewport proofing-stage hidden flex-1 min-h-0 relative w-full h-full overflow-hidden flex items-center justify-center pt-[104px] md:pt-16 pb-28 px-3">
+        <div id="stageContainer" class="relative z-10 w-0 h-0 overflow-visible origin-center will-change-transform flex items-center justify-center">
+          <div id="pageFrame" class="shrink-0 studio-page-frame overflow-hidden relative transition-colors"></div>
+        </div>
+      </main>
+
+      <!-- ================================================================ -->
+      <!-- FLOATING CONTEXTUAL CONTROLS (Mode-specific overlays over page)  -->
+      <!-- ================================================================ -->
+      <div id="contextOverlay" class="no-print hidden absolute left-1/2 -translate-x-1/2 bottom-[114px] z-35 w-[min(calc(100%-24px),580px)] pointer-events-none flex flex-col items-center gap-2"></div>
+
+      <!-- ================================================================ -->
+      <!-- FLOATING BOTTOM DOCK: Mode Pill + Page & Zoom Pill               -->
+      <!-- ================================================================ -->
+      <div id="bottomDock" class="no-print hidden absolute bottom-3 left-1/2 -translate-x-1/2 z-40 flex flex-col items-center gap-2 max-w-[calc(100%-24px)]">
+        <!-- Mode Pill (Scope-Based Tabs: Pan | Parts | Step | Page on steps; Pan | Camera | Page on cover/complete; Pan | Page on simple pages) -->
+        <div id="modePill" class="studio-pill p-1 rounded-full flex items-center gap-0.5 text-xs font-semibold whitespace-nowrap max-w-full overflow-x-auto no-scrollbar">
+          <button data-mode="pan" type="button" class="mode-btn min-h-[34px] px-2.5 sm:px-3 py-1.5 rounded-full flex items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer">
+            <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9l-3 3 3 3"/><path d="M9 5l3-3 3 3"/><path d="M15 19l-3 3-3-3"/><path d="M19 9l3 3-3 3"/><line x1="2" x2="22" y1="12" y2="12"/><line x1="12" x2="12" y1="2" y2="22"/></svg>
+            <span>Pan</span>
+          </button>
+          <button data-mode="parts" type="button" class="mode-btn min-h-[34px] px-2.5 sm:px-3 py-1.5 rounded-full flex items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer">
+            <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m4 4 7.07 17 2.51-7.39L21 11.07z"/></svg>
+            <span>Parts</span>
+          </button>
+          <button data-mode="camera" type="button" class="mode-btn hidden min-h-[34px] px-2.5 sm:px-3 py-1.5 rounded-full items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer">
+            <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>
+            <span>Camera</span>
+          </button>
+          <button data-mode="step" type="button" class="mode-btn min-h-[34px] px-2.5 sm:px-3 py-1.5 rounded-full flex items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer">
+            <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 7.5 12 12l8-4.5L12 3Z"/><path d="M4 7.5V16.5L12 21l8-4.5V7.5"/><path d="M12 12v9"/></svg>
+            <span>Step</span>
+          </button>
+          <button data-mode="page" type="button" class="mode-btn min-h-[34px] px-2.5 sm:px-3 py-1.5 rounded-full flex items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer">
+            <svg id="modeEditIconDefault" class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" x2="16" y1="13" y2="13"/><line x1="8" x2="13" y1="17" y2="17"/></svg>
+            <svg id="modeEditIconBom" class="hidden w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+            <span id="modeEditLabel">Page</span>
+          </button>
+        </div>
+
+        <!-- Page & Desktop Zoom Pill -->
+        <div class="studio-pill w-[min(calc(100vw-24px),420px)] md:w-[min(calc(100vw-24px),492px)] max-w-full min-w-0 px-1.5 py-1 rounded-full flex items-center gap-1 text-xs font-semibold">
+          <button id="firstPage" type="button" title="First Page" aria-label="First Page" class="h-8 w-8 rounded-full enabled:hover:bg-[var(--surface-hover)] text-[var(--foreground)] flex items-center justify-center disabled:opacity-35 transition-colors shrink-0 cursor-pointer disabled:cursor-default">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m17 18-6-6 6-6"/><path d="M7 6v12"/></svg>
+          </button>
+          <button id="prevPage" type="button" title="Previous Page" aria-label="Previous Page" class="h-8 w-8 rounded-full bg-[var(--primary)] enabled:hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] flex items-center justify-center disabled:opacity-35 transition-colors shrink-0 cursor-pointer disabled:cursor-default">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
+          </button>
+          <button id="btnPageOverview" type="button" class="h-8 px-2 rounded-full hover:bg-[var(--surface-hover)] flex items-center justify-center gap-1.5 min-w-0 flex-1 overflow-hidden transition-colors cursor-pointer">
+            <span id="pageLabelText" class="truncate min-w-0 font-semibold">Page 1</span>
+            <span id="pageCountText" class="shrink-0 font-mono text-xs text-[var(--muted-foreground)] whitespace-nowrap"></span>
+            <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
+          </button>
+          <button id="nextPage" type="button" title="Next Page" aria-label="Next Page" class="h-8 w-8 rounded-full bg-[var(--primary)] enabled:hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] flex items-center justify-center disabled:opacity-35 transition-colors shrink-0 cursor-pointer disabled:cursor-default">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+          </button>
+          <button id="lastPage" type="button" title="Last Page" aria-label="Last Page" class="h-8 w-8 rounded-full enabled:hover:bg-[var(--surface-hover)] text-[var(--foreground)] flex items-center justify-center disabled:opacity-35 transition-colors shrink-0 cursor-pointer disabled:cursor-default">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 18 6-6-6-6"/><path d="M17 6v12"/></svg>
+          </button>
+
+          <div id="zoomControlsBar" class="hidden md:inline-flex items-center gap-1 shrink-0">
+            <div class="w-px h-5 bg-[var(--border)] mx-0.5 shrink-0" aria-hidden="true"></div>
+            <button id="btnZoomOut" type="button" title="Zoom Page View Out" aria-label="Zoom Page View Out" class="h-8 w-8 rounded-full flex items-center justify-center hover:bg-[var(--surface-hover)] transition-colors shrink-0 cursor-pointer">
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="5" x2="19" y1="12" y2="12"/></svg>
+            </button>
+            <button id="btnZoomFit" type="button" title="Reset Page View Zoom" class="h-8 w-12 rounded-full font-mono text-xs font-semibold flex items-center justify-center hover:bg-[var(--surface-hover)] transition-colors shrink-0 cursor-pointer">100%</button>
+            <button id="btnZoomIn" type="button" title="Zoom Page View In" aria-label="Zoom Page View In" class="h-8 w-8 rounded-full flex items-center justify-center hover:bg-[var(--surface-hover)] transition-colors shrink-0 cursor-pointer">
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="12" x2="12" y1="5" y2="19"/><line x1="5" x2="19" y1="12" y2="12"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ================================================================ -->
+      <!-- DISMISSIBLE BOTTOM IMPORT ERROR NOTIFICATION                     -->
+      <!-- ================================================================ -->
+      <div id="errorBanner" class="no-print hidden absolute left-1/2 -translate-x-1/2 bottom-[114px] z-45 max-w-[calc(100%-24px)] transition-opacity duration-300">
+        <div class="flex items-center gap-3 px-4 py-2.5 rounded-full bg-[var(--ink-bar)] text-[var(--ink-bar-foreground)] shadow-[var(--shadow-sheet)] border border-white/15 text-xs font-semibold">
+          <span class="w-2 h-2 rounded-full bg-[var(--primary)] shrink-0"></span>
+          <span id="errorBannerText" class="whitespace-nowrap">There are 0 issues.</span>
+          <button id="btnBannerSeeErrors" type="button" class="px-2.5 py-1 rounded-full bg-white/12 hover:bg-white/20 text-[var(--ink-bar-accent)] font-semibold whitespace-nowrap transition-colors cursor-pointer">See issues</button>
+          <button id="btnBannerDismiss" type="button" title="Dismiss" aria-label="Dismiss notification" class="w-7 h-7 rounded-full hover:bg-white/15 flex items-center justify-center opacity-80 cursor-pointer">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Toast Banner -->
+      <div id="toast" class="no-print hidden absolute top-16 left-1/2 -translate-x-1/2 z-[60] px-4 py-2 rounded-2xl text-xs font-semibold bg-[var(--ink-bar)] text-[var(--ink-bar-foreground)] shadow-[var(--shadow-sheet)] border border-white/15 max-w-[calc(100%-24px)] text-center pointer-events-none"></div>
     </div>
 
     <!-- ================================================================ -->
@@ -2177,20 +2181,6 @@
     </div>
 
     <!-- ================================================================ -->
-    <!-- DISMISSIBLE BOTTOM IMPORT ERROR NOTIFICATION                     -->
-    <!-- ================================================================ -->
-    <div id="errorBanner" class="no-print hidden fixed left-1/2 -translate-x-1/2 bottom-[114px] z-45 max-w-[94vw] transition-opacity duration-300">
-      <div class="flex items-center gap-3 px-4 py-2.5 rounded-full bg-[var(--ink-bar)] text-[var(--ink-bar-foreground)] shadow-[var(--shadow-sheet)] border border-white/15 text-xs font-semibold">
-        <span class="w-2 h-2 rounded-full bg-[var(--primary)] shrink-0"></span>
-        <span id="errorBannerText" class="whitespace-nowrap">There are 0 issues.</span>
-        <button id="btnBannerSeeErrors" type="button" class="px-2.5 py-1 rounded-full bg-white/12 hover:bg-white/20 text-[var(--ink-bar-accent)] font-semibold whitespace-nowrap transition-colors cursor-pointer">See issues</button>
-        <button id="btnBannerDismiss" type="button" title="Dismiss" aria-label="Dismiss notification" class="w-7 h-7 rounded-full hover:bg-white/15 flex items-center justify-center opacity-80 cursor-pointer">
-          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
-        </button>
-      </div>
-    </div>
-
-    <!-- ================================================================ -->
     <!-- PERMANENT ACTION CONFIRMATION DIALOG ("Are you sure?")           -->
     <!-- ================================================================ -->
     <div id="confirmActionModal" role="alertdialog" aria-modal="true" aria-labelledby="confirmActionTitle" aria-describedby="confirmActionMessage" class="no-print hidden fixed inset-0 z-[65] bg-black/55 backdrop-blur-xs flex items-center justify-center p-4">
@@ -2211,9 +2201,6 @@
         </div>
       </div>
     </div>
-
-    <!-- Toast Banner -->
-    <div id="toast" class="no-print hidden fixed top-16 left-1/2 -translate-x-1/2 z-[60] px-4 py-2 rounded-2xl text-xs font-semibold bg-[var(--ink-bar)] text-[var(--ink-bar-foreground)] shadow-[var(--shadow-sheet)] border border-white/15 max-w-[90vw] text-center pointer-events-none"></div>
 
     <!-- Global Floating Page Break Help Tooltip -->
     <div id="pageBreakHelpTooltip" role="tooltip" aria-hidden="true" class="no-print hidden fixed top-0 left-0 z-[70] w-[min(272px,calc(100vw-24px))] rounded-lg bg-[var(--ink-bar)] text-[var(--ink-bar-foreground)] border border-white/15 shadow-[var(--shadow-sheet)] px-3 py-2.5 text-xs leading-relaxed">

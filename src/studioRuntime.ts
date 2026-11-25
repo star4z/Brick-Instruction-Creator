@@ -45,6 +45,14 @@ import {
   canInsertDividerAfterPage,
   computeMenuVisibility,
 } from './engine/menuVisibility';
+import {
+  closeSideMenuOverlayState,
+  computeSideMenuLayout,
+  computeWorkspaceViewportSize,
+  createInitialSideMenuState,
+  openSideMenuState,
+  toggleSideMenuState,
+} from './engine/sideMenuState';
 import { computeScrollJumpVisibility } from './engine/scrollJump';
 import {
   computePageNavigationState,
@@ -6346,6 +6354,22 @@ const shortcutUiState = {
   validationMsg: null,
 };
 
+let sideMenuState = createInitialSideMenuState();
+function getSideMenuLayout() {
+  const diags = Array.isArray(state.diagnostics) ? state.diagnostics : [];
+  const seen = state.seenDiagnosticKeys instanceof Set ? state.seenDiagnosticKeys : new Set();
+  const badgeCount = getMenuIconErrorBadgeCount(diags, seen);
+  return computeSideMenuLayout({
+    state: sideMenuState,
+    viewportWidth: window.innerWidth,
+    hasModel: Boolean(state.model),
+    errorBadgeCount: badgeCount,
+  });
+}
+function getWorkspaceViewportSize() {
+  return computeWorkspaceViewportSize(window.innerWidth, window.innerHeight, getSideMenuLayout());
+}
+
 // Keep hit-test projection metadata for active rendered step slots
 let currentSlotRenderInfo = new Map();
 
@@ -7241,8 +7265,9 @@ function flushStageTransform() {
   const container = document.getElementById('stageContainer');
   if (!container) return;
   // Softly clamp pan so the page can't be lost completely offscreen
-  const limX = Math.max(window.innerWidth * 0.75, window.innerWidth * state.zoom * 0.65);
-  const limY = Math.max(window.innerHeight * 0.75, window.innerHeight * state.zoom * 0.65);
+  const ws = getWorkspaceViewportSize();
+  const limX = Math.max(ws.width * 0.75, ws.width * state.zoom * 0.65);
+  const limY = Math.max(ws.height * 0.75, ws.height * state.zoom * 0.65);
   state.panX = Math.max(-limX, Math.min(limX, state.panX));
   state.panY = Math.max(-limY, Math.min(limY, state.panY));
   const effScale = getEffectiveStageScale();
@@ -7297,12 +7322,13 @@ function formatPhysicalDims(wIn, hIn) {
 
 function computePageFrameDimensions() {
   const [wIn, hIn] = getActivePagePhysicalInches();
+  const ws = getWorkspaceViewportSize();
   return computeCanonicalPageMetrics({
     paperFormat: state.paperFormat,
     widthIn: wIn,
     heightIn: hIn,
-    viewportW: window.innerWidth,
-    viewportH: window.innerHeight,
+    viewportW: ws.width,
+    viewportH: ws.height,
   });
 }
 
@@ -7569,17 +7595,7 @@ function renderAll() {
   document.getElementById('stageViewport').classList.toggle('hidden', !hasModel);
   document.getElementById('topRightPills').classList.toggle('hidden', !hasModel);
   document.getElementById('bottomDock').classList.toggle('hidden', !hasModel);
-  const desktopModelChip = document.getElementById('desktopModelChip');
-  if (desktopModelChip) {
-    desktopModelChip.classList.toggle('md:inline-flex', hasModel);
-  }
-  const mobileBrandPill = document.getElementById('mobileEditorBrandPill');
-  if (mobileBrandPill) {
-    mobileBrandPill.classList.toggle('hidden', !hasModel);
-    mobileBrandPill.classList.toggle('flex', hasModel);
-  }
 
-  const desktopSepEl = document.getElementById('desktopModelSep');
   const desktopNameEl = document.getElementById('desktopModelName');
   const mobileModelSepEl = document.getElementById('mobileEditorModelSep');
   const mobileModelNameEl = document.getElementById('mobileEditorModelName');
@@ -7588,14 +7604,14 @@ function renderAll() {
   const statsEl = document.getElementById('menuModelStats');
 
   if (!hasModel) {
-    if (desktopSepEl) desktopSepEl.classList.add('hidden');
-    if (desktopNameEl) { desktopNameEl.textContent = ''; desktopNameEl.classList.add('hidden'); }
+    if (desktopNameEl) desktopNameEl.textContent = '';
     if (mobileModelSepEl) mobileModelSepEl.classList.add('hidden');
     if (mobileModelNameEl) { mobileModelNameEl.textContent = ''; mobileModelNameEl.classList.add('hidden'); }
     document.getElementById('menuModelName').textContent = 'No model loaded';
     if (fileTypeEl) { fileTypeEl.textContent = 'Import a model below to get started.'; fileTypeEl.classList.remove('hidden'); }
     if (statsEl) { statsEl.innerHTML = ''; statsEl.classList.add('hidden'); }
     document.getElementById('contextOverlay').classList.add('hidden');
+    syncSideMenuLayout();
     syncMenuControls();
     syncPageSizeWarningUI(null);
     return;
@@ -7608,8 +7624,7 @@ function renderAll() {
   const allParts = getAllParts(state.model);
   const fileTypeLabel = getModelFileTypeLabel();
 
-  if (desktopSepEl) desktopSepEl.classList.remove('hidden');
-  if (desktopNameEl) { desktopNameEl.textContent = state.model.title; desktopNameEl.classList.remove('hidden'); }
+  if (desktopNameEl) desktopNameEl.textContent = state.model.title;
   if (mobileModelSepEl) mobileModelSepEl.classList.remove('hidden');
   if (mobileModelNameEl) { mobileModelNameEl.textContent = state.model.title; mobileModelNameEl.classList.remove('hidden'); }
   document.getElementById('menuModelName').textContent = state.model.title;
@@ -7624,6 +7639,7 @@ function renderAll() {
       <span class="px-2 py-0.5 rounded bg-[var(--card)] border border-[var(--border)]">${state.pages.length} pages</span>`;
     statsEl.classList.remove('hidden');
   }
+  syncSideMenuLayout();
 
   document.getElementById('btnUndo').disabled = state.undoStack.length === 0;
   document.getElementById('btnRedo').disabled = state.redoStack.length === 0;
@@ -10456,7 +10472,8 @@ function renderPaperFormatPreviewUI() {
   const cDiv = state.customUnit === 'cm' ? 2.54 : 1;
   const cWIn = Math.max(2, (Number(state.customWidth) || 10) / cDiv);
   const cHIn = Math.max(2, (Number(state.customHeight) || 8) / cDiv);
-  const screenAspect = Math.max(0.62, Math.min(1.68, (window.innerWidth - 24) / Math.max(300, window.innerHeight - 170)));
+  const wsPaper = getWorkspaceViewportSize();
+  const screenAspect = Math.max(0.62, Math.min(1.68, (wsPaper.width - 24) / Math.max(300, wsPaper.height - 170)));
   const preview = computePaperPreviewBox({
     paperFormat: state.paperFormat,
     orientation: state.orientation,
@@ -10657,7 +10674,8 @@ function renderGridPreviewInto(containerEl, spec, maxW = 136, maxH = 92, autoPre
   const cDiv = state.customUnit === 'cm' ? 2.54 : 1;
   const cWIn = Math.max(2, (Number(state.customWidth) || 10) / cDiv);
   const cHIn = Math.max(2, (Number(state.customHeight) || 8) / cDiv);
-  const screenAspect = Math.max(0.62, Math.min(1.68, (window.innerWidth - 24) / Math.max(300, window.innerHeight - 170)));
+  const wsGrid = getWorkspaceViewportSize();
+  const screenAspect = Math.max(0.62, Math.min(1.68, (wsGrid.width - 24) / Math.max(300, wsGrid.height - 170)));
   const pageBox = computePaperPreviewBox({
     paperFormat: state.paperFormat,
     orientation: state.orientation,
@@ -14311,8 +14329,9 @@ function updateErrorIndicators() {
   const menuBtn = document.getElementById('menuErrorsBtn');
   const menuPill = document.getElementById('menuErrorCountBadge');
   if (menuDot) {
+    const showDot = badgeCount > 0 && getSideMenuLayout().showMenuButtonErrorBadge;
     menuDot.textContent = formatMenuIconErrorBadge(badgeCount);
-    menuDot.classList.toggle('hidden', badgeCount === 0);
+    menuDot.classList.toggle('hidden', !showDot);
   }
   if (menuBtn) {
     menuBtn.classList.toggle('hidden', !state.model || totalCount === 0);
@@ -16164,18 +16183,120 @@ async function runPdfExport(pagesToExport) {
 // 13. EVENT WIRING & FILE IMPORT / EXPORT
 // =========================================================================
 function isMenuOpen() {
-  const el = document.getElementById('menuBackdrop');
-  return Boolean(el && !el.classList.contains('hidden'));
+  return getSideMenuLayout().isOverlay;
 }
-function openMenu() { document.getElementById('menuBackdrop').classList.remove('hidden'); syncMenuControls(); }
-function closeMenu() { stopShortcutRecording(); document.getElementById('menuBackdrop').classList.add('hidden'); }
 
-document.getElementById('btnOpenMenu').onclick = openMenu;
-document.getElementById('desktopModelChip').onclick = openMenu;
+function getMenuToggleTooltipLabel(layout) {
+  const base = layout.isExpanded
+    ? (layout.isDesktop ? 'Collapse menu' : 'Close menu')
+    : 'Open menu';
+  return {
+    base,
+    title: formatShortcutTooltip(base, getEffectiveShortcut('toggleMenu', shortcutOverrides), isMacShortcutsPlatform),
+  };
+}
+
+function syncSideMenuLayout({ animate = false } = {}) {
+  const layout = getSideMenuLayout();
+  const drawerEl = document.getElementById('menuDrawer');
+  const panelEl = document.getElementById('menuDrawerPanel');
+  const backdropEl = document.getElementById('menuBackdrop');
+  const workspaceEl = document.getElementById('workspaceArea');
+  const toggleBtnEl = document.getElementById('btnOpenMenu');
+  const brandChipEl = document.getElementById('desktopModelChip');
+  const desktopSepEl = document.getElementById('desktopModelSep');
+  const desktopNameEl = document.getElementById('desktopModelName');
+  const mobileBrandPillEl = document.getElementById('mobileEditorBrandPill');
+  const menuDotEl = document.getElementById('menuBtnErrorBadge');
+
+  if (drawerEl) {
+    drawerEl.dataset.expanded = layout.isExpanded ? 'true' : 'false';
+    drawerEl.dataset.mode = layout.mode;
+    drawerEl.dataset.compact = layout.isCompactPill ? 'true' : 'false';
+    drawerEl.dataset.hasModel = state.model ? 'true' : 'false';
+    drawerEl.dataset.animated = animate ? 'true' : 'false';
+  }
+  if (panelEl) {
+    panelEl.classList.toggle('hidden', !layout.isExpanded);
+  }
+  if (backdropEl) {
+    backdropEl.classList.toggle('hidden', !layout.showBackdrop);
+  }
+  if (workspaceEl) {
+    workspaceEl.dataset.menuDocked = layout.isDocked ? 'true' : 'false';
+  }
+  if (toggleBtnEl) {
+    const { base, title } = getMenuToggleTooltipLabel(layout);
+    toggleBtnEl.setAttribute('aria-expanded', layout.isExpanded ? 'true' : 'false');
+    toggleBtnEl.setAttribute('aria-label', base);
+    toggleBtnEl.title = title;
+  }
+  if (brandChipEl) {
+    brandChipEl.classList.toggle('hidden', !layout.showBrandTitleInHeader);
+    brandChipEl.classList.toggle('inline-flex', layout.showBrandTitleInHeader);
+    brandChipEl.tabIndex = layout.isExpanded ? -1 : 0;
+    brandChipEl.title = layout.isExpanded ? '' : 'Open menu';
+  }
+  if (desktopSepEl) {
+    desktopSepEl.classList.toggle('hidden', !layout.showModelNameInHeader);
+  }
+  if (desktopNameEl) {
+    desktopNameEl.classList.toggle('hidden', !layout.showModelNameInHeader);
+  }
+  if (mobileBrandPillEl) {
+    mobileBrandPillEl.classList.toggle('hidden', !layout.showMobileEditorBrandPill);
+    mobileBrandPillEl.classList.toggle('flex', layout.showMobileEditorBrandPill);
+  }
+  if (menuDotEl) {
+    const diags = Array.isArray(state.diagnostics) ? state.diagnostics : [];
+    const seen = state.seenDiagnosticKeys instanceof Set ? state.seenDiagnosticKeys : new Set();
+    const badgeCount = getMenuIconErrorBadgeCount(diags, seen);
+    menuDotEl.textContent = formatMenuIconErrorBadge(badgeCount);
+    menuDotEl.classList.toggle('hidden', !(badgeCount > 0 && layout.showMenuButtonErrorBadge));
+  }
+  return layout;
+}
+
+function applySideMenuTransition(nextState, { animate = true } = {}) {
+  const prevInset = getSideMenuLayout().workspaceLeftInsetPx;
+  sideMenuState = nextState;
+  const nextLayout = syncSideMenuLayout({ animate });
+  if (!nextLayout.isExpanded) {
+    stopShortcutRecording();
+  }
+  if (nextLayout.isOverlay) {
+    setStylePopoverOpen(false);
+  }
+  if (nextLayout.isExpanded) {
+    syncMenuControls();
+  }
+  if (prevInset !== nextLayout.workspaceLeftInsetPx) {
+    if (state.model) {
+      renderAll();
+    }
+    updateStylePopoverTail();
+  }
+  return nextLayout;
+}
+
+function openMenu() {
+  applySideMenuTransition(openSideMenuState(sideMenuState, window.innerWidth), { animate: true });
+}
+function closeMenu() {
+  applySideMenuTransition(closeSideMenuOverlayState(sideMenuState, window.innerWidth), { animate: false });
+}
+function toggleMenu() {
+  applySideMenuTransition(toggleSideMenuState(sideMenuState, window.innerWidth), { animate: true });
+}
+
+document.getElementById('btnOpenMenu').onclick = toggleMenu;
+document.getElementById('desktopModelChip').onclick = () => {
+  if (!getSideMenuLayout().isExpanded) openMenu();
+};
 const mobileEditorBrandPillEl = document.getElementById('mobileEditorBrandPill');
 if (mobileEditorBrandPillEl) mobileEditorBrandPillEl.onclick = openMenu;
-document.getElementById('btnCloseMenu').onclick = closeMenu;
-document.getElementById('menuDismissArea').onclick = closeMenu;
+const menuBackdropEl = document.getElementById('menuBackdrop');
+if (menuBackdropEl) menuBackdropEl.onclick = closeMenu;
 
 const stylePopEl = document.getElementById('stylePopover');
 const btnStylePopEl = document.getElementById('btnStylePop');
@@ -16711,7 +16832,7 @@ function syncShortcutTooltips() {
   };
   setTitle('btnUndo', 'undo', 'Undo');
   setTitle('btnRedo', 'redo', 'Redo');
-  setTitle('btnOpenMenu', 'toggleMenu', 'Open studio menu');
+  setTitle('btnOpenMenu', 'toggleMenu', getMenuToggleTooltipLabel(getSideMenuLayout()).base);
   setTitle('btnStylePop', 'toggleStyle', 'Style & Themes');
   setTitle('btnHeaderExport', 'openExport', 'Print or export');
   setTitle('firstPage', 'pageFirst', 'First Page');
@@ -17195,8 +17316,7 @@ function executeShortcutAction(actionId) {
       toggleSelectedPartsArrow();
       return;
     case 'toggleMenu':
-      if (isMenuOpen()) closeMenu();
-      else openMenu();
+      toggleMenu();
       return;
     case 'toggleOverview':
       if (isOverviewModalOpen()) closeOverviewModal();
@@ -20201,6 +20321,8 @@ if (isAppleTouchDevice) {
 }
 
 window.addEventListener('resize', () => {
+  const layout = syncSideMenuLayout({ animate: false });
+  if (layout.isExpanded) syncMenuControls();
   if (state.model) renderAll();
   if (impState.parsed && !document.getElementById('importModal').classList.contains('hidden')) {
     drawImportPreviewFrame();
@@ -20210,6 +20332,10 @@ window.addEventListener('resize', () => {
   }
   updateStylePopoverTail();
 });
+
+// Initialize responsive side menu immediately (expanded by default on desktop)
+syncSideMenuLayout({ animate: false });
+syncMenuControls();
 
 // Automatically reload last opened model & session on start!
 restoreLastSessionOnStart();

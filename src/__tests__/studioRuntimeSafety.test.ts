@@ -404,10 +404,11 @@ describe('studioRuntime safety checks', () => {
     expect(svgPaths).toHaveLength(3);
     expect(svgPaths.map(([, fill]) => fill)).toEqual(['#38bdf8', '#7c152e', '#ed7d1f']);
 
-    // Every path in public/logo.svg appears in all 5 inline SVG logos in index.html and in BRAND_LOGO_PATHS
+    // Every path in public/logo.svg appears in all 4 inline SVG logos in index.html
+    // (unified menu header, mobile editor brand pill, welcome sheet, open-model modal) and in BRAND_LOGO_PATHS
     for (const [d, fill] of svgPaths) {
       const htmlTag = `<path d="${d}" fill="${fill}"/>`;
-      expect(html.split(htmlTag).length - 1).toBe(5);
+      expect(html.split(htmlTag).length - 1).toBe(4);
       expect(runtime).toContain(`['${d}', '${fill}']`);
     }
   });
@@ -549,6 +550,46 @@ describe('studioRuntime safety checks', () => {
     expect(runtime).toContain('function insertDividerAfterCurrentPage(');
     expect(runtime).toContain("box.querySelector('#stepInsertDividerBtn')");
     expect(runtime).toContain("box.querySelector('#stepGotoDividerBtn')");
+  });
+
+  it('combines the menu button and site title into the side menu without Instruction Studio copy and expands by default on desktop', () => {
+    const html = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf8');
+    const runtime = fs.readFileSync(path.resolve(process.cwd(), 'src/studioRuntime.ts'), 'utf8');
+
+    // "Instruction Studio" subtitle must not appear in the UI
+    expect(html.toLowerCase()).not.toContain('instruction studio');
+
+    // Unified side menu contains the menu toggle button, site title, and collapsible panel in one shell
+    const drawerStart = html.indexOf('id="menuDrawer"');
+    const drawerEnd = html.indexOf('</aside>', drawerStart);
+    expect(drawerStart).toBeGreaterThan(-1);
+    expect(drawerEnd).toBeGreaterThan(drawerStart);
+    const drawerHtml = html.slice(drawerStart, drawerEnd);
+
+    expect(drawerHtml).toContain('id="menuHeaderBar"');
+    expect(drawerHtml).toContain('id="btnOpenMenu"');
+    expect(drawerHtml).toContain('id="desktopModelChip"');
+    expect(drawerHtml).toContain('Brick Instruction Works');
+    expect(drawerHtml).toContain('id="menuDrawerPanel"');
+    // No separate close-button/dark-rail replacement header
+    expect(drawerHtml).not.toContain('id="btnCloseMenu"');
+    expect(html).not.toContain('id="menuDismissArea"');
+
+    // Workspace area wraps stage and floating dock so docked desktop side menu never obscures content
+    const wsStart = html.indexOf('id="workspaceArea"');
+    expect(wsStart).toBeGreaterThan(drawerEnd);
+    expect(html.indexOf('id="emptyState"', wsStart)).toBeGreaterThan(wsStart);
+    expect(html.indexOf('id="stageViewport"', wsStart)).toBeGreaterThan(wsStart);
+    expect(html.indexOf('id="bottomDock"', wsStart)).toBeGreaterThan(wsStart);
+
+    // Runtime wires pure desktop-default side menu state machine and workspace viewport sizing
+    expect(runtime).toContain('createInitialSideMenuState(');
+    expect(runtime).toContain('computeSideMenuLayout(');
+    expect(runtime).toContain('toggleSideMenuState(');
+    expect(runtime).toContain('openSideMenuState(');
+    expect(runtime).toContain('closeSideMenuOverlayState(');
+    expect(runtime).toContain('computeWorkspaceViewportSize(');
+    expect(runtime).toContain('function syncSideMenuLayout(');
   });
 });
 
