@@ -2084,7 +2084,59 @@ export function extractMinifigureGroups(
     }
   }
 
-  // Post-pass: attach a genuine lightsaber blade (e.g. 30374 Bar 4L) ONLY when plugged directly into
+  // Post-pass 1: attach unclaimed handheld accessories/tools gripped in any minifigure's hands
+  // (covers both Stage A explicit submodels where a prop was placed at top level AND tall tools
+  // whose box center lies beyond Stage B's body-center radius while their shaft passes through a hand).
+  const groupHandData = groups.map((g) => ({
+    group: g,
+    handPts: collectGroupHandPoints(g.indices),
+    groupSet: new Set(g.indices),
+  }));
+  for (let j = 0; j < parts.length; j++) {
+    if (claimed[j]) continue;
+    const k = kinds[j];
+    if (k === 'legs' || k === 'torso' || k === 'head') continue;
+    const childIds = (parts[j].children || []).map((c) => c.p);
+    if (isNonMinifigPart(parts[j].p, resolveName(parts[j].p), childIds)) continue;
+
+    let bestEntry: (typeof groupHandData)[number] | null = null;
+    let bestDist = Infinity;
+    for (const entry of groupHandData) {
+      if (entry.handPts.length === 0) continue;
+      for (const hp of entry.handPts) {
+        const d = pointToBoxDistance(hp, boxes[j]);
+        if (d < bestDist) {
+          bestDist = d;
+          bestEntry = entry;
+        }
+      }
+    }
+    if (!bestEntry) continue;
+
+    if (k === 'headgear') {
+      if (bestDist <= 14) {
+        bestEntry.group.indices.push(j);
+        bestEntry.groupSet.add(j);
+        claimed[j] = 1;
+        parts[j]._detachedGap = 0;
+      }
+      continue;
+    }
+
+    // Unclassified non-structural custom/unofficial prop: require tight hand grip, unanchored, and handheld proportions
+    if (bestDist <= 12 && !isAnchoredToModelStructure(j, bestEntry.groupSet)) {
+      const b = boxes[j];
+      const dims = [b.max[0] - b.min[0], b.max[1] - b.min[1], b.max[2] - b.min[2]].sort((a, c) => a - c);
+      if (dims[2] <= 130 && dims[1] <= 40) {
+        bestEntry.group.indices.push(j);
+        bestEntry.groupSet.add(j);
+        claimed[j] = 1;
+        parts[j]._detachedGap = 0;
+      }
+    }
+  }
+
+  // Post-pass 2: attach a genuine lightsaber blade (e.g. 30374 Bar 4L) ONLY when plugged directly into
   // a minifigure's lightsaber hilt and NOT anchored to any surrounding model/train structure.
   for (const g of groups) {
     const hiltIndices = g.indices.filter((idx) => isLightsaberHiltPart(parts[idx].p, resolveName(parts[idx].p)));

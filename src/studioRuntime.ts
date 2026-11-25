@@ -6,6 +6,7 @@
 import {
   analyzeModelSubdivisions,
   classifySubdivisionPartFlags,
+  planFreestandingScenePlacements,
   SECTION_PREVIEW_PALETTE,
 } from './engine/subdivisionAnalyzer';
 import {
@@ -6036,14 +6037,45 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
 
     if (subdivisionPlan.outputMode === 'numbered_bags') {
       const runningPlaced = new Set();
-      const bagSections = [...resolvedSections];
+      const rawBagSections = [...resolvedSections];
       if (leftover.length > 0) {
-        if (bagSections.length > 0) {
-          bagSections[bagSections.length - 1].cleanRepeatGroups[0].push(...leftover);
-          bagSections[bagSections.length - 1].cleanIndices.push(...leftover);
+        if (rawBagSections.length > 0) {
+          rawBagSections[rawBagSections.length - 1].cleanRepeatGroups[0].push(...leftover);
+          rawBagSections[rawBagSections.length - 1].cleanIndices.push(...leftover);
         } else {
-          bagSections.push({ id: 'bag_rest', name: 'Final Bag', role: 'bag', cleanIndices: leftover, cleanRepeatGroups: [leftover] });
+          rawBagSections.push({ id: 'bag_rest', name: 'Final Bag', role: 'bag', cleanIndices: leftover, cleanRepeatGroups: [leftover] });
         }
+      }
+
+      const bagScenePlan = planFreestandingScenePlacements(
+        rawBagSections.map((sec, idx) => ({
+          id: `bag_${idx}_${sec.id}`,
+          indices: sec.cleanRepeatGroups.flat(),
+          repeatCount: sec.cleanRepeatGroups.length,
+        })),
+        [],
+        normalizedMinifigs.map(nm => ({ id: nm.id, worldBox: nm.worldBox })),
+        [],
+        boxes,
+        adj,
+      );
+      const pairedBagPropById = new Map();
+      const pairedBagPropSecIds = new Set();
+      for (const propList of Object.values(bagScenePlan.propsAfterMinifig)) {
+        for (const pid of propList) pairedBagPropSecIds.add(pid);
+      }
+      const bagSections = [];
+      rawBagSections.forEach((sec, idx) => {
+        const candId = `bag_${idx}_${sec.id}`;
+        if (pairedBagPropSecIds.has(candId)) {
+          pairedBagPropById.set(candId, sec.cleanRepeatGroups.flat());
+        } else {
+          bagSections.push(sec);
+        }
+      });
+      if (bagSections.length === 0) {
+        bagSections.push(...rawBagSections);
+        pairedBagPropById.clear();
       }
 
       // Assign each minifigure to the bag whose bricks are closest to its placement spot
@@ -6065,7 +6097,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
 
       let runningCam = { ...DEFAULT_STUDIO_CAMERA };
       bagSections.forEach((sec, bIdx) => {
-        const bagIndices = sec.cleanRepeatGroups.flat();
+        const bagIndices = [...sec.cleanRepeatGroups.flat()];
         const { steps: bagSteps, placed: afterPlaced, lastCam } = buildStepsForIndexList(
           bagIndices,
           `bag${bIdx + 1}`,
@@ -6077,6 +6109,34 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
         for (const pi of afterPlaced) runningPlaced.add(pi);
         for (const nm of (bagMinifigs[bIdx] || [])) {
           appendMinifigPlacementSteps(bagSteps, nm, `bag${bIdx + 1}`);
+          for (const propId of (bagScenePlan.propsAfterMinifig[nm.id] || [])) {
+            const propIndices = pairedBagPropById.get(propId);
+            if (!propIndices || propIndices.length === 0) continue;
+            bagIndices.push(...propIndices);
+            if (propIndices.length === 1) {
+              runningPlaced.add(propIndices[0]);
+              globalStep++;
+              bagSteps.push({
+                id: `bag${bIdx + 1}_prop_s${globalStep}`,
+                num: globalStep,
+                side: runningCam.side || 'top',
+                corner: runningCam.corner || 'front_right',
+                cue: 'none',
+                parts: [parts[propIndices[0]]],
+              });
+            } else {
+              const { steps: propSteps, placed: afterProp, lastCam: propCam } = buildStepsForIndexList(
+                propIndices,
+                `bag${bIdx + 1}_prop`,
+                runningPlaced,
+                adaptiveMaxSpread,
+                runningCam,
+              );
+              if (propCam) runningCam = propCam;
+              for (const pi of afterProp) runningPlaced.add(pi);
+              bagSteps.push(...propSteps);
+            }
+          }
         }
         if (bagSteps.length > 0) {
           chapters.push({
@@ -6112,53 +6172,92 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
       const artSec = joinSecs.find(s => s.articulatedJoin);
       const artJoin = artSec?.articulatedJoin || null;
 
-      const attachQueue = [];
+      // Pre-classify structural modules vs. disconnected freestanding scene assemblies (e.g., loose
+      // scene props near minifigures) so 1-piece freestanding props skip redundant 1-step section
+      // chapters and freestanding assemblies never interrupt the main structural join.
+      const preNonCapCandidates = [];
+      const preCapCandidates = [];
       moduleSecs.forEach((sec, mIdx) => {
         const repeatCount = sec.cleanRepeatGroups.length;
         const subId = `mod_${mIdx + 1}_${sec.id}`;
-        const canonicalParts = normalizeCanonicalSubParts(sec.cleanIndices.map(i => parts[i]), subId);
-        const prebuiltMechChapters = [];
-        const subSteps = buildLocalSubmodelSteps(canonicalParts, subId, repeatCount, prebuiltMechChapters);
-        for (const mechCh of prebuiltMechChapters) {
-          chapters.push({
-            id: `subch_${++chSeq}_${mechCh.id}`,
-            name: mechCh.name,
-            kind: 'submodel',
-            sectionId: `subsec_${mechCh.id}`,
-            repeatCount: 1,
-            pieceCount: mechCh.pieceCount,
-            canonicalParts: mechCh.canonicalParts,
-            steps: mechCh.steps,
-          });
-        }
-        // Mark as a standalone section module (uses clean "SECTION · N pcs" banner when repeatCount === 1)
-        chapters.push({
-          id: `subch_${++chSeq}_${subId}`,
-          name: sec.name || `Section ${mIdx + 1}`,
-          kind: 'submodel',
-          isSectionModule: true,
-          sectionId: `subsec_${subId}`,
-          repeatCount,
-          pieceCount: sec.cleanIndices.length,
-          canonicalParts,
-          steps: subSteps,
+        sec.cleanRepeatGroups.forEach((grpIndices, copyIdx) => {
+          const cand = { id: `${subId}_c${copyIdx}`, indices: grpIndices, repeatCount };
+          if (sec.isDetachableCap) preCapCandidates.push(cand);
+          else preNonCapCandidates.push(cand);
         });
+      });
+      const scenePlan = planFreestandingScenePlacements(
+        preNonCapCandidates.length > 0 ? preNonCapCandidates : preCapCandidates,
+        joinIndices,
+        normalizedMinifigs.map(nm => ({ id: nm.id, worldBox: nm.worldBox })),
+        preNonCapCandidates.length > 0 ? preCapCandidates : [],
+        boxes,
+        adj,
+      );
+
+      const attachQueue = [];
+      let builtSectionChapterCount = 0;
+      moduleSecs.forEach((sec, mIdx) => {
+        const repeatCount = sec.cleanRepeatGroups.length;
+        const subId = `mod_${mIdx + 1}_${sec.id}`;
+        const firstCopyId = `${subId}_c0`;
+        const isSinglePartProp = repeatCount === 1 && scenePlan.singlePartPropIds.has(firstCopyId);
+
+        let canonicalParts = null;
+        if (!isSinglePartProp) {
+          canonicalParts = normalizeCanonicalSubParts(sec.cleanIndices.map(i => parts[i]), subId);
+          const prebuiltMechChapters = [];
+          const subSteps = buildLocalSubmodelSteps(canonicalParts, subId, repeatCount, prebuiltMechChapters);
+          for (const mechCh of prebuiltMechChapters) {
+            chapters.push({
+              id: `subch_${++chSeq}_${mechCh.id}`,
+              name: mechCh.name,
+              kind: 'submodel',
+              sectionId: `subsec_${mechCh.id}`,
+              repeatCount: 1,
+              pieceCount: mechCh.pieceCount,
+              canonicalParts: mechCh.canonicalParts,
+              steps: mechCh.steps,
+            });
+          }
+          // Mark as a standalone section module (uses clean "SECTION · N pcs" banner when repeatCount === 1)
+          chapters.push({
+            id: `subch_${++chSeq}_${subId}`,
+            name: sec.name || `Section ${mIdx + 1}`,
+            kind: 'submodel',
+            isSectionModule: true,
+            sectionId: `subsec_${subId}`,
+            repeatCount,
+            pieceCount: sec.cleanIndices.length,
+            canonicalParts,
+            steps: subSteps,
+          });
+          builtSectionChapterCount++;
+        }
 
         sec.cleanRepeatGroups.forEach((grpIndices, copyIdx) => {
+          const itemId = `${subId}_c${copyIdx}`;
           attachQueue.push({
-            id: `${subId}_c${copyIdx}`,
+            id: itemId,
             name: repeatCount > 1 ? `${sec.name} #${copyIdx + 1}` : sec.name,
             baseName: sec.name,
             indices: grpIndices,
             canonicalParts,
             isDetachableCap: Boolean(sec.isDetachableCap),
+            isFreestanding: scenePlan.freestandingModuleIds.has(itemId),
+            isSinglePartProp: scenePlan.singlePartPropIds.has(itemId),
           });
         });
       });
 
       const primaryAttachQueue = attachQueue.filter(item => !item.isDetachableCap);
       const capAttachQueue = attachQueue.filter(item => item.isDetachableCap);
-      const mainAttachList = primaryAttachQueue.length > 0 ? primaryAttachQueue : attachQueue;
+      const allMainCandidates = primaryAttachQueue.length > 0 ? primaryAttachQueue : attachQueue;
+      const structuralCandidates = allMainCandidates.filter(item => !item.isFreestanding);
+      const mainAttachList = structuralCandidates.length > 0 ? structuralCandidates : allMainCandidates;
+      const freestandingById = new Map(
+        allMainCandidates.filter(item => item.isFreestanding).map(item => [item.id, item]),
+      );
       const deferredCaps = primaryAttachQueue.length > 0 ? capAttachQueue : [];
 
       // Partition join indices cleanly when an articulated axle-through-round-hole joint is present
@@ -6530,9 +6629,56 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
         }
       }
 
-      // Place minifigures BEFORE snapping on removable roofs/caps so interior figures can be seated easily!
-      for (const nm of normalizedMinifigs) {
+      const mainAttachIdSet = new Set(mainAttachList.map(item => item.id));
+      const emittedFreestanding = new Set();
+      const emitFreestandingItem = (item) => {
+        if (!item || mainAttachIdSet.has(item.id) || emittedFreestanding.has(item.id)) return;
+        emittedFreestanding.add(item.id);
+        for (const pi of item.indices) joinedPlaced.add(pi);
+        globalStep++;
+        if (item.isSinglePartProp) {
+          joinSteps.push({
+            id: `join_prop_s${globalStep}`,
+            num: globalStep,
+            side: 'top',
+            corner: 'front_right',
+            cue: 'none',
+            parts: item.indices.map(i => parts[i]),
+          });
+        } else {
+          joinSteps.push({
+            id: `join_prop_s${globalStep}`,
+            num: globalStep,
+            side: 'top',
+            corner: 'front_right',
+            cue: 'none',
+            parts: item.indices.map(i => parts[i]),
+            attachedSubmodel: {
+              id: item.id,
+              name: item.name,
+              repeatCount: 1,
+              totalRepeatCount: 1,
+              isSectionAttach: true,
+              attachVerb: 'Place',
+              canonicalParts: item.canonicalParts,
+            },
+          });
+        }
+      };
+
+      const minifigById = new Map(normalizedMinifigs.map(nm => [nm.id, nm]));
+      const emitMinifigWithPairedProps = (mfId) => {
+        const nm = minifigById.get(mfId);
+        if (!nm) return;
         appendMinifigPlacementSteps(joinSteps, nm, 'join');
+        for (const propId of (scenePlan.propsAfterMinifig[mfId] || [])) {
+          emitFreestandingItem(freestandingById.get(propId));
+        }
+      };
+
+      // Place interior/mounted minifigures BEFORE snapping on removable roofs/caps so interior figures can be seated easily!
+      for (const mfId of scenePlan.interiorMinifigIds) {
+        emitMinifigWithPairedProps(mfId);
       }
 
       // Snap removable tile-majority roofs / caps cleanly onto the finished model with crisp downward arrows!
@@ -6580,6 +6726,16 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
         });
       }
 
+      // Place exterior/freestanding minifigures (alongside any adjacent freestanding props) after closing removable caps!
+      for (const mfId of scenePlan.exteriorMinifigIds) {
+        emitMinifigWithPairedProps(mfId);
+      }
+
+      // Place any remaining unpaired freestanding scene assemblies cleanly at the end!
+      for (const propId of scenePlan.unpairedFreestandingIds) {
+        emitFreestandingItem(freestandingById.get(propId));
+      }
+
       if (joinSteps.length > 0) {
         chapters.push({
           id: `ach_${++chSeq}_connect`,
@@ -6591,7 +6747,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
       }
 
       optimizeManualStepCameras(chapters);
-      const modCount = moduleSecs.length + (bogieCanonical ? 1 : 0);
+      const modCount = builtSectionChapterCount + (bogieCanonical ? 1 : 0);
       return {
         title: parsed.title,
         subtitle: `${parts.length} pieces · ${modCount} section${modCount === 1 ? '' : 's'} + final join`,

@@ -3965,3 +3965,250 @@ export function splitProposedSection(
     sections: nextSections,
   };
 }
+
+export interface ScenePlacementBox {
+  min: Vec3;
+  max: Vec3;
+  center: Vec3;
+}
+
+export interface SceneModuleCandidate {
+  id: string;
+  indices: number[];
+  repeatCount?: number;
+}
+
+export interface SceneMinifigCandidate {
+  id: string;
+  worldBox: ScenePlacementBox;
+}
+
+export interface FreestandingScenePlan {
+  /** Module IDs belonging to the primary connected structural model. */
+  structuralModuleIds: Set<string>;
+  /** Module IDs with zero physical contact edges to the primary structure. */
+  freestandingModuleIds: Set<string>;
+  /** Single-part freestanding props (repeatCount === 1 && 1 piece) placed directly without a 1-step section chapter. */
+  singlePartPropIds: Set<string>;
+  /** Compact freestanding module IDs paired with their closest minifigure (ordered closest-first for adjacent-step placement). */
+  propsAfterMinifig: Record<string, string[]>;
+  /** Freestanding module IDs not paired with any minifigure (placed after roofs and minifigures). */
+  unpairedFreestandingIds: string[];
+  /** Minifigure IDs inside/touching the primary model or under a removable cap (placed before caps). */
+  interiorMinifigIds: string[];
+  /** Minifigure IDs standing outside the primary model (placed after caps, alongside any paired freestanding props). */
+  exteriorMinifigIds: string[];
+}
+
+function mergeSceneBoxes(indices: number[], boxes: ScenePlacementBox[]): ScenePlacementBox | null {
+  const min: Vec3 = [Infinity, Infinity, Infinity];
+  const max: Vec3 = [-Infinity, -Infinity, -Infinity];
+  let count = 0;
+  for (const idx of indices) {
+    const b = boxes[idx];
+    if (!b) continue;
+    count++;
+    for (let k = 0; k < 3; k++) {
+      if (b.min[k] < min[k]) min[k] = b.min[k];
+      if (b.max[k] > max[k]) max[k] = b.max[k];
+    }
+  }
+  if (count === 0) return null;
+  return {
+    min,
+    max,
+    center: [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2],
+  };
+}
+
+/**
+ * Classifies non-cap module instances into the primary connected structure vs. physically
+ * disconnected freestanding scene assemblies using pure graph connectivity and 3D proximity:
+ * - Freestanding modules never interrupt the main structural join.
+ * - Single-piece freestanding props skip redundant 1-step section chapters and emit direct part steps.
+ * - Compact freestanding props (<= 20 pcs) near a minifigure are paired to be placed in the
+ *   immediately adjacent step right after that minifigure.
+ * - Minifigures inside/touching the primary model or beneath removable caps are placed before caps;
+ *   exterior freestanding minifigures are placed after caps alongside their paired scene props.
+ */
+export function planFreestandingScenePlacements(
+  modules: SceneModuleCandidate[],
+  joinIndices: number[],
+  minifigs: SceneMinifigCandidate[],
+  caps: SceneModuleCandidate[],
+  boxes: ScenePlacementBox[],
+  adjacency: number[][],
+): FreestandingScenePlan {
+  const structuralModuleIds = new Set<string>();
+  const freestandingModuleIds = new Set<string>();
+  const singlePartPropIds = new Set<string>();
+  const propsAfterMinifig: Record<string, string[]> = {};
+  const unpairedFreestandingIds: string[] = [];
+  const interiorMinifigIds: string[] = [];
+  const exteriorMinifigIds: string[] = [];
+
+  if (modules.length === 0) {
+    for (const mf of minifigs) interiorMinifigIds.push(mf.id);
+    return {
+      structuralModuleIds,
+      freestandingModuleIds,
+      singlePartPropIds,
+      propsAfterMinifig,
+      unpairedFreestandingIds,
+      interiorMinifigIds,
+      exteriorMinifigIds,
+    };
+  }
+
+  // 1. Build module-level contact graph (modules 0..M-1 plus optional join bridge node M)
+  const modCount = modules.length;
+  const joinNode = modCount;
+  const partToNode = new Map<number, number>();
+  for (let m = 0; m < modCount; m++) {
+    for (const pi of modules[m].indices) partToNode.set(pi, m);
+  }
+  for (const pi of joinIndices) {
+    if (!partToNode.has(pi)) partToNode.set(pi, joinNode);
+  }
+
+  const nodeAdj: Set<number>[] = Array.from({ length: modCount + 1 }, () => new Set<number>());
+  for (const [pi, u] of partToNode.entries()) {
+    const nbs = adjacency[pi];
+    if (!nbs) continue;
+    for (const nb of nbs) {
+      const v = partToNode.get(nb);
+      if (v !== undefined && v !== u) {
+        nodeAdj[u].add(v);
+        nodeAdj[v].add(u);
+      }
+    }
+  }
+
+  // Extract connected components among module nodes (bridging through joinNode if present)
+  const visited = new Uint8Array(modCount + 1);
+  let primaryNodes = new Set<number>();
+  let primaryPartCount = -1;
+
+  for (let start = 0; start < modCount; start++) {
+    if (visited[start]) continue;
+    const queue = [start];
+    visited[start] = 1;
+    const compModules: number[] = [];
+    let partTotal = 0;
+    while (queue.length > 0) {
+      const u = queue.shift()!;
+      if (u < modCount) {
+        compModules.push(u);
+        partTotal += modules[u].indices.length;
+      } else {
+        partTotal += joinIndices.length;
+      }
+      for (const v of nodeAdj[u]) {
+        if (!visited[v]) {
+          visited[v] = 1;
+          queue.push(v);
+        }
+      }
+    }
+    if (partTotal > primaryPartCount) {
+      primaryPartCount = partTotal;
+      primaryNodes = new Set(compModules);
+    }
+  }
+
+  const primaryPartIndices: number[] = [...joinIndices];
+  for (let m = 0; m < modCount; m++) {
+    const mod = modules[m];
+    if (primaryNodes.has(m)) {
+      structuralModuleIds.add(mod.id);
+      primaryPartIndices.push(...mod.indices);
+    } else {
+      freestandingModuleIds.add(mod.id);
+      if (mod.indices.length === 1 && (mod.repeatCount ?? 1) === 1) {
+        singlePartPropIds.add(mod.id);
+      }
+    }
+  }
+
+  const capBoxes = caps
+    .map((c) => mergeSceneBoxes(c.indices, boxes))
+    .filter((b): b is ScenePlacementBox => b !== null);
+
+  const minGapToPrimary = (box: ScenePlacementBox): number => {
+    let best = Infinity;
+    for (const pi of primaryPartIndices) {
+      const pb = boxes[pi];
+      if (!pb) continue;
+      const g = boxGap3D(box, pb);
+      if (g < best) {
+        best = g;
+        if (best <= 0) return 0;
+      }
+    }
+    return best;
+  };
+
+  // 2. Pair compact freestanding props (<= 20 pcs) with their closest minifigure
+  const pairedByMf = new Map<string, Array<{ id: string; dist: number }>>();
+  for (const mod of modules) {
+    if (!freestandingModuleIds.has(mod.id)) continue;
+    const fBox = mergeSceneBoxes(mod.indices, boxes);
+    if (!fBox || mod.indices.length > 20 || minifigs.length === 0) {
+      unpairedFreestandingIds.push(mod.id);
+      continue;
+    }
+
+    let bestMfId: string | null = null;
+    let bestMfDist = Infinity;
+    for (const mf of minifigs) {
+      const d = boxGap3D(fBox, mf.worldBox);
+      if (d < bestMfDist) {
+        bestMfDist = d;
+        bestMfId = mf.id;
+      }
+    }
+
+    const dMain = minGapToPrimary(fBox);
+    if (bestMfId && bestMfDist <= 120 && bestMfDist <= dMain + 24) {
+      let list = pairedByMf.get(bestMfId);
+      if (!list) {
+        list = [];
+        pairedByMf.set(bestMfId, list);
+      }
+      list.push({ id: mod.id, dist: bestMfDist });
+    } else {
+      unpairedFreestandingIds.push(mod.id);
+    }
+  }
+
+  for (const [mfId, list] of pairedByMf.entries()) {
+    list.sort((a, b) => a.dist - b.dist);
+    propsAfterMinifig[mfId] = list.map((entry) => entry.id);
+  }
+
+  // 3. Partition minifigures into interior/mounted (before caps) vs exterior/freestanding (after caps)
+  for (const mf of minifigs) {
+    const underCap = capBoxes.some((cb) => {
+      const ovX = Math.min(mf.worldBox.max[0], cb.max[0]) - Math.max(mf.worldBox.min[0], cb.min[0]);
+      const ovZ = Math.min(mf.worldBox.max[2], cb.max[2]) - Math.max(mf.worldBox.min[2], cb.min[2]);
+      return ovX >= 4 && ovZ >= 4 && cb.min[1] >= mf.worldBox.min[1];
+    });
+    const dMain = minGapToPrimary(mf.worldBox);
+    if (underCap || dMain <= 32) {
+      interiorMinifigIds.push(mf.id);
+    } else {
+      exteriorMinifigIds.push(mf.id);
+    }
+  }
+
+  return {
+    structuralModuleIds,
+    freestandingModuleIds,
+    singlePartPropIds,
+    propsAfterMinifig,
+    unpairedFreestandingIds,
+    interiorMinifigIds,
+    exteriorMinifigIds,
+  };
+}
+

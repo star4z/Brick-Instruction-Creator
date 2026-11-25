@@ -15,6 +15,7 @@ import {
   computeRadialExplodeOffsets,
   isConnectedSubgraph,
   mergeProposedSections,
+  planFreestandingScenePlacements,
   recomputeProposalWithCount,
   splitProposedSection,
   verifyProposalZeroFloating,
@@ -1185,4 +1186,79 @@ describe('Large & Elongated Model Subdivision Analyzer', () => {
       }
     }
   });
+
+  describe('planFreestandingScenePlacements', () => {
+    const mkBox = (min: [number, number, number], max: [number, number, number]) => ({
+      min,
+      max,
+      center: [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2] as [number, number, number],
+    });
+
+    it('separates disconnected freestanding props from the primary structure, pairs nearby props with their minifigure, and orders interior vs exterior minifigures around removable caps', () => {
+      // Parts 0..3: Section A (Front), Parts 4..7: Section B (Back), Part 8: Join bridge,
+      // Part 9: Removable roof cap over Section B,
+      // Part 10: 1-piece freestanding prop (e.g. trash can) beside exterior minifigure,
+      // Parts 11..12: 2-piece freestanding prop (e.g. bench) far from all minifigures
+      const boxes = [
+        mkBox([0, 0, 0], [80, 100, 200]),       // 0: Front
+        mkBox([0, 0, 200], [80, 100, 400]),     // 1: Front
+        mkBox([0, 0, 400], [80, 100, 480]),     // 2: Front
+        mkBox([0, 0, 480], [80, 100, 500]),     // 3: Front
+        mkBox([0, 0, 520], [80, 100, 700]),     // 4: Back
+        mkBox([0, 0, 700], [80, 100, 900]),     // 5: Back
+        mkBox([0, 0, 900], [80, 100, 1000]),    // 6: Back
+        mkBox([0, 0, 1000], [80, 100, 1050]),   // 7: Back
+        mkBox([20, 0, 495], [60, 100, 525]),    // 8: Join bridge linking Front (3) & Back (4)
+        mkBox([0, 110, 520], [80, 130, 1050]),  // 9: Removable Roof over Back
+        mkBox([-192, 0, -60], [-128, 48, -20]), // 10: 1-piece freestanding prop beside exterior figure
+        mkBox([300, 0, 300], [360, 20, 340]),   // 11: Distant 2-piece bench part 1
+        mkBox([300, 20, 300], [360, 40, 340]),  // 12: Distant 2-piece bench part 2
+      ];
+      const adj: number[][] = [
+        [1], [0, 2], [1, 3], [2, 8],
+        [5, 8], [4, 6], [5, 7], [6],
+        [3, 4],
+        [],
+        [],
+        [12], [11],
+      ];
+
+      const plan = planFreestandingScenePlacements(
+        [
+          { id: 'mod_front', indices: [0, 1, 2, 3], repeatCount: 1 },
+          { id: 'mod_back', indices: [4, 5, 6, 7], repeatCount: 1 },
+          { id: 'mod_prop_bin', indices: [10], repeatCount: 1 },
+          { id: 'mod_prop_bench', indices: [11, 12], repeatCount: 1 },
+        ],
+        [8],
+        [
+          { id: 'mf_interior', worldBox: mkBox([20, 10, 620], [60, 100, 660]) },
+          { id: 'mf_exterior', worldBox: mkBox([-180, 0, 30], [-140, 110, 70]) },
+        ],
+        [{ id: 'cap_roof', indices: [9], repeatCount: 1 }],
+        boxes,
+        adj,
+      );
+
+      // Front & Back are connected through join bridge 8; bin & bench are freestanding
+      expect(plan.structuralModuleIds.has('mod_front')).toBe(true);
+      expect(plan.structuralModuleIds.has('mod_back')).toBe(true);
+      expect(plan.freestandingModuleIds.has('mod_prop_bin')).toBe(true);
+      expect(plan.freestandingModuleIds.has('mod_prop_bench')).toBe(true);
+
+      // 1-piece prop skips redundant 1-step section chapter; 2-piece bench keeps its chapter
+      expect(plan.singlePartPropIds.has('mod_prop_bin')).toBe(true);
+      expect(plan.singlePartPropIds.has('mod_prop_bench')).toBe(false);
+
+      // Nearby freestanding prop pairs with exterior minifigure; distant bench remains unpaired
+      expect(plan.propsAfterMinifig['mf_exterior']).toEqual(['mod_prop_bin']);
+      expect(plan.propsAfterMinifig['mf_interior']).toBeUndefined();
+      expect(plan.unpairedFreestandingIds).toEqual(['mod_prop_bench']);
+
+      // Interior figure placed before removable cap; exterior figure placed after cap
+      expect(plan.interiorMinifigIds).toEqual(['mf_interior']);
+      expect(plan.exteriorMinifigIds).toEqual(['mf_exterior']);
+    });
+  });
 });
+

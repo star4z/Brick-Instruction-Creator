@@ -194,6 +194,6 @@ The proposal chooser is a custom, theme-matched listbox (`#impProposalPicker`, r
 | Phase | Scope | Status |
 | :--- | :--- | :--- |
 | **Phase 1: Engine Perf + Spread Guard** | Spatial hash broad-phase in `connectivity.ts` & `studioRuntime.ts`; precomputed AABB cache; spatial spread guard; 1,000-part benchmark test. | **Implemented** |
-| **Phase 2: Subdivision Analyzer & Join Chapters** | `subdivisionAnalyzer.ts` (6 strategies incl. Split by Baseplate + 2D PCA + `2×` symmetry); `modular_chapters` & `numbered_bags` execution; `section_divider` pages in live view & PDF export. | **Implemented** |
+| **Phase 2: Subdivision Analyzer & Join Chapters** | `subdivisionAnalyzer.ts` (6 strategies incl. Split by Baseplate + 2D PCA + `2×` symmetry + `planFreestandingScenePlacements` for disconnected scene props & interior/exterior minifigure ordering); `modular_chapters` & `numbered_bags` execution; `section_divider` pages in live view & PDF export. | **Implemented** |
 | **Phase 3: Mobile & Desktop 3D Import Assistant** | Responsive `#importModal` with live exploded 3D WebGL preview, touch/mouse orbit, color modes, ranked proposal cards, Menu re-entry, Undo & IndexedDB persistence. | **Implemented** |
 | **Phase 4: Multi-Booklet Export & Local-Focus Zoom** | Separate PDF booklet volumes for 1,500+ piece models; optional auto-zoom with mini-locator silhouette inset for post-join detail steps. | **Planned** |

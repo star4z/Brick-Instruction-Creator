@@ -1232,4 +1232,130 @@ describe('Front-Facing Minifig Pose Step & 3D Rotation Indicators', () => {
   });
 });
 
+describe('extractMinifigureGroups — unified handheld accessory post-pass', () => {
+  it('attaches a top-level handheld tool gripped in a Stage A submodel minifigure hand while leaving nearby ground props standalone', () => {
+    const sub = [{ name: 'Worker', instId: 901 }];
+    const parts: RuntimePart[] = [
+      { id: 'w_legs', p: '3815c01', c: 0, x: -160, y: 40, z: 51, m: R_IDENTITY, subChain: sub },
+      {
+        id: 'w_torso',
+        p: 'asm_973_0',
+        c: 330,
+        x: -160,
+        y: 72,
+        z: 51,
+        m: R_IDENTITY,
+        subChain: sub,
+        children: [
+          { id: 'w_torso_b', p: '973', c: 330, x: -160, y: 72, z: 51, m: R_IDENTITY },
+          { id: 'w_hand_r', p: '3820', c: 14, x: -181.5, y: 58.3, z: 30.5, m: R_IDENTITY },
+          { id: 'w_hand_l', p: '3820', c: 14, x: -136.4, y: 45.3, z: 41.0, m: R_IDENTITY },
+        ],
+      },
+      { id: 'w_head', p: '3626c', c: 14, x: -160, y: 96, z: 51, m: R_IDENTITY, subChain: sub },
+      { id: 'w_cap', p: '27059', c: 72, x: -160, y: 106, z: 51, m: R_IDENTITY, subChain: sub },
+      // Top-level long-handled broom (NOT inside submodel) whose handle passes right through w_hand_r
+      { id: 'top_broom', p: '3836', c: 70, x: -181.4, y: 84.1, z: 15.3, m: R_IDENTITY },
+      // Top-level freestanding trash can standing on the ground ~50 LDU away from the figure
+      { id: 'ground_bin', p: '92926', c: 72, x: -160, y: 24, z: -40, m: R_IDENTITY },
+    ];
+    const extraNames: Record<string, string> = {
+      ...NAMES,
+      asm_973_0: 'Minifigure Torso Assembly',
+      '27059': 'Minifigure, Headgear Cap',
+      '3836': 'Minifigure, Utensil Push Broom',
+      '92926': 'Container, Trash Can with 4 Cover Holders',
+    };
+    const boxes: WorldBox[] = [
+      { min: [-176, 0, 41], max: [-144, 44, 61], center: [-160, 22, 51] },
+      { min: [-186, 44, 26], max: [-134, 84, 61], center: [-160, 64, 43.5] },
+      { min: [-172, 84, 39], max: [-148, 108, 63], center: [-160, 96, 51] },
+      { min: [-174, 100, 37], max: [-146, 114, 65], center: [-160, 107, 51] },
+      // Broom spans Y=[0, 84], Z=[10, 26], X=[-198, -164]: ~4.5 LDU from w_hand_r wrist origin!
+      { min: [-198, 0, 10], max: [-164, 84, 26], center: [-181, 42, 18] },
+      // Trash can spans Y=[0, 48], Z=[-60, -20], X=[-192, -128]: ~50 LDU from w_hand_r
+      { min: [-192, 0, -60], max: [-128, 48, -20], center: [-160, 24, -40] },
+    ];
+
+    const { groups, claimed } = extractMinifigureGroups(parts, boxes, (pid) => extraNames[pid] || pid);
+    expect(groups).toHaveLength(1);
+    const ids = groups[0].indices.map((i) => parts[i].id);
+    expect(ids).toContain('top_broom');
+    expect(ids).not.toContain('ground_bin');
+    expect(claimed[4]).toBe(1);
+    expect(claimed[5]).toBe(0);
+  });
+
+  it('assigns an unanchored handheld prop to the minifigure with the closest hand and rejects oversized or model-anchored unknown props', () => {
+    const parts: RuntimePart[] = [
+      // Figure 1 at x = 0
+      { id: 'f1_legs', p: '970c00', c: 1, x: 0, y: 20, z: 0, m: R_IDENTITY },
+      {
+        id: 'f1_torso',
+        p: 'asm_973_1',
+        c: 1,
+        x: 0,
+        y: 56,
+        z: 0,
+        m: R_IDENTITY,
+        children: [
+          { id: 'f1_tb', p: '973', c: 1, x: 0, y: 56, z: 0, m: R_IDENTITY },
+          { id: 'f1_hr', p: '3820', c: 14, x: -20, y: 48, z: 10, m: R_IDENTITY },
+        ],
+      },
+      { id: 'f1_head', p: '3626c', c: 14, x: 0, y: 86, z: 0, m: R_IDENTITY },
+      // Figure 2 at x = 60
+      { id: 'f2_legs', p: '970c00', c: 4, x: 60, y: 20, z: 0, m: R_IDENTITY },
+      {
+        id: 'f2_torso',
+        p: 'asm_973_2',
+        c: 4,
+        x: 60,
+        y: 56,
+        z: 0,
+        m: R_IDENTITY,
+        children: [
+          { id: 'f2_tb', p: '973', c: 4, x: 60, y: 56, z: 0, m: R_IDENTITY },
+          { id: 'f2_hr', p: '3820', c: 14, x: 40, y: 48, z: 10, m: R_IDENTITY },
+        ],
+      },
+      { id: 'f2_head', p: '3626c', c: 14, x: 60, y: 86, z: 0, m: R_IDENTITY },
+      // Unclassified thin staff gripped in Figure 2's hand (x=40, y=48, z=10)
+      { id: 'custom_staff', p: 'u_custom_999', c: 70, x: 40, y: 60, z: 12, m: R_IDENTITY },
+      // Unclassified bulky crate right next to Figure 1's hand (too bulky in 2+ dims -> rejected)
+      { id: 'bulky_prop', p: 'u_custom_888', c: 72, x: -20, y: 48, z: 14, m: R_IDENTITY },
+    ];
+    const extraNames: Record<string, string> = {
+      ...NAMES,
+      asm_973_1: 'Minifigure Torso Assembly',
+      asm_973_2: 'Minifigure Torso Assembly',
+      u_custom_999: 'Custom Unofficial Element',
+      u_custom_888: 'Custom Bulky Element',
+    };
+    const boxes: WorldBox[] = [
+      { min: [-16, 0, -10], max: [16, 40, 10], center: [0, 20, 0] },
+      { min: [-24, 40, -10], max: [24, 72, 16], center: [0, 56, 3] },
+      { min: [-12, 72, -12], max: [12, 100, 12], center: [0, 86, 0] },
+      { min: [44, 0, -10], max: [76, 40, 10], center: [60, 20, 0] },
+      { min: [36, 40, -10], max: [84, 72, 16], center: [60, 56, 3] },
+      { min: [48, 72, -12], max: [72, 100, 12], center: [60, 86, 0] },
+      // 110 LDU tall thin staff (8x110x8) right in Figure 2's hand
+      { min: [36, 5, 8], max: [44, 115, 16], center: [40, 60, 12] },
+      // 50x50x50 bulky prop touching Figure 1's hand
+      { min: [-45, 23, -11], max: [5, 73, 39], center: [-20, 48, 14] },
+    ];
+
+    const { groups, claimed } = extractMinifigureGroups(parts, boxes, (pid) => extraNames[pid] || pid);
+    expect(groups).toHaveLength(2);
+    const g1Ids = groups[0].indices.map((i) => parts[i].id);
+    const g2Ids = groups[1].indices.map((i) => parts[i].id);
+    expect(g2Ids).toContain('custom_staff');
+    expect(g1Ids).not.toContain('custom_staff');
+    expect(g1Ids).not.toContain('bulky_prop');
+    expect(claimed[6]).toBe(1);
+    expect(claimed[7]).toBe(0);
+  });
+});
+
+
 
