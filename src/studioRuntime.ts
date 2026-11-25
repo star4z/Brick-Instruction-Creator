@@ -15461,6 +15461,36 @@ function formatColorFilterReadoutHtml(colorId) {
   return `<span class="inline-flex items-center gap-1.5 min-w-0"><span class="w-3 h-3 rounded-full border border-black/25 dark:border-white/25 shrink-0" style="${getSwatchStyleAttr(col)}"></span><span class="font-semibold text-[var(--foreground)] truncate">${escHtml(col?.name || `Color ${colorId}`)}</span></span><span class="font-mono shrink-0">#${colorId}${escHtml(countNote)}</span>`;
 }
 
+function positionLibColorFilterPopover() {
+  if (!libUiState.colorFilterOpen) return;
+  const popover = document.getElementById('libColorFilterPopover');
+  const btn = document.getElementById('libColorFilterBtn');
+  if (!popover || !btn) return;
+  const rect = btn.getBoundingClientRect();
+  const vv = window.visualViewport;
+  const placement = computeViewportPopoverPlacement(
+    { top: rect.top, right: rect.right, bottom: rect.bottom, left: rect.left },
+    {
+      width: vv ? vv.width : window.innerWidth,
+      height: vv ? vv.height : window.innerHeight,
+      offsetLeft: vv ? vv.offsetLeft : 0,
+      offsetTop: vv ? vv.offsetTop : 0,
+      layoutHeight: window.innerHeight,
+    },
+    { preferredWidth: 344, maxHeight: 460, minComfortableHeight: 260, margin: 12, gap: 6 },
+  );
+  popover.style.left = `${placement.left}px`;
+  popover.style.width = `${placement.width}px`;
+  popover.style.maxHeight = `${placement.maxHeight}px`;
+  if (placement.top !== null) {
+    popover.style.top = `${placement.top}px`;
+    popover.style.bottom = 'auto';
+  } else {
+    popover.style.top = 'auto';
+    popover.style.bottom = `${placement.bottom ?? 12}px`;
+  }
+}
+
 function setLibColorFilterOpen(open) {
   libUiState.colorFilterOpen = Boolean(open);
   if (libUiState.colorFilterOpen && libUiState.colorPickerOpen) {
@@ -15473,6 +15503,7 @@ function setLibColorFilterOpen(open) {
   if (libUiState.colorFilterOpen) {
     void ensurePartColorsCatalog();
     renderLibColorFilterControls();
+    positionLibColorFilterPopover();
     const searchEl = document.getElementById('libColorFilterSearchInput');
     if (searchEl) {
       searchEl.value = libUiState.colorFilterQuery;
@@ -15481,6 +15512,7 @@ function setLibColorFilterOpen(open) {
         requestAnimationFrame(() => searchEl.focus());
       }
     }
+    requestAnimationFrame(() => positionLibColorFilterPopover());
   }
 }
 
@@ -21733,8 +21765,11 @@ document.getElementById('bricksLibraryModal').onclick = (e) => {
     return;
   }
   if (libUiState.colorFilterOpen) {
+    const filterPopover = document.getElementById('libColorFilterPopover');
     const filterWrap = document.getElementById('libColorFilterWrap');
-    if (filterWrap && !filterWrap.contains(e.target)) {
+    const insideFilterPopover = filterPopover && filterPopover.contains(e.target);
+    const insideFilterWrap = filterWrap && filterWrap.contains(e.target);
+    if (!insideFilterPopover && !insideFilterWrap) {
       setLibColorFilterOpen(false);
     }
   }
@@ -21777,6 +21812,7 @@ if (libColorFilterSearchInputEl) {
   libColorFilterSearchInputEl.oninput = (e) => {
     libUiState.colorFilterQuery = e.target.value || '';
     renderLibColorFilterControls();
+    positionLibColorFilterPopover();
   };
 }
 const libColorPickerBtnEl = document.getElementById('libColorPickerBtn');
@@ -21798,14 +21834,18 @@ if (libColorSearchInputEl) {
     positionLibColorPopover();
   };
 }
-window.addEventListener('resize', positionLibColorPopover, { passive: true });
+const repositionLibPopovers = () => {
+  positionLibColorPopover();
+  positionLibColorFilterPopover();
+};
+window.addEventListener('resize', repositionLibPopovers, { passive: true });
 if (window.visualViewport) {
-  window.visualViewport.addEventListener('resize', positionLibColorPopover, { passive: true });
-  window.visualViewport.addEventListener('scroll', positionLibColorPopover, { passive: true });
+  window.visualViewport.addEventListener('resize', repositionLibPopovers, { passive: true });
+  window.visualViewport.addEventListener('scroll', repositionLibPopovers, { passive: true });
 }
 const libBrowseGridWrapForPopover = document.getElementById('libBrowseGridWrap');
 if (libBrowseGridWrapForPopover) {
-  libBrowseGridWrapForPopover.addEventListener('scroll', positionLibColorPopover, { passive: true });
+  libBrowseGridWrapForPopover.addEventListener('scroll', repositionLibPopovers, { passive: true });
 }
 
 document.querySelectorAll('.lib-tab-btn').forEach((btn) => {
@@ -21813,6 +21853,7 @@ document.querySelectorAll('.lib-tab-btn').forEach((btn) => {
     const nextTab = btn.getAttribute('data-lib-tab');
     if (nextTab === 'browse' || nextTab === 'manage') {
       if (nextTab !== libUiState.tab) {
+        setLibColorFilterOpen(false);
         setLibColorPickerOpen(false);
       }
       libUiState.tab = nextTab;
