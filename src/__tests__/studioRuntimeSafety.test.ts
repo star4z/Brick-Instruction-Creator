@@ -544,7 +544,6 @@ describe('studioRuntime safety checks', () => {
 
     for (const id of [
       'menuShortcutsBtn',
-      'menuShortcutsSummary',
       'menuShortcutsCustomBadge',
       'shortcutsModal',
       'shortcutsModalCustomBadge',
@@ -662,7 +661,7 @@ describe('studioRuntime safety checks', () => {
     expect(drawerHtml).toContain('Brick Instruction Works');
     expect(drawerHtml).toContain('id="menuDrawerPanel"');
     expect(drawerHtml).toContain('id="menuStyleBtn"');
-    expect(drawerHtml).toContain('id="menuStyleSummary"');
+    expect(drawerHtml).not.toContain('id="menuStyleSummary"');
     // No separate close-button/dark-rail replacement header
     expect(drawerHtml).not.toContain('id="btnCloseMenu"');
     expect(html).not.toContain('id="menuDismissArea"');
@@ -976,7 +975,7 @@ describe('studioRuntime safety checks', () => {
     const runtime = fs.readFileSync(path.resolve(process.cwd(), 'src/studioRuntime.ts'), 'utf8');
 
     expect(html).toContain('id="menuSettingsBtn"');
-    expect(html).toContain('id="menuSettingsSummary"');
+    expect(html).not.toContain('id="menuSettingsSummary"');
 
     const settingsStart = html.indexOf('id="settingsModal"');
     const settingsEnd = html.indexOf('id="confirmActionModal"', settingsStart);
@@ -1016,6 +1015,36 @@ describe('studioRuntime safety checks', () => {
     expect(runtime).toContain('formatPhysicalDimensionsForUnit(');
     expect(runtime).toContain('function openSettingsModal()');
     expect(runtime).toContain('function closeSettingsModal()');
+  });
+
+  it('omits inline summaries and item descriptions from the side menu items', () => {
+    const html = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf8');
+    const runtime = fs.readFileSync(path.resolve(process.cwd(), 'src/studioRuntime.ts'), 'utf8');
+
+    const menuBodyStart = html.indexOf('id="menuScrollBody"');
+    const menuFooterStart = html.indexOf('id="menuDrawerFooter"', menuBodyStart);
+    expect(menuBodyStart).toBeGreaterThan(-1);
+    expect(menuFooterStart).toBeGreaterThan(menuBodyStart);
+    const menuBodyHtml = html.slice(menuBodyStart, menuFooterStart);
+
+    // No paragraph descriptions under side menu items
+    expect(menuBodyHtml).not.toContain('<p ');
+    expect(menuBodyHtml).not.toContain('<p>');
+
+    // No inline summary elements in side menu buttons
+    for (const removedId of [
+      'menuPageSetupSummary',
+      'menuStyleSummary',
+      'menuBomSetupSummary',
+      'menuStepGenSummary',
+      'libStatusText',
+      'menuShortcutsSummary',
+      'menuShortcutsHintKey',
+      'menuSettingsSummary',
+    ]) {
+      expect(html).not.toContain(`id="${removedId}"`);
+      expect(runtime).not.toContain(`'${removedId}'`);
+    }
   });
 });
 

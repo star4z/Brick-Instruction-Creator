@@ -23,7 +23,6 @@ import {
   resolveInitialDesktopSideMenuExpanded,
   saveAppSettings,
   shouldOpenImportWizard,
-  summarizeAppSettings,
 } from './engine/appSettings';
 import {
   STUD_INNER_COLOR_FLAG,
@@ -432,7 +431,6 @@ import {
   computeViewportPopoverPlacement,
   extractFetchablePartIdFromQuery,
   filterLibraryItems,
-  formatLibraryMenuSummary,
   getAllStarterPackPartIds,
   getModelFetchCopy,
   isOnlineOnlyItem,
@@ -12806,28 +12804,12 @@ function syncMenuControls() {
   setVisible('menuPageSetupBtn', vis.showPageSetup);
   setVisible('menuStyleBtn', vis.showStyle);
   setVisible('menuBomSetupBtn', vis.showBomSetup);
-  const menuStyleSum = document.getElementById('menuStyleSummary');
-  if (menuStyleSum) {
-    menuStyleSum.textContent = getActiveTheme().name;
-  }
   setVisible('menuPrintBtn', vis.showPrintPdf);
   setVisible('menuExportHtmlBtn', vis.showPrintPdf);
   setVisible('menuFetchLibWrap', vis.showFetchLibrary);
   setVisible('menuClearLibBtn', vis.showClearLibrary);
   setVisible('menuAutoGenSection', vis.showAutoGenerateSection);
   setVisible('menuStepGenBtn', vis.showAutoGenerateSection);
-
-  const stepGenSum = document.getElementById('menuStepGenSummary');
-  if (stepGenSum) {
-    const plan = state.model?._subdivisionPlan;
-    stepGenSum.textContent = plan?.sections?.length
-      ? `${plan.sections.length} Sections`
-      : (state.detectDuplicates ? 'Auto · Dupes On' : 'Single Build');
-  }
-  const settingsSum = document.getElementById('menuSettingsSummary');
-  if (settingsSum) {
-    settingsSum.textContent = summarizeAppSettings(appSettings);
-  }
 
   const isPageSetupWizard = importWizardState.active && importWizardState.subpage === 'pageSetup';
   const pageSetupWizVis = getWizardSubpageVisibility(isPageSetupWizard);
@@ -12867,15 +12849,6 @@ function syncMenuControls() {
       : `= ${cWIn.toFixed(2)} × ${cHIn.toFixed(2)} in`;
   }
   const [actWIn, actHIn] = getActivePagePhysicalInches();
-  const menuPageSum = document.getElementById('menuPageSetupSummary');
-  if (menuPageSum) {
-    const orientShort = activeFmt.supportsOrientation
-      ? ` · ${state.orientation === 'portrait' ? 'Portrait' : 'Landscape'}`
-      : state.paperFormat === 'custom'
-        ? ` · ${state.customWidth}×${state.customHeight} ${state.customUnit}`
-        : '';
-    menuPageSum.textContent = `${activeFmt.shortName || activeFmt.name}${orientShort}`;
-  }
   const pageSetupSub = document.getElementById('pageSetupSubtitle');
   if (pageSetupSub) {
     pageSetupSub.textContent = isPageSetupWizard
@@ -13757,11 +13730,9 @@ function syncBomSetupUI() {
   const ssEl = document.getElementById('bomSortSecondary');
   if (ssEl) ssEl.value = bc.sortSecondary;
 
-  // Summaries in side menu, modal subtitle, and Style popover
+  // Summaries in modal subtitle and Style popover
   const effBc = getEffectiveBomConfig();
   const traitNames = { color: 'Color', category: 'Category', qty: 'Quantity', size: 'Size', name: 'Name', partId: 'Part ID' };
-  const bomMenuSum = document.getElementById('menuBomSetupSummary');
-  if (bomMenuSum) bomMenuSum.textContent = summarizeBomConfig(effBc);
   const bomSub = document.getElementById('bomSetupSubtitle');
   if (bomSub) {
     const bomPages = state.pages.filter(p => p.kind === 'bom');
@@ -14859,17 +14830,7 @@ function isBricksLibraryModalOpen() {
 }
 
 function updateLibraryStatusUI() {
-  const snapshot = getLibrarySnapshot(true);
-  const { stats } = snapshot;
-  const statusEl = document.getElementById('libStatusText');
-  if (statusEl) {
-    const summary = formatLibraryMenuSummary(stats);
-    statusEl.textContent = summary;
-    statusEl.classList.toggle('hidden', !summary);
-    statusEl.classList.toggle('text-amber-600', stats.modelMissingShapeCount > 0);
-    statusEl.classList.toggle('dark:text-amber-400', stats.modelMissingShapeCount > 0);
-    statusEl.classList.toggle('font-bold', stats.modelMissingShapeCount > 0);
-  }
+  getLibrarySnapshot(true);
   if (isBricksLibraryModalOpen()) {
     renderBricksLibraryModal(false);
   }
@@ -19607,9 +19568,6 @@ function syncStylePanel() {
   const isBuiltIn = Boolean(t.builtIn || BUILT_IN_THEME_IDS.has(t.id));
   renderThemeStrip();
 
-  const menuStyleSum = document.getElementById('menuStyleSummary');
-  if (menuStyleSum) menuStyleSum.textContent = t.name;
-
   const nameInput = document.getElementById('themeNameInput');
   if (nameInput && document.activeElement !== nameInput && nameInput.value !== t.name) nameInput.value = t.name;
   document.getElementById('themeBuiltInHint')?.classList.toggle('hidden', !isBuiltIn);
@@ -20300,12 +20258,6 @@ function syncShortcutTooltips() {
   setTitle('menuBricksLibBtn', 'openBricksLibrary', 'Bricks Library');
   setTitle('menuShortcutsBtn', 'openShortcuts', 'Customize Shortcuts');
 
-  const hintKeyEl = document.getElementById('menuShortcutsHintKey');
-  if (hintKeyEl) {
-    const openKey = getEffectiveShortcut('openShortcuts', shortcutOverrides);
-    hintKeyEl.textContent = openKey ? formatShortcutCombo(openKey, isMacShortcutsPlatform) : 'Menu';
-  }
-
   const curPage = state.pages[state.pageIdx];
   if (curPage) {
     syncModePillButtons(curPage);
@@ -20337,10 +20289,6 @@ function persistAndRefreshShortcuts() {
 
 function syncKeyboardShortcutsMenuSummary() {
   const customCount = countCustomizedShortcuts(shortcutOverrides);
-  const sumEl = document.getElementById('menuShortcutsSummary');
-  if (sumEl) {
-    sumEl.textContent = customCount > 0 ? `${customCount} custom` : 'Defaults';
-  }
   const badgeEl = document.getElementById('menuShortcutsCustomBadge');
   if (badgeEl) {
     badgeEl.textContent = `${customCount} custom`;
@@ -24551,8 +24499,6 @@ if (settingsDefCoverSubtitleEl) {
   settingsDefCoverSubtitleEl.oninput = (e) => {
     appSettings = normalizeAppSettings({ ...appSettings, defaultCoverSubtitle: e.target.value });
     saveAppSettings(appSettings);
-    const settingsSum = document.getElementById('menuSettingsSummary');
-    if (settingsSum) settingsSum.textContent = summarizeAppSettings(appSettings);
   };
 }
 

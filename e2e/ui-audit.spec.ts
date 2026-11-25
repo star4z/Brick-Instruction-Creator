@@ -61,6 +61,12 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
       });
     }
 
+    // Side menu items omit inline summaries and item descriptions
+    await expect(page.locator('#menuScrollBody p')).toHaveCount(0);
+    await expect(page.locator('#menuBricksLibBtn')).toHaveText(/^\s*Bricks Library\s*$/);
+    await expect(page.locator('#menuShortcutsBtn')).toHaveText(/^\s*Customize Shortcuts\s*$/);
+    await expect(page.locator('#menuSettingsBtn')).toHaveText(/^\s*App Settings\s*$/);
+
     // 1. Open Model Modal
     await ensureMenuOpen(page);
     await page.locator('#menuImportBtn').click();
@@ -371,6 +377,10 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
 
     // 2. Page Setup Modal (Paper formats + Custom size + Orientation + Page Number Position)
     await ensureMenuOpen(page);
+    await expect(page.locator('#menuPageSetupBtn')).toHaveText(/^\s*Page Setup\s*$/);
+    await expect(page.locator('#menuStyleBtn')).toHaveText(/^\s*Style\s*$/);
+    await expect(page.locator('#menuBomSetupBtn')).toHaveText(/^\s*Parts List Setup\s*$/);
+    await expect(page.locator('#menuStepGenBtn')).toHaveText(/^\s*Step Generation\s*$/);
     await page.locator('#menuPageSetupBtn').click();
     await expect(page.locator('#pageSetupModal')).toBeVisible();
     await auditSurface(page, `${testInfo.project.name}: Page Setup Modal`, {

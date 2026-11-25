@@ -76,7 +76,7 @@ These actions were evaluated during the proposal phase and intentionally left ou
 ## Keyboard Shortcuts Screen UX (`#shortcutsModal`)
 
 - **Entry Point**: Always visible in `#menuScrollBody` inside the main slide-out menu drawer (`#menuShortcutsSection` → `#menuShortcutsBtn`), matching Page Setup, Parts List Setup, and Bricks Library. Clicking **Customize Shortcuts** (or pressing `?`) closes the drawer and opens `#shortcutsModal`—a full-height, spacious screen modal with pinned search, grouped category cards showing both action labels and descriptions, and a sticky footer.
-- **Summary & Status**: Displays `Defaults` or `<N> custom` in the menu button summary plus a primary-tinted `<N> custom` badge in both the menu section header (`#menuShortcutsCustomBadge`) and the modal header (`#shortcutsModalCustomBadge`) when overrides exist.
+- **Status Badge**: Displays a primary-tinted `<N> custom` badge in both the menu section header (`#menuShortcutsCustomBadge`) and the modal header (`#shortcutsModalCustomBadge`) when overrides exist.
 - **Filtering**: Live search input (`#shortcutsSearchInput`) matches action labels, descriptions, category names, and platform-formatted keycaps (e.g. `undo`, `camera`, `⌘z`, `ctrl`).
 - **Recording**: Clicking any keycap toggles recording mode (`Press keys…`) with an inline action strip offering **Clear** (sets override to `null` / `Unbound`), **Default** (restores default), and **Cancel**.
   - Protected keys (`Escape`, `Tab`, `Shift+Tab`, bare `Enter`) are rejected with an inline explanation rather than silently breaking focus navigation or dismiss behavior.
