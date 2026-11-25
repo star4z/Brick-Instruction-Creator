@@ -12,137 +12,54 @@ import {
   normalizeBomConfig,
 } from '../engine/partsList';
 
+import {
+  type CustomUploadedFont,
+  type ThemeFontId,
+  collectReferencedCustomFonts,
+  sanitizeCustomUploadedFont,
+  sanitizeThemeFontId,
+} from './customFonts';
+
+export {
+  type BuiltInThemeFontId,
+  type CustomFontFormat,
+  type CustomThemeFontId,
+  type CustomUploadedFont,
+  type ThemeFontCategory,
+  type ThemeFontCategoryMeta,
+  type ThemeFontId,
+  type ThemeFontOption,
+  type ThemeFontRole,
+  type ThemeFontSelectionLike,
+  CUSTOM_FONT_EXT_MAP,
+  DEFAULT_THEME_FONT,
+  MAX_CUSTOM_FONT_BYTES,
+  THEME_FONTS,
+  THEME_FONT_CATEGORIES,
+  THEME_FONT_IDS,
+  applyThemeFontsToElement,
+  buildCustomFontFamilyName,
+  clearCustomUploadedFonts,
+  collectReferencedCustomFonts,
+  deriveFontDisplayName,
+  ensureThemeFontsLoaded,
+  generateCustomFontId,
+  getAllThemeFontOptions,
+  getCustomUploadedFontById,
+  getCustomUploadedFonts,
+  getThemeFontOption,
+  getThemeFontStack,
+  hydrateCustomUploadedFonts,
+  isCustomThemeFontId,
+  parseUploadedFontFile,
+  registerCustomUploadedFont,
+  sanitizeCustomUploadedFont,
+  sanitizeThemeFontId,
+  themeCanvasFont,
+  unregisterCustomUploadedFont,
+} from './customFonts';
+
 export type ThemeBgType = 'solid' | 'gradient';
-
-/**
- * Curated, offline-safe font choices for printed manual pages. Bundled fonts
- * (Public Sans, JetBrains Mono) are self-hosted via `@font-face` in
- * `index.css`; the others are platform font stacks with safe fallbacks so pages
- * render identically offline and on Neocities / GitHub Pages.
- */
-export type ThemeFontId =
-  | 'system'
-  | 'public-sans'
-  | 'rounded'
-  | 'condensed'
-  | 'serif'
-  | 'slab'
-  | 'mono';
-
-export type ThemeFontRole = 'heading' | 'body';
-
-export interface ThemeFontOption {
-  id: ThemeFontId;
-  label: string;
-  /** CSS `font-family` stack (also valid inside a canvas `ctx.font` string). */
-  stack: string;
-  /** Self-hosted family that must be loaded before canvas/PDF rendering. */
-  bundledFamily?: string;
-}
-
-const SYSTEM_SANS_STACK = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
-
-export const THEME_FONTS: Record<ThemeFontId, ThemeFontOption> = {
-  system: { id: 'system', label: 'System Sans', stack: SYSTEM_SANS_STACK },
-  'public-sans': {
-    id: 'public-sans',
-    label: 'Public Sans',
-    stack: `"Public Sans", ${SYSTEM_SANS_STACK}`,
-    bundledFamily: 'Public Sans',
-  },
-  rounded: {
-    id: 'rounded',
-    label: 'Rounded',
-    stack: `ui-rounded, "SF Pro Rounded", "Nunito", "Varela Round", "Arial Rounded MT Bold", ${SYSTEM_SANS_STACK}`,
-  },
-  condensed: {
-    id: 'condensed',
-    label: 'Condensed',
-    stack: `"Avenir Next Condensed", "Roboto Condensed", "Arial Narrow", "Helvetica Neue", ${SYSTEM_SANS_STACK}`,
-  },
-  serif: {
-    id: 'serif',
-    label: 'Serif',
-    stack: '"Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif',
-  },
-  slab: {
-    id: 'slab',
-    label: 'Slab Serif',
-    stack: 'Rockwell, "Roboto Slab", "Zilla Slab", "Courier New", Georgia, serif',
-  },
-  mono: {
-    id: 'mono',
-    label: 'Monospace',
-    stack: '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-    bundledFamily: 'JetBrains Mono',
-  },
-};
-
-export const THEME_FONT_IDS = Object.keys(THEME_FONTS) as ThemeFontId[];
-export const DEFAULT_THEME_FONT: ThemeFontId = 'public-sans';
-
-export function sanitizeThemeFontId(value: unknown, fallback: ThemeFontId = DEFAULT_THEME_FONT): ThemeFontId {
-  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(THEME_FONTS, value)
-    ? (value as ThemeFontId)
-    : fallback;
-}
-
-/** Returns the CSS font stack for a theme's heading or body role. */
-export function getThemeFontStack(
-  theme: Pick<ManualTheme, 'headingFont' | 'bodyFont'> | null | undefined,
-  role: ThemeFontRole,
-): string {
-  const id = sanitizeThemeFontId(role === 'heading' ? theme?.headingFont : theme?.bodyFont);
-  return THEME_FONTS[id].stack;
-}
-
-/**
- * Builds a canvas `ctx.font` string. Weights ≥ 800 (step numbers, titles,
- * counts) use the heading font; lighter weights use the body font, mirroring
- * the DOM page rule that maps `.font-extrabold` / `.font-black` to headings.
- */
-export function themeCanvasFont(
-  theme: Pick<ManualTheme, 'headingFont' | 'bodyFont'> | null | undefined,
-  weight: number,
-  px: number,
-): string {
-  const role: ThemeFontRole = weight >= 800 ? 'heading' : 'body';
-  return `${weight} ${px}px ${getThemeFontStack(theme, role)}`;
-}
-
-/**
- * Ensures self-hosted fonts used by a theme are loaded so canvas (PDF / image)
- * rendering never silently falls back to a default face.
- */
-export async function ensureThemeFontsLoaded(
-  theme: Pick<ManualTheme, 'headingFont' | 'bodyFont'> | null | undefined,
-): Promise<void> {
-  if (typeof document === 'undefined' || !document.fonts?.load) return;
-  const families = new Set<string>();
-  for (const id of [theme?.headingFont, theme?.bodyFont]) {
-    const fam = THEME_FONTS[sanitizeThemeFontId(id)].bundledFamily;
-    if (fam) families.add(fam);
-  }
-  await Promise.all(
-    [...families].flatMap((fam) =>
-      ['500', '700', '800', '900'].map((w) => document.fonts.load(`${w} 16px "${fam}"`).catch(() => [])),
-    ),
-  );
-}
-
-/**
- * Applies a theme's fonts to a DOM page element: the body font is set as the
- * element's `font-family`, and the heading font is exposed through the
- * `--theme-heading-font` CSS variable (consumed by `.font-extrabold` /
- * `.font-black` rules in `index.css`).
- */
-export function applyThemeFontsToElement(
-  el: HTMLElement,
-  theme: Pick<ManualTheme, 'headingFont' | 'bodyFont'> | null | undefined,
-): void {
-  el.style.fontFamily = getThemeFontStack(theme, 'body');
-  el.style.setProperty('--theme-heading-font', getThemeFontStack(theme, 'heading'));
-}
 
 export type ThemeMinifigStyle = 'exploded' | 'sequential' | 'classic';
 export type LineWeightId = 'light' | 'medium' | 'heavy' | 'extra-heavy';
@@ -364,6 +281,7 @@ export interface ThemeExportSinglePayload {
   version: 1;
   exportedAt: string;
   theme: Omit<ManualTheme, 'builtIn'>;
+  customFonts?: CustomUploadedFont[];
 }
 
 export interface ThemeExportPackPayload {
@@ -371,6 +289,7 @@ export interface ThemeExportPackPayload {
   version: 1;
   exportedAt: string;
   themes: Array<Omit<ManualTheme, 'builtIn'>>;
+  customFonts?: CustomUploadedFont[];
 }
 
 export const CUSTOM_THEMES_STORAGE_KEY = 'bic_custom_themes_v1';
@@ -821,21 +740,25 @@ function stripBuiltInFlag(theme: ManualTheme): Omit<ManualTheme, 'builtIn'> {
 }
 
 export function serializeThemeExport(theme: ManualTheme): string {
+  const customFonts = collectReferencedCustomFonts([theme]);
   const payload: ThemeExportSinglePayload = {
     format: THEME_SINGLE_FORMAT,
     version: 1,
     exportedAt: new Date().toISOString(),
     theme: stripBuiltInFlag(theme),
+    ...(customFonts.length > 0 ? { customFonts } : {}),
   };
   return JSON.stringify(payload, null, 2);
 }
 
 export function serializeThemesPackExport(themes: ManualTheme[]): string {
+  const customFonts = collectReferencedCustomFonts(themes);
   const payload: ThemeExportPackPayload = {
     format: THEME_PACK_FORMAT,
     version: 1,
     exportedAt: new Date().toISOString(),
     themes: themes.map(stripBuiltInFlag),
+    ...(customFonts.length > 0 ? { customFonts } : {}),
   };
   return JSON.stringify(payload, null, 2);
 }
@@ -860,10 +783,16 @@ function looksLikeThemeObject(obj: unknown): boolean {
   );
 }
 
+export interface ParsedThemeImportPayload {
+  themes: ManualTheme[];
+  customFonts: CustomUploadedFont[];
+}
+
 /**
- * Parses a Brick Instruction Works `.biwtheme` payload (single theme or theme pack).
+ * Parses a Brick Instruction Works `.biwtheme` payload (single theme or theme
+ * pack) and extracts any embedded custom uploaded fonts.
  */
-export function parseImportedThemesJson(rawText: string): ManualTheme[] {
+export function parseImportedThemesPayload(rawText: string): ParsedThemeImportPayload {
   let parsed: unknown;
   try {
     parsed = JSON.parse(rawText);
@@ -872,12 +801,15 @@ export function parseImportedThemesJson(rawText: string): ManualTheme[] {
   }
 
   let candidates: unknown[] = [];
+  let rawCustomFonts: unknown[] = [];
   if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
     const obj = parsed as Record<string, unknown>;
     if (obj.format === THEME_PACK_FORMAT && obj.version === 1 && Array.isArray(obj.themes)) {
       candidates = obj.themes;
+      if (Array.isArray(obj.customFonts)) rawCustomFonts = obj.customFonts;
     } else if (obj.format === THEME_SINGLE_FORMAT && obj.version === 1 && obj.theme && typeof obj.theme === 'object') {
       candidates = [obj.theme];
+      if (Array.isArray(obj.customFonts)) rawCustomFonts = obj.customFonts;
     }
   }
 
@@ -891,7 +823,25 @@ export function parseImportedThemesJson(rawText: string): ManualTheme[] {
   if (normalized.length === 0) {
     throw new Error(`No valid themes were found in this ${THEME_FILE_EXT} file.`);
   }
-  return normalized;
+
+  const customFonts: CustomUploadedFont[] = [];
+  const seenFontIds = new Set<string>();
+  for (const rawFont of rawCustomFonts) {
+    const safeFont = sanitizeCustomUploadedFont(rawFont);
+    if (safeFont && !seenFontIds.has(safeFont.id)) {
+      seenFontIds.add(safeFont.id);
+      customFonts.push(safeFont);
+    }
+  }
+
+  return { themes: normalized, customFonts };
+}
+
+/**
+ * Parses a Brick Instruction Works `.biwtheme` payload (single theme or theme pack).
+ */
+export function parseImportedThemesJson(rawText: string): ManualTheme[] {
+  return parseImportedThemesPayload(rawText).themes;
 }
 
 /**
@@ -901,6 +851,15 @@ export function parseImportedThemesJson(rawText: string): ManualTheme[] {
 export async function parseImportedThemeFile(file: File): Promise<ManualTheme[]> {
   assertThemeFileName(file.name);
   return parseImportedThemesJson(await file.text());
+}
+
+/**
+ * Strictly validates that the file has a `.biwtheme` extension and parses both
+ * its themes and any embedded custom uploaded fonts.
+ */
+export async function parseImportedThemeFileWithFonts(file: File): Promise<ParsedThemeImportPayload> {
+  assertThemeFileName(file.name);
+  return parseImportedThemesPayload(await file.text());
 }
 
 /**

@@ -276,17 +276,22 @@ import {
   BUILT_IN_THEMES,
   BUILT_IN_THEME_IDS,
   THEME_FONTS,
-  THEME_FONT_IDS,
+  THEME_FONT_CATEGORIES,
   THEME_STYLE_OPTION_KEYS,
   applyThemeBackgroundToElement,
   applyThemeFontsToElement,
   buildThemeBgCss,
+  collectReferencedCustomFonts,
   createThemeDraftFromBase,
   ensureThemeFontsLoaded,
   fillThemeBackgroundCanvas,
+  getAllThemeFontOptions,
   getAllThemes,
+  getCustomUploadedFonts,
+  getThemeFontOption,
   getThemeFontStack,
   getThemeStyleOptions,
+  hydrateCustomUploadedFonts,
   loadThemeRecentsFromStorage,
   makeUniqueThemeName,
   loadCustomThemesFromStorage,
@@ -294,7 +299,8 @@ import {
   normalizeCustomTheme,
   normalizeThemeStyleOptions,
   orderThemesByRecent,
-  parseImportedThemeFile,
+  parseImportedThemeFileWithFonts,
+  parseUploadedFontFile,
   resolveThemeById,
   sanitizeThemeFontId,
   saveCustomThemesToStorage,
@@ -306,6 +312,7 @@ import {
   themeStyleOptionsEqual,
   toHexColor,
   touchThemeRecent,
+  unregisterCustomUploadedFont,
 } from './themes/customThemes';
 import {
   CUSTOM_FILE_MIME_TYPE,
@@ -15781,8 +15788,18 @@ renderAll = function () {
   scheduleSaveSessionPrefs();
 };
 
+function persistCustomUploadedFonts() {
+  try {
+    dbPut('customUploadedFonts', getCustomUploadedFonts());
+  } catch { /* ignore */ }
+}
+
 async function restoreLastSessionOnStart() {
   await loadSavedBricksLibrary();
+  const dbCustomFonts = await dbGet('customUploadedFonts');
+  if (Array.isArray(dbCustomFonts) && dbCustomFonts.length > 0) {
+    await hydrateCustomUploadedFonts(dbCustomFonts);
+  }
   const dbThemes = await dbGet('customThemes');
   if (Array.isArray(dbThemes) && dbThemes.length > 0 && customThemes.length === 0) {
     const restored = dbThemes.map(t => normalizeCustomTheme(t)).filter(Boolean);
@@ -17553,6 +17570,8 @@ function setStylePopoverOpen(open) {
   if (open) {
     syncMenuControls();
     updateStylePopoverTail();
+  } else {
+    closeThemeFontPicker();
   }
 }
 
@@ -17701,12 +17720,7 @@ function syncStylePanel() {
     b.className = `theme-angle-btn py-1.5 rounded-md border font-semibold transition cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
   });
 
-  const headingSel = document.getElementById('themeHeadingFont');
-  const hf = sanitizeThemeFontId(t.headingFont);
-  if (headingSel && headingSel.value !== hf) headingSel.value = hf;
-  const bodySel = document.getElementById('themeBodyFont');
-  const bf = sanitizeThemeFontId(t.bodyFont);
-  if (bodySel && bodySel.value !== bf) bodySel.value = bf;
+  syncThemeFontUI(t);
 
   const opts = getThemeStyleOptions(t);
   const setChk = (id, val) => { const el = document.getElementById(id); if (el) el.checked = Boolean(val); };
@@ -17750,19 +17764,266 @@ function syncStylePanel() {
   if (styleBomBtn) styleBomBtn.disabled = !canOpenBom;
 }
 
-function populateThemeFontSelect(elId) {
-  const sel = document.getElementById(elId);
-  if (!sel) return;
-  sel.innerHTML = THEME_FONT_IDS.map((id) => {
-    const f = THEME_FONTS[id];
-    return `<option value="${id}" style="font-family:${f.stack.replace(/"/g, '&quot;')}">${escHtml(f.label)}</option>`;
-  }).join('');
-  sel.onchange = (e) => {
-    patchActiveTheme({ [elId === 'themeHeadingFont' ? 'headingFont' : 'bodyFont']: sanitizeThemeFontId(e.target.value) });
-  };
+let activeFontPickerRole = null; // 'heading' | 'body' | null
+let activeFontPickerCategory = 'all';
+let activeFontPickerQuery = '';
+
+function syncThemeFontUI(t) {
+  const theme = t || getActiveTheme();
+  const hOpt = getThemeFontOption(theme?.headingFont);
+  const bOpt = getThemeFontOption(theme?.bodyFont);
+
+  const hLabel = document.getElementById('themeHeadingFontLabel');
+  const hSpec = document.getElementById('themeHeadingFontSpecimen');
+  if (hLabel) {
+    hLabel.textContent = hOpt.label;
+    hLabel.style.fontFamily = hOpt.stack;
+  }
+  if (hSpec) hSpec.style.fontFamily = hOpt.stack;
+
+  const bLabel = document.getElementById('themeBodyFontLabel');
+  const bSpec = document.getElementById('themeBodyFontSpecimen');
+  if (bLabel) {
+    bLabel.textContent = bOpt.label;
+    bLabel.style.fontFamily = bOpt.stack;
+  }
+  if (bSpec) bSpec.style.fontFamily = bOpt.stack;
+
+  const hBtn = document.getElementById('btnThemeHeadingFont');
+  const bBtn = document.getElementById('btnThemeBodyFont');
+  const hChev = document.getElementById('themeHeadingFontChevron');
+  const bChev = document.getElementById('themeBodyFontChevron');
+  const hOpen = activeFontPickerRole === 'heading';
+  const bOpen = activeFontPickerRole === 'body';
+
+  if (hBtn) {
+    hBtn.setAttribute('aria-expanded', hOpen ? 'true' : 'false');
+    hBtn.classList.toggle('border-[var(--primary)]', hOpen);
+    hBtn.classList.toggle('bg-[var(--primary-soft)]', hOpen);
+    hBtn.classList.toggle('border-transparent', !hOpen);
+  }
+  if (bBtn) {
+    bBtn.setAttribute('aria-expanded', bOpen ? 'true' : 'false');
+    bBtn.classList.toggle('border-[var(--primary)]', bOpen);
+    bBtn.classList.toggle('bg-[var(--primary-soft)]', bOpen);
+    bBtn.classList.toggle('border-transparent', !bOpen);
+  }
+  if (hChev) hChev.style.transform = hOpen ? 'rotate(180deg)' : '';
+  if (bChev) bChev.style.transform = bOpen ? 'rotate(180deg)' : '';
+
+  if (activeFontPickerRole) renderThemeFontPicker();
 }
-populateThemeFontSelect('themeHeadingFont');
-populateThemeFontSelect('themeBodyFont');
+
+function closeThemeFontPicker() {
+  activeFontPickerRole = null;
+  document.getElementById('themeFontPickerPanel')?.classList.add('hidden');
+  syncThemeFontUI(getActiveTheme());
+}
+
+function openThemeFontPicker(role) {
+  if (activeFontPickerRole === role) {
+    closeThemeFontPicker();
+    return;
+  }
+  activeFontPickerRole = role;
+  const panel = document.getElementById('themeFontPickerPanel');
+  const title = document.getElementById('themeFontPickerRoleTitle');
+  if (title) {
+    title.textContent = role === 'heading' ? 'Choose Heading & Number Font' : 'Choose Body & Label Font';
+  }
+  panel?.classList.remove('hidden');
+  syncThemeFontUI(getActiveTheme());
+  renderThemeFontPicker();
+  const activeItem = document.querySelector('#themeFontList [data-font-selected="true"]');
+  if (activeItem && typeof activeItem.scrollIntoView === 'function') {
+    activeItem.scrollIntoView({ block: 'nearest' });
+  }
+}
+
+function renderThemeFontPicker() {
+  if (!activeFontPickerRole) return;
+  const tabsEl = document.getElementById('themeFontCategoryTabs');
+  const listEl = document.getElementById('themeFontList');
+  if (!tabsEl || !listEl) return;
+
+  const theme = getActiveTheme();
+  const currentId = sanitizeThemeFontId(
+    activeFontPickerRole === 'heading' ? theme.headingFont : theme.bodyFont,
+  );
+  const allOptions = getAllThemeFontOptions();
+  const customCount = getCustomUploadedFonts().length;
+
+  const shortLabels = {
+    all: 'All',
+    sans: 'Sans',
+    technical: 'Tech',
+    serif: 'Serif',
+    display: 'Display',
+    custom: customCount > 0 ? `Yours (${customCount})` : 'Yours',
+  };
+
+  const tabIds = ['all', ...THEME_FONT_CATEGORIES.map((c) => c.id)];
+  tabsEl.innerHTML = tabIds.map((catId) => {
+    const active = activeFontPickerCategory === catId;
+    return `<button type="button" role="tab" aria-selected="${active ? 'true' : 'false'}" data-font-cat="${catId}" class="px-2 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+      active
+        ? 'bg-[var(--primary)] text-[var(--primary-foreground)]'
+        : 'bg-[var(--surface-sunken)] text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--surface-hover)]'
+    }">${escHtml(shortLabels[catId] || catId)}</button>`;
+  }).join('');
+
+  tabsEl.querySelectorAll('[data-font-cat]').forEach((btn) => {
+    btn.onclick = () => {
+      activeFontPickerCategory = btn.getAttribute('data-font-cat') || 'all';
+      renderThemeFontPicker();
+    };
+  });
+
+  const q = activeFontPickerQuery.trim().toLowerCase();
+  const filtered = allOptions.filter((opt) => {
+    if (activeFontPickerCategory !== 'all' && opt.category !== activeFontPickerCategory) return false;
+    if (!q) return true;
+    return (
+      opt.label.toLowerCase().includes(q) ||
+      opt.tagline.toLowerCase().includes(q) ||
+      opt.category.toLowerCase().includes(q)
+    );
+  });
+
+  if (filtered.length === 0) {
+    if (activeFontPickerCategory === 'custom' && customCount === 0) {
+      listEl.innerHTML = `<div class="py-5 px-3 text-center space-y-2">
+        <p class="text-xs text-[var(--muted-foreground)]">No custom fonts uploaded yet.</p>
+        <button id="btnEmptyUploadFont" type="button" class="px-3 py-1.5 rounded-lg bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] text-xs font-semibold cursor-pointer">Upload .ttf / .otf / .woff2</button>
+      </div>`;
+      const upBtn = document.getElementById('btnEmptyUploadFont');
+      if (upBtn) upBtn.onclick = () => document.getElementById('customFontUploadInput')?.click();
+    } else {
+      listEl.innerHTML = `<div class="py-5 px-3 text-center text-xs text-[var(--muted-foreground)]">No fonts match "${escHtml(activeFontPickerQuery)}".</div>`;
+    }
+    return;
+  }
+
+  const isHeading = activeFontPickerRole === 'heading';
+  const specimenText = isHeading ? 'Step 12 · 4×' : '2×4 Brick · Page 14';
+  const grouped = new Map();
+  for (const cat of THEME_FONT_CATEGORIES) {
+    const items = filtered.filter((o) => o.category === cat.id);
+    if (items.length > 0) grouped.set(cat.label, items);
+  }
+  const showGroupHeaders = activeFontPickerCategory === 'all' && !q;
+
+  const htmlParts = [];
+  for (const [groupLabel, items] of grouped.entries()) {
+    if (showGroupHeaders) {
+      htmlParts.push(
+        `<div class="px-1.5 pt-1.5 pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">${escHtml(groupLabel)}</div>`,
+      );
+    }
+    for (const opt of items) {
+      const selected = opt.id === currentId;
+      const safeStack = opt.stack.replace(/"/g, '&quot;');
+      const deleteBtn = opt.isCustom
+        ? `<button type="button" data-delete-custom-font="${escHtml(opt.id)}" title="Remove uploaded font" aria-label="Remove ${escHtml(opt.label)}" class="w-6 h-6 rounded-md hover:bg-[var(--danger-soft)] hover:text-[var(--danger)] text-[var(--muted-foreground)] flex items-center justify-center shrink-0 cursor-pointer"><svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>`
+        : '';
+      htmlParts.push(`
+        <div class="flex items-center gap-1 rounded-lg border transition-colors ${
+          selected
+            ? 'border-[var(--primary)] bg-[var(--primary-soft)]'
+            : 'border-transparent hover:border-[var(--border)] hover:bg-[var(--surface-sunken)]'
+        }" data-font-selected="${selected ? 'true' : 'false'}">
+          <button type="button" role="option" aria-selected="${selected ? 'true' : 'false'}" data-pick-font="${escHtml(opt.id)}" class="flex-1 min-w-0 px-2.5 py-2 text-left cursor-pointer">
+            <div class="flex items-baseline justify-between gap-2">
+              <span class="text-sm ${isHeading ? 'font-extrabold' : 'font-semibold'} text-[var(--foreground)] truncate" style="font-family:${safeStack}">${escHtml(opt.label)}</span>
+              <span class="text-[11px] ${isHeading ? 'font-black text-[var(--foreground)]' : 'font-medium text-[var(--muted-foreground)]'} shrink-0" style="font-family:${safeStack}">${specimenText}</span>
+            </div>
+            <div class="text-[10px] text-[var(--muted-foreground)] truncate mt-0.5">${escHtml(opt.tagline)}</div>
+          </button>
+          ${deleteBtn}
+        </div>
+      `);
+    }
+  }
+  listEl.innerHTML = htmlParts.join('');
+
+  listEl.querySelectorAll('[data-pick-font]').forEach((btn) => {
+    btn.onclick = () => {
+      const picked = sanitizeThemeFontId(btn.getAttribute('data-pick-font'));
+      patchActiveTheme({ [activeFontPickerRole === 'heading' ? 'headingFont' : 'bodyFont']: picked });
+      renderThemeFontPicker();
+    };
+  });
+
+  listEl.querySelectorAll('[data-delete-custom-font]').forEach((btn) => {
+    btn.onclick = (ev) => {
+      ev.stopPropagation();
+      const delId = btn.getAttribute('data-delete-custom-font');
+      if (!delId) return;
+      const opt = getThemeFontOption(delId);
+      unregisterCustomUploadedFont(delId);
+      persistCustomUploadedFonts();
+      // Reset any custom themes referencing the deleted font back to default
+      let changedThemes = false;
+      customThemes = customThemes.map((ct) => {
+        if (ct.headingFont === delId || ct.bodyFont === delId) {
+          changedThemes = true;
+          return {
+            ...ct,
+            headingFont: ct.headingFont === delId ? 'public-sans' : ct.headingFont,
+            bodyFont: ct.bodyFont === delId ? 'public-sans' : ct.bodyFont,
+          };
+        }
+        return ct;
+      });
+      if (changedThemes) persistCustomThemes();
+      renderAll();
+      renderThemeFontPicker();
+      showToast(`Removed font "${opt.label}".`);
+    };
+  });
+}
+
+document.getElementById('btnThemeHeadingFont')?.addEventListener('click', () => openThemeFontPicker('heading'));
+document.getElementById('btnThemeBodyFont')?.addEventListener('click', () => openThemeFontPicker('body'));
+document.getElementById('btnCloseFontPicker')?.addEventListener('click', closeThemeFontPicker);
+document.getElementById('themeFontSearchInput')?.addEventListener('input', (e) => {
+  activeFontPickerQuery = e.target.value || '';
+  renderThemeFontPicker();
+});
+document.getElementById('btnUploadCustomFont')?.addEventListener('click', () => {
+  document.getElementById('customFontUploadInput')?.click();
+});
+document.getElementById('customFontUploadInput')?.addEventListener('change', async (e) => {
+  const files = Array.from(e.target.files || []);
+  e.target.value = '';
+  if (files.length === 0) return;
+  let lastUploaded = null;
+  let errorCount = 0;
+  let lastError = '';
+  for (const file of files) {
+    try {
+      lastUploaded = await parseUploadedFontFile(file);
+    } catch (err) {
+      errorCount++;
+      lastError = err?.message || `Could not load ${file.name}.`;
+    }
+  }
+  if (lastUploaded) {
+    persistCustomUploadedFonts();
+    const targetRole = activeFontPickerRole || 'heading';
+    patchActiveTheme({ [targetRole === 'heading' ? 'headingFont' : 'bodyFont']: lastUploaded.id });
+    activeFontPickerCategory = 'custom';
+    if (!activeFontPickerRole) openThemeFontPicker(targetRole);
+    else renderThemeFontPicker();
+    showToast(
+      files.length === 1
+        ? `Added "${lastUploaded.name}" font.`
+        : `Added ${files.length - errorCount} custom font${files.length - errorCount === 1 ? '' : 's'}.`,
+    );
+  } else if (lastError) {
+    showToast(lastError);
+  }
+});
 
 for (const [elId, field] of THEME_COLOR_FIELDS) {
   const el = document.getElementById(elId);
@@ -17845,7 +18106,11 @@ document.getElementById('themeImportInput').onchange = async (e) => {
   e.target.value = '';
   if (!f) return;
   try {
-    const incoming = await parseImportedThemeFile(f);
+    const { themes: incoming, customFonts: incomingFonts } = await parseImportedThemeFileWithFonts(f);
+    if (incomingFonts.length > 0) {
+      await hydrateCustomUploadedFonts(incomingFonts);
+      persistCustomUploadedFonts();
+    }
     const { merged, importedIds } = mergeImportedThemes(customThemes, incoming);
     customThemes = merged;
     persistCustomThemes();
@@ -19761,6 +20026,7 @@ async function runInteractiveHtmlExport() {
         calloutBorder: theme.calloutBorder,
         headingFont: getThemeFontStack(theme, 'heading'),
         bodyFont: getThemeFontStack(theme, 'body'),
+        customFontFaces: collectReferencedCustomFonts([theme]).map(({ family, format, dataUrl }) => ({ family, format, dataUrl })),
         isDark: isDarkHexColor(theme.bg),
       },
       highlightNew: state.highlightNew,
@@ -19956,7 +20222,8 @@ async function exportProjectFile() {
   if (!state.model) return;
   const activeTheme = getActiveTheme();
   const embeddedCustomTheme = activeTheme && !activeTheme.builtIn && !BUILT_IN_THEME_IDS.has(activeTheme.id) ? activeTheme : undefined;
-  const payload = JSON.stringify({ format: PROJECT_FILE_FORMAT, version: PROJECT_FILE_STUDIO_VERSION, title: state.model.title, chapters: state.model.chapters, overrides: state.overrides, stepInserts: state.stepInserts, pageInserts: state.pageInserts, dividerAfter: state.dividerAfter, coverMeta: state.coverMeta, completeMeta: state.completeMeta, backMeta: state.backMeta, bomConfig: state.bomConfig, wordlessMode: state.wordlessMode, bomShowTextFields: state.bomShowTextFields, showStepBorders: state.showStepBorders, showPageTitle: state.showPageTitle, pageNumberFormat: state.pageNumberFormat, showCover: state.showCover, showBuildComplete: state.showBuildComplete, showPartsList: state.showPartsList, showBackCover: state.showBackCover, detectDuplicates: state.detectDuplicates, minifigStyle: state.minifigStyle, showMinifig1to1: state.showMinifig1to1, themeId: state.themeId, ...(embeddedCustomTheme ? { customTheme: embeddedCustomTheme } : {}), paperFormat: state.paperFormat, orientation: state.orientation, density: state.density, layout: state.layout, layoutConfig: state.layoutConfig, layoutGroups: state.layoutGroups }, null, 2);
+  const embeddedCustomFonts = collectReferencedCustomFonts(activeTheme ? [activeTheme] : []);
+  const payload = JSON.stringify({ format: PROJECT_FILE_FORMAT, version: PROJECT_FILE_STUDIO_VERSION, title: state.model.title, chapters: state.model.chapters, overrides: state.overrides, stepInserts: state.stepInserts, pageInserts: state.pageInserts, dividerAfter: state.dividerAfter, coverMeta: state.coverMeta, completeMeta: state.completeMeta, backMeta: state.backMeta, bomConfig: state.bomConfig, wordlessMode: state.wordlessMode, bomShowTextFields: state.bomShowTextFields, showStepBorders: state.showStepBorders, showPageTitle: state.showPageTitle, pageNumberFormat: state.pageNumberFormat, showCover: state.showCover, showBuildComplete: state.showBuildComplete, showPartsList: state.showPartsList, showBackCover: state.showBackCover, detectDuplicates: state.detectDuplicates, minifigStyle: state.minifigStyle, showMinifig1to1: state.showMinifig1to1, themeId: state.themeId, ...(embeddedCustomTheme ? { customTheme: embeddedCustomTheme } : {}), ...(embeddedCustomFonts.length > 0 ? { customFonts: embeddedCustomFonts } : {}), paperFormat: state.paperFormat, orientation: state.orientation, density: state.density, layout: state.layout, layoutConfig: state.layoutConfig, layoutGroups: state.layoutGroups }, null, 2);
   const fileName = buildProjectFileName(state.model.title);
   closeMenu();
   await shareOrDownloadCustomFile(payload, fileName, 'Shared project file.', `Exported ${fileName}`);
@@ -19999,6 +20266,10 @@ async function handleIncomingProjectFile(f) {
     if (data.pageNumberFormat) state.pageNumberFormat = data.pageNumberFormat;
     else state.pageNumberFormat = getWordlessSurfaceDefaults(state.wordlessMode).pageNumberFormat;
     if (typeof data.detectDuplicates === 'boolean') state.detectDuplicates = data.detectDuplicates;
+    if (Array.isArray(data.customFonts) && data.customFonts.length > 0) {
+      await hydrateCustomUploadedFonts(data.customFonts);
+      persistCustomUploadedFonts();
+    }
     if (data.customTheme) {
       const incomingTheme = (data.customTheme.bomConfig === undefined && data.bomConfig)
         ? { ...data.customTheme, bomConfig: data.bomConfig }

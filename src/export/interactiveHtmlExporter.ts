@@ -159,10 +159,19 @@ export interface InteractiveViewerTheme {
   headingFont?: string;
   /** CSS font stack for body text & labels (theme body font). */
   bodyFont?: string;
+  /** Optional embedded custom uploaded font faces referenced by this theme. */
+  customFontFaces?: Array<{
+    family: string;
+    format: 'woff2' | 'woff' | 'truetype' | 'opentype';
+    dataUrl: string;
+  }>;
   isDark: boolean;
 }
 
 const DEFAULT_VIEWER_FONT_STACK = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+const SAFE_EMBED_FONT_FAMILY_RE = /^BIW User uf_[a-zA-Z0-9_-]{3,48}$/;
+const SAFE_EMBED_FONT_DATA_URL_RE =
+  /^data:(?:font\/(?:woff2|woff|ttf|otf)|application\/(?:font-woff2?|x-font-(?:ttf|otf|woff)|octet-stream));base64,[A-Za-z0-9+/=]+$/;
 
 /**
  * Restricts a CSS font-family stack to safe characters so it can be embedded
@@ -172,6 +181,23 @@ export function sanitizeFontStack(value: unknown, fallback = DEFAULT_VIEWER_FONT
   if (typeof value !== 'string') return fallback;
   const cleaned = value.replace(/[^A-Za-z0-9 ,"'_-]/g, '').trim().slice(0, 300);
   return cleaned || fallback;
+}
+
+function buildCustomFontFacesCss(
+  faces: InteractiveViewerTheme['customFontFaces'],
+): string {
+  if (!Array.isArray(faces) || faces.length === 0) return '';
+  const rules: string[] = [];
+  for (const f of faces) {
+    if (!f || typeof f !== 'object') continue;
+    if (!SAFE_EMBED_FONT_FAMILY_RE.test(f.family)) continue;
+    if (f.format !== 'woff2' && f.format !== 'woff' && f.format !== 'truetype' && f.format !== 'opentype') continue;
+    if (!SAFE_EMBED_FONT_DATA_URL_RE.test(f.dataUrl)) continue;
+    rules.push(
+      `  @font-face { font-family: "${f.family}"; font-style: normal; font-weight: 100 900; font-display: swap; src: url("${f.dataUrl}") format("${f.format}"); }`,
+    );
+  }
+  return rules.length > 0 ? `${rules.join('\n')}\n` : '';
 }
 
 export interface InteractiveHtmlPayload {
@@ -437,13 +463,16 @@ export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload)
       : t.bg;
   const bodyFontStack = sanitizeFontStack(t.bodyFont);
   const headingFontStack = sanitizeFontStack(t.headingFont, bodyFontStack);
+  const customFontFacesCss = buildCustomFontFacesCss(t.customFontFaces);
   const glassBg = t.isDark ? 'rgba(22, 26, 34, 0.86)' : 'rgba(255, 255, 255, 0.88)';
   const glassBorder = t.isDark ? 'rgba(255, 255, 255, 0.14)' : 'rgba(15, 23, 42, 0.12)';
   const staticFallbackHtml = buildStaticFallbackHtml(payload, safeEditorUrl);
 
-  // Strip static fallback preview URLs from the JS 3D payload to avoid duplicating bytes in RAM
+  // Strip static fallback preview URLs and embedded font binaries from the JS 3D payload to avoid duplicating bytes in RAM
+  const { customFontFaces: _cf, ...runtimeTheme } = payload.theme;
   const runtimePayload: InteractiveHtmlPayload = {
     ...payload,
+    theme: runtimeTheme,
     pages: payload.pages.map((pg) => {
       const { previewUrl: _p, steps, ...rest } = pg;
       return {
@@ -465,7 +494,7 @@ export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload)
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover" />
 <title>${safeTitle} — Interactive 3D Instructions</title>
 <style>
-  :root {
+${customFontFacesCss}  :root {
     --page-bg: ${pageBgCss};
     --text: ${t.text};
     --muted: ${t.muted};

@@ -169,6 +169,79 @@ describe('theme fonts', () => {
     expect(draft.headingFont).toBe('condensed');
     expect(draft.bodyFont).toBe('rounded');
   });
+
+  it('includes curated self-hosted fonts across all 4 style categories', async () => {
+    const { THEME_FONTS, THEME_FONT_IDS, THEME_FONT_CATEGORIES } = await import('../customThemes');
+    expect(THEME_FONT_IDS.length).toBeGreaterThanOrEqual(18);
+    const nonCustomCats = THEME_FONT_CATEGORIES.filter((c) => c.id !== 'custom').map((c) => c.id);
+    for (const cat of nonCustomCats) {
+      const inCat = THEME_FONT_IDS.filter((id) => THEME_FONTS[id].category === cat);
+      expect(inCat.length).toBeGreaterThanOrEqual(3);
+    }
+    // Legacy IDs upgrade cleanly to real bundled faces
+    expect(THEME_FONTS.rounded.bundledFamily).toBe('Fredoka');
+    expect(THEME_FONTS.condensed.bundledFamily).toBe('Barlow Condensed');
+    expect(THEME_FONTS.serif.bundledFamily).toBe('Fraunces');
+    expect(THEME_FONTS.slab.bundledFamily).toBe('Roboto Slab');
+  });
+
+  it('registers custom uploaded fonts, round-trips them in .biwtheme, and rejects unsafe payloads', async () => {
+    const {
+      clearCustomUploadedFonts,
+      deriveFontDisplayName,
+      getAllThemeFontOptions,
+      getThemeFontStack,
+      parseImportedThemesPayload,
+      registerCustomUploadedFont,
+      sanitizeCustomUploadedFont,
+      themeCanvasFont,
+      unregisterCustomUploadedFont,
+    } = await import('../customThemes');
+
+    clearCustomUploadedFonts();
+    expect(deriveFontDisplayName('My_Brick-DisplayFont.woff2')).toBe('My Brick Display Font');
+
+    const sampleFont = {
+      id: 'uf_test_font_1' as const,
+      name: 'Brick Display',
+      family: 'BIW User uf_test_font_1',
+      format: 'woff2' as const,
+      dataUrl: 'data:font/woff2;base64,d09GMgABAAAAAA==',
+      sizeBytes: 1024,
+      addedAt: '2026-01-01T00:00:00.000Z',
+    };
+
+    expect(await registerCustomUploadedFont(sampleFont)).toBe(true);
+    expect(getAllThemeFontOptions().some((o) => o.id === sampleFont.id && o.isCustom)).toBe(true);
+
+    const themed = normalizeCustomTheme({
+      name: 'Custom Font Manual',
+      headingFont: sampleFont.id,
+      bodyFont: 'outfit',
+    })!;
+    expect(themed.headingFont).toBe(sampleFont.id);
+    expect(getThemeFontStack(themed, 'heading')).toContain('"BIW User uf_test_font_1"');
+    expect(themeCanvasFont(themed, 800, 22)).toContain('"BIW User uf_test_font_1"');
+    expect(themeCanvasFont(themed, 500, 12)).toContain('"Outfit"');
+
+    // Exporting embeds the referenced custom font; importing extracts it cleanly
+    const exportedJson = serializeThemeExport(themed);
+    const parsed = parseImportedThemesPayload(exportedJson);
+    expect(parsed.themes).toHaveLength(1);
+    expect(parsed.themes[0].headingFont).toBe(sampleFont.id);
+    expect(parsed.customFonts).toHaveLength(1);
+    expect(parsed.customFonts[0].id).toBe(sampleFont.id);
+
+    // Reject malicious/invalid custom font objects
+    expect(sanitizeCustomUploadedFont({ ...sampleFont, id: 'not_uf_prefix' })).toBeNull();
+    expect(sanitizeCustomUploadedFont({ ...sampleFont, dataUrl: 'javascript:alert(1)' })).toBeNull();
+    expect(sanitizeCustomUploadedFont({ ...sampleFont, format: 'svg' })).toBeNull();
+
+    // Unregistering falls back safely to Public Sans
+    expect(unregisterCustomUploadedFont(sampleFont.id)).toBe(true);
+    expect(getThemeFontStack(themed, 'heading')).toContain('"Public Sans"');
+    clearCustomUploadedFonts();
+  });
 });
 
 describe('theme style options, recents & naming', () => {
