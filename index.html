@@ -416,6 +416,17 @@
     <div id="stylePopover" role="dialog" aria-label="Style options" class="no-print hidden fixed top-[60px] right-3 z-45 w-[min(94vw,372px)]">
       <div class="style-popover-tail" aria-hidden="true"></div>
       <div class="style-popover-body rounded-xl studio-sheet text-xs max-h-[78vh] flex flex-col overflow-hidden">
+        <!-- Wizard-only modal header (shown when opened from Import Wizard) -->
+        <div id="styleWizardHeader" class="hidden px-5 py-4 border-b border-[var(--border)] bg-[var(--chrome)] flex items-center justify-between gap-3 shrink-0">
+          <div class="min-w-0">
+            <h2 class="text-base font-bold tracking-tight">Style &amp; Themes</h2>
+            <p class="text-xs text-[var(--muted-foreground)] truncate mt-0.5">Project-level theme and rendering defaults</p>
+          </div>
+          <button id="btnCloseStyleWizard" type="button" aria-label="Back to Import Wizard" class="w-9 h-9 rounded-md flex items-center justify-center hover:bg-[var(--surface-hover)] shrink-0 transition-colors cursor-pointer">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
+        </div>
+
         <!-- Sticky theme header: stays visible while scrolling style options -->
         <div id="stylePopoverThemeHeader" class="shrink-0 p-4 pb-3 space-y-2 bg-[var(--card)] border-b border-[var(--border)]">
           <div class="flex items-center justify-between gap-2">
@@ -566,7 +577,7 @@
         </div>
 
         <!-- Rendering Style (lighting, outlines & fades — saved with theme) -->
-        <div class="space-y-3 pt-3 border-t border-[var(--border)]">
+        <div id="styleStepDisplaySection" class="space-y-3 pt-3 border-t border-[var(--border)]">
           <div class="flex items-center justify-between gap-2">
             <span class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Rendering Style</span>
             <span class="px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-[var(--info-soft)] text-[var(--info)] border border-[var(--info)]/30 whitespace-nowrap">All Steps in Theme</span>
@@ -706,6 +717,10 @@
           </button>
         </div>
         </div>
+        <!-- Wizard-only modal footer -->
+        <div id="styleWizardFooter" class="hidden px-5 py-3.5 border-t border-[var(--border)] bg-[var(--chrome)] flex items-center justify-end gap-2.5 shrink-0">
+          <button id="btnDoneStyleWizard" type="button" class="px-5 py-2.5 rounded-md bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] font-semibold transition-colors cursor-pointer">Back to Import Wizard</button>
+        </div>
       </div>
     </div>
 
@@ -842,14 +857,49 @@
     </div>
 
     <!-- ================================================================ -->
-    <!-- IMPORT & SUBDIVISION ASSISTANT MODAL (Mobile Sheet + Desktop 2P) -->
+    <!-- IMPORT WIZARD MODAL (Read-Only Defaults Summary -> Editable Pages)-->
+    <!-- ================================================================ -->
+    <div id="importWizardModal" role="dialog" aria-modal="true" aria-labelledby="impWizTitle" class="no-print hidden fixed inset-0 z-50 bg-black/55 flex items-end sm:items-center justify-center p-0 sm:p-4">
+      <div class="w-full sm:max-w-xl max-h-[92vh] sm:max-h-[86vh] rounded-t-xl sm:rounded-xl studio-sheet flex flex-col overflow-hidden text-xs">
+        <!-- Header -->
+        <div class="px-5 py-4 border-b border-[var(--border)] bg-[var(--chrome)] flex items-start justify-between gap-3 shrink-0">
+          <div class="min-w-0">
+            <div class="text-[11px] font-semibold uppercase tracking-wider text-[var(--primary)]">Import Wizard</div>
+            <h3 id="impWizTitle" class="text-base font-bold tracking-tight truncate mt-0.5">Import Model</h3>
+            <p id="impWizSummary" class="text-xs text-[var(--muted-foreground)] mt-1 leading-relaxed"></p>
+          </div>
+          <button id="impWizBtnCloseX" type="button" aria-label="Close Import Wizard" class="w-9 h-9 rounded-md flex items-center justify-center hover:bg-[var(--surface-hover)] shrink-0 transition-colors cursor-pointer">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
+        </div>
+
+        <!-- Body: Read-only list of project-level defaults linking to editable pages -->
+        <div class="flex-1 min-h-0 overflow-y-auto overscroll-contain p-5 space-y-3">
+          <p class="text-xs text-[var(--muted-foreground)] leading-relaxed">
+            Selected project-level defaults for this manual. Select any setting below to edit it on its setup page before generating steps.
+          </p>
+          <div id="impWizItemsList" class="space-y-2"></div>
+        </div>
+
+        <!-- Sticky Action Footer -->
+        <div class="px-5 py-3.5 border-t border-[var(--border)] bg-[var(--chrome)] flex items-center justify-between gap-2 shrink-0">
+          <button id="impWizBtnCancel" type="button" class="px-4 py-2 rounded-md text-xs font-semibold text-[var(--muted-foreground)] hover:bg-[var(--surface-hover)] transition-colors cursor-pointer">Cancel</button>
+          <button id="impWizBtnGenerate" type="button" class="flex-1 sm:flex-initial px-5 py-2.5 rounded-md bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] text-xs font-semibold transition-colors cursor-pointer">
+            Generate Manual
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- STEP GENERATION / SLICING MODAL (Mobile Sheet + Desktop 2P)      -->
     <!-- ================================================================ -->
     <div id="importModal" class="no-print hidden fixed inset-0 z-50 bg-black/55 flex items-end sm:items-center justify-center p-0 sm:p-4">
       <div class="w-full sm:max-w-4xl max-h-[93vh] sm:max-h-[88vh] rounded-t-xl sm:rounded-xl studio-sheet flex flex-col overflow-hidden text-xs">
         <!-- Header -->
         <div class="px-5 py-4 border-b border-[var(--border)] bg-[var(--chrome)] flex items-start justify-between gap-3 shrink-0">
           <div class="min-w-0">
-            <h3 id="impTitle" class="text-base font-bold tracking-tight truncate">Import Model</h3>
+            <h3 id="impTitle" class="text-base font-bold tracking-tight truncate">Step Generation</h3>
             <p id="impSummary" class="text-xs text-[var(--muted-foreground)] mt-1 leading-relaxed"></p>
           </div>
           <button id="impBtnCloseX" type="button" aria-label="Close" class="w-9 h-9 rounded-md flex items-center justify-center hover:bg-[var(--surface-hover)] shrink-0 transition-colors cursor-pointer">
@@ -885,7 +935,7 @@
             </div>
           </div>
 
-          <!-- Right / Bottom Pane: Build Organization Dropdown + Step Generation Options -->
+          <!-- Right / Bottom Pane: Build Organization Dropdown + Slicing Options -->
           <div class="flex-1 min-h-0 lg:overflow-y-auto overscroll-contain p-5 space-y-4">
             <div class="space-y-2.5">
               <div id="impProposalLabel" class="block text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Build Organization</div>
@@ -893,33 +943,9 @@
               <div id="impProposalPicker" class="relative"></div>
             </div>
 
-            <!-- Step Generation Options -->
+            <!-- Slicing Options -->
             <div class="space-y-3 pt-4 border-t border-[var(--border)]">
-              <div class="space-y-2">
-                <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Instruction Language</div>
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2" role="radiogroup" aria-label="Instruction language style">
-                  <button type="button" data-imp-wordless="true" role="radio" aria-checked="true" class="imp-wordless-btn text-left p-3 rounded-lg border transition-colors cursor-pointer flex items-start gap-2.5">
-                    <span class="mt-0.5 w-7 h-7 rounded-md bg-[var(--primary-soft)] text-[var(--primary)] flex items-center justify-center shrink-0" aria-hidden="true">
-                      <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 11.5A8.5 8.5 0 0 0 6.2 5.4L4 7.6"/><polyline points="4 3.5 4 7.6 8.1 7.6"/><path d="M3.5 12.5A8.5 8.5 0 0 0 17.8 18.6L20 16.4"/><polyline points="20 20.5 20 16.4 15.9 16.4"/></svg>
-                    </span>
-                    <span class="min-w-0 flex-1">
-                      <span class="block font-bold text-xs text-[var(--foreground)]">Wordless (LEGO-Style)</span>
-                      <span class="block text-[11px] text-[var(--muted-foreground)] mt-0.5 leading-snug">Icons, diagrams &amp; numbers only — no translation needed.</span>
-                    </span>
-                  </button>
-                  <button type="button" data-imp-wordless="false" role="radio" aria-checked="false" class="imp-wordless-btn text-left p-3 rounded-lg border transition-colors cursor-pointer flex items-start gap-2.5">
-                    <span class="mt-0.5 w-7 h-7 rounded-md bg-[var(--surface-sunken)] text-[var(--muted-foreground)] flex items-center justify-center shrink-0" aria-hidden="true">
-                      <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16"/><path d="M4 12h12"/><path d="M4 18h8"/></svg>
-                    </span>
-                    <span class="min-w-0 flex-1">
-                      <span class="block font-bold text-xs text-[var(--foreground)]">With Text Labels</span>
-                      <span class="block text-[11px] text-[var(--muted-foreground)] mt-0.5 leading-snug">Show titles, section names, rotation text &amp; part names.</span>
-                    </span>
-                  </button>
-                </div>
-              </div>
-
-              <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)] pt-1">Step Options</div>
+              <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Step Options</div>
               <label class="flex items-start justify-between gap-3 p-3 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)]/55 cursor-pointer">
                 <div class="min-w-0">
                   <div class="font-semibold text-xs text-[var(--foreground)]">Auto-Detect Duplicate Submodels</div>
@@ -932,7 +958,10 @@
             <!-- Keep Existing File Steps -->
             <div id="impKeepWrap" class="hidden pt-4 border-t border-[var(--border)] space-y-2">
               <button id="impBtnKeep" type="button" class="w-full text-left p-3.5 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] hover:border-[var(--primary)] transition-colors cursor-pointer">
-                <div class="text-sm font-semibold">Keep Existing File Steps</div>
+                <div class="flex items-center justify-between gap-2">
+                  <div class="text-sm font-semibold">Keep Existing File Steps</div>
+                  <span id="impKeepSelectedBadge" class="hidden px-1.5 py-0.5 rounded text-[10px] font-semibold bg-[var(--primary)] text-[var(--primary-foreground)]">Selected</span>
+                </div>
                 <div class="text-xs text-[var(--muted-foreground)] mt-1">Preserves the exact STEP markers saved in your file without regenerating.</div>
               </button>
               <div id="impKeepNotice" role="note" class="hidden destructive-notice"></div>
@@ -946,7 +975,10 @@
           <div class="flex items-center justify-between gap-2">
             <button id="impBtnCancel" type="button" class="px-4 py-2 rounded-md text-xs font-semibold text-[var(--muted-foreground)] hover:bg-[var(--surface-hover)] transition-colors cursor-pointer">Cancel</button>
             <button id="impBtnAuto" type="button" class="flex-1 sm:flex-initial px-5 py-2.5 rounded-md bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] text-xs font-semibold transition-colors cursor-pointer">
-              Generate Manual
+              Regenerate &amp; Apply Steps
+            </button>
+            <button id="impBtnWizardDone" type="button" class="hidden ml-auto px-5 py-2.5 rounded-md bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] text-xs font-semibold transition-colors cursor-pointer">
+              Back to Import Wizard
             </button>
           </div>
         </div>
@@ -1019,9 +1051,9 @@
           </button>
         </div>
 
-        <div class="flex-1 min-h-0 overflow-y-auto overscroll-contain p-5 space-y-5">
+        <div id="pageSetupScroll" class="flex-1 min-h-0 overflow-y-auto overscroll-contain p-5 space-y-5">
           <!-- Page Format Dropdown + Live Proportion Preview Box -->
-          <div class="space-y-2.5">
+          <div id="pageSetupFormatSection" class="space-y-2.5">
             <div class="flex items-center justify-between gap-2">
               <label for="paperFormatSelect" class="block text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Page Format</label>
               <span class="px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-[var(--info-soft)] text-[var(--info)] border border-[var(--info)]/30 whitespace-nowrap">All Pages</span>
@@ -1203,7 +1235,7 @@
           </div>
 
           <!-- Step Range Groups (Per-Range Layouts & Styles) -->
-          <div class="space-y-3 pt-4 border-t border-[var(--border)]">
+          <div id="pageSetupRangeGroupsSection" class="space-y-3 pt-4 border-t border-[var(--border)]">
             <div class="flex items-center justify-between gap-2">
               <div>
                 <div class="flex items-center gap-2 flex-wrap">
@@ -1331,7 +1363,7 @@
             </div>
           </div>
 
-          <div class="space-y-2.5 pt-4 border-t border-[var(--border)]">
+          <div id="pageSetupWordlessSection" class="space-y-2.5 pt-4 border-t border-[var(--border)]">
             <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Instruction Language</div>
             <label class="flex items-start justify-between gap-3 p-3 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)]/55 cursor-pointer">
               <div class="min-w-0">

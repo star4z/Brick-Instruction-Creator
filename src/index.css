@@ -343,6 +343,45 @@ body {
   z-index: 1;
 }
 
+#stylePopover.style-popover-wizard-mode {
+  inset: 0;
+  top: 0;
+  right: 0;
+  width: 100%;
+  z-index: 50;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0;
+  animation: none !important;
+}
+
+@media (min-width: 640px) {
+  #stylePopover.style-popover-wizard-mode {
+    align-items: center;
+    padding: 1rem;
+  }
+}
+
+#stylePopover.style-popover-wizard-mode .style-popover-tail {
+  display: none;
+}
+
+#stylePopover.style-popover-wizard-mode .style-popover-body {
+  width: 100%;
+  max-width: 36rem;
+  max-height: 86vh;
+  border-radius: 0.75rem 0.75rem 0 0;
+  animation: pressRevealUp 200ms var(--ease-press);
+}
+
+@media (min-width: 640px) {
+  #stylePopover.style-popover-wizard-mode .style-popover-body {
+    border-radius: 0.75rem;
+  }
+}
+
 /* Unified Top-Left Menu, Site Title & Collapsible Side Menu */
 .side-menu-shell {
   position: fixed;
@@ -454,6 +493,7 @@ body {
 #overviewModal:not(.hidden) .studio-sheet,
 #importFetchOverlay:not(.hidden) .studio-sheet,
 #missingPartsModal:not(.hidden) .studio-sheet,
+#importWizardModal:not(.hidden) .studio-sheet,
 #importModal:not(.hidden) .studio-sheet,
 #exportModal:not(.hidden) .studio-sheet,
 #pageSetupModal:not(.hidden) .studio-sheet,

@@ -574,7 +574,10 @@ describe('studioRuntime safety checks', () => {
     const styleHtml = html.slice(styleStart, styleEnd);
     const partsListStart = styleHtml.indexOf('<!-- Parts List');
     expect(partsListStart).toBeGreaterThan(-1);
-    const partsListHtml = styleHtml.slice(partsListStart);
+    const partsListEnd = styleHtml.indexOf('id="styleWizardFooter"', partsListStart);
+    const partsListHtml = partsListEnd > partsListStart
+      ? styleHtml.slice(partsListStart, partsListEnd)
+      : styleHtml.slice(partsListStart);
 
     // Only the Parts List Setup link button (and live summary) remains — no inline format buttons or toggles
     expect(partsListHtml).toContain('id="btnStyleOpenBomSetup"');
@@ -818,6 +821,55 @@ describe('studioRuntime safety checks', () => {
     expect(openExtraBody).toContain('if (!canOpenExtraPageSettings(state, kind, Boolean(state.model))) return;');
     expect(openExtraBody).toContain('if (idx < 0) return;');
   });
+
+  it('keeps Step Generation focused on slicing and wires a read-only Import Wizard linking to project-level pages', () => {
+    const html = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf8');
+    const runtime = fs.readFileSync(path.resolve(process.cwd(), 'src/studioRuntime.ts'), 'utf8');
+
+    // Step Generation modal (#importModal) focuses on slicing — no Wordless controls
+    const stepGenStart = html.indexOf('id="importModal"');
+    const stepGenEnd = html.indexOf('id="exportModal"', stepGenStart);
+    expect(stepGenStart).toBeGreaterThan(-1);
+    expect(stepGenEnd).toBeGreaterThan(stepGenStart);
+    const stepGenHtml = html.slice(stepGenStart, stepGenEnd);
+    expect(stepGenHtml).not.toContain('imp-wordless-btn');
+    expect(stepGenHtml).not.toContain('Instruction Language');
+    expect(stepGenHtml).toContain('id="impProposalPicker"');
+    expect(stepGenHtml).toContain('id="toggleDetectDuplicates"');
+    expect(stepGenHtml).toContain('id="impBtnWizardDone"');
+
+    // Wordless toggle lives in Page Setup (#pageSetupModal)
+    expect(html).toContain('id="pageSetupWordlessSection"');
+    expect(html).toContain('id="pageSetupRangeGroupsSection"');
+    expect(html).toContain('id="toggleWordlessMode"');
+
+    // Main Import Wizard modal (#importWizardModal) is read-only (no form inputs) and links to editable pages
+    const wizStart = html.indexOf('id="importWizardModal"');
+    const wizEnd = html.indexOf('id="importModal"', wizStart);
+    expect(wizStart).toBeGreaterThan(-1);
+    expect(wizEnd).toBeGreaterThan(wizStart);
+    const wizHtml = html.slice(wizStart, wizEnd);
+    expect(wizHtml).toContain('id="impWizItemsList"');
+    expect(wizHtml).toContain('id="impWizBtnGenerate"');
+    expect(wizHtml).not.toContain('<input');
+    expect(wizHtml).not.toContain('<select');
+    expect(wizHtml).not.toContain('<textarea');
+
+    // Style modal supports wizard chrome and section targeting
+    expect(html).toContain('id="styleWizardHeader"');
+    expect(html).toContain('id="styleWizardFooter"');
+    expect(html).toContain('id="styleStepDisplaySection"');
+
+    // Runtime wires Import Wizard summary, subpage links, and project-level visibility
+    expect(runtime).toContain('buildImportWizardSummaryItems(');
+    expect(runtime).toContain('getWizardSubpageVisibility(');
+    expect(runtime).toContain('function openImportWizard(');
+    expect(runtime).toContain('function openSlicingFromImportWizard(');
+    expect(runtime).toContain('function openStyleFromImportWizard(');
+    expect(runtime).toContain('function openPageSetupFromImportWizard(');
+    expect(runtime).not.toContain('imp-wordless-btn');
+  });
 });
+
 
 

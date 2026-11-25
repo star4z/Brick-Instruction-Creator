@@ -9,6 +9,10 @@ import {
   SECTION_PREVIEW_PALETTE,
 } from './engine/subdivisionAnalyzer';
 import {
+  buildImportWizardSummaryItems,
+  getWizardSubpageVisibility,
+} from './engine/importWizard';
+import {
   STUD_INNER_COLOR_FLAG,
   STUD_SIDE_COLOR_FLAG,
   compileDatEntry as compileLDrawDatEntry,
@@ -6936,9 +6940,23 @@ function getEffectiveBomConfig() {
   return resolveEffectiveBomConfig(normalizeBomConfig(state.bomConfig), Boolean(state.bomShowTextFields));
 }
 
+const importWizardState = {
+  active: false,
+  subpage: null, // null | 'slicing' | 'style' | 'pageSetup'
+  parsed: null,
+  prep: null,
+  assessment: null,
+  proposals: [],
+  importMode: 'auto', // 'auto' | 'keep'
+  selectedId: 'none',
+  activeProposal: null,
+  skipAutoFetch: false,
+  snapshot: null,
+};
+
 function applyWordlessMode(enabled, { pushHistory = true, render = true } = {}) {
   const next = Boolean(enabled);
-  if (pushHistory && state.model) pushUndo();
+  if (pushHistory && state.model && !importWizardState.active) pushUndo();
   const defs = getWordlessSurfaceDefaults(next);
   state.wordlessMode = next;
   state.coverMeta = { ...normalizeCoverMeta(state.coverMeta, defs.coverShowText), showText: defs.coverShowText };
@@ -6946,7 +6964,13 @@ function applyWordlessMode(enabled, { pushHistory = true, render = true } = {}) 
   state.bomShowTextFields = defs.bomShowTextFields;
   state.pageNumberFormat = resolvePageNumberFormatForMode(state.pageNumberFormat, next);
   overviewThumbCache.bumpEpoch();
-  if (render) renderAll();
+  if (render) {
+    if (importWizardState.active) {
+      syncMenuControls();
+    } else {
+      renderAll();
+    }
+  }
 }
 
 function captureHistorySnap() {
@@ -11971,11 +11995,27 @@ function syncMenuControls() {
   const stepGenSum = document.getElementById('menuStepGenSummary');
   if (stepGenSum) {
     const plan = state.model?._subdivisionPlan;
-    const baseText = plan?.sections?.length
+    stepGenSum.textContent = plan?.sections?.length
       ? `${plan.sections.length} Sections`
       : (state.detectDuplicates ? 'Auto · Dupes On' : 'Single Build');
-    stepGenSum.textContent = state.wordlessMode ? `${baseText} · Wordless` : baseText;
   }
+
+  const isPageSetupWizard = importWizardState.active && importWizardState.subpage === 'pageSetup';
+  const pageSetupWizVis = getWizardSubpageVisibility(isPageSetupWizard);
+  const isStyleWizard = importWizardState.active && importWizardState.subpage === 'style';
+  const styleWizVis = getWizardSubpageVisibility(isStyleWizard);
+
+  setVisible('pageSetupRangeGroupsSection', pageSetupWizVis.showStepRangeGroups);
+  if (!pageSetupWizVis.showPageSizeFitWarning) {
+    document.getElementById('pageSizeFitWarning')?.classList.add('hidden');
+  }
+  const pageSetupDoneBtnEl = document.getElementById('pageSetupDoneBtn');
+  if (pageSetupDoneBtnEl) {
+    pageSetupDoneBtnEl.textContent = isPageSetupWizard ? 'Back to Import Wizard' : 'Done';
+  }
+  setVisible('styleBomSection', styleWizVis.showStyleBomLink);
+  setVisible('styleWizardHeader', styleWizVis.showStyleWizardChrome);
+  setVisible('styleWizardFooter', styleWizVis.showStyleWizardChrome);
 
   const activeFmt = PAPER_FORMATS[state.paperFormat] || PAPER_FORMATS.screen;
   document.getElementById('customSizeWrap').classList.toggle('hidden', state.paperFormat !== 'custom');
@@ -12008,9 +12048,11 @@ function syncMenuControls() {
   }
   const pageSetupSub = document.getElementById('pageSetupSubtitle');
   if (pageSetupSub) {
-    pageSetupSub.textContent = state.paperFormat === 'screen'
-      ? 'Adapts to current screen · Change paper size, grids & step groups'
-      : `${activeFmt.shortName || activeFmt.name} · ${formatPhysicalDims(actWIn, actHIn)}`;
+    pageSetupSub.textContent = isPageSetupWizard
+      ? 'Project-level paper size, default grid, language, and included pages'
+      : state.paperFormat === 'screen'
+        ? 'Adapts to current screen · Change paper size, grids & step groups'
+        : `${activeFmt.shortName || activeFmt.name} · ${formatPhysicalDims(actWIn, actHIn)}`;
   }
   renderPaperFormatPreviewUI();
   document.querySelectorAll('.orient-btn').forEach(b => {
@@ -12048,15 +12090,17 @@ function syncMenuControls() {
   const menuEditsSummary = getCurrentManualEditsSummary();
   applyDestructiveNoticeToEl(
     'wordlessToggleNotice',
-    getWordlessToggleDestructiveNotice({
-      currentWordless: Boolean(state.wordlessMode),
-      coverShowText: covShowText,
-      completeShowText: compShowText,
-      bomShowTextFields: Boolean(state.bomShowTextFields),
-      pageNumberFormat: state.pageNumberFormat,
-      hasCustomCoverText: menuEditsSummary.hasCustomCoverText,
-      hasCustomCompleteText: menuEditsSummary.hasCustomCompleteText,
-    }),
+    pageSetupWizVis.showWordlessDestructiveNotice
+      ? getWordlessToggleDestructiveNotice({
+          currentWordless: Boolean(state.wordlessMode),
+          coverShowText: covShowText,
+          completeShowText: compShowText,
+          bomShowTextFields: Boolean(state.bomShowTextFields),
+          pageNumberFormat: state.pageNumberFormat,
+          hasCustomCoverText: menuEditsSummary.hasCustomCoverText,
+          hasCustomCompleteText: menuEditsSummary.hasCustomCompleteText,
+        })
+      : null,
   );
   setChk('toggleShowCover', state.showCover);
   setChk('toggleShowComplete', state.showBuildComplete);
@@ -12068,7 +12112,7 @@ function syncMenuControls() {
     ['btnOpenPartsListSettings', 'bom'],
     ['btnOpenBackCoverSettings', 'back'],
   ]) {
-    const canOpen = canOpenExtraPageSettings(state, kind, hasModel);
+    const canOpen = pageSetupWizVis.showExtraPageSettingsLinks && canOpenExtraPageSettings(state, kind, hasModel);
     const btn = document.getElementById(btnId);
     if (btn) {
       btn.classList.toggle('hidden', !canOpen);
@@ -15808,6 +15852,9 @@ function openBomSetupModal() {
 function closePageSetupModal() {
   closeLayoutGroupEditor();
   document.getElementById('pageSetupModal').classList.add('hidden');
+  if (importWizardState.active && importWizardState.subpage === 'pageSetup') {
+    returnToImportWizard();
+  }
 }
 
 function closeBomSetupModal() {
@@ -15820,7 +15867,7 @@ function closeBomSetupModal() {
 let lastSourceRecord = null; // { kind:'io'|'ldr'|'project', fileName, data, importMode }
 let savePrefsTimer = null;
 function scheduleSaveSessionPrefs() {
-  if (!state.model) return;
+  if (!state.model || importWizardState.active) return;
   clearTimeout(savePrefsTimer);
   savePrefsTimer = setTimeout(() => {
     dbPut('prefs', {
@@ -17652,12 +17699,23 @@ function updateStylePopoverTail() {
 
 function setStylePopoverOpen(open) {
   if (!stylePopEl || !btnStylePopEl) return;
+  if (!open && importWizardState.active && importWizardState.subpage === 'style') {
+    stylePopEl.classList.remove('style-popover-wizard-mode');
+    stylePopEl.classList.add('hidden');
+    btnStylePopEl.classList.remove('style-chip-open');
+    btnStylePopEl.setAttribute('aria-expanded', 'false');
+    closeThemeFontPicker();
+    returnToImportWizard();
+    return;
+  }
+  const isWizardStyle = Boolean(open && importWizardState.active && importWizardState.subpage === 'style');
+  stylePopEl.classList.toggle('style-popover-wizard-mode', isWizardStyle);
   stylePopEl.classList.toggle('hidden', !open);
-  btnStylePopEl.classList.toggle('style-chip-open', open);
-  btnStylePopEl.setAttribute('aria-expanded', open ? 'true' : 'false');
+  btnStylePopEl.classList.toggle('style-chip-open', Boolean(open && !isWizardStyle));
+  btnStylePopEl.setAttribute('aria-expanded', open && !isWizardStyle ? 'true' : 'false');
   if (open) {
     syncMenuControls();
-    updateStylePopoverTail();
+    if (!isWizardStyle) updateStylePopoverTail();
   } else {
     closeThemeFontPicker();
   }
@@ -17666,8 +17724,20 @@ function setStylePopoverOpen(open) {
 btnStylePopEl.onclick = () => {
   setStylePopoverOpen(stylePopEl.classList.contains('hidden'));
 };
+const btnCloseStyleWizardEl = document.getElementById('btnCloseStyleWizard');
+if (btnCloseStyleWizardEl) btnCloseStyleWizardEl.onclick = () => setStylePopoverOpen(false);
+const btnDoneStyleWizardEl = document.getElementById('btnDoneStyleWizard');
+if (btnDoneStyleWizardEl) btnDoneStyleWizardEl.onclick = () => setStylePopoverOpen(false);
+if (stylePopEl) {
+  stylePopEl.addEventListener('click', (e) => {
+    if (e.target === stylePopEl && importWizardState.active && importWizardState.subpage === 'style') {
+      setStylePopoverOpen(false);
+    }
+  });
+}
 document.addEventListener('pointerdown', (e) => {
   if (!stylePopEl || stylePopEl.classList.contains('hidden')) return;
+  if (importWizardState.active && importWizardState.subpage === 'style') return;
   const t = e.target;
   if (t instanceof Node && (stylePopEl.contains(t) || (btnStylePopEl && btnStylePopEl.contains(t)))) return;
   suppressedBlankResetEvent = e;
@@ -18774,6 +18844,8 @@ function getActiveShortcutBlockingSurface() {
   if (isOpen('openModelModal')) return 'openModel';
   if (isOpen('missingPartsModal')) return 'missingParts';
   if (isOpen('importModal')) return 'import';
+  if (isOpen('importWizardModal')) return 'import';
+  if (importWizardState.active && importWizardState.subpage === 'style') return 'import';
   if (isOverviewModalOpen()) return 'overview';
   if (isMenuOpen()) return 'menu';
   return 'none';
@@ -18840,12 +18912,16 @@ function handleGlobalEscapeKey() {
     closeImportAssistant(false);
     return true;
   }
-  if (isOverviewModalOpen()) {
-    closeOverviewModal();
-    return true;
-  }
   if (stylePopEl && !stylePopEl.classList.contains('hidden')) {
     setStylePopoverOpen(false);
+    return true;
+  }
+  if (isOpen('importWizardModal')) {
+    cancelImportWizard();
+    return true;
+  }
+  if (isOverviewModalOpen()) {
+    closeOverviewModal();
     return true;
   }
   if (isMenuOpen()) {
@@ -20815,10 +20891,10 @@ let impState = {
   panX: 0,
   panY: 0,
   isPostImport: false,
+  isWizardSubpage: false,
   skipAutoFetch: false,
   pickerOpen: false,
   pickerFocusIdx: 0,
-  wordlessMode: DEFAULT_WORDLESS_MODE,
 };
 
 function closeImportAssistant(keepPendingRaw = false) {
@@ -20826,14 +20902,24 @@ function closeImportAssistant(keepPendingRaw = false) {
     cancelAnimationFrame(impExplodeAnimRaf);
     impExplodeAnimRaf = 0;
   }
+  const wasWizardSubpage = Boolean(impState.isWizardSubpage && importWizardState.active && importWizardState.subpage === 'slicing');
+  if (wasWizardSubpage) {
+    importWizardState.selectedId = impState.selectedId;
+    importWizardState.activeProposal = impState.activeProposal;
+  }
+  impState.isWizardSubpage = false;
+  impState.pickerOpen = false;
+  impPreviewMesh = null;
+  document.getElementById('importModal').classList.add('hidden');
+  if (wasWizardSubpage && !keepPendingRaw) {
+    returnToImportWizard();
+    return;
+  }
   state.pendingImport = null;
   if (!keepPendingRaw) pendingRawFile = null;
   impState.parsed = null;
   impState.activeProposal = null;
   impState.skipAutoFetch = false;
-  impState.pickerOpen = false;
-  impPreviewMesh = null;
-  document.getElementById('importModal').classList.add('hidden');
 }
 
 function getPreviewPartMaps() {
@@ -21183,6 +21269,11 @@ function selectImportProposal(pid) {
     const found = impState.proposals.find(p => p.id === pid);
     impState.activeProposal = found ? JSON.parse(JSON.stringify(found)) : null;
   }
+  if (impState.isWizardSubpage && importWizardState.active) {
+    importWizardState.importMode = 'auto';
+    importWizardState.selectedId = impState.selectedId;
+    importWizardState.activeProposal = impState.activeProposal;
+  }
   impState.pickerOpen = false;
   renderImportAssistantUI();
   rebuildAndDrawImportPreview();
@@ -21307,71 +21398,60 @@ document.addEventListener('pointerdown', (e) => {
 
 function renderImportAssistantUI() {
   const autoBtn = document.getElementById('impBtnAuto');
+  const cancelBtn = document.getElementById('impBtnCancel');
+  const wizDoneBtn = document.getElementById('impBtnWizardDone');
+  const keepBtn = document.getElementById('impBtnKeep');
+  const keepBadge = document.getElementById('impKeepSelectedBadge');
   const dupChk = document.getElementById('toggleDetectDuplicates');
   if (dupChk) dupChk.checked = Boolean(state.detectDuplicates);
 
-  document.querySelectorAll('.imp-wordless-btn').forEach((b) => {
-    const isWlBtn = b.getAttribute('data-imp-wordless') !== 'false';
-    const act = Boolean(impState.wordlessMode) === isWlBtn;
-    b.setAttribute('aria-checked', act ? 'true' : 'false');
-    b.className = `imp-wordless-btn text-left p-3 rounded-lg border transition-colors cursor-pointer flex items-start gap-2.5 ${
-      act
+  const isWizardSub = Boolean(impState.isWizardSubpage);
+  const stepGenVis = getWizardSubpageVisibility(isWizardSub);
+
+  if (cancelBtn) cancelBtn.classList.toggle('hidden', isWizardSub);
+  if (autoBtn) autoBtn.classList.toggle('hidden', isWizardSub);
+  if (wizDoneBtn) wizDoneBtn.classList.toggle('hidden', !isWizardSub);
+
+  const keepSelected = isWizardSub && importWizardState.importMode === 'keep';
+  if (keepBadge) keepBadge.classList.toggle('hidden', !keepSelected);
+  if (keepBtn) {
+    keepBtn.className = `w-full text-left p-3.5 rounded-lg border transition-colors cursor-pointer ${
+      keepSelected
         ? 'border-[var(--primary)] bg-[var(--primary-soft)] ring-1 ring-[var(--primary)]/30'
-        : 'border-[var(--border)] bg-[var(--card)] hover:border-[var(--primary)]/50 hover:bg-[var(--surface-hover)]'
+        : 'border-[var(--border)] bg-[var(--surface-sunken)] hover:border-[var(--primary)]'
     }`;
-    const iconWrap = b.querySelector('span');
-    if (iconWrap) {
-      iconWrap.className = `mt-0.5 w-7 h-7 rounded-md flex items-center justify-center shrink-0 ${
-        act
-          ? 'bg-[var(--primary)] text-[var(--primary-foreground)]'
-          : 'bg-[var(--surface-sunken)] text-[var(--muted-foreground)]'
-      }`;
-    }
-  });
+  }
 
   syncImportPreviewControlsUI();
   renderImportProposalPicker();
 
   const editsSummary = getCurrentManualEditsSummary();
-  const covShowText = state.model
-    ? normalizeCoverMeta(state.coverMeta, !state.wordlessMode).showText !== false
-    : !state.wordlessMode;
-  const compShowText = state.completeMeta.showText !== false;
-  const wordlessResetNotice =
-    impState.isPostImport && Boolean(impState.wordlessMode) !== Boolean(state.wordlessMode)
-      ? getWordlessToggleDestructiveNotice({
-          currentWordless: Boolean(state.wordlessMode),
-          coverShowText: covShowText,
-          completeShowText: compShowText,
-          bomShowTextFields: Boolean(state.bomShowTextFields),
-          pageNumberFormat: state.pageNumberFormat,
-          hasCustomCoverText: editsSummary.hasCustomCoverText,
-          hasCustomCompleteText: editsSummary.hasCustomCompleteText,
-        })
-      : null;
   applyDestructiveNoticeToEl(
     'impActionNotice',
-    getStepGenerationDestructiveNotice({
-      isPostImport: impState.isPostImport,
-      editsSummary,
-      wordlessResetNotice,
-      isKeepStepsAction: false,
-    }),
-  );
-  applyDestructiveNoticeToEl(
-    'impKeepNotice',
-    impState.parsed?.hasSteps
+    stepGenVis.showStepGenDestructiveNotice
       ? getStepGenerationDestructiveNotice({
           isPostImport: impState.isPostImport,
           editsSummary,
-          wordlessResetNotice,
+          wordlessResetNotice: null,
+          isKeepStepsAction: false,
+        })
+      : null,
+  );
+  applyDestructiveNoticeToEl(
+    'impKeepNotice',
+    stepGenVis.showStepGenDestructiveNotice && impState.parsed?.hasSteps
+      ? getStepGenerationDestructiveNotice({
+          isPostImport: impState.isPostImport,
+          editsSummary,
+          wordlessResetNotice: null,
           isKeepStepsAction: true,
         })
       : null,
   );
 
-  const active = impState.activeProposal;
+  if (isWizardSub || !autoBtn) return;
 
+  const active = impState.activeProposal;
   if (!active) {
     autoBtn.textContent = impState.isPostImport ? 'Regenerate & Apply Steps' : 'Generate Manual';
     return;
@@ -21386,13 +21466,17 @@ function renderImportAssistantUI() {
   autoBtn.textContent = `${impState.isPostImport ? 'Apply & Regenerate' : 'Generate Manual'} (${secCountLabel})`;
 }
 
-function openImportAssistant(parsed, isPostImport = false) {
+function openImportAssistant(parsed, isPostImport = false, opts = {}) {
   if (impExplodeAnimRaf) {
     cancelAnimationFrame(impExplodeAnimRaf);
     impExplodeAnimRaf = 0;
   }
-  const prep = prepareSubdivisionData(parsed);
-  const { assessment, proposals } = analyzeModelSubdivisions(prep.inputs, prep.adjacency);
+  const isWizardSubpage = Boolean(opts && opts.isWizardSubpage);
+  const prep = opts?.prep || prepareSubdivisionData(parsed);
+  const analyzed = opts?.assessment && opts?.proposals
+    ? { assessment: opts.assessment, proposals: opts.proposals }
+    : analyzeModelSubdivisions(prep.inputs, prep.adjacency);
+  const { assessment, proposals } = analyzed;
 
   state.pendingImport = parsed;
   impState.parsed = parsed;
@@ -21400,7 +21484,7 @@ function openImportAssistant(parsed, isPostImport = false) {
   impState.assessment = assessment;
   impState.proposals = proposals;
   impState.isPostImport = isPostImport;
-  impState.wordlessMode = isPostImport ? Boolean(state.wordlessMode) : DEFAULT_WORDLESS_MODE;
+  impState.isWizardSubpage = isWizardSubpage;
   impState.pickerOpen = false;
   impState.colorMode = 'sections';
   impState.az = 38;
@@ -21409,34 +21493,39 @@ function openImportAssistant(parsed, isPostImport = false) {
   impState.panX = 0;
   impState.panY = 0;
 
-  // When reopened from Step Generation menu, match the currently active plan if any; otherwise pick recommended
-  const currentPlan = isPostImport ? state.model?._subdivisionPlan : null;
-  const matchedExisting = currentPlan
-    ? proposals.find(p => p.id === currentPlan.id || p.strategy === currentPlan.strategy)
-    : null;
-
-  if (matchedExisting) {
-    impState.selectedId = matchedExisting.id;
-    impState.activeProposal = JSON.parse(JSON.stringify(matchedExisting));
-  } else if (isPostImport && !currentPlan) {
-    impState.selectedId = 'none';
-    impState.activeProposal = null;
-  } else if (assessment.shouldPrompt && proposals.length > 0) {
-    impState.selectedId = proposals[0].id;
-    impState.activeProposal = JSON.parse(JSON.stringify(proposals[0]));
+  if (isWizardSubpage) {
+    impState.selectedId = importWizardState.selectedId || 'none';
+    impState.activeProposal = importWizardState.activeProposal
+      ? JSON.parse(JSON.stringify(importWizardState.activeProposal))
+      : null;
   } else {
-    impState.selectedId = 'none';
-    impState.activeProposal = null;
+    // When reopened from Step Generation menu, match the currently active plan if any; otherwise pick recommended
+    const currentPlan = isPostImport ? state.model?._subdivisionPlan : null;
+    const matchedExisting = currentPlan
+      ? proposals.find(p => p.id === currentPlan.id || p.strategy === currentPlan.strategy)
+      : null;
+
+    if (matchedExisting) {
+      impState.selectedId = matchedExisting.id;
+      impState.activeProposal = JSON.parse(JSON.stringify(matchedExisting));
+    } else if (isPostImport && !currentPlan) {
+      impState.selectedId = 'none';
+      impState.activeProposal = null;
+    } else if (assessment.shouldPrompt && proposals.length > 0) {
+      impState.selectedId = proposals[0].id;
+      impState.activeProposal = JSON.parse(JSON.stringify(proposals[0]));
+    } else {
+      impState.selectedId = 'none';
+      impState.activeProposal = null;
+    }
   }
 
   impState.isExploded = Boolean(impState.activeProposal);
   impState.explodePct = impState.isExploded ? IMP_EXPLODED_PCT : 0;
 
-  document.getElementById('impTitle').textContent = isPostImport
-    ? 'Step Generation'
-    : assessment.shouldPrompt
-      ? `Step Generation — ${parsed.title}`
-      : `Import ${parsed.title}`;
+  document.getElementById('impTitle').textContent = isWizardSubpage
+    ? 'Step Generation — Slicing'
+    : 'Step Generation';
 
   const reasonStr = assessment.reasons.length > 0
     ? `${parsed.title} · Detected ${assessment.reasons.join(' · ')}.`
@@ -21447,6 +21536,301 @@ function openImportAssistant(parsed, isPostImport = false) {
   document.getElementById('importModal').classList.remove('hidden');
   renderImportAssistantUI();
   requestAnimationFrame(() => rebuildAndDrawImportPreview());
+}
+
+// ============================================================================
+// IMPORT WIZARD (Read-Only Project-Level Defaults Summary -> Editable Subpages)
+// ============================================================================
+function capturePreWizardStateSnapshot() {
+  return {
+    themeId: state.themeId,
+    wordlessMode: state.wordlessMode,
+    bomShowTextFields: state.bomShowTextFields,
+    pageNumberFormat: state.pageNumberFormat,
+    paperFormat: state.paperFormat,
+    orientation: state.orientation,
+    customWidth: state.customWidth,
+    customHeight: state.customHeight,
+    customUnit: state.customUnit,
+    density: state.density,
+    layoutConfig: JSON.parse(JSON.stringify(state.layoutConfig || {})),
+    showCover: state.showCover,
+    showBuildComplete: state.showBuildComplete,
+    showPartsList: state.showPartsList,
+    showBackCover: state.showBackCover,
+    detectDuplicates: state.detectDuplicates,
+    coverMeta: JSON.parse(JSON.stringify(state.coverMeta || {})),
+    completeMeta: JSON.parse(JSON.stringify(state.completeMeta || {})),
+  };
+}
+
+function restorePreWizardStateSnapshot(snap) {
+  if (!snap) return;
+  state.themeId = snap.themeId;
+  applyActiveThemeStyleToState();
+  state.wordlessMode = snap.wordlessMode;
+  state.bomShowTextFields = snap.bomShowTextFields;
+  state.pageNumberFormat = snap.pageNumberFormat;
+  state.paperFormat = snap.paperFormat;
+  state.orientation = snap.orientation;
+  state.customWidth = snap.customWidth;
+  state.customHeight = snap.customHeight;
+  state.customUnit = snap.customUnit;
+  state.density = snap.density;
+  state.layoutConfig = snap.layoutConfig;
+  state.showCover = snap.showCover;
+  state.showBuildComplete = snap.showBuildComplete;
+  state.showPartsList = snap.showPartsList;
+  state.showBackCover = snap.showBackCover;
+  state.detectDuplicates = snap.detectDuplicates;
+  state.coverMeta = snap.coverMeta;
+  state.completeMeta = snap.completeMeta;
+}
+
+function clearImportWizardState() {
+  importWizardState.active = false;
+  importWizardState.subpage = null;
+  importWizardState.parsed = null;
+  importWizardState.prep = null;
+  importWizardState.assessment = null;
+  importWizardState.proposals = [];
+  importWizardState.importMode = 'auto';
+  importWizardState.selectedId = 'none';
+  importWizardState.activeProposal = null;
+  importWizardState.skipAutoFetch = false;
+  importWizardState.snapshot = null;
+  document.getElementById('importWizardModal')?.classList.add('hidden');
+}
+
+function cancelImportWizard() {
+  const snap = importWizardState.snapshot;
+  if (importWizardState.subpage === 'style' && stylePopEl) {
+    stylePopEl.classList.remove('style-popover-wizard-mode');
+    stylePopEl.classList.add('hidden');
+  }
+  document.getElementById('pageSetupModal')?.classList.add('hidden');
+  document.getElementById('importModal')?.classList.add('hidden');
+  clearImportWizardState();
+  state.pendingImport = null;
+  pendingRawFile = null;
+  restorePreWizardStateSnapshot(snap);
+  if (state.model) renderAll();
+  else syncMenuControls();
+}
+
+function getImportWizardItemIconSvg(itemId) {
+  switch (itemId) {
+    case 'slicing':
+      return '<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="7" height="16" rx="1.5"/><rect x="14" y="4" width="7" height="16" rx="1.5"/></svg>';
+    case 'wordless':
+      return '<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 11.5A8.5 8.5 0 0 0 6.2 5.4L4 7.6"/><polyline points="4 3.5 4 7.6 8.1 7.6"/><path d="M3.5 12.5A8.5 8.5 0 0 0 17.8 18.6L20 16.4"/><polyline points="20 20.5 20 16.4 15.9 16.4"/></svg>';
+    case 'rendering':
+      return '<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 3 7.5 12 12l9-4.5L12 3Z"/><path d="m3 12 9 4.5 9-4.5"/><path d="m3 16.5 9 4.5 9-4.5"/></svg>';
+    case 'format':
+      return '<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><line x1="8" x2="16" y1="8" y2="8"/><line x1="8" x2="16" y1="12" y2="12"/><line x1="8" x2="12" y1="16" y2="16"/></svg>';
+    default:
+      return '';
+  }
+}
+
+function renderImportWizardUI() {
+  const listEl = document.getElementById('impWizItemsList');
+  if (!listEl || !importWizardState.parsed) return;
+
+  const theme = getActiveTheme();
+  const activeFmt = PAPER_FORMATS[state.paperFormat] || PAPER_FORMATS.screen;
+  const layoutSummary = describePageLayoutSpec(normalizePageLayoutSpec(state.layoutConfig));
+
+  const items = buildImportWizardSummaryItems({
+    importMode: importWizardState.importMode,
+    activeProposal: importWizardState.activeProposal,
+    detectDuplicates: Boolean(state.detectDuplicates),
+    hasFileSteps: Boolean(importWizardState.parsed.hasSteps),
+    themeName: theme.name,
+    themeBuiltIn: Boolean(theme.builtIn || BUILT_IN_THEME_IDS.has(theme.id)),
+    themeBgColor: theme.bgColor || '#d8ecfd',
+    themeBgColorEnd: theme.bgColorEnd,
+    themeBgType: theme.bgType === 'gradient' ? 'gradient' : 'solid',
+    themeAccent: theme.accent || '#1a73e8',
+    themeText: theme.text || '#172536',
+    stepLighting: state.stepLighting,
+    highQualityStepRender: Boolean(state.highQualityStepRender),
+    starkBlackOutlines: Boolean(state.starkBlackOutlines),
+    outlineLineWeight: state.outlineLineWeight,
+    highlightNew: Boolean(state.highlightNew),
+    highlightLineWeight: state.highlightLineWeight,
+    fadeOpacity: Number(state.fadeOpacity ?? 0.82),
+    wordlessMode: Boolean(state.wordlessMode),
+    paperFormat: state.paperFormat,
+    paperFormatLabel: activeFmt.shortName || activeFmt.name,
+    supportsOrientation: Boolean(activeFmt.supportsOrientation),
+    orientation: state.orientation === 'portrait' ? 'portrait' : 'landscape',
+    customWidth: state.customWidth,
+    customHeight: state.customHeight,
+    customUnit: state.customUnit === 'cm' ? 'cm' : 'in',
+    layoutSummary,
+    density: state.density || 'balanced',
+  });
+
+  listEl.innerHTML = items.map((item) => {
+    const leading = item.swatch
+      ? `<span class="w-9 h-9 rounded-lg border border-black/15 shrink-0 flex flex-col items-center justify-between p-1" style="background:${
+          item.swatch.bgType === 'gradient' && item.swatch.bgColorEnd
+            ? `linear-gradient(135deg, ${escHtml(item.swatch.bgColor)}, ${escHtml(item.swatch.bgColorEnd)})`
+            : escHtml(item.swatch.bgColor)
+        }" aria-hidden="true"><span class="text-[10px] font-black leading-none" style="color:${escHtml(item.swatch.text)}">1</span><span class="w-2.5 h-2.5 rounded-full border border-white/70" style="background:${escHtml(item.swatch.accent)}"></span></span>`
+      : `<span class="w-9 h-9 rounded-lg bg-[var(--primary-soft)] text-[var(--primary)] border border-[var(--primary-border)] shrink-0 flex items-center justify-center" aria-hidden="true">${getImportWizardItemIconSvg(item.id)}</span>`;
+
+    return `
+      <button type="button" data-wiz-subpage="${escHtml(item.targetSubpage)}" data-wiz-section="${escHtml(item.targetSection)}"
+        class="w-full text-left p-3.5 rounded-lg border border-[var(--border)] bg-[var(--card)] hover:border-[var(--primary)] hover:bg-[var(--surface-hover)] transition-colors cursor-pointer flex items-center gap-3">
+        ${leading}
+        <span class="min-w-0 flex-1">
+          <span class="block text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">${escHtml(item.label)}</span>
+          <span class="block text-sm font-bold text-[var(--foreground)] truncate mt-0.5">${escHtml(item.value)}</span>
+          <span class="block text-[11px] text-[var(--muted-foreground)] truncate mt-0.5">${escHtml(item.detail)}</span>
+        </span>
+        <span class="shrink-0 inline-flex items-center gap-1 text-[11px] font-semibold text-[var(--primary)]">
+          <span>${escHtml(item.targetPageLabel)}</span>
+          <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+        </span>
+      </button>`;
+  }).join('');
+
+  listEl.querySelectorAll('button[data-wiz-subpage]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const subpage = btn.getAttribute('data-wiz-subpage');
+      const section = btn.getAttribute('data-wiz-section');
+      if (subpage === 'slicing') openSlicingFromImportWizard();
+      else if (subpage === 'style') openStyleFromImportWizard(section);
+      else if (subpage === 'pageSetup') openPageSetupFromImportWizard(section);
+    });
+  });
+}
+
+function returnToImportWizard() {
+  if (!importWizardState.active) return;
+  importWizardState.subpage = null;
+  syncMenuControls();
+  renderImportWizardUI();
+  document.getElementById('importWizardModal')?.classList.remove('hidden');
+}
+
+function openSlicingFromImportWizard() {
+  if (!importWizardState.active || !importWizardState.parsed) return;
+  importWizardState.subpage = 'slicing';
+  document.getElementById('importWizardModal')?.classList.add('hidden');
+  openImportAssistant(importWizardState.parsed, false, {
+    isWizardSubpage: true,
+    prep: importWizardState.prep,
+    assessment: importWizardState.assessment,
+    proposals: importWizardState.proposals,
+  });
+}
+
+function openStyleFromImportWizard(section = 'theme') {
+  if (!importWizardState.active) return;
+  importWizardState.subpage = 'style';
+  document.getElementById('importWizardModal')?.classList.add('hidden');
+  setStylePopoverOpen(true);
+  requestAnimationFrame(() => {
+    const scrollEl = document.getElementById('stylePopoverScroll');
+    if (!scrollEl) return;
+    if (section === 'rendering') {
+      const target = document.getElementById('styleStepDisplaySection');
+      if (target) target.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    } else {
+      scrollEl.scrollTop = 0;
+    }
+  });
+}
+
+function openPageSetupFromImportWizard(section = 'format') {
+  if (!importWizardState.active) return;
+  importWizardState.subpage = 'pageSetup';
+  document.getElementById('importWizardModal')?.classList.add('hidden');
+  openPageSetupModal();
+  requestAnimationFrame(() => {
+    const scrollEl = document.getElementById('pageSetupScroll');
+    if (!scrollEl) return;
+    if (section === 'wordless') {
+      const target = document.getElementById('pageSetupWordlessSection');
+      if (target) target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    } else {
+      scrollEl.scrollTop = 0;
+    }
+  });
+}
+
+function openImportWizard(parsed, opts = {}) {
+  closeMenu();
+  const skipAutoFetch = Boolean(opts && opts.skipAutoFetch);
+  const prep = prepareSubdivisionData(parsed);
+  const { assessment, proposals } = analyzeModelSubdivisions(prep.inputs, prep.adjacency);
+
+  importWizardState.snapshot = capturePreWizardStateSnapshot();
+  importWizardState.active = true;
+  importWizardState.subpage = null;
+  importWizardState.parsed = parsed;
+  importWizardState.prep = prep;
+  importWizardState.assessment = assessment;
+  importWizardState.proposals = proposals;
+  importWizardState.skipAutoFetch = skipAutoFetch;
+  importWizardState.importMode = 'auto';
+
+  if (assessment.shouldPrompt && proposals.length > 0) {
+    importWizardState.selectedId = proposals[0].id;
+    importWizardState.activeProposal = JSON.parse(JSON.stringify(proposals[0]));
+  } else {
+    importWizardState.selectedId = 'none';
+    importWizardState.activeProposal = null;
+  }
+
+  // Apply fresh-import Wordless default (editable via Page Setup link)
+  const wlDefs = getWordlessSurfaceDefaults(DEFAULT_WORDLESS_MODE);
+  state.wordlessMode = DEFAULT_WORDLESS_MODE;
+  state.bomShowTextFields = wlDefs.bomShowTextFields;
+  state.pageNumberFormat = resolvePageNumberFormatForMode(state.pageNumberFormat, DEFAULT_WORDLESS_MODE);
+  state.pendingImport = parsed;
+
+  document.getElementById('impWizTitle').textContent = `Import ${parsed.title}`;
+  const reasonStr = assessment.reasons.length > 0
+    ? `${formatPartCount(parsed.parts.length)} · Detected ${assessment.reasons.join(' · ')}.`
+    : `${formatPartCount(parsed.parts.length)}${parsed.submodelCount ? ` across ${parsed.submodelCount} submodels` : ''}.`;
+  document.getElementById('impWizSummary').textContent = reasonStr;
+
+  syncMenuControls();
+  renderImportWizardUI();
+  document.getElementById('importWizardModal').classList.remove('hidden');
+}
+
+// Wire Import Wizard buttons
+const impWizBtnGenerateEl = document.getElementById('impWizBtnGenerate');
+if (impWizBtnGenerateEl) {
+  impWizBtnGenerateEl.onclick = () => {
+    if (!importWizardState.active || !importWizardState.parsed) return;
+    const parsed = importWizardState.parsed;
+    const mode = importWizardState.importMode;
+    const plan = mode === 'keep' ? null : importWizardState.activeProposal;
+    const skipAutoFetch = importWizardState.skipAutoFetch;
+    const wordlessMode = Boolean(state.wordlessMode);
+    clearImportWizardState();
+    finishImport(parsed, mode, plan, false, {
+      skipAutoFetch,
+      wordlessMode,
+      preservePageNumberFormat: true,
+    });
+  };
+}
+const impWizBtnCancelEl = document.getElementById('impWizBtnCancel');
+if (impWizBtnCancelEl) impWizBtnCancelEl.onclick = () => cancelImportWizard();
+const impWizBtnCloseXEl = document.getElementById('impWizBtnCloseX');
+if (impWizBtnCloseXEl) impWizBtnCloseXEl.onclick = () => cancelImportWizard();
+const importWizardModalEl = document.getElementById('importWizardModal');
+if (importWizardModalEl) {
+  importWizardModalEl.onclick = (e) => {
+    if (e.target.id === 'importWizardModal') cancelImportWizard();
+  };
 }
 
 // Wire Import Preview overlay controls
@@ -21467,12 +21851,6 @@ if (impColorModeToggleBtn) {
     rebuildAndDrawImportPreview();
   };
 }
-document.querySelectorAll('.imp-wordless-btn').forEach((b) => {
-  b.onclick = () => {
-    impState.wordlessMode = b.getAttribute('data-imp-wordless') !== 'false';
-    renderImportAssistantUI();
-  };
-});
 
 function finishImport(parsed, mode, subdivisionPlan = null, isPostImport = false, importOpts = {}) {
   if (isPostImport) pushUndo();
@@ -21481,6 +21859,7 @@ function finishImport(parsed, mode, subdivisionPlan = null, isPostImport = false
   const targetWordless = hasExplicitWordless
     ? importOpts.wordlessMode
     : (isPostImport ? Boolean(state.wordlessMode) : DEFAULT_WORDLESS_MODE);
+  const preservePageNumberFormat = Boolean(importOpts && importOpts.preservePageNumberFormat);
   submodelThumbCache.clear();
   coverHeroCache.clear();
   overviewThumbCache.bumpEpoch();
@@ -21489,7 +21868,9 @@ function finishImport(parsed, mode, subdivisionPlan = null, isPostImport = false
     const wlDefs = getWordlessSurfaceDefaults(targetWordless);
     state.wordlessMode = targetWordless;
     state.bomShowTextFields = wlDefs.bomShowTextFields;
-    state.pageNumberFormat = wlDefs.pageNumberFormat;
+    state.pageNumberFormat = preservePageNumberFormat
+      ? resolvePageNumberFormatForMode(state.pageNumberFormat, targetWordless)
+      : wlDefs.pageNumberFormat;
     state.overrides = {}; state.stepInserts = {}; state.pageInserts = {}; state.dividerAfter = {};
     state.layoutGroups = [];
     state.coverMeta = createDefaultCoverMeta({ showText: wlDefs.coverShowText });
@@ -21529,16 +21910,25 @@ document.getElementById('impBtnAuto').onclick = () => {
   if (!impState.parsed) return;
   finishImport(impState.parsed, 'auto', impState.activeProposal, impState.isPostImport, {
     skipAutoFetch: impState.skipAutoFetch,
-    wordlessMode: impState.wordlessMode,
   });
 };
 document.getElementById('impBtnKeep').onclick = () => {
   if (!impState.parsed) return;
+  if (impState.isWizardSubpage && importWizardState.active) {
+    importWizardState.importMode = 'keep';
+    importWizardState.selectedId = 'none';
+    importWizardState.activeProposal = null;
+    impState.selectedId = 'none';
+    impState.activeProposal = null;
+    closeImportAssistant(false);
+    return;
+  }
   finishImport(impState.parsed, 'keep', null, impState.isPostImport, {
     skipAutoFetch: impState.skipAutoFetch,
-    wordlessMode: impState.wordlessMode,
   });
 };
+const impBtnWizardDoneEl = document.getElementById('impBtnWizardDone');
+if (impBtnWizardDoneEl) impBtnWizardDoneEl.onclick = () => closeImportAssistant(false);
 document.getElementById('impBtnCancel').onclick = () => closeImportAssistant(false);
 document.getElementById('impBtnCloseX').onclick = () => closeImportAssistant(false);
 document.getElementById('importModal').onclick = (e) => {
@@ -21555,18 +21945,7 @@ function analyzePendingImportMissingParts(parsed) {
 }
 
 function proceedAfterMissingPartsCheck(parsed, opts = {}) {
-  const skipAutoFetch = Boolean(opts && opts.skipAutoFetch);
-  const prep = prepareSubdivisionData(parsed);
-  const { assessment } = analyzeModelSubdivisions(prep.inputs, prep.adjacency);
-  impState.skipAutoFetch = skipAutoFetch;
-  if (parsed.hasSteps || parsed.submodelCount > 0 || assessment.shouldPrompt) {
-    openImportAssistant(parsed, false);
-  } else {
-    finishImport(parsed, 'auto', null, false, { skipAutoFetch, wordlessMode: DEFAULT_WORDLESS_MODE });
-    if (assessment.tier === 'borderline') {
-      showToast(`Imported ${parsed.title}. Tip: Open Menu → Subdivide Model to split into sections.`);
-    }
-  }
+  openImportWizard(parsed, opts);
 }
 
 function closeMissingPartsPrompt(keepPendingRaw = false) {
@@ -21682,7 +22061,7 @@ function renderMissingPartsPromptUI(statusMsg = null, statusTone = 'info') {
     fetchLabel.textContent = 'Fetching Parts…';
     skipBtn.classList.remove('hidden');
   } else if (isContinueMode) {
-    fetchLabel.textContent = 'Continue to Step Wizard';
+    fetchLabel.textContent = 'Continue to Import Wizard';
     skipBtn.classList.add('hidden');
   } else {
     fetchLabel.textContent = 'Fetch Missing Parts Online';
@@ -21886,6 +22265,7 @@ async function closeCurrentModel() {
   closeApplyAngleModal();
   closeBricksLibraryModal();
   stopOverviewThumbQueue();
+  clearImportWizardState();
   setStylePopoverOpen(false);
   cleanupPrintAllPages();
 
@@ -21895,6 +22275,7 @@ async function closeCurrentModel() {
     'pageSetupModal',
     'errorsModal',
     'overviewModal',
+    'importWizardModal',
     'importModal',
     'missingPartsModal',
     'errorBanner',
