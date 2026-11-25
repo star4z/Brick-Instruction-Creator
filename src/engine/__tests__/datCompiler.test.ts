@@ -14,6 +14,10 @@ import {
   normalizeTextureName,
   textureStore,
 } from '../textureStore';
+import {
+  convertStudioDatLinesToLDraw,
+  isUnconvertedStudioDatLines,
+} from '../../data/bricklinkColors';
 
 function makeTriangles(count: number, cx: number, cy: number, cz: number, color = 16): string[] {
   const out: string[] = [];
@@ -626,6 +630,75 @@ describe('compileDatEntry — minifigure torso & sibling-fair budgeting', () => 
     expect(accentMesh).not.toBeNull();
     expect(accentMesh!.triCols).toBeInstanceOf(Int32Array);
     expect(Array.from(accentMesh!.triCols!)).toEqual([4, 4, 4]);
+  });
+
+  it('translates BrickLink Studio model2.ldr color IDs inside embedded .dat assemblies and geometry prints', () => {
+    // Regression: in Studio .io model2.ldr, 973pb4787c01.dat uses BrickLink color IDs:
+    //   71 (Magenta) right arm, 36 (Bright Green) left arm, 3 (Yellow) hands.
+    // Reading them as LDraw IDs rendered them as Light Bluish Gray (71), Trans-Red (36, clear!),
+    // and Dark Turquoise (3).
+    const part973 = { key: '973pb4787', lines: ['3 -1 0 0 0 10 0 0 0 10 0'] };
+    const part982 = { key: '982', lines: ['3 -1 0 0 0 10 0 0 0 10 0'] };
+    const part981 = { key: '981', lines: ['3 -1 0 0 0 10 0 0 0 10 0'] };
+    const part983 = { key: '983', lines: ['3 -1 0 0 0 10 0 0 0 10 0'] };
+    const studioTorsoLines = [
+      '0 Torso Jacket / Bright Green Arm Left / Magenta Arm Right / Yellow Hands',
+      '0 Name: 973pb4787c01',
+      '0 IsSubModel False',
+      '0 BL_Item_No 973pb4787c01',
+      '0 IsAssembly True',
+      '1 -1 0 0 0 1 0 0 0 1 0 0 0 1 973pb4787.dat',
+      '1 71 -15 0 0 1 0 0 0 1 0 0 0 1 982.dat',
+      '1 36 15 0 0 1 0 0 0 1 0 0 0 1 981.dat',
+      '1 3 -20 10 0 1 0 0 0 1 0 0 0 1 983.dat',
+      '1 3 20 10 0 1 0 0 0 1 0 0 0 1 983.dat',
+    ];
+    const lookup = (ref: string): DatEntrySource | null => {
+      if (ref === '973pb4787') return part973;
+      if (ref === '982') return part982;
+      if (ref === '981') return part981;
+      if (ref === '983') return part983;
+      return null;
+    };
+
+    // 1. Raw unconverted model2.ldr lines (e.g. restored from saved IndexedDB library) auto-convert
+    expect(isUnconvertedStudioDatLines(studioTorsoLines)).toBe(true);
+    const rawMesh = compileDatEntry({ key: '973pb4787c01', lines: studioTorsoLines }, lookup);
+    expect(rawMesh).not.toBeNull();
+    // Inherited torso = 16, Right arm = 26 (Magenta), Left arm = 10 (Bright Green), Hands = 14 (Yellow)
+    expect(Array.from(rawMesh!.triCols!)).toEqual([16, 26, 10, 14, 14]);
+
+    // 2. Pre-converted lines (via convertStudioDatLinesToLDraw on .io import) produce identical LDraw
+    //    colors and are idempotent (never double-converted, e.g. BL 1 -> LDraw 15 must NOT become 41!)
+    const convertedOnce = convertStudioDatLinesToLDraw(studioTorsoLines);
+    expect(isUnconvertedStudioDatLines(convertedOnce)).toBe(false);
+    const convertedTwice = convertStudioDatLinesToLDraw(convertedOnce);
+    expect(convertedTwice).toEqual(convertedOnce);
+    const preConvertedMesh = compileDatEntry({ key: '973pb4787c01', lines: convertedOnce }, lookup);
+    expect(Array.from(preConvertedMesh!.triCols!)).toEqual([16, 26, 10, 14, 14]);
+
+    // 3. Geometry-printed head from model2.ldr: BL 11 (Black), BL 1 (White), BL 88 (Reddish Brown)
+    const studioHeadLines = [
+      '0 Minifigure, Head Glasses',
+      '0 IsSubModel False',
+      '0 BL_Item_No 3626pb1507',
+      '3 11 0 0 0 5 0 0 0 5 0',
+      '3 1 5 0 0 10 0 0 5 5 0',
+      '3 88 10 0 0 15 0 0 10 5 0',
+    ];
+    const headMesh = compileDatEntry({ key: '3626pb1507', lines: studioHeadLines }, () => null);
+    expect(Array.from(headMesh!.triCols!)).toEqual([0, 15, 70]);
+
+    // 4. Standard LDraw .dat files without Studio markers must keep native LDraw colors untouched
+    const nativeLDrawLines = [
+      '0 Standard LDraw Part',
+      '3 36 0 0 0 5 0 0 0 5 0', // LDraw 36 = Trans-Red
+      '3 71 5 0 0 10 0 0 5 5 0', // LDraw 71 = Light Bluish Gray
+      '3 3 10 0 0 15 0 0 10 5 0', // LDraw 3 = Dark Turquoise
+    ];
+    expect(isUnconvertedStudioDatLines(nativeLDrawLines)).toBe(false);
+    const nativeMesh = compileDatEntry({ key: 'native_part', lines: nativeLDrawLines }, () => null);
+    expect(Array.from(nativeMesh!.triCols!)).toEqual([36, 71, 3]);
   });
 });
 

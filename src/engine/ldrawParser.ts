@@ -18,6 +18,7 @@ import {
   vec3Add,
 } from './math';
 import { applyStudioOriginOffset, getStudioOriginOffset, isStudioAuthoredSource } from './studioPartOrigins';
+import { BRICKLINK_TO_LDRAW_COLOR, convertStudioDatLinesToLDraw } from '../data/bricklinkColors';
 
 interface ParsedSubfile {
   name: string;
@@ -26,34 +27,6 @@ interface ParsedSubfile {
   stepCount: number;
   hasGeometryPrimitives: boolean;
 }
-
-// Common BrickLink Studio color IDs -> LDraw color IDs when reading model2.ldr / modelv2.ldr
-const STUDIO_TO_LDRAW_COLOR: Record<number, number> = {
-  1: 15, // White
-  2: 19, // Tan
-  3: 14, // Yellow
-  4: 25, // Orange
-  5: 4,  // Red
-  6: 2,  // Green
-  7: 1,  // Blue
-  8: 70, // Brown
-  9: 7,  // Light Gray
-  10: 8, // Dark Gray
-  11: 0, // Black
-  12: 47, // Trans-Clear
-  15: 41, // Trans-Light Blue
-  17: 36, // Trans-Red
-  19: 46, // Trans-Yellow
-  59: 320, // Dark Red
-  63: 272, // Dark Blue
-  69: 28,  // Dark Tan
-  85: 72,  // Dark Bluish Gray
-  86: 71,  // Light Bluish Gray
-  88: 70,  // Reddish Brown
-  98: 57,  // Trans-Orange
-  115: 297, // Pearl Gold
-  95: 80,  // Flat Silver
-};
 
 export function buildPartSignature(
   partId: string,
@@ -179,8 +152,8 @@ export function parseLDrawSource(
   const mapColor = (rawColor: number, parentColor: number): number => {
     if (rawColor === 16 || rawColor === -1 || rawColor === -2) return parentColor;
     if (!Number.isFinite(rawColor)) return 71;
-    if (useStudioColorMap && STUDIO_TO_LDRAW_COLOR[rawColor] !== undefined) {
-      return STUDIO_TO_LDRAW_COLOR[rawColor];
+    if (useStudioColorMap && BRICKLINK_TO_LDRAW_COLOR[rawColor] !== undefined) {
+      return BRICKLINK_TO_LDRAW_COLOR[rawColor];
     }
     return rawColor;
   };
@@ -349,7 +322,7 @@ export async function parseModelFile(file: File): Promise<CanonicalModel> {
               sf.hasGeometryPrimitives ||
               sf.lines.some((l) => /^0\s+IsSubModel\s+False/i.test(l));
             if (isPartDef) {
-              embedded[normalizePartId(sf.name)] = sf.lines.join('\n');
+              embedded[normalizePartId(sf.name)] = convertStudioDatLinesToLDraw(sf.lines).join('\n');
             }
           }
         } catch {

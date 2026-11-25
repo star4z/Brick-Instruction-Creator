@@ -19,6 +19,10 @@ import {
   normalizeTextureName,
   textureStore,
 } from './engine/textureStore';
+import {
+  convertStudioDatLinesToLDraw,
+  mapBrickLinkColorToLDraw,
+} from './data/bricklinkColors';
 import { analyzeMissingParts } from './engine/missingParts';
 import {
   PUBLIC_LDRAW_MIRRORS,
@@ -4277,7 +4281,7 @@ async function extractIoArchive(arrayBuffer) {
     for (const sf of m2Map.values()) {
       const isPart = sf.name.toLowerCase().endsWith('.dat') || sf.lines.some(l => /^0\s+IsSubModel\s+False/i.test(l));
       if (isPart) {
-        registerEmbeddedDatEntry(sf, 'embedded');
+        registerEmbeddedDatEntry({ ...sf, lines: convertStudioDatLinesToLDraw(sf.lines) }, 'embedded');
       }
     }
   }
@@ -4406,7 +4410,7 @@ function parseImportedModel(m1Text, m2Text, fileName) {
   } else if (f1.parts.length > 0) {
     rawParts = f1.parts;
   } else {
-    rawParts = f2.parts;
+    rawParts = f2.parts.map((p2) => ({ ...p2, c: mapBrickLinkColorToLDraw(p2.c) }));
   }
   if (rawParts.length === 0) throw new Error('No LEGO part placements found inside this file.');
   const parts = fuseAssemblies(rawParts);

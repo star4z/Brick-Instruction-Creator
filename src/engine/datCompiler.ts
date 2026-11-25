@@ -2,6 +2,7 @@ import type { Mat3 } from './minifigPose';
 import { R_IDENTITY, mat3Multiply, mat3Vec } from './minifigPose';
 import { buildLocalSubBoxes, type LocalBox6 } from './partContact';
 import { hashTextureBase64 } from './textureStore';
+import { isUnconvertedStudioDatLines, mapBrickLinkColorToLDraw } from '../data/bricklinkColors';
 
 /**
  * High-bit tag for LDraw direct RGB colors (`0x2RRGGBB`) stored inside `triCols: Int32Array`.
@@ -1383,7 +1384,7 @@ export function compileDatEntry(
     return false;
   };
 
-  const resolveLineCol = (rawColStr: string, curColor: number): number => {
+  const resolveLineCol = (rawColStr: string, curColor: number, isStudioDat: boolean): number => {
     if (/^0[xX]2[0-9a-fA-F]{6}$/.test(rawColStr)) {
       const rgb = parseInt(rawColStr.slice(3), 16);
       if (Number.isFinite(rgb)) return DIRECT_RGB_COLOR_FLAG | (rgb & 0xffffff);
@@ -1391,7 +1392,9 @@ export function compileDatEntry(
     const c = parseInt(rawColStr, 10);
     // BrickLink Studio model2.ldr encodes LDraw color 16 (inherit/main) as -1 and color 24 (edge) as -2.
     // Negative color IDs must always inherit `curColor` instead of leaking into `triCols`.
-    return Number.isFinite(c) && c >= 0 && c !== 16 && c !== 24 ? c : curColor;
+    if (!Number.isFinite(c) || c < 0) return curColor;
+    const resolved = isStudioDat ? mapBrickLinkColorToLDraw(c) : c;
+    return resolved !== 16 && resolved !== 24 ? resolved : curColor;
   };
 
   const walk = (
@@ -1408,6 +1411,7 @@ export function compileDatEntry(
     inheritedPeTex: PeTexPathEntry[],
   ) => {
     if (depth > maxDepth || totalTriFloats >= triLimit) return;
+    const isStudioDat = isUnconvertedStudioDatLines(rawLines);
     const lines = preprocessTexmapLines(rawLines, px, py, pz, pm, lookupTexture);
 
     // Resolve incoming PE_TEX_PATH entries targeted at this file vs its subfile children
@@ -1515,7 +1519,7 @@ export function compileDatEntry(
         if (totalTriFloats >= directTriLimit) continue;
         const t = raw.split(/\s+/);
         if (t.length >= 11) {
-          const colId = resolveLineCol(t[1], curColor);
+          const colId = resolveLineCol(t[1], curColor, isStudioDat);
           const a = mat3Vec(pm, +t[2], +t[3], +t[4]);
           const b = mat3Vec(pm, +t[5], +t[6], +t[7]);
           const c = mat3Vec(pm, +t[8], +t[9], +t[10]);
@@ -1542,7 +1546,7 @@ export function compileDatEntry(
         if (totalTriFloats >= directTriLimit) continue;
         const t = raw.split(/\s+/);
         if (t.length >= 14) {
-          const colId = resolveLineCol(t[1], curColor);
+          const colId = resolveLineCol(t[1], curColor, isStudioDat);
           const a = mat3Vec(pm, +t[2], +t[3], +t[4]);
           const b = mat3Vec(pm, +t[5], +t[6], +t[7]);
           const c = mat3Vec(pm, +t[8], +t[9], +t[10]);
@@ -1631,7 +1635,7 @@ export function compileDatEntry(
         if (t.length < 15) continue;
         const curSubLineIdx = subfileLineIndex++;
 
-        const childCol = resolveLineCol(t[1], curColor);
+        const childCol = resolveLineCol(t[1], curColor, isStudioDat);
         const lx = +t[2], ly = +t[3], lz = +t[4];
         const lm: Mat3 = [
           +t[5], +t[6], +t[7],
