@@ -132,6 +132,18 @@ export function sanitizeStepLightingMode(
   return fallback;
 }
 
+export type PlacementArrowStyle = 'flat' | '3d';
+
+export const PLACEMENT_ARROW_STYLES: PlacementArrowStyle[] = ['flat', '3d'];
+
+export function sanitizePlacementArrowStyle(
+  raw: unknown,
+  fallback: PlacementArrowStyle = 'flat',
+): PlacementArrowStyle {
+  if (raw === 'flat' || raw === '3d') return raw;
+  return fallback;
+}
+
 /**
  * Step rendering and display options that belong to a theme (formerly loose
  * Style popover toggles). Field names intentionally match the studio runtime
@@ -140,6 +152,9 @@ export function sanitizeStepLightingMode(
 export interface ThemeStyleOptions {
   autoPlacementArrows: boolean;
   arrowColor: string;
+  arrowStyle: PlacementArrowStyle;
+  arrowOutlines: boolean;
+  arrowLighting: boolean;
   highlightNew: boolean;
   highlightColor: string;
   highlightLineWeight: LineWeightId;
@@ -162,6 +177,9 @@ export interface ThemeStyleOptions {
 export const THEME_STYLE_OPTION_KEYS: Array<keyof ThemeStyleOptions> = [
   'autoPlacementArrows',
   'arrowColor',
+  'arrowStyle',
+  'arrowOutlines',
+  'arrowLighting',
   'highlightNew',
   'highlightColor',
   'highlightLineWeight',
@@ -184,6 +202,9 @@ export const THEME_STYLE_OPTION_KEYS: Array<keyof ThemeStyleOptions> = [
 export const DEFAULT_THEME_STYLE_OPTIONS: ThemeStyleOptions = {
   autoPlacementArrows: true,
   arrowColor: '#dc2626',
+  arrowStyle: 'flat',
+  arrowOutlines: false,
+  arrowLighting: false,
   highlightNew: false,
   highlightColor: '#ff2d55',
   highlightLineWeight: 'medium',
@@ -242,6 +263,9 @@ export function normalizeThemeStyleOptions(
   return {
     autoPlacementArrows: bool('autoPlacementArrows'),
     arrowColor: sanitizeHexColor(r.arrowColor, sanitizeHexColor(fb.arrowColor, '#dc2626')),
+    arrowStyle: sanitizePlacementArrowStyle(r.arrowStyle, sanitizePlacementArrowStyle(fb.arrowStyle, 'flat')),
+    arrowOutlines: bool('arrowOutlines'),
+    arrowLighting: bool('arrowLighting'),
     highlightNew: bool('highlightNew'),
     highlightColor: sanitizeHexColor(r.highlightColor, sanitizeHexColor(fb.highlightColor, '#ff2d55')),
     highlightLineWeight: sanitizeLineWeight(r.highlightLineWeight, sanitizeLineWeight(fb.highlightLineWeight, 'medium')),
@@ -300,6 +324,9 @@ export interface ManualTheme {
   // Rendering style, step display & Parts List style options (see ThemeStyleOptions)
   autoPlacementArrows?: boolean;
   arrowColor?: string;
+  arrowStyle?: PlacementArrowStyle;
+  arrowOutlines?: boolean;
+  arrowLighting?: boolean;
   highlightNew?: boolean;
   highlightColor?: string;
   highlightLineWeight?: LineWeightId;

@@ -19,7 +19,14 @@ Large, contrasting, unobstructed, top-placed bricks on subsequent steps remain s
   - Pure, domain-neutral geometric and perceptual analysis (`computeAutoPlacementOffsetsForSequence`).
   - Distinguishes **vertical through-hole & coaxial sleeve insertions** (e.g., vertical axles/pins passing through horizontal beam holes, or bushes/collars sliding onto vertical rods) from **lateral horizontal insertions** (`±X`/`±Z`) so vertical through-hole pins are never offset sideways through a solid beam wall.
   - Collision-aware offset resolution (`resolveOffsetAlongAxis`) that targets a crisp ~20 LDU visible arrow gap, enforces a minimum `16` LDU clear air gap past any coaxial corridor obstacle tip (e.g., an axle protruding through a bush) with `arrowTo` at the entry tip, anchors arrows onto the actual attaching stud/contact overlap (`arrowBox`), and raises vertical lifts via exact orthographic 2D ray-exit sightline clearance (`tFront * tan(|el|) + 20`) so wide overhanging plates never block the camera's view of their attaching studs or arrows.
-  - Non-clipping 3D arrow segment generator (`computePlacementArrowSegments`): emits **1 centered arrow** for compact pieces and **2 parallel end-aligned arrows** for elongated pieces (`span >= 60` LDU perpendicular to the offset axis and aspect ratio `>= 2.2`).
+  - Camera-aware horizontal stud-aligned arrow segment generator (`computePlacementArrowSegments`):
+    - On the horizontal plane (XZ), aligns arrows directly in the center of the stud **nearest** to the camera and the stud **furthest** from the camera (computed from camera azimuth `azDeg`).
+    - For single-stud pieces (`1×1`), emits **1 arrow** centered on that stud.
+    - For multi-stud pieces along one axis (`1×N` / `N×1`), emits **2 arrows** centered on the nearest and furthest end studs.
+    - For pieces wider than 1 stud in both horizontal axes (`M×N`, e.g., `2×2`, `2×4`, `2×6`, `4×4`), emits **2 arrows positioned diagonally** on the nearest corner stud and furthest corner stud relative to the camera.
+  - Camera-facing arrow geometry builder (`buildPlacementArrowGeometry`):
+    - Defaults to **Flat 2D** (`arrowStyle: 'flat'`), **no outlines** (`arrowOutlines: false`), and **no lighting** (`arrowLighting: false`) — rendered as crisp camera-facing 2D ribbons in a dedicated WebGL pass across `WebGLBrickEngine`, `StudioPhotoRenderer` (unlit depth-tested after SSAO so arrows never cast shadows or receive SSAO darkening), and Interactive 3D HTML Export.
+    - All three appearance options (`arrowStyle: 'flat' | '3d'`, `arrowOutlines: boolean`, `arrowLighting: boolean`) are customizable per theme in the Style dialog.
   - Clutter caps (`MAX_FIRST_STEP_OFFSETS = 6`, `MAX_SUBSEQUENT_STEP_OFFSETS = 4`) so dense steps stay readable.
 - **Step 1 connection-seam camera orientation**: [`src/engine/stepCamera.ts`](../src/engine/stepCamera.ts)
   - `computeStep1ConnectionFacingCost` scores top views on Step 1 when an upper piece rests on and overhangs a lower piece, preferring a horizontal viewpoint where the lower base sits in front of the upper piece so the attaching studs and connection seam face directly toward the camera (rotating 180° horizontally when the default corner would hide the seam behind the upper overhang).
@@ -29,6 +36,6 @@ Large, contrasting, unobstructed, top-placed bricks on subsequent steps remain s
   - Combined via `getBaseDefaultPartOffsets(step)` and `getEffectivePartOffsets(step, ov)` across step framing, live rendering, Parts mode editing/reset/nudging, overview thumbnails, PDF export, and Interactive 3D HTML export.
 - **Theme & Rendering Style defaults**: [`src/themes/customThemes.ts`](../src/themes/customThemes.ts) & [`index.html`](../index.html)
   - `highlightNew` ("Outline New Parts") defaults to `false` across all built-in themes and remains available as an opt-in theme toggle.
-  - `autoPlacementArrows` ("Placement Arrows & Offsets") defaults to `true` with `arrowColor` defaulting to `#dc2626` (official LEGO crimson red), both editable in the Style dialog and persisted on themes.
+  - `autoPlacementArrows` ("Placement Arrows & Offsets") defaults to `true`, `arrowColor` defaults to `#dc2626` (official LEGO crimson red), `arrowStyle` defaults to `'flat'` (2D), `arrowOutlines` defaults to `false`, and `arrowLighting` defaults to `false` — all editable in the Style dialog and persisted on themes.
 - **Interactive 3D HTML Export**: [`src/export/interactiveHtmlExporter.ts`](../src/export/interactiveHtmlExporter.ts)
-  - Step scenes carry precomputed 3D arrow segments (`arrows`) and `arrowColor`, rendered directly in WebGL alongside the offset parts.
+  - Step scenes carry camera-aware `arrowSpecs` (plus fallback `arrows`), `arrowColor`, `arrowStyle`, `arrowOutlines`, and `arrowLighting`, rendered dynamically in WebGL as the user orbits the 3D scene.

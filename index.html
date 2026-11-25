@@ -636,6 +636,25 @@
               <input id="toggleAutoPlacementArrows" type="checkbox" checked class="w-4 h-4 accent-[var(--primary)] cursor-pointer" />
             </div>
           </label>
+          <div id="arrowStyleWrap" class="space-y-2 pl-2.5 border-l-2 border-[var(--border)]">
+            <div class="space-y-1">
+              <div class="text-xs text-[var(--muted-foreground)]">Arrow Style</div>
+              <div class="grid grid-cols-2 gap-1.5">
+                <button data-arrow-style="flat" type="button" class="arrow-style-chip py-1.5 px-2 rounded-md border font-semibold text-xs transition cursor-pointer" title="Flat 2D placement arrows (official LEGO manual style)">Flat 2D</button>
+                <button data-arrow-style="3d" type="button" class="arrow-style-chip py-1.5 px-2 rounded-md border font-semibold text-xs transition cursor-pointer" title="Cylindrical 3D placement arrows">3D</button>
+              </div>
+            </div>
+            <div class="grid grid-cols-2 gap-1.5">
+              <label class="flex items-center justify-between gap-2 px-2 py-1 rounded-md bg-[var(--surface-sunken)] border border-[var(--border)] text-xs cursor-pointer" title="Draw dark outlines around placement arrows">
+                <span>Arrow Outlines</span>
+                <input id="toggleArrowOutlines" type="checkbox" class="w-3.5 h-3.5 accent-[var(--primary)] cursor-pointer" />
+              </label>
+              <label class="flex items-center justify-between gap-2 px-2 py-1 rounded-md bg-[var(--surface-sunken)] border border-[var(--border)] text-xs cursor-pointer" title="Apply scene lighting and shading to placement arrows">
+                <span>Arrow Lighting</span>
+                <input id="toggleArrowLighting" type="checkbox" class="w-3.5 h-3.5 accent-[var(--primary)] cursor-pointer" />
+              </label>
+            </div>
+          </div>
           <label class="flex items-center justify-between gap-2 cursor-pointer">
             <span class="font-medium">Outline New Parts</span>
             <div class="flex items-center gap-2">

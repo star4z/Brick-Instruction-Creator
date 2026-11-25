@@ -849,19 +849,35 @@ export function computeAutoPlacementOffsetsForSequence(
 }
 
 /**
- * Computes crisp, non-clipping 3D arrow segment(s) from an offset part back
- * toward its seated destination.
+ * Computes half-distance from box center to the outermost stud centers along a
+ * horizontal axis (1 stud pitch = 20 LDU). Returns 0 for single-stud or narrower spans.
+ */
+function studAxisHalfOffset(span: number): number {
+  if (span < 32) return 0;
+  const studCount = Math.max(2, Math.round(span / 20));
+  return Math.min((studCount - 1) * 10, Math.max(0, span * 0.5 - 5));
+}
+
+/**
+ * Computes crisp, non-clipping placement arrow segment(s) from an offset part
+ * back toward its seated destination.
  *
- * - Compact pieces get 1 centered arrow.
- * - Elongated pieces (span >= 60 LDU perpendicular to the offset axis and
- *   aspect ratio >= 2.2, e.g., 1x4 plates or Technic beams) get 2 parallel
- *   arrows inset near their ends — matching official LEGO instruction manuals.
+ * On the horizontal plane (XZ), arrows align directly to the center of the stud
+ * nearest to the camera and the stud furthest from the camera (based on
+ * `cameraAzDeg`):
+ *   - 1×1 (single stud): 1 arrow centered on that stud.
+ *   - 1×N / N×1 (multi-stud along one horizontal axis): 2 arrows at the nearest
+ *     and furthest stud centers along that axis.
+ *   - M×N (more than 1 stud wide in both X and Z, e.g. 2×2, 2×4, 2×6, 4×4):
+ *     2 arrows placed diagonally at the nearest corner stud and furthest corner
+ *     stud relative to the camera.
  */
 export function computePlacementArrowSegments(
   box: PlacementAABB,
   offset: readonly [number, number, number],
   arrowTo?: readonly [number, number, number] | null,
   throughGuideTo?: readonly [number, number, number] | null,
+  cameraAzDeg = 38,
 ): PlacementArrowSegment[] {
   const ox = offset[0];
   const oy = offset[1];
@@ -907,38 +923,71 @@ export function computePlacementArrowSegments(
     toDist = 0;
   }
 
-  // Determine perpendicular axes to check if the part is elongated (dual arrows)
+  // Primary movement axis
   const absU = [Math.abs(ux), Math.abs(uy), Math.abs(uz)];
   let primaryAxis = 1;
   if (absU[0] >= absU[1] && absU[0] >= absU[2]) primaryAxis = 0;
   else if (absU[2] >= absU[0] && absU[2] >= absU[1]) primaryAxis = 2;
 
-  const perpAxes = [0, 1, 2].filter((k) => k !== primaryAxis);
-  const spanA = s[perpAxes[0]];
-  const spanB = s[perpAxes[1]];
-  const longAxis = spanA >= spanB ? perpAxes[0] : perpAxes[1];
-  const longSpan = Math.max(spanA, spanB);
-  const shortSpan = Math.min(spanA, spanB);
+  // Horizontal camera direction pointing FROM model TOWARD camera
+  const azRad = (cameraAzDeg * Math.PI) / 180;
+  const camX = Math.sin(azRad);
+  const camZ = Math.cos(azRad);
+  const sx = camX >= -1e-6 ? 1 : -1;
+  const sz = camZ >= -1e-6 ? 1 : -1;
 
-  const lateralOffsets: number[] =
-    longSpan >= 60 && longSpan >= shortSpan * 2.2
-      ? [-(longSpan * 0.5 - 10), longSpan * 0.5 - 10]
-      : [0];
+  // Anchor offsets [dx, dy, dz] relative to box.center
+  let anchorOffsets: Vec3[];
+  if (primaryAxis === 1) {
+    // Vertical insertion: align on the horizontal XZ plane to the nearest and furthest stud centers
+    const hx = studAxisHalfOffset(s[0]);
+    const hz = studAxisHalfOffset(s[2]);
+    if (hx > 0 || hz > 0) {
+      anchorOffsets = [
+        [sx * hx, 0, sz * hz],
+        [-sx * hx, 0, -sz * hz],
+      ];
+    } else {
+      anchorOffsets = [[0, 0, 0]];
+    }
+  } else {
+    // Lateral horizontal insertion (±X or ±Z): align along the perpendicular horizontal stud axis
+    const horizPerpAxis = primaryAxis === 0 ? 2 : 0;
+    const hPerp = studAxisHalfOffset(s[horizPerpAxis]);
+    const sHoriz = horizPerpAxis === 0 ? sx : sz;
+    if (hPerp > 0) {
+      const nearOff: Vec3 = [0, 0, 0];
+      const farOff: Vec3 = [0, 0, 0];
+      nearOff[horizPerpAxis] = sHoriz * hPerp;
+      farOff[horizPerpAxis] = -sHoriz * hPerp;
+      anchorOffsets = [nearOff, farOff];
+    } else if (s[1] >= 60 && s[1] >= s[horizPerpAxis] * 2.2) {
+      // Tall 1-stud-wide vertical wall/panel inserted laterally
+      const hy = Math.max(0, s[1] * 0.5 - 10);
+      anchorOffsets = [
+        [0, -hy, 0],
+        [0, hy, 0],
+      ];
+    } else {
+      anchorOffsets = [[0, 0, 0]];
+    }
+  }
 
   const c = box.center;
-  const segments: PlacementArrowSegment[] = lateralOffsets.map((lat) => {
-    const base: Vec3 = [c[0], c[1], c[2]];
-    base[longAxis] += lat;
+  const segments: PlacementArrowSegment[] = anchorOffsets.map((off) => {
+    const bx = c[0] + off[0];
+    const by = c[1] + off[1];
+    const bz = c[2] + off[2];
     return {
       from: [
-        base[0] + ux * fromDist,
-        base[1] + uy * fromDist,
-        base[2] + uz * fromDist,
+        bx + ux * fromDist,
+        by + uy * fromDist,
+        bz + uz * fromDist,
       ],
       to: [
-        base[0] + ux * toDist,
-        base[1] + uy * toDist,
-        base[2] + uz * toDist,
+        bx + ux * toDist,
+        by + uy * toDist,
+        bz + uz * toDist,
       ],
     };
   });
@@ -950,19 +999,20 @@ export function computePlacementArrowSegments(
       (throughGuideTo[1] - c[1]) * uy +
       (throughGuideTo[2] - c[2]) * uz;
     if (toDist - projGuide >= 6) {
-      for (const lat of lateralOffsets) {
-        const base: Vec3 = [c[0], c[1], c[2]];
-        base[longAxis] += lat;
+      for (const off of anchorOffsets) {
+        const bx = c[0] + off[0];
+        const by = c[1] + off[1];
+        const bz = c[2] + off[2];
         segments.push({
           from: [
-            base[0] + ux * toDist,
-            base[1] + uy * toDist,
-            base[2] + uz * toDist,
+            bx + ux * toDist,
+            by + uy * toDist,
+            bz + uz * toDist,
           ],
           to: [
-            base[0] + ux * projGuide,
-            base[1] + uy * projGuide,
-            base[2] + uz * projGuide,
+            bx + ux * projGuide,
+            by + uy * projGuide,
+            bz + uz * projGuide,
           ],
           isGuideLine: true,
         });
@@ -971,6 +1021,255 @@ export function computePlacementArrowSegments(
   }
 
   return segments;
+}
+
+export interface PlacementArrowSpec {
+  box: PlacementAABB;
+  offset: [number, number, number];
+  arrowTo?: [number, number, number] | null;
+  throughGuideTo?: [number, number, number] | null;
+  rgb: [number, number, number];
+}
+
+export interface PlacementArrowGeometryOptions {
+  style?: 'flat' | '3d';
+  outlines?: boolean;
+}
+
+export interface BuiltPlacementArrowGeometry {
+  triPos: Float32Array;
+  triNorm: Float32Array;
+  triCol: Uint8Array;
+  linePos: Float32Array;
+  lineCol: Uint8Array;
+}
+
+/**
+ * Builds render-ready WebGL triangle & optional outline buffers for placement
+ * arrows from camera-aware stud-aligned segments.
+ *
+ * - `'flat'` (default): camera-facing 2D flat ribbon arrows with zero 3D bevel/cone
+ *   distortion and crisp LEGO-manual proportions.
+ * - `'3d'`: cylindrical shaft + conical arrowhead geometry.
+ * - `outlines`: when false (default), emits zero outline edges.
+ */
+export function buildPlacementArrowGeometry(
+  specs: ReadonlyArray<PlacementArrowSpec>,
+  azDeg: number,
+  elDeg: number,
+  options: PlacementArrowGeometryOptions = {},
+): BuiltPlacementArrowGeometry {
+  const style = options.style === '3d' ? '3d' : 'flat';
+  const outlines = Boolean(options.outlines);
+
+  const triPosArr: number[] = [];
+  const triNormArr: number[] = [];
+  const triColArr: number[] = [];
+  const linePosArr: number[] = [];
+  const lineColArr: number[] = [];
+
+  if (!specs || specs.length === 0) {
+    return {
+      triPos: new Float32Array(0),
+      triNorm: new Float32Array(0),
+      triCol: new Uint8Array(0),
+      linePos: new Float32Array(0),
+      lineCol: new Uint8Array(0),
+    };
+  }
+
+  const az = (azDeg * Math.PI) / 180;
+  const el = (elDeg * Math.PI) / 180;
+  const vx = Math.sin(az) * Math.cos(el);
+  const vy = Math.sin(el);
+  const vz = Math.cos(az) * Math.cos(el);
+  const rxCam = Math.cos(az);
+  const ryCam = 0;
+  const rzCam = -Math.sin(az);
+  const ink: [number, number, number] = [24, 24, 28];
+
+  const pushTri = (
+    a: readonly [number, number, number],
+    b: readonly [number, number, number],
+    c: readonly [number, number, number],
+    n: readonly [number, number, number],
+    col: readonly [number, number, number],
+  ) => {
+    triPosArr.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
+    triNormArr.push(n[0], n[1], n[2], n[0], n[1], n[2], n[0], n[1], n[2]);
+    triColArr.push(
+      col[0], col[1], col[2], 255,
+      col[0], col[1], col[2], 255,
+      col[0], col[1], col[2], 255,
+    );
+  };
+
+  const pushEdge = (
+    a: readonly [number, number, number],
+    b: readonly [number, number, number],
+    col: readonly [number, number, number],
+    alpha = 255,
+  ) => {
+    linePosArr.push(a[0], a[1], a[2], b[0], b[1], b[2]);
+    lineColArr.push(col[0], col[1], col[2], alpha, col[0], col[1], col[2], alpha);
+  };
+
+  const viewNorm: [number, number, number] = [vx, vy, vz];
+
+  for (let si = 0; si < specs.length; si++) {
+    const spec = specs[si];
+    const segs = computePlacementArrowSegments(
+      spec.box,
+      spec.offset,
+      spec.arrowTo || null,
+      spec.throughGuideTo || null,
+      azDeg,
+    );
+    const col = spec.rgb;
+
+    for (let k = 0; k < segs.length; k++) {
+      const seg = segs[k];
+      const s = seg.from;
+      const t = seg.to;
+      const dx = t[0] - s[0];
+      const dy = t[1] - s[1];
+      const dz = t[2] - s[2];
+      const len = Math.hypot(dx, dy, dz);
+      if (len < 4) continue;
+      const ux = dx / len;
+      const uy = dy / len;
+      const uz = dz / len;
+
+      if (seg.isGuideLine) {
+        if (style === 'flat') {
+          let wx = vy * uz - vz * uy;
+          let wy = vz * ux - vx * uz;
+          let wz = vx * uy - vy * ux;
+          const wl = Math.hypot(wx, wy, wz);
+          if (wl < 1e-4) {
+            wx = rxCam; wy = ryCam; wz = rzCam;
+          } else {
+            wx /= wl; wy /= wl; wz /= wl;
+          }
+          const gw = 0.85;
+          const sL: Vec3 = [s[0] - wx * gw, s[1] - wy * gw, s[2] - wz * gw];
+          const sR: Vec3 = [s[0] + wx * gw, s[1] + wy * gw, s[2] + wz * gw];
+          const tL: Vec3 = [t[0] - wx * gw, t[1] - wy * gw, t[2] - wz * gw];
+          const tR: Vec3 = [t[0] + wx * gw, t[1] + wy * gw, t[2] + wz * gw];
+          pushTri(sL, sR, tR, viewNorm, col);
+          pushTri(sL, tR, tL, viewNorm, col);
+          if (outlines) {
+            pushEdge(sL, tL, ink, 210);
+            pushEdge(sR, tR, ink, 210);
+          }
+        } else {
+          pushEdge(s, t, col, 255);
+        }
+        continue;
+      }
+
+      if (style === 'flat') {
+        // Screen-aligned width vector perpendicular to BOTH view ray V and arrow axis u
+        let wx = vy * uz - vz * uy;
+        let wy = vz * ux - vx * uz;
+        let wz = vx * uy - vy * ux;
+        const wl = Math.hypot(wx, wy, wz);
+        if (wl < 1e-4) {
+          wx = rxCam; wy = ryCam; wz = rzCam;
+        } else {
+          wx /= wl; wy /= wl; wz /= wl;
+        }
+
+        const headLen = Math.min(9.5, len * 0.44);
+        const shaftEnd: Vec3 = [t[0] - ux * headLen, t[1] - uy * headLen, t[2] - uz * headLen];
+        const shaftHalfW = 1.6;
+        const headHalfW = 4.6;
+
+        const sL: Vec3 = [s[0] - wx * shaftHalfW, s[1] - wy * shaftHalfW, s[2] - wz * shaftHalfW];
+        const sR: Vec3 = [s[0] + wx * shaftHalfW, s[1] + wy * shaftHalfW, s[2] + wz * shaftHalfW];
+        const eL: Vec3 = [shaftEnd[0] - wx * shaftHalfW, shaftEnd[1] - wy * shaftHalfW, shaftEnd[2] - wz * shaftHalfW];
+        const eR: Vec3 = [shaftEnd[0] + wx * shaftHalfW, shaftEnd[1] + wy * shaftHalfW, shaftEnd[2] + wz * shaftHalfW];
+        const hL: Vec3 = [shaftEnd[0] - wx * headHalfW, shaftEnd[1] - wy * headHalfW, shaftEnd[2] - wz * headHalfW];
+        const hR: Vec3 = [shaftEnd[0] + wx * headHalfW, shaftEnd[1] + wy * headHalfW, shaftEnd[2] + wz * headHalfW];
+
+        pushTri(sL, sR, eR, viewNorm, col);
+        pushTri(sL, eR, eL, viewNorm, col);
+        pushTri(hL, hR, t, viewNorm, col);
+
+        if (outlines) {
+          pushEdge(sL, sR, ink, 220);
+          pushEdge(sR, eR, ink, 220);
+          pushEdge(eR, hR, ink, 220);
+          pushEdge(hR, t, ink, 220);
+          pushEdge(t, hL, ink, 220);
+          pushEdge(hL, eL, ink, 220);
+          pushEdge(eL, sL, ink, 220);
+        }
+      } else {
+        // Classic 3D cylindrical shaft + conical arrowhead
+        const rx = Math.abs(uy) < 0.9 ? 0 : 1;
+        const ry = Math.abs(uy) < 0.9 ? 1 : 0;
+        const rz = 0;
+        let bx = uy * rz - uz * ry;
+        let by = uz * rx - ux * rz;
+        let bz = ux * ry - uy * rx;
+        const bl = Math.hypot(bx, by, bz) || 1;
+        bx /= bl; by /= bl; bz /= bl;
+        const cx = by * uz - bz * uy;
+        const cy = bz * ux - bx * uz;
+        const cz = bx * uy - by * ux;
+
+        const headLen = Math.min(9.5, len * 0.42);
+        const shaftEnd: Vec3 = [t[0] - ux * headLen, t[1] - uy * headLen, t[2] - uz * headLen];
+        const segs3d = 10;
+        const shaftR = 1.45;
+        const headR = 4.4;
+        const ring = (center: Vec3, r: number, ang: number): Vec3 => [
+          center[0] + (Math.cos(ang) * bx + Math.sin(ang) * cx) * r,
+          center[1] + (Math.cos(ang) * by + Math.sin(ang) * cy) * r,
+          center[2] + (Math.cos(ang) * bz + Math.sin(ang) * cz) * r,
+        ];
+        const backNorm: Vec3 = [-ux, -uy, -uz];
+        for (let i = 0; i < segs3d; i++) {
+          const a0 = (i / segs3d) * Math.PI * 2;
+          const a1 = ((i + 1) / segs3d) * Math.PI * 2;
+          const am = (a0 + a1) * 0.5;
+          const sn: Vec3 = [
+            Math.cos(am) * bx + Math.sin(am) * cx,
+            Math.cos(am) * by + Math.sin(am) * cy,
+            Math.cos(am) * bz + Math.sin(am) * cz,
+          ];
+          const s0 = ring(s, shaftR, a0);
+          const s1 = ring(s, shaftR, a1);
+          const e0 = ring(shaftEnd, shaftR, a0);
+          const e1 = ring(shaftEnd, shaftR, a1);
+          pushTri(s0, s1, e1, sn, col);
+          pushTri(s0, e1, e0, sn, col);
+          const h0 = ring(shaftEnd, headR, a0);
+          const h1 = ring(shaftEnd, headR, a1);
+          pushTri(h0, h1, t, sn, col);
+          pushTri(shaftEnd, h1, h0, backNorm, col);
+          if (outlines) {
+            pushEdge(h0, h1, ink, 210);
+          }
+        }
+        if (outlines) {
+          for (const railAng of [0, Math.PI * 0.5, Math.PI, Math.PI * 1.5]) {
+            pushEdge(ring(s, shaftR, railAng), ring(shaftEnd, shaftR, railAng), ink, 200);
+            pushEdge(ring(shaftEnd, headR, railAng), t, ink, 210);
+          }
+        }
+      }
+    }
+  }
+
+  return {
+    triPos: new Float32Array(triPosArr),
+    triNorm: new Float32Array(triNormArr),
+    triCol: new Uint8Array(triColArr),
+    linePos: new Float32Array(linePosArr),
+    lineCol: new Uint8Array(lineColArr),
+  };
 }
 
 function parseHexToRgb255(hex: string): [number, number, number] {

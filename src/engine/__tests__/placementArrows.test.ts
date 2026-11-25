@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_ARROW_COLOR,
+  buildPlacementArrowGeometry,
   computeAutoPlacementOffsetsForSequence,
   computePlacementArrowSegments,
   perceptualRgbDistance,
@@ -302,30 +303,121 @@ describe('placementArrows — LEGO-style automatic placement arrows & offsets', 
     expect(res.get('s2')?.['pin']?.z).toBeGreaterThan(20);
   });
 
-  it('computes 1 centered non-clipping arrow for compact pieces and 2 end-aligned arrows for elongated pieces', () => {
-    // Compact 1x2 plate lifted +28 LDU
-    const compactBox = makeBox(0, 8, 0, 40, 8, 20);
-    const compactSegs = computePlacementArrowSegments(compactBox, [0, 28, 0]);
-    expect(compactSegs).toHaveLength(1);
-    expect(compactSegs[0].from[0]).toBeCloseTo(0, 4);
-    expect(compactSegs[0].from[1]).toBeLessThan(compactBox.center[1] + 28 - 4); // starts outside lifted plate bottom
-    expect(compactSegs[0].to[1]).toBeGreaterThan(compactBox.center[1]); // lands cleanly above seated center
+  it('aligns placement arrows on the horizontal plane to the centers of the nearest and furthest studs from the camera (diagonal when > 1 stud wide)', () => {
+    // 1x1 plate lifted +28 LDU -> 1 arrow centered on its single stud
+    const singleStudBox = makeBox(0, 8, 0, 20, 8, 20);
+    const singleSegs = computePlacementArrowSegments(singleStudBox, [0, 28, 0], null, null, 38);
+    expect(singleSegs).toHaveLength(1);
+    expect(singleSegs[0].from[0]).toBeCloseTo(0, 4);
+    expect(singleSegs[0].from[2]).toBeCloseTo(0, 4);
+    expect(singleSegs[0].from[1]).toBeLessThan(singleStudBox.center[1] + 28 - 4);
+    expect(singleSegs[0].to[1]).toBeGreaterThan(singleStudBox.center[1]);
 
-    // Elongated 1x4 plate (80x8x20) lifted +28 LDU -> 2 parallel arrows at X = ±30
+    // 1x2 plate (40x8x20) lifted +28 LDU at az=38° (front-right: +X, +Z) -> nearest stud (+10, 0) & furthest stud (-10, 0)
+    const plate1x2 = makeBox(0, 8, 0, 40, 8, 20);
+    const segs1x2 = computePlacementArrowSegments(plate1x2, [0, 28, 0], null, null, 38);
+    expect(segs1x2).toHaveLength(2);
+    expect(segs1x2[0].from[0]).toBeCloseTo(10, 4);
+    expect(segs1x2[0].from[2]).toBeCloseTo(0, 4);
+    expect(segs1x2[1].from[0]).toBeCloseTo(-10, 4);
+    expect(segs1x2[1].from[2]).toBeCloseTo(0, 4);
+
+    // 1x4 plate (80x8x20) lifted +28 LDU at az=38° -> end studs at X = +30 (nearest) and X = -30 (furthest)
     const longPlateBox = makeBox(0, 8, 0, 80, 8, 20);
-    const longSegs = computePlacementArrowSegments(longPlateBox, [0, 28, 0]);
+    const longSegs = computePlacementArrowSegments(longPlateBox, [0, 28, 0], null, null, 38);
     expect(longSegs).toHaveLength(2);
-    expect(longSegs[0].from[0]).toBeCloseTo(-30, 4);
-    expect(longSegs[1].from[0]).toBeCloseTo(30, 4);
+    expect(longSegs[0].from[0]).toBeCloseTo(30, 4);
+    expect(longSegs[0].from[2]).toBeCloseTo(0, 4);
+    expect(longSegs[1].from[0]).toBeCloseTo(-30, 4);
+    expect(longSegs[1].from[2]).toBeCloseTo(0, 4);
     expect(longSegs[0].from[1]).toBeGreaterThan(longSegs[0].to[1]);
 
-    // Elongated Technic beam (140x24x20) offset laterally along +Z -> 2 parallel horizontal arrows
+    // 2x4 plate (80x8x40, LDraw 79.5x8x39.5) lifted +28 LDU -> DIAGONAL nearest & furthest corner studs!
+    const plate2x4 = makeBox(0, 8, 0, 79.5, 8, 39.5);
+    // Front-right camera (az=38° -> +X, +Z): nearest (+30, +10), furthest (-30, -10)
+    const segsFR = computePlacementArrowSegments(plate2x4, [0, 28, 0], null, null, 38);
+    expect(segsFR).toHaveLength(2);
+    expect(segsFR[0].to[0]).toBeCloseTo(30, 4);
+    expect(segsFR[0].to[2]).toBeCloseTo(10, 4);
+    expect(segsFR[1].to[0]).toBeCloseTo(-30, 4);
+    expect(segsFR[1].to[2]).toBeCloseTo(-10, 4);
+
+    // Back-right camera (az=142° -> +X, -Z): nearest (+30, -10), furthest (-30, +10)
+    const segsBR = computePlacementArrowSegments(plate2x4, [0, 28, 0], null, null, 142);
+    expect(segsBR).toHaveLength(2);
+    expect(segsBR[0].to[0]).toBeCloseTo(30, 4);
+    expect(segsBR[0].to[2]).toBeCloseTo(-10, 4);
+    expect(segsBR[1].to[0]).toBeCloseTo(-30, 4);
+    expect(segsBR[1].to[2]).toBeCloseTo(10, 4);
+
+    // Back-left camera (az=218° -> -X, -Z): nearest (-30, -10), furthest (+30, +10)
+    const segsBL = computePlacementArrowSegments(plate2x4, [0, 28, 0], null, null, 218);
+    expect(segsBL).toHaveLength(2);
+    expect(segsBL[0].to[0]).toBeCloseTo(-30, 4);
+    expect(segsBL[0].to[2]).toBeCloseTo(-10, 4);
+    expect(segsBL[1].to[0]).toBeCloseTo(30, 4);
+    expect(segsBL[1].to[2]).toBeCloseTo(10, 4);
+
+    // Front-left camera (az=322° -> -X, +Z): nearest (-30, +10), furthest (+30, -10)
+    const segsFL = computePlacementArrowSegments(plate2x4, [0, 28, 0], null, null, 322);
+    expect(segsFL).toHaveLength(2);
+    expect(segsFL[0].to[0]).toBeCloseTo(-30, 4);
+    expect(segsFL[0].to[2]).toBeCloseTo(10, 4);
+    expect(segsFL[1].to[0]).toBeCloseTo(30, 4);
+    expect(segsFL[1].to[2]).toBeCloseTo(-10, 4);
+
+    // 2x2 plate (40x8x40) -> diagonal corner studs (+10, +10) and (-10, -10)
+    const plate2x2 = makeBox(0, 8, 0, 40, 8, 40);
+    const segs2x2 = computePlacementArrowSegments(plate2x2, [0, 28, 0], null, null, 38);
+    expect(segs2x2).toHaveLength(2);
+    expect(segs2x2[0].to[0]).toBeCloseTo(10, 4);
+    expect(segs2x2[0].to[2]).toBeCloseTo(10, 4);
+    expect(segs2x2[1].to[0]).toBeCloseTo(-10, 4);
+    expect(segs2x2[1].to[2]).toBeCloseTo(-10, 4);
+
+    // Elongated Technic beam (140x24x20) offset laterally along +Z -> 2 parallel horizontal arrows at nearest/furthest X studs (±60)
     const beamBox = makeBox(0, 0, 0, 140, 24, 20);
-    const beamSegs = computePlacementArrowSegments(beamBox, [0, 0, 40]);
+    const beamSegs = computePlacementArrowSegments(beamBox, [0, 0, 40], null, null, 38);
     expect(beamSegs).toHaveLength(2);
-    expect(beamSegs[0].from[0]).toBeCloseTo(-60, 4);
-    expect(beamSegs[1].from[0]).toBeCloseTo(60, 4);
+    expect(beamSegs[0].from[0]).toBeCloseTo(60, 4);
+    expect(beamSegs[1].from[0]).toBeCloseTo(-60, 4);
     expect(beamSegs[0].from[2]).toBeGreaterThan(beamSegs[0].to[2]);
+  });
+
+  it('builds flat 2D camera-facing arrows without outlines by default and supports optional outlines and 3D style', () => {
+    const spec = {
+      box: makeBox(0, 8, 0, 20, 8, 20),
+      offset: [0, 32, 0] as [number, number, number],
+      rgb: [220, 38, 38] as [number, number, number],
+    };
+
+    // Default: flat 2D (3 triangles = 9 vertices = 27 floats) with zero outlines
+    const flatDefault = buildPlacementArrowGeometry([spec], 38, 28);
+    expect(flatDefault.triPos.length).toBe(27);
+    expect(flatDefault.linePos.length).toBe(0);
+    // Every vertex normal points uniformly toward camera (flat plane)
+    const az = (38 * Math.PI) / 180;
+    const el = (28 * Math.PI) / 180;
+    const vx = Math.sin(az) * Math.cos(el);
+    const vy = Math.sin(el);
+    const vz = Math.cos(az) * Math.cos(el);
+    expect(flatDefault.triNorm[0]).toBeCloseTo(vx, 4);
+    expect(flatDefault.triNorm[1]).toBeCloseTo(vy, 4);
+    expect(flatDefault.triNorm[2]).toBeCloseTo(vz, 4);
+
+    // Flat 2D with outlines enabled emits 7 perimeter segments (14 vertices = 42 floats)
+    const flatOutlined = buildPlacementArrowGeometry([spec], 38, 28, { style: 'flat', outlines: true });
+    expect(flatOutlined.triPos.length).toBe(27);
+    expect(flatOutlined.linePos.length).toBe(42);
+
+    // 3D style emits full cylindrical shaft + cone mesh, with outlines only when opted in
+    const mesh3dNoOutline = buildPlacementArrowGeometry([spec], 38, 28, { style: '3d', outlines: false });
+    expect(mesh3dNoOutline.triPos.length).toBeGreaterThan(200);
+    expect(mesh3dNoOutline.linePos.length).toBe(0);
+
+    const mesh3dOutlined = buildPlacementArrowGeometry([spec], 38, 28, { style: '3d', outlines: true });
+    expect(mesh3dOutlined.triPos.length).toBe(mesh3dNoOutline.triPos.length);
+    expect(mesh3dOutlined.linePos.length).toBeGreaterThan(0);
   });
 
   it('perceptualRgbDistance distinguishes identical colors from contrasting colors', () => {
@@ -424,11 +516,11 @@ describe('placementArrows — LEGO-style automatic placement arrows & offsets', 
     expect(topOff.arrowBox).toBeDefined();
     expect(topOff.arrowBox!.center[2]).toBeCloseTo(-10, 2);
 
-    const segs = computePlacementArrowSegments(topOff.arrowBox!, [topOff.x, topOff.y, topOff.z], topOff.arrowTo);
+    const segs = computePlacementArrowSegments(topOff.arrowBox!, [topOff.x, topOff.y, topOff.z], topOff.arrowTo, null, 38);
     expect(segs).toHaveLength(2);
     expect(segs[0].to[2]).toBeCloseTo(-10, 2);
     expect(segs[1].to[2]).toBeCloseTo(-10, 2);
-    expect(segs[0].to[0]).toBeCloseTo(-50, 2);
-    expect(segs[1].to[0]).toBeCloseTo(50, 2);
+    expect(segs[0].to[0]).toBeCloseTo(50, 2);
+    expect(segs[1].to[0]).toBeCloseTo(-50, 2);
   });
 });

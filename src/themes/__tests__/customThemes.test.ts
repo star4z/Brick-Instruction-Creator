@@ -253,6 +253,11 @@ describe('theme style options, recents & naming', () => {
     expect(m.DEFAULT_THEME_STYLE_OPTIONS.starkBlackOutlines).toBe(false);
     expect(m.DEFAULT_THEME_STYLE_OPTIONS.highlightLineWeight).toBe('medium');
     expect(m.DEFAULT_THEME_STYLE_OPTIONS.outlineLineWeight).toBe('medium');
+    expect(m.DEFAULT_THEME_STYLE_OPTIONS.arrowStyle).toBe('flat');
+    expect(m.DEFAULT_THEME_STYLE_OPTIONS.arrowOutlines).toBe(false);
+    expect(m.DEFAULT_THEME_STYLE_OPTIONS.arrowLighting).toBe(false);
+    expect(m.sanitizePlacementArrowStyle('invalid', 'flat')).toBe('flat');
+    expect(m.sanitizePlacementArrowStyle('3d', 'flat')).toBe('3d');
     expect(m.getLineWeightTapOffsets('light', 1600, 1200)).toHaveLength(1);
     expect(m.getLineWeightTapOffsets('medium', 1600, 1200).length).toBeGreaterThan(1);
     expect(m.getLineWeightTapOffsets('heavy', 1600, 1200).length).toBeGreaterThan(m.getLineWeightTapOffsets('medium', 1600, 1200).length);
@@ -267,6 +272,9 @@ describe('theme style options, recents & naming', () => {
       starkBlackOutlines: true,
       highlightLineWeight: 'extra-heavy',
       outlineLineWeight: 'light',
+      arrowStyle: '3d',
+      arrowOutlines: true,
+      arrowLighting: true,
     })!;
     expect(t.showStepBorders).toBe(false);
     expect(t.minifigStyle).toBe('sequential');
@@ -278,6 +286,9 @@ describe('theme style options, recents & naming', () => {
     expect(t.starkBlackOutlines).toBe(true);
     expect(t.highlightLineWeight).toBe('extra-heavy');
     expect(t.outlineLineWeight).toBe('light');
+    expect(t.arrowStyle).toBe('3d');
+    expect(t.arrowOutlines).toBe(true);
+    expect(t.arrowLighting).toBe(true);
     const [back] = parseImportedThemesJson(serializeThemeExport(t));
     expect(m.themeStyleOptionsEqual(m.getThemeStyleOptions(back), m.getThemeStyleOptions(t))).toBe(true);
     expect(back.stepLighting).toBe('studio');
@@ -285,12 +296,18 @@ describe('theme style options, recents & naming', () => {
     expect(back.starkBlackOutlines).toBe(true);
     expect(back.highlightLineWeight).toBe('extra-heavy');
     expect(back.outlineLineWeight).toBe('light');
+    expect(back.arrowStyle).toBe('3d');
+    expect(back.arrowOutlines).toBe(true);
+    expect(back.arrowLighting).toBe(true);
     expect(createThemeDraftFromBase(t).showStepBorders).toBe(false);
     expect(createThemeDraftFromBase(t).stepLighting).toBe('studio');
     expect(createThemeDraftFromBase(t).highQualityStepRender).toBe(true);
     expect(createThemeDraftFromBase(t).starkBlackOutlines).toBe(true);
     expect(createThemeDraftFromBase(t).highlightLineWeight).toBe('extra-heavy');
     expect(createThemeDraftFromBase(t).outlineLineWeight).toBe('light');
+    expect(createThemeDraftFromBase(t).arrowStyle).toBe('3d');
+    expect(createThemeDraftFromBase(t).arrowOutlines).toBe(true);
+    expect(createThemeDraftFromBase(t).arrowLighting).toBe(true);
 
     // Flat / No Lighting mode round-trips cleanly and clears highQualityStepRender
     const flatTheme = normalizeCustomTheme({

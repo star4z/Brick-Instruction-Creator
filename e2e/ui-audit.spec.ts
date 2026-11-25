@@ -320,6 +320,19 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     await page.locator('#btnCloseFontPicker').click();
     await expect(page.locator('#themeFontPickerPanel')).toBeHidden();
 
+    // Verify Placement Arrow Style controls (default: Flat 2D, no outlines, no lighting) & customization
+    await expect(page.locator('#arrowStyleWrap')).toBeVisible();
+    await expect(page.locator('#toggleArrowOutlines')).not.toBeChecked();
+    await expect(page.locator('#toggleArrowLighting')).not.toBeChecked();
+    await page.locator('.arrow-style-chip[data-arrow-style="3d"]').click();
+    await page.locator('#toggleArrowOutlines').click();
+    await expect(page.locator('#toggleArrowOutlines')).toBeChecked();
+    await page.locator('#toggleArrowLighting').click();
+    await expect(page.locator('#toggleArrowLighting')).toBeChecked();
+    await page.locator('.arrow-style-chip[data-arrow-style="flat"]').click();
+    await page.locator('#toggleArrowOutlines').click();
+    await page.locator('#toggleArrowLighting').click();
+
     // Toggle a rendering option to verify built-in theme auto-forks to a custom theme
     await page.locator('#toggleStarkBlackOutlines').click();
     await expect(page.locator('#btnDeleteTheme')).toBeEnabled();

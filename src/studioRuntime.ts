@@ -125,6 +125,7 @@ import {
 } from './engine/stepCamera';
 import {
   DEFAULT_ARROW_COLOR,
+  buildPlacementArrowGeometry,
   computeAutoPlacementOffsetsForSequence,
   computePlacementArrowSegments,
   resolveContrastArrowColor,
@@ -348,6 +349,7 @@ import {
   serializeThemeExport,
   getLineWeightTapOffsets,
   sanitizeLineWeight,
+  sanitizePlacementArrowStyle,
   sanitizeStepLightingMode,
   themeCanvasFont,
   themeStyleOptionsEqual,
@@ -698,17 +700,21 @@ function selectTheme(id) {
   const prevLighting = sanitizeStepLightingMode(state.stepLighting, state.highQualityStepRender ? 'studio' : 'standard');
   const prevOutW = state.outlineLineWeight;
   const prevHlW = state.highlightLineWeight;
+  const prevArrowSig = `${state.autoPlacementArrows !== false}|${state.arrowColor}|${state.arrowStyle}|${Boolean(state.arrowOutlines)}|${Boolean(state.arrowLighting)}`;
   state.themeId = resolveThemeById(id, customThemes).id;
   applyActiveThemeStyleToState();
   const nextLighting = sanitizeStepLightingMode(state.stepLighting, state.highQualityStepRender ? 'studio' : 'standard');
+  const nextArrowSig = `${state.autoPlacementArrows !== false}|${state.arrowColor}|${state.arrowStyle}|${Boolean(state.arrowOutlines)}|${Boolean(state.arrowLighting)}`;
   if (prevStark !== Boolean(state.starkBlackOutlines) || prevOutW !== state.outlineLineWeight || prevLighting !== nextLighting) {
     pliThumbCache.clear();
     submodelThumbCache.clear();
     clearMinifigDiagramCaches();
     libThumbCache.clear();
     libPreviewMeshCache = { key: '', mesh: null };
+  } else if (prevArrowSig !== nextArrowSig) {
+    clearMinifigDiagramCaches();
   }
-  if (prevStark !== Boolean(state.starkBlackOutlines) || prevLighting !== nextLighting || prevOutW !== state.outlineLineWeight || prevHlW !== state.highlightLineWeight) {
+  if (prevStark !== Boolean(state.starkBlackOutlines) || prevLighting !== nextLighting || prevOutW !== state.outlineLineWeight || prevHlW !== state.highlightLineWeight || prevArrowSig !== nextArrowSig) {
     overviewThumbCache.bumpEpoch();
   }
   renderAll();
@@ -1450,6 +1456,7 @@ function buildMeshBuffers(prevParts, newParts, opts) {
   const hlCPos = new FloatBuf(Math.max(256, newParts.length * 48)), hlCOther = new FloatBuf(Math.max(256, newParts.length * 48)), hlCC1 = new FloatBuf(Math.max(256, newParts.length * 48)), hlCC2 = new FloatBuf(Math.max(256, newParts.length * 48)), hlCCol = new ByteBuf(Math.max(256, newParts.length * 64));
   let activeLineHighlighted = false;
   const texGroups = new Map();
+  const placementArrowSpecs = [];
 
   const smoothCurves = true;
 
@@ -1756,48 +1763,6 @@ function buildMeshBuffers(prevParts, newParts, opts) {
           pushEdge(fPts[i], bPts[i], eCol, eAlpha);
         }
       }
-    }
-  };
-
-  // Arbitrary-direction 3D Arrow (points cleanly from start -> target along ANY 3D vector!)
-  const addArrow3D = (s, t, col) => {
-    const dx = t[0]-s[0], dy = t[1]-s[1], dz = t[2]-s[2];
-    const len = Math.hypot(dx, dy, dz);
-    if (len < 6) return;
-    const ux = dx/len, uy = dy/len, uz = dz/len;
-    // Orthonormal basis around arrow axis u
-    let rx = Math.abs(uy) < 0.9 ? 0 : 1, ry = Math.abs(uy) < 0.9 ? 1 : 0, rz = 0;
-    let bx = uy*rz - uz*ry, by = uz*rx - ux*rz, bz = ux*ry - uy*rx;
-    const bl = Math.hypot(bx, by, bz) || 1; bx/=bl; by/=bl; bz/=bl;
-    const cx = by*uz - bz*uy, cy = bz*ux - bx*uz, cz = bx*uy - by*ux;
-
-    const headLen = Math.min(9.5, len * 0.42);
-    const shaftEnd = [t[0] - ux*headLen, t[1] - uy*headLen, t[2] - uz*headLen];
-    const segs = 10;
-    const shaftR = 1.45;
-    const headR = 4.4;
-    const ink = [24, 24, 28];
-    const ring = (center, r, ang) => [
-      center[0] + (Math.cos(ang)*bx + Math.sin(ang)*cx)*r,
-      center[1] + (Math.cos(ang)*by + Math.sin(ang)*cy)*r,
-      center[2] + (Math.cos(ang)*bz + Math.sin(ang)*cz)*r,
-    ];
-    for (let i = 0; i < segs; i++) {
-      const a0 = (i/segs)*Math.PI*2, a1 = ((i+1)/segs)*Math.PI*2;
-      const am = (a0+a1)/2;
-      const sn = [Math.cos(am)*bx + Math.sin(am)*cx, Math.cos(am)*by + Math.sin(am)*cy, Math.cos(am)*bz + Math.sin(am)*cz];
-      // Shaft
-      const s0 = ring(s, shaftR, a0), s1 = ring(s, shaftR, a1), e0 = ring(shaftEnd, shaftR, a0), e1 = ring(shaftEnd, shaftR, a1);
-      pushTri(s0, s1, e1, sn, col, 255); pushTri(s0, e1, e0, sn, col, 255);
-      // Arrowhead cone
-      const h0 = ring(shaftEnd, headR, a0), h1 = ring(shaftEnd, headR, a1);
-      pushTri(h0, h1, t, sn, col, 255);
-      pushTri(shaftEnd, h1, h0, [-ux,-uy,-uz], col, 255);
-      pushEdge(h0, h1, ink, 210);
-    }
-    for (const railAng of [0, Math.PI * 0.5, Math.PI, Math.PI * 1.5]) {
-      pushEdge(ring(s, shaftR, railAng), ring(shaftEnd, shaftR, railAng), ink, 200);
-      pushEdge(ring(shaftEnd, headR, railAng), t, ink, 210);
     }
   };
 
@@ -2626,14 +2591,13 @@ function buildMeshBuffers(prevParts, newParts, opts) {
       const baseArrowHex = pOv?.arrowColorOverride || opts.arrowColor || DEFAULT_ARROW_COLOR;
       const adaptiveHex = resolveContrastArrowColor(baseArrowHex, partRgb);
       const arrowRgb = hexToRgb255(adaptiveHex, 0);
-      const segments = computePlacementArrowSegments(pOv?.arrowBox || box, [offX, offY, offZ], pOv?.arrowTo || null, pOv?.throughGuideTo || null);
-      for (const seg of segments) {
-        if (seg.isGuideLine) {
-          pushEdge(seg.from, seg.to, arrowRgb, 255);
-        } else {
-          addArrow3D(seg.from, seg.to, arrowRgb);
-        }
-      }
+      placementArrowSpecs.push({
+        box: pOv?.arrowBox || box,
+        offset: [offX, offY, offZ],
+        arrowTo: pOv?.arrowTo || null,
+        throughGuideTo: pOv?.throughGuideTo || null,
+        rgb: [arrowRgb[0], arrowRgb[1], arrowRgb[2]],
+      });
     }
   };
 
@@ -2748,6 +2712,7 @@ function buildMeshBuffers(prevParts, newParts, opts) {
     opaqueCount: opP.length / 3,
     transCount: trP.length / 3,
     texDraws,
+    placementArrowSpecs,
     linePos: new Float32Array(lnPos.slice()),
     lineCol: new Uint8Array(lnCol.slice()),
     hlLinePos: new Float32Array(hlLnPos.slice()),
@@ -3024,6 +2989,8 @@ class WebGLBrickEngine {
     this.bHlLinePos = gl.createBuffer(); this.bHlLineCol = gl.createBuffer();
     this.bCondPos = gl.createBuffer(); this.bCondOther = gl.createBuffer(); this.bCondC1 = gl.createBuffer(); this.bCondC2 = gl.createBuffer(); this.bCondCol = gl.createBuffer();
     this.bHlCondPos = gl.createBuffer(); this.bHlCondOther = gl.createBuffer(); this.bHlCondC1 = gl.createBuffer(); this.bHlCondC2 = gl.createBuffer(); this.bHlCondCol = gl.createBuffer();
+    this.bArrowPos = gl.createBuffer(); this.bArrowNorm = gl.createBuffer(); this.bArrowCol = gl.createBuffer();
+    this.bArrowLinePos = gl.createBuffer(); this.bArrowLineCol = gl.createBuffer();
     this.emptyTex = gl.createTexture();
     if (this.emptyTex) {
       gl.bindTexture(gl.TEXTURE_2D, this.emptyTex);
@@ -3320,6 +3287,56 @@ class WebGLBrickEngine {
         drawCond(this.bHlCondPos, this.bHlCondOther, this.bHlCondC1, this.bHlCondC2, this.bHlCondCol, mesh.hlCondPos.length / 3, hlTaps, 1.0);
       }
     }
+
+    if (mesh.placementArrowSpecs && mesh.placementArrowSpecs.length > 0) {
+      const arrowStyle = sanitizePlacementArrowStyle(drawOpts?.arrowStyle, 'flat');
+      const arrowOutlines = Boolean(drawOpts?.arrowOutlines);
+      const arrowLighting = Boolean(drawOpts?.arrowLighting);
+      const arrowGeom = buildPlacementArrowGeometry(mesh.placementArrowSpecs, azDeg, elDeg, {
+        style: arrowStyle,
+        outlines: arrowOutlines,
+      });
+      if (arrowGeom.triPos.length > 0) {
+        gl.useProgram(this.triProg);
+        gl.uniformMatrix4fv(this.loc.tMVP, false, mvp);
+        gl.uniform1f(this.loc.tHeroMode, heroShading ? 1.0 : 0.0);
+        gl.uniform1f(this.loc.tUnlit, arrowLighting ? (unlit ? 1.0 : 0.0) : 1.0);
+        gl.uniform3f(this.loc.tEyePos, eyePos[0], eyePos[1], eyePos[2]);
+        gl.uniform3f(this.loc.tKeyDir, lights.key[0], lights.key[1], lights.key[2]);
+        gl.uniform3f(this.loc.tFillDir, lights.fill[0], lights.fill[1], lights.fill[2]);
+        gl.uniform3f(this.loc.tRimDir, lights.rim[0], lights.rim[1], lights.rim[2]);
+        gl.uniform3f(this.loc.tCamUp, up[0], up[1], up[2]);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.bArrowPos);
+        gl.bufferData(gl.ARRAY_BUFFER, arrowGeom.triPos, gl.DYNAMIC_DRAW);
+        gl.enableVertexAttribArray(this.loc.tPos);
+        gl.vertexAttribPointer(this.loc.tPos, 3, gl.FLOAT, false, 0, 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.bArrowNorm);
+        gl.bufferData(gl.ARRAY_BUFFER, arrowGeom.triNorm, gl.DYNAMIC_DRAW);
+        gl.enableVertexAttribArray(this.loc.tNorm);
+        gl.vertexAttribPointer(this.loc.tNorm, 3, gl.FLOAT, false, 0, 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.bArrowCol);
+        gl.bufferData(gl.ARRAY_BUFFER, arrowGeom.triCol, gl.DYNAMIC_DRAW);
+        gl.enableVertexAttribArray(this.loc.tCol);
+        gl.vertexAttribPointer(this.loc.tCol, 4, gl.UNSIGNED_BYTE, true, 0, 0);
+        gl.depthMask(true);
+        gl.drawArrays(gl.TRIANGLES, 0, arrowGeom.triPos.length / 3);
+      }
+      if (arrowGeom.linePos.length > 0) {
+        gl.useProgram(this.lineProg);
+        gl.uniformMatrix4fv(this.loc.lMVP, false, mvp);
+        gl.uniform1f(this.loc.lAlpha, 1.0);
+        gl.uniform2f(this.loc.lOffset, 0, 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.bArrowLinePos);
+        gl.bufferData(gl.ARRAY_BUFFER, arrowGeom.linePos, gl.DYNAMIC_DRAW);
+        gl.enableVertexAttribArray(this.loc.lPos);
+        gl.vertexAttribPointer(this.loc.lPos, 3, gl.FLOAT, false, 0, 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.bArrowLineCol);
+        gl.bufferData(gl.ARRAY_BUFFER, arrowGeom.lineCol, gl.DYNAMIC_DRAW);
+        gl.enableVertexAttribArray(this.loc.lCol);
+        gl.vertexAttribPointer(this.loc.lCol, 4, gl.UNSIGNED_BYTE, true, 0, 0);
+        gl.drawArrays(gl.LINES, 0, arrowGeom.linePos.length / 3);
+      }
+    }
     return mvp;
   }
   dispose() {
@@ -3419,6 +3436,9 @@ function renderStepWithStudioPhoto(mesh, az, el, w, h, zoom, opts) {
     boldLines: Boolean(opts?.starkBlackOutlines || opts?.boldLines),
     outlineLineWeight: opts?.outlineLineWeight ?? (opts?.starkBlackOutlines ? 'medium' : 'light'),
     highlightLineWeight: opts?.highlightLineWeight ?? 'medium',
+    arrowStyle: sanitizePlacementArrowStyle(opts?.arrowStyle, 'flat'),
+    arrowOutlines: Boolean(opts?.arrowOutlines),
+    arrowLighting: Boolean(opts?.arrowLighting),
     darkBackground: Boolean(opts?.darkBackground),
     getTextureImage: (texKey) => textureStore.getDecodedImage(texKey),
   });
@@ -4113,6 +4133,7 @@ function renderMinifigSequentialStage(step, stage, plan, cam, w, h, theme, zoom 
     highlightNew: false,
     fadePrev: false,
     showArrows: false,
+    arrowColor: state.arrowColor,
     accent: theme?.accent || '#1a73e8',
     partOffsets: stage.partOffsets || {},
     starkBlackOutlines: sb,
@@ -4124,6 +4145,11 @@ function renderMinifigSequentialStage(step, stage, plan, cam, w, h, theme, zoom 
     3_600_000,
     Math.max(96, Math.min(figW, figH)),
   );
+  const arrowDrawOpts = {
+    arrowStyle: state.arrowStyle,
+    arrowOutlines: state.arrowOutlines,
+    arrowLighting: state.arrowLighting,
+  };
   const stageMvp = snapshotEngine.draw(
     stageMesh,
     stageSs.width,
@@ -4132,7 +4158,7 @@ function renderMinifigSequentialStage(step, stage, plan, cam, w, h, theme, zoom 
     cam.el,
     Math.max(0.65, Math.min(1.6, zoom)),
     plan.sharedHalfH,
-    sb ? { fixedCenter: plan.sharedCenter, starkBlackOutlines: true, outlineLineWeight: outW, unlit } : { fixedCenter: plan.sharedCenter, unlit },
+    sb ? { fixedCenter: plan.sharedCenter, starkBlackOutlines: true, outlineLineWeight: outW, unlit, ...arrowDrawOpts } : { fixedCenter: plan.sharedCenter, unlit, ...arrowDrawOpts },
   );
 
   // 1. Celebratory starburst behind completed minifigure on the final sub-step (IMG_0315 Step 6!)
@@ -7271,6 +7297,9 @@ const state = {
   detectDuplicates: true,  // auto-detect explicit + geometric duplicate submodels
   autoPlacementArrows: true,
   arrowColor: DEFAULT_ARROW_COLOR,
+  arrowStyle: 'flat',
+  arrowOutlines: false,
+  arrowLighting: false,
   highlightNew: false,
   highlightColor: '#ff2d55',
   highlightLineWeight: 'medium',
@@ -9283,7 +9312,7 @@ function renderAll() {
         starkBlackOutlines: state.starkBlackOutlines,
         outlineLineWeight: state.starkBlackOutlines ? state.outlineLineWeight : 'light',
         darkBackground: darkThemeBg,
-        showArrows: true, arrowColor: state.arrowColor, accent: theme.accent, ov,
+        showArrows: true, arrowColor: state.arrowColor, arrowStyle: state.arrowStyle, arrowOutlines: state.arrowOutlines, arrowLighting: state.arrowLighting, accent: theme.accent, ov,
         partOffsets: effectivePartOffsets,
         selectedPartIds: state.mode === 'parts' && state.selectedStepId === step.id ? state.selectedPartIds : null,
         ...(mfPrep ? {
@@ -10091,6 +10120,9 @@ function bindStepPageInteractions(page) {
             boldLines: Boolean(liveDrawOpts?.starkBlackOutlines || liveDrawOpts?.boldLines),
             outlineLineWeight: liveDrawOpts?.outlineLineWeight ?? (liveDrawOpts?.starkBlackOutlines ? 'medium' : 'light'),
             highlightLineWeight: liveDrawOpts?.highlightLineWeight ?? 'medium',
+            arrowStyle: sanitizePlacementArrowStyle(liveDrawOpts?.arrowStyle, 'flat'),
+            arrowOutlines: Boolean(liveDrawOpts?.arrowOutlines),
+            arrowLighting: Boolean(liveDrawOpts?.arrowLighting),
             darkBackground: Boolean(liveDrawOpts?.darkBackground),
             getTextureImage: (texKey) => textureStore.getDecodedImage(texKey),
           });
@@ -12779,6 +12811,7 @@ function syncMenuControls() {
   });
   syncFadeVisibilityPreview();
   syncStepLightingUI(state.stepLighting);
+  syncArrowStyleUI(state);
   const hlWrap = document.getElementById('highlightWeightWrap');
   if (hlWrap) hlWrap.classList.toggle('opacity-45', !state.highlightNew);
   document.querySelectorAll('.hl-weight-chip').forEach(b => {
@@ -12794,6 +12827,18 @@ function syncMenuControls() {
 
   syncStylePanel();
   syncKeyboardShortcutsMenuSummary();
+}
+
+function syncArrowStyleUI(opts = state) {
+  const activeStyle = sanitizePlacementArrowStyle(opts?.arrowStyle, 'flat');
+  document.querySelectorAll('.arrow-style-chip').forEach(b => {
+    const act = b.getAttribute('data-arrow-style') === activeStyle;
+    b.className = `arrow-style-chip py-1.5 px-2 rounded-md border font-semibold text-xs transition cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
+  });
+  const outChk = document.getElementById('toggleArrowOutlines');
+  if (outChk) outChk.checked = Boolean(opts?.arrowOutlines);
+  const litChk = document.getElementById('toggleArrowLighting');
+  if (litChk) litChk.checked = Boolean(opts?.arrowLighting);
 }
 
 function syncStepLightingUI(mode = state.stepLighting) {
@@ -12905,6 +12950,10 @@ function renderOverviewThumbTask(task) {
         fadeOpacity: state.fadeOpacity,
         unlit: state.stepLighting === 'none',
         showArrows: false,
+        arrowColor: state.arrowColor,
+        arrowStyle: state.arrowStyle,
+        arrowOutlines: state.arrowOutlines,
+        arrowLighting: state.arrowLighting,
         accent,
         ov,
         partOffsets: effectivePartOffsets,
@@ -17248,6 +17297,7 @@ function scheduleSaveSessionPrefs() {
       density: state.density, layout: state.layout,
       layoutConfig: state.layoutConfig, layoutGroups: state.layoutGroups,
       detectDuplicates: state.detectDuplicates, autoPlacementArrows: state.autoPlacementArrows, arrowColor: state.arrowColor,
+      arrowStyle: state.arrowStyle, arrowOutlines: state.arrowOutlines, arrowLighting: state.arrowLighting,
       highlightNew: state.highlightNew, highlightColor: state.highlightColor,
       highlightLineWeight: state.highlightLineWeight,
       fadePrev: state.fadePrev, fadeOpacity: state.fadeOpacity, stepLighting: state.stepLighting, highQualityStepRender: state.highQualityStepRender,
@@ -17380,6 +17430,7 @@ async function restoreLastSessionOnStart() {
     if (arrChk) arrChk.checked = state.autoPlacementArrows !== false;
     const arrCol = document.getElementById('arrowColor');
     if (arrCol) arrCol.value = state.arrowColor || DEFAULT_ARROW_COLOR;
+    syncArrowStyleUI(state);
     document.getElementById('toggleHighlight').checked = state.highlightNew;
     document.getElementById('highlightColor').value = state.highlightColor;
     syncStepLightingUI(state.stepLighting);
@@ -18752,7 +18803,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
           starkBlackOutlines: state.starkBlackOutlines,
           outlineLineWeight: state.starkBlackOutlines ? state.outlineLineWeight : 'light',
           darkBackground: isDarkHexColor(toHexColor(theme.bgColor || '#ffffff', '#ffffff')),
-          showArrows: true, arrowColor: state.arrowColor, accent: theme.accent, ov, partOffsets: effectivePartOffsets,
+          showArrows: true, arrowColor: state.arrowColor, arrowStyle: state.arrowStyle, arrowOutlines: state.arrowOutlines, arrowLighting: state.arrowLighting, accent: theme.accent, ov, partOffsets: effectivePartOffsets,
           ...(mfPrep ? {
             minifigIndicators: mfPrep.indicators || [],
             ghostParts: mfPrep.ghostParts || [],
@@ -19351,6 +19402,7 @@ function syncStylePanel() {
   const opts = getThemeStyleOptions(t);
   const setChk = (id, val) => { const el = document.getElementById(id); if (el) el.checked = Boolean(val); };
   setChk('toggleAutoPlacementArrows', opts.autoPlacementArrows);
+  syncArrowStyleUI(opts);
   setChk('toggleHighlight', opts.highlightNew);
   syncFadeVisibilityPreview(opts);
   syncStepLightingUI(opts.stepLighting);
@@ -21298,9 +21350,35 @@ for (const [btnId, kind] of [
 }
 // Rendering style & step display options are part of the active theme (built-ins fork on first edit)
 const toggleAutoArrowsEl = document.getElementById('toggleAutoPlacementArrows');
-if (toggleAutoArrowsEl) toggleAutoArrowsEl.onchange = (e) => patchActiveTheme({ autoPlacementArrows: e.target.checked });
+if (toggleAutoArrowsEl) toggleAutoArrowsEl.onchange = (e) => {
+  overviewThumbCache.bumpEpoch();
+  patchActiveTheme({ autoPlacementArrows: e.target.checked });
+};
 const arrowColorEl = document.getElementById('arrowColor');
-if (arrowColorEl) arrowColorEl.oninput = (e) => patchActiveTheme({ arrowColor: e.target.value });
+if (arrowColorEl) arrowColorEl.oninput = (e) => {
+  clearMinifigDiagramCaches();
+  overviewThumbCache.bumpEpoch();
+  patchActiveTheme({ arrowColor: e.target.value });
+};
+document.querySelectorAll('.arrow-style-chip').forEach(b => {
+  b.onclick = () => {
+    clearMinifigDiagramCaches();
+    overviewThumbCache.bumpEpoch();
+    patchActiveTheme({ arrowStyle: sanitizePlacementArrowStyle(b.getAttribute('data-arrow-style'), 'flat') });
+  };
+});
+const toggleArrowOutlinesEl = document.getElementById('toggleArrowOutlines');
+if (toggleArrowOutlinesEl) toggleArrowOutlinesEl.onchange = (e) => {
+  clearMinifigDiagramCaches();
+  overviewThumbCache.bumpEpoch();
+  patchActiveTheme({ arrowOutlines: e.target.checked });
+};
+const toggleArrowLightingEl = document.getElementById('toggleArrowLighting');
+if (toggleArrowLightingEl) toggleArrowLightingEl.onchange = (e) => {
+  clearMinifigDiagramCaches();
+  overviewThumbCache.bumpEpoch();
+  patchActiveTheme({ arrowLighting: e.target.checked });
+};
 document.getElementById('toggleHighlight').onchange = (e) => patchActiveTheme({ highlightNew: e.target.checked });
 document.getElementById('highlightColor').oninput = (e) => patchActiveTheme({ highlightColor: e.target.value });
 const starkBlackToggleEl = document.getElementById('toggleStarkBlackOutlines');
@@ -21653,6 +21731,7 @@ async function runInteractiveHtmlExport() {
           const prevPartIdx = prev.map((p) => registerPart(p));
           const newPartIdx = (step.parts || []).map((p) => registerPart(p, effOffsets[p.id] || null));
           const stepArrows = [];
+          const stepArrowSpecs = [];
           for (const p of step.parts || []) {
             const pOv = effOffsets[p.id];
             if (!pOv || pOv.arrow === false) continue;
@@ -21660,8 +21739,20 @@ async function runInteractiveHtmlExport() {
             const oy = Number(pOv.y) || 0;
             const oz = Number(pOv.z) || 0;
             if (Math.hypot(ox, oy, oz) < 6) continue;
-            const segs = computePlacementArrowSegments(pOv.arrowBox || computeWorldBox(p), [ox, oy, oz], pOv.arrowTo || null);
-            for (const seg of segs) stepArrows.push(seg);
+            const partColorInfo = resolveColorInfo(p.c) || COLORS[71];
+            const partRgb = hexToRgb255(partColorInfo.hex, 0);
+            const baseArrowHex = pOv.arrowColorOverride || state.arrowColor || DEFAULT_ARROW_COLOR;
+            const adaptiveHex = resolveContrastArrowColor(baseArrowHex, partRgb);
+            const targetBox = pOv.arrowBox || computeWorldBox(p);
+            stepArrowSpecs.push({
+              box: targetBox,
+              offset: [ox, oy, oz],
+              arrowTo: pOv.arrowTo || null,
+              throughGuideTo: pOv.throughGuideTo || null,
+              color: adaptiveHex,
+            });
+            const segs = computePlacementArrowSegments(targetBox, [ox, oy, oz], pOv.arrowTo || null, pOv.throughGuideTo || null, cam.az);
+            for (const seg of segs) stepArrows.push({ ...seg, color: adaptiveHex });
           }
 
           const pliMap = new Map();
@@ -21697,10 +21788,17 @@ async function runInteractiveHtmlExport() {
             rotationCueKind: hasCue ? effectiveCue : undefined,
             subLabel,
             pli: Array.from(pliMap.values()),
-            previewUrl: renderFallbackPreview(prev, step.parts || [], cam.az, cam.el, ov.modelScale || 1.0, { partOffsets: effOffsets, arrowColor: state.arrowColor }),
+            previewUrl: renderFallbackPreview(prev, step.parts || [], cam.az, cam.el, ov.modelScale || 1.0, {
+              partOffsets: effOffsets,
+              arrowColor: state.arrowColor,
+              arrowStyle: state.arrowStyle,
+              arrowOutlines: state.arrowOutlines,
+              arrowLighting: state.arrowLighting,
+            }),
             prevPartIdx,
             newPartIdx,
             arrows: stepArrows.length > 0 ? stepArrows : undefined,
+            arrowSpecs: stepArrowSpecs.length > 0 ? stepArrowSpecs : undefined,
             az: cam.az,
             el: cam.el,
             zoom: ov.modelScale || 1.0,
@@ -21748,6 +21846,9 @@ async function runInteractiveHtmlExport() {
       highlightNew: state.highlightNew,
       highlightColor: state.highlightColor,
       arrowColor: state.arrowColor,
+      arrowStyle: state.arrowStyle,
+      arrowOutlines: state.arrowOutlines,
+      arrowLighting: state.arrowLighting,
       fadePrev: state.fadePrev,
       fadeOpacity: state.fadeOpacity,
       unlit: state.stepLighting === 'none',

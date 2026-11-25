@@ -8,7 +8,8 @@
 
 import { computeCameraBasis } from './coverLayout';
 import { computeStepOrthoFrustum, type WorldBounds3D } from '../engine/stepCamera';
-import { getLineWeightTapOffsets, type LineWeightId } from '../themes/customThemes';
+import { getLineWeightTapOffsets, type LineWeightId, type PlacementArrowStyle } from '../themes/customThemes';
+import { buildPlacementArrowGeometry, type PlacementArrowSpec } from '../engine/placementArrows';
 
 export interface StudioTexDraw {
   texKey: string;
@@ -26,6 +27,7 @@ export interface StudioMeshData {
   opaqueCount: number;
   transCount: number;
   texDraws?: StudioTexDraw[];
+  placementArrowSpecs?: PlacementArrowSpec[];
   linePos: Float32Array;
   lineCol: Uint8Array;
   hlLinePos?: Float32Array;
@@ -90,6 +92,12 @@ export interface StudioRenderOptions {
   outlineLineWeight?: LineWeightId;
   /** Weight for new-piece highlight outlines ('light' | 'medium' | 'heavy' | 'extra-heavy'). */
   highlightLineWeight?: LineWeightId;
+  /** Placement arrow geometry style ('flat' 2D default or '3d'). */
+  arrowStyle?: PlacementArrowStyle;
+  /** Whether to draw outlines around placement arrows (default false). */
+  arrowOutlines?: boolean;
+  /** Whether to apply studio lighting/shading to placement arrows (default false). */
+  arrowLighting?: boolean;
   getTextureImage?: (texKey: string) => TexImageSource | null;
 }
 
@@ -938,6 +946,44 @@ void main() {
 }
 `;
 
+// 7) Depth-Tested Unlit Flat Placement Arrow Pass (zero lighting, zero SSAO darkening, exact brick depth occlusion)
+const VS_UNLIT_ARROW = `
+attribute vec3 aPos;
+attribute vec4 aCol;
+uniform mat4 uMVP;
+uniform mat4 uView;
+uniform float uNear;
+uniform float uFar;
+uniform float uDepthBias;
+varying float vLinDepth;
+varying vec4 vCol;
+void main() {
+  vec4 clip = uMVP * vec4(aPos, 1.0);
+  clip.z -= uDepthBias * clip.w;
+  gl_Position = clip;
+  vec4 vp = uView * vec4(aPos, 1.0);
+  vLinDepth = clamp((-vp.z - uNear) / max(1.0, uFar - uNear), 0.0, 1.0);
+  vCol = aCol;
+}
+`;
+
+const FS_UNLIT_ARROW = `
+precision highp float;
+uniform sampler2D uDepthMap;
+uniform vec2 uTexel;
+uniform float uUseDepthMap;
+varying float vLinDepth;
+varying vec4 vCol;
+${DEPTH_PACK_GLSL}
+void main() {
+  if (uUseDepthMap > 0.5) {
+    float sceneDepth = unpackDepth24(texture2D(uDepthMap, gl_FragCoord.xy * uTexel));
+    if (vLinDepth > sceneDepth + 0.0015) discard;
+  }
+  gl_FragColor = vCol;
+}
+`;
+
 // =========================================================================
 // WebGL FBO Helpers & Multi-Pass Studio Photo Renderer
 // =========================================================================
@@ -1032,6 +1078,7 @@ export class StudioPhotoRenderer {
   private seamProg: WebGLProgram | null = null;
   private condProg: WebGLProgram | null = null;
   private ssaoProg: WebGLProgram | null = null;
+  private unlitArrowProg: WebGLProgram | null = null;
 
   private bTriPos: WebGLBuffer | null = null;
   private bTriNorm: WebGLBuffer | null = null;
@@ -1054,6 +1101,11 @@ export class StudioPhotoRenderer {
   private bHlCondC1: WebGLBuffer | null = null;
   private bHlCondC2: WebGLBuffer | null = null;
   private bHlCondCol: WebGLBuffer | null = null;
+  private bArrowPos: WebGLBuffer | null = null;
+  private bArrowNorm: WebGLBuffer | null = null;
+  private bArrowCol: WebGLBuffer | null = null;
+  private bArrowLinePos: WebGLBuffer | null = null;
+  private bArrowLineCol: WebGLBuffer | null = null;
   private bFloorPos: WebGLBuffer | null = null;
   private bQuadPos: WebGLBuffer | null = null;
 
@@ -1105,8 +1157,9 @@ export class StudioPhotoRenderer {
     this.seamProg = linkProgram(gl, VS_SEAM, FS_SEAM);
     this.condProg = linkProgram(gl, VS_COND_LINE, FS_SEAM);
     this.ssaoProg = linkProgram(gl, VS_QUAD, FS_SSAO_COMPOSITE);
+    this.unlitArrowProg = linkProgram(gl, VS_UNLIT_ARROW, FS_UNLIT_ARROW);
 
-    if (!this.depthProg || !this.viewDepthProg || !this.pbrProg || !this.floorProg || !this.seamProg || !this.condProg || !this.ssaoProg) {
+    if (!this.depthProg || !this.viewDepthProg || !this.pbrProg || !this.floorProg || !this.seamProg || !this.condProg || !this.ssaoProg || !this.unlitArrowProg) {
       return;
     }
 
@@ -1131,6 +1184,11 @@ export class StudioPhotoRenderer {
     this.bHlCondC1 = gl.createBuffer();
     this.bHlCondC2 = gl.createBuffer();
     this.bHlCondCol = gl.createBuffer();
+    this.bArrowPos = gl.createBuffer();
+    this.bArrowNorm = gl.createBuffer();
+    this.bArrowCol = gl.createBuffer();
+    this.bArrowLinePos = gl.createBuffer();
+    this.bArrowLineCol = gl.createBuffer();
     this.bFloorPos = gl.createBuffer();
     this.bQuadPos = gl.createBuffer();
 
@@ -1449,6 +1507,15 @@ export class StudioPhotoRenderer {
       gl.depthMask(true);
     }
 
+    const arrowSpecs = mesh.placementArrowSpecs;
+    const arrowGeom = arrowSpecs && arrowSpecs.length > 0
+      ? buildPlacementArrowGeometry(arrowSpecs, options.azDeg, options.elDeg, {
+          style: options.arrowStyle === '3d' ? '3d' : 'flat',
+          outlines: Boolean(options.arrowOutlines),
+        })
+      : null;
+    const arrowLit = Boolean(options.arrowLighting);
+
     // 3b. Photorealistic PBR LEGO Bricks (Opaque + Textured Decals + Transparent)
     {
       const prog = this.pbrProg!;
@@ -1561,6 +1628,26 @@ export class StudioPhotoRenderer {
         gl.vertexAttribPointer(cLoc, 4, gl.UNSIGNED_BYTE, true, 0, 0);
       }
 
+      if (arrowGeom && arrowLit && arrowGeom.triPos.length > 0) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.bArrowPos);
+        gl.bufferData(gl.ARRAY_BUFFER, arrowGeom.triPos, gl.DYNAMIC_DRAW);
+        gl.vertexAttribPointer(pLoc, 3, gl.FLOAT, false, 0, 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.bArrowNorm);
+        gl.bufferData(gl.ARRAY_BUFFER, arrowGeom.triNorm, gl.DYNAMIC_DRAW);
+        gl.vertexAttribPointer(nLoc, 3, gl.FLOAT, false, 0, 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.bArrowCol);
+        gl.bufferData(gl.ARRAY_BUFFER, arrowGeom.triCol, gl.DYNAMIC_DRAW);
+        gl.vertexAttribPointer(cLoc, 4, gl.UNSIGNED_BYTE, true, 0, 0);
+        gl.drawArrays(gl.TRIANGLES, 0, arrowGeom.triPos.length / 3);
+        // Restore main buffers for transparent pass
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.bTriPos);
+        gl.vertexAttribPointer(pLoc, 3, gl.FLOAT, false, 0, 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.bTriNorm);
+        gl.vertexAttribPointer(nLoc, 3, gl.FLOAT, false, 0, 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.bTriCol);
+        gl.vertexAttribPointer(cLoc, 4, gl.UNSIGNED_BYTE, true, 0, 0);
+      }
+
       if (mesh.transCount > 0) {
         gl.depthMask(false);
         gl.drawArrays(gl.TRIANGLES, mesh.opaqueCount, mesh.transCount);
@@ -1653,6 +1740,13 @@ export class StudioPhotoRenderer {
       if (mesh.hlCondPos && mesh.hlCondPos.length > 0) {
         drawCondLines(this.bHlCondPos, this.bHlCondOther, this.bHlCondC1, this.bHlCondC2, this.bHlCondCol, mesh.hlCondPos.length / 3, hlTaps, 1.0);
       }
+      if (arrowGeom && arrowLit && arrowGeom.linePos.length > 0) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.bArrowLinePos);
+        gl.bufferData(gl.ARRAY_BUFFER, arrowGeom.linePos, gl.DYNAMIC_DRAW);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.bArrowLineCol);
+        gl.bufferData(gl.ARRAY_BUFFER, arrowGeom.lineCol, gl.DYNAMIC_DRAW);
+        drawHardLines(this.bArrowLinePos, this.bArrowLineCol, arrowGeom.linePos.length / 3, [[0, 0]], 1.0);
+      }
     }
 
     // 4. Final Fullscreen SSAO Crevice Occlusion Composite Pass -> Default Canvas
@@ -1680,6 +1774,61 @@ export class StudioPhotoRenderer {
       gl.enableVertexAttribArray(pLoc);
       gl.vertexAttribPointer(pLoc, 2, gl.FLOAT, false, 0, 0);
       gl.drawArrays(gl.TRIANGLES, 0, 6);
+    }
+
+    // 5. Unlit Placement Arrows Pass (default: flat 2D, zero lighting, zero SSAO, depth-occluded by bricks)
+    if (arrowGeom && !arrowLit && (arrowGeom.triPos.length > 0 || arrowGeom.linePos.length > 0)) {
+      const prog = this.unlitArrowProg!;
+      const depthTexActive = Boolean(useSsao && this.viewDepthFbo);
+      if (depthTexActive) {
+        gl.clear(gl.DEPTH_BUFFER_BIT);
+      }
+      gl.enable(gl.DEPTH_TEST);
+      gl.depthFunc(gl.LEQUAL);
+      gl.depthMask(true);
+      gl.enable(gl.BLEND);
+      gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+
+      gl.useProgram(prog);
+      gl.uniformMatrix4fv(gl.getUniformLocation(prog, 'uMVP'), false, cam.mvp);
+      gl.uniformMatrix4fv(gl.getUniformLocation(prog, 'uView'), false, cam.view);
+      gl.uniform1f(gl.getUniformLocation(prog, 'uNear'), cam.near);
+      gl.uniform1f(gl.getUniformLocation(prog, 'uFar'), cam.far);
+      gl.uniform2f(gl.getUniformLocation(prog, 'uTexel'), 1 / w, 1 / h);
+      gl.uniform1f(gl.getUniformLocation(prog, 'uUseDepthMap'), depthTexActive ? 1.0 : 0.0);
+      gl.uniform1i(gl.getUniformLocation(prog, 'uDepthMap'), 0);
+      if (depthTexActive && this.viewDepthFbo) {
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, this.viewDepthFbo.tex);
+      }
+
+      const pLoc = gl.getAttribLocation(prog, 'aPos');
+      const cLoc = gl.getAttribLocation(prog, 'aCol');
+      const biasLoc = gl.getUniformLocation(prog, 'uDepthBias');
+      gl.enableVertexAttribArray(pLoc);
+      gl.enableVertexAttribArray(cLoc);
+
+      if (arrowGeom.triPos.length > 0) {
+        gl.uniform1f(biasLoc, 0.0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.bArrowPos);
+        gl.bufferData(gl.ARRAY_BUFFER, arrowGeom.triPos, gl.DYNAMIC_DRAW);
+        gl.vertexAttribPointer(pLoc, 3, gl.FLOAT, false, 0, 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.bArrowCol);
+        gl.bufferData(gl.ARRAY_BUFFER, arrowGeom.triCol, gl.DYNAMIC_DRAW);
+        gl.vertexAttribPointer(cLoc, 4, gl.UNSIGNED_BYTE, true, 0, 0);
+        gl.drawArrays(gl.TRIANGLES, 0, arrowGeom.triPos.length / 3);
+      }
+
+      if (arrowGeom.linePos.length > 0) {
+        gl.uniform1f(biasLoc, 0.0009);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.bArrowLinePos);
+        gl.bufferData(gl.ARRAY_BUFFER, arrowGeom.linePos, gl.DYNAMIC_DRAW);
+        gl.vertexAttribPointer(pLoc, 3, gl.FLOAT, false, 0, 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.bArrowLineCol);
+        gl.bufferData(gl.ARRAY_BUFFER, arrowGeom.lineCol, gl.DYNAMIC_DRAW);
+        gl.vertexAttribPointer(cLoc, 4, gl.UNSIGNED_BYTE, true, 0, 0);
+        gl.drawArrays(gl.LINES, 0, arrowGeom.linePos.length / 3);
+      }
     }
 
     return this.canvas;
