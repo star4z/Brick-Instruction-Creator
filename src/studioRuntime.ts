@@ -2927,8 +2927,8 @@ class WebGLBrickEngine {
         }
         gl_FragColor = shadeAbsPlastic(baseRgb, vCol.a, vPos, vNorm, uHeroMode, uEyePos, uKeyDir, uFillDir, uRimDir, uCamUp);
       }`;
-    const vsLine = `attribute vec3 aPos; attribute vec4 aCol; uniform mat4 uMVP; uniform vec2 uLineOffset; varying vec4 vCol; void main(){ gl_Position = uMVP * vec4(aPos,1.0); gl_Position.xy += uLineOffset * gl_Position.w; gl_Position.z -= 0.0014 * gl_Position.w; vCol = aCol; }`;
-    const vsCondLine = `attribute vec3 aPos; attribute vec3 aOther; attribute vec3 aCtrl1; attribute vec3 aCtrl2; attribute vec4 aCol; uniform mat4 uMVP; uniform vec2 uLineOffset; varying vec4 vCol; void main(){ vec4 p1 = uMVP * vec4(aPos, 1.0); vec4 p2 = uMVP * vec4(aOther, 1.0); vec4 c1 = uMVP * vec4(aCtrl1, 1.0); vec4 c2 = uMVP * vec4(aCtrl2, 1.0); vec2 s1 = p1.xy / max(0.0001, abs(p1.w)); vec2 s2 = p2.xy / max(0.0001, abs(p2.w)); vec2 sc1 = c1.xy / max(0.0001, abs(c1.w)); vec2 sc2 = c2.xy / max(0.0001, abs(c2.w)); vec2 d = s2 - s1; float cr1 = d.x * (sc1.y - s1.y) - d.y * (sc1.x - s1.x); float cr2 = d.x * (sc2.y - s1.y) - d.y * (sc2.x - s1.x); if (cr1 * cr2 > 0.0) { p1.xy += uLineOffset * p1.w; p1.z -= 0.0014 * p1.w; gl_Position = p1; vCol = aCol; } else { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); vCol = vec4(0.0); } }`;
+    const vsLine = `attribute vec3 aPos; attribute vec4 aCol; uniform mat4 uMVP; uniform vec2 uLineOffset; varying vec4 vCol; void main(){ gl_Position = uMVP * vec4(aPos,1.0); gl_Position.xy += uLineOffset * gl_Position.w; gl_Position.z -= 0.00025 * gl_Position.w; vCol = aCol; }`;
+    const vsCondLine = `attribute vec3 aPos; attribute vec3 aOther; attribute vec3 aCtrl1; attribute vec3 aCtrl2; attribute vec4 aCol; uniform mat4 uMVP; uniform vec2 uLineOffset; varying vec4 vCol; void main(){ vec4 p1 = uMVP * vec4(aPos, 1.0); vec4 p2 = uMVP * vec4(aOther, 1.0); vec4 c1 = uMVP * vec4(aCtrl1, 1.0); vec4 c2 = uMVP * vec4(aCtrl2, 1.0); vec2 s1 = p1.xy / max(0.0001, abs(p1.w)); vec2 s2 = p2.xy / max(0.0001, abs(p2.w)); vec2 sc1 = c1.xy / max(0.0001, abs(c1.w)); vec2 sc2 = c2.xy / max(0.0001, abs(c2.w)); vec2 d = s2 - s1; float cr1 = d.x * (sc1.y - s1.y) - d.y * (sc1.x - s1.x); float cr2 = d.x * (sc2.y - s1.y) - d.y * (sc2.x - s1.x); if (cr1 * cr2 > 0.0) { p1.xy += uLineOffset * p1.w; p1.z -= 0.00025 * p1.w; gl_Position = p1; vCol = aCol; } else { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); vCol = vec4(0.0); } }`;
     const fsLine = `precision mediump float; uniform float uLineAlpha; varying vec4 vCol; void main(){ gl_FragColor = vec4(vCol.rgb, vCol.a * uLineAlpha); }`;
     const cmp = (t, s) => { const sh = gl.createShader(t); gl.shaderSource(sh, s); gl.compileShader(sh); return sh; };
     const lnk = (v, f) => { const p = gl.createProgram(); gl.attachShader(p, cmp(gl.VERTEX_SHADER, v)); gl.attachShader(p, cmp(gl.FRAGMENT_SHADER, f)); gl.linkProgram(p); return p; };
@@ -3135,7 +3135,7 @@ class WebGLBrickEngine {
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL);
     gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-    gl.enable(gl.POLYGON_OFFSET_FILL); gl.polygonOffset(2.0, 2.5);
+    gl.enable(gl.POLYGON_OFFSET_FILL); gl.polygonOffset(1.0, 1.0);
 
     const tightFit = Boolean(drawOpts?.tightFit);
     const heroShading = Boolean(drawOpts?.heroShading);

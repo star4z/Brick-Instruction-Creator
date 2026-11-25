@@ -823,7 +823,7 @@ varying vec4 vCol;
 void main() {
   gl_Position = uMVP * vec4(aPos, 1.0);
   gl_Position.xy += uLineOffset * gl_Position.w;
-  gl_Position.z -= 0.0014 * gl_Position.w;
+  gl_Position.z -= 0.00025 * gl_Position.w;
   vCol = aCol;
 }
 `;
@@ -851,7 +851,7 @@ void main() {
   float cr2 = d.x * (sc2.y - s1.y) - d.y * (sc2.x - s1.x);
   if (cr1 * cr2 > 0.0) {
     p1.xy += uLineOffset * p1.w;
-    p1.z -= 0.0014 * p1.w;
+    p1.z -= 0.00025 * p1.w;
     gl_Position = p1;
     vCol = aCol;
   } else {
@@ -1454,7 +1454,7 @@ export class StudioPhotoRenderer {
       const prog = this.pbrProg!;
       gl.useProgram(prog);
       gl.enable(gl.POLYGON_OFFSET_FILL);
-      gl.polygonOffset(2.0, 2.5);
+      gl.polygonOffset(1.0, 1.0);
       gl.uniformMatrix4fv(gl.getUniformLocation(prog, 'uMVP'), false, cam.mvp);
       gl.uniformMatrix4fv(gl.getUniformLocation(prog, 'uKeyMVP'), false, keyMvp);
       gl.uniformMatrix4fv(gl.getUniformLocation(prog, 'uFillMVP'), false, fillMvp);
