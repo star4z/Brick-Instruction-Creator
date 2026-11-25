@@ -349,4 +349,45 @@ describe('ldrLibrary mirror fetching and dependency graph BFS', () => {
     // BrickLink-numbered prints never waste 404 probes against the official mirror.
     expect(requested.some((u) => u.startsWith('https://official.test/') && u.includes('3626cpb'))).toBe(false);
   });
+
+  it('probes unofficial mirrors first when preferUnofficial returns true, while falling back to official for shared subparts', async () => {
+    const scopedMirrors: LDrawMirrorConfig[] = [
+      { url: 'https://official.test/ldraw/', label: 'Official', repoGroup: 'off', scope: 'official' },
+      { url: 'https://unofficial.test/UnOfficial/', label: 'UnOfficial', repoGroup: 'unoff', scope: 'unofficial' },
+    ];
+    const requested: string[] = [];
+    const store = new Map<string, string[]>();
+
+    const fakeFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      requested.push(url);
+      if (url === 'https://unofficial.test/UnOfficial/parts/77845.dat') {
+        return mockResponse(200, '0 Unofficial Part\n1 16 0 0 0 1 0 0 0 1 0 0 0 1 box5.dat\n');
+      }
+      if (url === 'https://official.test/ldraw/p/box5.dat') {
+        return mockResponse(200, '0 Box 5\n3 16 0 0 0 1 0 0 0 1 0\n');
+      }
+      return mockResponse(404);
+    });
+
+    const res = await fetchLDrawDependencyGraph({
+      rootPartIds: ['77845'],
+      mirrors: scopedMirrors,
+      getDirectLoadedLines: (k) => store.get(k) ?? null,
+      getFallbacks: () => [],
+      preferUnofficial: (k) => k === '77845',
+      onDatLoaded: (storeKey, _reqKey, text) => {
+        store.set(storeKey, text.split('\n'));
+      },
+      fetchImpl: fakeFetch as unknown as typeof fetch,
+    });
+
+    expect(res.fetched).toBe(2);
+    expect(store.has('77845')).toBe(true);
+    expect(store.has('box5')).toBe(true);
+    // 77845 hit unofficial directly on the first request without a wasted official 404
+    expect(requested[0]).toBe('https://unofficial.test/UnOfficial/parts/77845.dat');
+    // box5 (not flagged unofficial) hit official directly on its first request
+    expect(requested[1]).toBe('https://official.test/ldraw/p/box5.dat');
+  });
 });

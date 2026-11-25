@@ -17,7 +17,7 @@ Previously, Bricks Library controls were embedded directly inside the slide-out 
 - The slide-out menu drawer (`#menuDrawer`) displays a clean **`Bricks Library →`** navigation button (`#menuBricksLibBtn`) matching **Page Setup** and **Parts List Setup**, with concise purpose-oriented helper copy (*"3D brick shapes needed to render parts in your models."*) rather than listing internal library-management features.
 - Its right-aligned summary (`#libStatusText`) concisely reports current state via `formatLibraryMenuSummary()`:
   - Missing model parts take priority with an amber highlight (e.g., `3 missing · 15 saved`).
-  - Otherwise shows saved top-level part count (`15 parts saved`), embedded `.io` count (`42 embedded (.io)`), or built-in count (`95 built-in`).
+  - Otherwise shows saved top-level part count (`15 parts saved`), embedded `.io` count (`42 embedded (.io)`), or unified built-in count (`29,715 built-in`, falling back to procedural count before the catalog loads).
 - Quick actions inside **Model Issues** (`#errorsModal`) open the dedicated Bricks Library screen directly rather than scrolling the menu drawer.
 
 ### 2.2 Dedicated Bricks Library Screen (`#bricksLibraryModal`)
@@ -27,23 +27,25 @@ A responsive full-height modal (`max-w-4xl`) organized into two top-level tabs p
 - **Search Bar**: Real-time debounced search (`#libSearchInput`) matching part ID, human-readable name, and category. Search normalization (`normalizeLibrarySearchText`) unifies spacing and multiplication signs (`2 x 4`, `2×4`, `2x4`) so official LDraw names match naturally.
 - **Direct Search-to-Fetch Shortcut**: When a user types a specific LDraw part ID (e.g., `3010` or `3626cp01`) that is not yet in the saved library, an inline banner offers one-click **Fetch `<id>` Online**.
 - **Filters**:
-  - **Scope pills**: `All`, `Saved`, `Embedded .io` (when present), `Built-in`, `Official LDraw` (bundled catalog), `Unofficial & Studio` (bundled catalog), `In Model` (when a model is loaded), and `Missing` (when the loaded model has missing shapes).
+  - **Scope pills**: `All`, `Built-in` (unified scope encompassing procedural shapes + all Official LDraw + all Unofficial & Studio parts), `Official LDraw` (bundled official catalog), `Unofficial & Studio` (bundled unofficial/Studio catalog), `Saved`, `Embedded .io` (when present), `In Model` (when a model is loaded), and `Missing` (when the loaded model has missing shapes).
   - **Category selector**: `All Categories`, `Bricks`, `Plates`, `Tiles`, `Slopes & Curves`, `Technic & Bars`, `Minifigures`, `Windows & Panels`, `Other Parts`.
   - **Helpers toggle**: `Show subparts & primitives` (off by default so internal `s/...` subparts and geometric primitives like `box5` or `4-4edge` don't clutter the browse grid).
-- **Bundled Online Parts Catalog (`public/parts-catalog/*.json` + `src/engine/partsCatalog.ts`)**:
+- **Unified Built-in Catalog (`public/parts-catalog/*.json` + `src/engine/partsCatalog.ts`)**:
   - Generated from the public mirrors by `scripts/build-parts-catalog.mjs` (`official.json`: ~23.8k official LDraw parts, ~337 KB gzipped; `unofficial.json`: ~5.9k additional LDraw Unofficial & BrickLink Studio parts not in official, ~101 KB gzipped).
-  - Contains IDs, clean titles, and helper/alias flags only — no 3D `.dat` geometry — and is fetched lazily the first time the Bricks Library opens, keeping initial app load untouched.
-  - Catalog-only parts render with a lightweight download placeholder in the browse grid (avoiding approximate placeholder boxes) and automatically fetch & cache their exact `.dat` geometry (plus subparts/textures) the first time they are selected in the preview inspector.
+  - Contains IDs, clean titles, and helper/alias flags only — no 3D `.dat` geometry — and is preloaded lazily when the side menu or Bricks Library opens, keeping initial app load untouched.
+  - All official and unofficial catalog parts are unified under the `Built-in` scope and count (`isBuiltInLibraryItem()`), while preserving dedicated `Official LDraw` and `Unofficial & Studio` filter pills and part badges.
   - Once loaded, catalog titles also enrich `getHumanPartName()` across the app.
-- **Lazy 3D Thumbnail Grid**:
-  - Paginated (48 items per batch + *"Load more parts"* button) so browsing ~30,000 parts or a full `complete.zip` import stays responsive.
-  - Uses `IntersectionObserver` + a 4-per-frame `requestAnimationFrame` WebGL snapshot queue (`libThumbCache`, bounded LRU up to 320 entries) with 10 selectable LEGO color swatches.
+- **Lazy Auto-Fetching 3D Thumbnail Grid**:
+  - Paginated (48 items per batch + *"Load more parts"* button / infinite scroll) so browsing ~30,000 parts or a full `complete.zip` import stays responsive.
+  - Uses `IntersectionObserver` + a 4-per-frame `requestAnimationFrame` WebGL snapshot queue (`libThumbCache`, bounded LRU up to 320 entries) with the full LDraw color picker.
+  - **Viewport Auto-Fetch**: When a built-in official or unofficial part scrolls into view without locally cached `.dat` geometry, a dedicated background viewport fetcher (`pumpLibThumbFetchQueue`) batches up to 6 visible parts at a time via `fetchLDrawDependencyGraph` (with `preferUnofficial` mirror routing so unofficial parts hit the unofficial mirror first), caches the downloaded `.dat` and textures to IndexedDB silently, and renders the crisp 320×320 3D thumbnail in place without rebuilding the grid DOM or showing "Tap to preview" placeholders. Scrolling away or closing the modal aborts stale fetches cleanly, and offline/404 states settle gracefully without spinning indefinitely.
   - Renders crisp HiDPI 320×320 thumbnails using `heroQuality: true` (micro-beveled ABS brick edges, 18–24 segment smooth studs & curves) and `heroShading: true` (camera-relative warm key + cool secondary fill + back-rim studio softbox lighting, dual glossy ABS specular catchlights, tight camera framing, and subtle edge seams) over a soft radial studio backdrop.
-  - Built-in catalog shapes render authentic procedural geometry rather than box placeholders (slopes, inverted slopes, smooth curved slopes, L-shaped corners, centered/end-stud jumpers, slotted grilles, rounded/quarter-round/holed tiles, Technic pin holes & `+`-section axles, open hollow window frames, SNOT brackets, horizontal/vertical C-clips, contoured seats, flanged train wheels/holders, and sculpted minifigure limbs & domed helmets).
+  - Procedural built-in shapes render authentic geometry offline without network access (slopes, inverted slopes, smooth curved slopes, L-shaped corners, centered/end-stud jumpers, slotted grilles, rounded/quarter-round/holed tiles, Technic pin holes & `+`-section axles, open hollow window frames, SNOT brackets, horizontal/vertical C-clips, contoured seats, flanged train wheels/holders, and sculpted minifigure limbs & domed helmets).
 - **Interactive 3D Part Preview Inspector (`#libPreviewPane`)**:
-  - Displays a HiDPI 880×880 studio-lit WebGL render with camera-relative primary + secondary softbox lighting and 4 yaw angles (`Front`, `Right`, `Back`, `Left`) plus a `Top`/`Bottom` flip toggle.
-  - Shows part ID, human name, kind (`Part`/`Subpart`/`Primitive`), category, subfile reference count, and all source badges (`Embedded (.io)`, `Saved LDraw .dat`, `Built-in Shape`, `Official LDraw Library`, `LDraw Unofficial & Studio`, `In Current Model` / `Missing in Model`).
-  - Offers single-part actions: **Fetch Exact `<id>.dat` Online** (when not saved) or **Remove `<id>.dat` from Saved Library** (when saved).
+  - Displays a HiDPI 880×880 studio-lit WebGL render with camera-relative primary + secondary softbox lighting and interactive orbit/flip controls.
+  - Clicking an uncached built-in part promotes it to the front of the background fetch queue (`requestPriorityLibPartFetch`) and renders its 880×880 3D preview as soon as its geometry arrives.
+  - Shows part ID, human name, kind (`Part`/`Subpart`/`Primitive`), category, subfile reference count, and all source badges (`Embedded (.io)`, `Cached LDraw .dat`, `Built-in Shape`, `Official LDraw`, `Unofficial & Studio`, `In Current Model` / `Missing in Model`).
+  - Offers single-part actions: **Fetch Exact `<id>.dat` Online** (when not cached) or **Remove `<id>.dat` from Saved Library** (when cached).
 
 #### Tab 2: **Fetch & Import** (`#libTabManage`)
 Organized into four clearly separated cards:

@@ -341,6 +341,7 @@ export async function fetchDatFromMirrors(
   fetchImpl: typeof fetch = fetch,
   timeoutMs = 8000,
   signal?: AbortSignal,
+  preferUnofficial?: (normKey: string) => boolean,
 ): Promise<FetchDatResult> {
   const tryKeys = [normKey, ...getFallbacks(normKey)];
   let sawNetworkError = false;
@@ -355,10 +356,17 @@ export async function fetchDatFromMirrors(
 
     // Studio custom IDs (bl_*, *-bl, bb####) and BrickLink-numbered prints (*pb####) only live in
     // UnOfficial / custom mirrors — probe those directly without wasting 404s against official LDraw mirrors!
-    const keyMirrors =
-      isUnofficialOnlyPartId(clean) && hasScopedUnofficial
-        ? mirrors.filter((m) => m.scope === 'unofficial' || m.scope === 'custom')
-        : mirrors;
+    // For general unofficial catalog parts, try unofficial/custom mirrors first while keeping official fallbacks.
+    let keyMirrors: readonly LDrawMirrorConfig[] = mirrors;
+    if (hasScopedUnofficial) {
+      if (isUnofficialOnlyPartId(clean)) {
+        keyMirrors = mirrors.filter((m) => m.scope === 'unofficial' || m.scope === 'custom');
+      } else if (preferUnofficial?.(clean)) {
+        const unofficialFirst = mirrors.filter((m) => m.scope === 'unofficial' || m.scope === 'custom');
+        const rest = mirrors.filter((m) => m.scope !== 'unofficial' && m.scope !== 'custom');
+        keyMirrors = [...unofficialFirst, ...rest];
+      }
+    }
 
     for (const rel of paths) {
       if (signal?.aborted) break;
@@ -454,6 +462,8 @@ export interface FetchGraphOptions {
   /** Checks whether `normKey` has an EXACT `.dat` already loaded (NOT a stripped fallback!). */
   getDirectLoadedLines: (normKey: string) => readonly string[] | null;
   getFallbacks: (normKey: string) => string[];
+  /** Optional hint that a part ID is known to come from an unofficial catalog (probed first). */
+  preferUnofficial?: (normKey: string) => boolean;
   hasTexture?: (texName: string) => boolean;
   notFoundCache?: Set<string>;
   onDatLoaded: (storeKey: string, requestedKey: string, text: string) => void;
@@ -491,6 +501,7 @@ export async function fetchLDrawDependencyGraph(
     mirrors,
     getDirectLoadedLines,
     getFallbacks,
+    preferUnofficial,
     hasTexture,
     notFoundCache,
     onDatLoaded,
@@ -596,7 +607,15 @@ export async function fetchLDrawDependencyGraph(
 
     const results = await Promise.all(
       batch.map(async (k) => {
-        const res = await fetchDatFromMirrors(k, mirrors, getFetchFallbacks, fetchImpl, timeoutMs, signal);
+        const res = await fetchDatFromMirrors(
+          k,
+          mirrors,
+          getFetchFallbacks,
+          fetchImpl,
+          timeoutMs,
+          signal,
+          preferUnofficial,
+        );
         return { k, ...res };
       }),
     );

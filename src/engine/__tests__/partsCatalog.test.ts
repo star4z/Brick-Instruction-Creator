@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { buildLibraryIndex, filterLibraryItems, isOnlineOnlyItem } from '../bricksLibrary';
+import { buildLibraryIndex, filterLibraryItems, isBuiltInLibraryItem, isOnlineOnlyItem } from '../bricksLibrary';
 import { PUBLIC_LDRAW_MIRRORS } from '../ldrLibrary';
 import {
   PARTS_CATALOG_FILES,
@@ -59,17 +59,26 @@ describe('Online Parts Catalog', () => {
     expect(PARTS_CATALOG_FILES.map((f) => f.origin)).toEqual(['official', 'unofficial']);
   });
 
-  it('merges catalog-only parts into the library index with scopes, search, and online-only state', () => {
+  it('merges catalog-only parts into the unified built-in index with official/unofficial scopes and search', () => {
     const cat = mergeCatalogEntries([
-      parseCatalogPayload(payload('official', [['3001', 'Brick 2 x 4'], ['3626c', 'Minifig Head']]), 'official'),
+      parseCatalogPayload(payload('official', [['3001', 'Brick 2 x 4'], ['3626c', 'Minifig Head'], ['u100', 'Helper', 'h']]), 'official'),
       parseCatalogPayload(payload('unofficial', [['3626cpb1965', 'Minifigure, Head Beard Stubble']]), 'unofficial'),
     ]);
     const { items, stats } = buildLibraryIndex({
-      userLibRaw: new Map([['3001', ['0 Brick 2 x 4', '0 !LDRAW_ORG Part']]]),
-      userLibTitles: new Map([['3001', 'Brick 2 x 4']]),
+      userLibRaw: new Map([
+        ['3001', ['0 Brick 2 x 4', '0 !LDRAW_ORG Part']],
+        ['custom999', ['0 User Custom Brick', '0 !LDRAW_ORG Part']],
+      ]),
+      userLibTitles: new Map([
+        ['3001', 'Brick 2 x 4'],
+        ['custom999', 'User Custom Brick'],
+      ]),
       embeddedDatRaw: new Map(),
       embeddedDatTitles: new Map(),
-      builtInCatalog: {},
+      builtInCatalog: {
+        '3001': { name: 'Brick 2×4' },
+        'proc1': { name: 'Procedural Brick' },
+      },
       modelPartIds: new Set(),
       missingShapePartIds: new Set(),
       missingExactDatPartIds: new Set(),
@@ -78,14 +87,31 @@ describe('Online Parts Catalog', () => {
     });
     expect(stats.catalogOfficialParts).toBe(2);
     expect(stats.catalogUnofficialParts).toBe(1);
+    // Deduplicated union of procedural (3001, proc1) + official (3001, 3626c) + unofficial (3626cpb1965), excluding helper u100 & user-only custom999
+    expect(stats.builtInParts).toBe(4);
+
     const saved = items.find((i) => i.id === '3001')!;
     expect(saved.primarySource).toBe('saved');
     expect(saved.sources).toContain('official');
     expect(isOnlineOnlyItem(saved)).toBe(false);
+    expect(isBuiltInLibraryItem(saved)).toBe(true);
+
     const head = items.find((i) => i.id === '3626cpb1965')!;
     expect(head.primarySource).toBe('unofficial');
     expect(isOnlineOnlyItem(head)).toBe(true);
+    expect(isBuiltInLibraryItem(head)).toBe(true);
 
+    const customOnly = items.find((i) => i.id === 'custom999')!;
+    expect(isBuiltInLibraryItem(customOnly)).toBe(false);
+
+    // Unified Built-in scope includes procedural, official, and unofficial parts, excluding user-only parts
+    expect(filterLibraryItems(items, { scope: 'builtin' }).map((i) => i.id).sort()).toEqual([
+      '3001',
+      '3626c',
+      '3626cpb1965',
+      'proc1',
+    ]);
+    // Official and Unofficial filter pills remain distinct
     expect(filterLibraryItems(items, { scope: 'unofficial' }).map((i) => i.id)).toEqual(['3626cpb1965']);
     expect(filterLibraryItems(items, { query: 'beard' }).map((i) => i.id)).toEqual(['3626cpb1965']);
     // Saved parts rank ahead of catalog-only parts.

@@ -52,6 +52,15 @@ export interface LibraryCatalogEntry {
   searchText: string;
 }
 
+/** True when the part is part of the built-in catalog (procedural shape, official LDraw, or unofficial/Studio). */
+export function isBuiltInLibraryItem(item: Pick<LibraryPartItem, 'sources'>): boolean {
+  return (
+    item.sources.includes('builtin') ||
+    item.sources.includes('official') ||
+    item.sources.includes('unofficial')
+  );
+}
+
 /** True when the part's geometry is only available online (listed in the catalog, not loaded locally). */
 export function isOnlineOnlyItem(item: LibraryPartItem): boolean {
   return item.primarySource === 'official' || item.primarySource === 'unofficial';
@@ -543,6 +552,13 @@ export function buildLibraryIndex(input: BuildLibraryIndexInput): BuildLibraryIn
 
   const items = Array.from(byId.values());
 
+  let builtInParts = 0;
+  for (const item of items) {
+    if (item.kind === 'part' && isBuiltInLibraryItem(item)) {
+      builtInParts++;
+    }
+  }
+
   return {
     items,
     stats: {
@@ -552,7 +568,7 @@ export function buildLibraryIndex(input: BuildLibraryIndexInput): BuildLibraryIn
       savedTextures: savedTextureCount,
       embeddedParts,
       embeddedHelpers,
-      builtInParts: builtInKeys.length,
+      builtInParts,
       modelUniqueParts: modelPartIds.size,
       modelMissingShapeCount: missingShapePartIds.size,
       modelMissingExactDatCount: missingExactDatPartIds.size,
@@ -591,7 +607,7 @@ export function filterLibraryItems(
 
     if (scope === 'saved' && !item.sources.includes('saved')) continue;
     if (scope === 'embedded' && !item.sources.includes('embedded')) continue;
-    if (scope === 'builtin' && !item.sources.includes('builtin')) continue;
+    if (scope === 'builtin' && !isBuiltInLibraryItem(item)) continue;
     if (scope === 'official' && !item.sources.includes('official')) continue;
     if (scope === 'unofficial' && !item.sources.includes('unofficial')) continue;
     if (scope === 'model' && !item.inCurrentModel) continue;
@@ -669,7 +685,7 @@ export function formatLibraryMenuSummary(stats: LibraryStats): string {
   if (stats.embeddedParts > 0) {
     return `${stats.embeddedParts.toLocaleString()} embedded (.io)`;
   }
-  return `${stats.builtInParts} built-in`;
+  return `${stats.builtInParts.toLocaleString()} built-in`;
 }
 
 export function getModelFetchCopy(opts: {
