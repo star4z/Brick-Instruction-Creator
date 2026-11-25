@@ -33,6 +33,36 @@ export type MixedLayoutStyle =
 
 export type SlotSizeWeight = 'sm' | 'md' | 'lg';
 
+export type PageNumberPosition = 'right' | 'outside';
+export type ResolvedPageNumberSide = 'left' | 'right';
+
+export const DEFAULT_PAGE_NUMBER_POSITION: PageNumberPosition = 'right';
+
+/**
+ * Sanitizes a persisted or user-supplied page number position preference.
+ * Unknown or legacy values fall back to `'right'`.
+ */
+export function normalizePageNumberPosition(val: unknown): PageNumberPosition {
+  return val === 'outside' ? 'outside' : 'right';
+}
+
+/**
+ * Resolves which horizontal edge a printed page number occupies on a 1-based physical page.
+ *
+ * - `'right'`: always bottom-right (standard single-sided / screen layout).
+ * - `'outside'`: booklet recto/verso placement — odd physical pages (1, 3, 5, …) are
+ *   right-hand (recto) pages with the outside edge on `'right'`, and even physical
+ *   pages (2, 4, 6, …) are left-hand (verso) pages with the outside edge on `'left'`.
+ */
+export function resolvePageNumberSide(
+  pageNumber: number,
+  position: PageNumberPosition | string | undefined,
+): ResolvedPageNumberSide {
+  if (normalizePageNumberPosition(position) !== 'outside') return 'right';
+  const n = Math.max(1, Math.floor(Number.isFinite(pageNumber) ? pageNumber : 1));
+  return n % 2 === 0 ? 'left' : 'right';
+}
+
 export interface PageLayoutSpec {
   /** Derived: 'custom' when the layout fixes a slot count, 'auto' for smart pagination. */
   mode: 'auto' | 'custom';

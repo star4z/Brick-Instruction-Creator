@@ -188,9 +188,12 @@ import {
   formatPageSizeWarningForPage,
   getPageSizeWarningStepLinks,
   getSpecStepsPerPageCap,
+  DEFAULT_PAGE_NUMBER_POSITION,
   normalizeLayoutGroups,
   normalizePageLayoutSpec,
+  normalizePageNumberPosition,
   packSmartAutoPage,
+  resolvePageNumberSide,
   withDerivedStepsPerPage,
 } from './engine/pageLayout';
 import {
@@ -7319,6 +7322,7 @@ const state = {
   wordlessMode: DEFAULT_WORDLESS_MODE, // LEGO-style icon/number-only instructions (no translation needed)
   bomShowTextFields: initialWordlessDefaults.bomShowTextFields,
   pageNumberFormat: initialWordlessDefaults.pageNumberFormat, // 'number' | 'page_n' | 'n_of_total' | 'none'
+  pageNumberPosition: DEFAULT_PAGE_NUMBER_POSITION, // 'right' | 'outside'
   ...createDefaultExtraPagesConfig(),
   overrides: {},           // keyed by stepId: { pin, side, corner, az, el, modelScale, pliScale, pliPos:{x,y}, calloutPos:{x,y}, calloutDir, calloutAsPages, minifigStyle, partOffsets:{ [partId]: {x,y,z,tilt,arrow} } }
   stepInserts: {},         // keyed by stepId: [ { id, kind:'text'|'image', text, src, corner, x, y, scale } ]
@@ -7446,6 +7450,7 @@ function captureHistorySnap() {
     wordlessMode: state.wordlessMode,
     bomShowTextFields: state.bomShowTextFields,
     pageNumberFormat: state.pageNumberFormat,
+    pageNumberPosition: state.pageNumberPosition,
     showCover: state.showCover,
     showBuildComplete: state.showBuildComplete,
     showPartsList: state.showPartsList,
@@ -7473,6 +7478,7 @@ function applyHistorySnap(json) {
   if (typeof s.wordlessMode === 'boolean') state.wordlessMode = s.wordlessMode;
   if (typeof s.bomShowTextFields === 'boolean') state.bomShowTextFields = s.bomShowTextFields;
   if (s.pageNumberFormat) state.pageNumberFormat = s.pageNumberFormat;
+  if (s.pageNumberPosition !== undefined) state.pageNumberPosition = normalizePageNumberPosition(s.pageNumberPosition);
   if (
     typeof s.showCover === 'boolean' ||
     typeof s.showBuildComplete === 'boolean' ||
@@ -8843,6 +8849,28 @@ function renderAll() {
   const footerPadBottom = Math.max(4, Math.round(padPx * 0.42));
   const wordless = Boolean(state.wordlessMode);
   const showFooterTitle = !wordless && Boolean(state.showPageTitle);
+  const renderPageFooterHtml = ({ titleText = '', progressFrac = null, zIndexClass = '' } = {}) => {
+    const pgNumText = formatPageNumber(page.num, state.pages.length);
+    const hasNum = Boolean(pgNumText);
+    const pgNumSide = hasNum ? resolvePageNumberSide(page.num, state.pageNumberPosition) : 'right';
+    const hasTitle = Boolean(showFooterTitle && titleText);
+    const hasBar = typeof progressFrac === 'number' && state.showProgressBar !== false;
+    if (!hasNum && !hasTitle && !hasBar) return '';
+    const titleSpan = hasTitle
+      ? `<span class="truncate ${hasBar ? 'shrink-0 max-w-[32%]' : 'min-w-0'} ${pgNumSide === 'left' ? 'text-right' : 'text-left'}">${escHtml(titleText)}</span>`
+      : '';
+    const numSpan = hasNum
+      ? `<span data-page-number="true" data-page-number-side="${pgNumSide}" style="color:${theme.text}" class="font-bold shrink-0">${escHtml(pgNumText)}</span>`
+      : '';
+    const barHtml = hasBar
+      ? buildProgressBarHtml(progressFrac, { accent: theme.accent, heightPx: Math.max(3, Math.round(typo.pt(3))) })
+      : '';
+    const spacer = !hasBar ? '<span class="min-w-0"></span>' : '';
+    const inner = pgNumSide === 'left' && hasNum
+      ? `${numSpan}${barHtml}${hasTitle ? titleSpan : spacer}`
+      : `${hasTitle ? titleSpan : spacer}${barHtml}${numSpan}`;
+    return `<div data-page-footer="true" data-page-number-side="${pgNumSide}" class="absolute ${zIndexClass ? `${zIndexClass} ` : ''}flex items-center justify-between font-medium pointer-events-none" style="gap:${Math.round(typo.pt(10))}px;bottom:${footerPadBottom}px;left:${padPx}px;right:${padPx}px;font-size:${typo.footerFont}px;color:${theme.muted}">${inner}</div>`;
+  };
 
   // Render Page Contents
   if (page.kind === 'cover') {
@@ -8991,7 +9019,6 @@ function renderAll() {
       theme,
     };
     const isLiveHeroCamera = state.mode === 'camera';
-    const pgNumText = formatPageNumber(page.num, state.pages.length);
     const showText = cm.showText !== false;
     const showFw = cm.showFireworks !== false;
     frame.innerHTML = `
@@ -9006,10 +9033,7 @@ function renderAll() {
             ? `<canvas id="liveHeroCanvas" class="absolute inset-0 w-full h-full object-contain cursor-grab active:cursor-grabbing touch-none select-none"></canvas>`
             : `<img data-cover-hero-img="true" src="${snap.url}" alt="Completed build" class="absolute inset-0 w-full h-full object-contain pointer-events-none select-none" />`}
         </div>
-        <div class="absolute z-10 flex justify-between font-medium pointer-events-none" style="bottom:${footerPadBottom}px;left:${padPx}px;right:${padPx}px;font-size:${typo.footerFont}px;color:${theme.muted}">
-          <span class="truncate">${showFooterTitle ? escHtml(state.model.title) : ''}</span>
-          <span style="color:${theme.text}" class="font-bold shrink-0">${escHtml(pgNumText)}</span>
-        </div>
+        ${renderPageFooterHtml({ titleText: state.model.title, zIndexClass: 'z-10' })}
       </div>`;
   } else if (page.kind === 'back') {
     const bm = normalizeBackMeta(state.backMeta);
@@ -9052,7 +9076,6 @@ function renderAll() {
       outlineLineWeight: state.starkBlackOutlines ? state.outlineLineWeight : 'light',
       darkBackground: isDarkHexColor(toHexColor(theme.bgColor || '#ffffff', '#ffffff')),
     });
-    const pgNumText = formatPageNumber(page.num, state.pages.length);
     const pillPadX = Math.round(typo.pt(8));
     const pillPadY = Math.round(typo.pt(2.5));
     const bagHeaderHtml = wordless
@@ -9079,10 +9102,7 @@ function renderAll() {
         <div class="relative flex-1 min-h-0 overflow-hidden" style="margin:${Math.round(typo.pt(8))}px 0">
           <img src="${snap.url}" alt="${escHtml(page.chapterName || 'Stage')}" class="absolute inset-0 w-full h-full object-contain pointer-events-none" />
         </div>
-        <div class="absolute flex justify-between font-medium pointer-events-none" style="bottom:${footerPadBottom}px;left:${padPx}px;right:${padPx}px;font-size:${typo.footerFont}px;color:${theme.muted}">
-          <span class="truncate">${showFooterTitle ? escHtml(state.model.title) : ''}</span>
-          <span style="color:${theme.text}" class="font-bold shrink-0">${escHtml(pgNumText)}</span>
-        </div>
+        ${renderPageFooterHtml({ titleText: state.model.title })}
       </div>`;
   } else if (page.kind === 'submodel_page') {
     const sub = page.step.subassembly;
@@ -9105,7 +9125,6 @@ function renderAll() {
       outlineLineWeight: state.starkBlackOutlines ? state.outlineLineWeight : 'light',
       darkBackground: isDarkHexColor(toHexColor(theme.bgColor || '#ffffff', '#ffffff')),
     });
-    const pgNumText = formatPageNumber(page.num, state.pages.length);
     frame.innerHTML = `
       <div class="relative w-full h-full flex flex-col justify-between overflow-hidden" style="padding:${padPx}px;padding-bottom:${padPx + footerH}px">
         <div class="shrink-0 flex items-center ${wordless ? 'justify-end' : 'justify-between'}">
@@ -9115,16 +9134,12 @@ function renderAll() {
         <div class="relative flex-1 min-h-0 overflow-hidden" style="margin:${Math.round(typo.pt(8))}px 0">
           <img src="${snap.url}" class="absolute inset-0 w-full h-full object-contain pointer-events-none" />
         </div>
-        <div class="absolute flex justify-between font-medium pointer-events-none" style="bottom:${footerPadBottom}px;left:${padPx}px;right:${padPx}px;font-size:${typo.footerFont}px;color:${theme.muted}">
-          <span class="truncate">${showFooterTitle ? escHtml(page.chapterName) : ''}</span>
-          <span style="color:${theme.text}" class="font-bold shrink-0">${escHtml(pgNumText)}</span>
-        </div>
+        ${renderPageFooterHtml({ titleText: page.chapterName })}
       </div>`;
   } else if (page.kind === 'bom') {
     const cfg = getEffectiveBomConfig();
     const enabledFields = getEnabledBomFields(cfg);
     const entries = page.bomEntries || [];
-    const pgNumText = formatPageNumber(page.num, state.pages.length);
     const bt = typo.bom;
     const bodyW = Math.max(60, dims.width - padPx * 2);
     const bodyH = Math.max(60, dims.height - padPx * 2 - footerH - bt.headerH);
@@ -9266,10 +9281,7 @@ function renderAll() {
       <div class="relative w-full h-full flex flex-col overflow-hidden" style="padding:${padPx}px;padding-bottom:${padPx + footerH}px">
         ${bomHeaderHtml}
         ${bomBodyHtml}
-        <div class="absolute flex justify-between font-medium pointer-events-none" style="bottom:${footerPadBottom}px;left:${padPx}px;right:${padPx}px;font-size:${typo.footerFont}px;color:${theme.muted}">
-          <span class="truncate">${showFooterTitle ? escHtml(state.model.title) : ''}</span>
-          <span style="color:${theme.text}" class="font-bold shrink-0">${escHtml(pgNumText)}</span>
-        </div>
+        ${renderPageFooterHtml({ titleText: state.model.title })}
       </div>`;
   } else {
     // STEPS PAGE
@@ -9457,7 +9469,6 @@ function renderAll() {
     const isStepNotesMode = state.mode === 'step' && state.stepSubTab === 'notes';
     const isPartsMode = state.mode === 'parts';
     const isArrangeMode = false;
-    const pgNumText = formatPageNumber(page.num, state.pages.length);
 
     frame.innerHTML = `
       <div class="relative w-full h-full flex flex-col overflow-hidden" style="padding:${padPx}px;padding-bottom:${padPx + footerH}px">
@@ -9754,15 +9765,7 @@ function renderAll() {
           const progFrac = idxInCh >= 0 && chSteps.length > 1
             ? computeBagProgressFraction(idxInCh, chSteps.length)
             : (state.pages.length > 1 ? Math.max(0, Math.min(1, page.num / state.pages.length)) : 1);
-          const showBar = state.showProgressBar !== false;
-          const barHtml = showBar
-            ? buildProgressBarHtml(progFrac, { accent: theme.accent, heightPx: Math.max(3, Math.round(typo.pt(3))) })
-            : '';
-          return `<div class="absolute flex items-center justify-between font-medium pointer-events-none" style="gap:${Math.round(typo.pt(10))}px;bottom:${footerPadBottom}px;left:${padPx}px;right:${padPx}px;font-size:${typo.footerFont}px;color:${theme.muted}">
-            ${showFooterTitle ? `<span class="truncate shrink-0 max-w-[32%]">${escHtml(page.chapterName)}</span>` : ''}
-            ${barHtml}
-            <span style="color:${theme.text}" class="font-bold shrink-0">${escHtml(pgNumText)}</span>
-          </div>`;
+          return renderPageFooterHtml({ titleText: page.chapterName, progressFrac: progFrac });
         })()}
       </div>`;
 
@@ -12753,6 +12756,30 @@ function syncMenuControls() {
           : 'border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] cursor-pointer'
     }`;
   });
+  const pgNumPos = normalizePageNumberPosition(state.pageNumberPosition);
+  const pgNumsOff = effPgFmt === 'none';
+  document.querySelectorAll('.pgnum-pos-btn').forEach(b => {
+    const pos = b.getAttribute('data-pgnum-pos');
+    const act = !pgNumsOff && pos === pgNumPos;
+    b.disabled = pgNumsOff;
+    b.setAttribute('aria-pressed', act ? 'true' : 'false');
+    b.title = pgNumsOff ? 'Enable a Page Number Format above to choose page number placement' : '';
+    b.className = `pgnum-pos-btn py-2.5 px-2.5 rounded-lg border font-semibold flex flex-col items-center gap-1.5 transition ${
+      pgNumsOff
+        ? 'border-[var(--border)] bg-[var(--surface-sunken)] opacity-45 cursor-not-allowed'
+        : act
+          ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)] cursor-pointer'
+          : 'border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] cursor-pointer'
+    }`;
+  });
+  const pgNumPosHintEl = document.getElementById('pageNumPosHint');
+  if (pgNumPosHintEl) {
+    pgNumPosHintEl.textContent = pgNumsOff
+      ? 'Page numbers are currently turned off.'
+      : pgNumPos === 'outside'
+        ? 'Booklet spread: even pages (2, 4, …) on bottom-left, odd pages (1, 3, …) on bottom-right.'
+        : 'Every page number is placed in the bottom-right corner.';
+  }
   const setChk = (id, val) => { const el = document.getElementById(id); if (el) el.checked = Boolean(val); };
   setChk('toggleWordlessMode', state.wordlessMode);
   setChk('toggleStepBorders', state.showStepBorders);
@@ -17305,6 +17332,7 @@ function scheduleSaveSessionPrefs() {
       showSizeGuides: state.showSizeGuides, minifigStyle: state.minifigStyle, showMinifig1to1: state.showMinifig1to1, showStepBorders: state.showStepBorders,
       showPageTitle: state.showPageTitle, wordlessMode: state.wordlessMode, bomShowTextFields: state.bomShowTextFields,
       pageNumberFormat: state.pageNumberFormat,
+      pageNumberPosition: normalizePageNumberPosition(state.pageNumberPosition),
       showCover: state.showCover, showBuildComplete: state.showBuildComplete,
       showPartsList: state.showPartsList, showBackCover: state.showBackCover,
       bomConfig: state.bomConfig,
@@ -17370,6 +17398,7 @@ async function restoreLastSessionOnStart() {
     state.bomShowTextFields = typeof prefs.bomShowTextFields === 'boolean' ? prefs.bomShowTextFields : !state.wordlessMode;
     if (prefs.pageNumberFormat) state.pageNumberFormat = prefs.pageNumberFormat;
     else state.pageNumberFormat = getWordlessSurfaceDefaults(state.wordlessMode).pageNumberFormat;
+    state.pageNumberPosition = normalizePageNumberPosition(prefs.pageNumberPosition);
     const extraCfg = normalizeExtraPagesConfig(prefs);
     state.showCover = extraCfg.showCover;
     state.showBuildComplete = extraCfg.showBuildComplete;
@@ -17577,25 +17606,67 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
   const footerH = typo.footerH;
   const footerTextY = pxH - Math.max(6, Math.round(pad * 0.42)) - Math.round(typo.footerFont * 1.15);
   const pgNumText = formatPageNumber(page.num, state.pages.length);
+  const pgNumSide = pgNumText ? resolvePageNumberSide(page.num, state.pageNumberPosition) : 'right';
   const wordless = Boolean(state.wordlessMode);
   const showFooterTitle = !wordless && Boolean(state.showPageTitle);
   const drawFooter = (leftLabel, progressFrac = null) => {
+    const gap = Math.round(typo.pt(12));
+    const hasTitle = Boolean(showFooterTitle && leftLabel);
+    const hasNum = Boolean(pgNumText);
+    const hasBar = typeof progressFrac === 'number' && state.showProgressBar !== false;
+    const maxTitleW = Math.round(pxW * 0.32);
+
     let barLeft = pad;
-    if (showFooterTitle && leftLabel) {
-      ctx.fillStyle = theme.muted;
-      ctx.font = themeCanvasFont(theme, 600, typo.footerFont);
-      ctx.fillText(leftLabel, pad, footerTextY);
-      barLeft = pad + Math.min(pxW * 0.32, ctx.measureText(leftLabel).width + Math.round(typo.pt(12)));
-    }
     let barRight = pxW - pad;
-    if (pgNumText) {
-      ctx.fillStyle = theme.text; ctx.textAlign = 'right';
-      ctx.font = themeCanvasFont(theme, 700, typo.footerFont);
-      ctx.fillText(pgNumText, pxW - pad, footerTextY);
-      barRight = pxW - pad - ctx.measureText(pgNumText).width - Math.round(typo.pt(12));
+
+    if (pgNumSide === 'left' && hasNum) {
+      ctx.fillStyle = theme.text;
       ctx.textAlign = 'left';
+      ctx.font = themeCanvasFont(theme, 700, typo.footerFont);
+      ctx.fillText(pgNumText, pad, footerTextY);
+      const numW = ctx.measureText(pgNumText).width;
+      barLeft = pad + numW + gap;
+
+      if (hasTitle) {
+        ctx.fillStyle = theme.muted;
+        ctx.textAlign = 'right';
+        ctx.font = themeCanvasFont(theme, 600, typo.footerFont);
+        const availTitleW = hasBar
+          ? maxTitleW
+          : Math.max(40, pxW - pad * 2 - numW - gap);
+        const measured = ctx.measureText(leftLabel).width;
+        ctx.fillText(leftLabel, pxW - pad, footerTextY, availTitleW);
+        barRight = pxW - pad - Math.min(maxTitleW, measured + gap);
+      }
+      ctx.textAlign = 'left';
+    } else {
+      if (hasTitle) {
+        ctx.fillStyle = theme.muted;
+        ctx.textAlign = 'left';
+        ctx.font = themeCanvasFont(theme, 600, typo.footerFont);
+        let numW = 0;
+        if (hasNum) {
+          ctx.font = themeCanvasFont(theme, 700, typo.footerFont);
+          numW = ctx.measureText(pgNumText).width;
+          ctx.font = themeCanvasFont(theme, 600, typo.footerFont);
+        }
+        const availTitleW = hasBar
+          ? maxTitleW
+          : Math.max(40, pxW - pad * 2 - (hasNum ? numW + gap : 0));
+        const measured = ctx.measureText(leftLabel).width;
+        ctx.fillText(leftLabel, pad, footerTextY, availTitleW);
+        barLeft = pad + Math.min(maxTitleW, measured + gap);
+      }
+      if (hasNum) {
+        ctx.fillStyle = theme.text;
+        ctx.textAlign = 'right';
+        ctx.font = themeCanvasFont(theme, 700, typo.footerFont);
+        ctx.fillText(pgNumText, pxW - pad, footerTextY);
+        barRight = pxW - pad - ctx.measureText(pgNumText).width - gap;
+        ctx.textAlign = 'left';
+      }
     }
-    if (typeof progressFrac === 'number' && state.showProgressBar !== false && barRight - barLeft > 40) {
+    if (hasBar && barRight - barLeft > 40) {
       drawProgressBarCanvas(
         ctx,
         barLeft,
@@ -21142,6 +21213,16 @@ document.querySelectorAll('.pgnum-btn').forEach(b => {
     renderAll();
   };
 });
+document.querySelectorAll('.pgnum-pos-btn').forEach(b => {
+  b.onclick = () => {
+    if (state.pageNumberFormat === 'none') return;
+    const pos = normalizePageNumberPosition(b.getAttribute('data-pgnum-pos'));
+    if (state.pageNumberPosition === pos) return;
+    if (state.model && !importWizardState.active) pushUndo();
+    state.pageNumberPosition = pos;
+    renderAll();
+  };
+});
 document.querySelectorAll('.step-lighting-chip').forEach(b => {
   b.onclick = () => {
     const mode = sanitizeStepLightingMode(b.getAttribute('data-step-lighting'), 'none');
@@ -21992,7 +22073,10 @@ function openExportModal() {
   document.getElementById('pageSetupModal').classList.add('hidden');
   const fmt = PAPER_FORMATS[state.paperFormat] || PAPER_FORMATS.letter;
   const [wIn, hIn] = getActivePagePhysicalInches();
-  document.getElementById('expFormatSummary').textContent = `${fmt.name} (${formatPhysicalDims(wIn, hIn)}) · ${state.pages.length} pages`;
+  const bookletNote = state.pageNumberFormat !== 'none' && normalizePageNumberPosition(state.pageNumberPosition) === 'outside'
+    ? ' · Booklet outside page numbers'
+    : '';
+  document.getElementById('expFormatSummary').textContent = `${fmt.name} (${formatPhysicalDims(wIn, hIn)}) · ${state.pages.length} pages${bookletNote}`;
   const sysPrintBtn = document.getElementById('btnSysPrint');
   if (sysPrintBtn) sysPrintBtn.classList.toggle('hidden', typeof window.print !== 'function');
   document.getElementById('expProgressWrap').classList.add('hidden');
@@ -22044,7 +22128,7 @@ async function exportProjectFile() {
   const activeTheme = getActiveTheme();
   const embeddedCustomTheme = activeTheme && !activeTheme.builtIn && !BUILT_IN_THEME_IDS.has(activeTheme.id) ? activeTheme : undefined;
   const embeddedCustomFonts = collectReferencedCustomFonts(activeTheme ? [activeTheme] : []);
-  const payload = JSON.stringify({ format: PROJECT_FILE_FORMAT, version: PROJECT_FILE_STUDIO_VERSION, title: state.model.title, chapters: state.model.chapters, overrides: state.overrides, stepInserts: state.stepInserts, pageInserts: state.pageInserts, dividerAfter: state.dividerAfter, coverMeta: state.coverMeta, completeMeta: state.completeMeta, backMeta: state.backMeta, bomConfig: state.bomConfig, wordlessMode: state.wordlessMode, bomShowTextFields: state.bomShowTextFields, showStepBorders: state.showStepBorders, showPageTitle: state.showPageTitle, pageNumberFormat: state.pageNumberFormat, showCover: state.showCover, showBuildComplete: state.showBuildComplete, showPartsList: state.showPartsList, showBackCover: state.showBackCover, detectDuplicates: state.detectDuplicates, minifigStyle: state.minifigStyle, showMinifig1to1: state.showMinifig1to1, themeId: state.themeId, ...(embeddedCustomTheme ? { customTheme: embeddedCustomTheme } : {}), ...(embeddedCustomFonts.length > 0 ? { customFonts: embeddedCustomFonts } : {}), paperFormat: state.paperFormat, orientation: state.orientation, density: state.density, layout: state.layout, layoutConfig: state.layoutConfig, layoutGroups: state.layoutGroups }, null, 2);
+  const payload = JSON.stringify({ format: PROJECT_FILE_FORMAT, version: PROJECT_FILE_STUDIO_VERSION, title: state.model.title, chapters: state.model.chapters, overrides: state.overrides, stepInserts: state.stepInserts, pageInserts: state.pageInserts, dividerAfter: state.dividerAfter, coverMeta: state.coverMeta, completeMeta: state.completeMeta, backMeta: state.backMeta, bomConfig: state.bomConfig, wordlessMode: state.wordlessMode, bomShowTextFields: state.bomShowTextFields, showStepBorders: state.showStepBorders, showPageTitle: state.showPageTitle, pageNumberFormat: state.pageNumberFormat, pageNumberPosition: normalizePageNumberPosition(state.pageNumberPosition), showCover: state.showCover, showBuildComplete: state.showBuildComplete, showPartsList: state.showPartsList, showBackCover: state.showBackCover, detectDuplicates: state.detectDuplicates, minifigStyle: state.minifigStyle, showMinifig1to1: state.showMinifig1to1, themeId: state.themeId, ...(embeddedCustomTheme ? { customTheme: embeddedCustomTheme } : {}), ...(embeddedCustomFonts.length > 0 ? { customFonts: embeddedCustomFonts } : {}), paperFormat: state.paperFormat, orientation: state.orientation, density: state.density, layout: state.layout, layoutConfig: state.layoutConfig, layoutGroups: state.layoutGroups }, null, 2);
   const fileName = buildProjectFileName(state.model.title);
   closeMenu();
   await shareOrDownloadCustomFile(payload, fileName, 'Shared project file.', `Exported ${fileName}`);
@@ -22086,6 +22170,7 @@ async function handleIncomingProjectFile(f) {
     state.backMeta = normalizeBackMeta(data.backMeta);
     if (data.pageNumberFormat) state.pageNumberFormat = data.pageNumberFormat;
     else state.pageNumberFormat = getWordlessSurfaceDefaults(state.wordlessMode).pageNumberFormat;
+    state.pageNumberPosition = normalizePageNumberPosition(data.pageNumberPosition);
     if (typeof data.detectDuplicates === 'boolean') state.detectDuplicates = data.detectDuplicates;
     if (Array.isArray(data.customFonts) && data.customFonts.length > 0) {
       await hydrateCustomUploadedFonts(data.customFonts);
@@ -23232,6 +23317,7 @@ function capturePreWizardStateSnapshot() {
     wordlessMode: state.wordlessMode,
     bomShowTextFields: state.bomShowTextFields,
     pageNumberFormat: state.pageNumberFormat,
+    pageNumberPosition: normalizePageNumberPosition(state.pageNumberPosition),
     paperFormat: state.paperFormat,
     orientation: state.orientation,
     customWidth: state.customWidth,
@@ -23256,6 +23342,7 @@ function restorePreWizardStateSnapshot(snap) {
   state.wordlessMode = snap.wordlessMode;
   state.bomShowTextFields = snap.bomShowTextFields;
   state.pageNumberFormat = snap.pageNumberFormat;
+  state.pageNumberPosition = normalizePageNumberPosition(snap.pageNumberPosition);
   state.paperFormat = snap.paperFormat;
   state.orientation = snap.orientation;
   state.customWidth = snap.customWidth;
@@ -23356,6 +23443,7 @@ function renderImportWizardUI() {
     customUnit: state.customUnit === 'cm' ? 'cm' : 'in',
     layoutSummary,
     density: state.density || 'balanced',
+    pageNumberPosition: normalizePageNumberPosition(state.pageNumberPosition),
   });
 
   listEl.innerHTML = items.map((item) => {
@@ -23458,6 +23546,7 @@ function captureCurrentProjectAsImportDefaults() {
     cols: lc.cols,
     rows: lc.rows,
     wordlessMode: Boolean(state.wordlessMode),
+    pageNumberPosition: normalizePageNumberPosition(state.pageNumberPosition),
     showCover: Boolean(state.showCover),
     showBuildComplete: Boolean(state.showBuildComplete),
     showPartsList: Boolean(state.showPartsList),
@@ -23492,6 +23581,7 @@ function applyResolvedImportDefaults(lastUsedSnapshot) {
   state.wordlessMode = resolved.wordlessMode;
   state.bomShowTextFields = wlDefs.bomShowTextFields;
   state.pageNumberFormat = wlDefs.pageNumberFormat;
+  state.pageNumberPosition = normalizePageNumberPosition(resolved.pageNumberPosition);
   return resolved;
 }
 
@@ -24101,6 +24191,17 @@ function renderSettingsModalUI() {
     }`;
   });
 
+  const cdPgPos = normalizePageNumberPosition(cd.pageNumberPosition);
+  document.querySelectorAll('.settings-pgnum-pos-btn').forEach((b) => {
+    const act = b.getAttribute('data-settings-pgnum-pos') === cdPgPos;
+    b.setAttribute('aria-pressed', act ? 'true' : 'false');
+    b.className = `settings-pgnum-pos-btn py-1.5 px-2 rounded-md border font-semibold text-xs transition cursor-pointer ${
+      act
+        ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]'
+        : 'border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)]'
+    }`;
+  });
+
   const setChk = (id, val) => { const el = document.getElementById(id); if (el) el.checked = Boolean(val); };
   setChk('settingsDefWordless', cd.wordlessMode);
   setChk('settingsDefShowCover', cd.showCover);
@@ -24214,6 +24315,11 @@ if (settingsDefRowsEl) {
 }
 document.querySelectorAll('.settings-density-btn').forEach((b) => {
   b.onclick = () => patchCustomDefaults({ density: b.getAttribute('data-settings-density') });
+});
+document.querySelectorAll('.settings-pgnum-pos-btn').forEach((b) => {
+  b.onclick = () => patchCustomDefaults({
+    pageNumberPosition: normalizePageNumberPosition(b.getAttribute('data-settings-pgnum-pos')),
+  });
 });
 for (const [id, key] of [
   ['settingsDefWordless', 'wordlessMode'],
@@ -24408,6 +24514,7 @@ async function closeCurrentModel() {
   state.wordlessMode = DEFAULT_WORDLESS_MODE;
   state.bomShowTextFields = wlDefs.bomShowTextFields;
   state.pageNumberFormat = wlDefs.pageNumberFormat;
+  state.pageNumberPosition = DEFAULT_PAGE_NUMBER_POSITION;
   state.coverMeta = createDefaultCoverMeta({ showText: wlDefs.coverShowText });
   state.completeMeta = { ...createDefaultCompleteMeta(), showText: wlDefs.completeShowText };
   state.backMeta = createDefaultBackMeta();

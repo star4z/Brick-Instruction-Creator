@@ -50,6 +50,7 @@ describe('App Settings Engine', () => {
         orientation: 'sideways' as never,
         density: 'dense' as never,
         wordlessMode: false,
+        pageNumberPosition: 'bogus' as never,
         showCover: false,
         showBuildComplete: true,
         showPartsList: true,
@@ -66,6 +67,7 @@ describe('App Settings Engine', () => {
     expect(normalized.customDefaults.cols).toBe(6);
     expect(normalized.customDefaults.rows).toBe('auto');
     expect(normalized.customDefaults.wordlessMode).toBe(false);
+    expect(normalized.customDefaults.pageNumberPosition).toBe('right');
     expect(normalized.customDefaults.showCover).toBe(false);
     expect(normalized.customDefaults.showBackCover).toBe(false);
   });
@@ -90,6 +92,7 @@ describe('App Settings Engine', () => {
         cols: 2,
         rows: 2,
         wordlessMode: false,
+        pageNumberPosition: 'outside',
       },
     });
 
@@ -98,6 +101,7 @@ describe('App Settings Engine', () => {
 
     const loaded = loadAppSettings(store);
     expect(loaded).toEqual(custom);
+    expect(loaded.customDefaults.pageNumberPosition).toBe('outside');
     expect(summarizeAppSettings(loaded)).toBe('Custom Defaults');
   });
 
@@ -109,6 +113,7 @@ describe('App Settings Engine', () => {
       orientation: 'portrait' as const,
       density: 'compact' as const,
       wordlessMode: false,
+      pageNumberPosition: 'outside' as const,
     };
 
     // Built-in ignores lastUsed
@@ -120,6 +125,7 @@ describe('App Settings Engine', () => {
     expect(builtin.themeId).toBe('blue');
     expect(builtin.paperFormat).toBe('screen');
     expect(builtin.orientation).toBe('landscape');
+    expect(builtin.pageNumberPosition).toBe('right');
 
     // Last Used picks up lastUsed and falls back to 'blue' if the theme was deleted
     const lastUsedSettings = normalizeAppSettings({ defaultsMode: 'last_used' });
@@ -132,6 +138,7 @@ describe('App Settings Engine', () => {
     expect(resolvedLast.paperFormat).toBe('letter');
     expect(resolvedLast.orientation).toBe('portrait');
     expect(resolvedLast.wordlessMode).toBe(false);
+    expect(resolvedLast.pageNumberPosition).toBe('outside');
 
     // Custom picks user-configured defaults
     const customSettings = normalizeAppSettings({
@@ -142,6 +149,7 @@ describe('App Settings Engine', () => {
         paperFormat: 'a4',
         cols: 2,
         rows: 3,
+        pageNumberPosition: 'outside',
       },
     });
     const resolvedCustom = resolveImportStartDefaults({
@@ -153,6 +161,7 @@ describe('App Settings Engine', () => {
     expect(resolvedCustom.paperFormat).toBe('a4');
     expect(resolvedCustom.cols).toBe(2);
     expect(resolvedCustom.rows).toBe(3);
+    expect(resolvedCustom.pageNumberPosition).toBe('outside');
   });
 
   it('evaluates Import Wizard prompt mode, desktop side menu startup, and unit-ordered dimensions', () => {

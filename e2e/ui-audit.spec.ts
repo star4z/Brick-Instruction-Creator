@@ -124,13 +124,21 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     await page.locator('#btnCloseBricksLib').click();
     await expect(page.locator('#bricksLibraryModal')).toBeHidden();
 
-    // 4. App Settings Modal
+    // 4. App Settings Modal (+ Custom Defaults including Page Number Position)
     await ensureMenuOpen(page);
     await page.locator('#menuSettingsBtn').click();
     await expect(page.locator('#settingsModal')).toBeVisible();
     await auditSurface(page, `${testInfo.project.name}: App Settings Modal`, {
       activeContainerSelector: '#settingsModal',
     });
+    await page.locator('[data-settings-defaults-mode="custom"]').click();
+    await expect(page.locator('#settingsCustomDefaultsWrap')).toBeVisible();
+    await page.locator('[data-settings-pgnum-pos="outside"]').click();
+    await expect(page.locator('[data-settings-pgnum-pos="outside"]')).toHaveAttribute('aria-pressed', 'true');
+    await auditSurface(page, `${testInfo.project.name}: App Settings Modal (Custom Defaults)`, {
+      activeContainerSelector: '#settingsModal',
+    });
+    await page.locator('[data-settings-defaults-mode="builtin"]').click();
     await page.locator('#btnCloseSettings').click();
     await expect(page.locator('#settingsModal')).toBeHidden();
 
@@ -356,7 +364,7 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     }
     await page.locator('#modePill [data-mode="pan"]').click();
 
-    // 2. Page Setup Modal (Paper formats + Custom size + Orientation)
+    // 2. Page Setup Modal (Paper formats + Custom size + Orientation + Page Number Position)
     await ensureMenuOpen(page);
     await page.locator('#menuPageSetupBtn').click();
     await expect(page.locator('#pageSetupModal')).toBeVisible();
@@ -371,8 +379,39 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     });
     await page.locator('#paperFormatSelect').selectOption('letter');
     await page.locator('#paperFormatSelect').selectOption('screen');
+
+    // Page Number Position: disabled when Page Number Format is Off, active for Outside Edge (Booklet)
+    await page.locator('[data-pgnum="none"]').click();
+    await expect(page.locator('[data-pgnum-pos="outside"]')).toBeDisabled();
+    await page.locator('[data-pgnum="number"]').click();
+    await expect(page.locator('[data-pgnum-pos="outside"]')).toBeEnabled();
+    await page.locator('[data-pgnum-pos="outside"]').click();
+    await expect(page.locator('[data-pgnum-pos="outside"]')).toHaveAttribute('aria-pressed', 'true');
     await page.locator('#btnClosePageSetup').click();
     await expect(page.locator('#pageSetupModal')).toBeHidden();
+
+    // Verify booklet outside-edge placement geometrically on even (Page 2 -> left) and odd (Page 3 -> right)
+    await closeMenuOnMobile(page);
+    await page.locator('#nextPage').click(); // Page 2 (even / verso -> left edge)
+    const p2Num = page.locator('#pageFrame [data-page-number="true"]');
+    await expect(p2Num).toHaveAttribute('data-page-number-side', 'left');
+    const p2FrameBox = await page.locator('#pageFrame').boundingBox();
+    const p2NumBox = await p2Num.boundingBox();
+    expect(p2FrameBox && p2NumBox).toBeTruthy();
+    if (p2FrameBox && p2NumBox) {
+      expect(p2NumBox.x + p2NumBox.width / 2).toBeLessThan(p2FrameBox.x + p2FrameBox.width / 2);
+    }
+
+    await page.locator('#nextPage').click(); // Page 3 (odd / recto -> right edge)
+    const p3Num = page.locator('#pageFrame [data-page-number="true"]');
+    await expect(p3Num).toHaveAttribute('data-page-number-side', 'right');
+    const p3FrameBox = await page.locator('#pageFrame').boundingBox();
+    const p3NumBox = await p3Num.boundingBox();
+    expect(p3FrameBox && p3NumBox).toBeTruthy();
+    if (p3FrameBox && p3NumBox) {
+      expect(p3NumBox.x + p3NumBox.width / 2).toBeGreaterThan(p3FrameBox.x + p3FrameBox.width / 2);
+    }
+    await page.locator('#firstPage').click();
 
     // 3. Parts List (BOM) Setup Modal (Grid Auto, Grid Custom, Table)
     await ensureMenuOpen(page);
@@ -406,10 +445,11 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     await page.locator('#impBtnCancel').click();
     await expect(page.locator('#importModal')).toBeHidden();
 
-    // 5. Export & Print Modal
+    // 5. Export & Print Modal (verifies booklet outside-edge summary note too)
     await closeMenuOnMobile(page);
     await page.locator('#btnHeaderExport').click();
     await expect(page.locator('#exportModal')).toBeVisible();
+    await expect(page.locator('#expFormatSummary')).toContainText('Booklet outside page numbers');
     await auditSurface(page, `${testInfo.project.name}: Export & Print Modal`, {
       activeContainerSelector: '#exportModal',
     });

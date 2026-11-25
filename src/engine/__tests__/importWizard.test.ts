@@ -96,6 +96,10 @@ describe('Import Wizard Engine', () => {
     expect(byId.format.targetPageLabel).toBe('Page Setup');
     expect(byId.format.value).toBe('Screen Fit');
     expect(byId.format.detail).toBe('Auto grid · Balanced margins');
+
+    const bookletFormat = buildImportWizardSummaryItems(baseInput({ pageNumberPosition: 'outside' }))
+      .find((item) => item.id === 'format');
+    expect(bookletFormat?.detail).toBe('Auto grid · Balanced margins · Outside page numbers');
   });
 
   it('formats slicing summaries for modular sections, non-modular sections, single build, and keep-file-steps', () => {

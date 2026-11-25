@@ -3,6 +3,12 @@
  * Brick Instruction Works.
  */
 
+import {
+  DEFAULT_PAGE_NUMBER_POSITION,
+  normalizePageNumberPosition,
+  type PageNumberPosition,
+} from './pageLayout';
+
 export const APP_SETTINGS_STORAGE_KEY = 'bic_app_settings_v1';
 
 export type ImportDefaultsMode = 'builtin' | 'custom' | 'last_used';
@@ -21,6 +27,7 @@ export interface CustomImportDefaults {
   cols: number | 'auto';
   rows: number | 'auto';
   wordlessMode: boolean;
+  pageNumberPosition: PageNumberPosition;
   showCover: boolean;
   showBuildComplete: boolean;
   showPartsList: boolean;
@@ -76,6 +83,7 @@ export function createDefaultCustomImportDefaults(): CustomImportDefaults {
     cols: 'auto',
     rows: 'auto',
     wordlessMode: true,
+    pageNumberPosition: DEFAULT_PAGE_NUMBER_POSITION,
     showCover: true,
     showBuildComplete: true,
     showPartsList: true,
@@ -126,6 +134,7 @@ export function normalizeCustomImportDefaults(
     cols: sanitizeGridDim(raw.cols),
     rows: sanitizeGridDim(raw.rows),
     wordlessMode: typeof raw.wordlessMode === 'boolean' ? raw.wordlessMode : def.wordlessMode,
+    pageNumberPosition: normalizePageNumberPosition(raw.pageNumberPosition),
     showCover: typeof raw.showCover === 'boolean' ? raw.showCover : def.showCover,
     showBuildComplete:
       typeof raw.showBuildComplete === 'boolean' ? raw.showBuildComplete : def.showBuildComplete,

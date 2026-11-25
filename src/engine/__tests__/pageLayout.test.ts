@@ -20,10 +20,13 @@ import {
   formatPageSizeWarningForPage,
   getPageSizeWarningStepLinks,
   getSpecStepsPerPageCap,
+  DEFAULT_PAGE_NUMBER_POSITION,
   normalizeLayoutGroups,
   normalizePageLayoutSpec,
+  normalizePageNumberPosition,
   packSmartAutoPage,
   resolveGridDimensions,
+  resolvePageNumberSide,
   type PageLayoutSpec,
   type SmartAutoStepMetric,
   type StepLayoutGroup,
@@ -717,5 +720,33 @@ describe('pageLayout engine', () => {
     expect(getPageSizeWarningStepLinks(sampleWarn)).toEqual([]);
     expect(getPageSizeWarningStepLinks(null)).toEqual([]);
   });
+
+  it('resolves booklet outside-edge page number placement (even left / odd right) vs bottom-right default', () => {
+    expect(DEFAULT_PAGE_NUMBER_POSITION).toBe('right');
+    expect(normalizePageNumberPosition('outside')).toBe('outside');
+    expect(normalizePageNumberPosition('right')).toBe('right');
+    expect(normalizePageNumberPosition(undefined)).toBe('right');
+    expect(normalizePageNumberPosition('center')).toBe('right');
+
+    // Default ('right') keeps every page number on the right edge
+    for (const p of [1, 2, 3, 4, 5, 10]) {
+      expect(resolvePageNumberSide(p, 'right')).toBe('right');
+      expect(resolvePageNumberSide(p, undefined)).toBe('right');
+    }
+
+    // Outside-edge ('outside') alternates verso (even -> left) and recto (odd -> right)
+    expect(resolvePageNumberSide(1, 'outside')).toBe('right');
+    expect(resolvePageNumberSide(2, 'outside')).toBe('left');
+    expect(resolvePageNumberSide(3, 'outside')).toBe('right');
+    expect(resolvePageNumberSide(4, 'outside')).toBe('left');
+    expect(resolvePageNumberSide(11, 'outside')).toBe('right');
+    expect(resolvePageNumberSide(12, 'outside')).toBe('left');
+
+    // Defensive handling for non-positive / non-finite page numbers
+    expect(resolvePageNumberSide(0, 'outside')).toBe('right');
+    expect(resolvePageNumberSide(-2, 'outside')).toBe('right');
+    expect(resolvePageNumberSide(Number.NaN, 'outside')).toBe('right');
+  });
 });
+
 

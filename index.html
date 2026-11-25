@@ -1473,6 +1473,27 @@
             </div>
           </div>
 
+          <div class="space-y-2">
+            <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Page Number Position</div>
+            <div class="grid grid-cols-2 gap-1.5" role="radiogroup" aria-label="Page number position">
+              <button data-pgnum-pos="right" type="button" class="pgnum-pos-btn py-2.5 px-2.5 rounded-lg border font-semibold flex flex-col items-center gap-1.5 cursor-pointer">
+                <span class="inline-flex items-center gap-0.5" aria-hidden="true">
+                  <span class="w-7 h-5 rounded-l border border-current/35 flex items-end justify-end px-1 pb-0.5 font-mono text-[8px] leading-none">2</span>
+                  <span class="w-7 h-5 rounded-r border border-current/35 flex items-end justify-end px-1 pb-0.5 font-mono text-[8px] leading-none">3</span>
+                </span>
+                <span class="text-[11px] leading-tight">Bottom Right</span>
+              </button>
+              <button data-pgnum-pos="outside" type="button" class="pgnum-pos-btn py-2.5 px-2.5 rounded-lg border font-semibold flex flex-col items-center gap-1.5 cursor-pointer">
+                <span class="inline-flex items-center gap-0.5" aria-hidden="true">
+                  <span class="w-7 h-5 rounded-l border border-current/35 flex items-end justify-start px-1 pb-0.5 font-mono text-[8px] leading-none">2</span>
+                  <span class="w-7 h-5 rounded-r border border-current/35 flex items-end justify-end px-1 pb-0.5 font-mono text-[8px] leading-none">3</span>
+                </span>
+                <span class="text-[11px] leading-tight">Outside Edge (Booklet)</span>
+              </button>
+            </div>
+            <p id="pageNumPosHint" class="text-[11px] text-[var(--muted-foreground)] leading-snug">Every page number is placed in the bottom-right corner.</p>
+          </div>
+
           <div class="space-y-2.5 pt-4 border-t border-[var(--border)]">
             <label class="flex items-center justify-between py-1 cursor-pointer">
               <span class="font-medium">Box Around Each Step</span>
@@ -2545,6 +2566,14 @@
                   <button type="button" data-settings-density="compact" class="settings-density-btn py-1.5 px-2 rounded-md border font-semibold text-xs transition cursor-pointer">Compact</button>
                   <button type="button" data-settings-density="balanced" class="settings-density-btn py-1.5 px-2 rounded-md border font-semibold text-xs transition cursor-pointer">Balanced</button>
                   <button type="button" data-settings-density="spacious" class="settings-density-btn py-1.5 px-2 rounded-md border font-semibold text-xs transition cursor-pointer">Spacious</button>
+                </div>
+              </div>
+
+              <div class="space-y-1">
+                <span class="block text-xs text-[var(--muted-foreground)]">Page Number Position</span>
+                <div class="grid grid-cols-2 gap-1.5">
+                  <button type="button" data-settings-pgnum-pos="right" class="settings-pgnum-pos-btn py-1.5 px-2 rounded-md border font-semibold text-xs transition cursor-pointer">Bottom Right</button>
+                  <button type="button" data-settings-pgnum-pos="outside" class="settings-pgnum-pos-btn py-1.5 px-2 rounded-md border font-semibold text-xs transition cursor-pointer">Outside Edge (Booklet)</button>
                 </div>
               </div>
 

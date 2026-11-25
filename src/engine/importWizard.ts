@@ -84,6 +84,7 @@ export interface ImportWizardSummaryInput {
   customUnit?: 'in' | 'cm';
   layoutSummary: string;
   density: 'compact' | 'balanced' | 'spacious';
+  pageNumberPosition?: 'right' | 'outside';
 }
 
 export interface FreshImportWizardDefaults {
@@ -250,6 +251,7 @@ export function formatWizardPageFormatSummary(input: {
   customUnit?: 'in' | 'cm';
   layoutSummary: string;
   density: 'compact' | 'balanced' | 'spacious';
+  pageNumberPosition?: 'right' | 'outside';
 }): { value: string; detail: string } {
   let value = input.paperFormatLabel || 'Screen Fit';
   if (input.paperFormat === 'custom' && input.customWidth && input.customHeight) {
@@ -263,7 +265,8 @@ export function formatWizardPageFormatSummary(input: {
     input.layoutSummary && input.layoutSummary.trim()
       ? `${input.layoutSummary.trim()} grid`
       : 'Auto grid';
-  const detail = `${gridLabel} · ${formatDensityLabel(input.density)} margins`;
+  const posSuffix = input.pageNumberPosition === 'outside' ? ' · Outside page numbers' : '';
+  const detail = `${gridLabel} · ${formatDensityLabel(input.density)} margins${posSuffix}`;
   return { value, detail };
 }
 
@@ -302,6 +305,7 @@ export function buildImportWizardSummaryItems(
     customUnit: input.customUnit,
     layoutSummary: input.layoutSummary,
     density: input.density,
+    pageNumberPosition: input.pageNumberPosition,
   });
 
   return [
