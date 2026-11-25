@@ -177,14 +177,14 @@ import {
 } from './engine/stepToolbar';
 import {
   getApplyCameraDestructiveNotice,
-  getCloseModelDestructiveNotice,
-  getDeleteThemeDestructiveNotice,
+  getCloseModelConfirmDialog,
+  getDeleteThemeConfirmDialog,
   getLayoutGroupOverlapDestructiveNotice,
-  getLibraryClearSavedDestructiveNotice,
-  getLibraryRemovePartDestructiveNotice,
+  getLibraryClearSavedConfirmDialog,
+  getLibraryRemovePartConfirmDialog,
   getMergeStepDestructiveNotice,
   getPartsMoveStepDestructiveNotice,
-  getReplaceModelModalDestructiveNotice,
+  getReplaceModelConfirmDialog,
   getStepGenerationDestructiveNotice,
   getWordlessToggleDestructiveNotice,
   hasCameraAngleOverride,
@@ -8820,6 +8820,67 @@ function getCurrentManualEditsSummary() {
   });
 }
 
+let confirmActionResolver = null;
+let confirmActionPriorFocus = null;
+
+function isConfirmActionDialogOpen() {
+  const modal = document.getElementById('confirmActionModal');
+  return Boolean(modal && !modal.classList.contains('hidden'));
+}
+
+function closeConfirmActionDialog(confirmed = false) {
+  const modal = document.getElementById('confirmActionModal');
+  if (modal) modal.classList.add('hidden');
+  const resolve = confirmActionResolver;
+  confirmActionResolver = null;
+  const prior = confirmActionPriorFocus;
+  confirmActionPriorFocus = null;
+  if (prior && typeof prior.focus === 'function' && document.contains(prior)) {
+    try { prior.focus(); } catch (_) {}
+  }
+  if (resolve) resolve(Boolean(confirmed));
+}
+
+function openConfirmActionDialog(spec) {
+  if (!spec) return Promise.resolve(true);
+  const modal = document.getElementById('confirmActionModal');
+  const titleEl = document.getElementById('confirmActionTitle');
+  const msgEl = document.getElementById('confirmActionMessage');
+  const detailEl = document.getElementById('confirmActionDetail');
+  const cancelBtn = document.getElementById('confirmActionCancel');
+  const confirmBtn = document.getElementById('confirmActionConfirm');
+  if (!modal || !titleEl || !msgEl || !cancelBtn || !confirmBtn) {
+    return Promise.resolve(true);
+  }
+  if (confirmActionResolver) closeConfirmActionDialog(false);
+  confirmActionPriorFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  titleEl.textContent = spec.title || 'Are you sure?';
+  msgEl.textContent = spec.message || '';
+  if (detailEl) {
+    const detailTxt = (spec.detail || '').trim();
+    detailEl.textContent = detailTxt;
+    detailEl.classList.toggle('hidden', !detailTxt);
+  }
+  cancelBtn.textContent = spec.cancelLabel || 'Cancel';
+  confirmBtn.textContent = spec.confirmLabel || 'Confirm';
+  modal.classList.remove('hidden');
+  requestAnimationFrame(() => cancelBtn.focus());
+  return new Promise((resolve) => {
+    confirmActionResolver = resolve;
+  });
+}
+
+const confirmActionModalEl = document.getElementById('confirmActionModal');
+if (confirmActionModalEl) {
+  confirmActionModalEl.onclick = (e) => {
+    if (e.target === confirmActionModalEl) closeConfirmActionDialog(false);
+  };
+}
+const confirmActionCancelBtnEl = document.getElementById('confirmActionCancel');
+if (confirmActionCancelBtnEl) confirmActionCancelBtnEl.onclick = () => closeConfirmActionDialog(false);
+const confirmActionConfirmBtnEl = document.getElementById('confirmActionConfirm');
+if (confirmActionConfirmBtnEl) confirmActionConfirmBtnEl.onclick = () => closeConfirmActionDialog(true);
+
 // Visual Cube + Simple Stylized Camera SVG icons shared across Cover, Build Complete & Step Camera controls
 function buildCameraViewSvg(kind) {
   if (kind === 'top') {
@@ -10843,15 +10904,6 @@ function syncMenuControls() {
 
   setVisible('menuModelCard', vis.showModelCard);
   setVisible('menuCloseModelBtn', vis.showCloseModel);
-  applyDestructiveNoticeToEl(
-    'menuCloseModelNotice',
-    vis.showCloseModel
-      ? getCloseModelDestructiveNotice({
-          editsSummary: getCurrentManualEditsSummary(),
-          undoHistoryCount: state.undoStack.length,
-        })
-      : null,
-  );
   setVisible('menuSaveProj', vis.showExportProject);
   setVisible('menuErrorsBtn', vis.showModelIssues);
   setVisible('menuPagePrintSection', vis.showPagePrintSection);
@@ -13587,16 +13639,10 @@ function renderLibPreviewInspector() {
     `);
   }
   if (item.sources.includes('saved')) {
-    const removePartNotice = getLibraryRemovePartDestructiveNotice({
-      partId: item.id,
-      usedInModel: Boolean(item.usedInModel),
-      hasEmbeddedCopy: item.sources.includes('embedded'),
-    });
     actionButtons.push(`
       <button id="libPreviewRemoveBtn" class="w-full py-2.5 px-3 rounded-md border border-[var(--danger)]/40 bg-[var(--danger-soft)] text-[var(--danger)] hover:bg-[var(--danger)] hover:text-white font-semibold transition-colors cursor-pointer">
         Remove ${escHtml(item.id)}.dat from Saved Library
       </button>
-      ${renderDestructiveNoticeHtml(removePartNotice, { compact: true })}
     `);
   }
   actionsEl.innerHTML = actionButtons.join('');
@@ -13625,6 +13671,12 @@ function renderLibPreviewInspector() {
   const removeOneBtn = actionsEl.querySelector('#libPreviewRemoveBtn');
   if (removeOneBtn) {
     removeOneBtn.onclick = async () => {
+      const confirmSpec = getLibraryRemovePartConfirmDialog({
+        partId: item.id,
+        usedInModel: Boolean(item.usedInModel),
+        hasEmbeddedCopy: item.sources.includes('embedded'),
+      });
+      if (!(await openConfirmActionDialog(confirmSpec))) return;
       const removedLines = userLibRaw.get(item.id);
       userLibRaw.delete(item.id);
       userLibTitles.delete(item.id);
@@ -13995,8 +14047,6 @@ function renderLibManageTab() {
   // 3. Saved Library Storage (Danger Zone — clearly separated from Import!)
   const storageEl = document.getElementById('libStorageSummary');
   const clearBtn = document.getElementById('libClearSavedBtn');
-  const confirmWrap = document.getElementById('libClearConfirmWrap');
-  const confirmText = document.getElementById('libClearConfirmText');
   const totalStored = stats.savedTotalFiles + stats.savedTextures;
   if (storageEl) {
     if (totalStored === 0) {
@@ -14009,20 +14059,6 @@ function renderLibManageTab() {
     }
   }
   if (clearBtn) clearBtn.disabled = totalStored === 0;
-  const modelReliantSavedCount = state.model
-    ? items.filter((it) => it.usedInModel && it.sources.includes('saved') && !it.sources.includes('embedded')).length
-    : 0;
-  applyDestructiveNoticeToEl(
-    'libClearModelImpactNotice',
-    getLibraryClearSavedDestructiveNotice({
-      savedFileCount: totalStored,
-      modelReliantSavedCount,
-    }),
-  );
-  if (confirmWrap && totalStored === 0) confirmWrap.classList.add('hidden');
-  if (confirmText) {
-    confirmText.textContent = `Delete all ${stats.savedTotalFiles.toLocaleString()} saved file${stats.savedTotalFiles === 1 ? '' : 's'}${stats.savedTextures > 0 ? ` and ${stats.savedTextures.toLocaleString()} texture${stats.savedTextures === 1 ? '' : 's'}` : ''} from your Bricks Library?`;
-  }
 }
 
 function renderBricksLibraryModal(resetLimit = false) {
@@ -14094,8 +14130,6 @@ function renderBricksLibraryModal(resetLimit = false) {
 
 function openBricksLibraryModal(preferredTab = null) {
   closeMenu();
-  const confirmWrap = document.getElementById('libClearConfirmWrap');
-  if (confirmWrap) confirmWrap.classList.add('hidden');
   const { stats } = getLibrarySnapshot(true);
   if (preferredTab === 'browse' || preferredTab === 'manage') {
     libUiState.tab = preferredTab;
@@ -14110,8 +14144,6 @@ function openBricksLibraryModal(preferredTab = null) {
 
 function closeBricksLibraryModal() {
   stopLibThumbQueue();
-  const confirmWrap = document.getElementById('libClearConfirmWrap');
-  if (confirmWrap) confirmWrap.classList.add('hidden');
   const modal = document.getElementById('bricksLibraryModal');
   if (modal) modal.classList.add('hidden');
 }
@@ -16244,17 +16276,6 @@ function syncStylePanel() {
     delBtn.disabled = isBuiltIn;
     delBtn.title = isBuiltIn ? 'Built-in themes cannot be deleted' : `Delete "${t.name}"`;
   }
-  const referencingGroupNames = isBuiltIn
-    ? []
-    : (state.layoutGroups || []).filter((g) => g.themeId === t.id).map((g) => g.name);
-  applyDestructiveNoticeToEl(
-    'themeDeleteNotice',
-    getDeleteThemeDestructiveNotice({
-      themeName: t.name,
-      isBuiltIn,
-      referencingGroupNames,
-    }),
-  );
   const expBtn = document.getElementById('btnExportTheme');
   if (expBtn) expBtn.title = `Export "${t.name}" (${THEME_FILE_EXT})`;
 
@@ -16373,10 +16394,18 @@ document.getElementById('btnNewCustomTheme').onclick = () => {
   });
 };
 
-document.getElementById('btnDeleteTheme').onclick = () => {
+document.getElementById('btnDeleteTheme').onclick = async () => {
   const t = getActiveTheme();
   if (t.builtIn || BUILT_IN_THEME_IDS.has(t.id)) return;
-  if (!confirm(`Delete the custom theme "${t.name}"?`)) return;
+  const referencingGroupNames = (state.layoutGroups || [])
+    .filter((g) => g.themeId === t.id)
+    .map((g) => g.name);
+  const confirmSpec = getDeleteThemeConfirmDialog({
+    themeName: t.name,
+    isBuiltIn: false,
+    referencingGroupNames,
+  });
+  if (!confirmSpec || !(await openConfirmActionDialog(confirmSpec))) return;
   customThemes = customThemes.filter(c => c.id !== t.id);
   themeRecents = themeRecents.filter(id => id !== t.id);
   saveThemeRecentsToStorage(themeRecents);
@@ -16949,6 +16978,7 @@ function getActiveShortcutBlockingSurface() {
     const el = document.getElementById(id);
     return Boolean(el && !el.classList.contains('hidden'));
   };
+  if (isConfirmActionDialogOpen()) return 'confirmAction';
   if (isBricksLibraryModalOpen()) return 'bricksLibrary';
   if (isOpen('applyAngleModal')) return 'applyAngle';
   if (isBomSetupModalOpen()) return 'bomSetup';
@@ -16968,6 +16998,10 @@ function handleGlobalEscapeKey() {
     const el = document.getElementById(id);
     return Boolean(el && !el.classList.contains('hidden'));
   };
+  if (isConfirmActionDialogOpen()) {
+    closeConfirmActionDialog(false);
+    return true;
+  }
   if (shortcutUiState.recordingActionId || shortcutUiState.pendingConflict) {
     stopShortcutRecording();
     return true;
@@ -18501,6 +18535,14 @@ async function handleIncomingProjectFile(f) {
   try {
     assertProjectFileName(f.name);
     const data = parseStudioProjectJson(await f.text());
+    const replaceConfirm = getReplaceModelConfirmDialog({
+      hasOpenModel: Boolean(state.model),
+      openModelTitle: state.model?.title,
+      incomingLabel: data.title || f.name,
+      editsSummary: getCurrentManualEditsSummary(),
+      undoHistoryCount: state.undoStack.length,
+    });
+    if (replaceConfirm && !(await openConfirmActionDialog(replaceConfirm))) return;
     submodelThumbCache.clear();
     coverHeroCache.clear();
     clearMinifigDiagramCaches();
@@ -18610,15 +18652,6 @@ document.getElementById('coverImageInput').onchange = (e) => {
 // Open / Import Model & Project Proofing Sheet Dialog
 function openOpenModelModal() {
   closeMenu();
-  applyDestructiveNoticeToEl(
-    'openModelReplaceNotice',
-    getReplaceModelModalDestructiveNotice({
-      hasOpenModel: Boolean(state.model),
-      modelTitle: state.model?.title,
-      editsSummary: getCurrentManualEditsSummary(),
-      undoHistoryCount: state.undoStack.length,
-    }),
-  );
   document.getElementById('openModelModal')?.classList.remove('hidden');
 }
 function closeOpenModelModal() {
@@ -18898,15 +18931,18 @@ document.getElementById('libImportInput').onchange = async (e) => {
   e.target.value = '';
 };
 
-document.getElementById('libClearSavedBtn').onclick = () => {
-  const confirmWrap = document.getElementById('libClearConfirmWrap');
-  if (confirmWrap) confirmWrap.classList.remove('hidden');
-};
-document.getElementById('libClearConfirmCancel').onclick = () => {
-  const confirmWrap = document.getElementById('libClearConfirmWrap');
-  if (confirmWrap) confirmWrap.classList.add('hidden');
-};
-document.getElementById('libClearConfirmYes').onclick = async () => {
+document.getElementById('libClearSavedBtn').onclick = async () => {
+  const { items, stats } = getLibrarySnapshot();
+  const modelReliantSavedCount = state.model
+    ? items.filter((it) => it.usedInModel && it.sources.includes('saved') && !it.sources.includes('embedded')).length
+    : 0;
+  const confirmSpec = getLibraryClearSavedConfirmDialog({
+    savedFileCount: stats.savedTotalFiles,
+    savedTextureCount: stats.savedTextures,
+    modelReliantSavedCount,
+  });
+  if (!confirmSpec) return;
+  if (!(await openConfirmActionDialog(confirmSpec))) return;
   userLibRaw.clear();
   userLibTitles.clear();
   movedToAliases.clear();
@@ -18914,8 +18950,6 @@ document.getElementById('libClearConfirmYes').onclick = async () => {
   textureStore.clearLibrary();
   invalidateLibraryRenderCaches();
   await dbClearStore(LIB_STORE);
-  const confirmWrap = document.getElementById('libClearConfirmWrap');
-  if (confirmWrap) confirmWrap.classList.add('hidden');
   updateLibraryStatusUI();
   if (state.model) {
     computeModelDiagnostics();
@@ -19488,10 +19522,7 @@ function renderImportAssistantUI() {
     'impActionNotice',
     getStepGenerationDestructiveNotice({
       isPostImport: impState.isPostImport,
-      hasOpenModel: Boolean(state.model),
-      openModelTitle: state.model?.title,
       editsSummary,
-      undoHistoryCount: state.undoStack.length,
       wordlessResetNotice,
       isKeepStepsAction: false,
     }),
@@ -19501,10 +19532,7 @@ function renderImportAssistantUI() {
     impState.parsed?.hasSteps
       ? getStepGenerationDestructiveNotice({
           isPostImport: impState.isPostImport,
-          hasOpenModel: Boolean(state.model),
-          openModelTitle: state.model?.title,
           editsSummary,
-          undoHistoryCount: state.undoStack.length,
           wordlessResetNotice,
           isKeepStepsAction: true,
         })
@@ -19749,15 +19777,6 @@ function renderMissingPartsPromptUI(statusMsg = null, statusTone = 'info') {
   if (printN > 0) clauses.push(`${printN} printed part${printN === 1 ? '' : 's'}`);
   if (texN > 0) clauses.push(`${texN} decal texture${texN === 1 ? '' : 's'}`);
   summaryEl.textContent = `"${parsed.title}" references ${clauses.join(' and ')} not yet in your Bricks Library.`;
-  applyDestructiveNoticeToEl(
-    'mpReplaceModelNotice',
-    getReplaceModelModalDestructiveNotice({
-      hasOpenModel: Boolean(state.model),
-      modelTitle: state.model?.title,
-      editsSummary: getCurrentManualEditsSummary(),
-      undoHistoryCount: state.undoStack.length,
-    }),
-  );
 
   const rows = [];
   for (const item of analysis.missingShapes) {
@@ -19977,6 +19996,14 @@ async function handleIncomingModelFile(file) {
   if (!lower.endsWith('.io') && !lower.endsWith('.ldr') && !lower.endsWith('.mpd')) {
     showToast('Please select a BrickLink Studio (.io) or LDraw (.ldr / .mpd) file.'); return;
   }
+  const replaceConfirm = getReplaceModelConfirmDialog({
+    hasOpenModel: Boolean(state.model),
+    openModelTitle: state.model?.title,
+    incomingLabel: file.name,
+    editsSummary: getCurrentManualEditsSummary(),
+    undoHistoryCount: state.undoStack.length,
+  });
+  if (replaceConfirm && !(await openConfirmActionDialog(replaceConfirm))) return;
   showToast(`Reading ${file.name}…`);
   try {
     let parsed;
@@ -20015,6 +20042,12 @@ async function closeCurrentModel() {
     closeMenu();
     return;
   }
+  const closeConfirm = getCloseModelConfirmDialog({
+    modelTitle: state.model.title,
+    editsSummary: getCurrentManualEditsSummary(),
+    undoHistoryCount: state.undoStack.length,
+  });
+  if (!(await openConfirmActionDialog(closeConfirm))) return;
   const closedTitle = state.model.title || 'model';
   closeMenu();
   closeBomSetupModal();

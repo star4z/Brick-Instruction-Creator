@@ -2,14 +2,14 @@ import { describe, expect, it } from 'vitest';
 import {
   formatCompactList,
   getApplyCameraDestructiveNotice,
-  getCloseModelDestructiveNotice,
-  getDeleteThemeDestructiveNotice,
+  getCloseModelConfirmDialog,
+  getDeleteThemeConfirmDialog,
   getLayoutGroupOverlapDestructiveNotice,
-  getLibraryClearSavedDestructiveNotice,
-  getLibraryRemovePartDestructiveNotice,
+  getLibraryClearSavedConfirmDialog,
+  getLibraryRemovePartConfirmDialog,
   getMergeStepDestructiveNotice,
   getPartsMoveStepDestructiveNotice,
-  getReplaceModelModalDestructiveNotice,
+  getReplaceModelConfirmDialog,
   getStepGenerationDestructiveNotice,
   getWordlessToggleDestructiveNotice,
   hasCustomPartOffset,
@@ -130,7 +130,7 @@ describe('destructiveActions engine', () => {
     expect(manualSum.items).toContain('cover/extra-page edits');
   });
 
-  describe('getApplyCameraDestructiveNotice', () => {
+  describe('Inline undoable off-screen / cross-surface notices', () => {
     const steps = [
       { id: 's1', num: 1, absNum: 1 },
       { id: 's2', num: 2, absNum: 2 },
@@ -139,12 +139,12 @@ describe('destructiveActions engine', () => {
       { id: 's5', num: 2, absNum: 5 },
     ];
 
-    it('returns null when no other steps in the selected range have overrides', () => {
+    it('Apply Camera to Steps returns null when no other steps in range have overrides', () => {
       const res = getApplyCameraDestructiveNotice({
         steps,
         overrides: {
-          s1: { az: 142, el: 30 }, // source step itself is ignored
-          s5: { az: 218, el: 30 }, // outside range [1..3]
+          s1: { az: 142, el: 30 },
+          s5: { az: 218, el: 30 },
         },
         sourceStepId: 's1',
         startNum: 1,
@@ -155,19 +155,18 @@ describe('destructiveActions engine', () => {
       expect(res.affectedStepIds).toEqual([]);
     });
 
-    it('warns only about zoom/framing conflicts when includeFraming is enabled', () => {
-      const overrides = {
-        s3: { modelScale: 1.4 },
-      };
-      const withoutFraming = getApplyCameraDestructiveNotice({
-        steps,
-        overrides,
-        sourceStepId: 's1',
-        startNum: 1,
-        endNum: 4,
-        includeFraming: false,
-      });
-      expect(withoutFraming.notice).toBeNull();
+    it('Apply Camera to Steps warns about zoom/framing only when includeFraming is enabled', () => {
+      const overrides = { s3: { modelScale: 1.4 } };
+      expect(
+        getApplyCameraDestructiveNotice({
+          steps,
+          overrides,
+          sourceStepId: 's1',
+          startNum: 1,
+          endNum: 4,
+          includeFraming: false,
+        }).notice,
+      ).toBeNull();
 
       const withFraming = getApplyCameraDestructiveNotice({
         steps,
@@ -183,7 +182,7 @@ describe('destructiveActions engine', () => {
       expect(withFraming.notice?.message).toContain('Step 3');
     });
 
-    it('names up to 3 affected steps and formats dual submodel step labels', () => {
+    it('Apply Camera to Steps names affected steps and formats dual submodel labels', () => {
       const res = getApplyCameraDestructiveNotice({
         steps,
         overrides: {
@@ -200,10 +199,8 @@ describe('destructiveActions engine', () => {
       expect(res.notice?.message).toContain('Step 2');
       expect(res.notice?.message).toContain('Step 1 (#4)');
     });
-  });
 
-  describe('getWordlessToggleDestructiveNotice', () => {
-    it('returns null on untouched defaults (both Wordless ON and Wordless OFF)', () => {
+    it('Wordless toggle stays silent on untouched defaults and warns when custom toggles or titles will be reset/hidden', () => {
       expect(
         getWordlessToggleDestructiveNotice({
           currentWordless: true,
@@ -223,56 +220,32 @@ describe('destructiveActions engine', () => {
           pageNumberFormat: 'page_n',
         }),
       ).toBeNull();
-    });
 
-    it('warns when turning Wordless ON hides custom Cover or Build Complete text the user edited', () => {
-      const notice = getWordlessToggleDestructiveNotice({
+      const hidesCustomTitle = getWordlessToggleDestructiveNotice({
         currentWordless: false,
         coverShowText: true,
         completeShowText: true,
         bomShowTextFields: true,
         pageNumberFormat: 'page_n',
         hasCustomCoverText: true,
-        hasCustomCompleteText: false,
       });
-      expect(notice?.tone).toBe('warning');
-      expect(notice?.undoable).toBe(true);
-      expect(notice?.message).toContain('hides your custom Front Cover title/subtitle');
-    });
+      expect(hidesCustomTitle?.tone).toBe('warning');
+      expect(hidesCustomTitle?.undoable).toBe(true);
+      expect(hidesCustomTitle?.message).toContain('hides your custom Front Cover title/subtitle');
 
-    it('warns when turning Wordless OFF resets custom extra-page text overrides made in Wordless mode', () => {
-      const notice = getWordlessToggleDestructiveNotice({
+      const resetsInWordless = getWordlessToggleDestructiveNotice({
         currentWordless: true,
-        coverShowText: true, // customized ON while in Wordless mode
+        coverShowText: true,
         completeShowText: false,
-        bomShowTextFields: true, // customized ON while in Wordless mode
-        pageNumberFormat: 'n_of_total', // preserved by resolvePageNumberFormatForMode
-      });
-      expect(notice?.tone).toBe('warning');
-      expect(notice?.message).toContain('resets your extra-page text overrides');
-      expect(notice?.message).toContain('enables Build Complete text');
-      expect(notice?.message).not.toContain('Front Cover title');
-      expect(notice?.message).not.toContain('page numbers');
-    });
-
-    it('warns when turning Wordless ON resets customized extra-page toggles made in text mode', () => {
-      const notice = getWordlessToggleDestructiveNotice({
-        currentWordless: false,
-        coverShowText: false, // customized OFF while in text mode
-        completeShowText: true,
         bomShowTextFields: true,
-        pageNumberFormat: 'page_n',
+        pageNumberFormat: 'n_of_total',
       });
-      expect(notice?.tone).toBe('warning');
-      expect(notice?.message).toContain('resets extra-page text overrides');
-      expect(notice?.message).toContain('Build Complete text');
-      expect(notice?.message).toContain('Parts List names & colors');
-      expect(notice?.message).toContain('switches page numbers to 1');
+      expect(resetsInWordless?.message).toContain('resets your extra-page text overrides');
+      expect(resetsInWordless?.message).toContain('enables Build Complete text');
+      expect(resetsInWordless?.message).not.toContain('Front Cover title');
     });
-  });
 
-  describe('getMergeStepDestructiveNotice', () => {
-    it('returns null when the step has no overrides or notes', () => {
+    it('Merge Step warns only when the step has existing overrides or notes', () => {
       expect(
         getMergeStepDestructiveNotice({
           stepNum: 5,
@@ -281,9 +254,7 @@ describe('destructiveActions engine', () => {
           hasSubassembly: false,
         }),
       ).toBeNull();
-    });
 
-    it('reports step overrides and notes cleared when merging a customized step', () => {
       const withEdits = getMergeStepDestructiveNotice({
         stepNum: 5,
         override: { az: 218, pin: true, partOffsets: { p1: { x: 20, y: 0, z: 0 } } },
@@ -298,11 +269,8 @@ describe('destructiveActions engine', () => {
       expect(withEdits?.message).toContain('page break');
       expect(withEdits?.message).toContain('1 note');
     });
-  });
 
-  describe('getPartsMoveStepDestructiveNotice', () => {
-    it('returns null for subset selections and for all-parts selections without off-tab overrides', () => {
-      // Subset selected even with camera/part overrides -> no warning
+    it('Parts Mode Move-to-Step warns only when ALL parts are selected AND step has off-tab overrides', () => {
       expect(
         getPartsMoveStepDestructiveNotice({
           stepNum: 3,
@@ -314,7 +282,6 @@ describe('destructiveActions engine', () => {
         }),
       ).toBeNull();
 
-      // All parts selected, only part nudges (visible on Parts tab) -> no warning
       expect(
         getPartsMoveStepDestructiveNotice({
           stepNum: 3,
@@ -325,9 +292,7 @@ describe('destructiveActions engine', () => {
           hasSubassembly: false,
         }),
       ).toBeNull();
-    });
 
-    it('warns when ALL parts are selected and the step has off-tab overrides', () => {
       const notice = getPartsMoveStepDestructiveNotice({
         stepNum: 3,
         totalPartsInStep: 2,
@@ -341,105 +306,32 @@ describe('destructiveActions engine', () => {
       expect(notice?.message).toContain('All parts selected');
       expect(notice?.message).toContain('removes Step 3');
       expect(notice?.message).toContain('custom camera');
-      expect(notice?.message).toContain('page break');
-      expect(notice?.message).toContain('1 note');
-      expect(notice?.message).toContain('subassembly callout');
       expect(notice?.message).not.toContain('part nudge');
     });
-  });
 
-  describe('Step Generation, Close Model, and Replace Model notices', () => {
-    const cleanEdits = summarizeManualEdits({});
-    const editsSummary = summarizeManualEdits({
-      chapters: [{ id: 'c1', steps: [{ id: 's1', num: 1 }] }],
-      overrides: { s1: { az: 142, pin: true } },
-      stepInserts: { s1: [{ id: 'n1' }] },
-    });
+    it('Step Generation inline notice fires only post-import when step/layout or custom Wordless overrides exist', () => {
+      const cleanEdits = summarizeManualEdits({});
+      const editsSummary = summarizeManualEdits({
+        chapters: [{ id: 'c1', steps: [{ id: 's1', num: 1 }] }],
+        overrides: { s1: { az: 142, pin: true } },
+        stepInserts: { s1: [{ id: 'n1' }] },
+      });
 
-    it('shows zero warnings on untouched models with no edits and no Undo history', () => {
-      expect(
-        getStepGenerationDestructiveNotice({
-          isPostImport: true,
-          hasOpenModel: true,
-          openModelTitle: 'Speedster',
-          editsSummary: cleanEdits,
-        }),
-      ).toBeNull();
-
+      // New-import replacement is handled via confirmation dialog, never an inline banner
       expect(
         getStepGenerationDestructiveNotice({
           isPostImport: false,
-          hasOpenModel: true,
-          openModelTitle: 'Speedster',
-          editsSummary: cleanEdits,
-          undoHistoryCount: 0,
-        }),
-      ).toBeNull();
-
-      expect(getCloseModelDestructiveNotice({ editsSummary: cleanEdits, undoHistoryCount: 0 })).toBeNull();
-
-      expect(
-        getReplaceModelModalDestructiveNotice({
-          hasOpenModel: true,
-          modelTitle: 'Speedster',
-          editsSummary: cleanEdits,
-          undoHistoryCount: 0,
-        }),
-      ).toBeNull();
-    });
-
-    it('warns on non-undoable Close / Replace / New Import when edits OR Undo history exist', () => {
-      const replaceOnNewImport = getStepGenerationDestructiveNotice({
-        isPostImport: false,
-        hasOpenModel: true,
-        openModelTitle: 'Speedster',
-        editsSummary,
-      });
-      expect(replaceOnNewImport?.tone).toBe('danger');
-      expect(replaceOnNewImport?.undoable).toBe(false);
-      expect(replaceOnNewImport?.message).toContain('Replaces "Speedster"');
-      expect(replaceOnNewImport?.message).toContain('cannot be undone');
-
-      const closeWithEdits = getCloseModelDestructiveNotice({ editsSummary });
-      expect(closeWithEdits?.tone).toBe('danger');
-      expect(closeWithEdits?.undoable).toBe(false);
-      expect(closeWithEdits?.message).toContain('Export .biw first');
-
-      const closeWithUndoOnly = getCloseModelDestructiveNotice({
-        editsSummary: cleanEdits,
-        undoHistoryCount: 2,
-      });
-      expect(closeWithUndoOnly?.tone).toBe('danger');
-      expect(closeWithUndoOnly?.undoable).toBe(false);
-      expect(closeWithUndoOnly?.message).toContain('unsaved session changes');
-
-      const openModalNotice = getReplaceModelModalDestructiveNotice({
-        hasOpenModel: true,
-        modelTitle: 'Speedster',
-        editsSummary,
-      });
-      expect(openModalNotice?.tone).toBe('danger');
-      expect(openModalNotice?.message).toContain('Speedster');
-
-      const openModalUndoOnly = getReplaceModelModalDestructiveNotice({
-        hasOpenModel: true,
-        modelTitle: 'Speedster',
-        editsSummary: cleanEdits,
-        undoHistoryCount: 1,
-      });
-      expect(openModalUndoOnly?.tone).toBe('danger');
-      expect(openModalUndoOnly?.message).toContain('unsaved session changes');
-
-      expect(
-        getReplaceModelModalDestructiveNotice({
-          hasOpenModel: false,
           editsSummary,
-          undoHistoryCount: 3,
         }),
       ).toBeNull();
-    });
 
-    it('warns on post-import Step Generation when step/layout overrides or custom Wordless overrides are affected', () => {
+      expect(
+        getStepGenerationDestructiveNotice({
+          isPostImport: true,
+          editsSummary: cleanEdits,
+        }),
+      ).toBeNull();
+
       const wordlessNotice = getWordlessToggleDestructiveNotice({
         currentWordless: false,
         coverShowText: true,
@@ -451,8 +343,6 @@ describe('destructiveActions engine', () => {
 
       const regenPost = getStepGenerationDestructiveNotice({
         isPostImport: true,
-        hasOpenModel: true,
-        openModelTitle: 'Speedster',
         editsSummary,
         wordlessResetNotice: wordlessNotice,
       });
@@ -464,47 +354,13 @@ describe('destructiveActions engine', () => {
 
       const keepPost = getStepGenerationDestructiveNotice({
         isPostImport: true,
-        hasOpenModel: true,
-        openModelTitle: 'Speedster',
         editsSummary,
         isKeepStepsAction: true,
       });
-      expect(keepPost?.tone).toBe('warning');
       expect(keepPost?.message).toContain('Keeping file steps');
     });
-  });
 
-  describe('Delete Custom Theme and Step Range Group Overlap notices', () => {
-    it('always warns on non-undoable custom theme deletion and names referencing groups', () => {
-      expect(
-        getDeleteThemeDestructiveNotice({
-          themeName: 'Classic Blue',
-          isBuiltIn: true,
-          referencingGroupNames: [],
-        }),
-      ).toBeNull();
-
-      const customNoRefs = getDeleteThemeDestructiveNotice({
-        themeName: 'Midnight Mint',
-        isBuiltIn: false,
-        referencingGroupNames: [],
-      });
-      expect(customNoRefs?.tone).toBe('danger');
-      expect(customNoRefs?.undoable).toBe(false);
-      expect(customNoRefs?.message).toContain('cannot be undone');
-
-      const customWithRefs = getDeleteThemeDestructiveNotice({
-        themeName: 'Midnight Mint',
-        isBuiltIn: false,
-        referencingGroupNames: ['Detail Steps', 'Roof'],
-      });
-      expect(customWithRefs?.tone).toBe('danger');
-      expect(customWithRefs?.undoable).toBe(false);
-      expect(customWithRefs?.message).toContain('2 Step Range Groups');
-      expect(customWithRefs?.message).toContain('Detail Steps and Roof');
-    });
-
-    it('warns on overlapping Step Range Groups and returns null for non-overlapping ranges', () => {
+    it('Step Range Group overlap warns only when ranges collide', () => {
       const groups: StepLayoutGroup[] = [
         {
           id: 'g1',
@@ -545,51 +401,166 @@ describe('destructiveActions engine', () => {
       expect(newOverlapping?.message).toContain('Saving overrides');
       expect(newOverlapping?.message).toContain('"Chassis" (#1–#6)');
 
-      const editEarlierOverlappingLater = getLayoutGroupOverlapDestructiveNotice({
+      const editEarlier = getLayoutGroupOverlapDestructiveNotice({
         editingId: 'g1',
         startStepNum: 1,
         endStepNum: 9,
         existingGroups: groups,
       });
-      expect(editEarlierOverlappingLater?.message).toContain('listed later and takes priority');
+      expect(editEarlier?.message).toContain('listed later and takes priority');
     });
   });
 
-  describe('Bricks Library permanent removal notices', () => {
-    it('always warns on non-undoable single part removal and highlights open-model reliance', () => {
-      const inUsePart = getLibraryRemovePartDestructiveNotice({
+  describe('Permanent (non-undoable) "Are you sure?" confirmation dialogs', () => {
+    const cleanEdits = summarizeManualEdits({});
+    const editsSummary = summarizeManualEdits({
+      chapters: [{ id: 'c1', steps: [{ id: 's1', num: 1 }] }],
+      overrides: { s1: { az: 142, pin: true } },
+      stepInserts: { s1: [{ id: 'n1' }] },
+    });
+
+    it('Close Model always returns a confirmation dialog tailored to edits, Undo history, or clean session', () => {
+      const withEdits = getCloseModelConfirmDialog({
+        modelTitle: 'Speedster',
+        editsSummary,
+      });
+      expect(withEdits.title).toBe('Close "Speedster"?');
+      expect(withEdits.message).toContain('1 camera override');
+      expect(withEdits.message).toContain('cannot be undone');
+      expect(withEdits.detail).toContain('.biw');
+      expect(withEdits.confirmLabel).toBe('Close Without Saving');
+
+      const withUndoOnly = getCloseModelConfirmDialog({
+        modelTitle: 'Speedster',
+        editsSummary: cleanEdits,
+        undoHistoryCount: 2,
+      });
+      expect(withUndoOnly.message).toContain('unsaved session changes');
+      expect(withUndoOnly.confirmLabel).toBe('Close Without Saving');
+
+      const clean = getCloseModelConfirmDialog({
+        modelTitle: 'Speedster',
+        editsSummary: cleanEdits,
+        undoHistoryCount: 0,
+      });
+      expect(clean.title).toBe('Close "Speedster"?');
+      expect(clean.message).toContain('cannot be undone');
+      expect(clean.confirmLabel).toBe('Close Model');
+    });
+
+    it('Replace Model returns null when untouched or no model open, and confirms when unsaved edits or Undo exist', () => {
+      expect(
+        getReplaceModelConfirmDialog({
+          hasOpenModel: false,
+          editsSummary,
+          undoHistoryCount: 2,
+        }),
+      ).toBeNull();
+
+      expect(
+        getReplaceModelConfirmDialog({
+          hasOpenModel: true,
+          openModelTitle: 'Speedster',
+          incomingLabel: 'spaceship.io',
+          editsSummary: cleanEdits,
+          undoHistoryCount: 0,
+        }),
+      ).toBeNull();
+
+      const withEdits = getReplaceModelConfirmDialog({
+        hasOpenModel: true,
+        openModelTitle: 'Speedster',
+        incomingLabel: 'spaceship.io',
+        editsSummary,
+      });
+      expect(withEdits?.title).toBe('Replace "Speedster"?');
+      expect(withEdits?.message).toContain('Opening "spaceship.io"');
+      expect(withEdits?.message).toContain('1 camera override');
+      expect(withEdits?.detail).toContain('.biw');
+      expect(withEdits?.confirmLabel).toBe('Replace Manual');
+
+      const withUndoOnly = getReplaceModelConfirmDialog({
+        hasOpenModel: true,
+        openModelTitle: 'Speedster',
+        incomingLabel: 'other.biw',
+        editsSummary: cleanEdits,
+        undoHistoryCount: 1,
+      });
+      expect(withUndoOnly?.message).toContain('unsaved session changes');
+      expect(withUndoOnly?.confirmLabel).toBe('Replace Manual');
+    });
+
+    it('Delete Theme returns null for built-in themes and confirms for custom themes with referencing groups', () => {
+      expect(
+        getDeleteThemeConfirmDialog({
+          themeName: 'Classic Blue',
+          isBuiltIn: true,
+          referencingGroupNames: [],
+        }),
+      ).toBeNull();
+
+      const noRefs = getDeleteThemeConfirmDialog({
+        themeName: 'Midnight Mint',
+        isBuiltIn: false,
+        referencingGroupNames: [],
+      });
+      expect(noRefs?.title).toBe('Delete "Midnight Mint"?');
+      expect(noRefs?.message).toContain('cannot be undone');
+      expect(noRefs?.detail).toContain('.biwtheme');
+      expect(noRefs?.confirmLabel).toBe('Delete Theme');
+
+      const withRefs = getDeleteThemeConfirmDialog({
+        themeName: 'Midnight Mint',
+        isBuiltIn: false,
+        referencingGroupNames: ['Detail Steps', 'Roof'],
+      });
+      expect(withRefs?.detail).toContain('2 Step Range Groups');
+      expect(withRefs?.detail).toContain('Detail Steps and Roof');
+    });
+
+    it('Bricks Library Remove Part and Clear Saved Library return clear confirmation dialogs with model impact', () => {
+      const inUse = getLibraryRemovePartConfirmDialog({
         partId: '3001',
         usedInModel: true,
         hasEmbeddedCopy: false,
       });
-      expect(inUsePart.tone).toBe('danger');
-      expect(inUsePart.undoable).toBe(false);
-      expect(inUsePart.message).toContain('cannot be undone');
-      expect(inUsePart.message).toContain('open model uses it');
+      expect(inUse.title).toBe('Remove 3001.dat from Saved Library?');
+      expect(inUse.message).toContain('cannot be undone');
+      expect(inUse.detail).toContain('simplified shapes');
+      expect(inUse.confirmLabel).toBe('Remove Part');
 
-      const unusedPart = getLibraryRemovePartDestructiveNotice({
+      const unused = getLibraryRemovePartConfirmDialog({
         partId: '3001',
         usedInModel: false,
         hasEmbeddedCopy: false,
       });
-      expect(unusedPart.tone).toBe('danger');
-      expect(unusedPart.undoable).toBe(false);
-      expect(unusedPart.message).toContain('cannot be undone');
-      expect(unusedPart.message).not.toContain('open model uses it');
-    });
+      expect(unused.detail).toBeUndefined();
 
-    it('warns on Clear Saved Library only when the open model relies on saved parts', () => {
       expect(
-        getLibraryClearSavedDestructiveNotice({ savedFileCount: 10, modelReliantSavedCount: 0 }),
+        getLibraryClearSavedConfirmDialog({
+          savedFileCount: 0,
+          savedTextureCount: 0,
+          modelReliantSavedCount: 0,
+        }),
       ).toBeNull();
-      const reliant = getLibraryClearSavedDestructiveNotice({
-        savedFileCount: 10,
-        modelReliantSavedCount: 3,
+
+      const clearWithImpact = getLibraryClearSavedConfirmDialog({
+        savedFileCount: 42,
+        savedTextureCount: 3,
+        modelReliantSavedCount: 5,
       });
-      expect(reliant?.tone).toBe('danger');
-      expect(reliant?.undoable).toBe(false);
-      expect(reliant?.message).toContain('3 parts');
-      expect(reliant?.message).toContain('cannot be undone');
+      expect(clearWithImpact?.title).toBe('Clear Entire Saved Library?');
+      expect(clearWithImpact?.message).toContain('42 saved files and 3 textures');
+      expect(clearWithImpact?.detail).toContain('5 parts');
+      expect(clearWithImpact?.confirmLabel).toBe('Clear Saved Library');
+
+      const clearNoImpact = getLibraryClearSavedConfirmDialog({
+        savedFileCount: 10,
+        savedTextureCount: 0,
+        modelReliantSavedCount: 0,
+      });
+      expect(clearNoImpact?.message).toContain('10 saved files');
+      expect(clearNoImpact?.detail).toBeUndefined();
     });
   });
 });

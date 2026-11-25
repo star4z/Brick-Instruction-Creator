@@ -23,6 +23,14 @@ export interface DestructiveNotice {
   undoable: boolean;
 }
 
+export interface PermanentActionConfirmSpec {
+  title: string;
+  message: string;
+  detail?: string;
+  confirmLabel: string;
+  cancelLabel: string;
+}
+
 export interface PartOffsetLike {
   x?: number;
   y?: number;
@@ -626,38 +634,17 @@ export function getPartsMoveStepDestructiveNotice(input: {
 
 /**
  * 5. Step Generation / Import Assistant Modal (`#importModal` → `#impBtnAuto` & `#impBtnKeep`):
- *    - New import (not undoable): warns when replacing an open manual that has unsaved edits or Undo history.
- *    - Post-import (undoable): warns ONLY when existing step/layout overrides or custom Wordless text
- *      overrides made elsewhere will be cleared or shifted.
+ *    Post-import (undoable) ONLY: warns when existing step/layout overrides or custom Wordless
+ *    text overrides made elsewhere will be cleared or shifted. New-import replacement is handled
+ *    by the "Are you sure?" confirmation dialog (`getReplaceModelConfirmDialog`) before import starts.
  */
 export function getStepGenerationDestructiveNotice(input: {
   isPostImport: boolean;
-  hasOpenModel: boolean;
-  openModelTitle?: string | null;
   editsSummary: ManualEditsSummary;
-  undoHistoryCount?: number;
   wordlessResetNotice?: DestructiveNotice | null;
   isKeepStepsAction?: boolean;
 }): DestructiveNotice | null {
-  if (!input.isPostImport) {
-    if (!input.hasOpenModel) return null;
-    const title = (input.openModelTitle || 'current manual').trim();
-    if (input.editsSummary.hasAnyEdits) {
-      return {
-        tone: 'danger',
-        message: `Replaces "${title}" and permanently clears unsaved edits (${formatCompactList(input.editsSummary.items, 4)}) and Undo history — cannot be undone.`,
-        undoable: false,
-      };
-    }
-    if ((input.undoHistoryCount || 0) > 0) {
-      return {
-        tone: 'danger',
-        message: `Replaces "${title}" and permanently discards unsaved session changes and Undo history — cannot be undone.`,
-        undoable: false,
-      };
-    }
-    return null;
-  }
+  if (!input.isPostImport) return null;
 
   const affected = [...input.editsSummary.stepItems];
   if (input.wordlessResetNotice) {
@@ -682,88 +669,7 @@ export function getStepGenerationDestructiveNotice(input: {
 }
 
 /**
- * 6. Menu Drawer → Close Model (`#menuCloseModelBtn`, NOT undoable):
- *    Warns when the open manual has unsaved edits or Undo history that closing will permanently clear.
- */
-export function getCloseModelDestructiveNotice(input: {
-  editsSummary: ManualEditsSummary;
-  undoHistoryCount?: number;
-}): DestructiveNotice | null {
-  if (input.editsSummary.hasAnyEdits) {
-    return {
-      tone: 'danger',
-      message: `Permanently clears unsaved edits (${formatCompactList(input.editsSummary.items, 4)}) and Undo history — cannot be undone. Export .biw first to save.`,
-      undoable: false,
-    };
-  }
-  if ((input.undoHistoryCount || 0) > 0) {
-    return {
-      tone: 'danger',
-      message: 'Permanently discards unsaved session changes and clears Undo history — cannot be undone. Export .biw first to save.',
-      undoable: false,
-    };
-  }
-  return null;
-}
-
-/**
- * 7. Open / Import Model or Project dialog (`#openModelModal`) & Missing Parts modal (NOT undoable):
- *    Warns when an open manual has unsaved edits or Undo history that importing another file will discard.
- */
-export function getReplaceModelModalDestructiveNotice(input: {
-  hasOpenModel: boolean;
-  modelTitle?: string | null;
-  editsSummary: ManualEditsSummary;
-  undoHistoryCount?: number;
-}): DestructiveNotice | null {
-  if (!input.hasOpenModel) return null;
-  const title = (input.modelTitle || 'current manual').trim();
-  if (input.editsSummary.hasAnyEdits) {
-    return {
-      tone: 'danger',
-      message: `Opening another file replaces "${title}" and permanently clears unsaved edits (${formatCompactList(input.editsSummary.items, 4)}) and Undo history. Export .biw first to keep them.`,
-      undoable: false,
-    };
-  }
-  if ((input.undoHistoryCount || 0) > 0) {
-    return {
-      tone: 'danger',
-      message: `Opening another file replaces "${title}" and permanently discards unsaved session changes and Undo history. Export .biw first to keep them.`,
-      undoable: false,
-    };
-  }
-  return null;
-}
-
-/**
- * 8. Style Popover → Delete Custom Theme (`#btnDeleteTheme`, NOT undoable):
- *    Built-in themes return null (button disabled). Custom themes always warn that deletion
- *    is permanent and cannot be undone, and name any Step Range Groups whose theme override
- *    will also be cleared.
- */
-export function getDeleteThemeDestructiveNotice(input: {
-  themeName: string;
-  isBuiltIn: boolean;
-  referencingGroupNames: ReadonlyArray<string>;
-}): DestructiveNotice | null {
-  if (input.isBuiltIn) return null;
-  const refs = input.referencingGroupNames.filter(Boolean);
-  if (refs.length > 0) {
-    return {
-      tone: 'danger',
-      message: `Deleting "${input.themeName}" permanently removes it from browser storage and clears the theme override on ${plural(refs.length, 'Step Range Group')} (${formatCompactList(refs, 2)}) — cannot be undone.`,
-      undoable: false,
-    };
-  }
-  return {
-    tone: 'danger',
-    message: `Deleting "${input.themeName}" permanently removes it from browser storage — cannot be undone. Export first to keep a backup.`,
-    undoable: false,
-  };
-}
-
-/**
- * 9. Page Setup → Step Range Group Editor (`#layoutGroupEditor`, undoable):
+ * 6. Page Setup → Step Range Group Editor (`#layoutGroupEditor`, undoable):
  *    Warns ONLY when the step range overlaps another existing Step Range Group.
  */
 export function getLayoutGroupOverlapDestructiveNotice(input: {
@@ -819,43 +725,156 @@ export function getLayoutGroupOverlapDestructiveNotice(input: {
   return null;
 }
 
+// ============================================================================
+// PERMANENT (NON-UNDOABLE) ACTIONS — "ARE YOU SURE?" CONFIRMATION DIALOGS
+// ============================================================================
+
 /**
- * 10. Bricks Library → Remove Single Saved Part (`#libPreviewRemoveBtn`, NOT undoable):
- *     Immediately deletes the saved part from browser storage with no Undo — always warns,
- *     and calls out when the open model relies on it.
+ * Permanent 1: Menu Drawer → Close Model (`#menuCloseModelBtn`).
+ * Always confirms because closing permanently removes the session from browser storage
+ * and cannot be undone; enumerates unsaved edits when present.
  */
-export function getLibraryRemovePartDestructiveNotice(input: {
-  partId: string;
-  usedInModel: boolean;
-  hasEmbeddedCopy: boolean;
-}): DestructiveNotice {
-  if (input.usedInModel && !input.hasEmbeddedCopy) {
+export function getCloseModelConfirmDialog(input: {
+  modelTitle?: string | null;
+  editsSummary: ManualEditsSummary;
+  undoHistoryCount?: number;
+}): PermanentActionConfirmSpec {
+  const title = (input.modelTitle || 'this manual').trim();
+  if (input.editsSummary.hasAnyEdits) {
     return {
-      tone: 'danger',
-      message: `Permanently removes ${input.partId}.dat from browser storage — cannot be undone. Your open model uses it and will switch to a simplified shape.`,
-      undoable: false,
+      title: `Close "${title}"?`,
+      message: `You have unsaved edits (${formatCompactList(input.editsSummary.items, 4)}) that will be permanently cleared along with Undo history. This cannot be undone.`,
+      detail: 'Export a .biw project file first if you want to keep your edits.',
+      confirmLabel: 'Close Without Saving',
+      cancelLabel: 'Cancel',
+    };
+  }
+  if ((input.undoHistoryCount || 0) > 0) {
+    return {
+      title: `Close "${title}"?`,
+      message: 'You have unsaved session changes that will be permanently discarded along with Undo history. This cannot be undone.',
+      detail: 'Export a .biw project file first if you want to keep your edits.',
+      confirmLabel: 'Close Without Saving',
+      cancelLabel: 'Cancel',
     };
   }
   return {
-    tone: 'danger',
-    message: `Permanently removes ${input.partId}.dat from browser storage — cannot be undone.`,
-    undoable: false,
+    title: `Close "${title}"?`,
+    message: `Closing removes "${title}" from this workspace and clears the saved browser session. This cannot be undone.`,
+    confirmLabel: 'Close Model',
+    cancelLabel: 'Cancel',
   };
 }
 
 /**
- * 11. Bricks Library → Clear Entire Saved Library (`#libClearSavedBtn`, NOT undoable):
- *     Supplements the danger section description & confirmation with a live notice when
- *     the currently open model relies on saved library parts.
+ * Permanent 2: Importing another model or `.biw` project while a manual is already open.
+ * Returns null when no model is open or the open manual has no unsaved edits / Undo history.
  */
-export function getLibraryClearSavedDestructiveNotice(input: {
-  savedFileCount: number;
-  modelReliantSavedCount: number;
-}): DestructiveNotice | null {
-  if (input.savedFileCount <= 0 || input.modelReliantSavedCount <= 0) return null;
+export function getReplaceModelConfirmDialog(input: {
+  hasOpenModel: boolean;
+  openModelTitle?: string | null;
+  incomingLabel?: string | null;
+  editsSummary: ManualEditsSummary;
+  undoHistoryCount?: number;
+}): PermanentActionConfirmSpec | null {
+  if (!input.hasOpenModel) return null;
+  const openTitle = (input.openModelTitle || 'current manual').trim();
+  const incoming = (input.incomingLabel || '').trim();
+  const opener = incoming ? `Opening "${incoming}"` : 'Opening another file';
+
+  if (input.editsSummary.hasAnyEdits) {
+    return {
+      title: `Replace "${openTitle}"?`,
+      message: `${opener} replaces "${openTitle}" and permanently clears unsaved edits (${formatCompactList(input.editsSummary.items, 4)}) and Undo history. This cannot be undone.`,
+      detail: 'Export a .biw project file first if you want to keep your edits.',
+      confirmLabel: 'Replace Manual',
+      cancelLabel: 'Cancel',
+    };
+  }
+  if ((input.undoHistoryCount || 0) > 0) {
+    return {
+      title: `Replace "${openTitle}"?`,
+      message: `${opener} replaces "${openTitle}" and permanently discards unsaved session changes and Undo history. This cannot be undone.`,
+      detail: 'Export a .biw project file first if you want to keep your edits.',
+      confirmLabel: 'Replace Manual',
+      cancelLabel: 'Cancel',
+    };
+  }
+  return null;
+}
+
+/**
+ * Permanent 3: Style Popover → Delete Custom Theme (`#btnDeleteTheme`).
+ * Built-in themes return null (button disabled). Custom themes always ask for confirmation
+ * and list any Step Range Groups whose theme override will also be cleared.
+ */
+export function getDeleteThemeConfirmDialog(input: {
+  themeName: string;
+  isBuiltIn: boolean;
+  referencingGroupNames: ReadonlyArray<string>;
+}): PermanentActionConfirmSpec | null {
+  if (input.isBuiltIn) return null;
+  const refs = input.referencingGroupNames.filter(Boolean);
   return {
-    tone: 'danger',
-    message: `Your open model currently renders ${plural(input.modelReliantSavedCount, 'part')} from this Saved Library — clearing switches them to simplified shapes and cannot be undone.`,
-    undoable: false,
+    title: `Delete "${input.themeName}"?`,
+    message: `Permanently removes "${input.themeName}" from browser storage. This cannot be undone.`,
+    detail:
+      refs.length > 0
+        ? `Also clears the theme override on ${plural(refs.length, 'Step Range Group')} (${formatCompactList(refs, 3)}).`
+        : 'Export this theme (.biwtheme) first if you want to keep a backup.',
+    confirmLabel: 'Delete Theme',
+    cancelLabel: 'Cancel',
+  };
+}
+
+/**
+ * Permanent 4: Bricks Library → Remove Single Saved Part (`#libPreviewRemoveBtn`).
+ * Always confirms because deleting from IndexedDB cannot be undone; warns when the
+ * currently open model renders this part from Saved Library.
+ */
+export function getLibraryRemovePartConfirmDialog(input: {
+  partId: string;
+  usedInModel: boolean;
+  hasEmbeddedCopy: boolean;
+}): PermanentActionConfirmSpec {
+  return {
+    title: `Remove ${input.partId}.dat from Saved Library?`,
+    message: `Permanently removes ${input.partId}.dat from browser storage. This cannot be undone.`,
+    detail:
+      input.usedInModel && !input.hasEmbeddedCopy
+        ? 'Your open model currently renders this part from Saved Library — removing it switches those parts to simplified shapes until re-fetched.'
+        : undefined,
+    confirmLabel: 'Remove Part',
+    cancelLabel: 'Cancel',
+  };
+}
+
+/**
+ * Permanent 5: Bricks Library → Clear Entire Saved Library (`#libClearSavedBtn`).
+ * Returns null when nothing is saved; otherwise asks for confirmation with exact counts
+ * and open-model impact details.
+ */
+export function getLibraryClearSavedConfirmDialog(input: {
+  savedFileCount: number;
+  savedTextureCount?: number;
+  modelReliantSavedCount: number;
+}): PermanentActionConfirmSpec | null {
+  const files = Math.max(0, Math.round(Number(input.savedFileCount) || 0));
+  const textures = Math.max(0, Math.round(Number(input.savedTextureCount) || 0));
+  if (files + textures <= 0) return null;
+
+  const countParts: string[] = [];
+  if (files > 0) countParts.push(plural(files, 'saved file'));
+  if (textures > 0) countParts.push(plural(textures, 'texture'));
+
+  return {
+    title: 'Clear Entire Saved Library?',
+    message: `Permanently deletes all ${countParts.join(' and ')} from browser storage. Your loaded model, embedded .io shapes, and built-in shapes stay intact, but this cannot be undone.`,
+    detail:
+      input.modelReliantSavedCount > 0
+        ? `Your open model currently renders ${plural(input.modelReliantSavedCount, 'part')} from Saved Library — clearing switches them to simplified shapes until re-fetched.`
+        : undefined,
+    confirmLabel: 'Clear Saved Library',
+    cancelLabel: 'Cancel',
   };
 }

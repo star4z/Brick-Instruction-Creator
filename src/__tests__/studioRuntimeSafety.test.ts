@@ -292,33 +292,54 @@ describe('studioRuntime safety checks', () => {
     expect(orbitBody).not.toContain('renderContextOverlay(page);');
   });
 
-  it('wires destructive notices for off-screen override impacts and non-undoable actions without warning on undoable on-screen actions', () => {
+  it('uses inline notices only for undoable off-screen override impacts and #confirmActionModal for permanent actions', () => {
     const html = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf8');
     const runtime = fs.readFileSync(path.resolve(process.cwd(), 'src/studioRuntime.ts'), 'utf8');
     const css = fs.readFileSync(path.resolve(process.cwd(), 'src/index.css'), 'utf8');
 
     expect(css).toContain('.destructive-notice');
     expect(css).toContain('.destructive-notice[data-tone="warning"]');
-    expect(css).toContain('.destructive-notice[data-tone="danger"]');
 
+    // Static inline notice slots are strictly for undoable off-screen / cross-surface overrides
     for (const id of [
-      'menuCloseModelNotice',
-      'themeDeleteNotice',
-      'mpReplaceModelNotice',
       'impKeepNotice',
       'impActionNotice',
       'grpOverlapNotice',
       'wordlessToggleNotice',
       'applyAngleConflictNotice',
-      'openModelReplaceNotice',
-      'libClearModelImpactNotice',
     ]) {
       expect(html).toContain(`id="${id}"`);
       expect(runtime).toContain(`'${id}'`);
     }
 
-    // Undoable actions that only affect what is visible on the current screen must not render warnings
-    for (const removedId of ['overviewClearPinsNotice', 'grpDeleteNotice']) {
+    // Unified "Are you sure?" confirmation dialog for permanent (non-undoable) actions
+    for (const id of [
+      'confirmActionModal',
+      'confirmActionTitle',
+      'confirmActionMessage',
+      'confirmActionDetail',
+      'confirmActionCancel',
+      'confirmActionConfirm',
+    ]) {
+      expect(html).toContain(`id="${id}"`);
+      expect(runtime).toContain(`'${id}'`);
+    }
+    expect(runtime).toContain('function openConfirmActionDialog(');
+    expect(runtime).toContain('if (isConfirmActionDialogOpen())');
+    // No raw browser window.confirm() calls left for permanent actions
+    expect(runtime).not.toMatch(/\bconfirm\(/);
+
+    // Neither undoable on-screen actions nor permanent actions render inline warning banners
+    for (const removedId of [
+      'overviewClearPinsNotice',
+      'grpDeleteNotice',
+      'menuCloseModelNotice',
+      'themeDeleteNotice',
+      'mpReplaceModelNotice',
+      'openModelReplaceNotice',
+      'libClearModelImpactNotice',
+      'libClearConfirmWrap',
+    ]) {
       expect(html).not.toContain(`id="${removedId}"`);
       expect(runtime).not.toContain(`'${removedId}'`);
     }
@@ -329,12 +350,12 @@ describe('studioRuntime safety checks', () => {
       'getMergeStepDestructiveNotice(',
       'getPartsMoveStepDestructiveNotice(',
       'getStepGenerationDestructiveNotice(',
-      'getCloseModelDestructiveNotice(',
-      'getReplaceModelModalDestructiveNotice(',
-      'getDeleteThemeDestructiveNotice(',
       'getLayoutGroupOverlapDestructiveNotice(',
-      'getLibraryRemovePartDestructiveNotice(',
-      'getLibraryClearSavedDestructiveNotice(',
+      'getCloseModelConfirmDialog(',
+      'getReplaceModelConfirmDialog(',
+      'getDeleteThemeConfirmDialog(',
+      'getLibraryRemovePartConfirmDialog(',
+      'getLibraryClearSavedConfirmDialog(',
     ]) {
       expect(runtime).toContain(fnName);
     }
@@ -346,6 +367,11 @@ describe('studioRuntime safety checks', () => {
       'getDeleteDividerDestructiveNotice',
       'getPartsActionDestructiveNotices',
       'getLayoutGroupDestructiveNotices',
+      'getCloseModelDestructiveNotice',
+      'getReplaceModelModalDestructiveNotice',
+      'getDeleteThemeDestructiveNotice',
+      'getLibraryRemovePartDestructiveNotice',
+      'getLibraryClearSavedDestructiveNotice',
     ]) {
       expect(runtime).not.toContain(removedFn);
     }
