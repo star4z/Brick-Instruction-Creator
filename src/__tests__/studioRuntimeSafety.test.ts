@@ -355,4 +355,23 @@ describe('studioRuntime safety checks', () => {
     expect(pageSetupHtml).toContain('id="pageSetupDoneBtn"');
     expect(runtime).not.toContain('pageSetupPrintBtn');
   });
+
+  it('keeps the 3-arc half-barbed brand logo synchronized across public/logo.svg, index.html, and studioRuntime.ts', () => {
+    const logoSvg = fs.readFileSync(path.resolve(process.cwd(), 'public/logo.svg'), 'utf8');
+    const html = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf8');
+    const runtime = fs.readFileSync(path.resolve(process.cwd(), 'src/studioRuntime.ts'), 'utf8');
+
+    const svgPaths = Array.from(logoSvg.matchAll(/<path d="([^"]+)" fill="([^"]+)"\/>/g)).map(
+      ([, d, fill]) => [d, fill] as const,
+    );
+    expect(svgPaths).toHaveLength(3);
+    expect(svgPaths.map(([, fill]) => fill)).toEqual(['#38bdf8', '#7c152e', '#ed7d1f']);
+
+    // Every path in public/logo.svg appears in all 5 inline SVG logos in index.html and in BRAND_LOGO_PATHS
+    for (const [d, fill] of svgPaths) {
+      const htmlTag = `<path d="${d}" fill="${fill}"/>`;
+      expect(html.split(htmlTag).length - 1).toBe(5);
+      expect(runtime).toContain(`['${d}', '${fill}']`);
+    }
+  });
 });
