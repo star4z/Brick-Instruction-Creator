@@ -695,9 +695,9 @@ ${customFontFacesCss}  :root {
     font-size: 13px; font-weight: 800; width: fit-content; box-shadow: none;
   }
   .step-cue-icon {
-    width: 30px; height: 30px; border-radius: 999px; background: var(--accent); color: #ffffff;
+    width: 30px; height: 30px; border-radius: 999px;
+    background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent);
     display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
-    box-shadow: 0 3px 10px rgba(0,0,0,0.16);
   }
 
   .page-step-tabs { display: flex; flex-wrap: wrap; gap: 4px; }

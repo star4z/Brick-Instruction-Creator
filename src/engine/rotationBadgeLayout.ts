@@ -122,6 +122,69 @@ export function computeRotationBadgeMetrics(
   };
 }
 
+export interface RotationBadgeColors {
+  /** Soft, understated circular medallion fill color (CSS / Canvas compatible). */
+  bg: string;
+  /** Crisp arrow stroke color inside the medallion. */
+  fg: string;
+}
+
+function parseHexRgb(hex: string | undefined | null, fallback: [number, number, number]): [number, number, number] {
+  const s = String(hex || '').trim().replace(/^#/, '');
+  if (/^[0-9a-fA-F]{3}$/.test(s)) {
+    return [
+      parseInt(s[0] + s[0], 16),
+      parseInt(s[1] + s[1], 16),
+      parseInt(s[2] + s[2], 16),
+    ];
+  }
+  if (/^[0-9a-fA-F]{6}$/.test(s)) {
+    return [
+      parseInt(s.slice(0, 2), 16),
+      parseInt(s.slice(2, 4), 16),
+      parseInt(s.slice(4, 6), 16),
+    ];
+  }
+  return fallback;
+}
+
+function relLuminance([r, g, b]: [number, number, number]): number {
+  return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+}
+
+/**
+ * Derives a calm, understated circular medallion background and crisp arrow color
+ * from the active theme's accent and page background colors.
+ */
+export function resolveRotationBadgeColors(
+  accentHex?: string | null,
+  bgHex?: string | null,
+): RotationBadgeColors {
+  const [ar, ag, ab] = parseHexRgb(accentHex, [26, 115, 232]);
+  const bgRgb = parseHexRgb(bgHex, [255, 255, 255]);
+  const darkBg = relLuminance(bgRgb) < 0.45;
+
+  if (darkBg) {
+    // Subtle translucent accent wash on dark/blueprint pages
+    return {
+      bg: `rgba(${ar}, ${ag}, ${ab}, 0.18)`,
+      fg: `rgb(${ar}, ${ag}, ${ab})`,
+    };
+  }
+
+  // Light pages: soft, calm accent wash (never a glaring solid block)
+  // If the accent itself is very pale, darken the arrow stroke slightly for legibility.
+  const accentLum = relLuminance([ar, ag, ab]);
+  const fgR = accentLum > 0.72 ? Math.round(ar * 0.55) : ar;
+  const fgG = accentLum > 0.72 ? Math.round(ag * 0.55) : ag;
+  const fgB = accentLum > 0.72 ? Math.round(ab * 0.55) : ab;
+
+  return {
+    bg: `rgba(${ar}, ${ag}, ${ab}, 0.14)`,
+    fg: `rgb(${fgR}, ${fgG}, ${fgB})`,
+  };
+}
+
 /** Projects a 3D world point through a 4x4 column-major MVP matrix to NDC. */
 function projectPointToNdc(
   x: number,

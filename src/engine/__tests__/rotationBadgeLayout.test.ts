@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   computeRotationBadgeMetrics,
   computeRotationBadgePlacement,
+  resolveRotationBadgeColors,
 } from '../rotationBadgeLayout';
 
 /** Identity 4x4 column-major MVP where world (x, y) in [-1, 1] maps directly to NDC. */
@@ -19,6 +20,23 @@ function makeNdcQuad(x0: number, y0: number, x1: number, y1: number): Float32Arr
     x0, y0, 0,  x1, y1, 0,  x0, y1, 0,
   ]);
 }
+
+describe('resolveRotationBadgeColors', () => {
+  it('derives a soft translucent tint background with crisp accent arrows on light and dark themes', () => {
+    const light = resolveRotationBadgeColors('#1a73e8', '#d8ecfd');
+    expect(light.bg).toBe('rgba(26, 115, 232, 0.14)');
+    expect(light.fg).toBe('rgb(26, 115, 232)');
+
+    const dark = resolveRotationBadgeColors('#8ab4f8', '#1a1d24');
+    expect(dark.bg).toBe('rgba(138, 180, 248, 0.18)');
+    expect(dark.fg).toBe('rgb(138, 180, 248)');
+
+    // Pale accent on light background darkens the arrow stroke for contrast
+    const paleOnLight = resolveRotationBadgeColors('#f5f0a0', '#ffffff');
+    expect(paleOnLight.bg).toBe('rgba(245, 240, 160, 0.14)');
+    expect(paleOnLight.fg).not.toBe('rgb(245, 240, 160)');
+  });
+});
 
 describe('computeRotationBadgeMetrics', () => {
   const pt = (p: number) => p * 1.25;

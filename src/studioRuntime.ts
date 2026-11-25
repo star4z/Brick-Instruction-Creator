@@ -453,6 +453,7 @@ import {
 import {
   computeRotationBadgeMetrics,
   computeRotationBadgePlacement,
+  resolveRotationBadgeColors,
 } from './engine/rotationBadgeLayout';
 
 const BRAND_LOGO_ROTATION_DEG = 12;
@@ -8569,19 +8570,20 @@ function renderRotationCueBadgeHtml(cue, theme, typo, isTightSlot = false, wordl
   const disp = getRotationCueDisplay(cue, wordless);
   const label = disp.text;
   const m = computeRotationBadgeMetrics((p) => typo.pt(p), isTightSlot, disp);
+  const colors = resolveRotationBadgeColors(theme.accent, theme.bgColor);
   const svgInner = cue === 'flip_vertical'
     ? buildFlipVerticalIconInnerSvg()
     : buildYawRotateIconInnerSvg(cue === 'yaw_90_ccw');
 
   if (disp.iconOnly) {
-    return `<span class="inline-flex items-center justify-center rounded-full shrink-0" style="width:${m.medallionPx}px;height:${m.medallionPx}px;background:${theme.accent};color:#ffffff;box-shadow:0 3px 10px rgba(0,0,0,0.16)" title="${escHtml(disp.ariaLabel)}" aria-label="${escHtml(disp.ariaLabel)}">
-      <svg style="width:${m.svgPx}px;height:${m.svgPx}px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.05" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${svgInner}</svg>
+    return `<span class="inline-flex items-center justify-center rounded-full shrink-0" style="width:${m.medallionPx}px;height:${m.medallionPx}px;background:${colors.bg};color:${colors.fg}" title="${escHtml(disp.ariaLabel)}" aria-label="${escHtml(disp.ariaLabel)}">
+      <svg style="width:${m.svgPx}px;height:${m.svgPx}px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${svgInner}</svg>
     </span>`;
   }
 
   return `<span class="inline-flex items-center font-extrabold whitespace-nowrap shrink-0" style="gap:${m.gapPx}px;font-size:${m.fontPx}px;color:${theme.text || '#18181b'}" title="${escHtml(disp.ariaLabel)}">
-    <span class="rounded-full flex items-center justify-center shrink-0" style="width:${m.medallionPx}px;height:${m.medallionPx}px;background:${theme.accent};color:#ffffff;box-shadow:0 3px 10px rgba(0,0,0,0.16)">
-      <svg style="width:${m.svgPx}px;height:${m.svgPx}px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${svgInner}</svg>
+    <span class="rounded-full flex items-center justify-center shrink-0" style="width:${m.medallionPx}px;height:${m.medallionPx}px;background:${colors.bg};color:${colors.fg}">
+      <svg style="width:${m.svgPx}px;height:${m.svgPx}px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.15" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${svgInner}</svg>
     </span>
     <span class="tracking-tight leading-none">${escHtml(label)}</span>
   </span>`;
@@ -8602,32 +8604,28 @@ function measureRotationCueBadgeCanvas(ctx, cue, theme, typo, isTightSlot, wordl
 function drawRotationCueBadgeCanvasAt(ctx, cue, cueX, cueY, theme, typo, isTightSlot, _drawRRect, wordless = Boolean(state.wordlessMode)) {
   if (!cue || cue === 'none') return;
   const { disp, m, cueH } = measureRotationCueBadgeCanvas(ctx, cue, theme, typo, isTightSlot, wordless);
+  const colors = resolveRotationBadgeColors(theme.accent, theme.bgColor);
   const label = disp.text;
   const medallionD = m.medallionPx;
 
   ctx.save();
   ctx.font = themeCanvasFont(theme, 800, m.fontPx);
 
-  // Solid accent circular medallion (no outer white/blue circle outlines)
+  // Soft muted circular medallion (no outer white/blue outlines)
   const cx = cueX + medallionD / 2;
   const cy = cueY + cueH / 2;
   const r = medallionD / 2;
-  ctx.save();
-  ctx.shadowColor = 'rgba(0, 0, 0, 0.16)';
-  ctx.shadowBlur = 10;
-  ctx.shadowOffsetY = 2;
   ctx.beginPath();
   ctx.arc(cx, cy, r, 0, Math.PI * 2);
-  ctx.fillStyle = theme.accent;
+  ctx.fillStyle = colors.bg;
   ctx.fill();
-  ctx.restore();
 
-  // Clean, spacious white dual curved arrows inside medallion (no center dash)
+  // Clean, spacious dual curved arrows inside medallion (no center dash)
   ctx.save();
   ctx.translate(cx, cy);
   if (cue === 'yaw_90_ccw') ctx.scale(-1, 1);
-  ctx.strokeStyle = '#ffffff';
-  ctx.fillStyle = '#ffffff';
+  ctx.strokeStyle = colors.fg;
+  ctx.fillStyle = colors.fg;
   ctx.lineWidth = Math.max(1.8, medallionD * 0.082);
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
