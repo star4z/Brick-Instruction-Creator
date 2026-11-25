@@ -369,6 +369,27 @@ export function computeStudioLightDirs(azDeg: number): {
   };
 }
 
+/**
+ * Computes world-space normal-offset shadow biases [key, fill, overhead] calibrated to each
+ * shadow map's world texel size so grazing vertical walls & stud sides clear their own PCF
+ * disk completely (zero horizontal shadow-acne banding) while horizontal tops stay tight.
+ */
+export function computeShadowNormalOffsets(
+  modelRadius: number,
+  keyDim: number,
+  fillDim: number,
+  overDim: number,
+): [number, number, number] {
+  const keyTexelWorld = (2 * Math.max(20, modelRadius * 1.32)) / Math.max(1, keyDim);
+  const fillTexelWorld = (2 * Math.max(20, modelRadius * 1.36)) / Math.max(1, fillDim);
+  const overTexelWorld = (2 * Math.max(20, modelRadius * 1.4)) / Math.max(1, overDim);
+  return [
+    keyTexelWorld * 2.6,   // clears key PCF spread (2.2 texels)
+    fillTexelWorld * 3.0,  // clears fill PCF spread (2.6 texels)
+    overTexelWorld * 3.4,  // clears overhead PCF spread (2.8 texels) at 84° grazing angle
+  ];
+}
+
 // =========================================================================
 // GLSL Shaders (Pure WebGL 1.0, 24-bit Depth Packing, GGX PBR, PCF Shadows, SSAO)
 // =========================================================================
@@ -440,6 +461,11 @@ uniform mat4 uMVP;
 uniform mat4 uKeyMVP;
 uniform mat4 uFillMVP;
 uniform mat4 uOverMVP;
+uniform vec3 uEyePos;
+uniform vec3 uKeyDir;
+uniform vec3 uFillDir;
+uniform vec3 uOverDir;
+uniform vec3 uShadowNormalOffsets;
 varying vec3 vWorldPos;
 varying vec3 vWorldNorm;
 varying vec4 vCol;
@@ -453,11 +479,20 @@ void main() {
   vWorldNorm = aNorm;
   vCol = aCol;
   vUv = aUv;
-  vec4 kp = uKeyMVP * vec4(aPos, 1.0);
+  float nLen = length(aNorm);
+  vec3 nrm = nLen > 0.0001 ? (aNorm / nLen) : vec3(0.0, 1.0, 0.0);
+  if (dot(nrm, uEyePos - aPos) < 0.0) nrm = -nrm;
+  float kd = dot(nrm, normalize(uKeyDir));
+  float fd = dot(nrm, normalize(uFillDir));
+  float od = dot(nrm, normalize(uOverDir));
+  float keySin = sqrt(max(0.0, 1.0 - kd * kd));
+  float fillSin = sqrt(max(0.0, 1.0 - fd * fd));
+  float overSin = sqrt(max(0.0, 1.0 - od * od));
+  vec4 kp = uKeyMVP * vec4(aPos + nrm * (uShadowNormalOffsets.x * keySin), 1.0);
   vKeyCoord = (kp.xyz / kp.w) * 0.5 + 0.5;
-  vec4 fp = uFillMVP * vec4(aPos, 1.0);
+  vec4 fp = uFillMVP * vec4(aPos + nrm * (uShadowNormalOffsets.y * fillSin), 1.0);
   vFillCoord = (fp.xyz / fp.w) * 0.5 + 0.5;
-  vec4 op = uOverMVP * vec4(aPos, 1.0);
+  vec4 op = uOverMVP * vec4(aPos + nrm * (uShadowNormalOffsets.z * overSin), 1.0);
   vOverCoord = (op.xyz / op.w) * 0.5 + 0.5;
 }
 `;
@@ -592,15 +627,15 @@ void main() {
   float NdotLRim = max(dot(N, Lrim), 0.0);
   float NdotLOver = max(dot(N, Lover), 0.0);
 
-  // Per-pixel rotated Vogel-disk PCF soft shadows
+  // Per-pixel rotated Vogel-disk PCF soft shadows (spreads calibrated inside normal-offset clearance)
   float rotAng = igNoise(gl_FragCoord.xy) * 6.2831853;
   float keyBias = max(0.0009, 0.0032 * (1.0 - NdotLKey));
   float fillBias = max(0.0010, 0.0034 * (1.0 - NdotLFill));
-  float overBias = max(0.0011, 0.0035 * (1.0 - NdotLOver));
+  float overBias = max(0.0011, 0.0042 * (1.0 - NdotLOver));
 
   float keyVis = samplePcf12(uKeyMap, vKeyCoord, uKeyTexel, keyBias, 2.2, rotAng);
-  float fillVis = samplePcf12(uFillMap, vFillCoord, uFillTexel, fillBias, 2.8, rotAng + 1.7);
-  float overVis = samplePcf12(uOverMap, vOverCoord, uOverTexel, overBias, 3.8, rotAng + 3.1);
+  float fillVis = samplePcf12(uFillMap, vFillCoord, uFillTexel, fillBias, 2.6, rotAng + 1.7);
+  float overVis = samplePcf12(uOverMap, vOverCoord, uOverTexel, overBias, 2.8, rotAng + 3.1);
 
   vec3 direct = vec3(0.0);
 
@@ -1421,6 +1456,18 @@ export class StudioPhotoRenderer {
       gl.uniform1i(gl.getUniformLocation(prog, 'uDecalMap'), 3);
       gl.uniform1f(gl.getUniformLocation(prog, 'uUseDecal'), 0.0);
       gl.uniform1f(gl.getUniformLocation(prog, 'uFadeMix'), 0.0);
+      const shadowNormalOffsets = computeShadowNormalOffsets(
+        modelRadius,
+        this.keyFbo!.w,
+        this.fillFbo!.w,
+        this.overFbo!.w,
+      );
+      gl.uniform3f(
+        gl.getUniformLocation(prog, 'uShadowNormalOffsets'),
+        shadowNormalOffsets[0],
+        shadowNormalOffsets[1],
+        shadowNormalOffsets[2],
+      );
       gl.uniform2f(gl.getUniformLocation(prog, 'uKeyTexel'), 1 / this.keyFbo!.w, 1 / this.keyFbo!.h);
       gl.uniform2f(gl.getUniformLocation(prog, 'uFillTexel'), 1 / this.fillFbo!.w, 1 / this.fillFbo!.h);
       gl.uniform2f(gl.getUniformLocation(prog, 'uOverTexel'), 1 / this.overFbo!.w, 1 / this.overFbo!.h);

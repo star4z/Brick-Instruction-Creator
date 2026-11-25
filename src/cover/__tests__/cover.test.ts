@@ -18,6 +18,7 @@ import {
 import { buildQrSvg, generateQrMatrix } from '../qrCode';
 import {
   computeLightOrthoMVP,
+  computeShadowNormalOffsets,
   computeStudioLightDirs,
   computeStudioOrthoCamera,
   computeStudioTelephotoCamera,
@@ -541,6 +542,31 @@ describe('Photorealistic Studio Camera & Softbox Light Rig', () => {
     // 2x zoom doubles orthographic projection scale
     expect(Math.abs(cam2x.proj[0] / cam1x.proj[0])).toBeCloseTo(2.0, 5);
     expect(Math.abs(cam2x.proj[5] / cam1x.proj[5])).toBeCloseTo(2.0, 5);
+  });
+
+  it('computes normal-offset shadow biases that clear PCF spreads on vertical walls for any model size', () => {
+    const lights = computeStudioLightDirs(34);
+    const small = computeShadowNormalOffsets(120, 2048, 1024, 1024);
+    const large = computeShadowNormalOffsets(600, 2048, 1024, 1024);
+
+    // Scales linearly with model radius
+    expect(large[0] / small[0]).toBeCloseTo(5.0, 5);
+    expect(large[1] / small[1]).toBeCloseTo(5.0, 5);
+    expect(large[2] / small[2]).toBeCloseTo(5.0, 5);
+
+    // On a vertical wall (normal = [1, 0, 0]), the overhead normal-offset * sin(theta)
+    // must strictly exceed the 2.8-texel overhead PCF radius so horizontal acne bands never form.
+    const overTexelWorld = (2 * 600 * 1.4) / 1024;
+    const od = lights.overhead[0]; // dot([1, 0, 0], overhead)
+    const overSin = Math.sqrt(Math.max(0, 1 - od * od));
+    const effectiveOverTexels = (large[2] * overSin) / overTexelWorld;
+    expect(effectiveOverTexels).toBeGreaterThan(2.8);
+
+    // On a horizontal top face (normal = [0, 1, 0]), overhead sin(theta) stays tiny (< 0.4 texels)
+    // so stud contact shadows remain tight with zero peter-panning.
+    const topSin = Math.sqrt(Math.max(0, 1 - lights.overhead[1] * lights.overhead[1]));
+    const effectiveTopTexels = (large[2] * topSin) / overTexelWorld;
+    expect(effectiveTopTexels).toBeLessThan(0.4);
   });
 });
 
