@@ -8,6 +8,7 @@ import {
   computeBoundingSphereFromBoxLists,
   computePageSlotRects,
   computeRenderedStudSizeCm,
+  computeRepresentativeStepMetric,
   computeRequiredModelSideForStudCm,
   computeSmartAutoPreviewGrid,
   createDefaultPageLayoutSpec,
@@ -608,5 +609,47 @@ describe('pageLayout engine', () => {
       maxY: 80,
       maxZ: 200,
     });
+  });
+
+  it('uses model-representative step metrics in Smart Auto Grid previews and states even at 1 step/page on multi-step warnings', () => {
+    const modelSteps: SmartAutoStepMetric[] = [
+      { stepId: 's1', stepNum: 1, absStepNum: 1, viewRadiusLdu: 60, projHalfWLdu: 55, projHalfHLdu: 45, pliUniqueCount: 2 },
+      { stepId: 's2', stepNum: 2, absStepNum: 2, viewRadiusLdu: 380, projHalfWLdu: 360, projHalfHLdu: 340, pliUniqueCount: 2 },
+      { stepId: 's3', stepNum: 3, absStepNum: 3, viewRadiusLdu: 420, projHalfWLdu: 400, projHalfHLdu: 390, pliUniqueCount: 3 },
+      { stepId: 's4', stepNum: 4, absStepNum: 4, viewRadiusLdu: 430, projHalfWLdu: 410, projHalfHLdu: 400, pliUniqueCount: 3 },
+    ];
+
+    const rep = computeRepresentativeStepMetric(modelSteps);
+    expect(rep).not.toBeNull();
+    expect(rep!.viewRadiusLdu).toBe(420);
+
+    // On US Letter landscape, the representative step cannot fit even 1-up, so the preview
+    // shows 1×1 (fits: false) instead of a misleading 24-cell grid from a tiny placeholder brick.
+    const letterCtx = buildSmartAutoPageContext({ pageWidthIn: 11, pageHeightIn: 8.5, density: 'balanced' });
+    const letterPreview = computeSmartAutoPreviewGrid(letterCtx, rep!);
+    expect(letterPreview.cols).toBe(1);
+    expect(letterPreview.rows).toBe(1);
+    expect(letterPreview.maxSteps).toBe(1);
+    expect(letterPreview.fits).toBe(false);
+
+    // On A3 landscape, the same representative step fits cleanly at 1-up.
+    const a3Ctx = buildSmartAutoPageContext({ pageWidthIn: 16.54, pageHeightIn: 11.69, density: 'balanced' });
+    const a3Preview = computeSmartAutoPreviewGrid(a3Ctx, rep!);
+    expect(a3Preview.fits).toBe(true);
+
+    // Multi-step warning explicitly clarifies "even at 1 step/page"
+    const multiWarn = analyzePageSizeFit({
+      stepChecks: modelSteps.map((metric, idx) => ({ metric, pageId: `pg_${idx + 1}`, pageNum: idx + 1 })),
+      currentFormatId: 'letter',
+      currentOrientation: 'landscape',
+      currentPageWidthIn: 11,
+      currentPageHeightIn: 8.5,
+      density: 'balanced',
+    });
+    expect(multiWarn.hasWarning).toBe(true);
+    expect(multiWarn.affectedStepCount).toBe(3);
+    expect(multiWarn.message).toContain('even at 1 step/page');
+    expect(multiWarn.shortMessage).toContain('even at 1 step/page');
+    expect(formatPageSizeWarningForPage(multiWarn, 'pg_4')).toContain('even at 1 step/page');
   });
 });

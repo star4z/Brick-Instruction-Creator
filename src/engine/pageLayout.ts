@@ -1393,22 +1393,87 @@ export function packSmartAutoPage(
 }
 
 /**
+ * Picks a representative (median physical extent) step metric from a list of steps
+ * so Page Setup / Step Range Group previews reflect the actual loaded model's
+ * proportions rather than a hardcoded tiny placeholder brick.
+ */
+export function computeRepresentativeStepMetric(
+  steps: readonly SmartAutoStepMetric[],
+): SmartAutoStepMetric | null {
+  if (!steps || steps.length === 0) return null;
+  const ranked = steps.map((step) => {
+    const safeR = Math.max(20, Number.isFinite(step.viewRadiusLdu) ? step.viewRadiusLdu : 20);
+    const hw =
+      typeof step.projHalfWLdu === 'number' && Number.isFinite(step.projHalfWLdu)
+        ? Math.max(12, step.projHalfWLdu)
+        : safeR;
+    const hh =
+      typeof step.projHalfHLdu === 'number' && Number.isFinite(step.projHalfHLdu)
+        ? Math.max(12, step.projHalfHLdu)
+        : safeR;
+    const zoom = Math.max(0.4, Number.isFinite(step.modelScale) ? step.modelScale! : 1.0);
+    return { step, span: Math.max(hw, hh) / zoom };
+  });
+  ranked.sort((a, b) => a.span - b.span);
+  const pick = ranked[Math.floor(ranked.length / 2)].step;
+  return {
+    stepId: pick.stepId || 'preview',
+    stepNum: pick.stepNum || 1,
+    absStepNum: pick.absStepNum,
+    viewRadiusLdu: Math.max(20, Number.isFinite(pick.viewRadiusLdu) ? pick.viewRadiusLdu : 20),
+    projHalfWLdu: pick.projHalfWLdu,
+    projHalfHLdu: pick.projHalfHLdu,
+    modelScale: pick.modelScale ?? 1.0,
+    pliUniqueCount: pick.pliUniqueCount ?? 2,
+    hasInlineCallout: pick.hasInlineCallout,
+    calloutDir: pick.calloutDir,
+    hasMinifig1to1: pick.hasMinifig1to1,
+    hasPoseLegend: pick.hasPoseLegend,
+    isOfficialMinifigStyle: pick.isOfficialMinifigStyle,
+  };
+}
+
+/**
  * Computes the dynamic Smart Auto Grid layout for a homogeneous page of typical
- * compact steps at the active page size and Step Proportions (used for live Page
+ * steps at the active page size and Step Proportions (used for live Page
  * Setup & Step Range Group previews).
+ *
+ * Accepts either a scalar `typicalRadiusLdu` (default `45` when no model is loaded)
+ * or a `Partial<SmartAutoStepMetric>` derived from the active model's actual steps.
  */
 export function computeSmartAutoPreviewGrid(
   ctx: SmartAutoPageContext,
-  typicalRadiusLdu = 45,
+  typicalRadiusOrMetric: number | Partial<SmartAutoStepMetric> = 45,
   spec?: Pick<PageLayoutSpec, 'mixedLayout' | 'flow' | 'slotSizes'> | null,
 ): { cols: number; rows: number; maxSteps: number; fits: boolean } {
-  const sampleStep: SmartAutoStepMetric = {
-    stepId: 'preview',
-    stepNum: 1,
-    viewRadiusLdu: Math.max(20, typicalRadiusLdu),
-    modelScale: 1.0,
-    pliUniqueCount: 2,
-  };
+  const sampleStep: SmartAutoStepMetric =
+    typeof typicalRadiusOrMetric === 'number'
+      ? {
+          stepId: 'preview',
+          stepNum: 1,
+          viewRadiusLdu: Math.max(20, typicalRadiusOrMetric),
+          modelScale: 1.0,
+          pliUniqueCount: 2,
+        }
+      : {
+          stepId: typicalRadiusOrMetric.stepId || 'preview',
+          stepNum: typicalRadiusOrMetric.stepNum || 1,
+          viewRadiusLdu: Math.max(
+            20,
+            Number.isFinite(typicalRadiusOrMetric.viewRadiusLdu)
+              ? typicalRadiusOrMetric.viewRadiusLdu!
+              : 45,
+          ),
+          projHalfWLdu: typicalRadiusOrMetric.projHalfWLdu,
+          projHalfHLdu: typicalRadiusOrMetric.projHalfHLdu,
+          modelScale: typicalRadiusOrMetric.modelScale ?? 1.0,
+          pliUniqueCount: typicalRadiusOrMetric.pliUniqueCount ?? 2,
+          hasInlineCallout: typicalRadiusOrMetric.hasInlineCallout,
+          calloutDir: typicalRadiusOrMetric.calloutDir,
+          hasMinifig1to1: typicalRadiusOrMetric.hasMinifig1to1,
+          hasPoseLegend: typicalRadiusOrMetric.hasPoseLegend,
+          isOfficialMinifigStyle: typicalRadiusOrMetric.isOfficialMinifigStyle,
+        };
   const single = evaluateStepInSlot(sampleStep, ctx.gridWidthIn, ctx.gridHeightIn, ctx, 1);
   if (!single.fits) {
     return { cols: 1, rows: 1, maxSteps: 1, fits: false };
@@ -1893,13 +1958,13 @@ export function analyzePageSizeFit(params: {
   } else if (violations.length === 1) {
     const v = worstViolation;
     const studTxt = `${v.studSizeCm.toFixed(2)} cm/stud`;
-    message = `Step ${v.stepNum} cannot fit at ${curName} while keeping 1 stud ≥ ${minStudStr} (renders at ${studTxt} even at 1 step/page). ${suggestPhrase}`;
-    shortMessage = `Step ${v.stepNum} is below ${minStudStr}/stud at ${curName} (${studTxt}) — ${shortSuggest}`;
+    message = `Step ${v.stepNum} cannot fit at ${curName} even at 1 step/page while keeping 1 stud ≥ ${minStudStr} (renders at ${studTxt}). ${suggestPhrase}`;
+    shortMessage = `Step ${v.stepNum} is below ${minStudStr}/stud at ${curName} even at 1 step/page (${studTxt}) — ${shortSuggest}`;
   } else {
     const v = worstViolation;
     const studTxt = `${v.studSizeCm.toFixed(2)} cm/stud`;
-    message = `${violations.length} steps cannot fit at ${curName} while keeping 1 stud ≥ ${minStudStr} (smallest: ${studTxt} on Step ${v.stepNum}). ${suggestPhrase}`;
-    shortMessage = `${violations.length} steps are below ${minStudStr}/stud at ${curName} (min ${studTxt}) — ${shortSuggest}`;
+    message = `${violations.length} steps cannot fit at ${curName} even at 1 step/page while keeping 1 stud ≥ ${minStudStr} (smallest: ${studTxt} on Step ${v.stepNum}). ${suggestPhrase}`;
+    shortMessage = `${violations.length} steps are below ${minStudStr}/stud at ${curName} even at 1 step/page (min ${studTxt}) — ${shortSuggest}`;
   }
 
   return {
@@ -1948,8 +2013,8 @@ export function formatPageSizeWarningForPage(
   const minStudStr = `${worst.minStudSizeCm.toFixed(1)} cm`;
   const studTxt = `${worst.studSizeCm.toFixed(2)} cm/stud`;
   if (pageViolations.length === 1) {
-    return `Step ${worst.stepNum} renders at ${studTxt} (below ${minStudStr}/stud) — ${shortSuggest}`;
+    return `Step ${worst.stepNum} renders at ${studTxt} even at 1 step/page (below ${minStudStr}/stud) — ${shortSuggest}`;
   }
-  return `${pageViolations.length} steps on this page render below ${minStudStr}/stud (min ${studTxt}) — ${shortSuggest}`;
+  return `${pageViolations.length} steps on this page render below ${minStudStr}/stud even at 1 step/page (min ${studTxt}) — ${shortSuggest}`;
 }
 

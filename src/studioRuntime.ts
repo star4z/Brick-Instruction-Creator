@@ -154,6 +154,7 @@ import {
   buildSmartAutoPageContext,
   computeBoundingSphereFromBoxLists,
   computePageSlotRects,
+  computeRepresentativeStepMetric,
   computeSmartAutoPreviewGrid,
   createDefaultPageLayoutSpec,
   describePageLayoutSpec,
@@ -7246,6 +7247,7 @@ const state = {
   pages: [],
   pageIdx: 0,
   pageSizeWarning: null,   // PageSizeWarningSummary from analyzePageSizeFit()
+  lastStepMetrics: [],     // SmartAutoStepMetric[] from latest rebuildPages() pass
   mode: 'pan',             // pan | parts | camera | step | page
   stepSubTab: 'camera',    // camera | layout | notes
   cameraMobileExpanded: false,
@@ -7741,6 +7743,7 @@ function rebuildPages() {
   if (!state.model) {
     state.pages = [];
     state.pageSizeWarning = null;
+    state.lastStepMetrics = [];
     syncLayoutDiagnostic();
     return;
   }
@@ -8052,6 +8055,7 @@ function rebuildPages() {
       }
     }
   }
+  state.lastStepMetrics = allStepChecks.map((c) => c.metric);
   state.pageSizeWarning = analyzePageSizeFit({
     stepChecks: allStepChecks,
     currentFormatId: state.paperFormat,
@@ -12039,7 +12043,7 @@ function syncPageSizeWarningUI() {
   }
 }
 
-function getSmartAutoPreviewSample(spec = state.layoutConfig) {
+function getSmartAutoPreviewSample(spec = state.layoutConfig, stepRange = null) {
   const dims = computePageFrameDimensions();
   const ctx = buildSmartAutoPageContext({
     pageWidthIn: dims.widthIn,
@@ -12047,12 +12051,26 @@ function getSmartAutoPreviewSample(spec = state.layoutConfig) {
     density: state.density,
     hasSubmodelIntro: false,
   });
-  const est = computeSmartAutoPreviewGrid(ctx, 45, spec);
+  const allMetrics = Array.isArray(state.lastStepMetrics) ? state.lastStepMetrics : [];
+  let scopedMetrics = allMetrics;
+  if (stepRange && allMetrics.length > 0) {
+    const lo = Math.min(stepRange.startStepNum, stepRange.endStepNum);
+    const hi = Math.max(stepRange.startStepNum, stepRange.endStepNum);
+    const filtered = allMetrics.filter((m) => {
+      const n = Number.isFinite(m.absStepNum) ? m.absStepNum : m.stepNum;
+      return n >= lo && n <= hi;
+    });
+    if (filtered.length > 0) scopedMetrics = filtered;
+  }
+  const repMetric = computeRepresentativeStepMetric(scopedMetrics);
+  const est = computeSmartAutoPreviewGrid(ctx, repMetric ?? 45, spec);
   const cols = Math.max(1, est.cols);
   const rows = Math.max(1, est.rows);
   return {
     count: Math.max(1, est.maxSteps),
     grid: { cols, rows },
+    fits: est.fits,
+    isModelAware: Boolean(repMetric),
     widthIn: dims.widthIn,
     heightIn: dims.heightIn,
     isScreenFit: state.paperFormat === 'screen',
@@ -12133,7 +12151,16 @@ function readGroupEditorDraftSpec() {
 function renderGroupGridPreviewUI() {
   const el = document.getElementById('grpGridPreview');
   if (!el) return;
-  renderGridPreviewInto(el, readGroupEditorDraftSpec(), 128, 78);
+  const draftSpec = readGroupEditorDraftSpec();
+  const startVal = parseInt(document.getElementById('grpStartInput')?.value || '', 10);
+  const endVal = parseInt(document.getElementById('grpEndInput')?.value || '', 10);
+  const range = Number.isFinite(startVal) && Number.isFinite(endVal)
+    ? { startStepNum: startVal, endStepNum: endVal }
+    : null;
+  const autoPreview = getSpecStepsPerPageCap(draftSpec) === null
+    ? getSmartAutoPreviewSample(draftSpec, range)
+    : null;
+  renderGridPreviewInto(el, draftSpec, 128, 78, autoPreview);
 }
 
 function renderLayoutGroupsList() {
@@ -12296,7 +12323,10 @@ function syncPageLayoutControlsUI() {
       const pageLabel = autoPreview?.isScreenFit
         ? 'the viewport'
         : `${autoPreview.widthIn.toFixed(1)}″ × ${autoPreview.heightIn.toFixed(1)}″`;
-      gridDesc.textContent = `Adapts columns and rows dynamically to ${pageLabel} and each step's physical size—keeping at least ${SMART_AUTO_MIN_STEP_AREA_WIDTH_IN}″ × ${SMART_AUTO_MIN_STEP_AREA_HEIGHT_IN}″ per step (+ margins) and 1 stud ≥ ${SMART_AUTO_MIN_STUD_SIZE_CM} cm, with no fixed step limit. Page breaks always start a new page.`;
+      const oversizedNote = (state.pageSizeWarning?.hasWarning || (autoPreview?.isModelAware && !autoPreview.fits))
+        ? ' Steps larger than this sheet are already placed 1 per page; use a larger paper size to keep every stud ≥ ' + SMART_AUTO_MIN_STUD_SIZE_CM + ' cm.'
+        : '';
+      gridDesc.textContent = `Adapts columns and rows dynamically to ${pageLabel} and each step's physical size—keeping at least ${SMART_AUTO_MIN_STEP_AREA_WIDTH_IN}″ × ${SMART_AUTO_MIN_STEP_AREA_HEIGHT_IN}″ per step (+ margins) and 1 stud ≥ ${SMART_AUTO_MIN_STUD_SIZE_CM} cm, with no fixed step limit. Page breaks always start a new page.${oversizedNote}`;
     } else {
       const flowTxt = lc.flow === 'column' ? 'top-to-bottom columns' : 'left-to-right rows';
       const mixedTxt = lc.mixedLayout === 'hero_left' ? 'with Step 1 featured large on the left'
