@@ -512,7 +512,7 @@ describe('studioRuntime safety checks', () => {
     for (const id of [
       'pageSizeFitWarning',
       'menuPageSetupWarnDot',
-      'menuErrorsIcon',
+      'menuErrorCountBadge',
       'errorBannerDot',
     ]) {
       expect(html).toContain(`id="${id}"`);

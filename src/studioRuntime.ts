@@ -16782,7 +16782,6 @@ function updateErrorIndicators() {
   );
   const menuDot = document.getElementById('menuBtnErrorBadge');
   const menuBtn = document.getElementById('menuErrorsBtn');
-  const menuIcon = document.getElementById('menuErrorsIcon');
   const menuPill = document.getElementById('menuErrorCountBadge');
   if (menuDot) {
     const showDot = badgeCount > 0 && getSideMenuLayout().showMenuButtonErrorBadge;
@@ -16793,10 +16792,6 @@ function updateErrorIndicators() {
   }
   if (menuBtn) {
     menuBtn.classList.toggle('hidden', !state.model || totalCount === 0);
-  }
-  if (menuIcon) {
-    menuIcon.classList.toggle('text-[var(--danger)]', hasAnyError);
-    menuIcon.classList.toggle('text-[var(--warning)]', !hasAnyError);
   }
   if (menuPill) {
     menuPill.textContent = String(totalCount);
