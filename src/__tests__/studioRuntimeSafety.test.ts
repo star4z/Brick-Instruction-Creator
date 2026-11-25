@@ -416,4 +416,57 @@ describe('studioRuntime safety checks', () => {
       expect(runtime).toContain(`'${id}'`);
     }
   });
+
+  it('wires customizable keyboard shortcuts in the main menu and handles every registered action', async () => {
+    const html = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf8');
+    const runtime = fs.readFileSync(path.resolve(process.cwd(), 'src/studioRuntime.ts'), 'utf8');
+    const css = fs.readFileSync(path.resolve(process.cwd(), 'src/index.css'), 'utf8');
+    const { SHORTCUT_ACTIONS } = await import('../engine/keyboardShortcuts');
+
+    // Keyboard Shortcuts section lives inside the main menu drawer (#menuScrollBody)
+    const menuBodyStart = html.indexOf('id="menuScrollBody"');
+    const menuFooterStart = html.indexOf('id="menuProvideFeedbackLink"', menuBodyStart);
+    const shortcutsSectionIdx = html.indexOf('id="menuShortcutsSection"', menuBodyStart);
+    expect(menuBodyStart).toBeGreaterThan(-1);
+    expect(shortcutsSectionIdx).toBeGreaterThan(menuBodyStart);
+    expect(shortcutsSectionIdx).toBeLessThan(menuFooterStart);
+
+    for (const id of [
+      'menuShortcutsToggleBtn',
+      'menuShortcutsSummary',
+      'menuShortcutsCustomBadge',
+      'menuShortcutsPanel',
+      'shortcutsSearchInput',
+      'shortcutsConflictBanner',
+      'shortcutsGroupsList',
+      'btnResetAllShortcuts',
+      'shortcutsResetAllNotice',
+    ]) {
+      expect(html).toContain(`id="${id}"`);
+      expect(runtime).toContain(`'${id}'`);
+    }
+
+    expect(css).toContain('.shortcut-kbd-btn');
+    expect(css).toContain('.shortcut-kbd-btn[data-recording="true"]');
+    expect(css).toContain('.shortcut-kbd-btn[data-customized="true"]');
+
+    // Every registered shortcut action must have a case inside executeShortcutAction()
+    const execStart = runtime.indexOf('function executeShortcutAction(actionId)');
+    const execEnd = runtime.indexOf("document.addEventListener('keydown'", execStart);
+    expect(execStart).toBeGreaterThan(-1);
+    expect(execEnd).toBeGreaterThan(execStart);
+    const execBody = runtime.slice(execStart, execEnd);
+
+    for (const action of SHORTCUT_ACTIONS) {
+      expect(execBody).toContain(`case '${action.id}':`);
+    }
+
+    expect(runtime).toContain('function performUndo(');
+    expect(runtime).toContain('function performRedo(');
+    expect(runtime).toContain('resolveShortcutActionForEvent(');
+    expect(runtime).toContain('syncShortcutTooltips()');
+    expect(runtime).toContain('loadShortcutOverridesFromStorage()');
+    expect(runtime).toContain('saveShortcutOverridesToStorage(');
+  });
 });
+

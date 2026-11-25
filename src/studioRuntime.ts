@@ -193,6 +193,30 @@ import {
   summarizeManualEdits,
 } from './engine/destructiveActions';
 import {
+  SHORTCUT_ACTIONS,
+  SHORTCUT_ACTION_MAP,
+  SHORTCUT_CATEGORIES,
+  countCustomizedShortcuts,
+  detectMacPlatform,
+  eventToCanonicalCombo,
+  filterShortcutActions,
+  findShortcutConflict,
+  formatShortcutCombo,
+  formatShortcutTooltip,
+  getEffectiveShortcut,
+  getResetAllShortcutsNotice,
+  isEditableEventTarget,
+  isInteractiveActivationTarget,
+  isShortcutCustomized,
+  loadShortcutOverridesFromStorage,
+  resetAllShortcutOverrides,
+  resetShortcutOverride,
+  resolveShortcutActionForEvent,
+  saveShortcutOverridesToStorage,
+  setShortcutOverride,
+  validateRecordedCombo,
+} from './engine/keyboardShortcuts';
+import {
   clampRenderDimensions,
   computeCoverHeroRenderSize,
   computeMinifigDiagramRenderSize,
@@ -6312,6 +6336,17 @@ const state = {
   redoStack: [],
 };
 
+// Customizable keyboard shortcuts state (persisted in localStorage)
+const isMacShortcutsPlatform = detectMacPlatform();
+let shortcutOverrides = loadShortcutOverridesFromStorage();
+const shortcutUiState = {
+  expanded: false,
+  query: '',
+  recordingActionId: null,
+  pendingConflict: null,
+  validationMsg: null,
+};
+
 // Keep hit-test projection metadata for active rendered step slots
 let currentSlotRenderInfo = new Map();
 
@@ -7320,6 +7355,27 @@ function syncModePillButtons(page) {
     b.className = `mode-btn ${visible ? 'flex' : 'hidden'} min-h-[34px] px-2.5 sm:px-3 py-1.5 rounded-full items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer ${
       active ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--surface-hover)]'
     }`;
+    const modeActionId = m === 'pan'
+      ? 'modePan'
+      : m === 'parts'
+        ? 'modeParts'
+        : (m === 'step' || m === 'camera')
+          ? 'modeStepCamera'
+          : m === 'page'
+            ? 'modePage'
+            : null;
+    if (modeActionId) {
+      const baseTitle = m === 'page'
+        ? getEditModeButtonLabel(page?.kind)
+        : m === 'camera'
+          ? 'Camera Mode'
+          : m === 'step'
+            ? 'Step Mode'
+            : m === 'parts'
+              ? 'Parts Mode'
+              : 'Pan Mode';
+      b.title = formatShortcutTooltip(baseTitle, getEffectiveShortcut(modeActionId, shortcutOverrides), isMacShortcutsPlatform);
+    }
   });
 }
 
@@ -7577,7 +7633,11 @@ function renderAll() {
   document.getElementById('pageLabelText').textContent = page.label;
   const pageCountEl = document.getElementById('pageCountText');
   if (pageCountEl) pageCountEl.textContent = `· ${page.num}/${state.pages.length}`;
-  document.getElementById('btnPageOverview').title = fullLabel;
+  document.getElementById('btnPageOverview').title = formatShortcutTooltip(
+    fullLabel,
+    getEffectiveShortcut('toggleOverview', shortcutOverrides),
+    isMacShortcutsPlatform,
+  );
   const navState = computePageNavigationState(state.pageIdx, state.pages.length);
   const firstPageEl = document.getElementById('firstPage');
   if (firstPageEl) firstPageEl.disabled = !navState.canGoFirst;
@@ -10918,6 +10978,7 @@ function syncMenuControls() {
   });
 
   syncStylePanel();
+  syncKeyboardShortcutsMenuSummary();
 }
 
 let overviewThumbObserver = null;
@@ -16026,8 +16087,12 @@ async function runPdfExport(pagesToExport) {
 // =========================================================================
 // 13. EVENT WIRING & FILE IMPORT / EXPORT
 // =========================================================================
+function isMenuOpen() {
+  const el = document.getElementById('menuBackdrop');
+  return Boolean(el && !el.classList.contains('hidden'));
+}
 function openMenu() { document.getElementById('menuBackdrop').classList.remove('hidden'); syncMenuControls(); }
-function closeMenu() { document.getElementById('menuBackdrop').classList.add('hidden'); }
+function closeMenu() { stopShortcutRecording(); document.getElementById('menuBackdrop').classList.add('hidden'); }
 
 document.getElementById('btnOpenMenu').onclick = openMenu;
 document.getElementById('desktopModelChip').onclick = openMenu;
@@ -16357,23 +16422,840 @@ document.getElementById('themeImportInput').onchange = async (e) => {
   }
 };
 
-document.addEventListener('keydown', (e) => {
-  if (e.key !== 'Escape') return;
-  const applyModal = document.getElementById('applyAngleModal');
+/* ------------------------------------------------------------------
+ * Keyboard Shortcuts: Undo/Redo, Navigation, Modes, Camera, Parts,
+ * Panels, Hierarchical Escape & Inline Main Menu Customizer
+ * ------------------------------------------------------------------ */
+function performUndo({ announce = false } = {}) {
+  if (!state.model || !state.undoStack.length) return false;
+  state.redoStack.push(captureHistorySnap());
+  applyHistorySnap(state.undoStack.pop());
+  if (announce) showToast('Undid last change.');
+  return true;
+}
+
+function performRedo({ announce = false } = {}) {
+  if (!state.model || !state.redoStack.length) return false;
+  state.undoStack.push(captureHistorySnap());
+  applyHistorySnap(state.redoStack.pop());
+  if (announce) showToast('Redid change.');
+  return true;
+}
+
+function openOverviewModal() {
+  if (!state.model) return;
+  closeMenu();
+  const modal = document.getElementById('overviewModal');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+  renderOverviewModal({ scrollActiveIntoView: true });
+}
+
+function switchStudioMode(nextMode) {
+  if (!state.model || !nextMode) return;
+  const curPage = state.pages[state.pageIdx];
+  const visible = getVisibleModeTabs(curPage?.kind);
+  let target = nextMode;
+  if (target === 'step' && (curPage?.kind === 'cover' || curPage?.kind === 'complete')) {
+    target = 'camera';
+  }
+  if (!visible.includes(target)) return;
+  if (target === 'page' && curPage?.kind === 'bom') {
+    if (isBomSetupModalOpen()) closeBomSetupModal();
+    else openBomSetupModal();
+    return;
+  }
+  if (isBomSetupModalOpen()) closeBomSetupModal();
+  state.mode = target;
+  if (state.mode !== 'parts') state.selectedPartIds.clear();
+  state.selectedArrangeEl = null;
+  renderAll();
+}
+
+function rotateActiveCameraByStep(dir) {
+  if (!state.model) return;
+  const pg = state.pages[state.pageIdx];
+  if (!pg) return;
+  if (pg.kind === 'cover' || pg.kind === 'complete') {
+    const isCover = pg.kind === 'cover';
+    if (isCover) state.coverMeta = normalizeCoverMeta(state.coverMeta, !state.wordlessMode);
+    else state.completeMeta = normalizeCompleteMeta(state.completeMeta);
+    const meta = isCover ? state.coverMeta : state.completeMeta;
+    const matched = findMatchingCameraPreset(meta.az);
+    pushUndo();
+    if (matched) {
+      const idx = CORNERS.findIndex(c => c.id === matched.id);
+      const next = CORNERS[(idx + dir + CORNERS.length) % CORNERS.length];
+      meta.az = next.az;
+    } else {
+      meta.az = ((meta.az + dir * 90) % 360 + 360) % 360;
+    }
+    meta.el = clampCoverElevation(meta.el);
+    renderAll();
+    return;
+  }
+  if (pg.kind !== 'steps') return;
+  const active = getActiveStepObj();
+  if (!active) return;
+  const { step } = active;
+  const cur = state.overrides[step.id] || {};
+  const curCam = getStepCamera(step);
+  const matched = findMatchingCameraPreset(curCam.az);
+  pushUndo();
+  let nextAz;
+  let nextCorner;
+  if (matched) {
+    const idx = CORNERS.findIndex(c => c.id === matched.id);
+    const next = CORNERS[(idx + dir + CORNERS.length) % CORNERS.length];
+    nextAz = next.az;
+    nextCorner = next.id;
+  } else {
+    nextAz = ((curCam.az + dir * 90) % 360 + 360) % 360;
+    nextCorner = findMatchingCameraPreset(nextAz)?.id;
+  }
+  const nextOv = {
+    ...cur,
+    side: curCam.side || 'top',
+    az: nextAz,
+    el: curCam.el ?? ((curCam.side || 'top') === 'bottom' ? -30 : 30),
+  };
+  if (nextCorner) nextOv.corner = nextCorner;
+  else delete nextOv.corner;
+  state.overrides[step.id] = nextOv;
+  renderAll();
+}
+
+function flipActiveCameraSide() {
+  if (!state.model) return;
+  const pg = state.pages[state.pageIdx];
+  if (!pg || pg.kind !== 'steps') return;
+  const active = getActiveStepObj();
+  if (!active) return;
+  const { step } = active;
+  const cur = state.overrides[step.id] || {};
+  const curCam = getStepCamera(step);
+  const nextSide = curCam.side === 'bottom' ? 'top' : 'bottom';
+  const nextEl = nextSide === 'bottom' ? -30 : 30;
+  const matched = findMatchingCameraPreset(curCam.az);
+  pushUndo();
+  const nextOv = {
+    ...cur,
+    side: nextSide,
+    az: curCam.az,
+    el: nextEl,
+  };
+  if (matched) nextOv.corner = matched.id;
+  else delete nextOv.corner;
+  state.overrides[step.id] = nextOv;
+  renderAll();
+}
+
+function resetActiveCamera() {
+  if (!state.model) return;
+  const pg = state.pages[state.pageIdx];
+  if (!pg) return;
+  if (pg.kind === 'cover' || pg.kind === 'complete') {
+    const isCover = pg.kind === 'cover';
+    if (isCover) state.coverMeta = normalizeCoverMeta(state.coverMeta, !state.wordlessMode);
+    else state.completeMeta = normalizeCompleteMeta(state.completeMeta);
+    const meta = isCover ? state.coverMeta : state.completeMeta;
+    const defaults = isCover ? createDefaultCoverMeta() : createDefaultCompleteMeta();
+    if (!isHeroCameraCustomized(meta, defaults)) return;
+    pushUndo();
+    meta.az = defaults.az;
+    meta.el = defaults.el;
+    meta.zoom = defaults.zoom;
+    showToast(`Reset ${isCover ? 'Cover' : 'Build Complete'} camera.`);
+    renderAll();
+    return;
+  }
+  if (pg.kind !== 'steps') return;
+  const active = getActiveStepObj();
+  if (!active) return;
+  const { ch, step } = active;
+  const ov = state.overrides[step.id] || {};
+  const isMfBuild = Boolean((step.isStandaloneFigure || ch.kind === 'minifigure') && !step.isMinifigPoseStep);
+  const caps = resolveStepToolbarCapabilities({
+    isMinifigBuild: isMfBuild,
+    minifigStyle: isMfBuild ? getEffectiveMinifigStyle(step) : 'classic',
+    hasSubassembly: Boolean(step.subassembly),
+    override: ov,
+  });
+  if (!caps.hasCustomCameraAny) return;
+  pushUndo();
+  state.overrides[step.id] = clearStepCameraOverride(state.overrides[step.id], true);
+  showToast(`Reset camera for Step ${step.num}.`);
+  renderAll();
+}
+
+function cycleActiveStepSlot(delta) {
+  if (!state.model) return;
+  const pg = state.pages[state.pageIdx];
+  if (!pg || pg.kind !== 'steps' || !pg.slots || pg.slots.length <= 1) return;
+  const curIdx = Math.max(0, pg.slots.findIndex(sl => sl.step.id === state.selectedStepId));
+  const nextIdx = (curIdx + delta + pg.slots.length) % pg.slots.length;
+  state.selectedStepId = pg.slots[nextIdx].step.id;
+  state.selectedPartIds.clear();
+  renderAll();
+}
+
+function nudgeSelectedPartsByKeyboard(dx, dy, dz) {
+  if (!state.model || state.mode !== 'parts' || state.selectedPartIds.size === 0) return;
+  const active = getActiveStepObj();
+  if (!active) return;
+  const { step } = active;
+  pushUndo();
+  const curOv = state.overrides[step.id] || {};
+  const po = { ...(curOv.partOffsets || {}) };
+  for (const id of state.selectedPartIds) {
+    const cur = po[id] || step.defaultPartOffsets?.[id] || { x: 0, y: 0, z: 0, tilt: 0, arrow: true };
+    po[id] = { x: cur.x + dx, y: cur.y + dy, z: cur.z + dz, tilt: cur.tilt, arrow: cur.arrow };
+  }
+  state.overrides[step.id] = { ...curOv, partOffsets: po };
+  renderAll();
+}
+
+function toggleSelectedPartsArrow() {
+  if (!state.model || state.mode !== 'parts' || state.selectedPartIds.size === 0) return;
+  const active = getActiveStepObj();
+  if (!active) return;
+  const { step } = active;
+  const firstId = Array.from(state.selectedPartIds)[0];
+  const curOv = state.overrides[step.id] || {};
+  const firstOv = curOv.partOffsets?.[firstId] || step.defaultPartOffsets?.[firstId] || { x: 0, y: 0, z: 0, tilt: 0, arrow: true };
+  const nextVal = firstOv.arrow === false;
+  pushUndo();
+  const po = { ...(curOv.partOffsets || {}) };
+  for (const id of state.selectedPartIds) {
+    const cur = po[id] || step.defaultPartOffsets?.[id] || { x: 0, y: 0, z: 0, tilt: 0, arrow: true };
+    po[id] = { ...cur, arrow: nextVal };
+  }
+  state.overrides[step.id] = { ...curOv, partOffsets: po };
+  renderAll();
+}
+
+function syncShortcutTooltips() {
+  const tip = (actionId, base) =>
+    formatShortcutTooltip(base, getEffectiveShortcut(actionId, shortcutOverrides), isMacShortcutsPlatform);
+  const setTitle = (id, actionId, base) => {
+    const el = document.getElementById(id);
+    if (el) el.title = tip(actionId, base);
+  };
+  setTitle('btnUndo', 'undo', 'Undo');
+  setTitle('btnRedo', 'redo', 'Redo');
+  setTitle('btnOpenMenu', 'toggleMenu', 'Open studio menu');
+  setTitle('btnStylePop', 'toggleStyle', 'Style & Themes');
+  setTitle('btnHeaderExport', 'openExport', 'Print or export');
+  setTitle('firstPage', 'pageFirst', 'First Page');
+  setTitle('prevPage', 'pagePrev', 'Previous Page');
+  setTitle('nextPage', 'pageNext', 'Next Page');
+  setTitle('lastPage', 'pageLast', 'Last Page');
+  setTitle('btnZoomOut', 'zoomOut', 'Zoom Page View Out');
+  setTitle('btnZoomFit', 'zoomReset', 'Reset Page View Zoom');
+  setTitle('btnZoomIn', 'zoomIn', 'Zoom Page View In');
+  setTitle('menuImportBtn', 'importFile', 'Import Model or Project');
+  setTitle('menuSaveProj', 'exportProject', 'Export project (.biw)');
+  setTitle('menuPageSetupBtn', 'openPageSetup', 'Page Setup');
+  setTitle('menuBomSetupBtn', 'openBomSetup', 'Parts List Setup');
+  setTitle('menuPrintBtn', 'openExport', 'Print / Export PDF');
+  setTitle('menuBricksLibBtn', 'openBricksLibrary', 'Bricks Library');
+
+  const hintKeyEl = document.getElementById('menuShortcutsHintKey');
+  if (hintKeyEl) {
+    const openKey = getEffectiveShortcut('openShortcuts', shortcutOverrides);
+    hintKeyEl.textContent = openKey ? formatShortcutCombo(openKey, isMacShortcutsPlatform) : 'Menu';
+  }
+
+  const curPage = state.pages[state.pageIdx];
+  if (curPage) {
+    syncModePillButtons(curPage);
+    const fullLabel = `${curPage.label} · ${curPage.num}/${state.pages.length}`;
+    const ovBtn = document.getElementById('btnPageOverview');
+    if (ovBtn) ovBtn.title = tip('toggleOverview', fullLabel);
+  }
+}
+
+function stopShortcutRecording() {
+  if (!shortcutUiState.recordingActionId && !shortcutUiState.pendingConflict && !shortcutUiState.validationMsg) return;
+  shortcutUiState.recordingActionId = null;
+  shortcutUiState.pendingConflict = null;
+  shortcutUiState.validationMsg = null;
+  if (shortcutUiState.expanded) renderKeyboardShortcutsPanel();
+}
+
+function persistAndRefreshShortcuts() {
+  saveShortcutOverridesToStorage(shortcutOverrides);
+  syncShortcutTooltips();
+  syncKeyboardShortcutsMenuSummary();
+  if (shortcutUiState.expanded) renderKeyboardShortcutsPanel();
+}
+
+function syncKeyboardShortcutsMenuSummary() {
+  const customCount = countCustomizedShortcuts(shortcutOverrides);
+  const sumEl = document.getElementById('menuShortcutsSummary');
+  if (sumEl) {
+    sumEl.textContent = customCount > 0 ? `${customCount} custom` : 'Defaults';
+  }
+  const badgeEl = document.getElementById('menuShortcutsCustomBadge');
+  if (badgeEl) {
+    badgeEl.textContent = `${customCount} custom`;
+    badgeEl.classList.toggle('hidden', customCount === 0);
+  }
+  const toggleBtn = document.getElementById('menuShortcutsToggleBtn');
+  if (toggleBtn) toggleBtn.setAttribute('aria-expanded', shortcutUiState.expanded ? 'true' : 'false');
+  const chev = document.getElementById('menuShortcutsChevron');
+  if (chev) chev.classList.toggle('rotate-90', shortcutUiState.expanded);
+  const panel = document.getElementById('menuShortcutsPanel');
+  if (panel) panel.classList.toggle('hidden', !shortcutUiState.expanded);
+
+  const resetAllBtn = document.getElementById('btnResetAllShortcuts');
+  if (resetAllBtn) {
+    resetAllBtn.disabled = customCount === 0;
+    resetAllBtn.className = customCount > 0
+      ? 'w-full py-2 px-3 rounded-lg border border-[var(--warning)]/35 bg-[var(--warning-soft)] text-[var(--warning)] hover:bg-[var(--warning)] hover:text-white font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer'
+      : 'w-full py-2 px-3 rounded-lg border border-[var(--border)] bg-[var(--card)] font-semibold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-45 disabled:cursor-not-allowed';
+  }
+  applyDestructiveNoticeToEl('shortcutsResetAllNotice', getResetAllShortcutsNotice(customCount));
+
+  if (shortcutUiState.expanded) {
+    renderKeyboardShortcutsPanel();
+  }
+}
+
+function renderKeyboardShortcutsPanel() {
+  const listEl = document.getElementById('shortcutsGroupsList');
+  const conflictEl = document.getElementById('shortcutsConflictBanner');
+  if (!listEl) return;
+
+  if (conflictEl) {
+    const c = shortcutUiState.pendingConflict;
+    if (c) {
+      const targetDef = SHORTCUT_ACTION_MAP[c.actionId];
+      const otherDef = SHORTCUT_ACTION_MAP[c.conflictActionId];
+      const keyTxt = formatShortcutCombo(c.combo, isMacShortcutsPlatform);
+      conflictEl.innerHTML = `
+        <div class="font-semibold leading-snug">
+          <kbd class="shortcut-kbd-inline">${escHtml(keyTxt)}</kbd> is already assigned to <strong>${escHtml(otherDef?.label || c.conflictActionId)}</strong>.
+        </div>
+        <div class="flex items-center gap-1.5 flex-wrap">
+          <button type="button" id="btnShortcutConflictReplace" class="px-2.5 py-1 rounded-md bg-[var(--warning)] text-white font-semibold cursor-pointer">Assign to ${escHtml(targetDef?.label || 'Action')} &amp; Unbind</button>
+          <button type="button" id="btnShortcutConflictCancel" class="px-2.5 py-1 rounded-md border border-[var(--border)] bg-[var(--card)] text-[var(--foreground)] font-semibold cursor-pointer">Cancel</button>
+        </div>`;
+      conflictEl.classList.remove('hidden');
+      const repBtn = conflictEl.querySelector('#btnShortcutConflictReplace');
+      if (repBtn) {
+        repBtn.onclick = () => {
+          const res = setShortcutOverride(shortcutOverrides, c.actionId, c.combo, { unbindConflicting: true });
+          shortcutOverrides = res.overrides;
+          shortcutUiState.recordingActionId = null;
+          shortcutUiState.pendingConflict = null;
+          shortcutUiState.validationMsg = null;
+          persistAndRefreshShortcuts();
+          showToast(`Assigned ${keyTxt} to ${targetDef?.label || 'action'} (unbound ${otherDef?.label || 'previous'}).`);
+        };
+      }
+      const canBtn = conflictEl.querySelector('#btnShortcutConflictCancel');
+      if (canBtn) {
+        canBtn.onclick = () => {
+          shortcutUiState.pendingConflict = null;
+          shortcutUiState.validationMsg = null;
+          renderKeyboardShortcutsPanel();
+        };
+      }
+    } else {
+      conflictEl.classList.add('hidden');
+      conflictEl.innerHTML = '';
+    }
+  }
+
+  const filtered = filterShortcutActions(shortcutUiState.query, shortcutOverrides, isMacShortcutsPlatform);
+  if (filtered.length === 0) {
+    listEl.innerHTML = `<p class="py-4 text-center text-xs text-[var(--muted-foreground)]">No shortcuts match &ldquo;${escHtml(shortcutUiState.query)}&rdquo;.</p>`;
+    return;
+  }
+
+  const byCategory = new Map();
+  for (const act of filtered) {
+    if (!byCategory.has(act.category)) byCategory.set(act.category, []);
+    byCategory.get(act.category).push(act);
+  }
+
+  const icoReset = '<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>';
+  const sectionsHtml = [];
+
+  for (const cat of SHORTCUT_CATEGORIES) {
+    const items = byCategory.get(cat.id);
+    if (!items || items.length === 0) continue;
+    const rowsHtml = items.map(act => {
+      const eff = getEffectiveShortcut(act.id, shortcutOverrides);
+      const customized = isShortcutCustomized(act.id, shortcutOverrides);
+      const isRec = shortcutUiState.recordingActionId === act.id;
+      const formatted = eff ? formatShortcutCombo(eff, isMacShortcutsPlatform) : 'Unbound';
+      const defaultFormatted = formatShortcutCombo(act.defaultCombo, isMacShortcutsPlatform);
+      const secondaryHint =
+        !customized && act.secondaryDefaultCombo && !(act.secondaryNonMacOnly && isMacShortcutsPlatform)
+          ? `also ${formatShortcutCombo(act.secondaryDefaultCombo, isMacShortcutsPlatform)}`
+          : '';
+      const recStripHtml = isRec
+        ? `<div class="mt-1.5 pt-1.5 border-t border-[var(--border)] flex items-center justify-between gap-1.5 flex-wrap">
+            <span class="text-xs font-medium ${shortcutUiState.validationMsg ? 'text-[var(--danger)]' : 'text-[var(--primary)]'}">${escHtml(shortcutUiState.validationMsg || 'Press any key or combo…')}</span>
+            <div class="flex items-center gap-1 shrink-0">
+              ${eff ? `<button type="button" data-shortcut-clear="${act.id}" class="shortcut-clear-btn px-2 py-0.5 rounded border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] text-xs font-semibold cursor-pointer">Clear</button>` : ''}
+              ${customized ? `<button type="button" data-shortcut-reset="${act.id}" class="shortcut-reset-btn px-2 py-0.5 rounded border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] text-xs font-semibold cursor-pointer">Default</button>` : ''}
+              <button type="button" data-shortcut-cancel="${act.id}" class="shortcut-cancel-btn px-2 py-0.5 rounded border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] text-xs font-semibold cursor-pointer">Cancel</button>
+            </div>
+          </div>`
+        : '';
+
+      return `<div class="rounded-md px-2 py-1.5 transition-colors ${isRec ? 'bg-[var(--primary-soft)] ring-1 ring-[var(--primary-border)]' : 'hover:bg-[var(--surface-sunken)]/75'}">
+        <div class="flex items-center justify-between gap-2">
+          <div class="min-w-0 flex-1" title="${escHtml(act.description)}">
+            <div class="text-xs font-medium text-[var(--foreground)] truncate">${escHtml(act.label)}</div>
+            ${secondaryHint ? `<div class="text-xs font-mono text-[var(--muted-foreground)] leading-tight">${escHtml(secondaryHint)}</div>` : ''}
+          </div>
+          <div class="flex items-center gap-1 shrink-0">
+            <button type="button" data-shortcut-record="${act.id}" title="${escHtml(isRec ? 'Listening for keys…' : `${act.label}: click to customize (default ${defaultFormatted})`)}" aria-pressed="${isRec ? 'true' : 'false'}" class="shortcut-kbd-btn cursor-pointer" data-recording="${isRec ? 'true' : 'false'}" data-customized="${customized ? 'true' : 'false'}" data-unbound="${eff === null ? 'true' : 'false'}">${escHtml(isRec ? 'Press keys…' : formatted)}</button>
+            ${customized && !isRec ? `<button type="button" data-shortcut-reset="${act.id}" title="${escHtml(`Reset ${act.label} to default (${defaultFormatted})`)}" aria-label="${escHtml(`Reset ${act.label} to default`)}" class="shortcut-reset-btn w-6 h-6 rounded border border-[var(--border)] bg-[var(--card)] hover:border-[var(--primary)] hover:text-[var(--primary)] text-[var(--muted-foreground)] flex items-center justify-center shrink-0 transition-colors cursor-pointer">${icoReset}</button>` : ''}
+          </div>
+        </div>
+        ${recStripHtml}
+      </div>`;
+    }).join('');
+
+    sectionsHtml.push(`<div class="space-y-1">
+      <div class="px-2 text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">${escHtml(cat.label)}</div>
+      <div class="space-y-0.5">${rowsHtml}</div>
+    </div>`);
+  }
+
+  listEl.innerHTML = sectionsHtml.join('');
+
+  listEl.querySelectorAll('[data-shortcut-record]').forEach(btn => {
+    btn.onclick = () => {
+      const actionId = btn.getAttribute('data-shortcut-record');
+      if (!actionId) return;
+      if (shortcutUiState.recordingActionId === actionId) {
+        stopShortcutRecording();
+      } else {
+        shortcutUiState.recordingActionId = actionId;
+        shortcutUiState.pendingConflict = null;
+        shortcutUiState.validationMsg = null;
+        renderKeyboardShortcutsPanel();
+      }
+    };
+  });
+
+  listEl.querySelectorAll('.shortcut-clear-btn').forEach(btn => {
+    btn.onclick = () => {
+      const actionId = btn.getAttribute('data-shortcut-clear');
+      if (!actionId) return;
+      const res = setShortcutOverride(shortcutOverrides, actionId, null);
+      shortcutOverrides = res.overrides;
+      shortcutUiState.recordingActionId = null;
+      shortcutUiState.pendingConflict = null;
+      shortcutUiState.validationMsg = null;
+      persistAndRefreshShortcuts();
+      showToast(`Cleared shortcut for ${SHORTCUT_ACTION_MAP[actionId]?.label || 'action'}.`);
+    };
+  });
+
+  listEl.querySelectorAll('.shortcut-reset-btn').forEach(btn => {
+    btn.onclick = () => {
+      const actionId = btn.getAttribute('data-shortcut-reset');
+      if (!actionId) return;
+      const res = resetShortcutOverride(shortcutOverrides, actionId);
+      shortcutOverrides = res.overrides;
+      shortcutUiState.recordingActionId = null;
+      shortcutUiState.pendingConflict = null;
+      shortcutUiState.validationMsg = null;
+      persistAndRefreshShortcuts();
+      const def = SHORTCUT_ACTION_MAP[actionId];
+      const unboundDef = res.unboundActionId ? SHORTCUT_ACTION_MAP[res.unboundActionId] : null;
+      showToast(
+        unboundDef
+          ? `Reset ${def?.label || 'shortcut'} to ${formatShortcutCombo(def?.defaultCombo, isMacShortcutsPlatform)} (unbound ${unboundDef.label}).`
+          : `Reset ${def?.label || 'shortcut'} to default.`,
+      );
+    };
+  });
+
+  listEl.querySelectorAll('.shortcut-cancel-btn').forEach(btn => {
+    btn.onclick = () => stopShortcutRecording();
+  });
+}
+
+function openShortcutsSectionInMenu() {
+  openMenu();
+  shortcutUiState.expanded = true;
+  syncKeyboardShortcutsMenuSummary();
+  requestAnimationFrame(() => {
+    document.getElementById('menuShortcutsSection')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    document.getElementById('shortcutsSearchInput')?.focus();
+  });
+}
+
+const menuShortcutsToggleBtnEl = document.getElementById('menuShortcutsToggleBtn');
+if (menuShortcutsToggleBtnEl) {
+  menuShortcutsToggleBtnEl.onclick = () => {
+    shortcutUiState.expanded = !shortcutUiState.expanded;
+    if (!shortcutUiState.expanded) stopShortcutRecording();
+    syncKeyboardShortcutsMenuSummary();
+    if (shortcutUiState.expanded) {
+      requestAnimationFrame(() => {
+        document.getElementById('menuShortcutsSection')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      });
+    }
+  };
+}
+
+const shortcutsSearchInputEl = document.getElementById('shortcutsSearchInput');
+const shortcutsSearchClearBtnEl = document.getElementById('shortcutsSearchClearBtn');
+if (shortcutsSearchInputEl) {
+  shortcutsSearchInputEl.onfocus = () => stopShortcutRecording();
+  shortcutsSearchInputEl.oninput = (e) => {
+    shortcutUiState.query = e.target.value || '';
+    if (shortcutsSearchClearBtnEl) shortcutsSearchClearBtnEl.classList.toggle('hidden', !shortcutUiState.query);
+    renderKeyboardShortcutsPanel();
+  };
+}
+if (shortcutsSearchClearBtnEl) {
+  shortcutsSearchClearBtnEl.onclick = () => {
+    shortcutUiState.query = '';
+    if (shortcutsSearchInputEl) {
+      shortcutsSearchInputEl.value = '';
+      shortcutsSearchInputEl.focus();
+    }
+    shortcutsSearchClearBtnEl.classList.add('hidden');
+    renderKeyboardShortcutsPanel();
+  };
+}
+
+const btnResetAllShortcutsEl = document.getElementById('btnResetAllShortcuts');
+if (btnResetAllShortcutsEl) {
+  btnResetAllShortcutsEl.onclick = () => {
+    const prevCount = countCustomizedShortcuts(shortcutOverrides);
+    if (prevCount === 0) return;
+    shortcutOverrides = resetAllShortcutOverrides();
+    shortcutUiState.recordingActionId = null;
+    shortcutUiState.pendingConflict = null;
+    shortcutUiState.validationMsg = null;
+    persistAndRefreshShortcuts();
+    showToast(`Reset ${prevCount} custom shortcut${prevCount === 1 ? '' : 's'} to defaults.`);
+  };
+}
+
+function getActiveShortcutBlockingSurface() {
+  const isOpen = (id) => {
+    const el = document.getElementById(id);
+    return Boolean(el && !el.classList.contains('hidden'));
+  };
+  if (isBricksLibraryModalOpen()) return 'bricksLibrary';
+  if (isOpen('applyAngleModal')) return 'applyAngle';
+  if (isBomSetupModalOpen()) return 'bomSetup';
+  if (isOpen('pageSetupModal')) return 'pageSetup';
+  if (isOpen('exportModal')) return 'export';
+  if (isOpen('errorsModal')) return 'errors';
+  if (isOpen('openModelModal')) return 'openModel';
+  if (isOpen('missingPartsModal')) return 'missingParts';
+  if (isOpen('importModal')) return 'import';
+  if (isOverviewModalOpen()) return 'overview';
+  if (isMenuOpen()) return 'menu';
+  return 'none';
+}
+
+function handleGlobalEscapeKey() {
+  const isOpen = (id) => {
+    const el = document.getElementById(id);
+    return Boolean(el && !el.classList.contains('hidden'));
+  };
+  if (shortcutUiState.recordingActionId || shortcutUiState.pendingConflict) {
+    stopShortcutRecording();
+    return true;
+  }
   if (isPageBreakHelpTooltipOpen()) {
     hidePageBreakHelpTooltip();
-  } else if (isBricksLibraryModalOpen()) {
-    closeBricksLibraryModal();
-  } else if (applyModal && !applyModal.classList.contains('hidden')) {
-    closeApplyAngleModal();
-  } else if (isBomSetupModalOpen()) {
-    closeBomSetupModal();
-  } else if (isOverviewModalOpen()) {
-    closeOverviewModal();
-  } else if (stylePopEl && !stylePopEl.classList.contains('hidden')) {
-    setStylePopoverOpen(false);
+    return true;
   }
+  if (isBricksLibraryModalOpen() && libUiState.colorPickerOpen) {
+    setLibColorPickerOpen(false);
+    return true;
+  }
+  if (isBricksLibraryModalOpen()) {
+    closeBricksLibraryModal();
+    return true;
+  }
+  if (isOpen('applyAngleModal')) {
+    closeApplyAngleModal();
+    return true;
+  }
+  if (isBomSetupModalOpen()) {
+    closeBomSetupModal();
+    return true;
+  }
+  if (isOpen('pageSetupModal')) {
+    closePageSetupModal();
+    return true;
+  }
+  if (isOpen('exportModal')) {
+    if (!isPrintPrepActive) document.getElementById('exportModal')?.classList.add('hidden');
+    return true;
+  }
+  if (isOpen('errorsModal')) {
+    document.getElementById('errorsModal')?.classList.add('hidden');
+    return true;
+  }
+  if (isOpen('openModelModal')) {
+    closeOpenModelModal();
+    return true;
+  }
+  if (isOpen('missingPartsModal')) {
+    if (!mpState.fetching) closeMissingPartsPrompt(false);
+    return true;
+  }
+  if (isOpen('importModal')) {
+    closeImportAssistant(false);
+    return true;
+  }
+  if (isOverviewModalOpen()) {
+    closeOverviewModal();
+    return true;
+  }
+  if (stylePopEl && !stylePopEl.classList.contains('hidden')) {
+    setStylePopoverOpen(false);
+    return true;
+  }
+  if (isMenuOpen()) {
+    closeMenu();
+    return true;
+  }
+  if (state.selectedPartIds.size > 0) {
+    state.selectedPartIds.clear();
+    renderAll();
+    return true;
+  }
+  if (state.model && state.mode !== 'pan') {
+    state.mode = 'pan';
+    state.selectedArrangeEl = null;
+    renderAll();
+    return true;
+  }
+  return false;
+}
+
+function executeShortcutAction(actionId) {
+  switch (actionId) {
+    case 'undo':
+      performUndo({ announce: true });
+      return;
+    case 'redo':
+      performRedo({ announce: true });
+      return;
+    case 'pagePrev':
+      navigatePage('prev');
+      return;
+    case 'pageNext':
+      navigatePage('next');
+      return;
+    case 'pageFirst':
+      navigatePage('first');
+      return;
+    case 'pageLast':
+      navigatePage('last');
+      return;
+    case 'stepPrevSlot':
+      cycleActiveStepSlot(-1);
+      return;
+    case 'stepNextSlot':
+      cycleActiveStepSlot(1);
+      return;
+    case 'zoomIn':
+      setZoom(state.zoom * 1.22);
+      return;
+    case 'zoomOut':
+      setZoom(state.zoom * 0.82);
+      return;
+    case 'zoomReset':
+      resetZoom();
+      return;
+    case 'modePan':
+      switchStudioMode('pan');
+      return;
+    case 'modeParts':
+      switchStudioMode('parts');
+      return;
+    case 'modeStepCamera':
+      switchStudioMode('step');
+      return;
+    case 'modePage':
+      switchStudioMode('page');
+      return;
+    case 'cameraRotateLeft':
+      rotateActiveCameraByStep(-1);
+      return;
+    case 'cameraRotateRight':
+      rotateActiveCameraByStep(1);
+      return;
+    case 'cameraFlipSide':
+      flipActiveCameraSide();
+      return;
+    case 'cameraReset':
+      resetActiveCamera();
+      return;
+    case 'togglePageBreak': {
+      const active = getActiveStepObj();
+      if (active) toggleStepPageBreak(active.step, { ch: active.ch, followToggledStep: true });
+      return;
+    }
+    case 'partNudgeUp':
+      nudgeSelectedPartsByKeyboard(0, 20, 0);
+      return;
+    case 'partNudgeDown':
+      nudgeSelectedPartsByKeyboard(0, -20, 0);
+      return;
+    case 'partNudgeLeft':
+      nudgeSelectedPartsByKeyboard(-20, 0, 0);
+      return;
+    case 'partNudgeRight':
+      nudgeSelectedPartsByKeyboard(20, 0, 0);
+      return;
+    case 'partToggleArrow':
+      toggleSelectedPartsArrow();
+      return;
+    case 'toggleMenu':
+      if (isMenuOpen()) closeMenu();
+      else openMenu();
+      return;
+    case 'toggleOverview':
+      if (isOverviewModalOpen()) closeOverviewModal();
+      else openOverviewModal();
+      return;
+    case 'toggleStyle':
+      if (isMenuOpen()) closeMenu();
+      setStylePopoverOpen(Boolean(stylePopEl && stylePopEl.classList.contains('hidden')));
+      return;
+    case 'openPageSetup': {
+      const el = document.getElementById('pageSetupModal');
+      if (el && !el.classList.contains('hidden')) closePageSetupModal();
+      else openPageSetupModal();
+      return;
+    }
+    case 'openBomSetup':
+      if (isBomSetupModalOpen()) closeBomSetupModal();
+      else openBomSetupModal();
+      return;
+    case 'openBricksLibrary':
+      if (isBricksLibraryModalOpen()) closeBricksLibraryModal();
+      else openBricksLibraryModal();
+      return;
+    case 'importFile': {
+      const el = document.getElementById('openModelModal');
+      if (el && !el.classList.contains('hidden')) closeOpenModelModal();
+      else openOpenModelModal();
+      return;
+    }
+    case 'exportProject':
+      exportProjectFile();
+      return;
+    case 'openExport': {
+      const el = document.getElementById('exportModal');
+      if (el && !el.classList.contains('hidden')) {
+        if (!isPrintPrepActive) el.classList.add('hidden');
+      } else {
+        openExportModal();
+      }
+      return;
+    }
+    case 'openShortcuts':
+      openShortcutsSectionInMenu();
+      return;
+  }
+}
+
+document.addEventListener('keydown', (e) => {
+  // 1. Live shortcut recording inside Main Menu → Keyboard Shortcuts
+  if (shortcutUiState.recordingActionId) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      stopShortcutRecording();
+      return;
+    }
+    const combo = eventToCanonicalCombo(e, isMacShortcutsPlatform);
+    if (!combo) return; // Waiting for non-modifier key
+    e.preventDefault();
+    e.stopPropagation();
+
+    const checked = validateRecordedCombo(combo);
+    if (!checked.valid) {
+      shortcutUiState.validationMsg = checked.reason;
+      shortcutUiState.pendingConflict = null;
+      renderKeyboardShortcutsPanel();
+      return;
+    }
+
+    const actionId = shortcutUiState.recordingActionId;
+    const conflictId = findShortcutConflict(checked.combo, actionId, shortcutOverrides);
+    if (conflictId) {
+      shortcutUiState.pendingConflict = {
+        actionId,
+        combo: checked.combo,
+        conflictActionId: conflictId,
+      };
+      shortcutUiState.validationMsg = null;
+      renderKeyboardShortcutsPanel();
+      document.getElementById('shortcutsConflictBanner')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      return;
+    }
+
+    const res = setShortcutOverride(shortcutOverrides, actionId, checked.combo);
+    shortcutOverrides = res.overrides;
+    shortcutUiState.recordingActionId = null;
+    shortcutUiState.pendingConflict = null;
+    shortcutUiState.validationMsg = null;
+    persistAndRefreshShortcuts();
+    const def = SHORTCUT_ACTION_MAP[actionId];
+    showToast(`Set ${def?.label || 'shortcut'} to ${formatShortcutCombo(checked.combo, isMacShortcutsPlatform)}.`);
+    return;
+  }
+
+  // 2. Universal hierarchical Escape dismiss (works even inside inputs inside modals)
+  if (e.key === 'Escape') {
+    if (handleGlobalEscapeKey()) {
+      e.preventDefault();
+    }
+    return;
+  }
+
+  // 3. Never hijack typing, sliders, selects, or native text-field undo/redo
+  if (e.isComposing || isEditableEventTarget(e.target)) return;
+
+  // Preserve native button/checkbox/link activation for unmodified Space or Enter
+  if (
+    !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey
+    && (e.key === ' ' || e.key === 'Enter')
+    && isInteractiveActivationTarget(e.target)
+  ) {
+    return;
+  }
+
+  const curPage = state.pages[state.pageIdx] || null;
+  const actionId = resolveShortcutActionForEvent(e, shortcutOverrides, {
+    blockingSurface: getActiveShortcutBlockingSurface(),
+    hasModel: Boolean(state.model),
+    pageKind: curPage?.kind || null,
+    mode: state.mode,
+    selectedPartCount: state.selectedPartIds.size,
+    isRepeat: Boolean(e.repeat),
+    isMac: isMacShortcutsPlatform,
+  });
+
+  if (!actionId) return;
+  e.preventDefault();
+  executeShortcutAction(actionId);
 });
+
+syncShortcutTooltips();
+syncKeyboardShortcutsMenuSummary();
 
 // Delegated hover, keyboard focus, and outside-click handlers for Page Break `?` help buttons
 document.addEventListener('pointerover', (e) => {
@@ -16461,11 +17343,7 @@ window.addEventListener('resize', () => {
   if (isPageBreakHelpTooltipOpen()) hidePageBreakHelpTooltip();
 });
 
-document.getElementById('btnPageOverview').onclick = () => {
-  const modal = document.getElementById('overviewModal');
-  modal.classList.remove('hidden');
-  renderOverviewModal({ scrollActiveIntoView: true });
-};
+document.getElementById('btnPageOverview').onclick = openOverviewModal;
 document.getElementById('btnCloseOverview').onclick = () => closeOverviewModal();
 document.getElementById('overviewModal').onclick = (e) => {
   if (e.target === e.currentTarget) closeOverviewModal();
@@ -16496,16 +17374,8 @@ if (btnOverviewJumpBottom) {
   btnOverviewJumpBottom.onclick = () => scrollOverviewListTo('bottom');
 }
 
-document.getElementById('btnUndo').onclick = () => {
-  if (!state.undoStack.length) return;
-  state.redoStack.push(captureHistorySnap());
-  applyHistorySnap(state.undoStack.pop());
-};
-document.getElementById('btnRedo').onclick = () => {
-  if (!state.redoStack.length) return;
-  state.undoStack.push(captureHistorySnap());
-  applyHistorySnap(state.redoStack.pop());
-};
+document.getElementById('btnUndo').onclick = () => performUndo();
+document.getElementById('btnRedo').onclick = () => performRedo();
 
 // Apply Camera to Step Range Modal bindings
 const applyAngleModalEl = document.getElementById('applyAngleModal');
@@ -16618,21 +17488,7 @@ if (btnConfirmApplyAngle) {
 document.querySelectorAll('.mode-btn').forEach(b => {
   b.onclick = () => {
     const nextMode = b.getAttribute('data-mode');
-    if (!nextMode) return;
-    const curPage = state.pages[state.pageIdx];
-    if (nextMode === 'page' && curPage?.kind === 'bom') {
-      if (isBomSetupModalOpen()) {
-        closeBomSetupModal();
-      } else {
-        openBomSetupModal();
-      }
-      return;
-    }
-    if (isBomSetupModalOpen()) closeBomSetupModal();
-    state.mode = nextMode;
-    if (state.mode !== 'parts') state.selectedPartIds.clear();
-    state.selectedArrangeEl = null;
-    renderAll();
+    if (nextMode) switchStudioMode(nextMode);
   };
 });
 
@@ -17581,7 +18437,7 @@ if (menuExportHtmlBtn) menuExportHtmlBtn.onclick = runInteractiveHtmlExport;
 const btnExpInteractiveHtml = document.getElementById('btnExpInteractiveHtml');
 if (btnExpInteractiveHtml) btnExpInteractiveHtml.onclick = runInteractiveHtmlExport;
 document.getElementById('menuPageSetupBtn').onclick = openPageSetupModal;
-const closePageSetupModal = () => { closeLayoutGroupEditor(); document.getElementById('pageSetupModal').classList.add('hidden'); };
+function closePageSetupModal() { closeLayoutGroupEditor(); document.getElementById('pageSetupModal').classList.add('hidden'); }
 document.getElementById('btnClosePageSetup').onclick = closePageSetupModal;
 document.getElementById('pageSetupDoneBtn').onclick = closePageSetupModal;
 document.getElementById('pageSetupModal').onclick = (e) => { if (e.target.id === 'pageSetupModal') closePageSetupModal(); };
@@ -17629,7 +18485,7 @@ if (menuStepGenBtn) {
 }
 
 // Export / Import .biw Project (supports iOS Share Sheet + Download!)
-document.getElementById('menuSaveProj').onclick = async () => {
+async function exportProjectFile() {
   if (!state.model) return;
   const activeTheme = getActiveTheme();
   const embeddedCustomTheme = activeTheme && !activeTheme.builtIn && !BUILT_IN_THEME_IDS.has(activeTheme.id) ? activeTheme : undefined;
@@ -17637,7 +18493,8 @@ document.getElementById('menuSaveProj').onclick = async () => {
   const fileName = buildProjectFileName(state.model.title);
   closeMenu();
   await shareOrDownloadCustomFile(payload, fileName, 'Shared project file.', `Exported ${fileName}`);
-};
+}
+document.getElementById('menuSaveProj').onclick = exportProjectFile;
 
 async function handleIncomingProjectFile(f) {
   if (!f) return;

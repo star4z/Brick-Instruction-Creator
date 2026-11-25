@@ -382,6 +382,64 @@
               <span>Insert Blank / Divider Page After Current</span>
             </button>
           </div>
+
+          <!-- Keyboard Shortcuts -->
+          <div id="menuShortcutsSection" class="flex flex-col gap-2.5 pt-5 border-t border-[var(--border)]">
+            <div class="flex items-center justify-between gap-2">
+              <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Keyboard Shortcuts</div>
+              <span id="menuShortcutsCustomBadge" class="hidden px-2 py-0.5 rounded font-mono text-xs font-semibold bg-[var(--primary-soft)] text-[var(--primary)] border border-[var(--primary-border)]">0 custom</span>
+            </div>
+            <button id="menuShortcutsToggleBtn" type="button" aria-expanded="false" aria-controls="menuShortcutsPanel" class="w-full py-2.5 px-3.5 rounded-lg border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold text-left flex items-center justify-between gap-2 transition-colors cursor-pointer">
+              <span class="flex items-center gap-2 min-w-0">
+                <svg class="w-4 h-4 text-[var(--primary)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="2" y="5" width="20" height="14" rx="2"/>
+                  <path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M8 13h.01M12 13h.01M16 13h.01M7 17h10"/>
+                </svg>
+                <span>Customize Shortcuts</span>
+              </span>
+              <span class="flex items-center gap-1.5 shrink-0 max-w-[52%]">
+                <span id="menuShortcutsSummary" class="font-mono text-xs text-[var(--muted-foreground)] truncate">Defaults</span>
+                <svg id="menuShortcutsChevron" class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0 transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+              </span>
+            </button>
+            <p class="text-xs text-[var(--muted-foreground)] leading-relaxed">
+              Undo/redo, page navigation, zoom, modes, camera angles &amp; part nudging. Press <kbd id="menuShortcutsHintKey" class="shortcut-kbd-inline">?</kbd> anytime.
+            </p>
+
+            <!-- Inline Customizable Shortcuts Panel -->
+            <div id="menuShortcutsPanel" class="hidden space-y-3 pt-1">
+              <!-- Quick Filter -->
+              <div class="relative">
+                <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                <input id="shortcutsSearchInput" type="search" aria-label="Filter keyboard shortcuts" placeholder="Filter shortcuts (e.g. undo, camera, zoom)…" class="w-full pl-8 pr-8 py-2 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] text-xs outline-none focus:border-[var(--primary)]" />
+                <button id="shortcutsSearchClearBtn" type="button" title="Clear filter" aria-label="Clear shortcut filter" class="hidden absolute right-1.5 top-1/2 -translate-y-1/2 w-6 h-6 rounded hover:bg-[var(--surface-hover)] text-[var(--muted-foreground)] flex items-center justify-center cursor-pointer">
+                  <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                </button>
+              </div>
+
+              <p class="text-xs text-[var(--muted-foreground)] leading-snug">
+                Click any keycap to rebind. Press <kbd class="shortcut-kbd-inline">Esc</kbd> to cancel recording.
+              </p>
+
+              <!-- Live Conflict / Validation Banner -->
+              <div id="shortcutsConflictBanner" role="alert" class="hidden p-2.5 rounded-lg border border-[var(--warning)]/35 bg-[var(--warning-soft)] text-[var(--warning)] space-y-2 text-xs"></div>
+
+              <!-- Grouped Shortcut List -->
+              <div id="shortcutsGroupsList" class="space-y-3.5"></div>
+
+              <!-- Universal Escape Note + Reset All -->
+              <div class="pt-3 border-t border-[var(--border)] space-y-2">
+                <p class="text-xs text-[var(--muted-foreground)] leading-snug">
+                  <kbd class="shortcut-kbd-inline">Esc</kbd> always closes open dialogs/menus, clears part selection, or returns to Pan mode.
+                </p>
+                <button id="btnResetAllShortcuts" type="button" disabled class="w-full py-2 px-3 rounded-lg border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed">
+                  <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
+                  <span>Reset All to Defaults</span>
+                </button>
+                <div id="shortcutsResetAllNotice" role="note" class="hidden destructive-notice destructive-notice-compact"></div>
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- Drawer Footer -->
