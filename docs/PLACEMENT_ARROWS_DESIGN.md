@@ -17,7 +17,8 @@ Large, contrasting, unobstructed, top-placed bricks on subsequent steps remain s
 
 - **Core engine**: [`src/engine/placementArrows.ts`](../src/engine/placementArrows.ts)
   - Pure, domain-neutral geometric and perceptual analysis (`computeAutoPlacementOffsetsForSequence`).
-  - Collision-aware offset resolution (`resolveOffsetAlongAxis`) that targets a crisp ~20 LDU visible arrow gap and nudges outward if an obstacle lies in the path.
+  - Distinguishes **vertical through-hole & coaxial sleeve insertions** (e.g., vertical axles/pins passing through horizontal beam holes, or bushes/collars sliding onto vertical rods) from **lateral horizontal insertions** (`±X`/`±Z`) so vertical through-hole pins are never offset sideways through a solid beam wall.
+  - Collision-aware offset resolution (`resolveOffsetAlongAxis`) that targets a crisp ~20 LDU visible arrow gap, enforces a minimum `16` LDU clear air gap past any coaxial corridor obstacle tip (e.g., an axle protruding through a bush), and sets `arrowTo` at the entry tip so arrowheads never clip inside obstacles.
   - Non-clipping 3D arrow segment generator (`computePlacementArrowSegments`): emits **1 centered arrow** for compact pieces and **2 parallel end-aligned arrows** for elongated pieces (`span >= 60` LDU perpendicular to the offset axis and aspect ratio `>= 2.2`).
   - Clutter caps (`MAX_FIRST_STEP_OFFSETS = 6`, `MAX_SUBSEQUENT_STEP_OFFSETS = 4`) so dense steps stay readable.
 - **Step generation integration**: [`src/studioRuntime.ts`](../src/studioRuntime.ts)

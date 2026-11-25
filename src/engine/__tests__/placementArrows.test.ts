@@ -333,4 +333,70 @@ describe('placementArrows — LEGO-style automatic placement arrows & offsets', 
     expect(perceptualRgbDistance(LIGHT_BLUE, TAN)).toBeGreaterThan(50);
     expect(perceptualRgbDistance(DARK_GRAY, YELLOW)).toBeGreaterThan(80);
   });
+
+  it('offsets a vertical through-hole pin vertically (+Y) instead of sideways through a horizontal beam', () => {
+    // Horizontal flat beam with a vertical axle + vertical towball-pin passing through its holes
+    const step1: PlacementStepInput = {
+      id: 's1',
+      camera: { az: 38, el: 28, side: 'top' },
+      parts: [
+        makePart('flat_beam', 0, 0, 0, 100, 16, 20, BLACK),
+        makePart('vert_axle', -20, -20, 0, 12, 100, 12, YELLOW),
+        makePart('vert_towball_pin', 20, -14, 0, 16, 44, 16, DARK_GRAY),
+      ],
+    };
+
+    const res = computeAutoPlacementOffsetsForSequence([step1]);
+    const offs = res.get('s1');
+    expect(offs).toBeDefined();
+    expect(offs!['flat_beam']).toBeUndefined();
+    // Both vertical through-hole parts must lift vertically along +Y with zero sideways drift
+    expect(offs!['vert_axle'].x).toBe(0);
+    expect(offs!['vert_axle'].z).toBe(0);
+    expect(offs!['vert_axle'].y).toBeGreaterThan(30);
+    expect(offs!['vert_towball_pin'].x).toBe(0);
+    expect(offs!['vert_towball_pin'].z).toBe(0);
+    expect(offs!['vert_towball_pin'].y).toBeGreaterThan(24);
+  });
+
+  it('lifts a coaxial bush cleanly above a vertical axle tip and terminates its arrow above the axle without clipping', () => {
+    // Step 1: flat beam + vertical axle extending up to y=60
+    // Step 2: bush seated around the vertical axle at y=[20..40] (axle sticks 20 LDU above the bush!)
+    const bushBox = makeBox(-20, 20, 0, 18, 20, 18);
+    const steps: PlacementStepInput[] = [
+      {
+        id: 's1',
+        camera: { az: 38, el: 28, side: 'top' },
+        parts: [
+          makePart('flat_beam', 0, 0, 0, 100, 16, 20, BLACK),
+          makePart('vert_axle', -20, -20, 0, 12, 80, 12, YELLOW), // maxY = 60
+        ],
+      },
+      {
+        id: 's2',
+        camera: { az: 38, el: 28, side: 'top' },
+        parts: [
+          { id: 'bush', box: bushBox, rgb: BLACK, sku: 'bush' },
+        ],
+      },
+    ];
+
+    const res = computeAutoPlacementOffsetsForSequence(steps);
+    const offs = res.get('s2');
+    expect(offs).toBeDefined();
+    const bushOff = offs!['bush'];
+    expect(bushOff).toBeDefined();
+    expect(bushOff.x).toBe(0);
+    expect(bushOff.z).toBe(0);
+    // Lifted bush bottom (20 + bushOff.y) must clear axle top (60) by at least 16 LDU
+    expect(bushBox.min[1] + bushOff.y).toBeGreaterThanOrEqual(60 + 16);
+    // arrowTo must stop cleanly at the axle entry tip (y = 62), never inside the axle
+    expect(bushOff.arrowTo).toBeDefined();
+    expect(bushOff.arrowTo![1]).toBeCloseTo(62, 1);
+
+    const segs = computePlacementArrowSegments(bushBox, [bushOff.x, bushOff.y, bushOff.z], bushOff.arrowTo);
+    expect(segs).toHaveLength(1);
+    expect(segs[0].to[1]).toBeGreaterThanOrEqual(61);
+    expect(segs[0].from[1] - segs[0].to[1]).toBeGreaterThanOrEqual(12);
+  });
 });

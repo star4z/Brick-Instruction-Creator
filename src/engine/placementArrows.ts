@@ -27,6 +27,8 @@ export interface AutoPartOffset {
   z: number;
   tilt: number;
   arrow: boolean;
+  /** Optional world-space landing point along the insertion axis (e.g. tip of a coaxial axle) so the arrowhead never clips inside an obstacle. */
+  arrowTo?: [number, number, number];
 }
 
 export interface PlacementPartInput {
@@ -240,6 +242,8 @@ function estimateCameraOcclusion(
 interface ContactSummary {
   supportedFromBelow: boolean;
   supportedFromAbove: boolean;
+  /** True when the piece passes vertically through a hole or sleeves coaxially around a vertical rod/axle. */
+  verticalCoaxial: boolean;
   lateralCount: number;
   /** Outward lateral normal from contacting reference parts toward this part. */
   lateralNormal: Vec3 | null;
@@ -251,8 +255,10 @@ function analyzeContacts(
   refs: ReadonlyArray<PlacementPartInput>,
 ): ContactSummary {
   const b = part.box;
+  const s = boxSize(b);
   let supportedFromBelow = false;
   let supportedFromAbove = false;
+  let verticalCoaxial = false;
   let lateralCount = 0;
   let latX = 0;
   let latZ = 0;
@@ -265,6 +271,7 @@ function analyzeContacts(
     if (!boxesWithinMargin(b, rb, COLOR_NEIGHBOR_EPS)) continue;
     touchingRefs.push(ref);
 
+    const rs = boxSize(rb);
     const ovX = overlap1D(b.min[0], b.max[0], rb.min[0], rb.max[0]);
     const ovY = overlap1D(b.min[1], b.max[1], rb.min[1], rb.max[1]);
     const ovZ = overlap1D(b.min[2], b.max[2], rb.min[2], rb.max[2]);
@@ -277,13 +284,27 @@ function analyzeContacts(
     if (ovX > 2 && ovZ > 2 && rb.min[1] >= b.max[1] - CONTACT_EPS && rb.min[1] <= b.max[1] + CONTACT_EPS) {
       supportedFromAbove = true;
     }
+
+    // Coaxial / through-hole penetration (overlapping in all 3 axes):
+    // Distinguish vertical through-hole/sleeve insertions (±Y) from horizontal pin/axle insertions (±X/±Z).
+    const nestedXZ = ovX > 1.5 && ovZ > 1.5;
+    if (ovY > 3 && nestedXZ) {
+      const partVertElongated = s[1] >= Math.max(s[0], s[2]) * 1.1;
+      const partProtrudesVert = b.max[1] > rb.max[1] + 2 || b.min[1] < rb.min[1] - 2;
+      const refHorizWider = Math.max(rs[0], rs[2]) >= Math.max(s[0], s[2]) * 1.3;
+      const refVertRod = rs[1] >= Math.max(rs[0], rs[2]) * 1.25 && (rb.max[1] > b.max[1] + 2 || rb.min[1] < b.min[1] - 2);
+      if ((partVertElongated && (partProtrudesVert || refHorizWider)) || (partProtrudesVert && refHorizWider) || refVertRod) {
+        verticalCoaxial = true;
+        continue;
+      }
+    }
+
     // Lateral contact (shared Y band, touching or nested on ±X or ±Z)
     if (ovY > 3) {
       const touchPosX = ovZ > 2 && Math.abs(b.min[0] - rb.max[0]) <= CONTACT_EPS;
       const touchNegX = ovZ > 2 && Math.abs(rb.min[0] - b.max[0]) <= CONTACT_EPS;
       const touchPosZ = ovX > 2 && Math.abs(b.min[2] - rb.max[2]) <= CONTACT_EPS;
       const touchNegZ = ovX > 2 && Math.abs(rb.min[2] - b.max[2]) <= CONTACT_EPS;
-      const nestedXZ = ovX > 1 && ovZ > 1;
       if (touchPosX || touchNegX || touchPosZ || touchNegZ || nestedXZ) {
         lateralCount++;
         if (touchPosX) latX += 1;
@@ -291,7 +312,7 @@ function analyzeContacts(
         else if (touchPosZ) latZ += 1;
         else if (touchNegZ) latZ -= 1;
         else {
-          // Embedded/overlapping (e.g., pin inside beam hole): normalize by ref half-extent
+          // Embedded horizontal pin/axle inside a side hole: normalize by ref half-extent
           const rbHalfX = Math.max(1, (rb.max[0] - rb.min[0]) * 0.5);
           const rbHalfZ = Math.max(1, (rb.max[2] - rb.min[2]) * 0.5);
           const nx = (b.center[0] - rb.center[0]) / rbHalfX;
@@ -318,14 +339,20 @@ function analyzeContacts(
   return {
     supportedFromBelow,
     supportedFromAbove,
+    verticalCoaxial,
     lateralCount,
     lateralNormal,
     touchingRefs,
   };
 }
 
+const MIN_CORRIDOR_ARROW_GAP = 16;
+
 /**
  * Picks a clean, collision-free offset vector along the physical insertion axis.
+ * When lifting a sleeve/bush off a coaxial axle or pin, guarantees a crisp open
+ * air gap past the obstacle tip and sets `arrowTo` at the entry tip so the red
+ * arrow never buries itself inside the axle geometry.
  */
 function resolveOffsetAlongAxis(
   part: PlacementPartInput,
@@ -343,13 +370,47 @@ function resolveOffsetAlongAxis(
   };
 
   for (const dir of dirs) {
+    const axis = Math.abs(dir[0]) >= 0.5 ? 0 : (Math.abs(dir[1]) >= 0.5 ? 1 : 2);
+    const sign = dir[axis] >= 0 ? 1 : -1;
+    const perpA = (axis + 1) % 3;
+    const perpB = (axis + 2) % 3;
+
+    // Find any coaxial / corridor obstacle directly along the insertion path (e.g., vertical axle inside a bush)
+    let corridorObsTip: number | null = null;
+    for (let i = 0; i < obstacles.length; i++) {
+      const obs = obstacles[i];
+      if (obs.id === part.id) continue;
+      const ob = obs.box;
+      const ovA = overlap1D(part.box.min[perpA], part.box.max[perpA], ob.min[perpA], ob.max[perpA]);
+      const ovB = overlap1D(part.box.min[perpB], part.box.max[perpB], ob.min[perpB], ob.max[perpB]);
+      if (ovA <= 1.5 || ovB <= 1.5) continue;
+      // Check if obstacle overlaps part along the insertion axis or protrudes past part's center in `dir`
+      if (sign > 0) {
+        if (ob.max[axis] > part.box.min[axis] + 1 && ob.min[axis] < part.box.max[axis] + 24) {
+          if (corridorObsTip === null || ob.max[axis] > corridorObsTip) corridorObsTip = ob.max[axis];
+        }
+      } else {
+        if (ob.min[axis] < part.box.max[axis] - 1 && ob.max[axis] > part.box.min[axis] - 24) {
+          if (corridorObsTip === null || ob.min[axis] < corridorObsTip) corridorObsTip = ob.min[axis];
+        }
+      }
+    }
+
     const baseMag = computeBaseMag(dir);
-    for (let extra = 0; extra <= 24; extra += 8) {
+    for (let extra = 0; extra <= 96; extra += 8) {
       const mag = baseMag + extra;
       const dx = Math.round(dir[0] * mag);
       const dy = Math.round(dir[1] * mag);
       const dz = Math.round(dir[2] * mag);
       const shifted = shiftBox(part.box, dx, dy, dz);
+
+      // Ensure crisp open air gap past any coaxial obstacle tip (e.g., bush lifted above axle tip)
+      if (corridorObsTip !== null) {
+        const nearFace = sign > 0 ? shifted.min[axis] : shifted.max[axis];
+        const gapToTip = sign > 0 ? nearFace - corridorObsTip : corridorObsTip - nearFace;
+        if (gapToTip < MIN_CORRIDOR_ARROW_GAP) continue;
+      }
+
       let collides = false;
       for (let i = 0; i < obstacles.length; i++) {
         if (obstacles[i].id === part.id) continue;
@@ -359,7 +420,19 @@ function resolveOffsetAlongAxis(
         }
       }
       if (!collides) {
-        return { x: dx, y: dy, z: dz, tilt: 0, arrow: true };
+        const res: AutoPartOffset = { x: dx, y: dy, z: dz, tilt: 0, arrow: true };
+        // If a coaxial obstacle extends beyond the seated center, stop the arrowhead cleanly at its entry tip
+        if (corridorObsTip !== null) {
+          const pastCenter = sign > 0
+            ? corridorObsTip - part.box.center[axis]
+            : part.box.center[axis] - corridorObsTip;
+          if (pastCenter > 2) {
+            const arrowTo: Vec3 = [part.box.center[0], part.box.center[1], part.box.center[2]];
+            arrowTo[axis] = corridorObsTip + sign * 2;
+            res.arrowTo = arrowTo;
+          }
+        }
+        return res;
       }
     }
   }
@@ -382,6 +455,12 @@ function chooseInsertionDirs(
   const verticalDefault: Vec3 = cameraSide === 'bottom' ? [0, -1, 0] : [0, 1, 0];
   const verticalOpposite: Vec3 = cameraSide === 'bottom' ? [0, 1, 0] : [0, -1, 0];
 
+  if (contacts.verticalCoaxial) {
+    return {
+      preferred: verticalDefault,
+      fallbacks: [verticalOpposite],
+    };
+  }
   if (isLateralPrimary && contacts.lateralNormal) {
     const lat = contacts.lateralNormal;
     return {
@@ -457,17 +536,26 @@ function computeFirstStepOffsets(
   }
 
   // Score each part for being the primary grounded base piece:
-  // supporting other parts > largest volume > on base plane
+  // supporting other parts > central hub touching multiple Step-1 parts > largest volume > on base plane
   const baseScores = parts.map((p) => {
     const vol = boxVolume(p.box);
     const sup = supportCount.get(p.id) || 0;
+    let touchCount = 0;
+    for (const other of parts) {
+      if (other.id !== p.id && boxesWithinMargin(p.box, other.box, CONTACT_EPS)) touchCount++;
+    }
     const onGround = isBottomView
       ? (Math.abs(p.box.max[1] - basePlaneY) <= CONTACT_EPS ? 1 : 0)
       : (Math.abs(p.box.min[1] - basePlaneY) <= CONTACT_EPS ? 1 : 0);
     const isSupported = supportedByAnother.has(p.id) ? 1 : 0;
     return {
       part: p,
-      score: sup * 1_000_000 + (1 - isSupported) * 200_000 + onGround * 50_000 + vol,
+      score:
+        sup * 1_000_000 +
+        (1 - isSupported) * 200_000 +
+        touchCount * 120_000 +
+        onGround * 20_000 +
+        vol,
     };
   });
   baseScores.sort((a, b) => b.score - a.score);
@@ -542,10 +630,10 @@ function computeSubsequentStepOffsets(
       !contacts.supportedFromBelow &&
       !contacts.supportedFromAbove;
 
-    // 1. Lateral / horizontal insertion (pins, axles, Technic beams, SNOT bricks)
+    // 1. Lateral / horizontal insertion or coaxial through-hole/sleeve insertion (pins, axles, bushes, beams)
     let score = 0;
-    if (isLateral) {
-      // Sideways attachment is very hard to read from an isometric view without an arrow
+    if (isLateral || contacts.verticalCoaxial) {
+      // Sideways and coaxial insertions are hard to read from an isometric view without an arrow
       score += 3.0;
     }
 
@@ -650,6 +738,7 @@ export function computeAutoPlacementOffsetsForSequence(
 export function computePlacementArrowSegments(
   box: PlacementAABB,
   offset: readonly [number, number, number],
+  arrowTo?: readonly [number, number, number] | null,
 ): PlacementArrowSegment[] {
   const ox = offset[0];
   const oy = offset[1];
@@ -664,7 +753,7 @@ export function computePlacementArrowSegments(
   const s = boxSize(box);
   const halfAlong = 0.5 * (Math.abs(ux) * s[0] + Math.abs(uy) * s[1] + Math.abs(uz) * s[2]);
 
-  // Clear gap between near face of lifted brick and seated destination
+  // Clear gap between near face of lifted brick and seated destination (or coaxial obstacle tip)
   const clearGap = mag - halfAlong * 1.45;
   let fromDist: number;
   let toDist: number;
@@ -676,6 +765,18 @@ export function computePlacementArrowSegments(
     // Small manual nudge fallback
     fromDist = mag;
     toDist = 0;
+  }
+
+  // If a coaxial obstacle tip (e.g. top of a vertical axle inside a bush) was provided,
+  // terminate the arrowhead cleanly at that entry tip so it never clips inside the obstacle.
+  if (arrowTo) {
+    const proj =
+      (arrowTo[0] - box.center[0]) * ux +
+      (arrowTo[1] - box.center[1]) * uy +
+      (arrowTo[2] - box.center[2]) * uz;
+    if (proj > toDist && fromDist - proj >= 8) {
+      toDist = proj;
+    }
   }
 
   if (fromDist - toDist < 6) {

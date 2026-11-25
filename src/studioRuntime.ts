@@ -2546,7 +2546,7 @@ function buildMeshBuffers(prevParts, newParts, opts) {
     if (isNew && hasOffset && arrowEnabled) {
       const box = computeWorldBox(part);
       const arrowRgb = hexToRgb255(opts.arrowColor || DEFAULT_ARROW_COLOR, 0);
-      const segments = computePlacementArrowSegments(box, [offX, offY, offZ]);
+      const segments = computePlacementArrowSegments(box, [offX, offY, offZ], pOv?.arrowTo || null);
       for (const seg of segments) {
         addArrow3D(seg.from, seg.to, arrowRgb);
       }
@@ -5579,7 +5579,7 @@ function optimizeManualStepCameras(chapters) {
   const sectionSteps = new Map();
   for (const ch of chapters) {
     if (ch.kind === 'minifigure') continue;
-    if (ch.kind === 'submodel') {
+    if (ch.kind === 'submodel' && !ch.isSectionModule) {
       optimizeStepList(ch.steps || []);
       continue;
     }
@@ -5589,7 +5589,7 @@ function optimizeManualStepCameras(chapters) {
     for (const s of ch.steps || []) list.push(s);
   }
 
-  // 2. Optimize each continuous main / bag / join section as one unified step sequence
+  // 2. Optimize each continuous main / bag / join / section-module sequence as one unified step sequence
   for (const list of sectionSteps.values()) {
     optimizeStepList(list);
   }
@@ -5650,7 +5650,7 @@ function assignAutoPlacementOffsets(chapters) {
   const sectionSteps = new Map();
   for (const ch of chapters) {
     if (ch.kind === 'minifigure') continue;
-    if (ch.kind === 'submodel') {
+    if (ch.kind === 'submodel' && !ch.isSectionModule) {
       applyToSequence(ch.steps || []);
       continue;
     }
@@ -6228,30 +6228,78 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
           canonicalParts = normalizeCanonicalSubParts(sec.cleanIndices.map(i => parts[i]), subId);
           const prebuiltMechChapters = [];
           const subSteps = buildLocalSubmodelSteps(canonicalParts, subId, repeatCount, prebuiltMechChapters);
-          for (const mechCh of prebuiltMechChapters) {
+          if (prebuiltMechChapters.length === 0) {
+            // Mark as a standalone section module (uses clean "SECTION · N pcs" banner when repeatCount === 1)
             chapters.push({
-              id: `subch_${++chSeq}_${mechCh.id}`,
-              name: mechCh.name,
+              id: `subch_${++chSeq}_${subId}`,
+              name: sec.name || `Section ${mIdx + 1}`,
               kind: 'submodel',
-              sectionId: `subsec_${mechCh.id}`,
-              repeatCount: 1,
-              pieceCount: mechCh.pieceCount,
-              canonicalParts: mechCh.canonicalParts,
-              steps: mechCh.steps,
+              isSectionModule: true,
+              sectionId: `subsec_${subId}`,
+              repeatCount,
+              pieceCount: sec.cleanIndices.length,
+              canonicalParts,
+              steps: subSteps,
             });
+          } else {
+            // Emit each pre-built mechanism sub-assembly RIGHT BEFORE the step that attaches it,
+            // rather than up front before the section even starts!
+            const mechById = new Map(prebuiltMechChapters.map(m => [m.id, m]));
+            const emittedMechs = new Set();
+            let curChunk = [];
+            let chunkSeq = 0;
+            const flushSectionChunk = () => {
+              if (curChunk.length === 0) return;
+              chapters.push({
+                id: `subch_${++chSeq}_${subId}${chunkSeq > 0 ? `_p${chunkSeq + 1}` : ''}`,
+                name: sec.name || `Section ${mIdx + 1}`,
+                kind: 'submodel',
+                isSectionModule: true,
+                isSectionContinuation: chunkSeq > 0,
+                sectionId: `subsec_${subId}`,
+                repeatCount,
+                pieceCount: sec.cleanIndices.length,
+                canonicalParts,
+                steps: curChunk,
+              });
+              curChunk = [];
+              chunkSeq++;
+            };
+            for (const st of subSteps) {
+              const attId = st.attachedSubmodel?.id;
+              if (attId && mechById.has(attId) && !emittedMechs.has(attId)) {
+                flushSectionChunk();
+                const mechCh = mechById.get(attId);
+                chapters.push({
+                  id: `subch_${++chSeq}_${mechCh.id}`,
+                  name: mechCh.name,
+                  kind: 'submodel',
+                  sectionId: `subsec_${mechCh.id}`,
+                  repeatCount: 1,
+                  pieceCount: mechCh.pieceCount,
+                  canonicalParts: mechCh.canonicalParts,
+                  steps: mechCh.steps,
+                });
+                emittedMechs.add(attId);
+              }
+              curChunk.push(st);
+            }
+            flushSectionChunk();
+            for (const mechCh of prebuiltMechChapters) {
+              if (!emittedMechs.has(mechCh.id)) {
+                chapters.push({
+                  id: `subch_${++chSeq}_${mechCh.id}`,
+                  name: mechCh.name,
+                  kind: 'submodel',
+                  sectionId: `subsec_${mechCh.id}`,
+                  repeatCount: 1,
+                  pieceCount: mechCh.pieceCount,
+                  canonicalParts: mechCh.canonicalParts,
+                  steps: mechCh.steps,
+                });
+              }
+            }
           }
-          // Mark as a standalone section module (uses clean "SECTION · N pcs" banner when repeatCount === 1)
-          chapters.push({
-            id: `subch_${++chSeq}_${subId}`,
-            name: sec.name || `Section ${mIdx + 1}`,
-            kind: 'submodel',
-            isSectionModule: true,
-            sectionId: `subsec_${subId}`,
-            repeatCount,
-            pieceCount: sec.cleanIndices.length,
-            canonicalParts,
-            steps: subSteps,
-          });
           builtSectionChapterCount++;
         }
 
@@ -7342,16 +7390,37 @@ function renumberContinuousSteps(model) {
   // `num` = printed step number (restarts per submodel / non-classic minifig chapter).
   // `absNum` = absolute step number, unique across the whole manual; used for all ranges.
   let mainNum = 0;
+  const secModuleCounter = new Map();
+  const lastSecModuleChapter = new Map();
+  for (const ch of model.chapters) {
+    if (ch.kind === 'submodel' && ch.isSectionModule) {
+      lastSecModuleChapter.set(ch.sectionId || ch.id, ch.id);
+    }
+  }
   for (const ch of model.chapters) {
     if (ch.kind === 'submodel') {
       const rep = ch.repeatCount ?? (ch.isSectionModule ? 1 : 2);
-      ch.steps.forEach((s, idx) => {
-        s.num = idx + 1;
-        s.isMainNumbered = false;
-        s.isSubmodelStep = true;
-        s.isSubmodelFinal = idx === ch.steps.length - 1 && rep > 1;
-        s.submodelRepeat = rep;
-      });
+      if (ch.isSectionModule) {
+        const secKey = ch.sectionId || ch.id;
+        let secNum = secModuleCounter.get(secKey) || 0;
+        const isLastChunk = lastSecModuleChapter.get(secKey) === ch.id;
+        ch.steps.forEach((s, idx) => {
+          s.num = ++secNum;
+          s.isMainNumbered = false;
+          s.isSubmodelStep = true;
+          s.isSubmodelFinal = isLastChunk && idx === ch.steps.length - 1 && rep > 1;
+          s.submodelRepeat = rep;
+        });
+        secModuleCounter.set(secKey, secNum);
+      } else {
+        ch.steps.forEach((s, idx) => {
+          s.num = idx + 1;
+          s.isMainNumbered = false;
+          s.isSubmodelStep = true;
+          s.isSubmodelFinal = idx === ch.steps.length - 1 && rep > 1;
+          s.submodelRepeat = rep;
+        });
+      }
     } else if (ch.kind === 'minifigure' && normalizeMinifigStepStyle(state.minifigStyle) !== 'classic') {
       ch.steps.forEach((s, idx) => { s.num = idx + 1; s.isMainNumbered = false; });
     } else {
@@ -7367,14 +7436,18 @@ function renumberContinuousSteps(model) {
 function getPreviousPartsForStep(model, ch, step) {
   const prev = [];
   if (step.isStandaloneFigure || step.isMinifigPoseStep) return prev;
-  if (ch.kind === 'submodel') {
+  if (ch.kind === 'submodel' && !ch.isSectionModule) {
     for (const s of ch.steps) { if (s.id === step.id) break; prev.push(...s.parts); }
     return prev;
   }
   const sec = ch.sectionId || ch.id;
   for (const c of model.chapters) {
-    if (c.kind === 'submodel') continue;
-    if ((c.sectionId || c.id) !== sec) continue;
+    if (ch.isSectionModule) {
+      if (!c.isSectionModule || (c.sectionId || c.id) !== sec) continue;
+    } else {
+      if (c.kind === 'submodel') continue;
+      if ((c.sectionId || c.id) !== sec) continue;
+    }
     for (const s of c.steps) {
       if (s.id === step.id) return prev;
       if (s.isMinifigPoseStep || s.isStandaloneFigure) continue;
@@ -7667,7 +7740,7 @@ function rebuildPages() {
     // in a single O(parts) pass matching getPreviousPartsForStep + computeStepCameraFraming.
     const secKey = ch.sectionId || ch.id;
     let chPrevBoxes;
-    if (isSubCh) {
+    if (isSubCh && !ch.isSectionModule) {
       chPrevBoxes = [];
     } else {
       chPrevBoxes = sectionPrevBoxes.get(secKey);
@@ -7842,7 +7915,7 @@ function rebuildPages() {
       const firstGroup = findLayoutGroupForStep(state.layoutGroups, getAbsStepNum(first));
       const pageLayoutSpec = firstGroup ? firstGroup.layout : state.layoutConfig;
       const explicitCap = getSpecStepsPerPageCap(pageLayoutSpec);
-      const hasSubmodelIntro = Boolean(isSubCh && isFirstChPage);
+      const hasSubmodelIntro = Boolean(isSubCh && isFirstChPage && !ch.isSectionContinuation);
       const pageAutoCtx = hasSubmodelIntro ? autoCtxWithIntro : autoCtxNoIntro;
 
       const slots = [];
@@ -9306,8 +9379,8 @@ function renderAll() {
     frame.innerHTML = `
       <div class="relative w-full h-full flex flex-col overflow-hidden" style="padding:${padPx}px;padding-bottom:${padPx + footerH}px">
         ${page.submodelIntro ? `
-          <div class="shrink-0 flex items-center justify-between shadow-xs overflow-hidden" style="margin-bottom:${Math.round(typo.pt(7))}px;padding:${Math.round(typo.pt(5))}px ${Math.round(typo.pt(10))}px;border-radius:${Math.round(typo.pt(10))}px;gap:${Math.round(typo.pt(10))}px;background:${theme.calloutBg};border:1.5px solid ${theme.calloutBorder}">
-            <div class="flex items-center min-w-0 flex-1" style="gap:${Math.round(typo.pt(8))}px">
+          <div class="shrink-0 flex items-center ${wordless ? 'w-fit self-start' : 'justify-between'} shadow-xs overflow-hidden" style="margin-bottom:${Math.round(typo.pt(7))}px;padding:${Math.round(typo.pt(5))}px ${Math.round(typo.pt(10))}px;border-radius:${Math.round(typo.pt(10))}px;gap:${Math.round(typo.pt(10))}px;background:${theme.calloutBg};border:1.5px solid ${theme.calloutBorder}">
+            <div class="flex items-center min-w-0 ${wordless ? '' : 'flex-1'}" style="gap:${Math.round(typo.pt(8))}px">
               <img src="${subIntroImg}" alt="${escHtml(page.submodelIntro.name)}" style="width:${st.introThumbW}px;height:${st.introThumbH}px" class="object-contain shrink-0 pointer-events-none" />
               ${wordless ? '' : `
                 <div class="min-w-0 flex-1 overflow-hidden">
@@ -17863,14 +17936,6 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
     if (page.submodelIntro) {
       const sub = page.submodelIntro;
       const bannerH = Math.round(st.introThumbH + typo.pt(12));
-      const bannerW = pxW - pad * 2;
-      drawRRect(pad, pad, bannerW, bannerH, Math.round(typo.pt(10)));
-      ctx.fillStyle = theme.calloutBg;
-      ctx.fill();
-      ctx.strokeStyle = theme.calloutBorder;
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-
       const hasMult = sub.repeatCount > 1;
       const rawCount = sub.pieceCount || sub.canonicalParts?.length || 0;
       const multLabel = hasMult ? `×${sub.repeatCount}` : (wordless ? String(rawCount) : `${rawCount} pcs`);
@@ -17880,6 +17945,17 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       const multTextW = Math.ceil(ctx.measureText(multLabel).width);
       const pillW = Math.max(Math.round(typo.pt(42)), Math.round(multTextW + introBrickSz + introBrickGap + typo.pt(20)));
       const pillH = Math.round(st.introPillFont * 1.9);
+      const fullBannerW = pxW - pad * 2;
+      const bannerW = wordless
+        ? Math.min(fullBannerW, Math.round(typo.pt(10) + st.introThumbW + typo.pt(10) + pillW + typo.pt(10)))
+        : fullBannerW;
+      drawRRect(pad, pad, bannerW, bannerH, Math.round(typo.pt(10)));
+      ctx.fillStyle = theme.calloutBg;
+      ctx.fill();
+      ctx.strokeStyle = theme.calloutBorder;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
       const pillX = pad + bannerW - pillW - Math.round(typo.pt(10));
       const pillY = pad + Math.round((bannerH - pillH) / 2);
 
@@ -21115,7 +21191,7 @@ async function runInteractiveHtmlExport() {
             const oy = Number(pOv.y) || 0;
             const oz = Number(pOv.z) || 0;
             if (Math.hypot(ox, oy, oz) < 6) continue;
-            const segs = computePlacementArrowSegments(computeWorldBox(p), [ox, oy, oz]);
+            const segs = computePlacementArrowSegments(computeWorldBox(p), [ox, oy, oz], pOv.arrowTo || null);
             for (const seg of segs) stepArrows.push(seg);
           }
 
