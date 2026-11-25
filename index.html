@@ -87,6 +87,23 @@
     </div>
 
     <!-- ================================================================ -->
+    <!-- FLOATING PAGE-SIZE READABILITY WARNING (non-print)               -->
+    <!-- ================================================================ -->
+    <div id="pageSizeWarningBanner" role="status" aria-live="polite" class="no-print hidden fixed top-[104px] md:top-[60px] left-1/2 -translate-x-1/2 z-30 max-w-[min(94vw,640px)]">
+      <div class="flex items-center gap-2 px-3 py-2 rounded-xl bg-[var(--card)] border border-[var(--warning)]/45 shadow-[var(--shadow-surface)] text-xs text-[var(--foreground)]">
+        <span class="w-6 h-6 rounded-full bg-[var(--warning-soft)] text-[var(--warning)] flex items-center justify-center shrink-0" aria-hidden="true">
+          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+        </span>
+        <span id="pageSizeWarningText" class="min-w-0 flex-1 leading-snug font-medium"></span>
+        <button id="btnApplySuggestedPageSize" type="button" class="hidden px-2.5 py-1 rounded-md bg-[var(--warning)] text-white hover:opacity-90 font-semibold whitespace-nowrap shrink-0 transition-opacity cursor-pointer"></button>
+        <button id="btnOpenPageSetupFromWarning" type="button" class="px-2.5 py-1 rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer">Page Setup</button>
+        <button id="btnDismissPageSizeWarning" type="button" title="Dismiss warning" aria-label="Dismiss page size warning" class="w-6 h-6 rounded-full hover:bg-[var(--surface-hover)] text-[var(--muted-foreground)] flex items-center justify-center shrink-0 transition-colors cursor-pointer">
+          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- ================================================================ -->
     <!-- EMPTY WELCOME PROOFING SHEET (shown until model is loaded)       -->
     <!-- ================================================================ -->
     <section id="emptyState" class="proofing-stage flex-1 min-h-0 flex items-center justify-center pt-16 pb-6 px-4 sm:p-8 overflow-y-auto">
@@ -297,6 +314,7 @@
               <span class="flex items-center gap-2 min-w-0">
                 <svg class="w-4 h-4 text-[var(--primary)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="3" width="16" height="18" rx="2"/><line x1="8" x2="16" y1="8" y2="8"/><line x1="8" x2="16" y1="12" y2="12"/><line x1="8" x2="12" y1="16" y2="16"/></svg>
                 <span>Page Setup</span>
+                <span id="menuPageSetupWarnDot" class="hidden w-2 h-2 rounded-full bg-[var(--warning)] shrink-0" title="Some steps need a larger page size"></span>
               </span>
               <span class="flex items-center gap-1.5 shrink-0 max-w-[55%]">
                 <span id="menuPageSetupSummary" class="font-mono text-xs text-[var(--muted-foreground)] truncate">Screen Fit</span>
@@ -995,6 +1013,8 @@
             </div>
           </div>
 
+          <div id="pageSizeFitWarning" role="alert" class="hidden destructive-notice"></div>
+
           <!-- Default Page Grid + Live Visual Grid Preview (steps per page is derived from the grid & page breaks) -->
           <div class="space-y-3 pt-4 border-t border-[var(--border)]">
             <div class="flex items-center justify-between gap-2">
@@ -1010,7 +1030,7 @@
               <div id="layoutGridPreview" class="shrink-0 flex items-center justify-center min-w-[144px] min-h-[100px]" aria-label="Live step grid preview"></div>
               <div class="flex-1 min-w-0 space-y-1 text-center sm:text-left">
                 <div id="layoutGridPreviewTitle" class="font-bold text-xs text-[var(--foreground)]">Smart Auto Grid</div>
-                <p id="layoutGridPreviewDesc" class="text-[11px] text-[var(--muted-foreground)] leading-snug">Automatically fits 1–2 steps per page based on step complexity and page shape.</p>
+                <p id="layoutGridPreviewDesc" class="text-[11px] text-[var(--muted-foreground)] leading-snug">Automatically packs as many steps per page as fit with at least 1″ × 1″ step area (+ margins) and 1 stud ≥ 0.5 cm.</p>
               </div>
             </div>
 

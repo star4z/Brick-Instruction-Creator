@@ -106,13 +106,22 @@ import {
   toggleStepPageBreakOverride,
 } from './engine/pageBreaks';
 import {
+  SMART_AUTO_MIN_STEP_AREA_HEIGHT_IN,
+  SMART_AUTO_MIN_STEP_AREA_WIDTH_IN,
+  SMART_AUTO_MIN_STUD_SIZE_CM,
+  analyzePageSizeFit,
+  buildSmartAutoPageContext,
+  computeBoundingSphereFromBoxLists,
   computePageSlotRects,
+  computeSmartAutoPreviewGrid,
   createDefaultPageLayoutSpec,
   describePageLayoutSpec,
   findLayoutGroupForStep,
+  formatPageSizeWarningForPage,
   getSpecStepsPerPageCap,
   normalizeLayoutGroups,
   normalizePageLayoutSpec,
+  packSmartAutoPage,
   withDerivedStepsPerPage,
 } from './engine/pageLayout';
 import {
@@ -6289,6 +6298,7 @@ const state = {
   bomConfig: createDefaultBomConfig(),
   pages: [],
   pageIdx: 0,
+  pageSizeWarning: null,   // PageSizeWarningSummary from analyzePageSizeFit()
   mode: 'pan',             // pan | parts | camera | step | page
   stepSubTab: 'camera',    // camera | layout | notes
   selectedStepId: null,
@@ -6672,13 +6682,40 @@ function drawFireworksCanvas(ctx, pxW, pxH) {
 }
 
 function rebuildPages() {
-  if (!state.model) { state.pages = []; return; }
+  if (!state.model) {
+    state.pages = [];
+    state.pageSizeWarning = null;
+    return;
+  }
   renumberContinuousSteps(state.model);
   const pages = [];
   let pNum = 0;
-  const isLandPage = state.paperFormat === 'screen'
-    ? computePageFrameDimensions().isLandscape
-    : getActivePagePhysicalInches()[0] >= getActivePagePhysicalInches()[1];
+  const dims = computePageFrameDimensions();
+  const isLandPage = dims.isLandscape;
+  const autoCtxNoIntro = buildSmartAutoPageContext({
+    pageWidthIn: dims.widthIn,
+    pageHeightIn: dims.heightIn,
+    density: state.density,
+    hasSubmodelIntro: false,
+  });
+  const autoCtxWithIntro = buildSmartAutoPageContext({
+    pageWidthIn: dims.widthIn,
+    pageHeightIn: dims.heightIn,
+    density: state.density,
+    hasSubmodelIntro: true,
+  });
+  const partBoxCache = new Map();
+  const getCachedPartBox = (part) => {
+    let b = partBoxCache.get(part);
+    if (!b) {
+      b = computeWorldBox(part);
+      partBoxCache.set(part, b);
+    }
+    return b;
+  };
+  const sectionPrevBoxes = new Map();
+  const allStepChecks = [];
+
   if (state.showExtras) pages.push({ id:'cover', kind:'cover', num:++pNum, label:'Cover' });
 
   for (const ch of state.model.chapters) {
@@ -6686,6 +6723,103 @@ function rebuildPages() {
     let isFirstChPage = true;
     const isSubCh = ch.kind === 'submodel';
     const subRepeat = ch.repeatCount ?? (ch.isSectionModule ? 1 : 2);
+
+    // Precompute exact physical framing & slot-chrome metrics for every step in this chapter
+    // in a single O(parts) pass matching getPreviousPartsForStep + computeStepCameraFraming.
+    const secKey = ch.sectionId || ch.id;
+    let chPrevBoxes;
+    if (isSubCh) {
+      chPrevBoxes = [];
+    } else {
+      chPrevBoxes = sectionPrevBoxes.get(secKey);
+      if (!chPrevBoxes) {
+        chPrevBoxes = [];
+        sectionPrevBoxes.set(secKey, chPrevBoxes);
+      }
+    }
+
+    const stepMetrics = ch.steps.map((step) => {
+      const ov = state.overrides[step.id] || {};
+      const effectivePartOffsets = step.defaultPartOffsets
+        ? { ...step.defaultPartOffsets, ...(ov.partOffsets || {}) }
+        : (ov.partOffsets || {});
+      const stepParts = step.parts || [];
+      const canonicalNewBoxes = stepParts.map(getCachedPartBox);
+      const shiftedNewBoxes = canonicalNewBoxes.map((b, idx) => {
+        const p = stepParts[idx];
+        const off = p && effectivePartOffsets[p.id];
+        if (!off || (!off.x && !off.y && !off.z)) return b;
+        const dx = Number(off.x) || 0;
+        const dy = Number(off.y) || 0;
+        const dz = Number(off.z) || 0;
+        return {
+          min: [b.min[0] + dx, b.min[1] + dy, b.min[2] + dz],
+          max: [b.max[0] + dx, b.max[1] + dy, b.max[2] + dz],
+          center: [b.center[0] + dx, b.center[1] + dy, b.center[2] + dz],
+        };
+      });
+
+      const hasPrev = !(step.isStandaloneFigure || step.isMinifigPoseStep) && chPrevBoxes.length > 0;
+      const fullSphere = computeBoundingSphereFromBoxLists(
+        hasPrev ? chPrevBoxes : [],
+        shiftedNewBoxes,
+        20,
+      );
+      const newSphere = computeBoundingSphereFromBoxLists(shiftedNewBoxes, [], 18);
+      const framing = hasPrev
+        ? computeStepCameraFraming({
+            focusMode: ov.focusMode || 'auto',
+            hasPrevParts: true,
+            fullCenter: fullSphere.center,
+            fullRadius: fullSphere.radius,
+            newCenter: newSphere.center,
+            newRadius: newSphere.radius,
+          })
+        : { center: fullSphere.center, radius: fullSphere.radius, isZoomedIn: false };
+
+      const isMfBuild = Boolean((step.isStandaloneFigure || ch.kind === 'minifigure') && !step.isMinifigPoseStep);
+      const mfStyle = isMfBuild ? getEffectiveMinifigStyle(step) : 'classic';
+      const isOfficialMfStyle = Boolean(isMfBuild && (mfStyle === 'exploded' || mfStyle === 'sequential'));
+      const viewRadiusLdu = (isMfBuild && mfStyle === 'exploded')
+        ? Math.max(framing.radius, 95)
+        : framing.radius;
+
+      let pliUniqueCount = 0;
+      if (!isOfficialMfStyle) {
+        if (step.attachedSubmodel || step.attachedMinifig || step.minifigPrep) {
+          pliUniqueCount = 1;
+        } else {
+          const skuSet = new Set();
+          for (const p of stepParts) {
+            skuSet.add(`${p.p}:${p.c}`);
+            if (skuSet.size >= 7) break;
+          }
+          pliUniqueCount = skuSet.size;
+        }
+      }
+
+      if (isSubCh || (!step.isMinifigPoseStep && !step.isStandaloneFigure)) {
+        for (let bi = 0; bi < canonicalNewBoxes.length; bi++) {
+          chPrevBoxes.push(canonicalNewBoxes[bi]);
+        }
+      }
+
+      return {
+        stepId: step.id,
+        stepNum: step.num,
+        absStepNum: getAbsStepNum(step),
+        viewRadiusLdu,
+        modelScale: ov.modelScale || 1.0,
+        pliUniqueCount,
+        hasInlineCallout: Boolean(step.subassembly && !ov.calloutAsPages && !isOfficialMfStyle),
+        calloutDir: ov.calloutDir === 'vertical' ? 'vertical' : 'horizontal',
+        hasMinifig1to1: Boolean(state.showMinifig1to1 && isMfBuild),
+        hasPoseLegend: Boolean(step.isMinifigPoseStep && step.minifigPrep?.indicators?.length > 0),
+        isOfficialMinifigStyle: isOfficialMfStyle,
+        isMinifigPoseStep: Boolean(step.isMinifigPoseStep),
+        hasAttachedMinifig: Boolean(step.attachedMinifig),
+      };
+    });
 
     // Emit an official-style Bag / Stage opener divider page before each numbered bag chapter
     if (ch.kind === 'bag' && ch.steps.length > 0) {
@@ -6718,17 +6852,27 @@ function rebuildPages() {
         for (const sl of slices) {
           const pgId = sl.pageIdx === 0 ? `pg_${first.id}` : `pg_${first.id}_seq${sl.pageIdx + 1}`;
           const stepLabel = sl.end - sl.start === 1 ? `Step ${sl.start + 1}` : `Steps ${sl.start + 1}–${sl.end}`;
+          const pageNum = ++pNum;
           pages.push({
             id: pgId,
             kind: 'steps',
-            num: ++pNum,
+            num: pageNum,
             label: `${mfTitle} · ${stepLabel}`,
             chapterName: mfTitle,
             isSubmodelPage: false,
             submodelIntro: null,
             pinned: sl.pageIdx === 0 ? Boolean(firstOv.pin) : false,
+            autoGrid: null,
             slots: [{ ch, step: first, minifigSeqSlice: sl }],
           });
+          if (sl.pageIdx === 0) {
+            allStepChecks.push({
+              metric: stepMetrics[i],
+              pageId: pgId,
+              pageNum,
+              hasSubmodelIntro: false,
+            });
+          }
           if (state.dividerAfter[pgId]) {
             pages.push({ id: 'div_' + pgId, kind: 'divider', num: ++pNum, label: 'Divider Page', sourcePgId: pgId });
           }
@@ -6746,31 +6890,59 @@ function rebuildPages() {
           chapterName: ch.name, step: first, ch,
         });
       }
-      const nextStep = ch.steps[i + 1];
-      const isPosePlacePair = Boolean(first.isMinifigPoseStep && nextStep?.attachedMinifig);
       const firstGroup = findLayoutGroupForStep(state.layoutGroups, getAbsStepNum(first));
       const pageLayoutSpec = firstGroup ? firstGroup.layout : state.layoutConfig;
       const explicitCap = getSpecStepsPerPageCap(pageLayoutSpec);
-      const cap = explicitCap !== null
-        ? explicitCap
-        : (isPosePlacePair
-          ? 2
-          : (isFirstMfBuild && firstMfStyle === 'exploded'
-            ? (isLandPage && first.parts.length <= 7 ? 2 : 1)
-            : (first.subassembly || first.attachedSubmodel || first.attachedMinifig || first.parts.length >= 6 ? 1 : 2)));
+      const hasSubmodelIntro = Boolean(isSubCh && isFirstChPage);
+      const pageAutoCtx = hasSubmodelIntro ? autoCtxWithIntro : autoCtxNoIntro;
+
       const slots = [];
-      for (let k = 0; k < cap && i < ch.steps.length; k++) {
-        const s = ch.steps[i];
-        const sGroup = findLayoutGroupForStep(state.layoutGroups, getAbsStepNum(s));
-        if (k > 0 && (sGroup?.id || null) !== (firstGroup?.id || null)) break;
-        const isSMfBuild = Boolean((s.isStandaloneFigure || ch.kind === 'minifigure') && !s.isMinifigPoseStep);
-        if (k > 0 && isSMfBuild && getEffectiveMinifigStyle(s) === 'sequential') break;
-        if (k > 0 && state.overrides[s.id]?.pin) break;
-        if (k > 0 && (s.subassembly || s.attachedSubmodel || (s.attachedMinifig && !isPosePlacePair) || s.isMinifigPoseStep) && explicitCap === null) break;
-        slots.push({ ch, step: s });
-        i++;
-        if ((s.subassembly || s.attachedSubmodel || s.attachedMinifig) && explicitCap === null) break;
+      const pageMetrics = [];
+      let autoGrid = null;
+
+      if (explicitCap === null) {
+        // Smart Auto Grid: pack as many steps as fit while keeping >= 1"×1" (+ margins)
+        // AND 1 stud >= 0.5 cm — no artificial 1–2 step cap!
+        const eligibleIndices = [];
+        for (let j = i; j < ch.steps.length; j++) {
+          const s = ch.steps[j];
+          if (j > i) {
+            const sGroup = findLayoutGroupForStep(state.layoutGroups, getAbsStepNum(s));
+            if ((sGroup?.id || null) !== (firstGroup?.id || null)) break;
+            const isSMfBuild = Boolean((s.isStandaloneFigure || ch.kind === 'minifigure') && !s.isMinifigPoseStep);
+            if (isSMfBuild && getEffectiveMinifigStyle(s) === 'sequential') break;
+            const sOv = state.overrides[s.id] || {};
+            if (sOv.pin) break;
+            if (s.subassembly && sOv.calloutAsPages) break;
+          }
+          eligibleIndices.push(j);
+        }
+        const eligibleMetrics = eligibleIndices.map((idx) => stepMetrics[idx]);
+        const packed = packSmartAutoPage(eligibleMetrics, pageAutoCtx);
+        const takeCount = Math.max(1, Math.min(eligibleIndices.length, packed.count));
+        for (let k = 0; k < takeCount; k++) {
+          const idx = eligibleIndices[k];
+          slots.push({ ch, step: ch.steps[idx] });
+          pageMetrics.push(stepMetrics[idx]);
+        }
+        i += takeCount;
+        autoGrid = packed.grid;
+      } else {
+        for (let k = 0; k < explicitCap && i < ch.steps.length; k++) {
+          const s = ch.steps[i];
+          const sGroup = findLayoutGroupForStep(state.layoutGroups, getAbsStepNum(s));
+          if (k > 0 && (sGroup?.id || null) !== (firstGroup?.id || null)) break;
+          const isSMfBuild = Boolean((s.isStandaloneFigure || ch.kind === 'minifigure') && !s.isMinifigPoseStep);
+          if (k > 0 && isSMfBuild && getEffectiveMinifigStyle(s) === 'sequential') break;
+          const sOv = state.overrides[s.id] || {};
+          if (k > 0 && sOv.pin) break;
+          if (k > 0 && s.subassembly && sOv.calloutAsPages) break;
+          slots.push({ ch, step: s });
+          pageMetrics.push(stepMetrics[i]);
+          i++;
+        }
       }
+
       const allExplodedMf = slots.every(sl =>
         Boolean((sl.step.isStandaloneFigure || sl.ch.kind === 'minifigure') && !sl.step.isMinifigPoseStep) &&
         getEffectiveMinifigStyle(sl.step) === 'exploded',
@@ -6782,14 +6954,15 @@ function rebuildPages() {
           ? (subRepeat > 1 ? `${ch.name} ×${subRepeat} · ${stepRange}` : `${ch.name} · ${stepRange}`)
           : (ch.kind === 'bag' ? `${ch.name} · ${stepRange}` : stepRange);
       const pgId = 'pg_' + slots[0].step.id;
+      const pageNum = ++pNum;
       pages.push({
         id: pgId,
         kind: 'steps',
-        num: ++pNum,
+        num: pageNum,
         label,
         chapterName: isSubCh && subRepeat > 1 ? `${ch.name} (×${subRepeat})` : ch.name,
         isSubmodelPage: isSubCh,
-        submodelIntro: (isSubCh && isFirstChPage) ? {
+        submodelIntro: hasSubmodelIntro ? {
           id: ch.id,
           name: ch.name,
           repeatCount: subRepeat,
@@ -6800,14 +6973,27 @@ function rebuildPages() {
         pinned: Boolean(state.overrides[slots[0].step.id]?.pin),
         layoutSpec: pageLayoutSpec,
         layoutGroup: firstGroup || null,
+        autoGrid,
         slots,
       });
+      for (const m of pageMetrics) {
+        allStepChecks.push({ metric: m, pageId: pgId, pageNum, hasSubmodelIntro });
+      }
       isFirstChPage = false;
       if (state.dividerAfter[pgId]) {
         pages.push({ id: 'div_' + pgId, kind: 'divider', num: ++pNum, label: 'Divider Page', sourcePgId: pgId });
       }
     }
   }
+
+  state.pageSizeWarning = analyzePageSizeFit({
+    stepChecks: allStepChecks,
+    currentFormatId: state.paperFormat,
+    currentOrientation: state.orientation,
+    currentPageWidthIn: dims.widthIn,
+    currentPageHeightIn: dims.heightIn,
+    density: state.density,
+  });
   if (state.showExtras) {
     // 1. Build Complete celebration page BEFORE Parts List
     pages.push({ id:'complete', kind:'complete', num:++pNum, label:'Build Complete' });
@@ -7356,6 +7542,7 @@ function renderAll() {
     if (statsEl) { statsEl.innerHTML = ''; statsEl.classList.add('hidden'); }
     document.getElementById('contextOverlay').classList.add('hidden');
     syncMenuControls();
+    syncPageSizeWarningUI(null);
     return;
   }
 
@@ -7853,7 +8040,7 @@ function renderAll() {
     const introEstH = page.submodelIntro ? Math.round(st.introThumbH + typo.pt(20)) : 0;
     const gridW = Math.max(120, dims.width - padPx * 2);
     const gridH = Math.max(120, dims.height - padPx * 2 - footerH - introEstH);
-    const slotRects = computePageSlotRects(slots.length, pageSpec, dims.isLandscape, gridW, gridH, gapPx);
+    const slotRects = computePageSlotRects(slots.length, pageSpec, dims.isLandscape, gridW, gridH, gapPx, page.autoGrid);
     const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) ? window.devicePixelRatio : 1;
 
     const slotData = slots.map(({ ch, step, minifigSeqSlice }, slotIdx) => {
@@ -8282,6 +8469,7 @@ function renderAll() {
 
   renderContextOverlay(page);
   syncMenuControls();
+  syncPageSizeWarningUI(page);
   applyStageTransform();
 }
 
@@ -9488,6 +9676,9 @@ function renderContextOverlay(page) {
     const orientTxt = paperSpec.supportsOrientation ? (state.orientation === 'portrait' ? 'Portrait' : 'Landscape') : '';
     const gridSummary = describePageLayoutSpec(state.layoutConfig);
     const manualSummary = [paperSpec.shortName, orientTxt, gridSummary].filter(Boolean).join(' · ');
+    const pgWarn = state.pageSizeWarning?.hasWarning ? state.pageSizeWarning : null;
+    const pgWarnAction = pgWarn ? getPrimaryPageSizeAction(pgWarn) : null;
+    const pgWarnText = pgWarn ? formatPageSizeWarningForPage(pgWarn, page.id) : '';
 
     box.innerHTML = `
       <div class="pointer-events-auto studio-surface rounded-xl p-3.5 w-full max-h-[46vh] overflow-y-auto space-y-2.5 text-xs">
@@ -9498,6 +9689,15 @@ function renderContextOverlay(page) {
           </div>
           ${renderScopeBadge('local', 'This Page')}
         </div>
+
+        ${pgWarn ? `
+          <div role="alert" data-tone="warning" class="destructive-notice destructive-notice-compact flex-wrap items-center justify-between">
+            <div class="flex items-start gap-1.5 min-w-0 flex-1">
+              ${DESTRUCTIVE_ALERT_SVG}
+              <span class="min-w-0 flex-1">${escHtml(pgWarnText)}</span>
+            </div>
+            ${pgWarnAction ? `<button id="pageCardApplyLargerSizeBtn" type="button" class="px-2 py-1 rounded-md bg-[var(--warning)] text-white hover:opacity-90 font-semibold whitespace-nowrap shrink-0 cursor-pointer">${escHtml(pgWarnAction.buttonLabel)}</button>` : ''}
+          </div>` : ''}
 
         <!-- Page Breaks & Page Inserts (affects later pages) -->
         <div class="space-y-1.5">
@@ -9547,6 +9747,10 @@ function renderContextOverlay(page) {
         </div>
       </div>`;
 
+    const pgWarnBtn = box.querySelector('#pageCardApplyLargerSizeBtn');
+    if (pgWarnBtn && pgWarnAction) {
+      pgWarnBtn.onclick = () => applySuggestedPageSize(pgWarnAction);
+    }
     box.querySelectorAll('.page-break-slot-btn').forEach(b => {
       b.onclick = () => {
         const sid = b.getAttribute('data-page-break-step');
@@ -10118,7 +10322,168 @@ function renderPaperFormatPreviewUI() {
   }
 }
 
-function renderGridPreviewInto(containerEl, spec, maxW = 136, maxH = 92) {
+let dismissedPageSizeWarningKey = '';
+
+function getPageSizeWarningKey(warn) {
+  if (!warn || !warn.hasWarning) return '';
+  return [
+    state.model?.title || '',
+    state.paperFormat,
+    state.orientation,
+    state.customWidth,
+    state.customHeight,
+    state.customUnit,
+    state.density,
+    warn.affectedStepCount,
+  ].join('|');
+}
+
+function getPrimaryPageSizeAction(warn) {
+  if (!warn || !warn.hasWarning) return null;
+  if (warn.suggestedFormats && warn.suggestedFormats.length > 0) {
+    const first = warn.suggestedFormats[0];
+    return {
+      kind: 'format',
+      formatId: first.formatId,
+      orientation: first.orientation,
+      label: first.label,
+      buttonLabel: `Use ${first.label}`,
+    };
+  }
+  if (warn.minRequiredPageWidthIn <= 48 && warn.minRequiredPageHeightIn <= 48) {
+    return {
+      kind: 'custom',
+      widthIn: Math.min(48, Math.max(2, warn.minRequiredPageWidthIn)),
+      heightIn: Math.min(48, Math.max(2, warn.minRequiredPageHeightIn)),
+      label: 'Custom Size',
+      buttonLabel: 'Use Custom Size',
+    };
+  }
+  return null;
+}
+
+function applySuggestedPageSize(action) {
+  if (!action) return;
+  if (action.kind === 'format') {
+    state.paperFormat = action.formatId;
+    if (action.orientation) state.orientation = action.orientation;
+    dismissedPageSizeWarningKey = '';
+    resetZoom();
+    renderAll();
+    showToast(`Switched page size to ${action.label}.`);
+  } else if (action.kind === 'custom') {
+    state.paperFormat = 'custom';
+    if (state.customUnit === 'cm') {
+      state.customWidth = +(action.widthIn * 2.54).toFixed(1);
+      state.customHeight = +(action.heightIn * 2.54).toFixed(1);
+    } else {
+      state.customWidth = +action.widthIn.toFixed(1);
+      state.customHeight = +action.heightIn.toFixed(1);
+    }
+    dismissedPageSizeWarningKey = '';
+    resetZoom();
+    renderAll();
+    showToast(`Switched to Custom page size (${state.customWidth} × ${state.customHeight} ${state.customUnit}).`);
+  }
+}
+
+function syncPageSizeWarningUI(currentPage = null) {
+  const warn = state.model && state.pageSizeWarning?.hasWarning ? state.pageSizeWarning : null;
+  const action = warn ? getPrimaryPageSizeAction(warn) : null;
+
+  const menuDot = document.getElementById('menuPageSetupWarnDot');
+  if (menuDot) menuDot.classList.toggle('hidden', !warn);
+
+  // 1. Inline warning inside Page Setup modal (always shown when active, never dismissed)
+  const setupEl = document.getElementById('pageSizeFitWarning');
+  if (setupEl) {
+    if (!warn) {
+      setupEl.classList.add('hidden');
+      setupEl.removeAttribute('data-tone');
+      setupEl.innerHTML = '';
+    } else {
+      setupEl.setAttribute('data-tone', 'warning');
+      setupEl.innerHTML = `
+        ${DESTRUCTIVE_ALERT_SVG}
+        <div class="min-w-0 flex-1 space-y-1.5">
+          <div>${escHtml(warn.message)}</div>
+          ${action ? `<button id="btnSetupApplySuggestedPageSize" type="button" class="px-2.5 py-1 rounded-md bg-[var(--warning)] text-white hover:opacity-90 font-semibold text-[11px] transition-opacity cursor-pointer">${escHtml(action.buttonLabel)}</button>` : ''}
+        </div>`;
+      setupEl.classList.remove('hidden');
+      const setupBtn = setupEl.querySelector('#btnSetupApplySuggestedPageSize');
+      if (setupBtn && action) setupBtn.onclick = () => applySuggestedPageSize(action);
+    }
+  }
+
+  // 2. Floating non-print workspace banner (dismissible per paper size / model state)
+  const banner = document.getElementById('pageSizeWarningBanner');
+  if (banner) {
+    const warnKey = getPageSizeWarningKey(warn);
+    if (!warn || (warnKey && dismissedPageSizeWarningKey === warnKey)) {
+      banner.classList.add('hidden');
+    } else {
+      const txtEl = document.getElementById('pageSizeWarningText');
+      if (txtEl) txtEl.textContent = formatPageSizeWarningForPage(warn, currentPage?.id || null);
+      const applyBtn = document.getElementById('btnApplySuggestedPageSize');
+      if (applyBtn) {
+        if (action) {
+          applyBtn.textContent = action.buttonLabel;
+          applyBtn.classList.remove('hidden');
+          applyBtn.onclick = () => applySuggestedPageSize(action);
+        } else {
+          applyBtn.classList.add('hidden');
+          applyBtn.onclick = null;
+        }
+      }
+      banner.classList.remove('hidden');
+    }
+  }
+}
+
+function getSmartAutoPreviewSample() {
+  const autoPages = (state.pages || []).filter((p) => p.kind === 'steps' && p.autoGrid && p.slots?.length > 0);
+  if (autoPages.length > 0) {
+    let minSteps = Infinity;
+    let maxSteps = 0;
+    for (const p of autoPages) {
+      const n = p.slots.length;
+      if (n < minSteps) minSteps = n;
+      if (n > maxSteps) maxSteps = n;
+    }
+    const curPage = state.pages[state.pageIdx];
+    let sample = (curPage && curPage.kind === 'steps' && curPage.autoGrid && curPage.slots?.length > 0)
+      ? curPage
+      : null;
+    if (!sample) {
+      const sorted = [...autoPages].sort((a, b) => a.slots.length - b.slots.length);
+      sample = sorted[Math.floor(sorted.length / 2)];
+    }
+    return {
+      count: sample.slots.length,
+      grid: sample.autoGrid,
+      minSteps,
+      maxSteps,
+      hasModelSample: true,
+    };
+  }
+  const dims = computePageFrameDimensions();
+  const ctx = buildSmartAutoPageContext({
+    pageWidthIn: dims.widthIn,
+    pageHeightIn: dims.heightIn,
+    density: state.density,
+    hasSubmodelIntro: false,
+  });
+  const est = computeSmartAutoPreviewGrid(ctx);
+  return {
+    count: Math.max(1, Math.min(24, est.maxSteps)),
+    grid: { cols: est.cols, rows: est.rows },
+    minSteps: 1,
+    maxSteps: est.maxSteps,
+    hasModelSample: false,
+  };
+}
+
+function renderGridPreviewInto(containerEl, spec, maxW = 136, maxH = 92, autoPreview = null) {
   if (!containerEl) return;
   const cDiv = state.customUnit === 'cm' ? 2.54 : 1;
   const cWIn = Math.max(2, (Number(state.customWidth) || 10) / cDiv);
@@ -10138,9 +10503,21 @@ function renderGridPreviewInto(containerEl, spec, maxW = 136, maxH = 92) {
   const innerW = Math.max(24, pageBox.widthPx - padPx * 2);
   const innerH = Math.max(20, pageBox.heightPx - padPx * 2 - 6);
   const derivedCap = getSpecStepsPerPageCap(spec);
-  const sampleCount = derivedCap === null ? 2 : Math.max(1, Math.min(12, derivedCap));
-  const rects = computePageSlotRects(sampleCount, spec, pageBox.isLandscape, innerW, innerH, gapPx);
+  const resolvedAuto = derivedCap === null ? (autoPreview || getSmartAutoPreviewSample()) : null;
+  const sampleCount = derivedCap === null
+    ? Math.max(1, Math.min(24, resolvedAuto.count))
+    : Math.max(1, Math.min(24, derivedCap));
+  const rects = computePageSlotRects(
+    sampleCount,
+    spec,
+    pageBox.isLandscape,
+    innerW,
+    innerH,
+    gapPx,
+    resolvedAuto?.grid || null,
+  );
   const showBorders = state.showStepBorders !== false;
+  const numFontPx = sampleCount > 12 ? 7 : sampleCount > 6 ? 8 : 10;
   containerEl.innerHTML = `
     <div class="relative rounded-[5px] border border-[var(--border-strong)] bg-[var(--card)] shadow-xs overflow-hidden transition-all duration-150" style="width:${pageBox.widthPx}px;height:${pageBox.heightPx}px;padding:${padPx}px ${padPx}px ${padPx + 5}px">
       <div class="relative w-full h-full">
@@ -10151,7 +10528,7 @@ function renderGridPreviewInto(containerEl, spec, maxW = 136, maxH = 92) {
           const heightPct = (r.h / innerH) * 100;
           const accentFill = r.isFeatured ? 'bg-[var(--primary-soft)] border-[var(--primary)] text-[var(--primary)]' : 'bg-[var(--surface-sunken)] border-[var(--border-strong)] text-[var(--foreground)]';
           const borderCls = showBorders ? 'border' : 'border border-dashed opacity-85';
-          return `<div class="absolute rounded-[3px] ${borderCls} ${accentFill} flex items-center justify-center font-mono font-bold" style="left:${leftPct.toFixed(2)}%;top:${topPct.toFixed(2)}%;width:${widthPct.toFixed(2)}%;height:${heightPct.toFixed(2)}%;font-size:${sampleCount > 6 ? 8 : 10}px">${i + 1}</div>`;
+          return `<div class="absolute rounded-[3px] ${borderCls} ${accentFill} flex items-center justify-center font-mono font-bold" style="left:${leftPct.toFixed(2)}%;top:${topPct.toFixed(2)}%;width:${widthPct.toFixed(2)}%;height:${heightPct.toFixed(2)}%;font-size:${numFontPx}px">${i + 1}</div>`;
         }).join('')}
       </div>
       <div class="absolute bottom-1 right-1.5 font-mono text-[7px] text-[var(--muted-foreground)] leading-none pointer-events-none">${spec.flow === 'column' ? '↓' : '→'}</div>
@@ -10312,17 +10689,33 @@ function syncGroupEditorSlotSizesUI() {
 function syncPageLayoutControlsUI() {
   const lc = state.layoutConfig;
   const derivedCap = getSpecStepsPerPageCap(lc);
+  const autoPreview = derivedCap === null ? getSmartAutoPreviewSample() : null;
   const chip = document.getElementById('layoutSummaryChip');
-  if (chip) chip.textContent = describePageLayoutSpec(lc);
+  if (chip) {
+    if (derivedCap === null && autoPreview?.hasModelSample) {
+      chip.textContent = autoPreview.minSteps === autoPreview.maxSteps
+        ? `Auto · ${autoPreview.minSteps}/page`
+        : `Auto · ${autoPreview.minSteps}–${autoPreview.maxSteps}/page`;
+    } else {
+      chip.textContent = describePageLayoutSpec(lc);
+    }
+  }
 
   // Render live default grid preview & explanatory text
-  renderGridPreviewInto(document.getElementById('layoutGridPreview'), lc, 138, 94);
+  renderGridPreviewInto(document.getElementById('layoutGridPreview'), lc, 138, 94, autoPreview);
   const gridTitle = document.getElementById('layoutGridPreviewTitle');
   const gridDesc = document.getElementById('layoutGridPreviewDesc');
   if (gridTitle && gridDesc) {
     if (derivedCap === null) {
-      gridTitle.textContent = 'Smart Auto Grid';
-      gridDesc.textContent = 'Automatically chooses 1–2 steps per page based on each step’s complexity and your paper orientation. Page breaks always start a new page.';
+      if (autoPreview?.hasModelSample) {
+        gridTitle.textContent = autoPreview.minSteps === autoPreview.maxSteps
+          ? `Smart Auto Grid · ${autoPreview.minSteps} Step${autoPreview.minSteps === 1 ? '' : 's'}/Page`
+          : `Smart Auto Grid · ${autoPreview.minSteps}–${autoPreview.maxSteps} Steps/Page`;
+      } else {
+        const upTo = autoPreview?.maxSteps || 1;
+        gridTitle.textContent = `Smart Auto Grid · Up to ${upTo} Step${upTo === 1 ? '' : 's'}/Page`;
+      }
+      gridDesc.textContent = `Automatically packs as many steps per page as fit with at least ${SMART_AUTO_MIN_STEP_AREA_WIDTH_IN}″ × ${SMART_AUTO_MIN_STEP_AREA_HEIGHT_IN}″ step area (+ margins) and 1 stud ≥ ${SMART_AUTO_MIN_STUD_SIZE_CM} cm. Page breaks always start a new page.`;
     } else {
       const flowTxt = lc.flow === 'column' ? 'top-to-bottom columns' : 'left-to-right rows';
       const mixedTxt = lc.mixedLayout === 'hero_left' ? 'with Step 1 featured large on the left'
@@ -10364,6 +10757,7 @@ function syncPageLayoutControlsUI() {
   }
 
   renderLayoutGroupsList();
+  syncPageSizeWarningUI(state.pages[state.pageIdx] || null);
 }
 
 function syncMenuControls() {
@@ -15079,7 +15473,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
 
     const availW = Math.max(80, pxW - pad * 2);
     const availH = Math.max(80, pxH - topY - pad - footerH);
-    const slotRects = computePageSlotRects(slots.length, pageSpec, isLand, availW, availH, gap);
+    const slotRects = computePageSlotRects(slots.length, pageSpec, isLand, availW, availH, gap, page.autoGrid);
     const effectiveBorders = typeof page.layoutGroup?.showStepBorders === 'boolean' ? page.layoutGroup.showStepBorders : state.showStepBorders;
 
     for (let idx = 0; idx < slots.length; idx++) {
@@ -16263,10 +16657,23 @@ document.getElementById('btnZoomOut').onclick = () => setZoom(state.zoom * 0.82)
 document.getElementById('btnZoomFit').onclick = resetZoom;
 
 // Print & Page Setup + Parts List Setup
+const btnOpenPageSetupFromWarningEl = document.getElementById('btnOpenPageSetupFromWarning');
+if (btnOpenPageSetupFromWarningEl) {
+  btnOpenPageSetupFromWarningEl.onclick = () => openPageSetupModal();
+}
+const btnDismissPageSizeWarningEl = document.getElementById('btnDismissPageSizeWarning');
+if (btnDismissPageSizeWarningEl) {
+  btnDismissPageSizeWarningEl.onclick = () => {
+    dismissedPageSizeWarningKey = getPageSizeWarningKey(state.pageSizeWarning);
+    const banner = document.getElementById('pageSizeWarningBanner');
+    if (banner) banner.classList.add('hidden');
+  };
+}
 const paperFormatSelectEl = document.getElementById('paperFormatSelect');
 if (paperFormatSelectEl) {
   paperFormatSelectEl.onchange = (e) => {
     state.paperFormat = e.target.value;
+    dismissedPageSizeWarningKey = '';
     resetZoom();
     renderAll();
   };
@@ -18769,6 +19176,7 @@ async function closeCurrentModel() {
     'importModal',
     'missingPartsModal',
     'errorBanner',
+    'pageSizeWarningBanner',
   ]) {
     const el = document.getElementById(modalId);
     if (el) el.classList.add('hidden');
@@ -18798,6 +19206,8 @@ async function closeCurrentModel() {
   state.model = null;
   state.pages = [];
   state.pageIdx = 0;
+  state.pageSizeWarning = null;
+  dismissedPageSizeWarningKey = '';
   state.mode = 'pan';
   state.stepSubTab = 'camera';
   state.selectedStepId = null;

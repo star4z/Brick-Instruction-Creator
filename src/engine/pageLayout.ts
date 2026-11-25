@@ -1,9 +1,13 @@
 /**
- * Pure Page Layout & Step Range Group Engine
+ * Pure Page Layout, Physical Smart Auto Grid & Step Range Group Engine
  *
  * Supports:
- * - Steps per page DERIVED from the layout (columns × rows / mixed layout slots)
- *   and split by page breaks — Auto smart pagination when the grid is Auto
+ * - Physical Smart Auto pagination: packs as many steps per page as fit while
+ *   guaranteeing a minimum 3D step area (1" × 1" + margins/header chrome) AND
+ *   a minimum rendered piece scale (1 LEGO stud = 20 LDU ≥ 0.5 cm), with zero
+ *   artificial 1–2 step cap.
+ * - Page-size readability validation & larger paper format suggestions whenever
+ *   a step cannot meet the minimum area or 0.5 cm/stud threshold even at 1-up.
  * - Explicit grid dimensions (columns × rows, or Auto)
  * - Fill direction: Row-first (L→R, then T→B) vs Column-first (T→B, then L→R)
  * - Mixed layouts where featured steps are rendered larger than companion steps
@@ -12,6 +16,10 @@
  * - Deterministic pixel/fractional slot rectangles shared identically by both
  *   the live Studio renderer and the PDF export pipeline.
  */
+
+import type { Vec3, WorldBox } from './minifigPose';
+import { computePageTypography, type PageDensity } from './pageTypography';
+import { PAPER_FORMAT_ORDER, PAPER_FORMAT_SPECS, type PaperFormatSpec } from './stepToolbar';
 
 export type StepFlowDirection = 'row' | 'column';
 
@@ -313,6 +321,7 @@ export function computePageSlotRects(
   contentW: number,
   contentH: number,
   gap: number,
+  resolvedGridOverride?: ResolvedGridDims | null,
 ): ComputedSlotRect[] {
   const n = Math.max(1, Math.round(slotCount));
   const W = Math.max(20, contentW);
@@ -474,8 +483,20 @@ export function computePageSlotRects(
     return tagCompact(rects);
   }
 
-  // Uniform Even Grid (supports any N, explicit cols/rows, and Row-first vs Column-first flow!)
-  const { cols, rows } = resolveGridDimensions(n, spec, isLandscape);
+  // Uniform Even Grid (supports any N, explicit cols/rows, smart-auto overrides, and Row-first vs Column-first flow!)
+  const hasValidOverride =
+    Boolean(resolvedGridOverride) &&
+    Number.isFinite(resolvedGridOverride!.cols) &&
+    Number.isFinite(resolvedGridOverride!.rows) &&
+    Math.round(resolvedGridOverride!.cols) >= 1 &&
+    Math.round(resolvedGridOverride!.rows) >= 1 &&
+    Math.round(resolvedGridOverride!.cols) * Math.round(resolvedGridOverride!.rows) >= n;
+  const { cols, rows } = hasValidOverride
+    ? {
+        cols: Math.round(resolvedGridOverride!.cols),
+        rows: Math.round(resolvedGridOverride!.rows),
+      }
+    : resolveGridDimensions(n, spec, isLandscape);
   const cellW = Math.max(10, (W - g * (cols - 1)) / cols);
   const cellH = Math.max(10, (H - g * (rows - 1)) / rows);
   const rects: ComputedSlotRect[] = [];
@@ -578,3 +599,1047 @@ export function describePageLayoutSpec(spec: PageLayoutSpec): string {
 
   return parts.join(' · ');
 }
+
+// =========================================================================
+// PHYSICAL SMART AUTO GRID & PAGE-SIZE READABILITY VALIDATION
+// =========================================================================
+
+export const CM_PER_INCH = 2.54;
+export const LDU_PER_STUD = 20;
+/** Exact orthographic half-height framing margin used by WebGLBrickEngine.computeMVP (`mesh.radius * 1.12 / zoom`). */
+export const STEP_CAMERA_RADIUS_MARGIN = 1.12;
+
+/** Minimum physical 3D step visual area (excluding margins/padding & header chrome): 1" × 1". */
+export const SMART_AUTO_MIN_STEP_AREA_WIDTH_IN = 1.0;
+export const SMART_AUTO_MIN_STEP_AREA_HEIGHT_IN = 1.0;
+
+/** Minimum physical rendered size of 1 LEGO stud (20 LDU): 0.5 cm. */
+export const SMART_AUTO_MIN_STUD_SIZE_CM = 0.5;
+
+/** Generous upper bound on smart auto grid tracks for very large poster/custom sheets. */
+export const MAX_SMART_AUTO_GRID_TRACKS = 24;
+
+export interface BoundingSphereLdu {
+  center: Vec3;
+  radius: number;
+}
+
+export interface SmartAutoPageContext {
+  /** Full physical page width in inches. */
+  pageWidthIn: number;
+  /** Full physical page height in inches. */
+  pageHeightIn: number;
+  /** Usable step grid width in inches (after outer page margins). */
+  gridWidthIn: number;
+  /** Usable step grid height in inches (after outer page margins, footer, and optional submodel intro banner). */
+  gridHeightIn: number;
+  /** Physical gap between adjacent step slots in inches. */
+  gapIn: number;
+  /** Internal slot padding on each edge in inches. */
+  slotPadIn: number;
+  /** Scale factor from computePageTypography (relative to 8.5" US Letter short side). */
+  typeScale: number;
+  /** Minimum 3D step visual width in inches (default 1.0"). */
+  minStepAreaWidthIn: number;
+  /** Minimum 3D step visual height in inches (default 1.0"). */
+  minStepAreaHeightIn: number;
+  /** Minimum rendered 1-stud size in cm (default 0.5 cm). */
+  minStudSizeCm: number;
+}
+
+export interface SmartAutoStepMetric {
+  stepId: string;
+  stepNum: number;
+  absStepNum?: number;
+  /** Orthographic camera framing radius in LDU (from computeStepCameraFraming). */
+  viewRadiusLdu: number;
+  /** User/override step zoom multiplier (default 1.0, clamped >= 0.4). */
+  modelScale?: number;
+  /** Distinct (partId, colorId) entries rendered in the step's PLI box (0..7). */
+  pliUniqueCount?: number;
+  /** True when the step renders an inline subassembly callout box inside the slot. */
+  hasInlineCallout?: boolean;
+  calloutDir?: 'horizontal' | 'vertical';
+  /** True when the step renders a side-by-side 1:1 minifigure reference card. */
+  hasMinifig1to1?: boolean;
+  /** True when the step renders a bottom minifigure pose legend strip. */
+  hasPoseLegend?: boolean;
+  /** True for official exploded/sequential minifigure diagrams (no standard PLI header). */
+  isOfficialMinifigStyle?: boolean;
+  /** True when this step poses a minifigure right before attaching it. */
+  isMinifigPoseStep?: boolean;
+  /** True when this step places a minifigure onto the model. */
+  hasAttachedMinifig?: boolean;
+}
+
+export interface StepSlotPhysicalEvaluation {
+  slotWidthIn: number;
+  slotHeightIn: number;
+  modelAreaWidthIn: number;
+  modelAreaHeightIn: number;
+  studSizeCm: number;
+  meetsMinArea: boolean;
+  meetsMinStudSize: boolean;
+  fits: boolean;
+  /** Minimum slot width in inches needed to satisfy both constraints for this step. */
+  requiredSlotWidthIn: number;
+  /** Minimum slot height in inches needed to satisfy both constraints for this step. */
+  requiredSlotHeightIn: number;
+}
+
+export interface SmartAutoGridResolution {
+  cols: number;
+  rows: number;
+  fits: boolean;
+  minStudSizeCm: number;
+  minModelWidthIn: number;
+  minModelHeightIn: number;
+  slotWidthIn: number;
+  slotHeightIn: number;
+  worstEval: StepSlotPhysicalEvaluation;
+}
+
+export interface SmartAutoPageGroupResult {
+  /** Number of steps packed onto this page (>= 1). */
+  count: number;
+  /** Optimal grid dimensions for the packed steps. */
+  grid: ResolvedGridDims;
+  /** False when even 1 step cannot meet minimum area & stud size at this page size. */
+  fits: boolean;
+  /** Evaluation of the tightest step on the page (or 1×1 fallback when fits === false). */
+  worstEval: StepSlotPhysicalEvaluation;
+}
+
+export interface PageSizeStepCheck {
+  metric: SmartAutoStepMetric;
+  pageId?: string;
+  pageNum?: number;
+  hasSubmodelIntro?: boolean;
+}
+
+export interface PageSizeViolation {
+  stepId: string;
+  stepNum: number;
+  absStepNum?: number;
+  pageId?: string;
+  pageNum?: number;
+  reason: 'area' | 'stud_size' | 'both';
+  studSizeCm: number;
+  minStudSizeCm: number;
+  modelAreaWidthIn: number;
+  modelAreaHeightIn: number;
+  minStepAreaWidthIn: number;
+  minStepAreaHeightIn: number;
+  requiredSlotWidthIn: number;
+  requiredSlotHeightIn: number;
+}
+
+export interface SuggestedPageSize {
+  formatId: string;
+  name: string;
+  shortName: string;
+  orientation: 'landscape' | 'portrait' | null;
+  widthIn: number;
+  heightIn: number;
+  label: string;
+}
+
+export interface PageSizeWarningSummary {
+  hasWarning: boolean;
+  affectedStepCount: number;
+  affectedPageIds: string[];
+  violations: PageSizeViolation[];
+  worstViolation: PageSizeViolation | null;
+  /** Up to 2 smallest larger standard paper formats that satisfy all steps. */
+  suggestedFormats: SuggestedPageSize[];
+  /** Minimum custom page dimensions (in inches) that satisfy every step on a 1-up page. */
+  minRequiredPageWidthIn: number;
+  minRequiredPageHeightIn: number;
+  /** Detailed warning copy for Page Setup & Page contextual card. */
+  message: string;
+  /** Compact single-line warning copy for the floating workspace banner. */
+  shortMessage: string;
+}
+
+/**
+ * Computes the bounding sphere `(center, radius)` of one or two lists of `WorldBox`es,
+ * matching `buildMeshBuffers`'s union-AABB center + farthest-corner radius without
+ * allocating GPU buffers or copying box arrays.
+ */
+export function computeBoundingSphereFromBoxLists(
+  firstBoxes: readonly WorldBox[],
+  secondBoxes: readonly WorldBox[] = [],
+  minRadius = 20,
+): BoundingSphereLdu {
+  let minX = Infinity;
+  let minY = Infinity;
+  let minZ = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let maxZ = -Infinity;
+
+  const scanUnion = (list: readonly WorldBox[]) => {
+    for (let i = 0; i < list.length; i++) {
+      const b = list[i];
+      if (!b) continue;
+      if (b.min[0] < minX) minX = b.min[0];
+      if (b.min[1] < minY) minY = b.min[1];
+      if (b.min[2] < minZ) minZ = b.min[2];
+      if (b.max[0] > maxX) maxX = b.max[0];
+      if (b.max[1] > maxY) maxY = b.max[1];
+      if (b.max[2] > maxZ) maxZ = b.max[2];
+    }
+  };
+
+  scanUnion(firstBoxes);
+  scanUnion(secondBoxes);
+
+  if (!Number.isFinite(minX)) {
+    return { center: [0, 0, 0], radius: Math.max(1, minRadius) };
+  }
+
+  const cx = (minX + maxX) * 0.5;
+  const cy = (minY + maxY) * 0.5;
+  const cz = (minZ + maxZ) * 0.5;
+  let maxR2 = 0;
+
+  const scanRadius = (list: readonly WorldBox[]) => {
+    for (let i = 0; i < list.length; i++) {
+      const b = list[i];
+      if (!b) continue;
+      const dx = Math.max(Math.abs(b.min[0] - cx), Math.abs(b.max[0] - cx));
+      const dy = Math.max(Math.abs(b.min[1] - cy), Math.abs(b.max[1] - cy));
+      const dz = Math.max(Math.abs(b.min[2] - cz), Math.abs(b.max[2] - cz));
+      const r2 = dx * dx + dy * dy + dz * dz;
+      if (r2 > maxR2) maxR2 = r2;
+    }
+  };
+
+  scanRadius(firstBoxes);
+  scanRadius(secondBoxes);
+
+  return {
+    center: [cx, cy, cz],
+    radius: Math.max(minRadius, Math.sqrt(maxR2)),
+  };
+}
+
+/**
+ * Builds the physical inch-space layout context for a page using the exact same
+ * print-calibrated margins, gaps, footer, and slot padding as `computePageTypography`.
+ */
+export function buildSmartAutoPageContext(params: {
+  pageWidthIn: number;
+  pageHeightIn: number;
+  density?: PageDensity | string;
+  hasSubmodelIntro?: boolean;
+  minStepAreaWidthIn?: number;
+  minStepAreaHeightIn?: number;
+  minStudSizeCm?: number;
+}): SmartAutoPageContext {
+  const safeW = Math.max(0.5, Number.isFinite(params.pageWidthIn) ? params.pageWidthIn : 11);
+  const safeH = Math.max(0.5, Number.isFinite(params.pageHeightIn) ? params.pageHeightIn : 8.5);
+  const typo = computePageTypography({
+    widthIn: safeW,
+    heightIn: safeH,
+    pxPerInch: 72,
+    density: params.density,
+  });
+
+  const padIn = typo.pad / 72;
+  const gapIn = typo.gap / 72;
+  const footerIn = typo.footerH / 72;
+  const introIn = params.hasSubmodelIntro
+    ? (typo.steps.introThumbH + typo.pt(20)) / 72
+    : 0;
+  const slotPadIn = typo.steps.slotPad / 72;
+
+  return {
+    pageWidthIn: safeW,
+    pageHeightIn: safeH,
+    gridWidthIn: Math.max(0, safeW - padIn * 2),
+    gridHeightIn: Math.max(0, safeH - padIn * 2 - footerIn - introIn),
+    gapIn,
+    slotPadIn,
+    typeScale: typo.typeScale,
+    minStepAreaWidthIn: Math.max(
+      0.25,
+      params.minStepAreaWidthIn ?? SMART_AUTO_MIN_STEP_AREA_WIDTH_IN,
+    ),
+    minStepAreaHeightIn: Math.max(
+      0.25,
+      params.minStepAreaHeightIn ?? SMART_AUTO_MIN_STEP_AREA_HEIGHT_IN,
+    ),
+    minStudSizeCm: Math.max(0.1, params.minStudSizeCm ?? SMART_AUTO_MIN_STUD_SIZE_CM),
+  };
+}
+
+/**
+ * Computes the physical printed length (in cm) of 1 LEGO stud (20 LDU) inside a
+ * step's 3D render box `(modelAreaWidthIn × modelAreaHeightIn)` under the exact
+ * orthographic projection used by `WebGLBrickEngine.computeMVP` + `object-contain`.
+ */
+export function computeRenderedStudSizeCm(
+  modelAreaWidthIn: number,
+  modelAreaHeightIn: number,
+  viewRadiusLdu: number,
+  modelScale = 1.0,
+): number {
+  const minModelSideIn = Math.max(0, Math.min(modelAreaWidthIn, modelAreaHeightIn));
+  const safeZoom = Math.max(0.4, Number.isFinite(modelScale) ? modelScale : 1.0);
+  const safeRadius = Math.max(20, Number.isFinite(viewRadiusLdu) ? viewRadiusLdu : 20);
+  return (
+    (LDU_PER_STUD * CM_PER_INCH * minModelSideIn * safeZoom) /
+    (2 * STEP_CAMERA_RADIUS_MARGIN * safeRadius)
+  );
+}
+
+/**
+ * Exact inverse of `computeRenderedStudSizeCm`: returns the minimum physical
+ * `min(modelAreaWidthIn, modelAreaHeightIn)` in inches required so that 1 stud
+ * renders at least `minStudSizeCm` centimeters.
+ */
+export function computeRequiredModelSideForStudCm(
+  viewRadiusLdu: number,
+  modelScale = 1.0,
+  minStudSizeCm = SMART_AUTO_MIN_STUD_SIZE_CM,
+): number {
+  const safeZoom = Math.max(0.4, Number.isFinite(modelScale) ? modelScale : 1.0);
+  const safeRadius = Math.max(20, Number.isFinite(viewRadiusLdu) ? viewRadiusLdu : 20);
+  return (
+    (Math.max(0.1, minStudSizeCm) * 2 * STEP_CAMERA_RADIUS_MARGIN * safeRadius) /
+    (LDU_PER_STUD * CM_PER_INCH * safeZoom)
+  );
+}
+
+/**
+ * Evaluates whether a single step fits inside a slot of physical size
+ * `(slotWidthIn × slotHeightIn)` while satisfying BOTH:
+ * 1. Minimum 3D step area (default `1" × 1"`) + slot margins, header/PLI & callout chrome
+ * 2. Minimum rendered piece scale (default `1 stud ≥ 0.5 cm`)
+ */
+export function evaluateStepInSlot(
+  step: SmartAutoStepMetric,
+  slotWidthIn: number,
+  slotHeightIn: number,
+  ctx: SmartAutoPageContext,
+  slotCount = 1,
+): StepSlotPhysicalEvaluation {
+  const safeSlotW = Math.max(0, slotWidthIn);
+  const safeSlotH = Math.max(0, slotHeightIn);
+  const ts = ctx.typeScale;
+  const isTight =
+    slotCount >= 4 || safeSlotH < (250 / 72) * ts || safeSlotW < (230 / 72) * ts;
+  const slotPadIn = ctx.slotPadIn;
+
+  // Inline subassembly callout box reserve
+  let calloutReserveWIn = 0;
+  let calloutReserveHIn = 0;
+  const calloutGapIn = (6 / 72) * ts;
+  if (step.hasInlineCallout && !step.isOfficialMinifigStyle) {
+    if (step.calloutDir === 'vertical') {
+      calloutReserveHIn = Math.min(safeSlotH * 0.36, 1.15 * ts) + calloutGapIn;
+    } else {
+      const targetW = ((isTight ? 92 : 115) / 72) * ts;
+      calloutReserveWIn = Math.min(safeSlotW * 0.42, targetW) + calloutGapIn;
+    }
+  }
+
+  // Side-by-side 1:1 minifigure reference card reserve
+  const mf1to1ReserveWIn = step.hasMinifig1to1 ? Math.min(safeSlotW * 0.34, 1.35) : 0;
+
+  // Step number + PLI header reserve (including natural wrapping for multi-SKU steps)
+  let headerHIn = 0;
+  let singleRowHeaderHIn = 0;
+  if (step.isOfficialMinifigStyle) {
+    headerHIn = slotCount > 1 ? ((7.5 * 1.8) / 72) * ts : 0;
+    singleRowHeaderHIn = headerHIn;
+  } else {
+    const pliThumbIn = ((isTight ? 20 : 25) / 72) * ts;
+    const singlePliRowHIn = pliThumbIn + (10 / 72) * ts;
+    const headerGapIn = (8 / 72) * ts;
+    singleRowHeaderHIn = singlePliRowHIn + headerGapIn;
+    const pliCount = Math.max(0, Math.min(7, Math.round(step.pliUniqueCount ?? 1)));
+    const stepNumPt = isTight ? 15 : slotCount === 1 ? 21 : 17.5;
+    const stepNumWIn = ((stepNumPt * 1.3) / 72) * ts;
+    const availPliWIn = Math.max(0.35, safeSlotW - slotPadIn * 2 - stepNumWIn - (8 / 72) * ts);
+    const chipWIn = pliThumbIn + (20 / 72) * ts;
+    const chipsPerRow = Math.max(1, Math.floor(availPliWIn / Math.max(0.3, chipWIn)));
+    const pliRows = pliCount <= 1 ? 1 : Math.min(3, Math.ceil(pliCount / chipsPerRow));
+    const rawHeaderHIn = singlePliRowHIn * (1 + (pliRows - 1) * 0.72) + headerGapIn;
+    headerHIn =
+      pliRows > 1 ? Math.min(rawHeaderHIn, Math.max(singleRowHeaderHIn, safeSlotH * 0.36)) : singleRowHeaderHIn;
+  }
+
+  const poseLegendHIn = step.hasPoseLegend ? (22 / 72) * ts : 0;
+
+  const modelAreaWidthIn = Math.max(0, safeSlotW - slotPadIn * 2 - calloutReserveWIn - mf1to1ReserveWIn);
+  const modelAreaHeightIn = Math.max(
+    0,
+    safeSlotH - slotPadIn * 2 - headerHIn - calloutReserveHIn - poseLegendHIn,
+  );
+
+  const modelScale = Math.max(0.4, Number.isFinite(step.modelScale) ? step.modelScale! : 1.0);
+  const studSizeCm = computeRenderedStudSizeCm(
+    modelAreaWidthIn,
+    modelAreaHeightIn,
+    step.viewRadiusLdu,
+    modelScale,
+  );
+
+  const meetsMinArea =
+    modelAreaWidthIn >= ctx.minStepAreaWidthIn - 1e-4 &&
+    modelAreaHeightIn >= ctx.minStepAreaHeightIn - 1e-4;
+  const meetsMinStudSize = studSizeCm >= ctx.minStudSizeCm - 1e-4;
+
+  // Minimum slot footprint needed to satisfy both constraints (1-row PLI baseline)
+  const reqModelForStud = computeRequiredModelSideForStudCm(
+    step.viewRadiusLdu,
+    modelScale,
+    ctx.minStudSizeCm,
+  );
+  const reqModelW = Math.max(ctx.minStepAreaWidthIn, reqModelForStud);
+  const reqModelH = Math.max(ctx.minStepAreaHeightIn, reqModelForStud);
+  const reqCalloutW =
+    step.hasInlineCallout && !step.isOfficialMinifigStyle && step.calloutDir !== 'vertical'
+      ? (115 / 72) * ts + calloutGapIn
+      : 0;
+  const reqCalloutH =
+    step.hasInlineCallout && !step.isOfficialMinifigStyle && step.calloutDir === 'vertical'
+      ? 1.15 * ts + calloutGapIn
+      : 0;
+  const reqMf1to1W = step.hasMinifig1to1 ? 1.35 : 0;
+
+  const requiredSlotWidthIn = reqModelW + slotPadIn * 2 + reqCalloutW + reqMf1to1W;
+  const requiredSlotHeightIn =
+    reqModelH + slotPadIn * 2 + singleRowHeaderHIn + reqCalloutH + poseLegendHIn;
+
+  return {
+    slotWidthIn: safeSlotW,
+    slotHeightIn: safeSlotH,
+    modelAreaWidthIn,
+    modelAreaHeightIn,
+    studSizeCm,
+    meetsMinArea,
+    meetsMinStudSize,
+    fits: meetsMinArea && meetsMinStudSize,
+    requiredSlotWidthIn,
+    requiredSlotHeightIn,
+  };
+}
+
+/**
+ * Finds the best tight `(cols, rows)` uniform grid for `steps` on a page with
+ * physical context `ctx` where EVERY step meets both minimum step area and
+ * minimum rendered stud size.
+ *
+ * Returns `fits: false` (with the 1×1 evaluation) when no valid grid satisfies all steps.
+ */
+export function findBestSmartAutoGridForSteps(
+  steps: readonly SmartAutoStepMetric[],
+  ctx: SmartAutoPageContext,
+): SmartAutoGridResolution {
+  const k = steps.length;
+  if (k <= 0) {
+    const fallbackStep: SmartAutoStepMetric = { stepId: '', stepNum: 1, viewRadiusLdu: 40 };
+    const ev = evaluateStepInSlot(fallbackStep, ctx.gridWidthIn, ctx.gridHeightIn, ctx, 1);
+    return {
+      cols: 1,
+      rows: 1,
+      fits: ev.fits,
+      minStudSizeCm: ev.studSizeCm,
+      minModelWidthIn: ev.modelAreaWidthIn,
+      minModelHeightIn: ev.modelAreaHeightIn,
+      slotWidthIn: ev.slotWidthIn,
+      slotHeightIn: ev.slotHeightIn,
+      worstEval: ev,
+    };
+  }
+
+  const evalGrid = (cols: number, rows: number) => {
+    const slotW = (ctx.gridWidthIn - ctx.gapIn * (cols - 1)) / cols;
+    const slotH = (ctx.gridHeightIn - ctx.gapIn * (rows - 1)) / rows;
+    let allFit = true;
+    let minStud = Infinity;
+    let minModelW = Infinity;
+    let minModelH = Infinity;
+    let minModelSide = Infinity;
+    let worstEval: StepSlotPhysicalEvaluation | null = null;
+
+    for (let i = 0; i < k; i++) {
+      const ev = evaluateStepInSlot(steps[i], slotW, slotH, ctx, k);
+      if (!ev.fits) allFit = false;
+      if (ev.studSizeCm < minStud) minStud = ev.studSizeCm;
+      if (ev.modelAreaWidthIn < minModelW) minModelW = ev.modelAreaWidthIn;
+      if (ev.modelAreaHeightIn < minModelH) minModelH = ev.modelAreaHeightIn;
+      const side = Math.min(ev.modelAreaWidthIn, ev.modelAreaHeightIn);
+      if (side < minModelSide) minModelSide = side;
+      if (
+        !worstEval ||
+        (!ev.fits && worstEval.fits) ||
+        (ev.fits === worstEval.fits && ev.studSizeCm < worstEval.studSizeCm)
+      ) {
+        worstEval = ev;
+      }
+    }
+
+    return {
+      cols,
+      rows,
+      fits: allFit,
+      minStudSizeCm: minStud,
+      minModelWidthIn: minModelW,
+      minModelHeightIn: minModelH,
+      minModelSide,
+      slotWidthIn: slotW,
+      slotHeightIn: slotH,
+      worstEval: worstEval!,
+    };
+  };
+
+  if (k === 1) {
+    const single = evalGrid(1, 1);
+    return {
+      cols: 1,
+      rows: 1,
+      fits: single.fits,
+      minStudSizeCm: single.minStudSizeCm,
+      minModelWidthIn: single.minModelWidthIn,
+      minModelHeightIn: single.minModelHeightIn,
+      slotWidthIn: single.slotWidthIn,
+      slotHeightIn: single.slotHeightIn,
+      worstEval: single.worstEval,
+    };
+  }
+
+  const minRawCellW = ctx.minStepAreaWidthIn + ctx.slotPadIn * 2;
+  const minRawCellH = ctx.minStepAreaHeightIn + ctx.slotPadIn * 2;
+  const maxCols = Math.min(
+    k,
+    MAX_SMART_AUTO_GRID_TRACKS,
+    Math.max(1, Math.floor((ctx.gridWidthIn + ctx.gapIn) / Math.max(0.5, minRawCellW + ctx.gapIn))),
+  );
+  const maxRows = Math.min(
+    k,
+    MAX_SMART_AUTO_GRID_TRACKS,
+    Math.max(1, Math.floor((ctx.gridHeightIn + ctx.gapIn) / Math.max(0.5, minRawCellH + ctx.gapIn))),
+  );
+
+  let best: SmartAutoGridResolution | null = null;
+  let bestScore = -Infinity;
+
+  for (let cols = 1; cols <= maxCols; cols++) {
+    const rows = Math.ceil(k / cols);
+    if (rows > maxRows) continue;
+    // Ensure tight grid with no completely empty column (rows already satisfies no empty row)
+    if (cols > 1 && (cols - 1) * rows >= k) continue;
+
+    const cand = evalGrid(cols, rows);
+    if (!cand.fits) continue;
+
+    const aspect = cand.minModelWidthIn / Math.max(0.05, cand.minModelHeightIn);
+    const idealAspect = 1.15;
+    const distortion = Math.max(aspect / idealAspect, idealAspect / aspect);
+    const aspectFactor = 1 / Math.pow(distortion, 0.12);
+    const fillRatio = k / (cols * rows);
+    const fillFactor = 0.95 + 0.05 * fillRatio;
+    // Primary driver is physical model scale (`minModelSide`), with mild aspect & fullness tie-breakers
+    const score = cand.minModelSide * aspectFactor * fillFactor;
+
+    if (score > bestScore + 1e-6) {
+      bestScore = score;
+      best = {
+        cols: cand.cols,
+        rows: cand.rows,
+        fits: true,
+        minStudSizeCm: cand.minStudSizeCm,
+        minModelWidthIn: cand.minModelWidthIn,
+        minModelHeightIn: cand.minModelHeightIn,
+        slotWidthIn: cand.slotWidthIn,
+        slotHeightIn: cand.slotHeightIn,
+        worstEval: cand.worstEval,
+      };
+    }
+  }
+
+  if (best) return best;
+
+  const fallback = evalGrid(1, 1);
+  return {
+    cols: 1,
+    rows: 1,
+    fits: false,
+    minStudSizeCm: fallback.minStudSizeCm,
+    minModelWidthIn: fallback.minModelWidthIn,
+    minModelHeightIn: fallback.minModelHeightIn,
+    slotWidthIn: fallback.slotWidthIn,
+    slotHeightIn: fallback.slotHeightIn,
+    worstEval: fallback.worstEval,
+  };
+}
+
+/**
+ * Greedily packs as many contiguous `eligibleSteps` onto a single Smart Auto Grid
+ * page as can simultaneously satisfy BOTH minimum step area (`1" × 1"` + margins)
+ * AND minimum piece scale (`1 stud ≥ 0.5 cm`) with zero artificial 1–2 step cap.
+ *
+ * Always emits at least 1 step so no step is ever dropped; when even 1 step cannot
+ * satisfy the physical minimums, returns `fits: false` along with its 1×1 evaluation
+ * so the UI can warn the user to choose a larger page size.
+ */
+export function packSmartAutoPage(
+  eligibleSteps: readonly SmartAutoStepMetric[],
+  ctx: SmartAutoPageContext,
+): SmartAutoPageGroupResult {
+  if (eligibleSteps.length === 0) {
+    const emptyRes = findBestSmartAutoGridForSteps([], ctx);
+    return {
+      count: 0,
+      grid: { cols: 1, rows: 1 },
+      fits: emptyRes.fits,
+      worstEval: emptyRes.worstEval,
+    };
+  }
+
+  const firstRes = findBestSmartAutoGridForSteps([eligibleSteps[0]], ctx);
+  if (!firstRes.fits) {
+    return {
+      count: 1,
+      grid: { cols: 1, rows: 1 },
+      fits: false,
+      worstEval: firstRes.worstEval,
+    };
+  }
+
+  let bestCount = 1;
+  let bestRes = firstRes;
+
+  for (let k = 2; k <= eligibleSteps.length; k++) {
+    const candidate = findBestSmartAutoGridForSteps(eligibleSteps.slice(0, k), ctx);
+    if (!candidate.fits) break;
+    bestCount = k;
+    bestRes = candidate;
+  }
+
+  // Keep a minifigure Pose + Place pair together rather than stranding Pose as the final slot
+  if (
+    bestCount > 1 &&
+    bestCount < eligibleSteps.length &&
+    eligibleSteps[bestCount - 1]?.isMinifigPoseStep &&
+    eligibleSteps[bestCount]?.hasAttachedMinifig
+  ) {
+    const trimmed = findBestSmartAutoGridForSteps(eligibleSteps.slice(0, bestCount - 1), ctx);
+    if (trimmed.fits) {
+      bestCount -= 1;
+      bestRes = trimmed;
+    }
+  }
+
+  return {
+    count: bestCount,
+    grid: { cols: bestRes.cols, rows: bestRes.rows },
+    fits: true,
+    worstEval: bestRes.worstEval,
+  };
+}
+
+/**
+ * Estimates the maximum Smart Auto Grid layout for a homogeneous page of typical
+ * compact steps at the active page size (used for live Page Setup previews when
+ * no model or smart-auto page sample is present).
+ */
+export function computeSmartAutoPreviewGrid(
+  ctx: SmartAutoPageContext,
+  typicalRadiusLdu = 45,
+): { cols: number; rows: number; maxSteps: number; fits: boolean } {
+  const sampleStep: SmartAutoStepMetric = {
+    stepId: 'preview',
+    stepNum: 1,
+    viewRadiusLdu: Math.max(20, typicalRadiusLdu),
+    modelScale: 1.0,
+    pliUniqueCount: 2,
+  };
+  const single = evaluateStepInSlot(sampleStep, ctx.gridWidthIn, ctx.gridHeightIn, ctx, 1);
+  if (!single.fits) {
+    return { cols: 1, rows: 1, maxSteps: 1, fits: false };
+  }
+
+  const minCellW = ctx.minStepAreaWidthIn + ctx.slotPadIn * 2;
+  const minCellH = ctx.minStepAreaHeightIn + ctx.slotPadIn * 2;
+  const maxCols = Math.min(
+    MAX_SMART_AUTO_GRID_TRACKS,
+    Math.max(1, Math.floor((ctx.gridWidthIn + ctx.gapIn) / Math.max(0.5, minCellW + ctx.gapIn))),
+  );
+  const maxRows = Math.min(
+    MAX_SMART_AUTO_GRID_TRACKS,
+    Math.max(1, Math.floor((ctx.gridHeightIn + ctx.gapIn) / Math.max(0.5, minCellH + ctx.gapIn))),
+  );
+
+  let bestCols = 1;
+  let bestRows = 1;
+  let bestCount = 1;
+  let bestMinSide = Math.min(single.modelAreaWidthIn, single.modelAreaHeightIn);
+
+  for (let c = 1; c <= maxCols; c++) {
+    for (let r = 1; r <= maxRows; r++) {
+      const count = c * r;
+      if (count < bestCount) continue;
+      const slotW = (ctx.gridWidthIn - ctx.gapIn * (c - 1)) / c;
+      const slotH = (ctx.gridHeightIn - ctx.gapIn * (r - 1)) / r;
+      const ev = evaluateStepInSlot(sampleStep, slotW, slotH, ctx, count);
+      if (!ev.fits) continue;
+      const minSide = Math.min(ev.modelAreaWidthIn, ev.modelAreaHeightIn);
+      if (count > bestCount || (count === bestCount && minSide > bestMinSide + 1e-4)) {
+        bestCount = count;
+        bestCols = c;
+        bestRows = r;
+        bestMinSide = minSide;
+      }
+    }
+  }
+
+  return { cols: bestCols, rows: bestRows, maxSteps: bestCount, fits: true };
+}
+
+function roundUpPageDimIn(valueIn: number): number {
+  if (!Number.isFinite(valueIn) || valueIn <= 0) return 2;
+  if (valueIn < 6) return Math.ceil(valueIn * 10) / 10;
+  return Math.ceil(valueIn * 2) / 2;
+}
+
+function formatInchesCompact(wIn: number, hIn: number): string {
+  const fmt = (n: number) => (Math.abs(n - Math.round(n)) < 0.05 ? String(Math.round(n)) : n.toFixed(1));
+  return `${fmt(wIn)} × ${fmt(hIn)} in`;
+}
+
+function getFormatDisplayName(
+  formatId: string,
+  specs: Readonly<Record<string, PaperFormatSpec>>,
+  widthIn: number,
+  heightIn: number,
+): string {
+  if (formatId === 'custom') return `Custom (${formatInchesCompact(widthIn, heightIn)})`;
+  return specs[formatId]?.shortName || specs[formatId]?.name || formatId;
+}
+
+/**
+ * Checks every step in the manual against the active page size at 1 step per page
+ * (the largest possible allocation on the current sheet). Whenever any step fails
+ * the minimum step area (`1" × 1"` + margins) or minimum piece size (`1 stud ≥ 0.5 cm`),
+ * computes the smallest larger standard paper format(s) — or minimum Custom size —
+ * that can fit every step cleanly.
+ */
+export function analyzePageSizeFit(params: {
+  stepChecks: readonly PageSizeStepCheck[];
+  currentFormatId: string;
+  currentOrientation: 'landscape' | 'portrait' | string;
+  currentPageWidthIn: number;
+  currentPageHeightIn: number;
+  density?: PageDensity | string;
+  minStepAreaWidthIn?: number;
+  minStepAreaHeightIn?: number;
+  minStudSizeCm?: number;
+  paperFormatSpecs?: Readonly<Record<string, PaperFormatSpec>>;
+}): PageSizeWarningSummary {
+  const specs = params.paperFormatSpecs ?? PAPER_FORMAT_SPECS;
+  const curW = Math.max(0.5, Number.isFinite(params.currentPageWidthIn) ? params.currentPageWidthIn : 11);
+  const curH = Math.max(0.5, Number.isFinite(params.currentPageHeightIn) ? params.currentPageHeightIn : 8.5);
+  const curOrient: 'landscape' | 'portrait' =
+    params.currentOrientation === 'portrait' ? 'portrait' : 'landscape';
+
+  const ctxNoIntro = buildSmartAutoPageContext({
+    pageWidthIn: curW,
+    pageHeightIn: curH,
+    density: params.density,
+    hasSubmodelIntro: false,
+    minStepAreaWidthIn: params.minStepAreaWidthIn,
+    minStepAreaHeightIn: params.minStepAreaHeightIn,
+    minStudSizeCm: params.minStudSizeCm,
+  });
+  const ctxWithIntro = buildSmartAutoPageContext({
+    pageWidthIn: curW,
+    pageHeightIn: curH,
+    density: params.density,
+    hasSubmodelIntro: true,
+    minStepAreaWidthIn: params.minStepAreaWidthIn,
+    minStepAreaHeightIn: params.minStepAreaHeightIn,
+    minStudSizeCm: params.minStudSizeCm,
+  });
+
+  const violations: PageSizeViolation[] = [];
+  const affectedPageIdSet = new Set<string>();
+  const checksToTest: PageSizeStepCheck[] =
+    params.stepChecks.length > 0
+      ? [...params.stepChecks]
+      : [{ metric: { stepId: 'sample', stepNum: 1, viewRadiusLdu: 20, pliUniqueCount: 1 } }];
+  const hasRealSteps = params.stepChecks.length > 0;
+
+  for (const check of checksToTest) {
+    const ctx = check.hasSubmodelIntro ? ctxWithIntro : ctxNoIntro;
+    const ev = evaluateStepInSlot(check.metric, ctx.gridWidthIn, ctx.gridHeightIn, ctx, 1);
+    if (!ev.fits) {
+      const reason: PageSizeViolation['reason'] =
+        !ev.meetsMinArea && !ev.meetsMinStudSize
+          ? 'both'
+          : !ev.meetsMinArea
+            ? 'area'
+            : 'stud_size';
+      violations.push({
+        stepId: check.metric.stepId,
+        stepNum: check.metric.stepNum,
+        absStepNum: check.metric.absStepNum,
+        pageId: check.pageId,
+        pageNum: check.pageNum,
+        reason,
+        studSizeCm: ev.studSizeCm,
+        minStudSizeCm: ctx.minStudSizeCm,
+        modelAreaWidthIn: ev.modelAreaWidthIn,
+        modelAreaHeightIn: ev.modelAreaHeightIn,
+        minStepAreaWidthIn: ctx.minStepAreaWidthIn,
+        minStepAreaHeightIn: ctx.minStepAreaHeightIn,
+        requiredSlotWidthIn: ev.requiredSlotWidthIn,
+        requiredSlotHeightIn: ev.requiredSlotHeightIn,
+      });
+      if (check.pageId) affectedPageIdSet.add(check.pageId);
+    }
+  }
+
+  if (violations.length === 0) {
+    return {
+      hasWarning: false,
+      affectedStepCount: 0,
+      affectedPageIds: [],
+      violations: [],
+      worstViolation: null,
+      suggestedFormats: [],
+      minRequiredPageWidthIn: curW,
+      minRequiredPageHeightIn: curH,
+      message: '',
+      shortMessage: '',
+    };
+  }
+
+  // Pick worst violation (prefer area failure if all steps fail area, otherwise lowest studSizeCm)
+  let worstViolation = violations[0];
+  for (let i = 1; i < violations.length; i++) {
+    const v = violations[i];
+    if (v.studSizeCm < worstViolation.studSizeCm - 1e-4) {
+      worstViolation = v;
+    }
+  }
+
+  // Iteratively compute minimum Custom page dimensions that satisfy every step on a 1-up sheet
+  let reqPageW = curW;
+  let reqPageH = curH;
+  for (let iter = 0; iter < 4; iter++) {
+    const tNoIntro = buildSmartAutoPageContext({
+      pageWidthIn: reqPageW,
+      pageHeightIn: reqPageH,
+      density: params.density,
+      hasSubmodelIntro: false,
+      minStepAreaWidthIn: params.minStepAreaWidthIn,
+      minStepAreaHeightIn: params.minStepAreaHeightIn,
+      minStudSizeCm: params.minStudSizeCm,
+    });
+    const tWithIntro = buildSmartAutoPageContext({
+      pageWidthIn: reqPageW,
+      pageHeightIn: reqPageH,
+      density: params.density,
+      hasSubmodelIntro: true,
+      minStepAreaWidthIn: params.minStepAreaWidthIn,
+      minStepAreaHeightIn: params.minStepAreaHeightIn,
+      minStudSizeCm: params.minStudSizeCm,
+    });
+    let maxNeedW = reqPageW;
+    let maxNeedH = reqPageH;
+    for (const check of checksToTest) {
+      const c = check.hasSubmodelIntro ? tWithIntro : tNoIntro;
+      const ev = evaluateStepInSlot(check.metric, c.gridWidthIn, c.gridHeightIn, c, 1);
+      if (ev.fits) continue;
+      const needW = ev.requiredSlotWidthIn + (reqPageW - c.gridWidthIn);
+      const needH = ev.requiredSlotHeightIn + (reqPageH - c.gridHeightIn);
+      if (needW > maxNeedW) maxNeedW = needW;
+      if (needH > maxNeedH) maxNeedH = needH;
+    }
+    reqPageW = maxNeedW;
+    reqPageH = maxNeedH;
+  }
+  const minRequiredPageWidthIn = roundUpPageDimIn(reqPageW);
+  const minRequiredPageHeightIn = roundUpPageDimIn(reqPageH);
+
+  // Test every standard paper format to find the smallest larger options that fit ALL steps
+  const curArea = curW * curH;
+  const allChecksFitAt = (wIn: number, hIn: number): boolean => {
+    const cNo = buildSmartAutoPageContext({
+      pageWidthIn: wIn,
+      pageHeightIn: hIn,
+      density: params.density,
+      hasSubmodelIntro: false,
+      minStepAreaWidthIn: params.minStepAreaWidthIn,
+      minStepAreaHeightIn: params.minStepAreaHeightIn,
+      minStudSizeCm: params.minStudSizeCm,
+    });
+    const cIntro = buildSmartAutoPageContext({
+      pageWidthIn: wIn,
+      pageHeightIn: hIn,
+      density: params.density,
+      hasSubmodelIntro: true,
+      minStepAreaWidthIn: params.minStepAreaWidthIn,
+      minStepAreaHeightIn: params.minStepAreaHeightIn,
+      minStudSizeCm: params.minStudSizeCm,
+    });
+    for (const check of checksToTest) {
+      const c = check.hasSubmodelIntro ? cIntro : cNo;
+      const ev = evaluateStepInSlot(check.metric, c.gridWidthIn, c.gridHeightIn, c, 1);
+      if (!ev.fits) return false;
+    }
+    return true;
+  };
+
+  const candidates: Array<SuggestedPageSize & { area: number }> = [];
+  for (const fmtId of PAPER_FORMAT_ORDER) {
+    if (fmtId === 'screen' || fmtId === 'custom') continue;
+    const fmt = specs[fmtId];
+    if (!fmt) continue;
+
+    const shortSide = Math.min(fmt.wIn, fmt.hIn);
+    const longSide = Math.max(fmt.wIn, fmt.hIn);
+    const area = shortSide * longSide;
+
+    // Recommend genuinely larger standard formats than the current sheet
+    if (params.currentFormatId !== 'screen' && area <= curArea * 1.02) continue;
+
+    if (!fmt.supportsOrientation) {
+      if (allChecksFitAt(fmt.wIn, fmt.hIn)) {
+        candidates.push({
+          formatId: fmt.id,
+          name: fmt.name,
+          shortName: fmt.shortName,
+          orientation: null,
+          widthIn: fmt.wIn,
+          heightIn: fmt.hIn,
+          label: fmt.shortName,
+          area,
+        });
+      }
+      continue;
+    }
+
+    const primaryOrient = curOrient;
+    const altOrient: 'landscape' | 'portrait' = curOrient === 'portrait' ? 'landscape' : 'portrait';
+    const primaryDims = primaryOrient === 'portrait' ? [shortSide, longSide] : [longSide, shortSide];
+    const altDims = altOrient === 'portrait' ? [shortSide, longSide] : [longSide, shortSide];
+
+    if (allChecksFitAt(primaryDims[0], primaryDims[1])) {
+      candidates.push({
+        formatId: fmt.id,
+        name: fmt.name,
+        shortName: fmt.shortName,
+        orientation: primaryOrient,
+        widthIn: primaryDims[0],
+        heightIn: primaryDims[1],
+        label: fmt.shortName,
+        area,
+      });
+    } else if (allChecksFitAt(altDims[0], altDims[1])) {
+      candidates.push({
+        formatId: fmt.id,
+        name: fmt.name,
+        shortName: fmt.shortName,
+        orientation: altOrient,
+        widthIn: altDims[0],
+        heightIn: altDims[1],
+        label: `${fmt.shortName} (${altOrient === 'portrait' ? 'Portrait' : 'Landscape'})`,
+        area,
+      });
+    }
+  }
+
+  candidates.sort((a, b) => a.area - b.area || a.shortName.localeCompare(b.shortName));
+  const suggestedFormats: SuggestedPageSize[] = candidates.slice(0, 2).map(({ area: _area, ...rest }) => rest);
+
+  const curName = getFormatDisplayName(params.currentFormatId, specs, curW, curH);
+  const minStudStr = `${ctxNoIntro.minStudSizeCm.toFixed(1)} cm`;
+  const suggestPhrase =
+    suggestedFormats.length === 2
+      ? `Try a larger page size such as ${suggestedFormats[0].label} or ${suggestedFormats[1].label}.`
+      : suggestedFormats.length === 1
+        ? `Try a larger page size such as ${suggestedFormats[0].label}.`
+        : `Try a larger Custom page size (at least ${formatInchesCompact(minRequiredPageWidthIn, minRequiredPageHeightIn)}) or subdivide the model.`;
+  const shortSuggest =
+    suggestedFormats.length === 2
+      ? `Try ${suggestedFormats[0].label} or ${suggestedFormats[1].label}.`
+      : suggestedFormats.length === 1
+        ? `Try ${suggestedFormats[0].label}.`
+        : `Try Custom ≥ ${formatInchesCompact(minRequiredPageWidthIn, minRequiredPageHeightIn)}.`;
+
+  const areaOnlyFailure = violations.every((v) => v.reason === 'area') || !hasRealSteps;
+  let message: string;
+  let shortMessage: string;
+
+  if (areaOnlyFailure) {
+    message = `Current page size (${curName}) is too small to fit a ${ctxNoIntro.minStepAreaWidthIn}″ × ${ctxNoIntro.minStepAreaHeightIn}″ step area with margins. ${suggestPhrase}`;
+    shortMessage = `${curName} is too small for a ${ctxNoIntro.minStepAreaWidthIn}″ × ${ctxNoIntro.minStepAreaHeightIn}″ step area — ${shortSuggest}`;
+  } else if (violations.length === 1) {
+    const v = worstViolation;
+    const studTxt = `${v.studSizeCm.toFixed(2)} cm/stud`;
+    message = `Step ${v.stepNum} cannot fit at ${curName} while keeping 1 stud ≥ ${minStudStr} (renders at ${studTxt} even at 1 step/page). ${suggestPhrase}`;
+    shortMessage = `Step ${v.stepNum} is below ${minStudStr}/stud at ${curName} (${studTxt}) — ${shortSuggest}`;
+  } else {
+    const v = worstViolation;
+    const studTxt = `${v.studSizeCm.toFixed(2)} cm/stud`;
+    message = `${violations.length} steps cannot fit at ${curName} while keeping 1 stud ≥ ${minStudStr} (smallest: ${studTxt} on Step ${v.stepNum}). ${suggestPhrase}`;
+    shortMessage = `${violations.length} steps are below ${minStudStr}/stud at ${curName} (min ${studTxt}) — ${shortSuggest}`;
+  }
+
+  return {
+    hasWarning: true,
+    affectedStepCount: hasRealSteps ? violations.length : 0,
+    affectedPageIds: Array.from(affectedPageIdSet),
+    violations,
+    worstViolation,
+    suggestedFormats,
+    minRequiredPageWidthIn,
+    minRequiredPageHeightIn,
+    message,
+    shortMessage,
+  };
+}
+
+/**
+ * Formats a concise page-aware warning string for the floating workspace banner.
+ * When the user is viewing an affected page, calls out the step(s) on that page;
+ * otherwise returns the manual-wide summary.
+ */
+export function formatPageSizeWarningForPage(
+  summary: PageSizeWarningSummary | null | undefined,
+  currentPageId?: string | null,
+): string {
+  if (!summary || !summary.hasWarning) return '';
+  if (!currentPageId) return summary.shortMessage;
+  const pageViolations = summary.violations.filter((v) => v.pageId === currentPageId);
+  if (pageViolations.length === 0) return summary.shortMessage;
+
+  const shortSuggest =
+    summary.suggestedFormats.length === 2
+      ? `Try ${summary.suggestedFormats[0].label} or ${summary.suggestedFormats[1].label}.`
+      : summary.suggestedFormats.length === 1
+        ? `Try ${summary.suggestedFormats[0].label}.`
+        : `Try Custom ≥ ${formatInchesCompact(summary.minRequiredPageWidthIn, summary.minRequiredPageHeightIn)}.`;
+
+  if (pageViolations.every((v) => v.reason === 'area')) {
+    return summary.shortMessage;
+  }
+
+  let worst = pageViolations[0];
+  for (let i = 1; i < pageViolations.length; i++) {
+    if (pageViolations[i].studSizeCm < worst.studSizeCm) worst = pageViolations[i];
+  }
+  const minStudStr = `${worst.minStudSizeCm.toFixed(1)} cm`;
+  const studTxt = `${worst.studSizeCm.toFixed(2)} cm/stud`;
+  if (pageViolations.length === 1) {
+    return `Step ${worst.stepNum} renders at ${studTxt} (below ${minStudStr}/stud) — ${shortSuggest}`;
+  }
+  return `${pageViolations.length} steps on this page render below ${minStudStr}/stud (min ${studTxt}) — ${shortSuggest}`;
+}
+

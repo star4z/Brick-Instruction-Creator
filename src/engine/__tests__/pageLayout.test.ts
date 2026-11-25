@@ -1,15 +1,29 @@
 import { describe, expect, it } from 'vitest';
 import {
+  SMART_AUTO_MIN_STEP_AREA_HEIGHT_IN,
+  SMART_AUTO_MIN_STEP_AREA_WIDTH_IN,
+  SMART_AUTO_MIN_STUD_SIZE_CM,
+  analyzePageSizeFit,
+  buildSmartAutoPageContext,
+  computeBoundingSphereFromBoxLists,
   computePageSlotRects,
+  computeRenderedStudSizeCm,
+  computeRequiredModelSideForStudCm,
+  computeSmartAutoPreviewGrid,
   createDefaultPageLayoutSpec,
   deriveStepsPerPageFromLayout,
   describePageLayoutSpec,
+  evaluateStepInSlot,
+  findBestSmartAutoGridForSteps,
   findLayoutGroupForStep,
+  formatPageSizeWarningForPage,
   getSpecStepsPerPageCap,
   normalizeLayoutGroups,
   normalizePageLayoutSpec,
+  packSmartAutoPage,
   resolveGridDimensions,
   type PageLayoutSpec,
+  type SmartAutoStepMetric,
   type StepLayoutGroup,
 } from '../pageLayout';
 
@@ -158,5 +172,261 @@ describe('pageLayout engine', () => {
     expect(describePageLayoutSpec(groups[0].layout)).toContain('4/page');
     expect(describePageLayoutSpec(groups[0].layout)).toContain('Columns ↓');
     expect(describePageLayoutSpec(groups[1].layout)).toContain('Large Left');
+  });
+
+  it('packs more than 2 steps per page in Smart Auto Grid based on 1"×1" (+ margins) and 1 stud ≥ 0.5 cm', () => {
+    const letterLand = buildSmartAutoPageContext({
+      pageWidthIn: 11,
+      pageHeightIn: 8.5,
+      density: 'balanced',
+    });
+    const smallSteps: SmartAutoStepMetric[] = Array.from({ length: 20 }, (_, i) => ({
+      stepId: `s${i + 1}`,
+      stepNum: i + 1,
+      viewRadiusLdu: 60, // ~4×4 stud early build
+      pliUniqueCount: 2,
+    }));
+
+    const packed = packSmartAutoPage(smallSteps, letterLand);
+    expect(packed.fits).toBe(true);
+    // No artificial 1–2 step cap: plenty of small steps fit cleanly on US Letter Landscape
+    expect(packed.count).toBeGreaterThanOrEqual(8);
+    expect(packed.grid.cols * packed.grid.rows).toBeGreaterThanOrEqual(packed.count);
+    expect(packed.worstEval.modelAreaWidthIn).toBeGreaterThanOrEqual(SMART_AUTO_MIN_STEP_AREA_WIDTH_IN - 1e-3);
+    expect(packed.worstEval.modelAreaHeightIn).toBeGreaterThanOrEqual(SMART_AUTO_MIN_STEP_AREA_HEIGHT_IN - 1e-3);
+    expect(packed.worstEval.studSizeCm).toBeGreaterThanOrEqual(SMART_AUTO_MIN_STUD_SIZE_CM - 1e-3);
+
+    // A larger sheet (Tabloid 17×11) packs even more of the exact same steps
+    const tabloidLand = buildSmartAutoPageContext({
+      pageWidthIn: 17,
+      pageHeightIn: 11,
+      density: 'balanced',
+    });
+    const packedTabloid = packSmartAutoPage(smallSteps, tabloidLand);
+    expect(packedTabloid.fits).toBe(true);
+    expect(packedTabloid.count).toBeGreaterThan(packed.count);
+  });
+
+  it('enforces exact stud scale inverse math and scales down steps per page as model radius grows', () => {
+    const reqSide = computeRequiredModelSideForStudCm(160, 1.0, 0.5);
+    expect(computeRenderedStudSizeCm(reqSide, reqSide, 160, 1.0)).toBeCloseTo(0.5, 4);
+
+    const letterLand = buildSmartAutoPageContext({
+      pageWidthIn: 11,
+      pageHeightIn: 8.5,
+      density: 'balanced',
+    });
+
+    const tinySteps: SmartAutoStepMetric[] = Array.from({ length: 30 }, (_, i) => ({
+      stepId: `tiny_${i}`,
+      stepNum: i + 1,
+      viewRadiusLdu: 25,
+      pliUniqueCount: 1,
+    }));
+    const mediumSteps: SmartAutoStepMetric[] = Array.from({ length: 12 }, (_, i) => ({
+      stepId: `med_${i}`,
+      stepNum: i + 1,
+      viewRadiusLdu: 165, // mid-sized car (~6×14 studs)
+      pliUniqueCount: 2,
+    }));
+    const largeSteps: SmartAutoStepMetric[] = Array.from({ length: 6 }, (_, i) => ({
+      stepId: `lg_${i}`,
+      stepNum: i + 1,
+      viewRadiusLdu: 280, // ~16×24 stud building
+      pliUniqueCount: 3,
+    }));
+
+    const pTiny = packSmartAutoPage(tinySteps, letterLand);
+    const pMed = packSmartAutoPage(mediumSteps, letterLand);
+    const pLarge = packSmartAutoPage(largeSteps, letterLand);
+
+    // Tiny steps are bounded by 1"×1" + margins floor, medium drops to ~2/page, large drops to 1/page
+    expect(pTiny.count).toBeGreaterThan(pMed.count);
+    expect(pMed.count).toBe(2);
+    expect(pLarge.count).toBe(1);
+    expect(pLarge.fits).toBe(true);
+    expect(pTiny.worstEval.modelAreaWidthIn).toBeGreaterThanOrEqual(1.0 - 1e-3);
+    expect(pTiny.worstEval.modelAreaHeightIn).toBeGreaterThanOrEqual(1.0 - 1e-3);
+  });
+
+  it('accounts for density margins, PLI count, callouts, and user modelScale in slot evaluation', () => {
+    const compactCtx = buildSmartAutoPageContext({ pageWidthIn: 11, pageHeightIn: 8.5, density: 'compact' });
+    const spaciousCtx = buildSmartAutoPageContext({ pageWidthIn: 11, pageHeightIn: 8.5, density: 'spacious' });
+    const steps: SmartAutoStepMetric[] = Array.from({ length: 30 }, (_, i) => ({
+      stepId: `d_${i}`,
+      stepNum: i + 1,
+      viewRadiusLdu: 40,
+      pliUniqueCount: 1,
+    }));
+    expect(packSmartAutoPage(steps, compactCtx).count).toBeGreaterThanOrEqual(
+      packSmartAutoPage(steps, spaciousCtx).count,
+    );
+
+    // Inline callout reserves space and reduces available 3D model area compared to a plain step
+    const plainEval = evaluateStepInSlot({ stepId: 'a', stepNum: 1, viewRadiusLdu: 100, pliUniqueCount: 1 }, 3.2, 3.2, compactCtx, 4);
+    const calloutEval = evaluateStepInSlot(
+      { stepId: 'b', stepNum: 1, viewRadiusLdu: 100, pliUniqueCount: 1, hasInlineCallout: true, calloutDir: 'horizontal' },
+      3.2,
+      3.2,
+      compactCtx,
+      4,
+    );
+    expect(calloutEval.modelAreaWidthIn).toBeLessThan(plainEval.modelAreaWidthIn);
+    expect(calloutEval.studSizeCm).toBeLessThan(plainEval.studSizeCm);
+
+    // Zooming in via modelScale increases rendered stud size proportionally
+    const zoomedEval = evaluateStepInSlot({ stepId: 'z', stepNum: 1, viewRadiusLdu: 250, modelScale: 1.5 }, 5, 5, compactCtx, 1);
+    const normalEval = evaluateStepInSlot({ stepId: 'n', stepNum: 1, viewRadiusLdu: 250, modelScale: 1.0 }, 5, 5, compactCtx, 1);
+    expect(zoomedEval.studSizeCm).toBeCloseTo(normalEval.studSizeCm * 1.5, 4);
+  });
+
+  it('warns and suggests larger standard page sizes when 1 stud < 0.5 cm even at 1 step/page', () => {
+    const largeStep: SmartAutoStepMetric = {
+      stepId: 'step_big',
+      stepNum: 14,
+      absStepNum: 14,
+      viewRadiusLdu: 280, // needs ~6.17" model box -> fits on Letter/A4, fails on A5
+      pliUniqueCount: 2,
+    };
+
+    // On A5 (8.27 × 5.83 in landscape), even 1-up cannot keep 1 stud >= 0.5 cm
+    const a5Warn = analyzePageSizeFit({
+      stepChecks: [{ metric: largeStep, pageId: 'pg_step_big', pageNum: 8 }],
+      currentFormatId: 'a5',
+      currentOrientation: 'landscape',
+      currentPageWidthIn: 8.27,
+      currentPageHeightIn: 5.83,
+      density: 'balanced',
+    });
+    expect(a5Warn.hasWarning).toBe(true);
+    expect(a5Warn.affectedStepCount).toBe(1);
+    expect(a5Warn.worstViolation?.reason).toBe('stud_size');
+    expect(a5Warn.worstViolation?.studSizeCm).toBeLessThan(0.5);
+    expect(a5Warn.suggestedFormats.length).toBeGreaterThanOrEqual(1);
+    // Suggested formats should be strictly larger than A5 (e.g., Square / US Letter / A4)
+    expect(a5Warn.suggestedFormats[0].widthIn * a5Warn.suggestedFormats[0].heightIn).toBeGreaterThan(8.27 * 5.83);
+    expect(a5Warn.message).toContain('0.5 cm');
+    expect(a5Warn.message).toContain('larger page size');
+    expect(formatPageSizeWarningForPage(a5Warn, 'pg_step_big')).toContain('Step 14');
+
+    // Switching to the top suggested format resolves the warning cleanly!
+    const top = a5Warn.suggestedFormats[0];
+    const resolved = analyzePageSizeFit({
+      stepChecks: [{ metric: largeStep, pageId: 'pg_step_big', pageNum: 8 }],
+      currentFormatId: top.formatId,
+      currentOrientation: top.orientation || 'landscape',
+      currentPageWidthIn: top.widthIn,
+      currentPageHeightIn: top.heightIn,
+      density: 'balanced',
+    });
+    expect(resolved.hasWarning).toBe(false);
+  });
+
+  it('warns when a tiny custom page cannot fit 1"×1" + margins and suggests a larger size', () => {
+    const smallStep: SmartAutoStepMetric = {
+      stepId: 's1',
+      stepNum: 1,
+      viewRadiusLdu: 20,
+      pliUniqueCount: 1,
+    };
+
+    const tinyWarn = analyzePageSizeFit({
+      stepChecks: [{ metric: smallStep, pageId: 'pg_s1', pageNum: 1 }],
+      currentFormatId: 'custom',
+      currentOrientation: 'landscape',
+      currentPageWidthIn: 2.0,
+      currentPageHeightIn: 2.0,
+      density: 'balanced',
+    });
+    expect(tinyWarn.hasWarning).toBe(true);
+    expect(tinyWarn.worstViolation?.reason).toBe('area');
+    expect(tinyWarn.message).toContain('1″ × 1″');
+    expect(tinyWarn.suggestedFormats.length).toBeGreaterThanOrEqual(1);
+    expect(tinyWarn.minRequiredPageHeightIn).toBeGreaterThan(2.0);
+
+    // Using the computed minimum custom page size resolves the warning!
+    const customResolved = analyzePageSizeFit({
+      stepChecks: [{ metric: smallStep, pageId: 'pg_s1', pageNum: 1 }],
+      currentFormatId: 'custom',
+      currentOrientation: 'landscape',
+      currentPageWidthIn: tinyWarn.minRequiredPageWidthIn,
+      currentPageHeightIn: tinyWarn.minRequiredPageHeightIn,
+      density: 'balanced',
+    });
+    expect(customResolved.hasWarning).toBe(false);
+  });
+
+  it('suggests a larger Custom page size when a giant model exceeds even A3/Tabloid', () => {
+    const giantStep: SmartAutoStepMetric = {
+      stepId: 'giant',
+      stepNum: 42,
+      viewRadiusLdu: 640, // ~45×45 stud UCS build
+      pliUniqueCount: 3,
+    };
+
+    const a3Warn = analyzePageSizeFit({
+      stepChecks: [{ metric: giantStep, pageId: 'pg_giant', pageNum: 30 }],
+      currentFormatId: 'a3',
+      currentOrientation: 'landscape',
+      currentPageWidthIn: 16.54,
+      currentPageHeightIn: 11.69,
+      density: 'balanced',
+    });
+    expect(a3Warn.hasWarning).toBe(true);
+    expect(a3Warn.suggestedFormats).toEqual([]);
+    expect(a3Warn.minRequiredPageHeightIn).toBeGreaterThan(14);
+    expect(a3Warn.message).toContain('Custom page size');
+
+    // Applying the recommended Custom dimensions eliminates the warning
+    const resolved = analyzePageSizeFit({
+      stepChecks: [{ metric: giantStep, pageId: 'pg_giant', pageNum: 30 }],
+      currentFormatId: 'custom',
+      currentOrientation: 'landscape',
+      currentPageWidthIn: a3Warn.minRequiredPageWidthIn,
+      currentPageHeightIn: a3Warn.minRequiredPageHeightIn,
+      density: 'balanced',
+    });
+    expect(resolved.hasWarning).toBe(false);
+  });
+
+  it('supports Smart Auto resolvedGridOverride > 6 tracks in computePageSlotRects with zero overlap', () => {
+    const autoSpec = createDefaultPageLayoutSpec();
+    const rects = computePageSlotRects(28, autoSpec, true, 1400, 900, 8, { cols: 7, rows: 4 });
+    expect(rects).toHaveLength(28);
+    // Verify 7 distinct X columns and 4 distinct Y rows with zero overlap
+    const xs = new Set(rects.map((r) => Math.round(r.x)));
+    const ys = new Set(rects.map((r) => Math.round(r.y)));
+    expect(xs.size).toBe(7);
+    expect(ys.size).toBe(4);
+    for (let i = 0; i < rects.length; i++) {
+      for (let j = i + 1; j < rects.length; j++) {
+        const a = rects[i];
+        const b = rects[j];
+        const overlapX = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+        const overlapY = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+        expect(overlapX > 0.5 && overlapY > 0.5).toBe(false);
+      }
+    }
+
+    // Bounding sphere helper & preview capacity sanity check
+    const sphere = computeBoundingSphereFromBoxLists([
+      { min: [0, 0, 0], max: [80, 24, 80], center: [40, 12, 40] },
+    ]);
+    expect(sphere.center).toEqual([40, 12, 40]);
+    expect(sphere.radius).toBeCloseTo(Math.hypot(40, 12, 40), 3);
+
+    const preview = computeSmartAutoPreviewGrid(
+      buildSmartAutoPageContext({ pageWidthIn: 11, pageHeightIn: 8.5, density: 'balanced' }),
+    );
+    expect(preview.fits).toBe(true);
+    expect(preview.maxSteps).toBeGreaterThan(2);
+
+    const bestGrid = findBestSmartAutoGridForSteps(
+      Array.from({ length: 6 }, (_, i) => ({ stepId: `x${i}`, stepNum: i + 1, viewRadiusLdu: 70 })),
+      buildSmartAutoPageContext({ pageWidthIn: 11, pageHeightIn: 8.5, density: 'balanced' }),
+    );
+    expect(bestGrid.fits).toBe(true);
+    expect(bestGrid.cols).toBe(3);
+    expect(bestGrid.rows).toBe(2);
   });
 });
