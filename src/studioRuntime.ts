@@ -9732,8 +9732,9 @@ function renderAll() {
 
         <!-- Page Footer (+ Official-Style Bottom Build Progress Bar) -->
         ${(() => {
-          const chSteps = page.chapter?.steps || [];
-          const lastStepOnPage = page.steps[page.steps.length - 1];
+          const lastSlotOnPage = Array.isArray(page.slots) && page.slots.length > 0 ? page.slots[page.slots.length - 1] : null;
+          const lastStepOnPage = lastSlotOnPage?.step || null;
+          const chSteps = lastSlotOnPage?.ch?.steps || page.chapter?.steps || [];
           const idxInCh = lastStepOnPage ? chSteps.findIndex((s) => s.id === lastStepOnPage.id) : -1;
           const progFrac = idxInCh >= 0 && chSteps.length > 1
             ? computeBagProgressFraction(idxInCh, chSteps.length)
@@ -18948,8 +18949,9 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       }
     }
 
-    const chStepsPdf = page.chapter?.steps || [];
-    const lastStepPdf = page.steps[page.steps.length - 1];
+    const lastSlotPdf = Array.isArray(page.slots) && page.slots.length > 0 ? page.slots[page.slots.length - 1] : null;
+    const lastStepPdf = lastSlotPdf?.step || null;
+    const chStepsPdf = lastSlotPdf?.ch?.steps || page.chapter?.steps || [];
     const idxInChPdf = lastStepPdf ? chStepsPdf.findIndex((s) => s.id === lastStepPdf.id) : -1;
     const progFracPdf = idxInChPdf >= 0 && chStepsPdf.length > 1
       ? computeBagProgressFraction(idxInChPdf, chStepsPdf.length)
@@ -18959,8 +18961,9 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
 
   // Build invisible Ctrl+F searchable metadata tokens (step numbers & LDraw part IDs) for this PDF page
   const searchableSet = new Set();
-  if (page.kind === 'steps' && Array.isArray(page.steps)) {
-    for (const s of page.steps) {
+  if (page.kind === 'steps' && Array.isArray(page.slots)) {
+    for (const slot of page.slots) {
+      const s = slot?.step;
       if (s?.num != null) searchableSet.add(`Step ${s.num}`);
       if (Array.isArray(s?.parts)) {
         for (const p of s.parts) {

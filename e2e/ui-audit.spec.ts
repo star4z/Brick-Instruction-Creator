@@ -124,6 +124,16 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     await page.locator('#btnCloseBricksLib').click();
     await expect(page.locator('#bricksLibraryModal')).toBeHidden();
 
+    // 4. App Settings Modal
+    await ensureMenuOpen(page);
+    await page.locator('#menuSettingsBtn').click();
+    await expect(page.locator('#settingsModal')).toBeVisible();
+    await auditSurface(page, `${testInfo.project.name}: App Settings Modal`, {
+      activeContainerSelector: '#settingsModal',
+    });
+    await page.locator('#btnCloseSettings').click();
+    await expect(page.locator('#settingsModal')).toBeHidden();
+
     runtime.assertClean(`${testInfo.project.name}: Pre-model UI`);
   });
 

@@ -38,6 +38,7 @@ All tests use offline synthetic LDraw fixtures (`e2e/fixtures/sampleModels.ts`) 
 2. **Open Model Modal** (`#openModelModal`): Import Model / Import Project triggers and close.
 3. **Keyboard Shortcuts Modal** (`#shortcutsModal`): Search filter, clear filter, and close.
 4. **Bricks Library Modal** (`#bricksLibraryModal`): Browse & Search tab, part search (`3001`), 3D Preview Color popover (`#libColorPopover`), Available Color Filter popover (`#libColorFilterPopover`), and Fetch & Import tab.
+5. **App Settings Modal** (`#settingsModal`): Opened from `#menuSettingsBtn`, verifies layout, defaults controls, and close.
 5. **Missing Parts Modal** (`#missingPartsModal`): Triggered via synthetic `.ldr` with an unknown part ID, verifies missing part list and Skip & Continue transition.
 6. **Import Wizard Modal** (`#importWizardModal`): Read-only project defaults summary, deep-link into editable setup pages with back-navigation, and Generate Manual action.
 7. **Live Workspace, Page Types & Bottom Dock Modes**:
