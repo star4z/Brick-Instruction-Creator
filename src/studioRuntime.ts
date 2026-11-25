@@ -178,9 +178,11 @@ import {
   getEditModeButtonLabel,
   getFocusModeDescription,
   getVisibleModeTabs,
+  isBlankStageClickTarget,
   migratePageInsertsToSteps,
   resolveModeForPage,
   resolveStepToolbarCapabilities,
+  shouldResetModeOnBlankStageClick,
 } from './engine/stepToolbar';
 import {
   getApplyCameraDestructiveNotice,
@@ -7354,6 +7356,8 @@ function getModelFileTypeLabel() {
   return 'Imported Model';
 }
 
+let suppressedBlankResetEvent = null;
+
 function isPanGestureEnabled() {
   const page = state.pages[state.pageIdx];
   return state.mode === 'pan' || getVisibleModeTabs(page?.kind).length === 0;
@@ -12342,14 +12346,17 @@ function scrollOverviewListTo(edge) {
 // =========================================================================
 (function setupStageGestures() {
   const stage = document.getElementById('stageViewport');
+  const pageFrame = document.getElementById('pageFrame');
   let modeTouch = null; // 'pan' | 'pinch' | null
   let startZoom = 1, startPanX = 0, startPanY = 0;
   let startX = 0, startY = 0, startDist = 0, startMidX = 0, startMidY = 0;
   let lastTapTime = 0, touchMoved = false;
+  let blankPress = null;
 
   // Desktop mouse wheel focal-point zoom
   stage.addEventListener('wheel', (e) => {
     if (!state.model) return;
+    blankPress = null;
     e.preventDefault();
     const factor = Math.exp(-e.deltaY * 0.0018);
     setZoom(state.zoom * factor, e.clientX, e.clientY);
@@ -12360,6 +12367,9 @@ function scrollOverviewListTo(edge) {
     if (!state.model) return;
     if (e.target?.closest?.('a[href]')) return;
     const t = e.touches;
+    if (t.length >= 2 && blankPress) {
+      blankPress.multiTouch = true;
+    }
     if (t.length === 2) {
       e.preventDefault();
       modeTouch = 'pinch'; touchMoved = true;
@@ -12432,6 +12442,80 @@ function scrollOverviewListTo(edge) {
     applyStageTransform();
   });
   window.addEventListener('mouseup', () => { mouseDragging = false; });
+
+  // Clicking/tapping blank proofing-table space outside #pageFrame switches editor mode back to Pan
+  document.addEventListener('pointerdown', (e) => {
+    if (blankPress && blankPress.isDown && e.pointerId !== blankPress.pointerId) {
+      blankPress.multiTouch = true;
+      return;
+    }
+    if (!isBlankStageClickTarget(e.target, stage, pageFrame)) {
+      blankPress = null;
+    }
+  }, true);
+
+  stage.addEventListener('pointerdown', (e) => {
+    const dismissedTransientOverlay = suppressedBlankResetEvent === e;
+    if (suppressedBlankResetEvent) suppressedBlankResetEvent = null;
+    if (!state.model || !isBlankStageClickTarget(e.target, stage, pageFrame)) return;
+    if (blankPress && blankPress.isDown && e.pointerId !== blankPress.pointerId) {
+      blankPress.multiTouch = true;
+      return;
+    }
+    const isPrimaryButton = e.pointerType === 'mouse' ? e.button === 0 : e.isPrimary !== false;
+    blankPress = {
+      pointerId: e.pointerId,
+      isDown: true,
+      startX: e.clientX,
+      startY: e.clientY,
+      maxMovedPx: 0,
+      isPrimaryButton,
+      multiTouch: e.isPrimary === false,
+      dismissedTransientOverlay,
+    };
+  });
+
+  window.addEventListener('pointermove', (e) => {
+    if (!blankPress || !blankPress.isDown || e.pointerId !== blankPress.pointerId) return;
+    const dist = Math.hypot(e.clientX - blankPress.startX, e.clientY - blankPress.startY);
+    if (dist > blankPress.maxMovedPx) blankPress.maxMovedPx = dist;
+  });
+
+  window.addEventListener('pointerup', (e) => {
+    if (!blankPress || e.pointerId !== blankPress.pointerId) return;
+    blankPress.isDown = false;
+    const dist = Math.hypot(e.clientX - blankPress.startX, e.clientY - blankPress.startY);
+    if (dist > blankPress.maxMovedPx) blankPress.maxMovedPx = dist;
+  });
+
+  window.addEventListener('pointercancel', (e) => {
+    if (blankPress && e.pointerId === blankPress.pointerId) blankPress = null;
+  });
+  window.addEventListener('blur', () => { blankPress = null; });
+
+  stage.addEventListener('click', (e) => {
+    const press = blankPress;
+    blankPress = null;
+    if (!press) return;
+    const movedPx = Math.max(
+      press.maxMovedPx,
+      Math.hypot(e.clientX - press.startX, e.clientY - press.startY),
+    );
+    const curPage = state.pages[state.pageIdx];
+    if (shouldResetModeOnBlankStageClick({
+      hasModel: Boolean(state.model),
+      mode: state.mode,
+      pageKind: curPage?.kind,
+      startedInBlankSpace: true,
+      endedInBlankSpace: isBlankStageClickTarget(e.target, stage, pageFrame),
+      movedPx,
+      isPrimaryButton: press.isPrimaryButton && e.button === 0,
+      wasMultiTouch: press.multiTouch,
+      dismissedTransientOverlay: press.dismissedTransientOverlay,
+    })) {
+      switchStudioMode('pan');
+    }
+  });
 })();
 
 // =========================================================================
@@ -16328,6 +16412,7 @@ document.addEventListener('pointerdown', (e) => {
   if (!stylePopEl || stylePopEl.classList.contains('hidden')) return;
   const t = e.target;
   if (t instanceof Node && (stylePopEl.contains(t) || (btnStylePopEl && btnStylePopEl.contains(t)))) return;
+  suppressedBlankResetEvent = e;
   setStylePopoverOpen(false);
 }, true);
 
@@ -16655,6 +16740,7 @@ function switchStudioMode(nextMode) {
     return;
   }
   if (isBomSetupModalOpen()) closeBomSetupModal();
+  hidePageBreakHelpTooltip();
   state.mode = target;
   if (state.mode !== 'parts') state.selectedPartIds.clear();
   state.selectedArrangeEl = null;
@@ -17527,6 +17613,9 @@ const dismissPageBreakHelpOnOutside = (e) => {
   const target = e.target;
   if (target instanceof Element && (target.closest('#pageBreakHelpTooltip') || target.closest('.pb-help-btn'))) {
     return;
+  }
+  if (e.type === 'pointerdown' && pageBreakHelpState.pinned) {
+    suppressedBlankResetEvent = e;
   }
   hidePageBreakHelpTooltip();
 };

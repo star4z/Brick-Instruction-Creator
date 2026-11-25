@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  BLANK_STAGE_CLICK_MAX_MOVE_PX,
   CAMERA_ANGLE_PRESETS,
   FOCUS_MODE_OPTIONS,
   MINIFIG_STYLE_OPTIONS,
@@ -15,10 +16,12 @@ import {
   getEditModeButtonLabel,
   getFocusModeDescription,
   getVisibleModeTabs,
+  isBlankStageClickTarget,
   isModalEditPageKind,
   migratePageInsertsToSteps,
   resolveModeForPage,
   resolveStepToolbarCapabilities,
+  shouldResetModeOnBlankStageClick,
 } from '../stepToolbar';
 
 describe('Step Toolbar & Scope-Based Editor Capabilities', () => {
@@ -382,5 +385,100 @@ describe('Step Toolbar & Scope-Based Editor Capabilities', () => {
     }
     expect(getFocusModeDescription('focus')).toContain('Zooms closely');
     expect(getFocusModeDescription(undefined)).toContain('Automatically');
+  });
+
+  it('distinguishes blank stage space outside #pageFrame from document and floating chrome targets', () => {
+    const stepSlot = { id: 'stepSlot' };
+    const pageFrame = {
+      id: 'pageFrame',
+      contains: (n: unknown) => n === pageFrame || n === stepSlot,
+    };
+    const stageContainer = {
+      id: 'stageContainer',
+      contains: (n: unknown) => n === stageContainer || pageFrame.contains(n),
+    };
+    const stage = {
+      id: 'stageViewport',
+      contains: (n: unknown) => n === stage || stageContainer.contains(n),
+    };
+    const bottomDock = { id: 'bottomDock' };
+    const contextCard = { id: 'contextCard' };
+
+    // Blank space inside #stageViewport but outside #pageFrame
+    expect(isBlankStageClickTarget(stage, stage, pageFrame)).toBe(true);
+    expect(isBlankStageClickTarget(stageContainer, stage, pageFrame)).toBe(true);
+
+    // Inside the document (#pageFrame or its descendants)
+    expect(isBlankStageClickTarget(pageFrame, stage, pageFrame)).toBe(false);
+    expect(isBlankStageClickTarget(stepSlot, stage, pageFrame)).toBe(false);
+
+    // Floating UI siblings outside #stageViewport
+    expect(isBlankStageClickTarget(bottomDock, stage, pageFrame)).toBe(false);
+    expect(isBlankStageClickTarget(contextCard, stage, pageFrame)).toBe(false);
+    expect(isBlankStageClickTarget(null, stage, pageFrame)).toBe(false);
+    expect(isBlankStageClickTarget(stage, null, pageFrame)).toBe(false);
+  });
+
+  it('switches Parts, Step, Page, and Camera modes back to Pan on a clean blank-stage click', () => {
+    const base = {
+      hasModel: true,
+      startedInBlankSpace: true,
+      endedInBlankSpace: true,
+      movedPx: 0,
+      isPrimaryButton: true,
+      wasMultiTouch: false,
+      dismissedTransientOverlay: false,
+    };
+
+    // Step pages: Parts, Step, and Page all switch back to Pan
+    expect(shouldResetModeOnBlankStageClick({ ...base, pageKind: 'steps', mode: 'parts' })).toBe(true);
+    expect(shouldResetModeOnBlankStageClick({ ...base, pageKind: 'steps', mode: 'step' })).toBe(true);
+    expect(shouldResetModeOnBlankStageClick({ ...base, pageKind: 'steps', mode: 'page' })).toBe(true);
+    expect(shouldResetModeOnBlankStageClick({ ...base, pageKind: 'steps', mode: 'pan' })).toBe(false);
+
+    // Cover & Build Complete pages: Camera and Page switch back to Pan
+    expect(shouldResetModeOnBlankStageClick({ ...base, pageKind: 'cover', mode: 'camera' })).toBe(true);
+    expect(shouldResetModeOnBlankStageClick({ ...base, pageKind: 'cover', mode: 'page' })).toBe(true);
+    expect(shouldResetModeOnBlankStageClick({ ...base, pageKind: 'complete', mode: 'camera' })).toBe(true);
+    expect(shouldResetModeOnBlankStageClick({ ...base, pageKind: 'complete', mode: 'page' })).toBe(true);
+
+    // Back Cover & Divider pages: Page switches back to Pan
+    expect(shouldResetModeOnBlankStageClick({ ...base, pageKind: 'back', mode: 'page' })).toBe(true);
+    expect(shouldResetModeOnBlankStageClick({ ...base, pageKind: 'divider', mode: 'page' })).toBe(true);
+
+    // Slight click/tap jitter within threshold still resets
+    expect(
+      shouldResetModeOnBlankStageClick({
+        ...base,
+        pageKind: 'steps',
+        mode: 'step',
+        movedPx: BLANK_STAGE_CLICK_MAX_MOVE_PX,
+      }),
+    ).toBe(true);
+  });
+
+  it('ignores drags, cross-boundary releases, multi-touch pinch, right-clicks, and popover dismissals', () => {
+    const base = {
+      hasModel: true,
+      pageKind: 'steps',
+      mode: 'step',
+      startedInBlankSpace: true,
+      endedInBlankSpace: true,
+      movedPx: 0,
+      isPrimaryButton: true,
+      wasMultiTouch: false,
+      dismissedTransientOverlay: false,
+    };
+
+    expect(shouldResetModeOnBlankStageClick({ ...base, hasModel: false })).toBe(false);
+    expect(shouldResetModeOnBlankStageClick({ ...base, pageKind: 'section_divider' })).toBe(false);
+    expect(shouldResetModeOnBlankStageClick({ ...base, pageKind: null })).toBe(false);
+    expect(shouldResetModeOnBlankStageClick({ ...base, startedInBlankSpace: false })).toBe(false);
+    expect(shouldResetModeOnBlankStageClick({ ...base, endedInBlankSpace: false })).toBe(false);
+    expect(shouldResetModeOnBlankStageClick({ ...base, movedPx: BLANK_STAGE_CLICK_MAX_MOVE_PX + 0.5 })).toBe(false);
+    expect(shouldResetModeOnBlankStageClick({ ...base, movedPx: Number.NaN })).toBe(false);
+    expect(shouldResetModeOnBlankStageClick({ ...base, isPrimaryButton: false })).toBe(false);
+    expect(shouldResetModeOnBlankStageClick({ ...base, wasMultiTouch: true })).toBe(false);
+    expect(shouldResetModeOnBlankStageClick({ ...base, dismissedTransientOverlay: true })).toBe(false);
   });
 });

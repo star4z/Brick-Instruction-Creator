@@ -591,5 +591,24 @@ describe('studioRuntime safety checks', () => {
     expect(runtime).toContain('computeWorkspaceViewportSize(');
     expect(runtime).toContain('function syncSideMenuLayout(');
   });
+
+  it('switches the bottom mode pill back to Pan when clicking blank stage space outside #pageFrame', () => {
+    const runtime = fs.readFileSync(path.resolve(process.cwd(), 'src/studioRuntime.ts'), 'utf8');
+
+    const start = runtime.indexOf('(function setupStageGestures()');
+    const end = runtime.indexOf('// 11. INDEXEDDB PERSISTENCE', start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const gesturesBody = runtime.slice(start, end);
+
+    expect(gesturesBody).toContain("const pageFrame = document.getElementById('pageFrame');");
+    expect(gesturesBody).toContain('isBlankStageClickTarget(');
+    expect(gesturesBody).toContain('shouldResetModeOnBlankStageClick({');
+    expect(gesturesBody).toContain("switchStudioMode('pan');");
+    expect(gesturesBody).toContain('suppressedBlankResetEvent');
+
+    expect(runtime).toContain('function switchStudioMode(nextMode)');
+    expect(runtime).toContain('suppressedBlankResetEvent = e;');
+  });
 });
 

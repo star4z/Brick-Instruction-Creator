@@ -376,6 +376,64 @@ export function resolveModeForPage(
   return visible.includes(mapped as StudioMode) ? (mapped as StudioMode) : 'pan';
 }
 
+/** Maximum pointer travel (CSS pixels) still treated as a blank-stage click/tap rather than a drag. */
+export const BLANK_STAGE_CLICK_MAX_MOVE_PX = 8;
+
+export interface NodeContainsLike {
+  contains(node: unknown): boolean;
+}
+
+export interface BlankStageModeResetInput {
+  hasModel: boolean;
+  mode: string | null | undefined;
+  pageKind: string | null | undefined;
+  startedInBlankSpace: boolean;
+  endedInBlankSpace: boolean;
+  movedPx: number;
+  isPrimaryButton?: boolean;
+  wasMultiTouch?: boolean;
+  dismissedTransientOverlay?: boolean;
+}
+
+/**
+ * Returns true when an event target lies inside the editor stage viewport
+ * (`#stageViewport`) and strictly outside the rendered manual page document (`#pageFrame`).
+ */
+export function isBlankStageClickTarget(
+  target: unknown,
+  stage: NodeContainsLike | null | undefined,
+  pageFrame: NodeContainsLike | null | undefined,
+): boolean {
+  if (!target || !stage) return false;
+  if (typeof Node !== 'undefined' && stage instanceof Node && !(target instanceof Node)) {
+    return false;
+  }
+  if (!stage.contains(target)) return false;
+  if (pageFrame && pageFrame.contains(target)) return false;
+  return true;
+}
+
+/**
+ * Determines whether clicking/tapping blank proofing-table space outside the
+ * rendered document page should switch the bottom mode pill back to `pan`.
+ */
+export function shouldResetModeOnBlankStageClick(input: BlankStageModeResetInput): boolean {
+  if (!input.hasModel) return false;
+  if (input.isPrimaryButton === false) return false;
+  if (input.wasMultiTouch) return false;
+  if (input.dismissedTransientOverlay) return false;
+  if (!input.startedInBlankSpace || !input.endedInBlankSpace) return false;
+  if (!Number.isFinite(input.movedPx) || input.movedPx < 0 || input.movedPx > BLANK_STAGE_CLICK_MAX_MOVE_PX) {
+    return false;
+  }
+
+  const visible = getVisibleModeTabs(input.pageKind);
+  if (!visible.includes('pan')) return false;
+
+  const resolved = resolveModeForPage(input.mode, input.pageKind);
+  return resolved !== 'pan';
+}
+
 export interface StepOverrideLike {
   side?: string;
   corner?: string;

@@ -20,6 +20,7 @@ Every mode tab corresponds to an unambiguous editing scope (eliminating the prev
 - **Back Cover & Divider pages (`back`, `divider`)**: `[ Pan | Page ]`
 - **Section Dividers & Submodel Pages**: Mode pill hidden (`[]`).
 - **Cross-page mode continuity**: Switching between Cover/Complete and Step pages smoothly maps `camera ↔ step` via `resolveModeForPage()` so users can keep adjusting cameras without re-selecting a tab, and migrates legacy saved mode IDs (`select`, `rotate`, `edit`, `arrange`).
+- **Click blank space to return to `Pan`**: Clicking or tapping the blank proofing-table area inside `#stageViewport` outside the rendered page frame (`#pageFrame`) switches any active editing mode (`Parts`, `Step`, `Page`, or `Camera`) back to `Pan`, closing the floating contextual card and clearing any part selection. Drags (> 8 px), cross-boundary pointer releases (such as orbiting or dragging out from `#pageFrame`), 2-finger pinch gestures, non-primary mouse buttons, and clicks that first dismiss an open floating popover (`#stylePopover` or pinned `#pageBreakHelpTooltip`) are ignored, and executing on `click` allows any focused text field inside `#contextOverlay` to blur and commit its changes before exiting to `Pan`.
 
 ### 2. Three-Tier Scope Badge System
 Whenever a control affects more than the currently focused part, step, or page, the UI communicates its blast radius with a consistent three-tier badge system aligned to `src/index.css` semantic tokens:
@@ -57,6 +58,7 @@ Every entry in the Pages & Steps list includes a theme-backed miniature preview 
 - `getVisibleModeTabs(pageKind)` — canonical scope-based bottom mode pill tabs (`['pan', 'parts', 'step', 'page']` on step pages, `['pan', 'camera', 'page']` on cover/complete, `['pan', 'page']` on back/divider/bom).
 - `getEditModeButtonLabel(pageKind)` & `isModalEditPageKind(pageKind)` — relabels the `page` button to `Customize Parts List` on Parts List (`bom`) pages and marks modal-backed edit pages (`bom`).
 - `resolveModeForPage(mode, pageKind)` — legacy mode migration and seamless `camera ↔ step` cross-page mapping.
+- `BLANK_STAGE_CLICK_MAX_MOVE_PX`, `isBlankStageClickTarget(target, stage, pageFrame)`, & `shouldResetModeOnBlankStageClick()` — blank proofing-table hit detection outside `#pageFrame` and click/tap gating for switching active modes back to `pan`.
 - `CAMERA_ANGLE_PRESETS`, `getCameraAngleLabel()`, `findMatchingCameraPreset()`, & `clampStepModelScale()` — neutral degree labels (`45°`, `135°`, `225°`, `315°`), wrap-safe azimuth matching shared by Cover, Build Complete, and Step cameras, and clamped step zoom.
 - `PAPER_FORMAT_SPECS`, `PAPER_FORMAT_ORDER`, & `computePaperPreviewBox()` — expanded paper sizes (`Screen Fit`, `US Letter`, `A4`, `A5`, `B5`, `Half Letter`, `US Legal`, `Tabloid`, `A3`, `Booklet Square`, `Custom`) and exact aspect-ratio preview box geometry.
 - `applyCameraAngleToStepRange()` — inclusive absolute step-range camera override helper with optional `modelScale` & `focusMode` propagation.
