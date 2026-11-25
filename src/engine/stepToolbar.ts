@@ -414,6 +414,7 @@ export interface StepToolbarCapabilityInput {
   totalStepCount?: number;
   followingStepCount?: number;
   canMergeWithPrev?: boolean;
+  canInsertDividerAfterPage?: boolean;
 }
 
 export interface StepToolbarCapabilities {
@@ -431,6 +432,7 @@ export interface StepToolbarCapabilities {
   showMinifigSettings: boolean;
   showSubassemblySettings: boolean;
   canMergeWithPrev: boolean;
+  canInsertDividerAfterPage: boolean;
   hasStepLayoutControls: boolean;
 }
 
@@ -465,8 +467,9 @@ export function resolveStepToolbarCapabilities(
   const followingCount = input.followingStepCount ?? 0;
   const totalSteps = input.totalStepCount ?? (followingCount > 0 ? followingCount + 1 : 1);
   const canMergeWithPrev = Boolean(input.canMergeWithPrev);
+  const canInsertDividerAfterPage = Boolean(input.canInsertDividerAfterPage);
   const hasStepLayoutControls =
-    hasPartsBox || input.hasSubassembly || input.isMinifigBuild || canMergeWithPrev;
+    hasPartsBox || input.hasSubassembly || input.isMinifigBuild || canMergeWithPrev || canInsertDividerAfterPage;
 
   return {
     isOfficialMinifigStyle,
@@ -483,6 +486,7 @@ export function resolveStepToolbarCapabilities(
     showMinifigSettings: input.isMinifigBuild,
     showSubassemblySettings: input.hasSubassembly,
     canMergeWithPrev,
+    canInsertDividerAfterPage,
     hasStepLayoutControls,
   };
 }

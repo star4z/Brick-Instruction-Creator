@@ -3,15 +3,14 @@
  *
  * Every button and section in the top-left menu drawer is hidden whenever it
  * cannot currently be used (e.g. no model loaded, zero model issues, no missing
- * parts to fetch online, `.biw` project without parsed LDraw geometry for
- * regeneration/subdivision, or current page not eligible for a divider insert).
+ * parts to fetch online, or `.biw` project without parsed LDraw geometry for
+ * regeneration/subdivision).
  */
 
 export interface MenuVisibilityState {
   hasModel: boolean;
   hasParsedModel: boolean;
   pageCount: number;
-  canInsertDividerAfterCurrentPage: boolean;
   diagnosticCount: number;
   savedLibraryCount: number;
   hasMissingPartsToFetch: boolean;
@@ -32,8 +31,6 @@ export interface MenuVisibility {
   showAutoGenerateSection: boolean;
   showRegenerateSteps: boolean;
   showSubdivideModel: boolean;
-  showPageInsertsSection: boolean;
-  showInsertDivider: boolean;
 }
 
 /**
@@ -75,9 +72,6 @@ export function computeMenuVisibility(input: MenuVisibilityState): MenuVisibilit
   const showSubdivideModel = hasParsed;
   const showAutoGenerateSection = showRegenerateSteps || showSubdivideModel;
 
-  const showInsertDivider = hasPages && Boolean(input.canInsertDividerAfterCurrentPage);
-  const showPageInsertsSection = showInsertDivider;
-
   return {
     showModelCard,
     showCloseModel,
@@ -92,7 +86,5 @@ export function computeMenuVisibility(input: MenuVisibilityState): MenuVisibilit
     showAutoGenerateSection,
     showRegenerateSteps,
     showSubdivideModel,
-    showPageInsertsSection,
-    showInsertDivider,
   };
 }

@@ -525,5 +525,30 @@ describe('studioRuntime safety checks', () => {
     expect(runtime).not.toContain('style-bom-format-btn');
     expect(runtime).not.toContain('styleToggleBomPartId');
   });
+
+  it('moves Insert Blank / Divider Page After Current from the menu drawer into Step -> Layout', () => {
+    const html = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf8');
+    const runtime = fs.readFileSync(path.resolve(process.cwd(), 'src/studioRuntime.ts'), 'utf8');
+
+    expect(html).not.toContain('id="menuPageInsertsSection"');
+    expect(html).not.toContain('id="menuAddDivider"');
+    expect(html).not.toContain('Insert Blank / Divider Page After Current');
+    expect(runtime).not.toContain('menuPageInsertsSection');
+    expect(runtime).not.toContain('menuAddDivider');
+
+    const stepLayoutStart = runtime.indexOf("} else if (subTab === 'layout') {");
+    const stepNotesStart = runtime.indexOf("// subTab === 'notes'", stepLayoutStart);
+    expect(stepLayoutStart).toBeGreaterThan(-1);
+    expect(stepNotesStart).toBeGreaterThan(stepLayoutStart);
+
+    const stepLayoutHtml = runtime.slice(stepLayoutStart, stepNotesStart);
+    expect(stepLayoutHtml).toContain('id="stepInsertDividerBtn"');
+    expect(stepLayoutHtml).toContain('Insert Blank / Divider Page After Current');
+    expect(stepLayoutHtml).toContain('id="stepGotoDividerBtn"');
+
+    expect(runtime).toContain('function insertDividerAfterCurrentPage(');
+    expect(runtime).toContain("box.querySelector('#stepInsertDividerBtn')");
+    expect(runtime).toContain("box.querySelector('#stepGotoDividerBtn')");
+  });
 });
 

@@ -10,7 +10,6 @@ function baseState(overrides: Partial<MenuVisibilityState> = {}): MenuVisibility
     hasModel: false,
     hasParsedModel: false,
     pageCount: 0,
-    canInsertDividerAfterCurrentPage: false,
     diagnosticCount: 0,
     savedLibraryCount: 0,
     hasMissingPartsToFetch: false,
@@ -36,8 +35,6 @@ describe('computeMenuVisibility', () => {
       showAutoGenerateSection: false,
       showRegenerateSteps: false,
       showSubdivideModel: false,
-      showPageInsertsSection: false,
-      showInsertDivider: false,
     });
   });
 
@@ -70,7 +67,6 @@ describe('computeMenuVisibility', () => {
         hasModel: true,
         hasParsedModel: false,
         pageCount: 6,
-        canInsertDividerAfterCurrentPage: true,
       }),
     );
     expect(projectOnly.showModelCard).toBe(true);
@@ -80,7 +76,6 @@ describe('computeMenuVisibility', () => {
     expect(projectOnly.showAutoGenerateSection).toBe(false);
     expect(projectOnly.showRegenerateSteps).toBe(false);
     expect(projectOnly.showSubdivideModel).toBe(false);
-    expect(projectOnly.showPageInsertsSection).toBe(true);
   });
 
   it('shows Auto-Generate Steps when a parsed .io/.ldr/.mpd model is loaded', () => {
@@ -111,20 +106,6 @@ describe('computeMenuVisibility', () => {
       baseState({ hasModel: true, pageCount: 4, hasMissingPartsToFetch: false, isFetchingLibrary: true }),
     );
     expect(fetching.showFetchLibrary).toBe(true);
-  });
-
-  it('hides Page Inserts section when current page cannot accept a divider', () => {
-    const onCover = computeMenuVisibility(
-      baseState({ hasModel: true, pageCount: 5, canInsertDividerAfterCurrentPage: false }),
-    );
-    expect(onCover.showInsertDivider).toBe(false);
-    expect(onCover.showPageInsertsSection).toBe(false);
-
-    const onStep = computeMenuVisibility(
-      baseState({ hasModel: true, pageCount: 5, canInsertDividerAfterCurrentPage: true }),
-    );
-    expect(onStep.showInsertDivider).toBe(true);
-    expect(onStep.showPageInsertsSection).toBe(true);
   });
 });
 

@@ -8921,6 +8921,15 @@ function renderZoomStepperHtml({ downId, upId, pct, downLabel, upLabel }) {
   </div>`;
 }
 
+function insertDividerAfterCurrentPage(page) {
+  if (!state.model || !canInsertDividerAfterPage(page, state.dividerAfter)) return false;
+  pushUndo();
+  state.dividerAfter[page.id] = { title: state.wordlessMode ? '' : 'Next Section', note: '' };
+  renderAll();
+  showToast('Inserted divider page after current page.');
+  return true;
+}
+
 function renderContextOverlay(page) {
   const box = document.getElementById('contextOverlay');
   box.innerHTML = '';
@@ -9370,6 +9379,7 @@ function renderContextOverlay(page) {
     totalStepCount: allStepsList.length,
     followingStepCount: followingCount,
     canMergeWithPrev: stepIdxInCh > 0,
+    canInsertDividerAfterPage: canInsertDividerAfterPage(page, state.dividerAfter),
   });
 
   // =========================================================================
@@ -9522,6 +9532,33 @@ function renderContextOverlay(page) {
               <button type="button" id="stepMergePrevBtn" class="px-2.5 py-1.5 rounded-md border font-semibold shrink-0 transition-colors cursor-pointer ${mergeNotice ? 'border-[var(--warning)]/35 bg-[var(--warning-soft)] text-[var(--warning)] hover:bg-[var(--warning)] hover:text-white' : 'border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)]'}">Merge into Step ${prevStep.num}</button>
             </div>
             ${renderDestructiveNoticeHtml(mergeNotice, { compact: true })}
+          </div>`);
+      }
+
+      const hasDividerAfter = Boolean(page?.id && state.dividerAfter[page.id]);
+      if (caps.canInsertDividerAfterPage) {
+        sections.push(`
+          <div class="space-y-1.5">
+            <div class="flex items-center justify-between gap-2 flex-wrap">
+              <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Page Inserts</span>
+              ${renderScopeBadge('range', 'Affects Later Pages')}
+            </div>
+            <button type="button" id="stepInsertDividerBtn" class="w-full py-2 px-3 rounded-lg border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold text-left flex items-center gap-2 transition-colors cursor-pointer">
+              <svg class="w-4 h-4 text-[var(--primary)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" x2="12" y1="5" y2="19"/><line x1="5" x2="19" y1="12" y2="12"/></svg>
+              <span>Insert Blank / Divider Page After Current</span>
+            </button>
+          </div>`);
+      } else if (hasDividerAfter) {
+        sections.push(`
+          <div class="space-y-1.5">
+            <div class="flex items-center justify-between gap-2 flex-wrap">
+              <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Page Inserts</span>
+              ${renderScopeBadge('range', 'Affects Later Pages')}
+            </div>
+            <div class="flex items-center justify-between gap-2 flex-wrap">
+              <span class="text-[11px] text-[var(--muted-foreground)] truncate">Blank / divider page inserted after Page ${page.num}</span>
+              <button type="button" id="stepGotoDividerBtn" class="px-2.5 py-1.5 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold shrink-0 transition-colors cursor-pointer">Edit Divider Page…</button>
+            </div>
           </div>`);
       }
 
@@ -9719,6 +9756,24 @@ function renderContextOverlay(page) {
         };
       }
 
+      const stepDivBtn = box.querySelector('#stepInsertDividerBtn');
+      if (stepDivBtn) {
+        stepDivBtn.onclick = () => insertDividerAfterCurrentPage(page);
+      }
+      const stepGotoDivBtn = box.querySelector('#stepGotoDividerBtn');
+      if (stepGotoDivBtn) {
+        stepGotoDivBtn.onclick = () => {
+          const divIdx = state.pages.findIndex(p => p.id === 'div_' + page.id);
+          if (divIdx >= 0) {
+            state.pageIdx = divIdx;
+            state.mode = 'page';
+            state.selectedPartIds.clear();
+            resetZoom();
+            renderAll();
+          }
+        };
+      }
+
       box.querySelectorAll('.step-mf-style-btn').forEach(b => {
         b.onclick = () => applyMinifigStyleChange(b.getAttribute('data-step-mf-style'), step.id);
       });
@@ -9886,13 +9941,7 @@ function renderContextOverlay(page) {
     });
     const divBtn = box.querySelector('#pageInsertDividerBtn');
     if (divBtn) {
-      divBtn.onclick = () => {
-        if (!canInsertDividerAfterPage(page, state.dividerAfter)) return;
-        pushUndo();
-        state.dividerAfter[page.id] = { title: 'Next Section', note: '' };
-        renderAll();
-        showToast('Inserted divider page after current page.');
-      };
+      divBtn.onclick = () => insertDividerAfterCurrentPage(page);
     }
     box.querySelector('#pageRangeGroupBtn').onclick = () => {
       openPageSetupModal();
@@ -10883,13 +10932,11 @@ function syncPageLayoutControlsUI() {
 function syncMenuControls() {
   const hasModel = Boolean(state.model);
   const hasParsedModel = Boolean(state.model?._parsed);
-  const currentPage = state.pages[state.pageIdx] || null;
   const diagCount = Array.isArray(state.diagnostics) ? state.diagnostics.length : 0;
   const vis = computeMenuVisibility({
     hasModel,
     hasParsedModel,
     pageCount: state.pages.length,
-    canInsertDividerAfterCurrentPage: canInsertDividerAfterPage(currentPage, state.dividerAfter),
     diagnosticCount: diagCount,
     savedLibraryCount: userLibRaw.size,
     hasMissingPartsToFetch: hasModel ? hasMissingPartsToFetch() : false,
@@ -10915,8 +10962,6 @@ function syncMenuControls() {
   setVisible('menuClearLibBtn', vis.showClearLibrary);
   setVisible('menuAutoGenSection', vis.showAutoGenerateSection);
   setVisible('menuStepGenBtn', vis.showAutoGenerateSection);
-  setVisible('menuPageInsertsSection', vis.showPageInsertsSection);
-  setVisible('menuAddDivider', vis.showInsertDivider);
 
   const stepGenSum = document.getElementById('menuStepGenSummary');
   if (stepGenSum) {
@@ -18485,14 +18530,6 @@ document.getElementById('btnSysPrint').onclick = () => {
   runSystemPrintAllPages();
 };
 
-document.getElementById('menuAddDivider').onclick = () => {
-  if (!state.model) return;
-  const pg = state.pages[state.pageIdx];
-  if (!canInsertDividerAfterPage(pg, state.dividerAfter)) return;
-  pushUndo();
-  state.dividerAfter[pg.id] = { title: state.wordlessMode ? '' : 'Next Section', note: '' };
-  closeMenu(); renderAll(); showToast('Inserted divider page after current page.');
-};
 const menuStepGenBtn = document.getElementById('menuStepGenBtn');
 if (menuStepGenBtn) {
   menuStepGenBtn.onclick = () => {

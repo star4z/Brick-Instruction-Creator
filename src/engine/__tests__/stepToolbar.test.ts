@@ -167,6 +167,19 @@ describe('Step Toolbar & Scope-Based Editor Capabilities', () => {
     });
     expect(subPages.hasPartsBox).toBe(true);
     expect(subPages.hasMovableCallout).toBe(false);
+
+    const dividerOnly = resolveStepToolbarCapabilities({
+      isMinifigBuild: false,
+      minifigStyle: 'exploded',
+      hasSubassembly: false,
+      stepInsertCount: 0,
+      totalStepCount: 1,
+      followingStepCount: 0,
+      canMergeWithPrev: false,
+      canInsertDividerAfterPage: true,
+    });
+    expect(dividerOnly.canInsertDividerAfterPage).toBe(true);
+    expect(dividerOnly.hasStepLayoutControls).toBe(true);
   });
 
   it('detects custom camera angle, zoom, framing, and arrange layouts independently', () => {
