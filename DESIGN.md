@@ -221,7 +221,7 @@ A calm pressroom neutral scale—cool slate stone, crisp archival paper, and dee
 - **Logo Maroon** (`--primary`: `#7c152e` light / `#eb6a84` dark): Primary actions (Import Model, Export pill, Export to PDF, Save, Done, Next Page), active mode pill buttons, active tabs, `.IO` file badge, checkboxes/sliders, caret color, and `:focus-visible` outlines.
 - **Logo Maroon Hover** (`--primary-hover`: `#641025` light / `#f28096` dark): Hover state for primary filled buttons, deepening in light mode and brightening in dark mode.
 - **Logo Maroon Foreground** (`--primary-foreground`: `#ffffff` light / `#1a0a0f` dark): High-contrast label and icon ink seated on primary fills (`10.48:1` light / `6.33:1` dark).
-- **Logo Maroon Soft / Border** (`--primary-soft` / `--primary-border`): Tinted fills and borders for secondary-emphasis buttons, active presets, dashed section dividers, `.print-margin-guide`, and `::selection` highlights.
+- **Logo Maroon Soft / Border** (`--primary-soft` / `--primary-border`): Tinted fills and borders for secondary-emphasis buttons, active presets, dashed section dividers, and `::selection` highlights.
 - **Warm Logo Orange** (`--accent-warm`: `#c75d0c` light / `#f59342` dark; `--brand-orange`: `#ed7d1f`; `--ink-bar-accent`: `#fb9e4f`): Studio tool icon accent (`Bricks Library`, `Style`), `--rail-accent`, `.LDR` badge (`--warning`), and high-legibility action text (`See issues`) inside the dark `--ink-bar` notification pill.
 - **Logo Sky Blue** (`--info`: `#0369a1` light / `#38bdf8` dark; `--brand-sky`: `#38bdf8`): Project import icon accent, `.MPD` badge, informational diagnostics, and the first calibration dot on the proofing table strip.
 

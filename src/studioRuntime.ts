@@ -6265,7 +6265,6 @@ const state = {
   customHeight: 8,
   customUnit: 'in',        // 'in' | 'cm'
   density: 'balanced',     // compact | balanced | spacious
-  showPrintGuides: false,
   layout: 'auto',          // legacy mirror ('auto' | '1-up' | '2-up' | '4-up' | 'custom')
   layoutConfig: createDefaultPageLayoutSpec(),
   layoutGroups: [],        // editable StepLayoutGroup[] for per-range layouts & styles
@@ -7444,7 +7443,6 @@ function renderAll() {
   // Apply stage scale immediately so there is never an unscaled flash before rAF
   flushStageTransform();
 
-  const guideCls = (state.showPrintGuides && state.paperFormat !== 'screen') ? 'print-margin-guide' : '';
   const footerPadBottom = Math.max(4, Math.round(padPx * 0.42));
   const wordless = Boolean(state.wordlessMode);
   const showFooterTitle = !wordless && Boolean(state.showPageTitle);
@@ -7515,7 +7513,7 @@ function renderAll() {
     const qrHintArrowSize = Math.max(7, Math.round(layout.brandQrHintFontPx * 1.05));
 
     frame.innerHTML = `
-      <div class="relative w-full h-full overflow-hidden ${guideCls}" style="${cm.bgSrc ? `background-image:url(${cm.bgSrc});background-size:cover;background-position:center;` : ''}">
+      <div class="relative w-full h-full overflow-hidden" style="${cm.bgSrc ? `background-image:url(${cm.bgSrc});background-size:cover;background-position:center;` : ''}">
         <!-- High-Quality Page-Filling Hero Render -->
         <div class="absolute z-0 flex items-center justify-center pointer-events-none" style="left:${layout.heroRect.x}px;top:${layout.heroRect.y}px;width:${layout.heroRect.w}px;height:${layout.heroRect.h}px;">
           <img data-cover-hero-img="true" src="${snap.url}" alt="${escHtml(title || state.model.title || 'Model')}" class="w-full h-full object-contain pointer-events-none select-none" />
@@ -7592,7 +7590,7 @@ function renderAll() {
     const showText = cm.showText !== false;
     const showFw = cm.showFireworks !== false;
     frame.innerHTML = `
-      <div class="relative w-full h-full text-center flex flex-col items-center justify-between overflow-hidden ${guideCls}" style="padding:${padPx}px;padding-bottom:${padPx + footerH}px;${cm.bgSrc ? `background-image:url(${cm.bgSrc});background-size:cover;background-position:center;` : ''}">
+      <div class="relative w-full h-full text-center flex flex-col items-center justify-between overflow-hidden" style="padding:${padPx}px;padding-bottom:${padPx + footerH}px;${cm.bgSrc ? `background-image:url(${cm.bgSrc});background-size:cover;background-position:center;` : ''}">
         ${showFw ? buildFireworksSvg() : ''}
         <div class="relative z-10 shrink-0 pointer-events-none ${showText ? '' : 'hidden'}">
           <h2 class="font-extrabold leading-tight" style="font-size:${typo.complete.titleFont}px">${escHtml(cm.title || 'Build Complete!')}</h2>
@@ -7610,7 +7608,7 @@ function renderAll() {
     const bm = normalizeBackMeta(state.backMeta);
     const credit = BACK_COVER_CREDIT;
     frame.innerHTML = `
-      <div class="relative w-full h-full text-center flex flex-col items-center justify-center overflow-hidden ${guideCls}" style="padding:${padPx + Math.round(typo.pt(8))}px;${bm.bgSrc ? `background-image:url(${bm.bgSrc});background-size:cover;background-position:center;` : ''}">
+      <div class="relative w-full h-full text-center flex flex-col items-center justify-center overflow-hidden" style="padding:${padPx + Math.round(typo.pt(8))}px;${bm.bgSrc ? `background-image:url(${bm.bgSrc});background-size:cover;background-position:center;` : ''}">
         <a href="${PROGRAM_URL}" target="_blank" rel="noopener noreferrer" data-cover-link="true" title="Open ${PROGRAM_NAME}" class="inline-flex flex-col items-center hover:opacity-90 transition cursor-pointer" style="gap:${Math.round(typo.pt(12))}px;text-decoration:none;">
           <div class="flex items-center justify-center shadow-sm" style="width:${typo.back.logoBox}px;height:${typo.back.logoBox}px;border-radius:${Math.round(typo.back.logoBox * 0.28)}px;background:${theme.pliBg};border:1px solid ${theme.pliBorder}">
             <svg style="width:${typo.back.logoIcon}px;height:${typo.back.logoIcon}px" viewBox="0 0 64 64" fill="none" aria-hidden="true">${BRAND_LOGO_SVG_BODY}</svg>
@@ -7623,7 +7621,7 @@ function renderAll() {
     const divTitle = (d.title || '').trim();
     const divNote = (d.note || '').trim() || (wordless ? '' : 'Switch to Page mode to edit this divider page.');
     frame.innerHTML = `
-      <div class="w-full h-full flex flex-col items-center justify-center text-center ${guideCls}" style="padding:${padPx + Math.round(typo.pt(10))}px;gap:${Math.round(typo.pt(8))}px">
+      <div class="w-full h-full flex flex-col items-center justify-center text-center" style="padding:${padPx + Math.round(typo.pt(10))}px;gap:${Math.round(typo.pt(8))}px">
         ${divTitle ? `<div class="font-extrabold" style="font-size:${typo.divider.customTitleFont}px">${escHtml(divTitle)}</div>` : ''}
         ${divNote ? `<div style="color:${theme.muted};font-size:${typo.divider.customNoteFont}px;max-width:${Math.round(typo.pt(320))}px">${escHtml(divNote)}</div>` : ''}
       </div>`;
@@ -7659,7 +7657,7 @@ function renderAll() {
           </div>
         </div>`;
     frame.innerHTML = `
-      <div class="relative w-full h-full flex flex-col justify-between overflow-hidden ${guideCls}" style="padding:${padPx}px;padding-bottom:${padPx + footerH}px">
+      <div class="relative w-full h-full flex flex-col justify-between overflow-hidden" style="padding:${padPx}px;padding-bottom:${padPx + footerH}px">
         ${bagHeaderHtml}
         <div class="relative flex-1 min-h-0 overflow-hidden" style="margin:${Math.round(typo.pt(8))}px 0">
           <img src="${snap.url}" alt="${escHtml(page.chapterName || 'Stage')}" class="absolute inset-0 w-full h-full object-contain pointer-events-none" />
@@ -7682,7 +7680,7 @@ function renderAll() {
     const snap = renderSnapshot([], sub.buildParts, 38, 30, subPageSize.width, subPageSize.height, 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent });
     const pgNumText = formatPageNumber(page.num, state.pages.length);
     frame.innerHTML = `
-      <div class="relative w-full h-full flex flex-col justify-between overflow-hidden ${guideCls}" style="padding:${padPx}px;padding-bottom:${padPx + footerH}px">
+      <div class="relative w-full h-full flex flex-col justify-between overflow-hidden" style="padding:${padPx}px;padding-bottom:${padPx + footerH}px">
         <div class="shrink-0 flex items-center ${wordless ? 'justify-end' : 'justify-between'}">
           ${wordless ? '' : `<h2 class="font-extrabold" style="font-size:${typo.submodelPage.titleFont}px">${escHtml(sub.name)}</h2>`}
           <span class="rounded-full font-black text-white" style="background:${theme.accent};font-size:${typo.submodelPage.badgeFont}px;padding:${Math.round(typo.pt(2.5))}px ${Math.round(typo.pt(9))}px">${wordless ? `×${sub.repeatCount}` : `Build ${sub.repeatCount}×`}</span>
@@ -7838,7 +7836,7 @@ function renderAll() {
         </div>`;
 
     frame.innerHTML = `
-      <div class="relative w-full h-full flex flex-col overflow-hidden ${guideCls}" style="padding:${padPx}px;padding-bottom:${padPx + footerH}px">
+      <div class="relative w-full h-full flex flex-col overflow-hidden" style="padding:${padPx}px;padding-bottom:${padPx + footerH}px">
         ${bomHeaderHtml}
         ${bomBodyHtml}
         <div class="absolute flex justify-between font-medium pointer-events-none" style="bottom:${footerPadBottom}px;left:${padPx}px;right:${padPx}px;font-size:${typo.footerFont}px;color:${theme.muted}">
@@ -8019,7 +8017,7 @@ function renderAll() {
     const pgNumText = formatPageNumber(page.num, state.pages.length);
 
     frame.innerHTML = `
-      <div class="relative w-full h-full flex flex-col overflow-hidden ${guideCls}" style="padding:${padPx}px;padding-bottom:${padPx + footerH}px">
+      <div class="relative w-full h-full flex flex-col overflow-hidden" style="padding:${padPx}px;padding-bottom:${padPx + footerH}px">
         ${page.submodelIntro ? `
           <div class="shrink-0 flex items-center justify-between shadow-xs overflow-hidden" style="margin-bottom:${Math.round(typo.pt(7))}px;padding:${Math.round(typo.pt(5))}px ${Math.round(typo.pt(10))}px;border-radius:${Math.round(typo.pt(10))}px;gap:${Math.round(typo.pt(10))}px;background:${theme.calloutBg};border:1.5px solid ${theme.calloutBorder}">
             <div class="flex items-center min-w-0 flex-1" style="gap:${Math.round(typo.pt(8))}px">
@@ -10539,7 +10537,6 @@ function syncMenuControls() {
       pageNumberFormat: state.pageNumberFormat,
     }),
   );
-  setChk('togglePrintGuides', state.showPrintGuides);
   setChk('toggleExtras', state.showExtras);
   setChk('toggleDetectDuplicates', state.detectDuplicates);
   setChk('toggleMinifig1to1', state.showMinifig1to1);
@@ -14022,7 +14019,7 @@ function scheduleSaveSessionPrefs() {
     dbPut('prefs', {
       themeId: state.themeId, paperFormat: state.paperFormat, orientation: state.orientation,
       customWidth: state.customWidth, customHeight: state.customHeight, customUnit: state.customUnit,
-      density: state.density, showPrintGuides: state.showPrintGuides, layout: state.layout,
+      density: state.density, layout: state.layout,
       layoutConfig: state.layoutConfig, layoutGroups: state.layoutGroups,
       detectDuplicates: state.detectDuplicates, highlightNew: state.highlightNew, highlightColor: state.highlightColor,
       fadePrev: state.fadePrev, fadeOpacity: state.fadeOpacity, showRotCues: state.showRotCues,
@@ -14071,7 +14068,6 @@ async function restoreLastSessionOnStart() {
     if (typeof prefs.customHeight === 'number') state.customHeight = prefs.customHeight;
     if (prefs.customUnit === 'in' || prefs.customUnit === 'cm') state.customUnit = prefs.customUnit;
     if (prefs.density) state.density = prefs.density;
-    if (typeof prefs.showPrintGuides === 'boolean') state.showPrintGuides = prefs.showPrintGuides;
     if (prefs.layout) state.layout = prefs.layout;
     state.layoutConfig = normalizePageLayoutSpec(prefs.layoutConfig, prefs.layout);
     state.layoutGroups = normalizeLayoutGroups(prefs.layoutGroups);
@@ -14127,7 +14123,6 @@ async function restoreLastSessionOnStart() {
     state.pageIdx = Math.max(0, prefs.pageIdx || 0);
     state.seenDiagnosticKeys = deserializeSeenDiagnosticKeys(prefs.seenDiagnosticKeys);
     // Sync checkboxes in DOM
-    document.getElementById('togglePrintGuides').checked = state.showPrintGuides;
     document.getElementById('toggleExtras').checked = state.showExtras;
     document.getElementById('toggleHighlight').checked = state.highlightNew;
     document.getElementById('highlightColor').value = state.highlightColor;
@@ -16611,7 +16606,6 @@ document.querySelectorAll('.bom-trows-btn').forEach(b => {
 document.getElementById('bomSortPrimary').onchange = (e) => patchBomConfig({ sortPrimary: e.target.value }, { immediate: true });
 document.getElementById('bomSortSecondary').onchange = (e) => patchBomConfig({ sortSecondary: e.target.value }, { immediate: true });
 
-document.getElementById('togglePrintGuides').onchange = (e) => { state.showPrintGuides = e.target.checked; renderAll(); };
 document.getElementById('toggleExtras').onchange = (e) => { state.showExtras = e.target.checked; renderAll(); };
 // Step display options are part of the active theme (built-ins fork on first edit)
 document.getElementById('toggleHighlight').onchange = (e) => patchActiveTheme({ highlightNew: e.target.checked });
