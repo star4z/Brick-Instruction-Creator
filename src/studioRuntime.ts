@@ -9,6 +9,8 @@ import {
   SECTION_PREVIEW_PALETTE,
 } from './engine/subdivisionAnalyzer';
 import {
+  STUD_INNER_COLOR_FLAG,
+  STUD_SIDE_COLOR_FLAG,
   compileDatEntry as compileLDrawDatEntry,
   isDirectRgbColor,
 } from './engine/datCompiler';
@@ -1510,7 +1512,8 @@ function buildMeshBuffers(prevParts, newParts, opts) {
     }
   };
 
-  const addCyl = (cx, cy, cz, rTop, rBot, h, axis, segs, m, ox, oy, oz, hinge, col, eCol, aByte, bevelTop = false) => {
+  const addCyl = (cx, cy, cz, rTop, rBot, h, axis, segs, m, ox, oy, oz, hinge, col, eCol, aByte, bevelTop = false, sideCol = null) => {
+    const wallCol = sideCol || col;
     const effSegs = heroQuality
       ? Math.max(segs, 24)
       : Math.max(segs, Math.max(rTop, rBot) > 7 ? 20 : 16);
@@ -1545,12 +1548,12 @@ function buildMeshBuffers(prevParts, newParts, opts) {
       if (smoothCurves) {
         const sn0 = mkN(c0, s0, 0);
         const sn1 = mkN(c1, s1, 0);
-        pushTriSmooth(b0, b1, t1, sn0, sn1, sn1, col, aByte);
-        pushTriSmooth(b0, t1, t0, sn0, sn1, sn0, col, aByte);
+        pushTriSmooth(b0, b1, t1, sn0, sn1, sn1, wallCol, aByte);
+        pushTriSmooth(b0, t1, t0, sn0, sn1, sn0, wallCol, aByte);
       } else {
         const am = (a0+a1)/2;
         const sn = mkN(Math.cos(am), Math.sin(am), 0);
-        pushTri(b0, b1, t1, sn, col, aByte); pushTri(b0, t1, t0, sn, col, aByte);
+        pushTri(b0, b1, t1, sn, wallCol, aByte); pushTri(b0, t1, t0, sn, wallCol, aByte);
       }
       if (useBevel) {
         const ct0 = topRimPts[i];
@@ -1576,7 +1579,9 @@ function buildMeshBuffers(prevParts, newParts, opts) {
   };
 
   // Hollow cylindrical ring / annulus (for round tiles with holes, Technic hole collars, and clips)
-  const addAnnulus = (cx, cy, cz, rOut, rIn, h, axis, segs, m, ox, oy, oz, hinge, col, eCol, aByte, startAng = 0, endAng = Math.PI * 2) => {
+  const addAnnulus = (cx, cy, cz, rOut, rIn, h, axis, segs, m, ox, oy, oz, hinge, col, eCol, aByte, startAng = 0, endAng = Math.PI * 2, outerSideCol = null, innerSideCol = null) => {
+    const outWallCol = outerSideCol || col;
+    const inWallCol = innerSideCol || col;
     const isFull = Math.abs((endAng - startAng) - Math.PI * 2) < 1e-4;
     const effSegs = heroQuality
       ? Math.max(segs, isFull ? 24 : 16)
@@ -1601,16 +1606,16 @@ function buildMeshBuffers(prevParts, newParts, opts) {
       if (smoothCurves) {
         const on0 = mkN(c0, s0, 0), on1 = mkN(c1, s1, 0);
         const in0 = mkN(-c0, -s0, 0), in1 = mkN(-c1, -s1, 0);
-        pushTriSmooth(ob0, ob1, ot1, on0, on1, on1, col, aByte);
-        pushTriSmooth(ob0, ot1, ot0, on0, on1, on0, col, aByte);
-        pushTriSmooth(it0, it1, ib1, in0, in1, in1, col, aByte);
-        pushTriSmooth(it0, ib1, ib0, in0, in1, in0, col, aByte);
+        pushTriSmooth(ob0, ob1, ot1, on0, on1, on1, outWallCol, aByte);
+        pushTriSmooth(ob0, ot1, ot0, on0, on1, on0, outWallCol, aByte);
+        pushTriSmooth(it0, it1, ib1, in0, in1, in1, inWallCol, aByte);
+        pushTriSmooth(it0, ib1, ib0, in0, in1, in0, inWallCol, aByte);
       } else {
         const am = (a0 + a1) / 2;
         const on = mkN(Math.cos(am), Math.sin(am), 0);
         const inn = mkN(-Math.cos(am), -Math.sin(am), 0);
-        pushTri(ob0, ob1, ot1, on, col, aByte); pushTri(ob0, ot1, ot0, on, col, aByte);
-        pushTri(it0, it1, ib1, inn, col, aByte); pushTri(it0, ib1, ib0, inn, col, aByte);
+        pushTri(ob0, ob1, ot1, on, outWallCol, aByte); pushTri(ob0, ot1, ot0, on, outWallCol, aByte);
+        pushTri(it0, it1, ib1, inn, inWallCol, aByte); pushTri(it0, ib1, ib0, inn, inWallCol, aByte);
       }
       pushTri(it0, ot0, ot1, nTop, col, aByte); pushTri(it0, ot1, it1, nTop, col, aByte);
       pushTri(ob0, ib0, ib1, nBot, col, aByte); pushTri(ob0, ib1, ob1, nBot, col, aByte);
@@ -1856,8 +1861,25 @@ function buildMeshBuffers(prevParts, newParts, opts) {
   const addTopStuds = (def, m, ox, oy, oz, hinge, col, eCol, aByte) => {
     if (!def.studs) return;
     const studSegs = heroQuality ? 24 : (totalParts <= 320 ? 20 : totalParts <= 650 ? 16 : 12);
+    const studLuma = 0.299 * col[0] + 0.587 * col[1] + 0.114 * col[2];
+    const studSideCol = starkBlack && studLuma >= 56 ? [0, 0, 0] : col;
+    const isHollowTechnicStud = def.shape === 'technic_brick';
     const emitStud = (x, z) => {
-      addCyl(x, 1.8, z, 5.8, 5.8, 4.4, 'y', studSegs, m, ox, oy, oz, hinge, col, eCol, aByte, true);
+      if (isHollowTechnicStud) {
+        const innerCol = starkBlack ? [0, 0, 0] : [Math.max(12, Math.round(col[0] * 0.45)), Math.max(12, Math.round(col[1] * 0.45)), Math.max(12, Math.round(col[2] * 0.45))];
+        addAnnulus(x, 1.8, z, 5.8, 3.8, 4.4, 'y', studSegs, m, ox, oy, oz, hinge, col, eCol, aByte, 0, Math.PI * 2, studSideCol, innerCol);
+        // Solid dark floor inside the hollow Technic stud cavity
+        const floorC = xformPt([x, 0.15, z], m, ox, oy, oz, hinge);
+        const nUp = xformNorm([0, 1, 0], m, hinge);
+        for (let i = 0; i < studSegs; i++) {
+          const a0 = (i / studSegs) * Math.PI * 2, a1 = ((i + 1) / studSegs) * Math.PI * 2;
+          const p0 = xformPt([x + Math.cos(a0) * 3.8, 0.15, z + Math.sin(a0) * 3.8], m, ox, oy, oz, hinge);
+          const p1 = xformPt([x + Math.cos(a1) * 3.8, 0.15, z + Math.sin(a1) * 3.8], m, ox, oy, oz, hinge);
+          pushTri(floorC, p0, p1, nUp, innerCol, aByte);
+        }
+      } else {
+        addCyl(x, 1.8, z, 5.8, 5.8, 4.4, 'y', studSegs, m, ox, oy, oz, hinge, col, eCol, aByte, true, studSideCol);
+      }
     };
     if (def.studLayout === 'center') {
       emitStud(0, 0);
@@ -2084,7 +2106,14 @@ function buildMeshBuffers(prevParts, newParts, opts) {
       const allowSubCols = !isSelected && !overrideHex && !isGhost;
       const subColCache = allowSubCols ? new Map() : null;
       const resolveSubColor = (cid) => {
-        if (!subColCache || cid === 16 || cid < 0) return null;
+        if (!subColCache || cid === 16) return null;
+        if (cid === STUD_SIDE_COLOR_FLAG) {
+          return (starkBlack && baseLuma >= 56) ? { rgb: [0, 0, 0], alpha: aByte } : null;
+        }
+        if (cid === STUD_INNER_COLOR_FLAG) {
+          return starkBlack ? { rgb: [0, 0, 0], alpha: aByte } : null;
+        }
+        if (cid < 0) return null;
         let cached = subColCache.get(cid);
         if (cached !== undefined) return cached;
         if (isDirectRgbColor(cid)) {

@@ -8,6 +8,10 @@ import { hashTextureBase64 } from './textureStore';
  * Disjoint from all standard LDraw color indices (0..99999).
  */
 export const DIRECT_RGB_COLOR_FLAG = 0x2000000;
+/** Sentinel color ID tagging outer cylindrical side walls of studs (rendered black in Part Outlines mode). */
+export const STUD_SIDE_COLOR_FLAG = -101;
+/** Sentinel color ID tagging hollow Technic stud interiors (rendered black in Part Outlines mode). */
+export const STUD_INNER_COLOR_FLAG = -102;
 
 /**
  * Returns true iff `cid` is a tagged LDraw direct RGB color (`0x2RRGGBB`).
@@ -976,7 +980,10 @@ export function compileDatEntry(
       const v = mat3Vec(pm, x, y, z);
       return [px + v[0], py + v[1], pz + v[2]];
     };
+    const sideColId = colId === 16 ? STUD_SIDE_COLOR_FLAG : colId;
+    const innerColId = colId === 16 ? STUD_INNER_COLOR_FLAG : colId;
     const topC = tp(0, -4, 0);
+    const innerBotC = tp(0, -0.1, 0);
     const topPts: Vec3[] = [];
     const basePts: Vec3[] = [];
     const botPts: Vec3[] = [];
@@ -992,18 +999,20 @@ export function compileDatEntry(
       const prev = (i + segs - 1) % segs;
       const t0 = topPts[i], t1 = topPts[next];
       const b0 = botPts[i], b1 = botPts[next];
-      emitTri(b0, b1, t1, colId);
-      emitTri(b0, t1, t0, colId);
+      emitTri(b0, b1, t1, sideColId);
+      emitTri(b0, t1, t0, sideColId);
       if (hollow) {
         const a0 = (i / segs) * Math.PI * 2, a1 = ((i + 1) / segs) * Math.PI * 2;
         const it0 = tp(Math.cos(a0) * rIn, -4, Math.sin(a0) * rIn);
         const it1 = tp(Math.cos(a1) * rIn, -4, Math.sin(a1) * rIn);
-        const ib0 = tp(Math.cos(a0) * rIn, 0, Math.sin(a0) * rIn);
-        const ib1 = tp(Math.cos(a1) * rIn, 0, Math.sin(a1) * rIn);
+        const ib0 = tp(Math.cos(a0) * rIn, -0.1, Math.sin(a0) * rIn);
+        const ib1 = tp(Math.cos(a1) * rIn, -0.1, Math.sin(a1) * rIn);
         emitTri(it0, t0, t1, colId);
         emitTri(it0, t1, it1, colId);
-        emitTri(ib0, it1, ib1, colId);
-        emitTri(ib0, it0, it1, colId);
+        emitTri(ib0, it1, ib1, innerColId);
+        emitTri(ib0, it0, it1, innerColId);
+        emitTri(innerBotC, ib0, ib1, innerColId);
+        if (edges.length < edgeLimit) emitEdge(it0, it1);
       } else {
         emitTri(topC, t0, t1, colId);
       }
