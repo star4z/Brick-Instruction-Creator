@@ -497,19 +497,26 @@ describe('studioRuntime safety checks', () => {
     const css = fs.readFileSync(path.resolve(process.cwd(), 'src/index.css'), 'utf8');
     const { SHORTCUT_ACTIONS } = await import('../engine/keyboardShortcuts');
 
-    // Keyboard Shortcuts section lives inside the main menu drawer (#menuScrollBody)
+    // Keyboard Shortcuts launcher lives inside the main menu drawer (#menuScrollBody),
+    // while the customizer itself lives in its own dedicated screen modal (#shortcutsModal)
     const menuBodyStart = html.indexOf('id="menuScrollBody"');
     const menuFooterStart = html.indexOf('id="menuProvideFeedbackLink"', menuBodyStart);
     const shortcutsSectionIdx = html.indexOf('id="menuShortcutsSection"', menuBodyStart);
+    const shortcutsModalIdx = html.indexOf('id="shortcutsModal"');
     expect(menuBodyStart).toBeGreaterThan(-1);
     expect(shortcutsSectionIdx).toBeGreaterThan(menuBodyStart);
     expect(shortcutsSectionIdx).toBeLessThan(menuFooterStart);
+    expect(shortcutsModalIdx).toBeGreaterThan(menuFooterStart);
+    expect(html).not.toContain('id="menuShortcutsPanel"');
 
     for (const id of [
-      'menuShortcutsToggleBtn',
+      'menuShortcutsBtn',
       'menuShortcutsSummary',
       'menuShortcutsCustomBadge',
-      'menuShortcutsPanel',
+      'shortcutsModal',
+      'shortcutsModalCustomBadge',
+      'btnCloseShortcuts',
+      'shortcutsDoneBtn',
       'shortcutsSearchInput',
       'shortcutsConflictBanner',
       'shortcutsGroupsList',

@@ -14,8 +14,8 @@ Manual creators iterate rapidly through dozens of pages—undoing camera tweaks,
    - Focused buttons, links, checkboxes, and radios preserve native unmodified `Space` / `Enter` activation.
    - Essential browser shortcuts (`Mod+C/V/X/A/W/T/N/R/L/F`, browser zoom `Mod++` / `Mod+-` / `Mod+0`, and macOS `⌘Y` History) are never stolen by defaults.
 3. **Context & Surface Gating**: Actions only run when their prerequisites are met (model loaded, matching page kind, Parts mode with selected parts, compatible active modal/drawer surface, and `allowRepeat` permission for held keys). Toggle and dialog actions block key-repeat so holding a key never flickers modals or triggers repeated file exports.
-4. **Universal Hierarchical `Escape`**: `Escape` is intentionally reserved (non-rebindable) and cleanly unwinds one layer at a time: active shortcut recording → Page Break `?` help tooltip → Bricks Library color picker → Bricks Library → Apply Camera to Steps → Parts List Setup → Page Setup → Export/Print → Model Issues → Open Model → Missing Parts → Import Assistant → Pages & Steps Overview → Style popover → Main Menu drawer → clear selected parts → return to Pan mode.
-5. **Customizable Inline in the Main Menu**: A dedicated, always-available **Keyboard Shortcuts** section (`#menuShortcutsSection`) lives directly inside the main slide-out menu drawer (`#menuScrollBody`), allowing users to search/filter shortcuts, click any keycap to record a custom combo, resolve conflicts cleanly without silent overwrites, unbind individual actions, reset single bindings, or reset all defaults—persisted in `localStorage` as a sparse diff (`biw_keyboard_shortcuts_v1`).
+4. **Universal Hierarchical `Escape`**: `Escape` is intentionally reserved (non-rebindable) and cleanly unwinds one layer at a time: active shortcut recording → Keyboard Shortcuts screen → Page Break `?` help tooltip → Bricks Library color picker → Bricks Library → Apply Camera to Steps → Parts List Setup → Page Setup → Export/Print → Model Issues → Open Model → Missing Parts → Import Assistant → Pages & Steps Overview → Style popover → Main Menu drawer → clear selected parts → return to Pan mode.
+5. **Dedicated Keyboard Shortcuts Screen**: Clicking **Customize Shortcuts** (`#menuShortcutsBtn`) in the main slide-out menu drawer (`#menuScrollBody`)—or pressing `?` anytime—opens the dedicated **Keyboard Shortcuts** screen modal (`#shortcutsModal`), matching Page Setup, Parts List Setup, and Bricks Library. Users can search/filter shortcuts, view full action descriptions, click any keycap to record a custom combo, resolve conflicts cleanly without silent overwrites, unbind individual actions, reset single bindings, or reset all defaults—persisted in `localStorage` as a sparse diff (`biw_keyboard_shortcuts_v1`).
 6. **Live Dynamic Tooltips**: Button tooltips across the Studio (`#btnUndo`, `#btnRedo`, `#btnOpenMenu`, `#btnStylePop`, `#btnHeaderExport`, page navigation, zoom bar, mode pill tabs, and menu items) automatically reflect each user's live custom keybindings (and omit parentheses when an action is unbound).
 
 ---
@@ -58,7 +58,7 @@ Manual creators iterate rapidly through dozens of pages—undoing camera tweaks,
 | **Panels & Files** | `importFile` | Import Model / Project | `Ctrl+O` | `⌘O` | No | Opens the Import Model or Project dialog (works on Welcome screen too). |
 | **Panels & Files** | `exportProject` | Export Project (`.biw`) | `Ctrl+S` | `⌘S` | No | Saves/exports the current project as a `.biw` file. |
 | **Panels & Files** | `openExport` | Print / Export PDF | `Ctrl+P` | `⌘P` | No | Opens the Print & Export PDF dialog when a model is loaded. |
-| **Panels & Files** | `openShortcuts` | Keyboard Shortcuts | `?` | `?` | No | Opens the Main Menu, expands the Keyboard Shortcuts section, and focuses the filter input. |
+| **Panels & Files** | `openShortcuts` | Keyboard Shortcuts | `?` | `?` | No | Opens/closes the dedicated Keyboard Shortcuts screen and focuses the filter input. |
 
 ---
 
@@ -73,14 +73,14 @@ These actions were evaluated during the proposal phase and intentionally left ou
 
 ---
 
-## Main Menu Customizer UX (`#menuShortcutsSection`)
+## Keyboard Shortcuts Screen UX (`#shortcutsModal`)
 
-- **Placement**: Always visible in `#menuScrollBody` inside the main slide-out menu drawer (below Page Inserts, above the Provide Feedback footer). Collapsible by default so the menu remains compact until opened (or jumped to directly via `?`).
-- **Summary & Status**: Displays `Defaults` or `<N> custom` plus a primary-tinted `<N> custom` badge in the section header when overrides exist.
+- **Entry Point**: Always visible in `#menuScrollBody` inside the main slide-out menu drawer (`#menuShortcutsSection` → `#menuShortcutsBtn`), matching Page Setup, Parts List Setup, and Bricks Library. Clicking **Customize Shortcuts** (or pressing `?`) closes the drawer and opens `#shortcutsModal`—a full-height, spacious screen modal with pinned search, grouped category cards showing both action labels and descriptions, and a sticky footer.
+- **Summary & Status**: Displays `Defaults` or `<N> custom` in the menu button summary plus a primary-tinted `<N> custom` badge in both the menu section header (`#menuShortcutsCustomBadge`) and the modal header (`#shortcutsModalCustomBadge`) when overrides exist.
 - **Filtering**: Live search input (`#shortcutsSearchInput`) matches action labels, descriptions, category names, and platform-formatted keycaps (e.g. `undo`, `camera`, `⌘z`, `ctrl`).
 - **Recording**: Clicking any keycap toggles recording mode (`Press keys…`) with an inline action strip offering **Clear** (sets override to `null` / `Unbound`), **Default** (restores default), and **Cancel**.
   - Protected keys (`Escape`, `Tab`, `Shift+Tab`, bare `Enter`) are rejected with an inline explanation rather than silently breaking focus navigation or dismiss behavior.
-  - Focusing the search input, collapsing the section, or closing the menu drawer cleanly exits recording mode.
-- **Conflict Resolution**: Pressing a combo already assigned to another action opens `#shortcutsConflictBanner` naming the conflicting action with **Assign & Unbind** and **Cancel** buttons, preventing accidental silent unbinding while making reassignment a single click. Single-action reset (`↺`) also guarantees uniqueness by cleanly unbinding any conflicting custom binding and notifying via toast.
-- **Reset All**: `#btnResetAllShortcuts` is enabled whenever ≥ 1 custom/unbound override exists and is paired with a live `.destructive-notice` (`#shortcutsResetAllNotice`) showing the exact count of custom shortcuts that will be restored.
+  - Focusing the search input, pressing `Esc`, or closing the modal cleanly exits recording mode (while `Esc` during active recording cancels recording first without closing the modal).
+- **Conflict Resolution**: Pressing a combo already assigned to another action opens `#shortcutsConflictBanner` in the pinned header area naming the conflicting action with **Assign & Unbind** and **Cancel** buttons, preventing accidental silent unbinding while making reassignment a single click. Single-action reset (`↺`) also guarantees uniqueness by cleanly unbinding any conflicting custom binding and notifying via toast.
+- **Reset All**: `#btnResetAllShortcuts` in the modal footer is enabled whenever ≥ 1 custom/unbound override exists and is paired with a live `.destructive-notice` (`#shortcutsResetAllNotice`) showing the exact count of custom shortcuts that will be restored.
 - **Persistence**: Sparse overrides (`Record<ShortcutActionId, string | null>`) persist in `localStorage` under `biw_keyboard_shortcuts_v1`, sanitized and deduplicated on load (`sanitizeShortcutOverrides`) and removed cleanly when all bindings return to defaults.

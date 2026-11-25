@@ -74,7 +74,8 @@ export type ShortcutBlockingSurface =
   | 'missingParts'
   | 'errors'
   | 'applyAngle'
-  | 'bricksLibrary';
+  | 'bricksLibrary'
+  | 'shortcuts';
 
 export interface ShortcutCategoryDef {
   id: ShortcutCategoryId;
@@ -516,11 +517,11 @@ export const SHORTCUT_ACTIONS: readonly ShortcutActionDef[] = [
     id: 'openShortcuts',
     category: 'panels',
     label: 'Keyboard Shortcuts',
-    description: 'Open the Keyboard Shortcuts section in the main menu',
+    description: 'Open or close the Keyboard Shortcuts screen',
     defaultCombo: '?',
     allowRepeat: false,
     requiresModel: false,
-    allowedSurfaces: ['none', 'menu'],
+    allowedSurfaces: ['none', 'menu', 'shortcuts'],
   },
 ];
 

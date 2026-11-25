@@ -6874,7 +6874,6 @@ const state = {
 const isMacShortcutsPlatform = detectMacPlatform();
 let shortcutOverrides = loadShortcutOverridesFromStorage();
 const shortcutUiState = {
-  expanded: false,
   query: '',
   recordingActionId: null,
   pendingConflict: null,
@@ -18366,6 +18365,7 @@ function syncShortcutTooltips() {
   setTitle('menuBomSetupBtn', 'openBomSetup', 'Parts List Setup');
   setTitle('menuPrintBtn', 'openExport', 'Print / Export PDF');
   setTitle('menuBricksLibBtn', 'openBricksLibrary', 'Bricks Library');
+  setTitle('menuShortcutsBtn', 'openShortcuts', 'Customize Shortcuts');
 
   const hintKeyEl = document.getElementById('menuShortcutsHintKey');
   if (hintKeyEl) {
@@ -18382,19 +18382,24 @@ function syncShortcutTooltips() {
   }
 }
 
+function isShortcutsModalOpen() {
+  const modal = document.getElementById('shortcutsModal');
+  return Boolean(modal && !modal.classList.contains('hidden'));
+}
+
 function stopShortcutRecording() {
   if (!shortcutUiState.recordingActionId && !shortcutUiState.pendingConflict && !shortcutUiState.validationMsg) return;
   shortcutUiState.recordingActionId = null;
   shortcutUiState.pendingConflict = null;
   shortcutUiState.validationMsg = null;
-  if (shortcutUiState.expanded) renderKeyboardShortcutsPanel();
+  if (isShortcutsModalOpen()) renderKeyboardShortcutsPanel();
 }
 
 function persistAndRefreshShortcuts() {
   saveShortcutOverridesToStorage(shortcutOverrides);
   syncShortcutTooltips();
   syncKeyboardShortcutsMenuSummary();
-  if (shortcutUiState.expanded) renderKeyboardShortcutsPanel();
+  if (isShortcutsModalOpen()) renderKeyboardShortcutsPanel();
 }
 
 function syncKeyboardShortcutsMenuSummary() {
@@ -18408,23 +18413,22 @@ function syncKeyboardShortcutsMenuSummary() {
     badgeEl.textContent = `${customCount} custom`;
     badgeEl.classList.toggle('hidden', customCount === 0);
   }
-  const toggleBtn = document.getElementById('menuShortcutsToggleBtn');
-  if (toggleBtn) toggleBtn.setAttribute('aria-expanded', shortcutUiState.expanded ? 'true' : 'false');
-  const chev = document.getElementById('menuShortcutsChevron');
-  if (chev) chev.classList.toggle('rotate-90', shortcutUiState.expanded);
-  const panel = document.getElementById('menuShortcutsPanel');
-  if (panel) panel.classList.toggle('hidden', !shortcutUiState.expanded);
+  const modalBadgeEl = document.getElementById('shortcutsModalCustomBadge');
+  if (modalBadgeEl) {
+    modalBadgeEl.textContent = `${customCount} custom`;
+    modalBadgeEl.classList.toggle('hidden', customCount === 0);
+  }
 
   const resetAllBtn = document.getElementById('btnResetAllShortcuts');
   if (resetAllBtn) {
     resetAllBtn.disabled = customCount === 0;
     resetAllBtn.className = customCount > 0
-      ? 'w-full py-2 px-3 rounded-lg border border-[var(--warning)]/35 bg-[var(--warning-soft)] text-[var(--warning)] hover:bg-[var(--warning)] hover:text-white font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer'
-      : 'w-full py-2 px-3 rounded-lg border border-[var(--border)] bg-[var(--card)] font-semibold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-45 disabled:cursor-not-allowed';
+      ? 'px-3.5 py-2.5 rounded-md border border-[var(--warning)]/35 bg-[var(--warning-soft)] text-[var(--warning)] hover:bg-[var(--warning)] hover:text-white font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer'
+      : 'px-3.5 py-2.5 rounded-md border border-[var(--border)] bg-[var(--card)] font-semibold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-45 disabled:cursor-not-allowed';
   }
   applyDestructiveNoticeToEl('shortcutsResetAllNotice', getResetAllShortcutsNotice(customCount));
 
-  if (shortcutUiState.expanded) {
+  if (isShortcutsModalOpen()) {
     renderKeyboardShortcutsPanel();
   }
 }
@@ -18477,7 +18481,7 @@ function renderKeyboardShortcutsPanel() {
 
   const filtered = filterShortcutActions(shortcutUiState.query, shortcutOverrides, isMacShortcutsPlatform);
   if (filtered.length === 0) {
-    listEl.innerHTML = `<p class="py-4 text-center text-xs text-[var(--muted-foreground)]">No shortcuts match &ldquo;${escHtml(shortcutUiState.query)}&rdquo;.</p>`;
+    listEl.innerHTML = `<p class="py-8 text-center text-xs text-[var(--muted-foreground)]">No shortcuts match &ldquo;${escHtml(shortcutUiState.query)}&rdquo;.</p>`;
     return;
   }
 
@@ -18504,23 +18508,26 @@ function renderKeyboardShortcutsPanel() {
           ? `also ${formatShortcutCombo(act.secondaryDefaultCombo, isMacShortcutsPlatform)}`
           : '';
       const recStripHtml = isRec
-        ? `<div class="mt-1.5 pt-1.5 border-t border-[var(--border)] flex items-center justify-between gap-1.5 flex-wrap">
+        ? `<div class="mt-2 pt-2 border-t border-[var(--border)] flex items-center justify-between gap-2 flex-wrap">
             <span class="text-xs font-medium ${shortcutUiState.validationMsg ? 'text-[var(--danger)]' : 'text-[var(--primary)]'}">${escHtml(shortcutUiState.validationMsg || 'Press any key or combo…')}</span>
-            <div class="flex items-center gap-1 shrink-0">
-              ${eff ? `<button type="button" data-shortcut-clear="${act.id}" class="shortcut-clear-btn px-2 py-0.5 rounded border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] text-xs font-semibold cursor-pointer">Clear</button>` : ''}
-              ${customized ? `<button type="button" data-shortcut-reset="${act.id}" class="shortcut-reset-btn px-2 py-0.5 rounded border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] text-xs font-semibold cursor-pointer">Default</button>` : ''}
-              <button type="button" data-shortcut-cancel="${act.id}" class="shortcut-cancel-btn px-2 py-0.5 rounded border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] text-xs font-semibold cursor-pointer">Cancel</button>
+            <div class="flex items-center gap-1.5 shrink-0">
+              ${eff ? `<button type="button" data-shortcut-clear="${act.id}" class="shortcut-clear-btn px-2.5 py-1 rounded border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] text-xs font-semibold cursor-pointer">Clear</button>` : ''}
+              ${customized ? `<button type="button" data-shortcut-reset="${act.id}" class="shortcut-reset-btn px-2.5 py-1 rounded border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] text-xs font-semibold cursor-pointer">Default</button>` : ''}
+              <button type="button" data-shortcut-cancel="${act.id}" class="shortcut-cancel-btn px-2.5 py-1 rounded border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] text-xs font-semibold cursor-pointer">Cancel</button>
             </div>
           </div>`
         : '';
 
-      return `<div class="rounded-md px-2 py-1.5 transition-colors ${isRec ? 'bg-[var(--primary-soft)] ring-1 ring-[var(--primary-border)]' : 'hover:bg-[var(--surface-sunken)]/75'}">
-        <div class="flex items-center justify-between gap-2">
-          <div class="min-w-0 flex-1" title="${escHtml(act.description)}">
-            <div class="text-xs font-medium text-[var(--foreground)] truncate">${escHtml(act.label)}</div>
-            ${secondaryHint ? `<div class="text-xs font-mono text-[var(--muted-foreground)] leading-tight">${escHtml(secondaryHint)}</div>` : ''}
+      return `<div class="rounded-lg px-3 py-2.5 transition-colors border ${isRec ? 'bg-[var(--primary-soft)] border-[var(--primary-border)]' : 'border-transparent hover:bg-[var(--surface-sunken)]/75'}">
+        <div class="flex items-center justify-between gap-3">
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="text-xs font-semibold text-[var(--foreground)]">${escHtml(act.label)}</span>
+              ${secondaryHint ? `<span class="text-[11px] font-mono text-[var(--muted-foreground)]">${escHtml(secondaryHint)}</span>` : ''}
+            </div>
+            <div class="text-xs text-[var(--muted-foreground)] leading-snug mt-0.5">${escHtml(act.description)}</div>
           </div>
-          <div class="flex items-center gap-1 shrink-0">
+          <div class="flex items-center gap-1.5 shrink-0">
             <button type="button" data-shortcut-record="${act.id}" title="${escHtml(isRec ? 'Listening for keys…' : `${act.label}: click to customize (default ${defaultFormatted})`)}" aria-pressed="${isRec ? 'true' : 'false'}" class="shortcut-kbd-btn cursor-pointer" data-recording="${isRec ? 'true' : 'false'}" data-customized="${customized ? 'true' : 'false'}" data-unbound="${eff === null ? 'true' : 'false'}">${escHtml(isRec ? 'Press keys…' : formatted)}</button>
             ${customized && !isRec ? `<button type="button" data-shortcut-reset="${act.id}" title="${escHtml(`Reset ${act.label} to default (${defaultFormatted})`)}" aria-label="${escHtml(`Reset ${act.label} to default`)}" class="shortcut-reset-btn w-6 h-6 rounded border border-[var(--border)] bg-[var(--card)] hover:border-[var(--primary)] hover:text-[var(--primary)] text-[var(--muted-foreground)] flex items-center justify-center shrink-0 transition-colors cursor-pointer">${icoReset}</button>` : ''}
           </div>
@@ -18529,10 +18536,10 @@ function renderKeyboardShortcutsPanel() {
       </div>`;
     }).join('');
 
-    sectionsHtml.push(`<div class="space-y-1">
-      <div class="px-2 text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">${escHtml(cat.label)}</div>
-      <div class="space-y-0.5">${rowsHtml}</div>
-    </div>`);
+    sectionsHtml.push(`<section class="space-y-1.5">
+      <div class="px-3 text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">${escHtml(cat.label)}</div>
+      <div class="rounded-lg border border-[var(--border)] bg-[var(--card)] divide-y divide-[var(--border)]/60 p-1">${rowsHtml}</div>
+    </section>`);
   }
 
   listEl.innerHTML = sectionsHtml.join('');
@@ -18591,27 +18598,38 @@ function renderKeyboardShortcutsPanel() {
   });
 }
 
-function openShortcutsSectionInMenu() {
-  openMenu();
-  shortcutUiState.expanded = true;
+function openShortcutsModal() {
+  closeMenu();
+  const modal = document.getElementById('shortcutsModal');
+  if (modal) modal.classList.remove('hidden');
   syncKeyboardShortcutsMenuSummary();
   requestAnimationFrame(() => {
-    document.getElementById('menuShortcutsSection')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     document.getElementById('shortcutsSearchInput')?.focus();
   });
 }
 
-const menuShortcutsToggleBtnEl = document.getElementById('menuShortcutsToggleBtn');
-if (menuShortcutsToggleBtnEl) {
-  menuShortcutsToggleBtnEl.onclick = () => {
-    shortcutUiState.expanded = !shortcutUiState.expanded;
-    if (!shortcutUiState.expanded) stopShortcutRecording();
-    syncKeyboardShortcutsMenuSummary();
-    if (shortcutUiState.expanded) {
-      requestAnimationFrame(() => {
-        document.getElementById('menuShortcutsSection')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      });
-    }
+function closeShortcutsModal() {
+  stopShortcutRecording();
+  const modal = document.getElementById('shortcutsModal');
+  if (modal) modal.classList.add('hidden');
+}
+
+const menuShortcutsBtnEl = document.getElementById('menuShortcutsBtn');
+if (menuShortcutsBtnEl) {
+  menuShortcutsBtnEl.onclick = openShortcutsModal;
+}
+const btnCloseShortcutsEl = document.getElementById('btnCloseShortcuts');
+if (btnCloseShortcutsEl) {
+  btnCloseShortcutsEl.onclick = closeShortcutsModal;
+}
+const shortcutsDoneBtnEl = document.getElementById('shortcutsDoneBtn');
+if (shortcutsDoneBtnEl) {
+  shortcutsDoneBtnEl.onclick = closeShortcutsModal;
+}
+const shortcutsModalEl = document.getElementById('shortcutsModal');
+if (shortcutsModalEl) {
+  shortcutsModalEl.onclick = (e) => {
+    if (e.target.id === 'shortcutsModal') closeShortcutsModal();
   };
 }
 
@@ -18657,6 +18675,7 @@ function getActiveShortcutBlockingSurface() {
     return Boolean(el && !el.classList.contains('hidden'));
   };
   if (isConfirmActionDialogOpen()) return 'confirmAction';
+  if (isShortcutsModalOpen()) return 'shortcuts';
   if (isBricksLibraryModalOpen()) return 'bricksLibrary';
   if (isOpen('applyAngleModal')) return 'applyAngle';
   if (isBomSetupModalOpen()) return 'bomSetup';
@@ -18682,6 +18701,10 @@ function handleGlobalEscapeKey() {
   }
   if (shortcutUiState.recordingActionId || shortcutUiState.pendingConflict) {
     stopShortcutRecording();
+    return true;
+  }
+  if (isShortcutsModalOpen()) {
+    closeShortcutsModal();
     return true;
   }
   if (isPageBreakHelpTooltipOpen()) {
@@ -18877,13 +18900,14 @@ function executeShortcutAction(actionId) {
       return;
     }
     case 'openShortcuts':
-      openShortcutsSectionInMenu();
+      if (isShortcutsModalOpen()) closeShortcutsModal();
+      else openShortcutsModal();
       return;
   }
 }
 
 document.addEventListener('keydown', (e) => {
-  // 1. Live shortcut recording inside Main Menu → Keyboard Shortcuts
+  // 1. Live shortcut recording inside the Keyboard Shortcuts screen modal
   if (shortcutUiState.recordingActionId) {
     if (e.key === 'Escape') {
       e.preventDefault();
