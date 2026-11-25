@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   BLANK_STAGE_CLICK_MAX_MOVE_PX,
   CAMERA_ANGLE_PRESETS,
+  CAMERA_ROTATION_STEPS,
   FOCUS_MODE_OPTIONS,
   MINIFIG_STYLE_OPTIONS,
   PAPER_FORMAT_ORDER,
@@ -21,6 +22,7 @@ import {
   migratePageInsertsToSteps,
   resolveModeForPage,
   resolveStepToolbarCapabilities,
+  rotateCameraAzimuth,
   shouldResetModeOnBlankStageClick,
 } from '../stepToolbar';
 
@@ -275,6 +277,33 @@ describe('Step Toolbar & Scope-Based Editor Capabilities', () => {
       expect(c.label.toLowerCase()).not.toContain('back');
     }
     expect(getCameraAngleLabel('back_right')).toBe('135°');
+  });
+
+  it('provides relative camera rotation steps (−90°, −45°, +45°, +90°, 180°) and wrap-safe azimuth math', () => {
+    expect(CAMERA_ROTATION_STEPS.map((s) => s.deltaDeg)).toEqual([-90, -45, 45, 90, 180]);
+    expect(CAMERA_ROTATION_STEPS.map((s) => s.label)).toEqual(['−90°', '−45°', '+45°', '+90°', '180°']);
+
+    // Basic relative rotation from default isometric 38°
+    expect(rotateCameraAzimuth(38, 90)).toBe(128);
+    expect(rotateCameraAzimuth(38, -90)).toBe(308);
+    expect(rotateCameraAzimuth(38, 45)).toBe(83);
+    expect(rotateCameraAzimuth(38, -45)).toBe(353);
+    expect(rotateCameraAzimuth(38, 180)).toBe(218);
+
+    // Exact reversibility and full 360° loop from any arbitrary drag-orbited angle
+    const start = 17;
+    const afterPlus90 = rotateCameraAzimuth(start, 90);
+    expect(rotateCameraAzimuth(afterPlus90, -90)).toBe(start);
+    let az = start;
+    for (let i = 0; i < 4; i++) az = rotateCameraAzimuth(az, 90);
+    expect(az).toBe(start);
+
+    // Wrap boundaries and non-finite fallbacks
+    expect(rotateCameraAzimuth(350, 45)).toBe(35);
+    expect(rotateCameraAzimuth(10, -45)).toBe(325);
+    expect(rotateCameraAzimuth(0, 360)).toBe(0);
+    expect(rotateCameraAzimuth(Number.NaN, 90)).toBe(90);
+    expect(rotateCameraAzimuth(38, Number.NaN)).toBe(38);
   });
 
   it('applies camera angle (and optional zoom & framing) cleanly across any inclusive step range', () => {

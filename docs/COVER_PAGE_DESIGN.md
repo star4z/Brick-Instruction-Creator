@@ -86,7 +86,7 @@ To achieve a publication-grade LEGO studio photography look on the Cover Page (a
    - Renders a linear view-space depth pass and evaluates a 16-sample depth-thresholded rotated screen-space occlusion kernel to softly darken stud bases, brick-to-brick joints, and recessed corners without creating silhouette halos.
 7. **High Resolution, Camera Controls & Graceful Fallback**:
    - Live cover preview renders up to 4K display scaling (`computeCoverHeroRenderSize`); PDF export renders at 300 DPI. Both reuse the cached hero beveled mesh and rendered snapshots across UI edits, and gracefully fall back to `WebGLBrickEngine` if FBOs are unavailable.
-   - In **`Camera`** mode on both Front Cover and Build Complete pages, the floating camera card provides the same 4 isometric **Cube + Camera** angle presets (`45°`, `135°`, `225°`, `315°`), **Zoom** (`− / % / +`), and **Reset Camera** controls used on step pages (without drag-to-orbit on the hero image). Elevation remains clamped above the studio floor (`4°..60°`) so floor shadows stay grounded. Content, logos, toggles, and backgrounds live separately under **`Page`** mode.
+   - In **`Camera`** mode on both Front Cover and Build Complete pages, the floating camera card provides live drag-to-orbit (`#liveHeroCanvas`), **View** (`Top` / `Bottom`), relative **Rotate** controls (`−90°`, `−45°`, `+45°`, `+90°`, `180°`), **Zoom** (`− / % / +`), and **Reset Camera** controls matching step pages. Content, logos, toggles, and backgrounds live separately under **`Page`** mode.
 
 ---
 

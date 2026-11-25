@@ -56,6 +56,25 @@ export const CAMERA_ANGLE_PRESETS: readonly CameraAnglePreset[] = [
   { id: 'front_left', label: '315°', az: 322, quadrant: 'sw' },
 ];
 
+export interface CameraRotationStep {
+  /** Relative horizontal azimuth delta in degrees (negative = CCW, positive = CW) */
+  deltaDeg: number;
+  /** Compact button label */
+  label: string;
+  /** Accessible tooltip / title */
+  title: string;
+  /** Icon direction hint */
+  icon: 'ccw' | 'cw' | 'flip';
+}
+
+export const CAMERA_ROTATION_STEPS: readonly CameraRotationStep[] = [
+  { deltaDeg: -90, label: '−90°', title: 'Rotate camera −90° (counter-clockwise)', icon: 'ccw' },
+  { deltaDeg: -45, label: '−45°', title: 'Rotate camera −45° (counter-clockwise)', icon: 'ccw' },
+  { deltaDeg: 45, label: '+45°', title: 'Rotate camera +45° (clockwise)', icon: 'cw' },
+  { deltaDeg: 90, label: '+90°', title: 'Rotate camera +90° (clockwise)', icon: 'cw' },
+  { deltaDeg: 180, label: '180°', title: 'Rotate camera 180° (opposite side)', icon: 'flip' },
+];
+
 export const PAPER_FORMAT_SPECS: Readonly<Record<string, PaperFormatSpec>> = {
   screen: {
     id: 'screen',
@@ -317,6 +336,17 @@ export function findMatchingCameraPreset(
     }
   }
   return best;
+}
+
+/**
+ * Applies a relative horizontal camera rotation (in degrees) to `currentAz`,
+ * normalizing the resulting azimuth cleanly into `[0, 360)`.
+ */
+export function rotateCameraAzimuth(currentAz: number, deltaDeg: number): number {
+  const base = Number.isFinite(currentAz) ? currentAz : 0;
+  const delta = Number.isFinite(deltaDeg) ? deltaDeg : 0;
+  const raw = Math.round((base + delta) * 1000) / 1000;
+  return ((raw % 360) + 360) % 360;
 }
 
 export function clampStepModelScale(scale: number): number {

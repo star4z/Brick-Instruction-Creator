@@ -180,6 +180,7 @@ import {
 } from './engine/partsList';
 import {
   CAMERA_ANGLE_PRESETS,
+  CAMERA_ROTATION_STEPS,
   FOCUS_MODE_OPTIONS,
   MINIFIG_STYLE_OPTIONS,
   PAPER_FORMAT_SPECS,
@@ -197,6 +198,7 @@ import {
   migratePageInsertsToSteps,
   resolveModeForPage,
   resolveStepToolbarCapabilities,
+  rotateCameraAzimuth,
   shouldResetModeOnBlankStageClick,
 } from './engine/stepToolbar';
 import {
@@ -9338,6 +9340,27 @@ function buildCameraViewSvg(kind) {
   </svg>`;
 }
 
+function buildCameraRotateSvg(kind) {
+  if (kind === 'ccw') {
+    return `<svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M3 12a9 9 0 1 0 3-6.7L3 8"/>
+      <path d="M3 3v5h5"/>
+    </svg>`;
+  }
+  if (kind === 'cw') {
+    return `<svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M21 12a9 9 0 1 1-3-6.7L21 8"/>
+      <path d="M21 3v5h-5"/>
+    </svg>`;
+  }
+  return `<svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M21 12a9 9 0 0 1-15.5 6.3"/>
+    <path d="M3 12a9 9 0 0 1 15.5-6.3"/>
+    <polyline points="3 16 3 12 7 12"/>
+    <polyline points="21 8 21 12 17 12"/>
+  </svg>`;
+}
+
 function renderZoomStepperHtml({ downId, upId, pct, downLabel, upLabel }) {
   return `<div class="inline-flex items-center gap-0.5 rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] p-0.5">
     <button type="button" id="${downId}" aria-label="${escHtml(downLabel)}" title="${escHtml(downLabel)}" class="w-6 h-6 rounded bg-[var(--card)] hover:bg-[var(--surface-hover)] font-bold flex items-center justify-center cursor-pointer">−</button>
@@ -9381,7 +9404,6 @@ function renderContextOverlay(page) {
     else state.completeMeta = normalizeCompleteMeta(state.completeMeta);
     const meta = isCover ? state.coverMeta : state.completeMeta;
     const defaults = isCover ? createDefaultCoverMeta() : createDefaultCompleteMeta();
-    const matchedPreset = findMatchingCameraPreset(meta.az);
     const clampedZoom = clampCoverZoom(meta.zoom ?? 1.0);
     const zoomPct = Math.round(clampedZoom * 100);
     const customized = isHeroCameraCustomized(meta, defaults);
@@ -9407,8 +9429,8 @@ function renderContextOverlay(page) {
           </div>
         </div>
         <div class="flex items-center gap-1.5 flex-wrap">
-          <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)] mr-0.5">Angle</span>
-          ${CORNERS.map(c => `<button type="button" data-hero-corner="${c.id}" title="Set camera to ${c.label} corner" class="hero-corner-btn px-2 py-1 rounded-md text-xs font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer ${matchedPreset?.id === c.id ? 'bg-[var(--primary-soft)] text-[var(--primary)] ring-1 ring-[var(--primary)]' : 'bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)]'}">${buildCameraViewSvg(c.quadrant)}<span class="font-mono">${c.label}</span></button>`).join('')}
+          <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)] mr-0.5">Rotate</span>
+          ${CAMERA_ROTATION_STEPS.map(r => `<button type="button" data-hero-rotate="${r.deltaDeg}" title="${escHtml(r.title)}" class="hero-rotate-btn px-2 py-1 rounded-md text-xs font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] active:bg-[var(--primary-soft)] active:text-[var(--primary)]">${buildCameraRotateSvg(r.icon)}<span class="font-mono">${r.label}</span></button>`).join('')}
         </div>
         <div class="flex items-center justify-between gap-2 flex-wrap pt-2 border-t border-[var(--border)]">
           <div class="flex items-center gap-2">
@@ -9431,12 +9453,12 @@ function renderContextOverlay(page) {
       overviewThumbCache.bumpEpoch();
       renderAll();
     };
-    box.querySelectorAll('.hero-corner-btn').forEach(b => {
+    box.querySelectorAll('.hero-rotate-btn').forEach(b => {
       b.onclick = () => {
-        const cObj = CORNERS.find(c => c.id === b.getAttribute('data-hero-corner'));
-        if (!cObj) return;
+        const deltaDeg = Number(b.getAttribute('data-hero-rotate'));
+        if (!Number.isFinite(deltaDeg)) return;
         pushUndo();
-        meta.az = cObj.az;
+        meta.az = rotateCameraAzimuth(meta.az, deltaDeg);
         meta.el = clampCoverElevation(meta.el);
         overviewThumbCache.bumpEpoch();
         renderAll();
@@ -9881,7 +9903,6 @@ function renderContextOverlay(page) {
         ? { side: 'top', corner: step.corner || MINIFIG_POSE_CAMERA.corner, az: step.az ?? MINIFIG_POSE_CAMERA.az, el: step.el ?? MINIFIG_POSE_CAMERA.el }
         : MINIFIG_BUILD_CAMERA;
       const isFront34 = isMfStep && Math.abs(cam.az - mfDefaultCam.az) <= 4 && Math.abs(cam.el - mfDefaultCam.el) <= 4;
-      const matchedCorner = findMatchingCameraPreset(cam.az);
       const modelScalePct = Math.round((ov.modelScale || 1.0) * 100);
       const fMode = ov.focusMode || 'auto';
 
@@ -9894,7 +9915,7 @@ function renderContextOverlay(page) {
                 <span>Drag 3D model to orbit</span>
               </span>
               ${renderScopeBadge('local', 'This Step')}
-              <span id="stepCamReadout" class="font-mono text-[11px] font-semibold text-[var(--muted-foreground)] tabular-nums">${Math.round(cam.az) % 360}° / ${Math.round(cam.el)}°</span>
+              <span id="stepCamReadout" class="font-mono text-[11px] font-semibold text-[var(--muted-foreground)] tabular-nums">${((Math.round(cam.az) % 360) + 360) % 360}° / ${Math.round(cam.el)}°</span>
             </div>
             <div class="flex items-center gap-1.5 shrink-0">
               <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">View</span>
@@ -9906,9 +9927,9 @@ function renderContextOverlay(page) {
           </div>
 
           <div class="flex items-center gap-1.5 flex-wrap">
-            <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)] mr-0.5">Angle</span>
+            <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)] mr-0.5">Rotate</span>
             ${isMfStep ? `<button type="button" id="btnMfFront34" class="px-2.5 py-1 rounded-md text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer ${isFront34 ? 'bg-[var(--primary-soft)] text-[var(--primary)] ring-1 ring-[var(--primary)]' : 'bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)]'}"><span>3/4 Pose</span></button>` : ''}
-            ${CORNERS.map(c => `<button type="button" data-corner="${c.id}" title="Orbit camera to ${c.label} corner" class="corner-btn px-2 py-1 rounded-md text-xs font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer ${!isFront34 && matchedCorner?.id === c.id ? 'bg-[var(--primary-soft)] text-[var(--primary)] ring-1 ring-[var(--primary)]' : 'bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)]'}">${buildCameraViewSvg(c.quadrant)}<span class="font-mono">${c.label}</span></button>`).join('')}
+            ${CAMERA_ROTATION_STEPS.map(r => `<button type="button" data-step-rotate="${r.deltaDeg}" title="${escHtml(r.title)}" class="step-rotate-btn px-2 py-1 rounded-md text-xs font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] active:bg-[var(--primary-soft)] active:text-[var(--primary)]">${buildCameraRotateSvg(r.icon)}<span class="font-mono">${r.label}</span></button>`).join('')}
           </div>
 
           <div class="flex items-center justify-between gap-2 flex-wrap">
@@ -10159,7 +10180,17 @@ function renderContextOverlay(page) {
       if (mf34Btn) {
         mf34Btn.onclick = () => setCam({ side: 'top', corner: mfDefaultCam.corner, az: mfDefaultCam.az, el: mfDefaultCam.el });
       }
-      box.querySelectorAll('.corner-btn').forEach(b => { b.onclick = () => setCam({ corner: b.getAttribute('data-corner') }); });
+      box.querySelectorAll('.step-rotate-btn').forEach(b => {
+        b.onclick = () => {
+          const deltaDeg = Number(b.getAttribute('data-step-rotate'));
+          if (!Number.isFinite(deltaDeg)) return;
+          const curCam = getStepCamera(step);
+          setCam({
+            az: rotateCameraAzimuth(curCam.az, deltaDeg),
+            el: curCam.el,
+          });
+        };
+      });
       box.querySelector('#stepCamZoomDown').onclick = () => {
         pushUndo();
         state.overrides[step.id] = { ...(state.overrides[step.id] || {}), modelScale: clampStepModelScale((ov.modelScale || 1) - 0.1) };
@@ -17388,21 +17419,16 @@ function rotateActiveCameraByStep(dir) {
   if (!state.model) return;
   const pg = state.pages[state.pageIdx];
   if (!pg) return;
+  const deltaDeg = dir * 90;
   if (pg.kind === 'cover' || pg.kind === 'complete') {
     const isCover = pg.kind === 'cover';
     if (isCover) state.coverMeta = normalizeCoverMeta(state.coverMeta, !state.wordlessMode);
     else state.completeMeta = normalizeCompleteMeta(state.completeMeta);
     const meta = isCover ? state.coverMeta : state.completeMeta;
-    const matched = findMatchingCameraPreset(meta.az);
     pushUndo();
-    if (matched) {
-      const idx = CORNERS.findIndex(c => c.id === matched.id);
-      const next = CORNERS[(idx + dir + CORNERS.length) % CORNERS.length];
-      meta.az = next.az;
-    } else {
-      meta.az = ((meta.az + dir * 90) % 360 + 360) % 360;
-    }
+    meta.az = rotateCameraAzimuth(meta.az, deltaDeg);
     meta.el = clampCoverElevation(meta.el);
+    overviewThumbCache.bumpEpoch();
     renderAll();
     return;
   }
@@ -17412,19 +17438,9 @@ function rotateActiveCameraByStep(dir) {
   const { step } = active;
   const cur = state.overrides[step.id] || {};
   const curCam = getStepCamera(step);
-  const matched = findMatchingCameraPreset(curCam.az);
   pushUndo();
-  let nextAz;
-  let nextCorner;
-  if (matched) {
-    const idx = CORNERS.findIndex(c => c.id === matched.id);
-    const next = CORNERS[(idx + dir + CORNERS.length) % CORNERS.length];
-    nextAz = next.az;
-    nextCorner = next.id;
-  } else {
-    nextAz = ((curCam.az + dir * 90) % 360 + 360) % 360;
-    nextCorner = findMatchingCameraPreset(nextAz)?.id;
-  }
+  const nextAz = rotateCameraAzimuth(curCam.az, deltaDeg);
+  const nextCorner = findMatchingCameraPreset(nextAz)?.id;
   const nextOv = {
     ...cur,
     side: curCam.side || 'top',

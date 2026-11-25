@@ -229,6 +229,11 @@ describe('studioRuntime safety checks', () => {
     expect(sourceText).toContain('id="liveHeroCanvas"');
     expect(sourceText).toContain('id="heroCamTop"');
     expect(sourceText).toContain('id="heroCamBot"');
+    expect(sourceText).toContain('data-hero-rotate=');
+    expect(sourceText).toContain('data-step-rotate=');
+    expect(sourceText).toContain('rotateCameraAzimuth(');
+    expect(sourceText).not.toContain('hero-corner-btn');
+    expect(sourceText).not.toContain('class="corner-btn');
     expect(sourceText.match(/Drag 3D model to orbit/g)?.length).toBe(2);
     expect(sourceText).not.toContain('openStepEditModal');
     expect(sourceText).not.toContain('closeStepEditModal');
