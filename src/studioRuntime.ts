@@ -1773,9 +1773,9 @@ function buildMeshBuffers(prevParts, newParts, opts) {
     const headLen = Math.min(9.5, len * 0.42);
     const shaftEnd = [t[0] - ux*headLen, t[1] - uy*headLen, t[2] - uz*headLen];
     const segs = 10;
-    const shaftR = 1.35;
-    const headR = 4.2;
-    const ink = [Math.max(0, Math.round(col[0] * 0.35)), Math.max(0, Math.round(col[1] * 0.35)), Math.max(0, Math.round(col[2] * 0.35))];
+    const shaftR = 1.45;
+    const headR = 4.4;
+    const ink = [24, 24, 28];
     const ring = (center, r, ang) => [
       center[0] + (Math.cos(ang)*bx + Math.sin(ang)*cx)*r,
       center[1] + (Math.cos(ang)*by + Math.sin(ang)*cy)*r,
@@ -1792,10 +1792,12 @@ function buildMeshBuffers(prevParts, newParts, opts) {
       const h0 = ring(shaftEnd, headR, a0), h1 = ring(shaftEnd, headR, a1);
       pushTri(h0, h1, t, sn, col, 255);
       pushTri(shaftEnd, h1, h0, [-ux,-uy,-uz], col, 255);
-      pushEdge(h0, h1, ink, 175);
+      pushEdge(h0, h1, ink, 210);
     }
-    pushEdge(ring(shaftEnd, headR, 0), t, ink, 175);
-    pushEdge(ring(shaftEnd, headR, Math.PI), t, ink, 175);
+    for (const railAng of [0, Math.PI * 0.5, Math.PI, Math.PI * 1.5]) {
+      pushEdge(ring(s, shaftR, railAng), ring(shaftEnd, shaftR, railAng), ink, 200);
+      pushEdge(ring(shaftEnd, headR, railAng), t, ink, 210);
+    }
   };
 
   // Curved 3D Rotation Arc Arrow (shows FROM starting pose -> TO target pose around any 3D joint/axis!)

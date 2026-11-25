@@ -517,11 +517,12 @@ export function stepCameraTransitionCost(
 
 /**
  * Evaluates how well a top-down camera azimuth `azDeg` reveals the attaching
- * connection seam on Step 1 when an upper piece rests on and overhangs a lower
- * piece. Looking from the lower piece toward the upper piece (like looking up a
- * staircase) exposes the attaching studs directly toward the camera (negative
- * cost), whereas viewing from the overhanging upper side hides the seam behind
- * the overhang (positive cost).
+ * studs on Step 1 when an upper piece rests on and overhangs a lower base
+ * piece. The attaching studs on the lower piece sit on its `lower -> upper`
+ * side: viewing from that side (positive alignment with camera vector `v`)
+ * places the attaching studs on the camera-facing near edge of the lower piece
+ * (negative cost), whereas viewing from the opposite side hides the attaching
+ * studs on the far back edge away from the camera (positive cost).
  */
 export function computeStep1ConnectionFacingCost(
   stepBoxes: readonly WorldBox[],
@@ -548,6 +549,14 @@ export function computeStep1ConnectionFacingCost(
       const ovZ = Math.min(lower.max[2], upper.max[2]) - Math.max(lower.min[2], upper.min[2]);
       if (ovX <= 2 || ovZ <= 2) continue;
 
+      // Only apply when the upper piece genuinely overhangs past the lower piece's edge
+      const overhangs =
+        upper.min[0] < lower.min[0] - 4 ||
+        upper.max[0] > lower.max[0] + 4 ||
+        upper.min[2] < lower.min[2] - 4 ||
+        upper.max[2] > lower.max[2] + 4;
+      if (!overhangs) continue;
+
       const dx = upper.center[0] - lower.center[0];
       const dz = upper.center[2] - lower.center[2];
       const shift = Math.hypot(dx, dz);
@@ -571,10 +580,10 @@ export function computeStep1ConnectionFacingCost(
   const vx = Math.sin(azRad);
   const vz = Math.cos(azRad);
 
-  // Positive alignment => upper overhang is between camera and attaching studs (bad)
-  // Negative alignment => lower base is in front, attaching studs face camera (good)
+  // Positive alignment => attaching studs on lower piece face toward camera (good -> negative cost)
+  // Negative alignment => attaching studs on lower piece face away from camera (bad -> positive cost)
   const alignment = ux * vx + uz * vz;
-  return 0.22 * alignment;
+  return -0.35 * alignment;
 }
 
 /**
