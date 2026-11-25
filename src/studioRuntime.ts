@@ -168,19 +168,15 @@ import {
 } from './engine/stepToolbar';
 import {
   getApplyCameraDestructiveNotice,
-  getClearAllPageBreaksDestructiveNotice,
   getCloseModelDestructiveNotice,
-  getDeleteDividerDestructiveNotice,
   getDeleteThemeDestructiveNotice,
-  getHeroResetCameraDestructiveNotice,
-  getLayoutGroupDestructiveNotices,
+  getLayoutGroupOverlapDestructiveNotice,
   getLibraryClearSavedDestructiveNotice,
   getLibraryRemovePartDestructiveNotice,
   getMergeStepDestructiveNotice,
-  getPartsActionDestructiveNotices,
+  getPartsMoveStepDestructiveNotice,
   getReplaceModelModalDestructiveNotice,
   getStepGenerationDestructiveNotice,
-  getStepResetCameraDestructiveNotice,
   getWordlessToggleDestructiveNotice,
   hasCameraAngleOverride,
   hasCameraFramingOverride,
@@ -8647,17 +8643,6 @@ function renderContextOverlay(page) {
     const clampedZoom = clampCoverZoom(meta.zoom ?? 1.0);
     const zoomPct = Math.round(clampedZoom * 100);
     const customized = isHeroCameraCustomized(meta, defaults);
-    const heroResetNotice = customized
-      ? getHeroResetCameraDestructiveNotice({
-          pageLabel: isCover ? 'Cover Page' : 'Build Complete',
-          az: meta.az,
-          el: meta.el,
-          zoom: clampedZoom,
-          defaultAz: defaults.az,
-          defaultEl: defaults.el,
-          defaultZoom: defaults.zoom,
-        })
-      : null;
 
     box.innerHTML = `
       <div class="pointer-events-auto studio-surface rounded-xl p-3.5 w-full space-y-2.5 text-xs">
@@ -8672,15 +8657,12 @@ function renderContextOverlay(page) {
           <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)] mr-0.5">Angle</span>
           ${CORNERS.map(c => `<button type="button" data-hero-corner="${c.id}" title="Set camera to ${c.label} corner" class="hero-corner-btn px-2 py-1 rounded-md text-xs font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer ${matchedPreset?.id === c.id ? 'bg-[var(--primary-soft)] text-[var(--primary)] ring-1 ring-[var(--primary)]' : 'bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)]'}">${buildCameraViewSvg(c.quadrant)}<span class="font-mono">${c.label}</span></button>`).join('')}
         </div>
-        <div class="space-y-2 pt-2 border-t border-[var(--border)]">
-          <div class="flex items-center justify-between gap-2 flex-wrap">
-            <div class="flex items-center gap-2">
-              <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Zoom</span>
-              ${renderZoomStepperHtml({ downId: 'heroZoomOut', upId: 'heroZoomIn', pct: zoomPct, downLabel: 'Zoom model out', upLabel: 'Zoom model in' })}
-            </div>
-            ${customized ? `<button id="heroResetCam" type="button" class="px-2.5 py-1 rounded-md border border-[var(--warning)]/35 bg-[var(--warning-soft)] text-[var(--warning)] hover:bg-[var(--warning)] hover:text-white text-xs font-semibold transition-colors cursor-pointer">Reset Camera</button>` : ''}
+        <div class="flex items-center justify-between gap-2 flex-wrap pt-2 border-t border-[var(--border)]">
+          <div class="flex items-center gap-2">
+            <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Zoom</span>
+            ${renderZoomStepperHtml({ downId: 'heroZoomOut', upId: 'heroZoomIn', pct: zoomPct, downLabel: 'Zoom model out', upLabel: 'Zoom model in' })}
           </div>
-          ${renderDestructiveNoticeHtml(heroResetNotice, { compact: true })}
+          ${customized ? `<button id="heroResetCam" type="button" class="px-2.5 py-1 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] text-xs font-semibold cursor-pointer">Reset Camera</button>` : ''}
         </div>
       </div>`;
 
@@ -8835,7 +8817,6 @@ function renderContextOverlay(page) {
   // DIVIDER — PAGE MODE
   if (page.kind === 'divider') {
     const d = state.dividerAfter[page.sourcePgId] || { title:'Section Divider', note:'' };
-    const divDeleteNotice = getDeleteDividerDestructiveNotice({ title: d.title, note: d.note });
     box.innerHTML = `
       <div class="pointer-events-auto studio-surface rounded-xl p-3.5 w-full space-y-2.5 text-xs">
         <div class="flex justify-between items-center gap-2">
@@ -8843,9 +8824,8 @@ function renderContextOverlay(page) {
             <span class="font-bold">Divider Page</span>
             ${renderScopeBadge('local', 'This Page')}
           </div>
-          <button id="delDividerBtn" type="button" class="px-3 py-1.5 rounded-md border border-[var(--danger)]/35 bg-[var(--danger-soft)] text-[var(--danger)] hover:bg-[var(--danger)] hover:text-white font-semibold transition-colors cursor-pointer">Delete Page</button>
+          <button id="delDividerBtn" type="button" class="px-3 py-1.5 rounded-md bg-[var(--danger-soft)] text-[var(--danger)] font-semibold cursor-pointer">Delete Page</button>
         </div>
-        ${renderDestructiveNoticeHtml(divDeleteNotice, { compact: true })}
         <input id="divTitleIn" value="${escHtml(d.title)}" class="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] outline-none focus:border-[var(--primary)]" placeholder="Divider Title" />
         <input id="divNoteIn" value="${escHtml(d.note || '')}" class="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] outline-none focus:border-[var(--primary)]" placeholder="Optional note…" />
       </div>`;
@@ -8899,14 +8879,14 @@ function renderContextOverlay(page) {
     const studX = Math.round((pOv.x || 0) / 20);
     const studZ = Math.round((pOv.z || 0) / 20);
     const tiltDeg = Math.round(pOv.tilt || 0);
-    const partsNotices = getPartsActionDestructiveNotices({
+    const moveStepNotice = getPartsMoveStepDestructiveNotice({
       stepNum: step.num,
       totalPartsInStep: step.parts.length,
-      selectedPartIds: selectedPartIdsArr,
+      selectedPartCount: selCount,
       override: ov,
       defaultPartOffsets: step.defaultPartOffsets,
       insertCount: (state.stepInserts[step.id] || []).length,
-      existingSubassemblyName: step.subassembly?.name || null,
+      hasSubassembly: Boolean(step.subassembly),
     });
     const icoArrUp = '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="m6 11 6-6 6 6"/></svg>';
     const icoArrDown = '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="m18 13-6 6-6-6"/></svg>';
@@ -8919,19 +8899,16 @@ function renderContextOverlay(page) {
 
     box.innerHTML = `
       <div class="pointer-events-auto studio-surface rounded-xl p-3.5 w-full max-h-[46vh] overflow-y-auto space-y-2.5 text-xs">
-        <div class="space-y-1.5">
-          <div class="flex items-center justify-between gap-2 flex-wrap">
-            <div class="flex items-center gap-2 min-w-0">
-              <span class="font-bold text-[var(--primary)]">${formatPartCount(selCount)} selected · Step ${step.num}</span>
-              ${renderScopeBadge('local', 'Selected Parts')}
-            </div>
-            <div class="flex items-center gap-1.5">
-              <button id="btnToggleArrow" type="button" class="px-2.5 py-1 rounded-md border text-xs font-semibold cursor-pointer ${pOv.arrow !== false ? 'bg-[var(--primary-soft)] border-[var(--primary)] text-[var(--primary)]' : 'border-[var(--border)] bg-[var(--surface-sunken)]'}">Arrow ${pOv.arrow !== false ? 'On' : 'Off'}</button>
-              <button id="btnResetSelPos" type="button" class="px-2.5 py-1 rounded-md text-xs font-semibold transition-colors cursor-pointer ${partsNotices.resetNotice ? 'border border-[var(--warning)]/35 bg-[var(--warning-soft)] text-[var(--warning)] hover:bg-[var(--warning)] hover:text-white' : 'bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)]'}">Reset</button>
-              <button id="btnClearSel" type="button" aria-label="Clear selection" class="w-7 h-7 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] flex items-center justify-center cursor-pointer">${icoClose}</button>
-            </div>
+        <div class="flex items-center justify-between gap-2 flex-wrap">
+          <div class="flex items-center gap-2 min-w-0">
+            <span class="font-bold text-[var(--primary)]">${formatPartCount(selCount)} selected · Step ${step.num}</span>
+            ${renderScopeBadge('local', 'Selected Parts')}
           </div>
-          ${renderDestructiveNoticeHtml(partsNotices.resetNotice, { compact: true })}
+          <div class="flex items-center gap-1.5">
+            <button id="btnToggleArrow" type="button" class="px-2.5 py-1 rounded-md border text-xs font-semibold cursor-pointer ${pOv.arrow !== false ? 'bg-[var(--primary-soft)] border-[var(--primary)] text-[var(--primary)]' : 'border-[var(--border)] bg-[var(--surface-sunken)]'}">Arrow ${pOv.arrow !== false ? 'On' : 'Off'}</button>
+            <button id="btnResetSelPos" type="button" class="px-2.5 py-1 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] text-xs font-semibold cursor-pointer">Reset</button>
+            <button id="btnClearSel" type="button" aria-label="Clear selection" class="w-7 h-7 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] flex items-center justify-center cursor-pointer">${icoClose}</button>
+          </div>
         </div>
 
         <!-- Part-Level Placement: Visual 3D Axis Move Pad + Brick Tilt -->
@@ -8976,7 +8953,7 @@ function renderContextOverlay(page) {
             <button id="actMoveStep" type="button" class="px-2.5 py-1.5 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] font-semibold cursor-pointer">Move to Step…</button>
             <button id="actMakeSub" type="button" class="px-2.5 py-1.5 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] font-semibold cursor-pointer">Make Submodel</button>
           </div>
-          ${renderDestructiveNoticeHtml(partsNotices.reorgNotice, { compact: true })}
+          ${renderDestructiveNoticeHtml(moveStepNotice, { compact: true })}
         </div>
       </div>`;
 
@@ -9121,9 +9098,6 @@ function renderContextOverlay(page) {
       const matchedCorner = findMatchingCameraPreset(cam.az);
       const modelScalePct = Math.round((ov.modelScale || 1.0) * 100);
       const fMode = ov.focusMode || 'auto';
-      const camResetNotice = caps.hasCustomCameraAny
-        ? getStepResetCameraDestructiveNotice({ stepNum: step.num, override: ov })
-        : null;
 
       bodyHtml = `
         <div class="space-y-2">
@@ -9164,9 +9138,8 @@ function renderContextOverlay(page) {
                 </div>
               </div>
             </div>
-            ${caps.hasCustomCameraAny ? `<button type="button" id="btnResetCam" class="px-2.5 py-1 rounded-md border border-[var(--warning)]/35 bg-[var(--warning-soft)] text-[var(--warning)] hover:bg-[var(--warning)] hover:text-white text-xs font-semibold transition-colors cursor-pointer">Reset</button>` : ''}
+            ${caps.hasCustomCameraAny ? `<button type="button" id="btnResetCam" class="px-2.5 py-1 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] text-xs font-semibold cursor-pointer">Reset</button>` : ''}
           </div>
-          ${renderDestructiveNoticeHtml(camResetNotice, { compact: true })}
         </div>
 
         ${caps.canApplyAngleToRange ? `
@@ -9226,7 +9199,6 @@ function renderContextOverlay(page) {
       if (caps.canMergeWithPrev && prevStep) {
         const mergeNotice = getMergeStepDestructiveNotice({
           stepNum: step.num,
-          prevStepNum: prevStep.num,
           override: ov,
           insertCount: stepInserts.length,
           hasSubassembly: Boolean(step.subassembly),
@@ -9239,7 +9211,7 @@ function renderContextOverlay(page) {
                 ${renderScopeBadge('range', 'Affects Prev Step')}
                 <span class="text-[11px] text-[var(--muted-foreground)] truncate">Combine parts into Step ${prevStep.num}</span>
               </div>
-              <button type="button" id="stepMergePrevBtn" class="px-2.5 py-1.5 rounded-md border border-[var(--warning)]/35 bg-[var(--warning-soft)] text-[var(--warning)] hover:bg-[var(--warning)] hover:text-white font-semibold shrink-0 transition-colors cursor-pointer">Merge into Step ${prevStep.num}</button>
+              <button type="button" id="stepMergePrevBtn" class="px-2.5 py-1.5 rounded-md border font-semibold shrink-0 transition-colors cursor-pointer ${mergeNotice ? 'border-[var(--warning)]/35 bg-[var(--warning-soft)] text-[var(--warning)] hover:bg-[var(--warning)] hover:text-white' : 'border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)]'}">Merge into Step ${prevStep.num}</button>
             </div>
             ${renderDestructiveNoticeHtml(mergeNotice, { compact: true })}
           </div>`);
@@ -10260,19 +10232,15 @@ function describeAbsStepRange(lo, hi) {
 function syncGroupEditorDestructiveNotices() {
   const s = parseInt(document.getElementById('grpStartStepInput')?.value, 10) || 1;
   const e = parseInt(document.getElementById('grpEndStepInput')?.value, 10) || s;
-  const existing = layoutGroupEditorState.editingId
-    ? state.layoutGroups.find((g) => g.id === layoutGroupEditorState.editingId)
-    : null;
-  const themeName = existing?.themeId ? resolveThemeById(existing.themeId, customThemes)?.name || null : null;
-  const notices = getLayoutGroupDestructiveNotices({
-    editingId: layoutGroupEditorState.editingId,
-    editingGroupThemeName: themeName,
-    startStepNum: s,
-    endStepNum: e,
-    existingGroups: state.layoutGroups,
-  });
-  applyDestructiveNoticeToEl('grpOverlapNotice', notices.overlapNotice);
-  applyDestructiveNoticeToEl('grpDeleteNotice', notices.deleteNotice);
+  applyDestructiveNoticeToEl(
+    'grpOverlapNotice',
+    getLayoutGroupOverlapDestructiveNotice({
+      editingId: layoutGroupEditorState.editingId,
+      startStepNum: s,
+      endStepNum: e,
+      existingGroups: state.layoutGroups,
+    }),
+  );
 }
 
 function syncGroupRangeHintUI() {
@@ -10321,7 +10289,6 @@ function openLayoutGroupEditor(existingGroup = null, prefillRange = null) {
 function closeLayoutGroupEditor() {
   layoutGroupEditorState.editingId = null;
   applyDestructiveNoticeToEl('grpOverlapNotice', null);
-  applyDestructiveNoticeToEl('grpDeleteNotice', null);
   const wrap = document.getElementById('layoutGroupEditor');
   if (wrap) wrap.classList.add('hidden');
 }
@@ -10426,8 +10393,8 @@ function syncMenuControls() {
     'menuCloseModelNotice',
     vis.showCloseModel
       ? getCloseModelDestructiveNotice({
-          modelTitle: state.model?.title,
           editsSummary: getCurrentManualEditsSummary(),
+          undoHistoryCount: state.undoStack.length,
         })
       : null,
   );
@@ -10527,6 +10494,7 @@ function syncMenuControls() {
   setChk('toggleCompleteText', compShowText);
   setChk('toggleCompleteFireworks', state.completeMeta.showFireworks !== false);
   setChk('toggleBomTextFields', state.bomShowTextFields);
+  const menuEditsSummary = getCurrentManualEditsSummary();
   applyDestructiveNoticeToEl(
     'wordlessToggleNotice',
     getWordlessToggleDestructiveNotice({
@@ -10535,6 +10503,8 @@ function syncMenuControls() {
       completeShowText: compShowText,
       bomShowTextFields: Boolean(state.bomShowTextFields),
       pageNumberFormat: state.pageNumberFormat,
+      hasCustomCoverText: menuEditsSummary.hasCustomCoverText,
+      hasCustomCompleteText: menuEditsSummary.hasCustomCompleteText,
     }),
   );
   setChk('toggleExtras', state.showExtras);
@@ -11284,10 +11254,6 @@ function renderOverviewModal(opts = {}) {
       ? `<span class="text-[var(--primary)] inline-flex items-center">${pageBreakSvg}</span><span>${breakCount} active page break${breakCount === 1 ? '' : 's'}</span>`
       : '';
   }
-  applyDestructiveNoticeToEl(
-    'overviewClearPinsNotice',
-    getClearAllPageBreaksDestructiveNotice(breakCount),
-  );
   if (clearBtn) {
     if (breakCount > 0) {
       clearBtn.textContent = 'Clear All';
@@ -17386,6 +17352,7 @@ function openOpenModelModal() {
       hasOpenModel: Boolean(state.model),
       modelTitle: state.model?.title,
       editsSummary: getCurrentManualEditsSummary(),
+      undoHistoryCount: state.undoStack.length,
     }),
   );
   document.getElementById('openModelModal')?.classList.remove('hidden');
@@ -18237,8 +18204,22 @@ function renderImportAssistantUI() {
   renderImportProposalPicker();
 
   const editsSummary = getCurrentManualEditsSummary();
-  const willChangeWordless =
-    impState.isPostImport && Boolean(impState.wordlessMode) !== Boolean(state.wordlessMode);
+  const covShowText = state.model
+    ? normalizeCoverMeta(state.coverMeta, !state.wordlessMode).showText !== false
+    : !state.wordlessMode;
+  const compShowText = state.completeMeta.showText !== false;
+  const wordlessResetNotice =
+    impState.isPostImport && Boolean(impState.wordlessMode) !== Boolean(state.wordlessMode)
+      ? getWordlessToggleDestructiveNotice({
+          currentWordless: Boolean(state.wordlessMode),
+          coverShowText: covShowText,
+          completeShowText: compShowText,
+          bomShowTextFields: Boolean(state.bomShowTextFields),
+          pageNumberFormat: state.pageNumberFormat,
+          hasCustomCoverText: editsSummary.hasCustomCoverText,
+          hasCustomCompleteText: editsSummary.hasCustomCompleteText,
+        })
+      : null;
   applyDestructiveNoticeToEl(
     'impActionNotice',
     getStepGenerationDestructiveNotice({
@@ -18246,8 +18227,8 @@ function renderImportAssistantUI() {
       hasOpenModel: Boolean(state.model),
       openModelTitle: state.model?.title,
       editsSummary,
-      willChangeWordless,
-      targetWordless: Boolean(impState.wordlessMode),
+      undoHistoryCount: state.undoStack.length,
+      wordlessResetNotice,
       isKeepStepsAction: false,
     }),
   );
@@ -18259,8 +18240,8 @@ function renderImportAssistantUI() {
           hasOpenModel: Boolean(state.model),
           openModelTitle: state.model?.title,
           editsSummary,
-          willChangeWordless,
-          targetWordless: Boolean(impState.wordlessMode),
+          undoHistoryCount: state.undoStack.length,
+          wordlessResetNotice,
           isKeepStepsAction: true,
         })
       : null,
@@ -18510,6 +18491,7 @@ function renderMissingPartsPromptUI(statusMsg = null, statusTone = 'info') {
       hasOpenModel: Boolean(state.model),
       modelTitle: state.model?.title,
       editsSummary: getCurrentManualEditsSummary(),
+      undoHistoryCount: state.undoStack.length,
     }),
   );
 

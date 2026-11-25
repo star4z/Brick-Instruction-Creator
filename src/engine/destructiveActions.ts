@@ -8,7 +8,7 @@ import {
   type CoverMeta,
 } from '../cover/coverLayout';
 import type { StepLayoutGroup } from './pageLayout';
-import { FOCUS_MODE_OPTIONS, type StepOverrideLike } from './stepToolbar';
+import type { StepOverrideLike } from './stepToolbar';
 import {
   getWordlessSurfaceDefaults,
   resolvePageNumberFormatForMode,
@@ -62,6 +62,8 @@ export interface StepOverrideSummary {
   insertCount: number;
   hasSubassembly: boolean;
   labels: string[];
+  /** Labels for edits made outside the Parts tab (camera, Parts Box, page break, callout, notes). */
+  nonPartLabels: string[];
   hasAny: boolean;
 }
 
@@ -75,6 +77,8 @@ export interface ManualEditsSummary {
   dividerCount: number;
   layoutGroupCount: number;
   manualSplitSteps: number;
+  hasCustomCoverText: boolean;
+  hasCustomCompleteText: boolean;
   hasCoverOrExtraPageEdits: boolean;
   /** All edit categories across the entire manual (for Close / Replace Model). */
   items: string[];
@@ -182,6 +186,14 @@ export function summarizeStepOverrides(
   const hasCalloutOverride = Boolean(ov.calloutAsPages) || ov.calloutDir === 'vertical';
   const safeInserts = Math.max(0, Math.round(Number(insertCount) || 0));
 
+  const nonPartLabels: string[] = [];
+  if (hasCameraAny) nonPartLabels.push('custom camera');
+  if (hasPliScale) nonPartLabels.push('Parts Box size');
+  if (hasPageBreak) nonPartLabels.push('page break');
+  if (hasCalloutOverride) nonPartLabels.push('callout layout');
+  if (safeInserts > 0) nonPartLabels.push(plural(safeInserts, 'note'));
+  if (hasSubassembly) nonPartLabels.push('subassembly callout');
+
   const labels: string[] = [];
   if (hasCameraAny) labels.push('custom camera');
   if (partOffsetCount > 0) labels.push(plural(partOffsetCount, 'part nudge'));
@@ -203,6 +215,7 @@ export function summarizeStepOverrides(
     insertCount: safeInserts,
     hasSubassembly,
     labels,
+    nonPartLabels,
     hasAny: labels.length > 0,
   };
 }
@@ -275,6 +288,8 @@ export function summarizeManualEdits(input: {
   const coverTitleTrim = (cm.title || '').trim();
   const hasCustomCoverTitle = Boolean(coverTitleTrim && coverTitleTrim !== modelTitle);
   const hasCustomCoverSub = Boolean((cm.subtitle || '').trim());
+  const hasCustomCoverText = hasCustomCoverTitle || hasCustomCoverSub;
+
   const hasCustomCoverCam = isHeroCameraCustomized(
     {
       az: typeof cm.az === 'number' ? cm.az : defCover.az,
@@ -296,8 +311,7 @@ export function summarizeManualEdits(input: {
     Boolean(comp.subtitle !== undefined && comp.subtitle.trim() !== defComplete.subtitle);
 
   const hasCoverOrExtraPageEdits = Boolean(
-    hasCustomCoverTitle ||
-      hasCustomCoverSub ||
+    hasCustomCoverText ||
       hasCustomCoverCam ||
       cm.creatorLogoSrc ||
       cm.themeImageSrc ||
@@ -336,6 +350,8 @@ export function summarizeManualEdits(input: {
     dividerCount,
     layoutGroupCount,
     manualSplitSteps,
+    hasCustomCoverText,
+    hasCustomCompleteText,
     hasCoverOrExtraPageEdits,
     items,
     stepItems,
@@ -345,7 +361,7 @@ export function summarizeManualEdits(input: {
 }
 
 /**
- * 1. Apply Camera to Steps modal: warns when other steps inside the selected range
+ * 1. Apply Camera to Steps modal: warns ONLY when other steps inside the selected range
  *    already have custom camera angles (or custom zoom/framing when includeFraming is on).
  */
 export function getApplyCameraDestructiveNotice(input: {
@@ -426,9 +442,9 @@ export function getApplyCameraDestructiveNotice(input: {
 }
 
 /**
- * 2. Wordless Instructions toggle: warns whenever toggling will overwrite or reset
- *    extra-page text settings (Cover title, Build Complete text, Parts List names/colors)
- *    or Page Number Format.
+ * 2. Wordless Instructions toggle: warns ONLY when the user has customized extra-page
+ *    text/page-number settings or edited custom Cover/Build Complete titles that toggling
+ *    Wordless mode will reset or hide. Untouched defaults show no warning.
  */
 export function getWordlessToggleDestructiveNotice(input: {
   currentWordless: boolean;
@@ -436,10 +452,20 @@ export function getWordlessToggleDestructiveNotice(input: {
   completeShowText: boolean;
   bomShowTextFields: boolean;
   pageNumberFormat: string | undefined;
+  hasCustomCoverText?: boolean;
+  hasCustomCompleteText?: boolean;
 }): DestructiveNotice | null {
+  const curDefs = getWordlessSurfaceDefaults(input.currentWordless);
   const nextWordless = !input.currentWordless;
   const nextDefs = getWordlessSurfaceDefaults(nextWordless);
   const nextPgFmt = resolvePageNumberFormatForMode(input.pageNumberFormat, nextWordless);
+
+  const hasCustomizedSurfaceToggle =
+    input.coverShowText !== curDefs.coverShowText ||
+    input.completeShowText !== curDefs.completeShowText ||
+    input.bomShowTextFields !== curDefs.bomShowTextFields;
+
+  const pageNumChanges = Boolean(input.pageNumberFormat && nextPgFmt !== input.pageNumberFormat);
 
   const changedTextSurfaces: string[] = [];
   if (input.coverShowText !== nextDefs.coverShowText) {
@@ -452,249 +478,165 @@ export function getWordlessToggleDestructiveNotice(input: {
     changedTextSurfaces.push('Parts List names & colors');
   }
 
-  const pageNumChanges = Boolean(input.pageNumberFormat && nextPgFmt !== input.pageNumberFormat);
+  // Case A: Turning Wordless ON will hide custom Cover or Build Complete text the user edited
+  const hiddenCustomTitles: string[] = [];
+  if (nextWordless) {
+    if (input.hasCustomCoverText && input.coverShowText) {
+      hiddenCustomTitles.push('custom Front Cover title/subtitle');
+    }
+    if (input.hasCustomCompleteText && input.completeShowText) {
+      hiddenCustomTitles.push('custom Build Complete text');
+    }
+  }
 
-  if (changedTextSurfaces.length === 0 && !pageNumChanges) {
+  // Only warn if user actually made custom overrides or custom cover/complete text
+  if (!hasCustomizedSurfaceToggle && hiddenCustomTitles.length === 0) {
+    return null;
+  }
+
+  if (changedTextSurfaces.length === 0 && !pageNumChanges && hiddenCustomTitles.length === 0) {
     return null;
   }
 
   if (nextWordless) {
-    if (changedTextSurfaces.length > 0 && pageNumChanges) {
+    if (hiddenCustomTitles.length > 0 && !hasCustomizedSurfaceToggle) {
       return {
         tone: 'warning',
-        message: `Turning on resets extra-page text settings (hides ${formatCompactList(changedTextSurfaces, 3)}) and switches page numbers to 1. Undo is available.`,
+        message: `Turning on hides your ${formatCompactList(hiddenCustomTitles, 2)}. Undo is available.`,
         undoable: true,
       };
     }
-    if (changedTextSurfaces.length > 0) {
+    const items = [...hiddenCustomTitles];
+    for (const s of changedTextSurfaces) {
+      if (s === 'Front Cover title' && hiddenCustomTitles.some((x) => x.includes('Front Cover'))) {
+        continue;
+      }
+      if (s === 'Build Complete text' && hiddenCustomTitles.some((x) => x.includes('Build Complete'))) {
+        continue;
+      }
+      items.push(s);
+    }
+    if (items.length > 0 && pageNumChanges) {
       return {
         tone: 'warning',
-        message: `Turning on resets extra-page text settings (hides ${formatCompactList(changedTextSurfaces, 3)}). Undo is available.`,
+        message: `Turning on resets extra-page text overrides (hides ${formatCompactList(items, 3)}) and switches page numbers to 1. Undo is available.`,
         undoable: true,
       };
     }
-    return {
-      tone: 'warning',
-      message: 'Turning on switches page numbers from Page 1 to 1. Undo is available.',
-      undoable: true,
-    };
+    if (items.length > 0) {
+      return {
+        tone: 'warning',
+        message: `Turning on resets extra-page text overrides (hides ${formatCompactList(items, 3)}). Undo is available.`,
+        undoable: true,
+      };
+    }
+    if (pageNumChanges) {
+      return {
+        tone: 'warning',
+        message: 'Turning on switches page numbers from Page 1 to 1. Undo is available.',
+        undoable: true,
+      };
+    }
+    return null;
   }
 
+  // Turning Wordless OFF after the user customized one or more extra-page toggles in Wordless mode
   if (changedTextSurfaces.length > 0 && pageNumChanges) {
     return {
       tone: 'warning',
-      message: `Turning off resets extra-page text settings (enables ${formatCompactList(changedTextSurfaces, 3)}) and switches page numbers to Page 1. Undo is available.`,
+      message: `Turning off resets your extra-page text overrides (enables ${formatCompactList(changedTextSurfaces, 3)}) and switches page numbers to Page 1. Undo is available.`,
       undoable: true,
     };
   }
   if (changedTextSurfaces.length > 0) {
     return {
       tone: 'warning',
-      message: `Turning off resets extra-page text settings (enables ${formatCompactList(changedTextSurfaces, 3)}). Undo is available.`,
+      message: `Turning off resets your extra-page text overrides (enables ${formatCompactList(changedTextSurfaces, 3)}). Undo is available.`,
       undoable: true,
     };
   }
-  return {
-    tone: 'warning',
-    message: 'Turning off switches page numbers from 1 to Page 1. Undo is available.',
-    undoable: true,
-  };
+  if (pageNumChanges) {
+    return {
+      tone: 'warning',
+      message: 'Turning off switches page numbers from 1 to Page 1. Undo is available.',
+      undoable: true,
+    };
+  }
+  return null;
 }
 
 /**
- * 3. Step Camera Reset (`#btnResetCam`): names all camera overrides cleared at once.
- */
-export function getStepResetCameraDestructiveNotice(input: {
-  stepNum: number;
-  override: StepOverrideWithPartsLike | null | undefined;
-}): DestructiveNotice | null {
-  const ov = input.override;
-  if (!ov) return null;
-
-  const cleared: string[] = [];
-  if (hasCameraAngleOverride(ov)) {
-    const angleDesc =
-      typeof ov.az === 'number'
-        ? `angle (${Math.round(((ov.az % 360) + 360) % 360)}°)`
-        : 'camera angle';
-    cleared.push(angleDesc);
-  }
-  if (hasCameraZoomOverride(ov)) {
-    cleared.push(`zoom (${Math.round((ov.modelScale || 1) * 100)}%)`);
-  }
-  if (hasCameraFramingOverride(ov)) {
-    const fLabel =
-      (FOCUS_MODE_OPTIONS.find((o) => o.id === ov.focusMode) || FOCUS_MODE_OPTIONS[0]).label;
-    cleared.push(`${fLabel} framing`);
-  }
-
-  if (cleared.length === 0) return null;
-  return {
-    tone: 'warning',
-    message: `Reset clears custom ${formatCompactList(cleared, 3)} on Step ${input.stepNum}. Undo is available.`,
-    undoable: true,
-  };
-}
-
-/**
- * 4. Cover / Build Complete Camera Reset (`#heroResetCam`).
- */
-export function getHeroResetCameraDestructiveNotice(input: {
-  pageLabel: string;
-  az: number;
-  el: number;
-  zoom: number;
-  defaultAz: number;
-  defaultEl: number;
-  defaultZoom: number;
-}): DestructiveNotice | null {
-  const cleared: string[] = [];
-  if (Math.abs(input.az - input.defaultAz) > 0.5 || Math.abs(input.el - input.defaultEl) > 0.5) {
-    cleared.push('camera angle');
-  }
-  if (Math.abs(input.zoom - input.defaultZoom) > 0.005) {
-    cleared.push(`zoom (${Math.round(input.zoom * 100)}%)`);
-  }
-  if (cleared.length === 0) return null;
-  return {
-    tone: 'warning',
-    message: `Reset Camera clears custom ${formatCompactList(cleared, 2)} on ${input.pageLabel}. Undo is available.`,
-    undoable: true,
-  };
-}
-
-/**
- * 5. Step Mode → Layout → Merge into Step N-1 (`#stepMergePrevBtn`).
+ * 3. Step Mode → Layout → Merge into Step N-1 (`#stepMergePrevBtn`):
+ *    Warns ONLY when the step being merged has overrides or notes made in other tabs
+ *    (camera, part nudges, Parts Box size, page break, callout layout, notes, or subassembly)
+ *    that merging will silently clear.
  */
 export function getMergeStepDestructiveNotice(input: {
   stepNum: number;
-  prevStepNum: number;
   override: StepOverrideWithPartsLike | null | undefined;
   insertCount: number;
   hasSubassembly: boolean;
   defaultPartOffsets?: Record<string, PartOffsetLike> | null;
-}): DestructiveNotice {
+}): DestructiveNotice | null {
   const sum = summarizeStepOverrides(
     input.override,
     input.insertCount,
     input.hasSubassembly,
     input.defaultPartOffsets,
   );
-  if (sum.hasAny) {
-    return {
-      tone: 'warning',
-      message: `Merging deletes Step ${input.stepNum} and clears its ${formatCompactList(sum.labels, 4)}. Undo is available.`,
-      undoable: true,
-    };
-  }
+  if (!sum.hasAny) return null;
   return {
     tone: 'warning',
-    message: `Merging deletes Step ${input.stepNum} and moves its parts into Step ${input.prevStepNum}. Undo is available.`,
+    message: `Merging clears Step ${input.stepNum}'s ${formatCompactList(sum.labels, 4)}. Undo is available.`,
     undoable: true,
   };
 }
 
 /**
- * 6. Parts Mode: Reset placement (`#btnResetSelPos`) and Move / Split / Make Submodel actions.
+ * 4. Parts Mode → Move to Step… (`#actMoveStep`):
+ *    Warns ONLY when ALL parts in the step are selected AND the step has overrides made
+ *    outside the Parts tab (camera, Parts Box size, page break, callout layout, notes, or
+ *    subassembly) that deleting the emptied step would silently clear.
  */
-export function getPartsActionDestructiveNotices(input: {
+export function getPartsMoveStepDestructiveNotice(input: {
   stepNum: number;
   totalPartsInStep: number;
-  selectedPartIds: ReadonlyArray<string>;
+  selectedPartCount: number;
   override: StepOverrideWithPartsLike | null | undefined;
   defaultPartOffsets?: Record<string, PartOffsetLike> | null;
   insertCount: number;
-  existingSubassemblyName?: string | null;
-}): {
-  resetNotice: DestructiveNotice | null;
-  reorgNotice: DestructiveNotice | null;
-  selectedOffsetCount: number;
-} {
-  const ov = input.override || {};
-  let selectedOffsetCount = 0;
-  for (const pid of input.selectedPartIds) {
-    if (hasCustomPartOffset(ov.partOffsets?.[pid], input.defaultPartOffsets?.[pid])) {
-      selectedOffsetCount += 1;
-    }
+  hasSubassembly: boolean;
+}): DestructiveNotice | null {
+  if (input.totalPartsInStep <= 0 || input.selectedPartCount < input.totalPartsInStep) {
+    return null;
   }
-
-  const resetNotice: DestructiveNotice | null =
-    selectedOffsetCount > 0
-      ? {
-          tone: 'warning',
-          message: `Reset clears custom nudge, tilt, or arrow overrides on ${plural(selectedOffsetCount, 'selected part')}. Undo is available.`,
-          undoable: true,
-        }
-      : null;
-
-  const reorgClauses: string[] = [];
-  const allPartsSelected =
-    input.totalPartsInStep > 0 && input.selectedPartIds.length >= input.totalPartsInStep;
-
-  if (allPartsSelected) {
-    const stepSum = summarizeStepOverrides(
-      ov,
-      input.insertCount,
-      Boolean(input.existingSubassemblyName),
-      input.defaultPartOffsets,
-    );
-    if (stepSum.hasAny) {
-      reorgClauses.push(
-        `All parts selected: Move to Step… deletes Step ${input.stepNum} and clears its ${formatCompactList(stepSum.labels, 3)}`,
-      );
-    } else {
-      reorgClauses.push(`All parts selected: Move to Step… deletes Step ${input.stepNum}`);
-    }
-  } else if (selectedOffsetCount > 0) {
-    reorgClauses.push(
-      `Moving or splitting clears custom nudge/tilt offsets on ${plural(selectedOffsetCount, 'selected part')}`,
-    );
-  }
-
-  if (input.existingSubassemblyName) {
-    reorgClauses.push(
-      `Make Submodel replaces the existing "${input.existingSubassemblyName}" callout on Step ${input.stepNum}`,
-    );
-  }
-
-  const reorgNotice: DestructiveNotice | null =
-    reorgClauses.length > 0
-      ? {
-          tone: 'warning',
-          message: `${reorgClauses.join('. ')}. Undo is available.`,
-          undoable: true,
-        }
-      : null;
-
-  return { resetNotice, reorgNotice, selectedOffsetCount };
-}
-
-/**
- * 7. Pages & Steps Overview → Clear All Page Breaks (`#btnClearAllPins`).
- */
-export function getClearAllPageBreaksDestructiveNotice(breakCount: number): DestructiveNotice | null {
-  if (!Number.isFinite(breakCount) || breakCount <= 0) return null;
-  const n = Math.round(breakCount);
+  const sum = summarizeStepOverrides(
+    input.override,
+    input.insertCount,
+    input.hasSubassembly,
+    input.defaultPartOffsets,
+  );
+  if (sum.nonPartLabels.length === 0) return null;
   return {
     tone: 'warning',
-    message:
-      n === 1
-        ? 'Clears 1 manual page break and lets pages reflow. Undo is available.'
-        : `Clears all ${n} manual page breaks across the manual and lets pages reflow. Undo is available.`,
+    message: `All parts selected: Move to Step… removes Step ${input.stepNum} and clears its ${formatCompactList(sum.nonPartLabels, 4)}. Undo is available.`,
     undoable: true,
   };
 }
 
 /**
- * 8. Step Generation / Import Assistant Modal (`#importModal` → `#impBtnAuto` & `#impBtnKeep`).
+ * 5. Step Generation / Import Assistant Modal (`#importModal` → `#impBtnAuto` & `#impBtnKeep`):
+ *    - New import (not undoable): warns when replacing an open manual that has unsaved edits or Undo history.
+ *    - Post-import (undoable): warns ONLY when existing step/layout overrides or custom Wordless text
+ *      overrides made elsewhere will be cleared or shifted.
  */
 export function getStepGenerationDestructiveNotice(input: {
   isPostImport: boolean;
   hasOpenModel: boolean;
   openModelTitle?: string | null;
   editsSummary: ManualEditsSummary;
-  willChangeWordless?: boolean;
-  targetWordless?: boolean;
+  undoHistoryCount?: number;
+  wordlessResetNotice?: DestructiveNotice | null;
   isKeepStepsAction?: boolean;
 }): DestructiveNotice | null {
   if (!input.isPostImport) {
@@ -707,60 +649,46 @@ export function getStepGenerationDestructiveNotice(input: {
         undoable: false,
       };
     }
-    return {
-      tone: 'danger',
-      message: `Replaces "${title}" and clears Undo history — cannot be undone.`,
-      undoable: false,
-    };
+    if ((input.undoHistoryCount || 0) > 0) {
+      return {
+        tone: 'danger',
+        message: `Replaces "${title}" and permanently discards unsaved session changes and Undo history — cannot be undone.`,
+        undoable: false,
+      };
+    }
+    return null;
   }
 
   const affected = [...input.editsSummary.stepItems];
-  if (input.willChangeWordless) {
-    affected.push(
-      input.targetWordless
-        ? 'extra-page text overrides (hidden in Wordless mode)'
-        : 'extra-page text settings (enabled in With Text mode)',
-    );
+  if (input.wordlessResetNotice) {
+    affected.push('custom extra-page text overrides');
   }
+
+  if (affected.length === 0) return null;
 
   if (input.isKeepStepsAction) {
-    if (affected.length > 0) {
-      return {
-        tone: 'warning',
-        message: `Keeping file steps replaces all generated steps and may clear or shift ${formatCompactList(affected, 4)}. Undo is available.`,
-        undoable: true,
-      };
-    }
     return {
       tone: 'warning',
-      message: 'Replaces current steps with the STEP markers saved in the file. Undo is available.',
-      undoable: true,
-    };
-  }
-
-  if (affected.length > 0) {
-    return {
-      tone: 'warning',
-      message: `Regenerating rebuilds all steps and may clear or shift ${formatCompactList(affected, 4)}. Undo is available.`,
+      message: `Keeping file steps replaces generated steps and may clear or shift ${formatCompactList(affected, 4)}. Undo is available.`,
       undoable: true,
     };
   }
 
   return {
     tone: 'warning',
-    message: 'Rebuilds all steps from the source file, replacing any manual step order. Undo is available.',
+    message: `Regenerating rebuilds all steps and may clear or shift ${formatCompactList(affected, 4)}. Undo is available.`,
     undoable: true,
   };
 }
 
 /**
- * 9. Menu Drawer → Close Model (`#menuCloseModelBtn`).
+ * 6. Menu Drawer → Close Model (`#menuCloseModelBtn`, NOT undoable):
+ *    Warns when the open manual has unsaved edits or Undo history that closing will permanently clear.
  */
 export function getCloseModelDestructiveNotice(input: {
-  modelTitle?: string | null;
   editsSummary: ManualEditsSummary;
-}): DestructiveNotice {
-  const title = (input.modelTitle || 'this manual').trim();
+  undoHistoryCount?: number;
+}): DestructiveNotice | null {
   if (input.editsSummary.hasAnyEdits) {
     return {
       tone: 'danger',
@@ -768,20 +696,25 @@ export function getCloseModelDestructiveNotice(input: {
       undoable: false,
     };
   }
-  return {
-    tone: 'danger',
-    message: `Closes "${title}" and clears Undo history from this browser — cannot be undone.`,
-    undoable: false,
-  };
+  if ((input.undoHistoryCount || 0) > 0) {
+    return {
+      tone: 'danger',
+      message: 'Permanently discards unsaved session changes and clears Undo history — cannot be undone. Export .biw first to save.',
+      undoable: false,
+    };
+  }
+  return null;
 }
 
 /**
- * 10. Open / Import Model or Project dialog (`#openModelModal`) & Missing Parts modal when a model is already open.
+ * 7. Open / Import Model or Project dialog (`#openModelModal`) & Missing Parts modal (NOT undoable):
+ *    Warns when an open manual has unsaved edits or Undo history that importing another file will discard.
  */
 export function getReplaceModelModalDestructiveNotice(input: {
   hasOpenModel: boolean;
   modelTitle?: string | null;
   editsSummary: ManualEditsSummary;
+  undoHistoryCount?: number;
 }): DestructiveNotice | null {
   if (!input.hasOpenModel) return null;
   const title = (input.modelTitle || 'current manual').trim();
@@ -792,15 +725,21 @@ export function getReplaceModelModalDestructiveNotice(input: {
       undoable: false,
     };
   }
-  return {
-    tone: 'danger',
-    message: `Opening another file replaces "${title}" and clears Undo history — cannot be undone.`,
-    undoable: false,
-  };
+  if ((input.undoHistoryCount || 0) > 0) {
+    return {
+      tone: 'danger',
+      message: `Opening another file replaces "${title}" and permanently discards unsaved session changes and Undo history. Export .biw first to keep them.`,
+      undoable: false,
+    };
+  }
+  return null;
 }
 
 /**
- * 11. Style Popover → Delete Custom Theme (`#btnDeleteTheme`).
+ * 8. Style Popover → Delete Custom Theme (`#btnDeleteTheme`, NOT undoable):
+ *    Built-in themes return null (button disabled). Custom themes always warn that deletion
+ *    is permanent and cannot be undone, and name any Step Range Groups whose theme override
+ *    will also be cleared.
  */
 export function getDeleteThemeDestructiveNotice(input: {
   themeName: string;
@@ -812,31 +751,27 @@ export function getDeleteThemeDestructiveNotice(input: {
   if (refs.length > 0) {
     return {
       tone: 'danger',
-      message: `Delete permanently removes "${input.themeName}" and clears the theme override on ${plural(refs.length, 'Step Range Group')} (${formatCompactList(refs, 2)}) — cannot be undone.`,
+      message: `Deleting "${input.themeName}" permanently removes it from browser storage and clears the theme override on ${plural(refs.length, 'Step Range Group')} (${formatCompactList(refs, 2)}) — cannot be undone.`,
       undoable: false,
     };
   }
   return {
     tone: 'danger',
-    message: `Delete permanently removes "${input.themeName}" from this browser — cannot be undone.`,
+    message: `Deleting "${input.themeName}" permanently removes it from browser storage — cannot be undone. Export first to keep a backup.`,
     undoable: false,
   };
 }
 
 /**
- * 12. Page Setup → Step Range Group Editor (`#layoutGroupEditor`):
- *     Delete impact & overlapping-range precedence warning.
+ * 9. Page Setup → Step Range Group Editor (`#layoutGroupEditor`, undoable):
+ *    Warns ONLY when the step range overlaps another existing Step Range Group.
  */
-export function getLayoutGroupDestructiveNotices(input: {
+export function getLayoutGroupOverlapDestructiveNotice(input: {
   editingId: string | null;
-  editingGroupThemeName?: string | null;
   startStepNum: number;
   endStepNum: number;
   existingGroups: ReadonlyArray<StepLayoutGroup>;
-}): {
-  deleteNotice: DestructiveNotice | null;
-  overlapNotice: DestructiveNotice | null;
-} {
+}): DestructiveNotice | null {
   const lo = Math.min(input.startStepNum, input.endStepNum);
   const hi = Math.max(input.startStepNum, input.endStepNum);
   const rangeStr = lo === hi ? `#${lo}` : `#${lo}–#${hi}`;
@@ -845,22 +780,6 @@ export function getLayoutGroupDestructiveNotices(input: {
     ? input.existingGroups.findIndex((g) => g.id === input.editingId)
     : -1;
   const effectiveIdx = editingIdx >= 0 ? editingIdx : input.existingGroups.length;
-
-  let deleteNotice: DestructiveNotice | null = null;
-  if (editingIdx >= 0) {
-    const grp = input.existingGroups[editingIdx];
-    const gLo = Math.min(grp.startStepNum, grp.endStepNum);
-    const gHi = Math.max(grp.startStepNum, grp.endStepNum);
-    const gRange = gLo === gHi ? `Step #${gLo}` : `Steps #${gLo}–#${gHi}`;
-    const themeClause = input.editingGroupThemeName
-      ? ` and clears its "${input.editingGroupThemeName}" theme override`
-      : '';
-    deleteNotice = {
-      tone: 'warning',
-      message: `Deleting reverts ${gRange} to the manual default grid${themeClause}. Undo is available.`,
-      undoable: true,
-    };
-  }
 
   const overriddenEarlier: string[] = [];
   const shadowedByLater: string[] = [];
@@ -876,53 +795,34 @@ export function getLayoutGroupDestructiveNotices(input: {
     }
   });
 
-  let overlapNotice: DestructiveNotice | null = null;
   if (overriddenEarlier.length > 0 && shadowedByLater.length > 0) {
-    overlapNotice = {
+    return {
       tone: 'warning',
       message: `Range ${rangeStr} overlaps ${formatCompactList(overriddenEarlier, 2)} (overridden by this group) and ${formatCompactList(shadowedByLater, 2)} (takes priority on shared steps).`,
       undoable: true,
     };
-  } else if (overriddenEarlier.length > 0) {
-    overlapNotice = {
+  }
+  if (overriddenEarlier.length > 0) {
+    return {
       tone: 'warning',
       message: `Saving overrides ${formatCompactList(overriddenEarlier, 2)} on overlapping steps in ${rangeStr}. Undo is available.`,
       undoable: true,
     };
-  } else if (shadowedByLater.length > 0) {
-    overlapNotice = {
+  }
+  if (shadowedByLater.length > 0) {
+    return {
       tone: 'warning',
       message: `Overlaps ${formatCompactList(shadowedByLater, 2)}, which is listed later and takes priority on shared steps.`,
       undoable: true,
     };
   }
-
-  return { deleteNotice, overlapNotice };
+  return null;
 }
 
 /**
- * 13. Divider Page → Page Mode → Delete Page (`#delDividerBtn`).
- */
-export function getDeleteDividerDestructiveNotice(input: {
-  title?: string | null;
-  note?: string | null;
-}): DestructiveNotice {
-  const title = (input.title || '').trim();
-  const note = (input.note || '').trim();
-  const hasCustomText =
-    note.length > 0 ||
-    (title.length > 0 && title !== 'Section Divider' && title !== 'Next Section');
-  return {
-    tone: 'warning',
-    message: hasCustomText
-      ? 'Delete Page removes this divider and clears its custom title/note. Undo is available.'
-      : 'Removes this inserted divider page. Undo is available.',
-    undoable: true,
-  };
-}
-
-/**
- * 14. Bricks Library → Remove Single Saved Part (`#libPreviewRemoveBtn`).
+ * 10. Bricks Library → Remove Single Saved Part (`#libPreviewRemoveBtn`, NOT undoable):
+ *     Immediately deletes the saved part from browser storage with no Undo — always warns,
+ *     and calls out when the open model relies on it.
  */
 export function getLibraryRemovePartDestructiveNotice(input: {
   partId: string;
@@ -932,20 +832,21 @@ export function getLibraryRemovePartDestructiveNotice(input: {
   if (input.usedInModel && !input.hasEmbeddedCopy) {
     return {
       tone: 'danger',
-      message: `Permanently deletes ${input.partId}.dat from browser storage — your open model uses it and will fall back to a simplified shape.`,
+      message: `Permanently removes ${input.partId}.dat from browser storage — cannot be undone. Your open model uses it and will switch to a simplified shape.`,
       undoable: false,
     };
   }
   return {
     tone: 'danger',
-    message: `Permanently deletes ${input.partId}.dat from browser storage — cannot be undone.`,
+    message: `Permanently removes ${input.partId}.dat from browser storage — cannot be undone.`,
     undoable: false,
   };
 }
 
 /**
- * 15. Bricks Library → Clear Entire Saved Library (`#libClearSavedBtn`):
- *     Extra live warning when the currently open model depends on saved library parts.
+ * 11. Bricks Library → Clear Entire Saved Library (`#libClearSavedBtn`, NOT undoable):
+ *     Supplements the danger section description & confirmation with a live notice when
+ *     the currently open model relies on saved library parts.
  */
 export function getLibraryClearSavedDestructiveNotice(input: {
   savedFileCount: number;
@@ -954,7 +855,7 @@ export function getLibraryClearSavedDestructiveNotice(input: {
   if (input.savedFileCount <= 0 || input.modelReliantSavedCount <= 0) return null;
   return {
     tone: 'danger',
-    message: `Your open model currently renders ${plural(input.modelReliantSavedCount, 'part')} from this Saved Library — clearing switches them to simplified shapes until re-fetched.`,
+    message: `Your open model currently renders ${plural(input.modelReliantSavedCount, 'part')} from this Saved Library — clearing switches them to simplified shapes and cannot be undone.`,
     undoable: false,
   };
 }

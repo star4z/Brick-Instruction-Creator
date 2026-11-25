@@ -292,7 +292,7 @@ describe('studioRuntime safety checks', () => {
     expect(orbitBody).not.toContain('renderContextOverlay(page);');
   });
 
-  it('wires destructive and override-impact inline notices near every destructive action control', () => {
+  it('wires destructive notices for off-screen override impacts and non-undoable actions without warning on undoable on-screen actions', () => {
     const html = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf8');
     const runtime = fs.readFileSync(path.resolve(process.cwd(), 'src/studioRuntime.ts'), 'utf8');
     const css = fs.readFileSync(path.resolve(process.cwd(), 'src/index.css'), 'utf8');
@@ -304,12 +304,10 @@ describe('studioRuntime safety checks', () => {
     for (const id of [
       'menuCloseModelNotice',
       'themeDeleteNotice',
-      'overviewClearPinsNotice',
       'mpReplaceModelNotice',
       'impKeepNotice',
       'impActionNotice',
       'grpOverlapNotice',
-      'grpDeleteNotice',
       'wordlessToggleNotice',
       'applyAngleConflictNotice',
       'openModelReplaceNotice',
@@ -319,24 +317,37 @@ describe('studioRuntime safety checks', () => {
       expect(runtime).toContain(`'${id}'`);
     }
 
+    // Undoable actions that only affect what is visible on the current screen must not render warnings
+    for (const removedId of ['overviewClearPinsNotice', 'grpDeleteNotice']) {
+      expect(html).not.toContain(`id="${removedId}"`);
+      expect(runtime).not.toContain(`'${removedId}'`);
+    }
+
     for (const fnName of [
       'getApplyCameraDestructiveNotice(',
       'getWordlessToggleDestructiveNotice(',
-      'getStepResetCameraDestructiveNotice(',
-      'getHeroResetCameraDestructiveNotice(',
       'getMergeStepDestructiveNotice(',
-      'getPartsActionDestructiveNotices(',
-      'getClearAllPageBreaksDestructiveNotice(',
+      'getPartsMoveStepDestructiveNotice(',
       'getStepGenerationDestructiveNotice(',
       'getCloseModelDestructiveNotice(',
       'getReplaceModelModalDestructiveNotice(',
       'getDeleteThemeDestructiveNotice(',
-      'getLayoutGroupDestructiveNotices(',
-      'getDeleteDividerDestructiveNotice(',
+      'getLayoutGroupOverlapDestructiveNotice(',
       'getLibraryRemovePartDestructiveNotice(',
       'getLibraryClearSavedDestructiveNotice(',
     ]) {
       expect(runtime).toContain(fnName);
+    }
+
+    for (const removedFn of [
+      'getStepResetCameraDestructiveNotice',
+      'getHeroResetCameraDestructiveNotice',
+      'getClearAllPageBreaksDestructiveNotice',
+      'getDeleteDividerDestructiveNotice',
+      'getPartsActionDestructiveNotices',
+      'getLayoutGroupDestructiveNotices',
+    ]) {
+      expect(runtime).not.toContain(removedFn);
     }
   });
 
