@@ -175,20 +175,30 @@ describe('theme style options, recents & naming', () => {
   it('stores step display options on themes with safe defaults and round-trips them', async () => {
     const m = await import('../customThemes');
     expect(m.getThemeStyleOptions(BUILT_IN_THEMES.blue)).toEqual(m.DEFAULT_THEME_STYLE_OPTIONS);
+    expect(m.DEFAULT_THEME_STYLE_OPTIONS.highQualityStepRender).toBe(false);
+    expect(m.DEFAULT_THEME_STYLE_OPTIONS.starkBlackOutlines).toBe(false);
     const t = normalizeCustomTheme({
       name: 'Bold',
       showStepBorders: false,
       minifigStyle: 'sequential',
       fadeOpacity: 7,
       highlightColor: 'red;}',
+      highQualityStepRender: true,
+      starkBlackOutlines: true,
     })!;
     expect(t.showStepBorders).toBe(false);
     expect(t.minifigStyle).toBe('sequential');
     expect(t.fadeOpacity).toBe(1);
     expect(t.highlightColor).toBe('#ff2d55');
+    expect(t.highQualityStepRender).toBe(true);
+    expect(t.starkBlackOutlines).toBe(true);
     const [back] = parseImportedThemesJson(serializeThemeExport(t));
     expect(m.themeStyleOptionsEqual(m.getThemeStyleOptions(back), m.getThemeStyleOptions(t))).toBe(true);
+    expect(back.highQualityStepRender).toBe(true);
+    expect(back.starkBlackOutlines).toBe(true);
     expect(createThemeDraftFromBase(t).showStepBorders).toBe(false);
+    expect(createThemeDraftFromBase(t).highQualityStepRender).toBe(true);
+    expect(createThemeDraftFromBase(t).starkBlackOutlines).toBe(true);
   });
 
   it('orders themes current-first, then by last use, then default order', async () => {

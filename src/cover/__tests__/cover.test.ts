@@ -19,6 +19,7 @@ import { buildQrSvg, generateQrMatrix } from '../qrCode';
 import {
   computeLightOrthoMVP,
   computeStudioLightDirs,
+  computeStudioOrthoCamera,
   computeStudioTelephotoCamera,
 } from '../studioPhotoRenderer';
 import { buildPdfBinary, canvasRectToPdfLink } from '../../export/pdfBinary';
@@ -262,7 +263,7 @@ describe('Cover Metadata & LEGO-Style Layout Geometry', () => {
       showProgramBadge: false,
     });
     expect(legacy.title).toBe('Cargo Ship');
-    expect(legacy.el).toBe(60); // Clamped into hero elevation range
+    expect(legacy.el).toBe(75); // Clamped into full hero elevation range (-75..75)
     expect(legacy.zoom).toBe(1.0);
     expect(legacy.showQrCode).toBe(true);
     expect(legacy.showProgramBadge).toBe(true);
@@ -279,7 +280,7 @@ describe('Cover Metadata & LEGO-Style Layout Geometry', () => {
     expect(customBack.bgSrc).toBe('data:image/png;base64,ABC');
   });
 
-  it('normalizes Build Complete metadata with clamped elevation and zoom', () => {
+  it('normalizes Build Complete metadata with full elevation (-75..75) and zoom (0.5..2.0) bounds', () => {
     const def = createDefaultCompleteMeta();
     expect(def.az).toBe(315);
     expect(def.el).toBe(28);
@@ -287,13 +288,17 @@ describe('Cover Metadata & LEGO-Style Layout Geometry', () => {
     expect(def.showText).toBe(true);
     expect(def.showFireworks).toBe(true);
 
-    const norm = normalizeCompleteMeta({ title: 'Done!', az: -45, el: -10, zoom: 2.5, showFireworks: false });
+    const norm = normalizeCompleteMeta({ title: 'Done!', az: -45, el: -30, zoom: 2.5, showFireworks: false });
     expect(norm.title).toBe('Done!');
     expect(norm.az).toBe(315);
-    expect(norm.el).toBe(4); // kept above the studio floor
-    expect(norm.zoom).toBe(1.4); // clamped to max hero zoom
+    expect(norm.el).toBe(-30); // allows full bottom-view inspection
+    expect(norm.zoom).toBe(2.0); // clamped to max hero zoom
     expect(norm.showText).toBe(true);
     expect(norm.showFireworks).toBe(false);
+
+    const clampedLow = normalizeCompleteMeta({ el: -120, zoom: 0.1 });
+    expect(clampedLow.el).toBe(-75);
+    expect(clampedLow.zoom).toBe(0.5);
   });
 
   it('detects whether a hero camera differs from its default angle, elevation, or zoom', () => {
@@ -519,6 +524,23 @@ describe('Photorealistic Studio Camera & Softbox Light Rig', () => {
     const keyMvp = computeLightOrthoMVP([0, 40, 0], 180, lights.key);
     expect(keyMvp.length).toBe(16);
     expect(Array.from(keyMvp).every((v) => Number.isFinite(v))).toBe(true);
+  });
+
+  it('computes orthographic step camera matrices aligned to target center and zoom', () => {
+    const cam1x = computeStudioOrthoCamera([10, 20, -5], 80, 120, 45, 30, 1200, 900, 1.0);
+    const cam2x = computeStudioOrthoCamera([10, 20, -5], 80, 120, 45, 30, 1200, 900, 2.0);
+    expect(cam1x.fovYDeg).toBe(0);
+    expect(cam1x.mvp.length).toBe(16);
+    expect(Array.from(cam1x.mvp).every((v) => Number.isFinite(v))).toBe(true);
+    // Target center projects to NDC (0, 0)
+    const m = cam1x.mvp;
+    const cx = m[0] * 10 + m[4] * 20 + m[8] * -5 + m[12];
+    const cy = m[1] * 10 + m[5] * 20 + m[9] * -5 + m[13];
+    expect(Math.abs(cx)).toBeLessThan(1e-4);
+    expect(Math.abs(cy)).toBeLessThan(1e-4);
+    // 2x zoom doubles orthographic projection scale
+    expect(Math.abs(cam2x.proj[0] / cam1x.proj[0])).toBeCloseTo(2.0, 5);
+    expect(Math.abs(cam2x.proj[5] / cam1x.proj[5])).toBeCloseTo(2.0, 5);
   });
 });
 

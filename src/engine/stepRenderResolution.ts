@@ -3,15 +3,15 @@
  * on step pages, minifig diagrams, submodel callouts, and print-ready PDF exports.
  */
 
-export const DEFAULT_SCREEN_MAX_EDGE = 2400;
-export const DEFAULT_SCREEN_MAX_PIXELS = 4_200_000;
-export const DEFAULT_PDF_MAX_EDGE = 2800;
-export const DEFAULT_PDF_MAX_PIXELS = 5_800_000;
+export const DEFAULT_SCREEN_MAX_EDGE = 3600;
+export const DEFAULT_SCREEN_MAX_PIXELS = 9_600_000;
+export const DEFAULT_PDF_MAX_EDGE = 3840;
+export const DEFAULT_PDF_MAX_PIXELS = 11_000_000;
 export const DEFAULT_GPU_MAX_DIM = 4096;
 
-export const STEP_PDF_PT_SCALE = 2.5; // ~180 DPI (72 pt/in * 2.5)
+export const STEP_PDF_PT_SCALE = 3.472; // ~250 DPI (72 pt/in * 3.472) for razor-sharp printed step pages
 export const COVER_PDF_PT_SCALE = 4.167; // 300 DPI (72 pt/in * 4.167 = 300 px/in) for print-quality covers
-export const STEP_PDF_MAX_EDGE = 2500;
+export const STEP_PDF_MAX_EDGE = 3400;
 export const COVER_PDF_MAX_EDGE = 3600;
 export const COVER_HERO_MAX_EDGE = 3840; // True 4K / 300 DPI print cover hero ceiling
 export const COVER_HERO_MAX_PIXELS = 11_000_000;
@@ -94,16 +94,16 @@ export function clampRenderDimensions(
 
 /**
  * Compute HiDPI + zoom-aware preview resolution multiplier for on-screen renders.
- * - Floors at 2.0× even on 1× desktop displays for crisp supersampled edges & decals.
+ * - Floors at 2.25× even on 1× desktop displays for ultra-crisp supersampled edges, studs & decals.
  * - Supports native 3× Retina displays (iPhone / iPad Pro).
- * - Scales smoothly when the user zooms into a page (up to 4.5× before per-slot caps).
+ * - Scales smoothly when the user zooms into a page (up to 5.0× before per-slot caps).
  */
 export function computePreviewResolutionScale(dpr = 1, zoom = 1): number {
   const safeDpr = Number.isFinite(dpr) && dpr > 0 ? dpr : 1;
   const safeZoom = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
-  const baseScale = Math.min(3, Math.max(2, safeDpr));
+  const baseScale = Math.min(3.25, Math.max(2.25, safeDpr * 1.15));
   const zoomBoost = safeZoom > 1.05 ? Math.min(2.25, safeZoom) : 1;
-  return Math.min(4.5, Number((baseScale * zoomBoost).toFixed(3)));
+  return Math.min(5.0, Number((baseScale * zoomBoost).toFixed(3)));
 }
 
 /**
@@ -128,9 +128,9 @@ export function computeStepSlotRenderSize(input: StepSlotRenderSizeInput): Rende
   const aspect = Math.max(0.72, Math.min(2.25, visualW / Math.max(1, visualH)));
 
   if (mode === 'pdf') {
-    // Supersample 1.5x over the high-DPI PDF slot rectangle so downsampling yields crisp AA
-    const minW = isLargeSlot ? 1600 : isCompact ? 1050 : 1280;
-    const targetW = Math.max(minW, Math.round(visualW * 1.5));
+    // Supersample 1.75x over the high-DPI PDF slot rectangle so downsampling yields print-grade AA
+    const minW = isLargeSlot ? 2400 : isCompact ? 1600 : 1920;
+    const targetW = Math.max(minW, Math.round(visualW * 1.75));
     const targetH = Math.round(targetW / aspect);
     const maxEdge = Math.min(DEFAULT_PDF_MAX_EDGE, gpuLimit);
     return clampRenderDimensions(targetW, targetH, maxEdge, DEFAULT_PDF_MAX_PIXELS, 240);
@@ -144,12 +144,12 @@ export function computeStepSlotRenderSize(input: StepSlotRenderSizeInput): Rende
 
   const resScale = computePreviewResolutionScale(dpr, zoom);
 
-  // Crisp baseline floors (in canonical px before resScale) so even zoomed-out viewports stay sharp
-  const baseW = isLargeSlot ? 820 : isCompact ? 480 : 600;
-  const baseH = isLargeSlot ? 560 : isCompact ? 360 : 440;
+  // High-resolution baseline floors (in canonical px before resScale) so even 1x desktop viewports are razor-sharp
+  const baseW = isLargeSlot ? 1120 : isCompact ? 680 : 840;
+  const baseH = isLargeSlot ? 780 : isCompact ? 500 : 620;
 
-  // Displayed physical pixels on screen * 1.35 supersampling factor
-  const displayOversample = Math.max(resScale, Math.min(4.5, fitScale * zoom * Math.max(1.5, dpr) * 1.35));
+  // Displayed physical pixels on screen * 1.5 supersampling factor
+  const displayOversample = Math.max(resScale, Math.min(5.0, fitScale * zoom * Math.max(1.75, dpr) * 1.5));
   const fromSlotW = visualW * displayOversample;
   const fromSlotH = visualH * displayOversample;
   const fromBaseW = baseW * resScale;
@@ -175,27 +175,27 @@ export function computeMinifigDiagramRenderSize(input: MinifigDiagramRenderSizeI
   if (mode === 'pdf') {
     const maxEdge = Math.min(DEFAULT_PDF_MAX_EDGE, gpuLimit);
     if (input.kind === 'exploded') {
-      const w = Math.max(1400, Math.round((input.targetWidth || 1000) * 1.45));
-      const h = Math.max(960, Math.round((input.targetHeight || 700) * 1.45));
+      const w = Math.max(2000, Math.round((input.targetWidth || 1200) * 1.65));
+      const h = Math.max(1380, Math.round((input.targetHeight || 840) * 1.65));
       return clampRenderDimensions(w, h, maxEdge, DEFAULT_PDF_MAX_PIXELS, 360);
     }
-    const w = Math.max(640, Math.round((input.targetWidth || 460) * 1.5));
-    const h = Math.max(840, Math.round((input.targetHeight || 620) * 1.5));
-    return clampRenderDimensions(w, h, Math.min(1800, maxEdge), 2_600_000, 240);
+    const w = Math.max(900, Math.round((input.targetWidth || 560) * 1.65));
+    const h = Math.max(1160, Math.round((input.targetHeight || 740) * 1.65));
+    return clampRenderDimensions(w, h, Math.min(2400, maxEdge), 4_500_000, 240);
   }
 
-  const resScale = Math.min(2.6, computePreviewResolutionScale(input.dpr ?? 1, input.zoom ?? 1));
+  const resScale = Math.min(3.2, computePreviewResolutionScale(input.dpr ?? 1, input.zoom ?? 1));
   const maxEdge = Math.min(DEFAULT_SCREEN_MAX_EDGE, gpuLimit);
   if (input.kind === 'exploded') {
-    const baseW = isLarge ? 980 : 720;
-    const baseH = isLarge ? 680 : 520;
+    const baseW = isLarge ? 1200 : 900;
+    const baseH = isLarge ? 840 : 640;
     return clampRenderDimensions(baseW * resScale, baseH * resScale, maxEdge, DEFAULT_SCREEN_MAX_PIXELS, 360);
   }
 
   const stages = Math.max(1, input.stageCount || 3);
-  const baseW = stages >= 4 ? 360 : stages === 3 ? 420 : 480;
-  const baseH = stages >= 4 ? 500 : 580;
-  return clampRenderDimensions(baseW * resScale, baseH * resScale, Math.min(1600, maxEdge), 2_200_000, 240);
+  const baseW = stages >= 4 ? 440 : stages === 3 ? 520 : 580;
+  const baseH = stages >= 4 ? 600 : 700;
+  return clampRenderDimensions(baseW * resScale, baseH * resScale, Math.min(2200, maxEdge), 3_800_000, 240);
 }
 
 /**
@@ -211,7 +211,7 @@ export function computePdfPagePixelDimensions(
   const isHero = pageKind === 'cover' || pageKind === 'complete';
   const scale = isHero ? COVER_PDF_PT_SCALE : STEP_PDF_PT_SCALE;
   const maxEdge = isHero ? COVER_PDF_MAX_EDGE : STEP_PDF_MAX_EDGE;
-  const maxPixels = isHero ? COVER_HERO_MAX_PIXELS : 5_200_000;
+  const maxPixels = isHero ? COVER_HERO_MAX_PIXELS : 9_200_000;
   return clampRenderDimensions(safeW * scale, safeH * scale, maxEdge, maxPixels, 360);
 }
 

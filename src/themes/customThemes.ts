@@ -156,6 +156,8 @@ export interface ThemeStyleOptions {
   highlightColor: string;
   fadePrev: boolean;
   fadeOpacity: number;
+  highQualityStepRender: boolean;
+  starkBlackOutlines: boolean;
   showRotCues: boolean;
   showSizeGuides: boolean;
   minifigStyle: ThemeMinifigStyle;
@@ -170,6 +172,8 @@ export const THEME_STYLE_OPTION_KEYS: Array<keyof ThemeStyleOptions> = [
   'highlightColor',
   'fadePrev',
   'fadeOpacity',
+  'highQualityStepRender',
+  'starkBlackOutlines',
   'showRotCues',
   'showSizeGuides',
   'minifigStyle',
@@ -184,6 +188,8 @@ export const DEFAULT_THEME_STYLE_OPTIONS: ThemeStyleOptions = {
   highlightColor: '#ff2d55',
   fadePrev: true,
   fadeOpacity: 0.82,
+  highQualityStepRender: false,
+  starkBlackOutlines: false,
   showRotCues: true,
   showSizeGuides: true,
   minifigStyle: 'exploded',
@@ -219,6 +225,8 @@ export function normalizeThemeStyleOptions(
     highlightColor: sanitizeHexColor(r.highlightColor, sanitizeHexColor(fb.highlightColor, '#ff2d55')),
     fadePrev: bool('fadePrev'),
     fadeOpacity: fade,
+    highQualityStepRender: bool('highQualityStepRender'),
+    starkBlackOutlines: bool('starkBlackOutlines'),
     showRotCues: bool('showRotCues'),
     showSizeGuides: bool('showSizeGuides'),
     minifigStyle: mf,
@@ -269,6 +277,8 @@ export interface ManualTheme {
   highlightColor?: string;
   fadePrev?: boolean;
   fadeOpacity?: number;
+  highQualityStepRender?: boolean;
+  starkBlackOutlines?: boolean;
   showRotCues?: boolean;
   showSizeGuides?: boolean;
   minifigStyle?: ThemeMinifigStyle;

@@ -120,12 +120,12 @@ export function createDefaultCompleteMeta(): CompleteMeta {
 
 export function clampCoverElevation(el: number): number {
   if (!Number.isFinite(el)) return 18;
-  return Math.max(4, Math.min(60, Math.round(el)));
+  return Math.max(-75, Math.min(75, Math.round(el)));
 }
 
 export function clampCoverZoom(zoom: number): number {
   if (!Number.isFinite(zoom)) return 1.0;
-  return Math.max(0.7, Math.min(1.4, Math.round(zoom * 100) / 100));
+  return Math.max(0.5, Math.min(2.0, Math.round(zoom * 100) / 100));
 }
 
 export function normalizeCoverMeta(raw: unknown, defaultShowText = true): CoverMeta {

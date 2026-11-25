@@ -608,8 +608,14 @@ function selectTheme(id) {
   // Commit/abandon an in-progress rename before switching themes.
   const nameEl = document.getElementById('themeNameInput');
   if (nameEl && document.activeElement === nameEl) nameEl.blur();
+  const prevStark = Boolean(state.starkBlackOutlines);
+  const prevHq = Boolean(state.highQualityStepRender);
   state.themeId = resolveThemeById(id, customThemes).id;
   applyActiveThemeStyleToState();
+  if (prevStark !== Boolean(state.starkBlackOutlines)) pliThumbCache.clear();
+  if (prevStark !== Boolean(state.starkBlackOutlines) || prevHq !== Boolean(state.highQualityStepRender)) {
+    overviewThumbCache.bumpEpoch();
+  }
   renderAll();
 }
 
@@ -1331,13 +1337,16 @@ class ByteBuf {
 
 function buildMeshBuffers(prevParts, newParts, opts) {
   const totalParts = prevParts.length + newParts.length;
-  const includeEdges = totalParts <= 320;
+  const starkBlack = Boolean(opts.starkBlackOutlines);
+  const heroQuality = Boolean(opts.heroQuality);
+  const emitHeroEdges = Boolean(opts.includeHeroEdges) || starkBlack;
+  const includeEdges = starkBlack || totalParts <= 520;
+  const emitProcEdges = (!heroQuality || emitHeroEdges) && includeEdges;
   const opPos = new FloatBuf(totalParts * 180), opNorm = new FloatBuf(totalParts * 180), opCol = new ByteBuf(totalParts * 240);
   const trPos = new FloatBuf(2048), trNorm = new FloatBuf(2048), trCol = new ByteBuf(2048);
   const lnPos = new FloatBuf(totalParts * 60), lnCol = new ByteBuf(totalParts * 80);
   const texGroups = new Map();
 
-  const heroQuality = Boolean(opts.heroQuality);
   const smoothCurves = heroQuality || totalParts <= 320;
 
   const pushTri = (a, b, c, n, col, aByte) => {
@@ -1435,6 +1444,15 @@ function buildMeshBuffers(prevParts, newParts, opts) {
       pushTri(fX1[1], fY0[1], fZ0[0], xformNorm([ s3,-s3,-s3], m, hinge), col, aByte);
       pushTri(fZ0[1], fY0[0], fX0[0], xformNorm([-s3,-s3,-s3], m, hinge), col, aByte);
       pushTri(fX0[1], fY0[3], fZ1[0], xformNorm([-s3,-s3, s3], m, hinge), col, aByte);
+      if (emitProcEdges) {
+        const eh = hw + 0.04, ey = hh + 0.04, ed = hd + 0.04;
+        const ev = [
+          pt(-eh,-ey, ed), pt( eh,-ey, ed), pt( eh, ey, ed), pt(-eh, ey, ed),
+          pt(-eh,-ey,-ed), pt( eh,-ey,-ed), pt( eh, ey,-ed), pt(-eh, ey,-ed),
+        ];
+        for (const [i,j] of [[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]])
+          pushEdge(ev[i], ev[j], eCol, eAlpha);
+      }
       return;
     }
 
@@ -1503,7 +1521,10 @@ function buildMeshBuffers(prevParts, newParts, opts) {
         if (rTop > 0.05) pushTri(topC, t0, t1, nTop, col, aByte);
       }
       if (rBot > 0.05) pushTri(botC, b1, b0, nBot, col, aByte);
-      if (!heroQuality && includeEdges && rTop > 0.05) pushEdge(t0, t1, eCol, aByte);
+      if (emitProcEdges) {
+        if (rTop > 0.05) pushEdge(t0, t1, eCol, starkBlack ? 255 : aByte);
+        if (starkBlack && rBot > 0.05) pushEdge(b0, b1, eCol, 255);
+      }
     }
   };
 
@@ -1546,9 +1567,14 @@ function buildMeshBuffers(prevParts, newParts, opts) {
       }
       pushTri(it0, ot0, ot1, nTop, col, aByte); pushTri(it0, ot1, it1, nTop, col, aByte);
       pushTri(ob0, ib0, ib1, nBot, col, aByte); pushTri(ob0, ib1, ob1, nBot, col, aByte);
-      if (!heroQuality && includeEdges) {
-        pushEdge(ot0, ot1, eCol, aByte);
-        pushEdge(it0, it1, eCol, aByte);
+      if (emitProcEdges) {
+        const ea = starkBlack ? 255 : aByte;
+        pushEdge(ot0, ot1, eCol, ea);
+        pushEdge(it0, it1, eCol, ea);
+        if (starkBlack) {
+          pushEdge(ob0, ob1, eCol, ea);
+          pushEdge(ib0, ib1, eCol, ea);
+        }
       }
       if (!isFull && i === 0) {
         const capN = mkN(s0, -c0, 0);
@@ -1591,7 +1617,7 @@ function buildMeshBuffers(prevParts, newParts, opts) {
         pushTri(fPts[i], bPts[i], bPts[j], flatN, col, aByte);
         pushTri(fPts[i], bPts[j], fPts[j], flatN, col, aByte);
       }
-      if (!heroQuality && includeEdges) {
+      if (emitProcEdges) {
         pushEdge(fPts[i], fPts[j], eCol, eAlpha);
         pushEdge(bPts[i], bPts[j], eCol, eAlpha);
         if (!smoothNorms || !smoothNorms[i]) {
@@ -1986,19 +2012,21 @@ function buildMeshBuffers(prevParts, newParts, opts) {
       : isSelected
         ? [26, 115, 232]
         : hexToRgb255(baseHex, fadeMix);
+    const baseLuma = 0.299 * baseCol[0] + 0.587 * baseCol[1] + 0.114 * baseCol[2];
+    const starkEdgeCol = baseLuma < 56 ? [204, 212, 222] : [0, 0, 0];
     const edgeCol = isGhost
       ? [51, 65, 85]
       : isSelected
         ? [255, 255, 255]
         : overrideHex
           ? hexToRgb255('#1e293b', isDimmed ? 0.72 : 0.25)
-          : (shouldHighlight ? hexToRgb255(hlColorHex, 0) : hexToRgb255(cInfo.edge, fadeMix * 0.85));
+          : (shouldHighlight ? hexToRgb255(hlColorHex, 0) : (starkBlack ? starkEdgeCol : hexToRgb255(cInfo.edge, fadeMix * 0.85)));
     const aByte = isGhost
       ? 82
       : isRealTrans
         ? Math.round(255 * (cInfo.alpha || 0.7) * (isFaded ? Math.max(0.55, opts.fadeOpacity) : 1))
         : 255;
-    const edgeAlpha = isGhost ? 185 : aByte;
+    const edgeAlpha = isGhost ? 185 : (starkBlack ? 255 : aByte);
     const m = leafPart.m || R_ID;
     const ox = leafPart.x + offX, oy = leafPart.y + offY, oz = leafPart.z + offZ;
 
@@ -2697,7 +2725,7 @@ class WebGLBrickEngine {
         }
         gl_FragColor = shadeAbsPlastic(baseRgb, vCol.a, vPos, vNorm, uHeroMode, uEyePos, uKeyDir, uFillDir, uRimDir, uCamUp);
       }`;
-    const vsLine = `attribute vec3 aPos; attribute vec4 aCol; uniform mat4 uMVP; varying vec4 vCol; void main(){ gl_Position = uMVP * vec4(aPos,1.0); gl_Position.z -= 0.00022; vCol = aCol; }`;
+    const vsLine = `attribute vec3 aPos; attribute vec4 aCol; uniform mat4 uMVP; uniform vec2 uLineOffset; varying vec4 vCol; void main(){ gl_Position = uMVP * vec4(aPos,1.0); gl_Position.xy += uLineOffset * gl_Position.w; gl_Position.z -= 0.00024 * gl_Position.w; vCol = aCol; }`;
     const fsLine = `precision mediump float; uniform float uLineAlpha; varying vec4 vCol; void main(){ gl_FragColor = vec4(vCol.rgb, vCol.a * uLineAlpha); }`;
     const cmp = (t, s) => { const sh = gl.createShader(t); gl.shaderSource(sh, s); gl.compileShader(sh); return sh; };
     const lnk = (v, f) => { const p = gl.createProgram(); gl.attachShader(p, cmp(gl.VERTEX_SHADER, v)); gl.attachShader(p, cmp(gl.FRAGMENT_SHADER, f)); gl.linkProgram(p); return p; };
@@ -2730,6 +2758,7 @@ class WebGLBrickEngine {
       xUv: gl.getAttribLocation(this.texProg, 'aUv'),
       xCol: gl.getAttribLocation(this.texProg, 'aCol'),
       lMVP: gl.getUniformLocation(this.lineProg, 'uMVP'),
+      lOffset: gl.getUniformLocation(this.lineProg, 'uLineOffset'),
       lAlpha: gl.getUniformLocation(this.lineProg, 'uLineAlpha'),
       lPos: gl.getAttribLocation(this.lineProg, 'aPos'),
       lCol: gl.getAttribLocation(this.lineProg, 'aCol'),
@@ -2945,7 +2974,19 @@ class WebGLBrickEngine {
       gl.uniform1f(this.loc.lAlpha, lineAlpha);
       gl.bindBuffer(gl.ARRAY_BUFFER, this.bLinePos); gl.enableVertexAttribArray(this.loc.lPos); gl.vertexAttribPointer(this.loc.lPos, 3, gl.FLOAT, false, 0, 0);
       gl.bindBuffer(gl.ARRAY_BUFFER, this.bLineCol); gl.enableVertexAttribArray(this.loc.lCol); gl.vertexAttribPointer(this.loc.lCol, 4, gl.UNSIGNED_BYTE, true, 0, 0);
-      gl.drawArrays(gl.LINES, 0, mesh.linePos.length / 3);
+      const lineVerts = mesh.linePos.length / 3;
+      if (drawOpts?.boldLines || drawOpts?.starkBlackOutlines) {
+        const stepPx = Math.max(0.65, Math.min(1.4, dw / 1600));
+        const ox = (2 * stepPx) / dw;
+        const oy = (2 * stepPx) / dh;
+        for (const [tx, ty] of [[0, 0], [ox, 0], [0, oy], [-ox, 0]]) {
+          gl.uniform2f(this.loc.lOffset, tx, ty);
+          gl.drawArrays(gl.LINES, 0, lineVerts);
+        }
+      } else {
+        gl.uniform2f(this.loc.lOffset, 0, 0);
+        gl.drawArrays(gl.LINES, 0, lineVerts);
+      }
     }
     return mvp;
   }
@@ -2989,11 +3030,12 @@ function isDarkHexColor(hex) {
 }
 
 function getPliThumb(part) {
-  const key = `${part.p}:${part.c}`;
+  const sb = Boolean(state.starkBlackOutlines);
+  const key = `${part.p}:${part.c}${sb ? ':sb' : ''}`;
   if (pliThumbCache.has(key)) return pliThumbCache.get(key);
   const samplePart = normalizeCompositeThumbPart(part, (pid) => resolvePart(pid).name, computeWorldBox);
-  const mesh = buildMeshBuffers([], [samplePart], { highlightNew:false, fadePrev:false, showArrows:false, accent:'#1a73e8' });
-  snapshotEngine.draw(mesh, 360, 360, 32, 22, 1.08);
+  const mesh = buildMeshBuffers([], [samplePart], { highlightNew:false, fadePrev:false, showArrows:false, accent:'#1a73e8', starkBlackOutlines: sb });
+  snapshotEngine.draw(mesh, 420, 420, 32, 22, 1.08, 0, sb ? { boldLines: true } : null);
   const url = snapshotCanvas.toDataURL('image/png');
   if (pliThumbCache.size > 360) pliThumbCache.clear();
   pliThumbCache.set(key, url);
@@ -3004,23 +3046,64 @@ function getBomPartThumb(part, colSpan = 1, rowSpan = 1) {
   const cs = Math.max(1, Math.round(colSpan || 1));
   const rs = Math.max(1, Math.round(rowSpan || 1));
   if (cs === 1 && rs === 1) return getPliThumb(part);
-  const key = `${part.p}:${part.c}:bom_${cs}x${rs}`;
+  const sb = Boolean(state.starkBlackOutlines);
+  const key = `${part.p}:${part.c}:bom_${cs}x${rs}${sb ? ':sb' : ''}`;
   if (pliThumbCache.has(key)) return pliThumbCache.get(key);
   const maxSpan = Math.max(cs, rs);
-  const basePx = Math.min(480, Math.round(240 * Math.min(2.0, 0.85 + maxSpan * 0.45)));
-  const rw = Math.max(180, Math.round((basePx * cs) / maxSpan));
-  const rh = Math.max(180, Math.round((basePx * rs) / maxSpan));
+  const basePx = Math.min(560, Math.round(280 * Math.min(2.0, 0.85 + maxSpan * 0.45)));
+  const rw = Math.max(200, Math.round((basePx * cs) / maxSpan));
+  const rh = Math.max(200, Math.round((basePx * rs) / maxSpan));
   const samplePart = normalizeCompositeThumbPart(part, (pid) => resolvePart(pid).name, computeWorldBox);
-  const mesh = buildMeshBuffers([], [samplePart], { highlightNew:false, fadePrev:false, showArrows:false, accent:'#1a73e8' });
-  snapshotEngine.draw(mesh, rw, rh, 32, 22, 1.04, 0, { tightFit: true });
+  const mesh = buildMeshBuffers([], [samplePart], { highlightNew:false, fadePrev:false, showArrows:false, accent:'#1a73e8', starkBlackOutlines: sb });
+  snapshotEngine.draw(mesh, rw, rh, 32, 22, 1.04, 0, { tightFit: true, boldLines: sb });
   const url = snapshotCanvas.toDataURL('image/png');
   if (pliThumbCache.size > 360) pliThumbCache.clear();
   pliThumbCache.set(key, url);
   return url;
 }
 
+function renderStepWithStudioPhoto(mesh, az, el, w, h, zoom, opts) {
+  const photo = getStudioPhotoEngine();
+  if (!photo || !photo.isAvailable()) return null;
+  const maxDim = Math.max(1024, Math.min(4096, photo.getMaxDimension() || 4096));
+  const clamped = clampRenderDimensions(w, h, maxDim, maxDim * maxDim, 320);
+  const rendered = photo.render(mesh, {
+    projection: 'ortho',
+    azDeg: az,
+    elDeg: el,
+    width: clamped.width,
+    height: clamped.height,
+    zoom: zoom || 1.0,
+    fixedHalfH: opts?.fixedHalfH || 0,
+    fixedCenter: opts?.fixedCenter,
+    panX: opts?.panX || 0,
+    panY: opts?.panY || 0,
+    showFloor: false,
+    lineAlpha: typeof opts?.lineAlpha === 'number' ? opts.lineAlpha : 1.0,
+    boldLines: Boolean(opts?.starkBlackOutlines || opts?.boldLines),
+    darkBackground: Boolean(opts?.darkBackground),
+    getTextureImage: (texKey) => textureStore.getDecodedImage(texKey),
+  });
+  if (!rendered) return null;
+  return {
+    url: rendered.url,
+    mesh,
+    mvp: rendered.mvp,
+    w: rendered.width,
+    h: rendered.height,
+  };
+}
+
 function renderSnapshot(prev, next, az, el, w, h, zoom, opts) {
-  const mesh = buildMeshBuffers(prev, next, opts);
+  const useStudio = Boolean(opts?.highQualityStepRender) && Boolean(getStudioPhotoEngine()?.isAvailable());
+  const meshOpts = useStudio
+    ? { ...opts, heroQuality: true, includeHeroEdges: true }
+    : opts;
+  const mesh = buildMeshBuffers(prev, next, meshOpts);
+  if (useStudio) {
+    const hq = renderStepWithStudioPhoto(mesh, az, el, w, h, zoom, opts);
+    if (hq) return hq;
+  }
   const mvp = snapshotEngine.draw(mesh, w, h, az, el, zoom, opts?.fixedHalfH || 0, opts);
   return {
     url: snapshotCanvas.toDataURL('image/png'),
@@ -3032,6 +3115,10 @@ function renderSnapshot(prev, next, az, el, w, h, zoom, opts) {
 }
 
 function renderMeshSnapshot(mesh, az, el, w, h, zoom, opts) {
+  if (opts?.highQualityStepRender) {
+    const hq = renderStepWithStudioPhoto(mesh, az, el, w, h, zoom, opts);
+    if (hq) return hq;
+  }
   const mvp = snapshotEngine.draw(mesh, w, h, az, el, zoom, opts?.fixedHalfH || 0, opts);
   return {
     url: snapshotCanvas.toDataURL('image/png'),
@@ -3042,12 +3129,12 @@ function renderMeshSnapshot(mesh, az, el, w, h, zoom, opts) {
   };
 }
 
-function drawSupersampledMeshToCtx(ctx, mesh, dstX, dstY, dstW, dstH, az, el, zoom = 1.0, fixedHalfH = 0, drawOpts = null, factor = 1.5) {
+function drawSupersampledMeshToCtx(ctx, mesh, dstX, dstY, dstW, dstH, az, el, zoom = 1.0, fixedHalfH = 0, drawOpts = null, factor = 1.65) {
   const ss = clampRenderDimensions(
     Math.round(dstW * factor),
     Math.round(dstH * factor),
-    Math.min(snapshotEngine.maxDim || 2048, 2200),
-    3_600_000,
+    Math.min(snapshotEngine.maxDim || 3200, 3200),
+    7_200_000,
     Math.max(48, Math.round(Math.min(dstW, dstH))),
   );
   const mvp = snapshotEngine.draw(mesh, ss.width, ss.height, az, el, zoom, fixedHalfH, drawOpts);
@@ -6318,6 +6405,8 @@ const state = {
   highlightColor: '#ff2d55',
   fadePrev: true,
   fadeOpacity: 0.82,
+  highQualityStepRender: false,
+  starkBlackOutlines: false,
   showRotCues: true,
   showSizeGuides: true,
   minifigStyle: 'exploded', // 'exploded' (IMG_0316) | 'sequential' (IMG_0315) | 'classic'
@@ -7774,7 +7863,9 @@ function renderAll() {
       theme,
     );
     currentCoverHeroInfo = {
+      kind: 'cover',
       parts: allParts,
+      mesh: snap.mesh,
       az: cm.az,
       el: cm.el,
       zoom: cm.zoom,
@@ -7784,6 +7875,7 @@ function renderAll() {
       h: snap.h,
       theme,
     };
+    const isLiveHeroCamera = state.mode === 'camera';
     const darkBg = isDarkHexColor(toHexColor(theme.bgColor || '#ffffff', '#ffffff'));
     const badgeSurface = darkBg ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.92)';
     const badgeBorder = darkBg ? 'rgba(255,255,255,0.20)' : 'rgba(15,23,42,0.14)';
@@ -7805,8 +7897,10 @@ function renderAll() {
     frame.innerHTML = `
       <div class="relative w-full h-full overflow-hidden" style="${cm.bgSrc ? `background-image:url(${cm.bgSrc});background-size:cover;background-position:center;` : ''}">
         <!-- High-Quality Page-Filling Hero Render -->
-        <div class="absolute z-0 flex items-center justify-center pointer-events-none" style="left:${layout.heroRect.x}px;top:${layout.heroRect.y}px;width:${layout.heroRect.w}px;height:${layout.heroRect.h}px;">
-          <img data-cover-hero-img="true" src="${snap.url}" alt="${escHtml(title || state.model.title || 'Model')}" class="w-full h-full object-contain pointer-events-none select-none" />
+        <div class="absolute z-0 flex items-center justify-center ${isLiveHeroCamera ? 'pointer-events-auto' : 'pointer-events-none'}" style="left:${layout.heroRect.x}px;top:${layout.heroRect.y}px;width:${layout.heroRect.w}px;height:${layout.heroRect.h}px;">
+          ${isLiveHeroCamera
+            ? `<canvas id="liveHeroCanvas" class="w-full h-full object-contain cursor-grab active:cursor-grabbing touch-none select-none"></canvas>`
+            : `<img data-cover-hero-img="true" src="${snap.url}" alt="${escHtml(title || state.model.title || 'Model')}" class="w-full h-full object-contain pointer-events-none select-none" />`}
         </div>
 
         <!-- Top-Left: Optional Creator Logo + Optional Model Name & Subtitle -->
@@ -7866,7 +7960,9 @@ function renderAll() {
     });
     const snap = renderCoverHeroSnapshot(allParts, cm.az, cm.el, cm.zoom, heroSize.width, heroSize.height, theme);
     currentCoverHeroInfo = {
+      kind: 'complete',
       parts: allParts,
+      mesh: snap.mesh,
       az: cm.az,
       el: cm.el,
       zoom: cm.zoom,
@@ -7876,6 +7972,7 @@ function renderAll() {
       h: snap.h,
       theme,
     };
+    const isLiveHeroCamera = state.mode === 'camera';
     const pgNumText = formatPageNumber(page.num, state.pages.length);
     const showText = cm.showText !== false;
     const showFw = cm.showFireworks !== false;
@@ -7886,8 +7983,10 @@ function renderAll() {
           <h2 class="font-extrabold leading-tight" style="font-size:${typo.complete.titleFont}px">${escHtml(cm.title || 'Build Complete!')}</h2>
           ${cm.subtitle ? `<p style="color:${theme.muted};font-size:${typo.complete.subtitleFont}px;margin-top:${Math.round(typo.pt(2.5))}px">${escHtml(cm.subtitle)}</p>` : ''}
         </div>
-        <div class="relative z-10 flex-1 min-h-0 w-full overflow-hidden pointer-events-none" style="margin:${Math.round(typo.pt(8))}px 0;">
-          <img data-cover-hero-img="true" src="${snap.url}" alt="Completed build" class="absolute inset-0 w-full h-full object-contain pointer-events-none select-none" />
+        <div class="relative z-10 flex-1 min-h-0 w-full overflow-hidden ${isLiveHeroCamera ? 'pointer-events-auto' : 'pointer-events-none'}" style="margin:${Math.round(typo.pt(8))}px 0;">
+          ${isLiveHeroCamera
+            ? `<canvas id="liveHeroCanvas" class="absolute inset-0 w-full h-full object-contain cursor-grab active:cursor-grabbing touch-none select-none"></canvas>`
+            : `<img data-cover-hero-img="true" src="${snap.url}" alt="Completed build" class="absolute inset-0 w-full h-full object-contain pointer-events-none select-none" />`}
         </div>
         <div class="absolute z-10 flex justify-between font-medium pointer-events-none" style="bottom:${footerPadBottom}px;left:${padPx}px;right:${padPx}px;font-size:${typo.footerFont}px;color:${theme.muted}">
           <span class="truncate">${showFooterTitle ? escHtml(state.model.title) : ''}</span>
@@ -7918,13 +8017,21 @@ function renderAll() {
   } else if (page.kind === 'section_divider') {
     const resScale = getPreviewResolutionScale();
     const divSize = clampRenderDimensions(
-      Math.round(Math.max(920, dims.width - padPx * 2) * resScale),
-      Math.round(Math.max(580, dims.height - padPx * 2 - footerH - 80) * resScale),
-      Math.min(snapshotEngine.maxDim || 2048, 2200),
-      3_800_000,
+      Math.round(Math.max(1080, dims.width - padPx * 2) * resScale),
+      Math.round(Math.max(680, dims.height - padPx * 2 - footerH - 80) * resScale),
+      Math.min(snapshotEngine.maxDim || 3200, 3200),
+      7_200_000,
       480,
     );
-    const snap = renderSnapshot([], page.previewParts || [], 38, 28, divSize.width, divSize.height, 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent });
+    const snap = renderSnapshot([], page.previewParts || [], 38, 28, divSize.width, divSize.height, 1.0, {
+      highlightNew: false,
+      fadePrev: false,
+      showArrows: false,
+      accent: theme.accent,
+      highQualityStepRender: state.highQualityStepRender,
+      starkBlackOutlines: state.starkBlackOutlines,
+      darkBackground: isDarkHexColor(toHexColor(theme.bgColor || '#ffffff', '#ffffff')),
+    });
     const pgNumText = formatPageNumber(page.num, state.pages.length);
     const pillPadX = Math.round(typo.pt(8));
     const pillPadY = Math.round(typo.pt(2.5));
@@ -8166,9 +8273,13 @@ function renderAll() {
         ? { ...step.defaultPartOffsets, ...(ov.partOffsets || {}) }
         : (ov.partOffsets || {});
       const mfPrep = step.isMinifigPoseStep ? step.minifigPrep : null;
+      const darkThemeBg = isDarkHexColor(toHexColor(theme.bgColor || '#ffffff', '#ffffff'));
       const opts = {
         highlightNew: state.highlightNew, highlightColor: state.highlightColor,
         fadePrev: state.fadePrev, fadeOpacity: state.fadeOpacity,
+        highQualityStepRender: state.highQualityStepRender,
+        starkBlackOutlines: state.starkBlackOutlines,
+        darkBackground: darkThemeBg,
         showArrows: true, accent: theme.accent, ov,
         partOffsets: effectivePartOffsets,
         selectedPartIds: state.mode === 'parts' && state.selectedStepId === step.id ? state.selectedPartIds : null,
@@ -8189,7 +8300,7 @@ function renderAll() {
         zoom: state.zoom,
         stageFitScale: currentPageFitScale,
         mode: 'screen',
-        gpuMaxDim: snapshotEngine.maxDim,
+        gpuMaxDim: state.highQualityStepRender ? getCoverHeroGpuMaxDim() : snapshotEngine.maxDim,
       });
       const rw = stepRenderDims.width;
       const rh = stepRenderDims.height;
@@ -8259,14 +8370,22 @@ function renderAll() {
       });
 
       const subCalloutDims = clampRenderDimensions(
-        Math.round(380 * resScale),
-        Math.round(260 * resScale),
-        Math.min(snapshotEngine.maxDim || 2048, 1400),
-        1_500_000,
-        240,
+        Math.round(520 * resScale),
+        Math.round(360 * resScale),
+        Math.min(snapshotEngine.maxDim || 2400, 2400),
+        3_800_000,
+        300,
       );
       const subImg = (step.subassembly && !ov.calloutAsPages)
-        ? renderSnapshot([], step.subassembly.buildParts, 38, 30, subCalloutDims.width, subCalloutDims.height, 1.0, { highlightNew:false, fadePrev:false, showArrows:false, accent:theme.accent }).url
+        ? renderSnapshot([], step.subassembly.buildParts, 38, 30, subCalloutDims.width, subCalloutDims.height, 1.0, {
+            highlightNew: false,
+            fadePrev: false,
+            showArrows: false,
+            accent: theme.accent,
+            highQualityStepRender: state.highQualityStepRender,
+            starkBlackOutlines: state.starkBlackOutlines,
+            darkBackground: darkThemeBg,
+          }).url
         : null;
       const attSubImg = step.attachedSubmodel ? getSubmodelThumb(step.attachedSubmodel, 360, 270) : null;
       const mfPrepImg = step.minifigPrep
@@ -8574,6 +8693,10 @@ function renderAll() {
     bindStepPageInteractions(page);
   }
 
+  if ((page.kind === 'cover' || page.kind === 'complete') && state.mode === 'camera') {
+    bindHeroCameraInteractions(page);
+  }
+
   renderContextOverlay(page);
   syncMenuControls();
   syncPageSizeWarningUI(page);
@@ -8618,6 +8741,127 @@ function syncVisibleStepRotationBadges() {
       wrap.classList.toggle('hidden', !hasAny);
     }
   }
+}
+
+function bindHeroCameraInteractions(page) {
+  const liveCanvas = document.getElementById('liveHeroCanvas');
+  const info = currentCoverHeroInfo;
+  if (!liveCanvas || !info || !info.mesh) return;
+  const isCover = page.kind === 'cover';
+  const meta = isCover ? state.coverMeta : state.completeMeta;
+  const darkBg = isDarkHexColor(toHexColor(info.theme?.bgColor || '#ffffff', '#ffffff'));
+  const w = info.w || 1200;
+  const h = info.h || 900;
+
+  const photo = getStudioPhotoEngine();
+  const useStudioLive = Boolean(photo && photo.isAvailable());
+  const ctx2d = useStudioLive ? liveCanvas.getContext('2d') : null;
+  if (useStudioLive && ctx2d) {
+    liveCanvas.width = w;
+    liveCanvas.height = h;
+  } else {
+    activeLiveEngine = new WebGLBrickEngine(liveCanvas);
+  }
+
+  const drawLiveHero = (curAz, curEl, interactive) => {
+    const safeZoom = clampCoverZoom(meta.zoom ?? 1.0);
+    if (useStudioLive && photo && ctx2d) {
+      const maxEdge = interactive ? 960 : Math.min(Math.max(w, h), photo.getMaxDimension() || 4096);
+      const scale = Math.min(1, maxEdge / Math.max(w, h, 1));
+      const rw = Math.max(320, Math.round(w * scale));
+      const rh = Math.max(240, Math.round(h * scale));
+      const rendered = photo.renderToCanvas(info.mesh, {
+        azDeg: curAz,
+        elDeg: curEl,
+        width: rw,
+        height: rh,
+        zoom: safeZoom,
+        darkBackground: darkBg,
+        getTextureImage: (texKey) => textureStore.getDecodedImage(texKey),
+      });
+      if (rendered) {
+        ctx2d.clearRect(0, 0, w, h);
+        ctx2d.imageSmoothingEnabled = true;
+        ctx2d.imageSmoothingQuality = 'high';
+        ctx2d.drawImage(rendered, 0, 0, rendered.width, rendered.height, 0, 0, w, h);
+      }
+    } else if (activeLiveEngine) {
+      activeLiveEngine.draw(info.mesh, w, h, curAz, curEl, safeZoom, 0, {
+        tightFit: true,
+        heroShading: true,
+        lineAlpha: 0.32,
+      });
+    }
+  };
+
+  let az = meta.az;
+  let el = meta.el;
+  drawLiveHero(az, el, false);
+
+  let dragging = false, moved = false, pushedUndo = false, startX = 0, startY = 0, lx = 0, ly = 0;
+  let dragRaf = 0;
+  liveCanvas.onpointerdown = (e) => {
+    e.stopPropagation();
+    dragging = true;
+    moved = false;
+    pushedUndo = false;
+    startX = lx = e.clientX;
+    startY = ly = e.clientY;
+    liveCanvas.setPointerCapture(e.pointerId);
+  };
+  liveCanvas.onpointermove = (e) => {
+    if (!dragging || (!useStudioLive && !activeLiveEngine)) return;
+    e.stopPropagation();
+    const dx = e.clientX - lx;
+    const dy = e.clientY - ly;
+    lx = e.clientX;
+    ly = e.clientY;
+    if (!moved && Math.hypot(e.clientX - startX, e.clientY - startY) < 2) return;
+    if (!pushedUndo) {
+      pushUndo();
+      pushedUndo = true;
+    }
+    moved = true;
+    az = (((az - dx * 0.7) % 360) + 360) % 360;
+    el = clampCoverElevation(el + dy * 0.5);
+    const roundedAz = ((Math.round(az) % 360) + 360) % 360;
+    const roundedEl = Math.round(el);
+    meta.az = roundedAz;
+    meta.el = roundedEl;
+    info.az = roundedAz;
+    info.el = roundedEl;
+    const readout = document.getElementById('heroCamReadout');
+    if (readout) readout.textContent = `${roundedAz}° / ${roundedEl}°`;
+    const isBottom = roundedEl < 0;
+    const topBtn = document.getElementById('heroCamTop');
+    const botBtn = document.getElementById('heroCamBot');
+    if (topBtn && botBtn) {
+      topBtn.className = `px-2 py-1 rounded inline-flex items-center gap-1 transition-colors cursor-pointer ${!isBottom ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'hover:bg-[var(--surface-hover)]'}`;
+      botBtn.className = `px-2 py-1 rounded inline-flex items-center gap-1 transition-colors cursor-pointer ${isBottom ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'hover:bg-[var(--surface-hover)]'}`;
+    }
+    if (useStudioLive) {
+      if (!dragRaf) {
+        dragRaf = requestAnimationFrame(() => {
+          dragRaf = 0;
+          drawLiveHero(az, el, true);
+        });
+      }
+    } else {
+      drawLiveHero(az, el, true);
+    }
+  };
+  const endOrbit = (e) => {
+    if (!dragging) return;
+    e.stopPropagation();
+    dragging = false;
+    if (dragRaf) { cancelAnimationFrame(dragRaf); dragRaf = 0; }
+    if (moved) {
+      overviewThumbCache.bumpEpoch();
+      renderAll();
+    }
+  };
+  liveCanvas.onpointerup = endOrbit;
+  liveCanvas.onpointercancel = endOrbit;
 }
 
 function bindStepPageInteractions(page) {
@@ -8692,22 +8936,66 @@ function bindStepPageInteractions(page) {
     });
   });
 
-  // STEP -> CAMERA MODE: Attach single GPU-cached live WebGL canvas matching static snapshot size identically
+  // STEP -> CAMERA MODE: Attach single GPU-cached live canvas matching static snapshot size identically
   if (isLiveStepCamera) {
     const liveCanvas = document.getElementById('liveRotateCanvas');
     const info = currentSlotRenderInfo.get(state.selectedStepId);
     if (liveCanvas && info) {
-      activeLiveEngine = new WebGLBrickEngine(liveCanvas);
       const w = info.snap.w || 760;
       const h = info.snap.h || 500;
       const fixedHalfH = info.opts?.fixedHalfH || 0;
       const liveDrawOpts = (info.isMfExploded || info.isMfSeq)
         ? { ...(info.opts || {}), tightFit: true }
         : (info.opts || null);
+      const photo = state.highQualityStepRender ? getStudioPhotoEngine() : null;
+      const useStudioLive = Boolean(photo && photo.isAvailable());
+      const ctx2d = useStudioLive ? liveCanvas.getContext('2d') : null;
+      if (useStudioLive && ctx2d) {
+        liveCanvas.width = w;
+        liveCanvas.height = h;
+      } else {
+        activeLiveEngine = new WebGLBrickEngine(liveCanvas);
+      }
+
+      const drawLiveStep = (curAz, curEl, interactive) => {
+        if (useStudioLive && photo && ctx2d) {
+          const maxEdge = interactive ? 1024 : Math.min(Math.max(w, h), photo.getMaxDimension() || 4096);
+          const scale = Math.min(1, maxEdge / Math.max(w, h, 1));
+          const rw = Math.max(320, Math.round(w * scale));
+          const rh = Math.max(240, Math.round(h * scale));
+          const rendered = photo.renderToCanvas(info.snap.mesh, {
+            projection: 'ortho',
+            azDeg: curAz,
+            elDeg: curEl,
+            width: rw,
+            height: rh,
+            zoom: info.modelScale || 1.0,
+            fixedHalfH,
+            fixedCenter: liveDrawOpts?.fixedCenter,
+            panX: liveDrawOpts?.panX || 0,
+            panY: liveDrawOpts?.panY || 0,
+            showFloor: false,
+            lineAlpha: typeof liveDrawOpts?.lineAlpha === 'number' ? liveDrawOpts.lineAlpha : 1.0,
+            boldLines: Boolean(liveDrawOpts?.starkBlackOutlines || liveDrawOpts?.boldLines),
+            darkBackground: Boolean(liveDrawOpts?.darkBackground),
+            getTextureImage: (texKey) => textureStore.getDecodedImage(texKey),
+          });
+          if (rendered) {
+            ctx2d.clearRect(0, 0, w, h);
+            ctx2d.imageSmoothingEnabled = true;
+            ctx2d.imageSmoothingQuality = 'high';
+            ctx2d.drawImage(rendered, 0, 0, rendered.width, rendered.height, 0, 0, w, h);
+          }
+        } else if (activeLiveEngine) {
+          activeLiveEngine.draw(info.snap.mesh, w, h, curAz, curEl, info.modelScale, fixedHalfH, liveDrawOpts);
+        }
+      };
+
       let az = info.cam.az, el = info.cam.el;
-      activeLiveEngine.draw(info.snap.mesh, w, h, az, el, info.modelScale, fixedHalfH, liveDrawOpts);
+      drawLiveStep(az, el, false);
 
       let dragging = false, moved = false, pushedUndo = false, startX = 0, startY = 0, lx = 0, ly = 0;
+      let dragRaf = 0;
       liveCanvas.onpointerdown = (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -8719,7 +9007,7 @@ function bindStepPageInteractions(page) {
         liveCanvas.setPointerCapture(e.pointerId);
       };
       liveCanvas.onpointermove = (e) => {
-        if (!dragging || !activeLiveEngine) return;
+        if (!dragging || (!useStudioLive && !activeLiveEngine)) return;
         e.stopPropagation();
         const dx = e.clientX - lx;
         const dy = e.clientY - ly;
@@ -8750,12 +9038,22 @@ function bindStepPageInteractions(page) {
         const readout = document.getElementById('stepCamReadout');
         if (readout) readout.textContent = `${roundedAz}° / ${roundedEl}°`;
         syncVisibleStepRotationBadges();
-        activeLiveEngine.draw(info.snap.mesh, w, h, az, el, info.modelScale, fixedHalfH, liveDrawOpts);
+        if (useStudioLive) {
+          if (!dragRaf) {
+            dragRaf = requestAnimationFrame(() => {
+              dragRaf = 0;
+              drawLiveStep(az, el, true);
+            });
+          }
+        } else {
+          drawLiveStep(az, el, true);
+        }
       };
       const endOrbit = (e) => {
         if (!dragging) return;
         e.stopPropagation();
         dragging = false;
+        if (dragRaf) { cancelAnimationFrame(dragRaf); dragRaf = 0; }
         if (moved) {
           renderAll();
         }
@@ -9012,7 +9310,7 @@ function renderContextOverlay(page) {
   const icoOrbit = '<svg class="w-3.5 h-3.5 text-[var(--primary)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 0 1-15.5 6.3"/><path d="M3 12a9 9 0 0 1 15.5-6.3"/><polyline points="3 16 3 12 7 12"/><polyline points="21 8 21 12 17 12"/></svg>';
 
   // =========================================================================
-  // COVER & BUILD COMPLETE — CAMERA MODE (Preset Angles + Zoom)
+  // COVER & BUILD COMPLETE — CAMERA MODE (Full Orbit + Top/Bottom + Angles + Zoom)
   // =========================================================================
   if ((page.kind === 'cover' || page.kind === 'complete') && state.mode === 'camera') {
     const isCover = page.kind === 'cover';
@@ -9024,15 +9322,26 @@ function renderContextOverlay(page) {
     const clampedZoom = clampCoverZoom(meta.zoom ?? 1.0);
     const zoomPct = Math.round(clampedZoom * 100);
     const customized = isHeroCameraCustomized(meta, defaults);
+    const isBottom = meta.el < 0;
 
     box.innerHTML = `
       <div class="pointer-events-auto studio-surface rounded-xl p-3.5 w-full space-y-2.5 text-xs">
         <div class="flex items-center justify-between gap-2 flex-wrap">
-          <div class="flex items-center gap-2 min-w-0">
-            <span class="font-bold">${isCover ? 'Cover Camera' : 'Build Complete Camera'}</span>
+          <div class="flex items-center gap-2 flex-wrap min-w-0">
+            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[var(--primary-soft)] border border-[var(--primary-border)] text-[var(--foreground)] font-extrabold text-xs tracking-tight">
+              ${icoOrbit}
+              <span>Drag 3D model to orbit</span>
+            </span>
             ${renderScopeBadge('local', isCover ? 'Cover Page' : 'Build Complete')}
+            <span id="heroCamReadout" class="font-mono text-[11px] font-semibold text-[var(--muted-foreground)] tabular-nums shrink-0">${((Math.round(meta.az) % 360) + 360) % 360}° / ${Math.round(meta.el)}°</span>
           </div>
-          <span class="font-mono text-[11px] font-semibold text-[var(--muted-foreground)] tabular-nums shrink-0">${Math.round(meta.az) % 360}° / ${Math.round(meta.el)}°</span>
+          <div class="flex items-center gap-1.5 shrink-0">
+            <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">View</span>
+            <div class="inline-flex rounded-md bg-[var(--surface-sunken)] p-0.5 text-xs font-semibold gap-0.5">
+              <button type="button" id="heroCamTop" title="Look down from above" class="px-2 py-1 rounded inline-flex items-center gap-1 transition-colors cursor-pointer ${!isBottom ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'hover:bg-[var(--surface-hover)]'}">${buildCameraViewSvg('top')}<span>Top</span></button>
+              <button type="button" id="heroCamBot" title="Look up from underneath" class="px-2 py-1 rounded inline-flex items-center gap-1 transition-colors cursor-pointer ${isBottom ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'hover:bg-[var(--surface-hover)]'}">${buildCameraViewSvg('bottom')}<span>Bottom</span></button>
+            </div>
+          </div>
         </div>
         <div class="flex items-center gap-1.5 flex-wrap">
           <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)] mr-0.5">Angle</span>
@@ -9047,6 +9356,18 @@ function renderContextOverlay(page) {
         </div>
       </div>`;
 
+    box.querySelector('#heroCamTop').onclick = () => {
+      pushUndo();
+      meta.el = clampCoverElevation(meta.el < 0 ? Math.abs(meta.el) || defaults.el : (meta.el || defaults.el));
+      overviewThumbCache.bumpEpoch();
+      renderAll();
+    };
+    box.querySelector('#heroCamBot').onclick = () => {
+      pushUndo();
+      meta.el = clampCoverElevation(meta.el >= 0 ? -(Math.abs(meta.el) || 24) : meta.el);
+      overviewThumbCache.bumpEpoch();
+      renderAll();
+    };
     box.querySelectorAll('.hero-corner-btn').forEach(b => {
       b.onclick = () => {
         const cObj = CORNERS.find(c => c.id === b.getAttribute('data-hero-corner'));
@@ -9054,17 +9375,20 @@ function renderContextOverlay(page) {
         pushUndo();
         meta.az = cObj.az;
         meta.el = clampCoverElevation(meta.el);
+        overviewThumbCache.bumpEpoch();
         renderAll();
       };
     });
     box.querySelector('#heroZoomOut').onclick = () => {
       pushUndo();
       meta.zoom = clampCoverZoom((meta.zoom ?? 1.0) - 0.1);
+      overviewThumbCache.bumpEpoch();
       renderAll();
     };
     box.querySelector('#heroZoomIn').onclick = () => {
       pushUndo();
       meta.zoom = clampCoverZoom((meta.zoom ?? 1.0) + 0.1);
+      overviewThumbCache.bumpEpoch();
       renderAll();
     };
     const resetBtn = box.querySelector('#heroResetCam');
@@ -9074,6 +9398,7 @@ function renderContextOverlay(page) {
         meta.az = defaults.az;
         meta.el = defaults.el;
         meta.zoom = defaults.zoom;
+        overviewThumbCache.bumpEpoch();
         renderAll();
       };
     }
@@ -14703,7 +15028,8 @@ function scheduleSaveSessionPrefs() {
       density: state.density, layout: state.layout,
       layoutConfig: state.layoutConfig, layoutGroups: state.layoutGroups,
       detectDuplicates: state.detectDuplicates, highlightNew: state.highlightNew, highlightColor: state.highlightColor,
-      fadePrev: state.fadePrev, fadeOpacity: state.fadeOpacity, showRotCues: state.showRotCues,
+      fadePrev: state.fadePrev, fadeOpacity: state.fadeOpacity, highQualityStepRender: state.highQualityStepRender,
+      starkBlackOutlines: state.starkBlackOutlines, showRotCues: state.showRotCues,
       showSizeGuides: state.showSizeGuides, minifigStyle: state.minifigStyle, showMinifig1to1: state.showMinifig1to1, showStepBorders: state.showStepBorders,
       showPageTitle: state.showPageTitle, wordlessMode: state.wordlessMode, bomShowTextFields: state.bomShowTextFields,
       pageNumberFormat: state.pageNumberFormat,
@@ -14821,6 +15147,10 @@ async function restoreLastSessionOnStart() {
     document.getElementById('toggleHighlight').checked = state.highlightNew;
     document.getElementById('highlightColor').value = state.highlightColor;
     document.getElementById('toggleFade').checked = state.fadePrev;
+    const hqEl = document.getElementById('toggleHighQualitySteps');
+    if (hqEl) hqEl.checked = Boolean(state.highQualityStepRender);
+    const sbEl = document.getElementById('toggleStarkBlackOutlines');
+    if (sbEl) sbEl.checked = Boolean(state.starkBlackOutlines);
     document.getElementById('toggleRotCues').checked = state.showRotCues;
     document.getElementById('toggleSizeGuides').checked = state.showSizeGuides;
     const mf1El = document.getElementById('toggleMinifig1to1');
@@ -16144,11 +16474,14 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
           isFeatured: Boolean(rect.isFeatured),
           isCompact: Boolean(rect.isCompact),
           mode: 'pdf',
-          gpuMaxDim: snapshotEngine.maxDim,
+          gpuMaxDim: state.highQualityStepRender ? getCoverHeroGpuMaxDim() : snapshotEngine.maxDim,
         });
         const snap = renderSnapshot(prev, step.parts, cam.az, cam.el, pdfStepDims.width, pdfStepDims.height, modelScale, {
           highlightNew: state.highlightNew, highlightColor: state.highlightColor,
           fadePrev: state.fadePrev, fadeOpacity: state.fadeOpacity,
+          highQualityStepRender: state.highQualityStepRender,
+          starkBlackOutlines: state.starkBlackOutlines,
+          darkBackground: isDarkHexColor(toHexColor(theme.bgColor || '#ffffff', '#ffffff')),
           showArrows: true, accent: theme.accent, ov, partOffsets: effectivePartOffsets,
           ...(mfPrep ? {
             minifigIndicators: mfPrep.indicators || [],
@@ -16651,6 +16984,8 @@ function syncStylePanel() {
   const setChk = (id, val) => { const el = document.getElementById(id); if (el) el.checked = Boolean(val); };
   setChk('toggleHighlight', opts.highlightNew);
   setChk('toggleFade', opts.fadePrev);
+  setChk('toggleHighQualitySteps', opts.highQualityStepRender);
+  setChk('toggleStarkBlackOutlines', opts.starkBlackOutlines);
   setChk('toggleRotCues', opts.showRotCues);
   setChk('toggleSizeGuides', opts.showSizeGuides);
   setChk('toggleMinifig1to1', opts.showMinifig1to1);
@@ -16904,7 +17239,20 @@ function rotateActiveCameraByStep(dir) {
 function flipActiveCameraSide() {
   if (!state.model) return;
   const pg = state.pages[state.pageIdx];
-  if (!pg || pg.kind !== 'steps') return;
+  if (!pg) return;
+  if (pg.kind === 'cover' || pg.kind === 'complete') {
+    const isCover = pg.kind === 'cover';
+    if (isCover) state.coverMeta = normalizeCoverMeta(state.coverMeta, !state.wordlessMode);
+    else state.completeMeta = normalizeCompleteMeta(state.completeMeta);
+    const meta = isCover ? state.coverMeta : state.completeMeta;
+    const defaults = isCover ? createDefaultCoverMeta() : createDefaultCompleteMeta();
+    pushUndo();
+    meta.el = clampCoverElevation(meta.el < 0 ? (Math.abs(meta.el) || defaults.el) : -(Math.abs(meta.el) || 24));
+    overviewThumbCache.bumpEpoch();
+    renderAll();
+    return;
+  }
+  if (pg.kind !== 'steps') return;
   const active = getActiveStepObj();
   if (!active) return;
   const { step } = active;
@@ -18259,6 +18607,17 @@ for (const [btnId, kind] of [
 document.getElementById('toggleHighlight').onchange = (e) => patchActiveTheme({ highlightNew: e.target.checked });
 document.getElementById('highlightColor').oninput = (e) => patchActiveTheme({ highlightColor: e.target.value });
 document.getElementById('toggleFade').onchange = (e) => patchActiveTheme({ fadePrev: e.target.checked });
+const hqStepsToggleEl = document.getElementById('toggleHighQualitySteps');
+if (hqStepsToggleEl) hqStepsToggleEl.onchange = (e) => {
+  overviewThumbCache.bumpEpoch();
+  patchActiveTheme({ highQualityStepRender: e.target.checked });
+};
+const starkBlackToggleEl = document.getElementById('toggleStarkBlackOutlines');
+if (starkBlackToggleEl) starkBlackToggleEl.onchange = (e) => {
+  pliThumbCache.clear();
+  overviewThumbCache.bumpEpoch();
+  patchActiveTheme({ starkBlackOutlines: e.target.checked });
+};
 document.getElementById('toggleRotCues').onchange = (e) => patchActiveTheme({ showRotCues: e.target.checked });
 document.getElementById('toggleSizeGuides').onchange = (e) => patchActiveTheme({ showSizeGuides: e.target.checked });
 const mf1to1ToggleEl = document.getElementById('toggleMinifig1to1');

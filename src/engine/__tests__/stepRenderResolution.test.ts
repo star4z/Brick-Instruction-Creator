@@ -14,14 +14,14 @@ import {
 } from '../stepRenderResolution';
 
 describe('stepRenderResolution', () => {
-  it('supersamples previews at >= 2x on 1x displays, supports 3x Retina, and boosts on zoom', () => {
-    expect(computePreviewResolutionScale(1, 1)).toBeGreaterThanOrEqual(2);
-    expect(computePreviewResolutionScale(2, 1)).toBe(2);
-    expect(computePreviewResolutionScale(3, 1)).toBe(3);
+  it('supersamples previews at >= 2.25x on 1x displays, supports 3x Retina, and boosts on zoom', () => {
+    expect(computePreviewResolutionScale(1, 1)).toBeGreaterThanOrEqual(2.25);
+    expect(computePreviewResolutionScale(2, 1)).toBeGreaterThanOrEqual(2.25);
+    expect(computePreviewResolutionScale(3, 1)).toBeGreaterThanOrEqual(3);
 
     const zoomed = computePreviewResolutionScale(2, 2.0);
     expect(zoomed).toBeGreaterThan(computePreviewResolutionScale(2, 1));
-    expect(zoomed).toBeLessThanOrEqual(4.5);
+    expect(zoomed).toBeLessThanOrEqual(5.0);
   });
 
   it('produces significantly higher resolution for 1-up, 2-up, and 4-up step slots than legacy bounds', () => {
@@ -33,8 +33,8 @@ describe('stepRenderResolution', () => {
       dpr: 1,
       zoom: 1,
     });
-    expect(oneUp.width).toBeGreaterThanOrEqual(1600);
-    expect(oneUp.height).toBeGreaterThanOrEqual(1050);
+    expect(oneUp.width).toBeGreaterThanOrEqual(2400);
+    expect(oneUp.height).toBeGreaterThanOrEqual(1500);
 
     const twoUp = computeStepSlotRenderSize({
       slotWidth: 480,
@@ -43,8 +43,8 @@ describe('stepRenderResolution', () => {
       dpr: 2,
       zoom: 1,
     });
-    expect(twoUp.width).toBeGreaterThanOrEqual(1050);
-    expect(twoUp.height).toBeGreaterThanOrEqual(1150);
+    expect(twoUp.width).toBeGreaterThanOrEqual(1550);
+    expect(twoUp.height).toBeGreaterThanOrEqual(1700);
 
     const fourUp = computeStepSlotRenderSize({
       slotWidth: 460,
@@ -54,9 +54,9 @@ describe('stepRenderResolution', () => {
       dpr: 1,
       zoom: 1,
     });
-    expect(fourUp.width).toBeGreaterThanOrEqual(1050);
-    expect(fourUp.height).toBeGreaterThanOrEqual(600);
-    expect(fourUp.width * fourUp.height).toBeGreaterThanOrEqual(650_000);
+    expect(fourUp.width).toBeGreaterThanOrEqual(1450);
+    expect(fourUp.height).toBeGreaterThanOrEqual(900);
+    expect(fourUp.width * fourUp.height).toBeGreaterThanOrEqual(1_400_000);
   });
 
   it('adapts render aspect ratio to portrait and landscape slots without clipping or extreme distortion', () => {

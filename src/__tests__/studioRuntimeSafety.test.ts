@@ -219,18 +219,37 @@ describe('studioRuntime safety checks', () => {
     expect(runtime).toContain('getPageBreakHelpExplanation(');
   });
 
-  it('wires scope-based editor cards and 3-tier scope badges without Cover/Complete drag-to-orbit', () => {
+  it('wires scope-based editor cards, 3-tier scope badges, and full Cover/Complete + Step drag-to-orbit camera controls', () => {
     const runtimePath = path.resolve(process.cwd(), 'src/studioRuntime.ts');
     const sourceText = fs.readFileSync(runtimePath, 'utf8');
 
     expect(sourceText).toContain('function renderScopeBadge(');
     expect(sourceText).toContain('resolveModeForPage(');
-    expect(sourceText).not.toContain('bindHeroCameraOrbit');
-    expect(sourceText).not.toContain('liveHeroOrbitCanvas');
-    expect(sourceText).not.toContain('heroOrbitContainer');
-    expect(sourceText.match(/Drag 3D model to orbit/g)?.length).toBe(1);
+    expect(sourceText).toContain('function bindHeroCameraInteractions(');
+    expect(sourceText).toContain('id="liveHeroCanvas"');
+    expect(sourceText).toContain('id="heroCamTop"');
+    expect(sourceText).toContain('id="heroCamBot"');
+    expect(sourceText.match(/Drag 3D model to orbit/g)?.length).toBe(2);
     expect(sourceText).not.toContain('openStepEditModal');
     expect(sourceText).not.toContain('closeStepEditModal');
+  });
+
+  it('wires Studio High-Quality Step Render and Stark Black Outlines toggles inside Styles -> Step Display', () => {
+    const html = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf8');
+    const runtime = fs.readFileSync(path.resolve(process.cwd(), 'src/studioRuntime.ts'), 'utf8');
+
+    const popStart = html.indexOf('id="stylePopover"');
+    const popEnd = html.indexOf('id="overviewModal"');
+    expect(popStart).toBeGreaterThan(-1);
+    expect(popEnd).toBeGreaterThan(popStart);
+    const popChunk = html.slice(popStart, popEnd);
+    expect(popChunk).toContain('id="toggleHighQualitySteps"');
+    expect(popChunk).toContain('id="toggleStarkBlackOutlines"');
+
+    expect(runtime).toContain("getElementById('toggleHighQualitySteps')");
+    expect(runtime).toContain("getElementById('toggleStarkBlackOutlines')");
+    expect(runtime).toContain('function renderStepWithStudioPhoto(');
+    expect(runtime).toContain('starkBlackOutlines');
   });
 
   it('keeps the Parts List live layout preview pinned above the scroll pane with valid paper preview dimensions', () => {

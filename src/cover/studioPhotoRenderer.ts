@@ -58,6 +58,20 @@ export interface StudioRenderOptions {
   zoom?: number;
   darkBackground?: boolean;
   fovYDeg?: number;
+  /** Projection mode: telephoto 'perspective' (default for cover/complete) or 'ortho' (exact step framing). */
+  projection?: 'perspective' | 'ortho';
+  /** Optional orthographic half-height override (matching WebGLBrickEngine.computeMVP). */
+  fixedHalfH?: number;
+  /** Optional orthographic focus center override. */
+  fixedCenter?: [number, number, number];
+  panX?: number;
+  panY?: number;
+  /** Whether to draw the 3D studio shadow-catcher floor (defaults to true for perspective top views, false for ortho/underside). */
+  showFloor?: boolean;
+  /** Line/outline opacity (defaults to 0.16 for subtle cover seams; pass 1.0 for crisp step outlines). */
+  lineAlpha?: number;
+  /** When true, draws multi-tap screen-space thickened outlines (e.g. LEGO-style stark black outlines & studs). */
+  boldLines?: boolean;
   getTextureImage?: (texKey: string) => TexImageSource | null;
 }
 
@@ -233,6 +247,64 @@ export function computeStudioTelephotoCamera(
 }
 
 /**
+ * Computes an orthographic camera matching WebGLBrickEngine.computeMVP 1:1 so
+ * high-quality Studio PBR step renders align identically with standard step renders,
+ * zoom/focus framing, and 2D part-picking coordinates.
+ */
+export function computeStudioOrthoCamera(
+  center: [number, number, number],
+  radius: number,
+  fullRadius: number,
+  azDeg: number,
+  elDeg: number,
+  width: number,
+  height: number,
+  zoom = 1.0,
+  fixedHalfH = 0,
+  fixedCenter?: [number, number, number],
+  panX = 0,
+  panY = 0,
+): StudioCameraResult {
+  const az = (azDeg * Math.PI) / 180;
+  const el = (elDeg * Math.PI) / 180;
+  const target: [number, number, number] = fixedCenter ?? center;
+  const clipRadius = Math.max(fullRadius || radius, radius, fixedHalfH > 0 ? fixedHalfH * 1.35 : 0, 12);
+  const dist = clipRadius * 2.5;
+  const eye: [number, number, number] = [
+    target[0] + dist * Math.sin(az) * Math.cos(el),
+    target[1] + dist * Math.sin(el),
+    target[2] + dist * Math.cos(az) * Math.cos(el),
+  ];
+  const near = Math.max(1, dist - clipRadius * 2.4);
+  const far = dist + clipRadius * 2.4;
+  const view = lookAtMat4(eye, target, [0, 1, 0]);
+
+  const aspect = width / Math.max(1, height);
+  const safeZoom = Math.max(0.4, zoom);
+  let halfH = fixedHalfH > 0
+    ? (fixedCenter ? fixedHalfH / safeZoom : fixedHalfH)
+    : ((radius * 1.12) / safeZoom);
+  if (fixedHalfH <= 0 && aspect < 1) {
+    halfH = halfH / Math.max(0.5, aspect);
+  }
+  const halfW = halfH * aspect;
+  const pxX = panX * halfW * safeZoom;
+  const pxY = panY * halfH * safeZoom;
+  const proj = orthoMat4(-halfW - pxX, halfW - pxX, -halfH + pxY, halfH + pxY, near, far);
+  const mvp = mulMat4(proj, view);
+
+  // Place shading eye far along view ray so orthographic Fresnel & specular match parallel view rays
+  const { forward } = computeCameraBasis(azDeg, elDeg);
+  const shadeEyeDist = clipRadius * 12;
+  const shadeEye: [number, number, number] = [
+    target[0] + forward[0] * shadeEyeDist,
+    target[1] + forward[1] * shadeEyeDist,
+    target[2] + forward[2] * shadeEyeDist,
+  ];
+  return { view, proj, mvp, eye: shadeEye, target, near, far, fovYDeg: 0 };
+}
+
+/**
  * Computes an orthographic shadow-map light matrix tightly framing the model bounding sphere.
  */
 export function computeLightOrthoMVP(
@@ -385,6 +457,7 @@ uniform sampler2D uFillMap;
 uniform sampler2D uOverMap;
 uniform sampler2D uDecalMap;
 uniform float uUseDecal;
+uniform float uFadeMix;
 uniform vec2 uKeyTexel;
 uniform vec2 uFillTexel;
 uniform vec2 uOverTexel;
@@ -479,7 +552,8 @@ void main() {
   vec3 srgbBase = vCol.rgb;
   if (uUseDecal > 0.5 && vUv.x >= 0.0 && vUv.x <= 1.0 && vUv.y >= 0.0 && vUv.y <= 1.0) {
     vec4 decal = texture2D(uDecalMap, vUv);
-    srgbBase = mix(srgbBase, decal.rgb, decal.a);
+    vec3 decalRgb = mix(decal.rgb, vec3(0.855, 0.871, 0.894), uFadeMix);
+    srgbBase = mix(srgbBase, decalRgb, decal.a);
   }
   // sRGB -> Linear albedo (with slight photographic saturation fidelity)
   vec3 albedo = pow(clamp(srgbBase, 0.0, 1.0), vec3(2.2));
@@ -679,10 +753,12 @@ const VS_SEAM = `
 attribute vec3 aPos;
 attribute vec4 aCol;
 uniform mat4 uMVP;
+uniform vec2 uLineOffset;
 varying vec4 vCol;
 void main() {
   gl_Position = uMVP * vec4(aPos, 1.0);
-  gl_Position.z -= 0.00018;
+  gl_Position.xy += uLineOffset * gl_Position.w;
+  gl_Position.z -= 0.00024 * gl_Position.w;
   vCol = aCol;
 }
 `;
@@ -880,6 +956,7 @@ export class StudioPhotoRenderer {
   private viewDepthFbo: FboTarget | null = null;
 
   private uploadedMesh: StudioMeshData | null = null;
+  private lastMvp: Float32Array | null = null;
   private maxDim = 2048;
   private anisoExt: EXT_texture_filter_anisotropic | null = null;
   private maxAniso = 1;
@@ -1060,6 +1137,10 @@ export class StudioPhotoRenderer {
     gl.disable(gl.POLYGON_OFFSET_FILL);
   }
 
+  getLastMvp(): Float32Array | null {
+    return this.lastMvp;
+  }
+
   renderToCanvas(mesh: StudioMeshData, options: StudioRenderOptions): HTMLCanvasElement | null {
     const gl = this.gl;
     const hasTexDraws = Boolean(mesh.texDraws && mesh.texDraws.length > 0);
@@ -1074,22 +1155,44 @@ export class StudioPhotoRenderer {
 
     this.uploadMesh(mesh);
 
-    const cam = computeStudioTelephotoCamera(
-      mesh.triPos.length >= 9 ? mesh.triPos : mesh.texDraws![0].triPos,
-      mesh.center,
-      options.azDeg,
-      options.elDeg,
-      w,
-      h,
-      options.zoom ?? 1.0,
-      options.fovYDeg ?? 18.5,
-    );
+    const isOrtho = options.projection === 'ortho';
+    const cam = isOrtho
+      ? computeStudioOrthoCamera(
+          mesh.center,
+          mesh.radius,
+          mesh.fullRadius,
+          options.azDeg,
+          options.elDeg,
+          w,
+          h,
+          options.zoom ?? 1.0,
+          options.fixedHalfH ?? 0,
+          options.fixedCenter,
+          options.panX ?? 0,
+          options.panY ?? 0,
+        )
+      : computeStudioTelephotoCamera(
+          mesh.triPos.length >= 9 ? mesh.triPos : mesh.texDraws![0].triPos,
+          mesh.center,
+          options.azDeg,
+          options.elDeg,
+          w,
+          h,
+          options.zoom ?? 1.0,
+          options.fovYDeg ?? 18.5,
+        );
+    this.lastMvp = cam.mvp;
 
     const lights = computeStudioLightDirs(options.azDeg);
     const modelRadius = Math.max(mesh.fullRadius || mesh.radius, 20);
-    const keyMvp = computeLightOrthoMVP(mesh.center, modelRadius, lights.key, 1.32);
-    const fillMvp = computeLightOrthoMVP(mesh.center, modelRadius, lights.fill, 1.36);
-    const overMvp = computeLightOrthoMVP(mesh.center, modelRadius, lights.overhead, 1.4);
+    const shadowCenter: [number, number, number] = [
+      (mesh.bounds.minX + mesh.bounds.maxX) * 0.5,
+      (mesh.bounds.minY + mesh.bounds.maxY) * 0.5,
+      (mesh.bounds.minZ + mesh.bounds.maxZ) * 0.5,
+    ];
+    const keyMvp = computeLightOrthoMVP(shadowCenter, modelRadius, lights.key, 1.32);
+    const fillMvp = computeLightOrthoMVP(shadowCenter, modelRadius, lights.fill, 1.36);
+    const overMvp = computeLightOrthoMVP(shadowCenter, modelRadius, lights.overhead, 1.4);
 
     // 1. Render 3 Softbox Shadow Maps
     this.renderShadowMap(this.keyFbo!, mesh, keyMvp);
@@ -1148,23 +1251,24 @@ export class StudioPhotoRenderer {
     gl.activeTexture(gl.TEXTURE2);
     gl.bindTexture(gl.TEXTURE_2D, this.overFbo!.tex);
 
-    // 3a. 3D Shadow-Catcher Studio Floor Plane at y = minY - 0.12
-    const floorY = mesh.bounds.minY - 0.12;
-    const floorSpan = Math.max(modelRadius * 2.8, 120);
-    const fx = (mesh.bounds.minX + mesh.bounds.maxX) * 0.5;
-    const fz = (mesh.bounds.minZ + mesh.bounds.maxZ) * 0.5;
-    const floorVerts = new Float32Array([
-      fx - floorSpan, floorY, fz - floorSpan,
-      fx + floorSpan, floorY, fz - floorSpan,
-      fx + floorSpan, floorY, fz + floorSpan,
-      fx - floorSpan, floorY, fz - floorSpan,
-      fx + floorSpan, floorY, fz + floorSpan,
-      fx - floorSpan, floorY, fz + floorSpan,
-    ]);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.bFloorPos);
-    gl.bufferData(gl.ARRAY_BUFFER, floorVerts, gl.DYNAMIC_DRAW);
+    // 3a. 3D Shadow-Catcher Studio Floor Plane (hidden in ortho step mode and when orbiting underneath)
+    const showFloor = options.showFloor ?? (!isOrtho && options.elDeg >= 2);
+    if (showFloor) {
+      const floorY = mesh.bounds.minY - 0.12;
+      const floorSpan = Math.max(modelRadius * 2.8, 120);
+      const fx = (mesh.bounds.minX + mesh.bounds.maxX) * 0.5;
+      const fz = (mesh.bounds.minZ + mesh.bounds.maxZ) * 0.5;
+      const floorVerts = new Float32Array([
+        fx - floorSpan, floorY, fz - floorSpan,
+        fx + floorSpan, floorY, fz - floorSpan,
+        fx + floorSpan, floorY, fz + floorSpan,
+        fx - floorSpan, floorY, fz - floorSpan,
+        fx + floorSpan, floorY, fz + floorSpan,
+        fx - floorSpan, floorY, fz + floorSpan,
+      ]);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.bFloorPos);
+      gl.bufferData(gl.ARRAY_BUFFER, floorVerts, gl.DYNAMIC_DRAW);
 
-    {
       const prog = this.floorProg!;
       gl.useProgram(prog);
       gl.depthMask(false);
@@ -1210,6 +1314,7 @@ export class StudioPhotoRenderer {
       gl.uniform1i(gl.getUniformLocation(prog, 'uOverMap'), 2);
       gl.uniform1i(gl.getUniformLocation(prog, 'uDecalMap'), 3);
       gl.uniform1f(gl.getUniformLocation(prog, 'uUseDecal'), 0.0);
+      gl.uniform1f(gl.getUniformLocation(prog, 'uFadeMix'), 0.0);
       gl.uniform2f(gl.getUniformLocation(prog, 'uKeyTexel'), 1 / this.keyFbo!.w, 1 / this.keyFbo!.h);
       gl.uniform2f(gl.getUniformLocation(prog, 'uFillTexel'), 1 / this.fillFbo!.w, 1 / this.fillFbo!.h);
       gl.uniform2f(gl.getUniformLocation(prog, 'uOverTexel'), 1 / this.overFbo!.w, 1 / this.overFbo!.h);
@@ -1243,6 +1348,7 @@ export class StudioPhotoRenderer {
       if (mesh.texDraws && mesh.texDraws.length > 0) {
         gl.polygonOffset(0.5, 0.5);
         const useDecalLoc = gl.getUniformLocation(prog, 'uUseDecal');
+        const fadeMixLoc = gl.getUniformLocation(prog, 'uFadeMix');
         if (uvLoc >= 0) gl.enableVertexAttribArray(uvLoc);
         for (const td of mesh.texDraws) {
           if (td.triPos.length < 9) continue;
@@ -1250,6 +1356,7 @@ export class StudioPhotoRenderer {
           gl.activeTexture(gl.TEXTURE3);
           gl.bindTexture(gl.TEXTURE_2D, glTex ?? this.emptyTex);
           gl.uniform1f(useDecalLoc, glTex ? 1.0 : 0.0);
+          gl.uniform1f(fadeMixLoc, td.fadeMix ?? 0.0);
 
           gl.bindBuffer(gl.ARRAY_BUFFER, this.bDecalPos);
           gl.bufferData(gl.ARRAY_BUFFER, td.triPos, gl.DYNAMIC_DRAW);
@@ -1272,6 +1379,7 @@ export class StudioPhotoRenderer {
           gl.drawArrays(gl.TRIANGLES, 0, td.triPos.length / 3);
         }
         gl.uniform1f(useDecalLoc, 0.0);
+        gl.uniform1f(fadeMixLoc, 0.0);
         if (uvLoc >= 0) {
           gl.disableVertexAttribArray(uvLoc);
           gl.vertexAttrib2f(uvLoc, 0, 0);
@@ -1294,12 +1402,14 @@ export class StudioPhotoRenderer {
       gl.disable(gl.POLYGON_OFFSET_FILL);
     }
 
-    // 3c. Ultra-subtle seam lines (only 0.16 alpha so flat LDraw parts retain delicate brick parting lines)
-    if (mesh.linePos.length > 0) {
+    // 3c. Seam & outline lines (0.16 subtle seams on cover, or 1.0 crisp / multi-tap bold outlines on steps)
+    const lineAlpha = typeof options.lineAlpha === 'number' ? options.lineAlpha : 0.16;
+    if (mesh.linePos.length > 0 && lineAlpha > 0.01) {
       const prog = this.seamProg!;
       gl.useProgram(prog);
       gl.uniformMatrix4fv(gl.getUniformLocation(prog, 'uMVP'), false, cam.mvp);
-      gl.uniform1f(gl.getUniformLocation(prog, 'uAlpha'), 0.16);
+      gl.uniform1f(gl.getUniformLocation(prog, 'uAlpha'), lineAlpha);
+      const ofsLoc = gl.getUniformLocation(prog, 'uLineOffset');
       const pLoc = gl.getAttribLocation(prog, 'aPos');
       const cLoc = gl.getAttribLocation(prog, 'aCol');
       gl.bindBuffer(gl.ARRAY_BUFFER, this.bLinePos);
@@ -1308,7 +1418,20 @@ export class StudioPhotoRenderer {
       gl.bindBuffer(gl.ARRAY_BUFFER, this.bLineCol);
       gl.enableVertexAttribArray(cLoc);
       gl.vertexAttribPointer(cLoc, 4, gl.UNSIGNED_BYTE, true, 0, 0);
-      gl.drawArrays(gl.LINES, 0, mesh.linePos.length / 3);
+      const vertCount = mesh.linePos.length / 3;
+      if (options.boldLines) {
+        const stepPx = Math.max(0.65, Math.min(1.4, w / 1600));
+        const ox = (2 * stepPx) / w;
+        const oy = (2 * stepPx) / h;
+        const taps: Array<[number, number]> = [[0, 0], [ox, 0], [0, oy], [-ox, 0]];
+        for (const [tx, ty] of taps) {
+          gl.uniform2f(ofsLoc, tx, ty);
+          gl.drawArrays(gl.LINES, 0, vertCount);
+        }
+      } else {
+        gl.uniform2f(ofsLoc, 0, 0);
+        gl.drawArrays(gl.LINES, 0, vertCount);
+      }
     }
 
     // 4. Final Fullscreen SSAO Crevice Occlusion Composite Pass -> Default Canvas
@@ -1341,13 +1464,14 @@ export class StudioPhotoRenderer {
     return this.canvas;
   }
 
-  render(mesh: StudioMeshData, options: StudioRenderOptions): { url: string; width: number; height: number } | null {
+  render(mesh: StudioMeshData, options: StudioRenderOptions): { url: string; width: number; height: number; mvp: Float32Array | null } | null {
     const canvas = this.renderToCanvas(mesh, options);
     if (!canvas) return null;
     return {
       url: canvas.toDataURL('image/png'),
       width: canvas.width,
       height: canvas.height,
+      mvp: this.lastMvp,
     };
   }
 
