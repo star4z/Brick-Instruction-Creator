@@ -9,9 +9,9 @@ export const DEFAULT_PDF_MAX_EDGE = 3840;
 export const DEFAULT_PDF_MAX_PIXELS = 11_000_000;
 export const DEFAULT_GPU_MAX_DIM = 4096;
 
-export const STEP_PDF_PT_SCALE = 3.472; // ~250 DPI (72 pt/in * 3.472) for razor-sharp printed step pages
+export const STEP_PDF_PT_SCALE = 4.167; // 300 DPI (72 pt/in * 4.167 = 300 px/in) for print-quality step pages
 export const COVER_PDF_PT_SCALE = 4.167; // 300 DPI (72 pt/in * 4.167 = 300 px/in) for print-quality covers
-export const STEP_PDF_MAX_EDGE = 3400;
+export const STEP_PDF_MAX_EDGE = 3600;
 export const COVER_PDF_MAX_EDGE = 3600;
 export const COVER_HERO_MAX_EDGE = 3840; // True 4K / 300 DPI print cover hero ceiling
 export const COVER_HERO_MAX_PIXELS = 11_000_000;
@@ -211,7 +211,7 @@ export function computePdfPagePixelDimensions(
   const isHero = pageKind === 'cover' || pageKind === 'complete';
   const scale = isHero ? COVER_PDF_PT_SCALE : STEP_PDF_PT_SCALE;
   const maxEdge = isHero ? COVER_PDF_MAX_EDGE : STEP_PDF_MAX_EDGE;
-  const maxPixels = isHero ? COVER_HERO_MAX_PIXELS : 9_200_000;
+  const maxPixels = COVER_HERO_MAX_PIXELS;
   return clampRenderDimensions(safeW * scale, safeH * scale, maxEdge, maxPixels, 360);
 }
 

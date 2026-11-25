@@ -115,13 +115,13 @@ describe('stepRenderResolution', () => {
     expect(Math.max(gpuCapped.width, gpuCapped.height)).toBeLessThanOrEqual(1536);
   });
 
-  it('produces print-ready high-DPI PDF page & supersampled step model sizes', () => {
-    // US Letter Landscape: 792 x 612 pt -> ~180 DPI (~1980 x 1530)
+  it('produces print-ready 300 DPI PDF page & supersampled step model sizes', () => {
+    // US Letter Landscape: 792 x 612 pt -> 300 DPI (3300 x 2550)
     const letterStepPage = computePdfPagePixelDimensions(792, 612, 'steps');
-    expect(letterStepPage.width).toBeGreaterThanOrEqual(1900);
-    expect(letterStepPage.height).toBeGreaterThanOrEqual(1480);
+    expect(letterStepPage.width).toBeGreaterThanOrEqual(3290);
+    expect(letterStepPage.height).toBeGreaterThanOrEqual(2540);
 
-    // Cover remains ultra-sharp
+    // Cover remains ultra-sharp 300 DPI
     const letterCover = computePdfPagePixelDimensions(792, 612, 'cover');
     expect(letterCover.width).toBeGreaterThanOrEqual(letterStepPage.width);
 

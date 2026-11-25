@@ -17,7 +17,7 @@ Models rendered on instruction step pages (both on-screen in the Studio editor a
   - Scales Exploded Stack and Sequential Step-by-Step minifigure diagrams up to `3600px` on screen and `3840px` in PDF export.
   - Inside `renderMinifigExplodedDiagram` and `renderMinifigSequentialStage`, each sub-render is supersampled `1.65×`–`2.0×` before high-quality downsampling (`imageSmoothingQuality = 'high'`).
 - **`computePdfPagePixelDimensions(pageWpt, pageHpt, pageKind)`**:
-  - Renders PDF step/BOM/divider pages at **`3.472×` points (~250 DPI)** (capped at `3400px` long edge, `9.2M` px budget) and Cover/Build Complete pages at **`4.167×` points (300 DPI)**.
+  - Renders all PDF pages (step, BOM, divider, Cover, and Build Complete) at **`4.167×` points (300 DPI)** (capped at `3600px` long edge, `11M` px budget — e.g., full `3300 × 2550` for US Letter and `3508 × 2480` for A4).
   - Renders each PDF step model at `1.75×` supersampling over its drawn slot rectangle, downsampled onto the PDF canvas with `imageSmoothingQuality = 'high'`.
 
 ### 2. Zoom-Aware In-Place Sharpening
