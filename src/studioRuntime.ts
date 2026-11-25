@@ -15,6 +15,17 @@ import {
   getWizardSubpageVisibility,
 } from './engine/importWizard';
 import {
+  createDefaultAppSettings,
+  formatPhysicalDimensionsForUnit,
+  loadAppSettings,
+  normalizeAppSettings,
+  resolveImportStartDefaults,
+  resolveInitialDesktopSideMenuExpanded,
+  saveAppSettings,
+  shouldOpenImportWizard,
+  summarizeAppSettings,
+} from './engine/appSettings';
+import {
   STUD_INNER_COLOR_FLAG,
   STUD_SIDE_COLOR_FLAG,
   compileDatEntry as compileLDrawDatEntry,
@@ -7202,6 +7213,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
 // =========================================================================
 // 4. APPLICATION STATE, UNDO/REDO STACK & PAGINATION
 // =========================================================================
+let appSettings = loadAppSettings();
 const initialWordlessDefaults = getWordlessSurfaceDefaults(DEFAULT_WORDLESS_MODE);
 const state = {
   model: null,
@@ -7210,7 +7222,7 @@ const state = {
   orientation: 'landscape',// landscape | portrait
   customWidth: 10,         // stored in customUnit
   customHeight: 8,
-  customUnit: 'in',        // 'in' | 'cm'
+  customUnit: appSettings.measurementUnit, // 'in' | 'cm'
   density: 'balanced',     // compact | balanced | spacious
   layout: 'auto',          // legacy mirror ('auto' | '1-up' | '2-up' | '4-up' | 'custom')
   layoutConfig: createDefaultPageLayoutSpec(),
@@ -7291,7 +7303,10 @@ const shortcutUiState = {
   validationMsg: null,
 };
 
-let sideMenuState = createInitialSideMenuState();
+let sideMenuState = {
+  ...createInitialSideMenuState(),
+  desktopExpanded: resolveInitialDesktopSideMenuExpanded(appSettings),
+};
 function getSideMenuLayout() {
   const diags = Array.isArray(state.diagnostics) ? state.diagnostics : [];
   const seen = state.seenDiagnosticKeys instanceof Set ? state.seenDiagnosticKeys : new Set();
@@ -8415,8 +8430,7 @@ function getActivePagePhysicalInches() {
 }
 
 function formatPhysicalDims(wIn, hIn) {
-  const wCm = wIn * 2.54, hCm = hIn * 2.54;
-  return `${wIn.toFixed(1)} × ${hIn.toFixed(1)} in · ${wCm.toFixed(1)} × ${hCm.toFixed(1)} cm`;
+  return formatPhysicalDimensionsForUnit(wIn, hIn, appSettings.measurementUnit);
 }
 
 function computePageFrameDimensions() {
@@ -12421,6 +12435,10 @@ function syncMenuControls() {
     stepGenSum.textContent = plan?.sections?.length
       ? `${plan.sections.length} Sections`
       : (state.detectDuplicates ? 'Auto · Dupes On' : 'Single Build');
+  }
+  const settingsSum = document.getElementById('menuSettingsSummary');
+  if (settingsSum) {
+    settingsSum.textContent = summarizeAppSettings(appSettings);
   }
 
   const isPageSetupWizard = importWizardState.active && importWizardState.subpage === 'pageSetup';
@@ -18824,12 +18842,20 @@ function applySideMenuTransition(nextState, { animate = true } = {}) {
 
 function openMenu() {
   applySideMenuTransition(openSideMenuState(sideMenuState, window.innerWidth), { animate: true });
+  if (appSettings.lastDesktopSideMenuExpanded !== sideMenuState.desktopExpanded) {
+    appSettings = { ...appSettings, lastDesktopSideMenuExpanded: sideMenuState.desktopExpanded };
+    saveAppSettings(appSettings);
+  }
 }
 function closeMenu() {
   applySideMenuTransition(closeSideMenuOverlayState(sideMenuState, window.innerWidth), { animate: false });
 }
 function toggleMenu() {
   applySideMenuTransition(toggleSideMenuState(sideMenuState, window.innerWidth), { animate: true });
+  if (appSettings.lastDesktopSideMenuExpanded !== sideMenuState.desktopExpanded) {
+    appSettings = { ...appSettings, lastDesktopSideMenuExpanded: sideMenuState.desktopExpanded };
+    saveAppSettings(appSettings);
+  }
 }
 
 document.getElementById('btnOpenMenu').onclick = toggleMenu;
@@ -20011,6 +20037,7 @@ function getActiveShortcutBlockingSurface() {
     return Boolean(el && !el.classList.contains('hidden'));
   };
   if (isConfirmActionDialogOpen()) return 'confirmAction';
+  if (isOpen('settingsModal')) return 'shortcuts';
   if (isShortcutsModalOpen()) return 'shortcuts';
   if (isBricksLibraryModalOpen()) return 'bricksLibrary';
   if (isOpen('applyAngleModal')) return 'applyAngle';
@@ -20035,6 +20062,10 @@ function handleGlobalEscapeKey() {
   };
   if (isConfirmActionDialogOpen()) {
     closeConfirmActionDialog(false);
+    return true;
+  }
+  if (isOpen('settingsModal')) {
+    closeSettingsModal();
     return true;
   }
   if (shortcutUiState.recordingActionId || shortcutUiState.pendingConflict) {
@@ -23042,12 +23073,63 @@ function openPageSetupFromImportWizard(section = 'format') {
   });
 }
 
+function captureCurrentProjectAsImportDefaults() {
+  const lc = normalizePageLayoutSpec(state.layoutConfig);
+  return {
+    themeId: state.themeId,
+    paperFormat: state.paperFormat,
+    orientation: state.orientation === 'portrait' ? 'portrait' : 'landscape',
+    density: state.density || 'balanced',
+    cols: lc.cols,
+    rows: lc.rows,
+    wordlessMode: Boolean(state.wordlessMode),
+    showCover: Boolean(state.showCover),
+    showBuildComplete: Boolean(state.showBuildComplete),
+    showPartsList: Boolean(state.showPartsList),
+    showBackCover: Boolean(state.showBackCover),
+  };
+}
+
+function applyResolvedImportDefaults(lastUsedSnapshot) {
+  const availableThemeIds = getAllThemes(customThemes).map((t) => t.id);
+  const resolved = resolveImportStartDefaults({
+    settings: appSettings,
+    lastUsed: lastUsedSnapshot,
+    availableThemeIds,
+  });
+  state.themeId = resolved.themeId;
+  applyActiveThemeStyleToState();
+  state.paperFormat = resolved.paperFormat;
+  state.orientation = resolved.orientation;
+  state.density = resolved.density;
+  state.customUnit = appSettings.measurementUnit;
+  state.layoutConfig = normalizePageLayoutSpec({
+    ...createDefaultPageLayoutSpec(),
+    cols: resolved.cols,
+    rows: resolved.rows,
+  });
+  state.detectDuplicates = getFreshImportWizardDefaults().detectDuplicates;
+  state.showCover = resolved.showCover;
+  state.showBuildComplete = resolved.showBuildComplete;
+  state.showPartsList = resolved.showPartsList;
+  state.showBackCover = resolved.showBackCover;
+  const wlDefs = getWordlessSurfaceDefaults(resolved.wordlessMode);
+  state.wordlessMode = resolved.wordlessMode;
+  state.bomShowTextFields = wlDefs.bomShowTextFields;
+  state.pageNumberFormat = wlDefs.pageNumberFormat;
+  return resolved;
+}
+
 function openImportWizard(parsed, opts = {}) {
   closeMenu();
   const skipAutoFetch = Boolean(opts && opts.skipAutoFetch);
-  const prep = prepareSubdivisionData(parsed);
-  const { assessment, proposals } = analyzeModelSubdivisions(prep.inputs, prep.adjacency);
+  const prep = opts?.prep || prepareSubdivisionData(parsed);
+  const analyzed = opts?.assessment && opts?.proposals
+    ? { assessment: opts.assessment, proposals: opts.proposals }
+    : analyzeModelSubdivisions(prep.inputs, prep.adjacency);
+  const { assessment, proposals } = analyzed;
 
+  const lastUsedSnapshot = captureCurrentProjectAsImportDefaults();
   importWizardState.snapshot = capturePreWizardStateSnapshot();
   importWizardState.active = true;
   importWizardState.subpage = null;
@@ -23066,24 +23148,9 @@ function openImportWizard(parsed, opts = {}) {
     importWizardState.activeProposal = null;
   }
 
-  // Apply clean fresh-import project-level defaults (prior session state is snapshotted above
-  // and restored automatically if the user cancels the Import Wizard).
-  const freshDefs = getFreshImportWizardDefaults();
-  state.themeId = freshDefs.themeId;
-  applyActiveThemeStyleToState();
-  state.paperFormat = freshDefs.paperFormat;
-  state.orientation = freshDefs.orientation;
-  state.density = freshDefs.density;
-  state.layoutConfig = createDefaultPageLayoutSpec();
-  state.detectDuplicates = freshDefs.detectDuplicates;
-  state.showCover = freshDefs.showCover;
-  state.showBuildComplete = freshDefs.showBuildComplete;
-  state.showPartsList = freshDefs.showPartsList;
-  state.showBackCover = freshDefs.showBackCover;
-  const wlDefs = getWordlessSurfaceDefaults(freshDefs.wordlessMode);
-  state.wordlessMode = freshDefs.wordlessMode;
-  state.bomShowTextFields = wlDefs.bomShowTextFields;
-  state.pageNumberFormat = wlDefs.pageNumberFormat;
+  // Apply resolved project-level defaults (Built-in, Custom Defaults, or Remember Last Used).
+  // Prior session state is snapshotted above and restored if the user cancels the Import Wizard.
+  applyResolvedImportDefaults(lastUsedSnapshot);
   state.pendingImport = parsed;
 
   document.getElementById('impWizTitle').textContent = `Import ${parsed.title}`;
@@ -23149,7 +23216,9 @@ if (impColorModeToggleBtn) {
 
 function finishImport(parsed, mode, subdivisionPlan = null, isPostImport = false, importOpts = {}) {
   if (isPostImport) pushUndo();
-  const skipAutoFetch = Boolean(importOpts && importOpts.skipAutoFetch);
+  const skipAutoFetch = Boolean(
+    (importOpts && importOpts.skipAutoFetch) || appSettings.missingPartsPolicy === 'never',
+  );
   const hasExplicitWordless = typeof importOpts?.wordlessMode === 'boolean';
   const targetWordless = hasExplicitWordless
     ? importOpts.wordlessMode
@@ -23168,7 +23237,11 @@ function finishImport(parsed, mode, subdivisionPlan = null, isPostImport = false
       : wlDefs.pageNumberFormat;
     state.overrides = {}; state.stepInserts = {}; state.pageInserts = {}; state.dividerAfter = {};
     state.layoutGroups = [];
-    state.coverMeta = createDefaultCoverMeta({ showText: wlDefs.coverShowText });
+    state.coverMeta = createDefaultCoverMeta({
+      showText: wlDefs.coverShowText,
+      creatorLogoSrc: appSettings.defaultCreatorLogoSrc,
+      subtitle: appSettings.defaultCoverSubtitle,
+    });
     state.completeMeta = { ...createDefaultCompleteMeta(), showText: wlDefs.completeShowText };
     state.backMeta = createDefaultBackMeta();
     state.undoStack = []; state.redoStack = [];
@@ -23242,7 +23315,29 @@ function analyzePendingImportMissingParts(parsed) {
 }
 
 function proceedAfterMissingPartsCheck(parsed, opts = {}) {
-  openImportWizard(parsed, opts);
+  const skipAutoFetch = Boolean(opts && opts.skipAutoFetch);
+  const prep = prepareSubdivisionData(parsed);
+  const { assessment, proposals } = analyzeModelSubdivisions(prep.inputs, prep.adjacency);
+  const openWiz = shouldOpenImportWizard({
+    mode: appSettings.importWizardMode,
+    hasSteps: Boolean(parsed.hasSteps),
+    submodelCount: Number(parsed.submodelCount) || 0,
+    shouldPromptSubdivision: Boolean(assessment.shouldPrompt),
+  });
+  if (openWiz) {
+    openImportWizard(parsed, { skipAutoFetch, prep, assessment, proposals });
+    return;
+  }
+  const lastUsedSnapshot = captureCurrentProjectAsImportDefaults();
+  const resolved = applyResolvedImportDefaults(lastUsedSnapshot);
+  const defaultPlan =
+    assessment.shouldPrompt && proposals.length > 0
+      ? JSON.parse(JSON.stringify(proposals[0]))
+      : null;
+  finishImport(parsed, 'auto', defaultPlan, false, {
+    skipAutoFetch,
+    wordlessMode: resolved.wordlessMode,
+  });
 }
 
 function closeMissingPartsPrompt(keepPendingRaw = false) {
@@ -23531,9 +23626,22 @@ async function handleIncomingModelFile(file) {
     }
     const missingAnalysis = analyzePendingImportMissingParts(parsed);
     if (missingAnalysis.shouldPrompt) {
-      openMissingPartsPrompt(parsed, missingAnalysis);
+      if (appSettings.missingPartsPolicy === 'never') {
+        proceedAfterMissingPartsCheck(parsed, { skipAutoFetch: true });
+      } else if (appSettings.missingPartsPolicy === 'auto') {
+        if (missingAnalysis.fetchableCount > 0) {
+          openMissingPartsPrompt(parsed, missingAnalysis);
+          document.getElementById('mpBtnFetch')?.click();
+        } else {
+          proceedAfterMissingPartsCheck(parsed, { skipAutoFetch: true });
+        }
+      } else {
+        openMissingPartsPrompt(parsed, missingAnalysis);
+      }
     } else {
-      proceedAfterMissingPartsCheck(parsed, { skipAutoFetch: false });
+      proceedAfterMissingPartsCheck(parsed, {
+        skipAutoFetch: appSettings.missingPartsPolicy === 'never',
+      });
     }
   } catch (err) {
     showToast(err?.message || 'Could not import this file.');
@@ -23544,6 +23652,308 @@ document.getElementById('fileInput').onchange = async (e) => {
   const file = e.target.files?.[0]; e.target.value = '';
   await handleIncomingModelFile(file);
 };
+
+// ============================================================================
+// APP SETTINGS MODAL
+// ============================================================================
+function persistAndSyncAppSettings(next) {
+  appSettings = normalizeAppSettings(next);
+  saveAppSettings(appSettings);
+  syncMenuControls();
+  renderSettingsModalUI();
+}
+
+function renderSettingsModalUI() {
+  const modal = document.getElementById('settingsModal');
+  if (!modal) return;
+
+  const stylePillBtn = (btn, active) => {
+    btn.className = `${btn.className.split(' ')[0]} py-2 px-2 rounded-lg border font-semibold text-xs transition cursor-pointer ${
+      active
+        ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]'
+        : 'border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)]'
+    }`;
+  };
+
+  document.querySelectorAll('.settings-defaults-mode-btn').forEach((b) => {
+    const act = b.getAttribute('data-settings-defaults-mode') === appSettings.defaultsMode;
+    stylePillBtn(b, act);
+  });
+
+  const customWrap = document.getElementById('settingsCustomDefaultsWrap');
+  if (customWrap) customWrap.classList.toggle('hidden', appSettings.defaultsMode !== 'custom');
+
+  const copyBtn = document.getElementById('btnSettingsCopyFromProject');
+  if (copyBtn) copyBtn.classList.toggle('hidden', !state.model);
+
+  const cd = appSettings.customDefaults;
+
+  const themeSel = document.getElementById('settingsDefTheme');
+  if (themeSel) {
+    const allThemes = getAllThemes(customThemes);
+    themeSel.innerHTML = allThemes
+      .map((t) => `<option value="${escHtml(t.id)}">${escHtml(t.name)}${t.builtIn ? '' : ' (Custom)'}</option>`)
+      .join('');
+    const hasMatch = allThemes.some((t) => t.id === cd.themeId);
+    themeSel.value = hasMatch ? cd.themeId : 'blue';
+  }
+
+  const fmtSel = document.getElementById('settingsDefPaperFormat');
+  if (fmtSel) fmtSel.value = cd.paperFormat || 'screen';
+  const fmtInfo = PAPER_FORMATS[cd.paperFormat] || PAPER_FORMATS.screen;
+  document.getElementById('settingsDefOrientWrap')?.classList.toggle('hidden', !fmtInfo.supportsOrientation);
+
+  document.querySelectorAll('.settings-orient-btn').forEach((b) => {
+    const act = b.getAttribute('data-settings-orient') === cd.orientation;
+    b.className = `settings-orient-btn py-2 px-2 rounded-md border font-semibold text-xs transition cursor-pointer ${
+      act
+        ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]'
+        : 'border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)]'
+    }`;
+  });
+
+  const colsSel = document.getElementById('settingsDefCols');
+  if (colsSel) colsSel.value = String(cd.cols ?? 'auto');
+  const rowsSel = document.getElementById('settingsDefRows');
+  if (rowsSel) rowsSel.value = String(cd.rows ?? 'auto');
+
+  document.querySelectorAll('.settings-density-btn').forEach((b) => {
+    const act = b.getAttribute('data-settings-density') === cd.density;
+    b.className = `settings-density-btn py-1.5 px-2 rounded-md border font-semibold text-xs transition cursor-pointer ${
+      act
+        ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]'
+        : 'border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)]'
+    }`;
+  });
+
+  const setChk = (id, val) => { const el = document.getElementById(id); if (el) el.checked = Boolean(val); };
+  setChk('settingsDefWordless', cd.wordlessMode);
+  setChk('settingsDefShowCover', cd.showCover);
+  setChk('settingsDefShowComplete', cd.showBuildComplete);
+  setChk('settingsDefShowPartsList', cd.showPartsList);
+  setChk('settingsDefShowBackCover', cd.showBackCover);
+
+  document.querySelectorAll('.settings-wizard-mode-btn').forEach((b) => {
+    const act = b.getAttribute('data-settings-wizard-mode') === appSettings.importWizardMode;
+    stylePillBtn(b, act);
+  });
+
+  const hasLogo = Boolean(appSettings.defaultCreatorLogoSrc);
+  const logoWrap = document.getElementById('settingsLogoPreviewWrap');
+  const logoImg = document.getElementById('settingsLogoPreviewImg');
+  const logoStatus = document.getElementById('settingsLogoStatus');
+  const logoClearBtn = document.getElementById('btnSettingsClearLogo');
+  if (logoWrap) logoWrap.classList.toggle('hidden', !hasLogo);
+  if (logoImg && hasLogo) logoImg.src = appSettings.defaultCreatorLogoSrc;
+  if (logoStatus) logoStatus.textContent = hasLogo ? 'Saved for all new manuals' : 'None set';
+  if (logoClearBtn) logoClearBtn.classList.toggle('hidden', !hasLogo);
+
+  const subInput = document.getElementById('settingsDefCoverSubtitle');
+  if (subInput && document.activeElement !== subInput) {
+    subInput.value = appSettings.defaultCoverSubtitle || '';
+  }
+
+  document.querySelectorAll('.settings-unit-btn').forEach((b) => {
+    const act = b.getAttribute('data-settings-unit') === appSettings.measurementUnit;
+    stylePillBtn(b, act);
+  });
+
+  document.querySelectorAll('.settings-menu-startup-btn').forEach((b) => {
+    const act = b.getAttribute('data-settings-menu-startup') === appSettings.desktopSideMenuStartup;
+    stylePillBtn(b, act);
+  });
+
+  document.querySelectorAll('.settings-missing-parts-btn').forEach((b) => {
+    const act = b.getAttribute('data-settings-missing-parts') === appSettings.missingPartsPolicy;
+    stylePillBtn(b, act);
+  });
+}
+
+function openSettingsModal() {
+  closeMenu();
+  renderSettingsModalUI();
+  document.getElementById('settingsModal')?.classList.remove('hidden');
+  const scrollEl = document.getElementById('settingsScrollBody');
+  if (scrollEl) scrollEl.scrollTop = 0;
+}
+
+function closeSettingsModal() {
+  document.getElementById('settingsModal')?.classList.add('hidden');
+}
+
+const menuSettingsBtnEl = document.getElementById('menuSettingsBtn');
+if (menuSettingsBtnEl) menuSettingsBtnEl.onclick = openSettingsModal;
+const btnCloseSettingsEl = document.getElementById('btnCloseSettings');
+if (btnCloseSettingsEl) btnCloseSettingsEl.onclick = closeSettingsModal;
+const settingsDoneBtnEl = document.getElementById('settingsDoneBtn');
+if (settingsDoneBtnEl) settingsDoneBtnEl.onclick = closeSettingsModal;
+const settingsModalEl = document.getElementById('settingsModal');
+if (settingsModalEl) {
+  settingsModalEl.onclick = (e) => {
+    if (e.target.id === 'settingsModal') closeSettingsModal();
+  };
+}
+
+document.querySelectorAll('.settings-defaults-mode-btn').forEach((b) => {
+  b.onclick = () => {
+    const mode = b.getAttribute('data-settings-defaults-mode');
+    persistAndSyncAppSettings({ ...appSettings, defaultsMode: mode });
+  };
+});
+
+const btnSettingsCopyFromProjectEl = document.getElementById('btnSettingsCopyFromProject');
+if (btnSettingsCopyFromProjectEl) {
+  btnSettingsCopyFromProjectEl.onclick = () => {
+    if (!state.model) return;
+    const snap = captureCurrentProjectAsImportDefaults();
+    persistAndSyncAppSettings({
+      ...appSettings,
+      defaultsMode: 'custom',
+      customDefaults: { ...appSettings.customDefaults, ...snap },
+    });
+    showToast('Copied current project settings to Custom Defaults.');
+  };
+}
+
+const patchCustomDefaults = (patch) => {
+  persistAndSyncAppSettings({
+    ...appSettings,
+    customDefaults: { ...appSettings.customDefaults, ...patch },
+  });
+};
+
+const settingsDefThemeEl = document.getElementById('settingsDefTheme');
+if (settingsDefThemeEl) settingsDefThemeEl.onchange = (e) => patchCustomDefaults({ themeId: e.target.value });
+const settingsDefPaperFormatEl = document.getElementById('settingsDefPaperFormat');
+if (settingsDefPaperFormatEl) settingsDefPaperFormatEl.onchange = (e) => patchCustomDefaults({ paperFormat: e.target.value });
+document.querySelectorAll('.settings-orient-btn').forEach((b) => {
+  b.onclick = () => patchCustomDefaults({ orientation: b.getAttribute('data-settings-orient') });
+});
+const settingsDefColsEl = document.getElementById('settingsDefCols');
+if (settingsDefColsEl) {
+  settingsDefColsEl.onchange = (e) => patchCustomDefaults({ cols: e.target.value === 'auto' ? 'auto' : Number(e.target.value) });
+}
+const settingsDefRowsEl = document.getElementById('settingsDefRows');
+if (settingsDefRowsEl) {
+  settingsDefRowsEl.onchange = (e) => patchCustomDefaults({ rows: e.target.value === 'auto' ? 'auto' : Number(e.target.value) });
+}
+document.querySelectorAll('.settings-density-btn').forEach((b) => {
+  b.onclick = () => patchCustomDefaults({ density: b.getAttribute('data-settings-density') });
+});
+for (const [id, key] of [
+  ['settingsDefWordless', 'wordlessMode'],
+  ['settingsDefShowCover', 'showCover'],
+  ['settingsDefShowComplete', 'showBuildComplete'],
+  ['settingsDefShowPartsList', 'showPartsList'],
+  ['settingsDefShowBackCover', 'showBackCover'],
+]) {
+  const el = document.getElementById(id);
+  if (el) el.onchange = (e) => patchCustomDefaults({ [key]: e.target.checked });
+}
+
+document.querySelectorAll('.settings-wizard-mode-btn').forEach((b) => {
+  b.onclick = () => {
+    persistAndSyncAppSettings({ ...appSettings, importWizardMode: b.getAttribute('data-settings-wizard-mode') });
+  };
+});
+
+const btnSettingsUploadLogoEl = document.getElementById('btnSettingsUploadLogo');
+const settingsLogoInputEl = document.getElementById('settingsLogoInput');
+if (btnSettingsUploadLogoEl && settingsLogoInputEl) {
+  btnSettingsUploadLogoEl.onclick = () => settingsLogoInputEl.click();
+  settingsLogoInputEl.onchange = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      showToast('Please choose an image under 2 MB for the default creator logo.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string' && reader.result.startsWith('data:image/')) {
+        persistAndSyncAppSettings({ ...appSettings, defaultCreatorLogoSrc: reader.result });
+        showToast('Saved default creator logo for new manuals.');
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+}
+const btnSettingsClearLogoEl = document.getElementById('btnSettingsClearLogo');
+if (btnSettingsClearLogoEl) {
+  btnSettingsClearLogoEl.onclick = () => {
+    persistAndSyncAppSettings({ ...appSettings, defaultCreatorLogoSrc: null });
+    showToast('Cleared default creator logo.');
+  };
+}
+
+const settingsDefCoverSubtitleEl = document.getElementById('settingsDefCoverSubtitle');
+if (settingsDefCoverSubtitleEl) {
+  settingsDefCoverSubtitleEl.oninput = (e) => {
+    appSettings = normalizeAppSettings({ ...appSettings, defaultCoverSubtitle: e.target.value });
+    saveAppSettings(appSettings);
+    const settingsSum = document.getElementById('menuSettingsSummary');
+    if (settingsSum) settingsSum.textContent = summarizeAppSettings(appSettings);
+  };
+}
+
+document.querySelectorAll('.settings-unit-btn').forEach((b) => {
+  b.onclick = () => {
+    const nextUnit = b.getAttribute('data-settings-unit') === 'cm' ? 'cm' : 'in';
+    const prevUnit = state.customUnit;
+    state.customUnit = nextUnit;
+    if (prevUnit !== nextUnit) {
+      if (nextUnit === 'cm') {
+        state.customWidth = Number((state.customWidth * 2.54).toFixed(2));
+        state.customHeight = Number((state.customHeight * 2.54).toFixed(2));
+      } else {
+        state.customWidth = Number((state.customWidth / 2.54).toFixed(2));
+        state.customHeight = Number((state.customHeight / 2.54).toFixed(2));
+      }
+    }
+    persistAndSyncAppSettings({ ...appSettings, measurementUnit: nextUnit });
+    if (state.model) renderAll();
+  };
+});
+
+document.querySelectorAll('.settings-menu-startup-btn').forEach((b) => {
+  b.onclick = () => {
+    const startup = b.getAttribute('data-settings-menu-startup');
+    persistAndSyncAppSettings({
+      ...appSettings,
+      desktopSideMenuStartup: startup,
+      lastDesktopSideMenuExpanded: sideMenuState.desktopExpanded,
+    });
+  };
+});
+
+document.querySelectorAll('.settings-missing-parts-btn').forEach((b) => {
+  b.onclick = () => {
+    persistAndSyncAppSettings({
+      ...appSettings,
+      missingPartsPolicy: b.getAttribute('data-settings-missing-parts'),
+    });
+  };
+});
+
+const btnSettingsResetEl = document.getElementById('btnSettingsReset');
+if (btnSettingsResetEl) {
+  btnSettingsResetEl.onclick = async () => {
+    const ok = await openConfirmActionDialog({
+      title: 'Reset App Settings?',
+      message: 'This resets your new-manual defaults, creator logo, units, side menu preference, and missing-parts policy back to built-in defaults.',
+      detail: 'Your saved Bricks Library shapes, custom themes, and keyboard shortcuts will not be affected.',
+      confirmLabel: 'Reset Settings',
+      cancelLabel: 'Cancel',
+    });
+    if (!ok) return;
+    const reset = createDefaultAppSettings();
+    state.customUnit = reset.measurementUnit;
+    persistAndSyncAppSettings(reset);
+    if (state.model) renderAll();
+    showToast('App settings reset to defaults.');
+  };
+}
 
 async function closeCurrentModel() {
   if (!state.model) {
@@ -23558,6 +23968,7 @@ async function closeCurrentModel() {
   if (!(await openConfirmActionDialog(closeConfirm))) return;
   const closedTitle = state.model.title || 'model';
   closeMenu();
+  closeSettingsModal();
   closeBomSetupModal();
   closeApplyAngleModal();
   closeBricksLibraryModal();

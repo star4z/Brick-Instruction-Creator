@@ -495,6 +495,7 @@ body {
 #missingPartsModal:not(.hidden) .studio-sheet,
 #importWizardModal:not(.hidden) .studio-sheet,
 #importModal:not(.hidden) .studio-sheet,
+#settingsModal:not(.hidden) .studio-sheet,
 #exportModal:not(.hidden) .studio-sheet,
 #pageSetupModal:not(.hidden) .studio-sheet,
 #bomSetupModal:not(.hidden) .studio-sheet,

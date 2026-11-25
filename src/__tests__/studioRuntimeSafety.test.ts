@@ -966,7 +966,55 @@ describe('studioRuntime safety checks', () => {
     expect(syncBody).toContain("filtersBar.classList.toggle('hidden', active)");
     expect(syncBody).toContain("gridWrap.classList.toggle('hidden', active)");
   });
+
+  it('wires the App Settings page with New Manual Defaults, Creator/Cover Defaults, Workspace, Missing Parts, and Reset', () => {
+    const html = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf8');
+    const runtime = fs.readFileSync(path.resolve(process.cwd(), 'src/studioRuntime.ts'), 'utf8');
+
+    expect(html).toContain('id="menuSettingsBtn"');
+    expect(html).toContain('id="menuSettingsSummary"');
+
+    const settingsStart = html.indexOf('id="settingsModal"');
+    const settingsEnd = html.indexOf('id="confirmActionModal"', settingsStart);
+    expect(settingsStart).toBeGreaterThan(-1);
+    expect(settingsEnd).toBeGreaterThan(settingsStart);
+    const settingsHtml = html.slice(settingsStart, settingsEnd);
+
+    for (const id of [
+      'settingsCustomDefaultsWrap',
+      'btnSettingsCopyFromProject',
+      'settingsDefTheme',
+      'settingsDefPaperFormat',
+      'settingsDefCols',
+      'settingsDefRows',
+      'settingsDefWordless',
+      'settingsDefShowCover',
+      'settingsDefShowComplete',
+      'settingsDefShowPartsList',
+      'settingsDefShowBackCover',
+      'btnSettingsUploadLogo',
+      'btnSettingsClearLogo',
+      'settingsDefCoverSubtitle',
+      'btnSettingsReset',
+      'settingsDoneBtn',
+    ]) {
+      expect(settingsHtml).toContain(`id="${id}"`);
+    }
+
+    expect(settingsHtml).toContain('Never Fetch');
+    expect(settingsHtml).not.toContain('Offline Only');
+    expect(settingsHtml).not.toContain('Duplicate Submodels');
+
+    expect(runtime).toContain('loadAppSettings()');
+    expect(runtime).toContain('resolveImportStartDefaults(');
+    expect(runtime).toContain('shouldOpenImportWizard(');
+    expect(runtime).toContain('resolveInitialDesktopSideMenuExpanded(');
+    expect(runtime).toContain('formatPhysicalDimensionsForUnit(');
+    expect(runtime).toContain('function openSettingsModal()');
+    expect(runtime).toContain('function closeSettingsModal()');
+  });
 });
+
 
 
 

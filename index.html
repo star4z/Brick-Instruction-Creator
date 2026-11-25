@@ -200,6 +200,27 @@
               Undo/redo, page navigation, zoom, modes, camera angles &amp; part nudging. Press <kbd id="menuShortcutsHintKey" class="shortcut-kbd-inline">?</kbd> anytime.
             </p>
           </div>
+
+          <!-- App Settings -->
+          <div id="menuSettingsSection" class="flex flex-col gap-2.5 pt-5 border-t border-[var(--border)]">
+            <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Settings</div>
+            <button id="menuSettingsBtn" type="button" class="w-full py-2.5 px-3.5 rounded-lg border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold text-left flex items-center justify-between gap-2 transition-colors cursor-pointer">
+              <span class="flex items-center gap-2 min-w-0">
+                <svg class="w-4 h-4 text-[var(--primary)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="3"/>
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.604.852.997 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                </svg>
+                <span>App Settings</span>
+              </span>
+              <span class="flex items-center gap-1.5 shrink-0 max-w-[52%]">
+                <span id="menuSettingsSummary" class="font-mono text-xs text-[var(--muted-foreground)] truncate">Defaults</span>
+                <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+              </span>
+            </button>
+            <p class="text-xs text-[var(--muted-foreground)] leading-relaxed">
+              New manual defaults, creator logo, units, side menu &amp; missing parts.
+            </p>
+          </div>
         </div>
 
         <!-- Drawer Footer -->
@@ -2407,6 +2428,210 @@
             <span>Reset All to Defaults</span>
           </button>
           <button id="shortcutsDoneBtn" type="button" class="px-5 py-2.5 rounded-md bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] font-semibold shrink-0 transition-colors cursor-pointer">Done</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- APP SETTINGS MODAL                                               -->
+    <!-- ================================================================ -->
+    <div id="settingsModal" role="dialog" aria-modal="true" aria-labelledby="settingsModalTitle" class="no-print hidden fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+      <div class="w-full max-w-xl max-h-[88vh] rounded-t-xl sm:rounded-xl studio-sheet flex flex-col overflow-hidden text-xs">
+        <div class="px-5 py-4 border-b border-[var(--border)] bg-[var(--chrome)] flex items-center justify-between gap-3 shrink-0">
+          <div class="min-w-0">
+            <h2 id="settingsModalTitle" class="text-base font-bold tracking-tight">Settings</h2>
+            <p class="text-xs text-[var(--muted-foreground)] truncate mt-0.5">App-wide defaults and workspace preferences</p>
+          </div>
+          <button id="btnCloseSettings" type="button" aria-label="Close Settings" class="w-9 h-9 rounded-md flex items-center justify-center hover:bg-[var(--surface-hover)] shrink-0 transition-colors cursor-pointer">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
+        </div>
+
+        <div id="settingsScrollBody" class="flex-1 min-h-0 overflow-y-auto overscroll-contain p-5 space-y-5">
+          <!-- 1. New Manual Defaults -->
+          <div class="space-y-3">
+            <div>
+              <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">New Manual Defaults</div>
+              <p class="text-[11px] text-[var(--muted-foreground)] mt-0.5 leading-snug">Choose the starting settings when importing a new model.</p>
+            </div>
+            <div class="grid grid-cols-3 gap-1.5" role="radiogroup" aria-label="New manual defaults mode">
+              <button type="button" data-settings-defaults-mode="builtin" class="settings-defaults-mode-btn py-2 px-2 rounded-lg border font-semibold text-xs transition cursor-pointer">Built-in</button>
+              <button type="button" data-settings-defaults-mode="custom" class="settings-defaults-mode-btn py-2 px-2 rounded-lg border font-semibold text-xs transition cursor-pointer">Custom Defaults</button>
+              <button type="button" data-settings-defaults-mode="last_used" class="settings-defaults-mode-btn py-2 px-2 rounded-lg border font-semibold text-xs transition cursor-pointer">Remember Last Used</button>
+            </div>
+
+            <!-- Custom Defaults Editor (visible when defaultsMode === 'custom') -->
+            <div id="settingsCustomDefaultsWrap" class="hidden p-4 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)]/55 space-y-3.5">
+              <div class="flex items-center justify-between gap-2 flex-wrap">
+                <span class="font-bold text-xs text-[var(--foreground)]">Custom Default Values</span>
+                <button id="btnSettingsCopyFromProject" type="button" class="hidden px-2.5 py-1 rounded-md border border-[var(--primary-border)] bg-[var(--primary-soft)] text-[var(--primary)] font-semibold text-[11px] hover:opacity-90 transition cursor-pointer">Copy from Current Project</button>
+              </div>
+
+              <label class="block space-y-1">
+                <span class="text-xs text-[var(--muted-foreground)]">Default Theme</span>
+                <select id="settingsDefTheme" class="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--card)] font-semibold outline-none focus:border-[var(--primary)] cursor-pointer"></select>
+              </label>
+
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <label class="block space-y-1">
+                  <span class="text-xs text-[var(--muted-foreground)]">Default Page Format</span>
+                  <select id="settingsDefPaperFormat" class="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--card)] font-semibold outline-none focus:border-[var(--primary)] cursor-pointer">
+                    <option value="screen">Screen Fit</option>
+                    <option value="letter">US Letter (8.5 × 11 in)</option>
+                    <option value="a4">A4 (210 × 297 mm)</option>
+                    <option value="a5">A5 Booklet (148 × 210 mm)</option>
+                    <option value="b5">B5 Booklet (176 × 250 mm)</option>
+                    <option value="half_letter">Half Letter (5.5 × 8.5 in)</option>
+                    <option value="legal">US Legal (8.5 × 14 in)</option>
+                    <option value="tabloid">Tabloid / Ledger (11 × 17 in)</option>
+                    <option value="a3">A3 Poster (297 × 420 mm)</option>
+                    <option value="square">Booklet Square (8.5 × 8.5 in)</option>
+                  </select>
+                </label>
+                <div id="settingsDefOrientWrap" class="space-y-1">
+                  <span class="block text-xs text-[var(--muted-foreground)]">Orientation</span>
+                  <div class="grid grid-cols-2 gap-1.5">
+                    <button type="button" data-settings-orient="landscape" class="settings-orient-btn py-2 px-2 rounded-md border font-semibold text-xs transition cursor-pointer">Landscape</button>
+                    <button type="button" data-settings-orient="portrait" class="settings-orient-btn py-2 px-2 rounded-md border font-semibold text-xs transition cursor-pointer">Portrait</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-2 gap-2.5">
+                <label class="block space-y-1">
+                  <span class="text-xs text-[var(--muted-foreground)]">Grid Columns</span>
+                  <select id="settingsDefCols" class="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--card)] font-semibold outline-none focus:border-[var(--primary)] cursor-pointer">
+                    <option value="auto">Auto</option>
+                    <option value="1">1 col</option><option value="2">2 cols</option><option value="3">3 cols</option>
+                    <option value="4">4 cols</option><option value="5">5 cols</option><option value="6">6 cols</option>
+                  </select>
+                </label>
+                <label class="block space-y-1">
+                  <span class="text-xs text-[var(--muted-foreground)]">Grid Rows</span>
+                  <select id="settingsDefRows" class="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--card)] font-semibold outline-none focus:border-[var(--primary)] cursor-pointer">
+                    <option value="auto">Auto</option>
+                    <option value="1">1 row</option><option value="2">2 rows</option><option value="3">3 rows</option>
+                    <option value="4">4 rows</option><option value="5">5 rows</option><option value="6">6 rows</option>
+                  </select>
+                </label>
+              </div>
+
+              <div class="space-y-1">
+                <span class="block text-xs text-[var(--muted-foreground)]">Page Margins</span>
+                <div class="grid grid-cols-3 gap-1.5">
+                  <button type="button" data-settings-density="compact" class="settings-density-btn py-1.5 px-2 rounded-md border font-semibold text-xs transition cursor-pointer">Compact</button>
+                  <button type="button" data-settings-density="balanced" class="settings-density-btn py-1.5 px-2 rounded-md border font-semibold text-xs transition cursor-pointer">Balanced</button>
+                  <button type="button" data-settings-density="spacious" class="settings-density-btn py-1.5 px-2 rounded-md border font-semibold text-xs transition cursor-pointer">Spacious</button>
+                </div>
+              </div>
+
+              <label class="flex items-center justify-between gap-2 pt-1 cursor-pointer">
+                <span class="font-medium">Wordless Instructions (LEGO-Style)</span>
+                <input id="settingsDefWordless" type="checkbox" checked class="w-4 h-4 accent-[var(--primary)] cursor-pointer" />
+              </label>
+
+              <div class="space-y-1.5 pt-2 border-t border-[var(--border)]">
+                <div class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Included Pages</div>
+                <div class="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                  <label class="flex items-center justify-between gap-2 py-0.5 cursor-pointer">
+                    <span class="font-medium">Cover</span>
+                    <input id="settingsDefShowCover" type="checkbox" checked class="w-4 h-4 accent-[var(--primary)] cursor-pointer" />
+                  </label>
+                  <label class="flex items-center justify-between gap-2 py-0.5 cursor-pointer">
+                    <span class="font-medium">Build Complete</span>
+                    <input id="settingsDefShowComplete" type="checkbox" checked class="w-4 h-4 accent-[var(--primary)] cursor-pointer" />
+                  </label>
+                  <label class="flex items-center justify-between gap-2 py-0.5 cursor-pointer">
+                    <span class="font-medium">Parts List</span>
+                    <input id="settingsDefShowPartsList" type="checkbox" checked class="w-4 h-4 accent-[var(--primary)] cursor-pointer" />
+                  </label>
+                  <label class="flex items-center justify-between gap-2 py-0.5 cursor-pointer">
+                    <span class="font-medium">Back Cover</span>
+                    <input id="settingsDefShowBackCover" type="checkbox" checked class="w-4 h-4 accent-[var(--primary)] cursor-pointer" />
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <!-- Show Import Wizard Mode -->
+            <div class="space-y-1.5 pt-1">
+              <div class="text-xs font-medium text-[var(--foreground)]">Show Import Wizard on Import</div>
+              <div class="grid grid-cols-3 gap-1.5">
+                <button type="button" data-settings-wizard-mode="always" class="settings-wizard-mode-btn py-2 px-2 rounded-lg border font-semibold text-xs transition cursor-pointer">Always</button>
+                <button type="button" data-settings-wizard-mode="when_needed" class="settings-wizard-mode-btn py-2 px-2 rounded-lg border font-semibold text-xs transition cursor-pointer">When Needed</button>
+                <button type="button" data-settings-wizard-mode="never" class="settings-wizard-mode-btn py-2 px-2 rounded-lg border font-semibold text-xs transition cursor-pointer">Never</button>
+              </div>
+              <p class="text-[11px] text-[var(--muted-foreground)] leading-snug">“When Needed” opens the wizard only for models with existing steps, submodels, or suggested sections.</p>
+            </div>
+          </div>
+
+          <!-- 2. Creator & Cover Defaults -->
+          <div class="space-y-3 pt-4 border-t border-[var(--border)]">
+            <div>
+              <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Creator &amp; Cover Defaults</div>
+              <p class="text-[11px] text-[var(--muted-foreground)] mt-0.5 leading-snug">Automatically applied to the Front Cover of newly imported manuals.</p>
+            </div>
+            <div class="flex items-center justify-between gap-3 p-3 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)]/55">
+              <div class="flex items-center gap-3 min-w-0">
+                <div id="settingsLogoPreviewWrap" class="hidden w-12 h-10 rounded-md border border-[var(--border)] bg-[var(--card)] flex items-center justify-center p-1 shrink-0 overflow-hidden">
+                  <img id="settingsLogoPreviewImg" alt="Default creator logo" class="max-w-full max-h-full object-contain" />
+                </div>
+                <div class="min-w-0">
+                  <div class="font-semibold text-xs text-[var(--foreground)]">Default Creator Logo</div>
+                  <div id="settingsLogoStatus" class="text-[11px] text-[var(--muted-foreground)] truncate">None set</div>
+                </div>
+              </div>
+              <div class="flex items-center gap-1.5 shrink-0">
+                <button id="btnSettingsUploadLogo" type="button" class="px-2.5 py-1.5 rounded-md border border-[var(--border)] bg-[var(--card)] hover:border-[var(--primary)] font-semibold text-xs transition cursor-pointer">Upload…</button>
+                <button id="btnSettingsClearLogo" type="button" class="hidden px-2.5 py-1.5 rounded-md border border-[var(--danger)]/35 bg-[var(--danger-soft)] text-[var(--danger)] font-semibold text-xs transition cursor-pointer">Clear</button>
+              </div>
+              <input id="settingsLogoInput" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" class="hidden" />
+            </div>
+
+            <label class="block space-y-1">
+              <span class="text-xs font-medium text-[var(--foreground)]">Default Cover Subtitle</span>
+              <input id="settingsDefCoverSubtitle" type="text" maxlength="120" placeholder="e.g. Designed by Your Studio (shown when Text &amp; Labels is on)" class="w-full px-3 py-2 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] text-xs font-medium outline-none focus:border-[var(--primary)]" />
+            </label>
+          </div>
+
+          <!-- 3. Editor & Workspace -->
+          <div class="space-y-3 pt-4 border-t border-[var(--border)]">
+            <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Editor &amp; Workspace</div>
+            <div class="space-y-1.5">
+              <div class="text-xs font-medium text-[var(--foreground)]">Measurement Units</div>
+              <div class="grid grid-cols-2 gap-1.5">
+                <button type="button" data-settings-unit="in" class="settings-unit-btn py-2 px-3 rounded-lg border font-semibold text-xs transition cursor-pointer">Inches (in)</button>
+                <button type="button" data-settings-unit="cm" class="settings-unit-btn py-2 px-3 rounded-lg border font-semibold text-xs transition cursor-pointer">Centimeters (cm)</button>
+              </div>
+            </div>
+            <div class="space-y-1.5">
+              <div class="text-xs font-medium text-[var(--foreground)]">Desktop Side Menu on Startup</div>
+              <div class="grid grid-cols-3 gap-1.5">
+                <button type="button" data-settings-menu-startup="expanded" class="settings-menu-startup-btn py-2 px-2 rounded-lg border font-semibold text-xs transition cursor-pointer">Expanded</button>
+                <button type="button" data-settings-menu-startup="collapsed" class="settings-menu-startup-btn py-2 px-2 rounded-lg border font-semibold text-xs transition cursor-pointer">Collapsed</button>
+                <button type="button" data-settings-menu-startup="remember" class="settings-menu-startup-btn py-2 px-2 rounded-lg border font-semibold text-xs transition cursor-pointer">Remember</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 4. Missing Parts -->
+          <div class="space-y-2.5 pt-4 border-t border-[var(--border)]">
+            <div>
+              <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Missing Parts on Import</div>
+              <p class="text-[11px] text-[var(--muted-foreground)] mt-0.5 leading-snug">What to do when an imported model references parts not yet in your Bricks Library.</p>
+            </div>
+            <div class="grid grid-cols-3 gap-1.5">
+              <button type="button" data-settings-missing-parts="ask" class="settings-missing-parts-btn py-2 px-2 rounded-lg border font-semibold text-xs transition cursor-pointer">Ask First</button>
+              <button type="button" data-settings-missing-parts="auto" class="settings-missing-parts-btn py-2 px-2 rounded-lg border font-semibold text-xs transition cursor-pointer">Fetch Automatically</button>
+              <button type="button" data-settings-missing-parts="never" class="settings-missing-parts-btn py-2 px-2 rounded-lg border font-semibold text-xs transition cursor-pointer">Never Fetch</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sticky Footer -->
+        <div class="px-5 py-3.5 border-t border-[var(--border)] bg-[var(--chrome)] flex items-center justify-between gap-2.5 shrink-0">
+          <button id="btnSettingsReset" type="button" class="px-3.5 py-2 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] text-xs font-semibold transition-colors cursor-pointer">Reset Settings</button>
+          <button id="settingsDoneBtn" type="button" class="px-5 py-2.5 rounded-md bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] font-semibold transition-colors cursor-pointer">Done</button>
         </div>
       </div>
     </div>
