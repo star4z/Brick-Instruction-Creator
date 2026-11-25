@@ -11,6 +11,7 @@ import {
 } from './engine/subdivisionAnalyzer';
 import {
   buildImportWizardSummaryItems,
+  getFreshImportWizardDefaults,
   getWizardSubpageVisibility,
 } from './engine/importWizard';
 import {
@@ -12234,6 +12235,7 @@ function syncMenuControls() {
   const styleWizVis = getWizardSubpageVisibility(isStyleWizard);
 
   setVisible('pageSetupRangeGroupsSection', pageSetupWizVis.showStepRangeGroups);
+  setVisible('btnBackPageSetupWizard', pageSetupWizVis.showWizardBackButton);
   if (!pageSetupWizVis.showPageSizeFitWarning) {
     document.getElementById('pageSizeFitWarning')?.classList.add('hidden');
   }
@@ -12277,7 +12279,7 @@ function syncMenuControls() {
   const pageSetupSub = document.getElementById('pageSetupSubtitle');
   if (pageSetupSub) {
     pageSetupSub.textContent = isPageSetupWizard
-      ? 'Project-level paper size, default grid, language, and included pages'
+      ? 'Project-level paper size, default grid, text & labels, and included pages'
       : state.paperFormat === 'screen'
         ? 'Adapts to current screen · Change paper size, grids & step groups'
         : `${activeFmt.shortName || activeFmt.name} · ${formatPhysicalDims(actWIn, actHIn)}`;
@@ -18173,6 +18175,8 @@ function setStylePopoverOpen(open) {
 btnStylePopEl.onclick = () => {
   setStylePopoverOpen(stylePopEl.classList.contains('hidden'));
 };
+const btnBackStyleWizardEl = document.getElementById('btnBackStyleWizard');
+if (btnBackStyleWizardEl) btnBackStyleWizardEl.onclick = () => setStylePopoverOpen(false);
 const btnCloseStyleWizardEl = document.getElementById('btnCloseStyleWizard');
 if (btnCloseStyleWizardEl) btnCloseStyleWizardEl.onclick = () => setStylePopoverOpen(false);
 const btnDoneStyleWizardEl = document.getElementById('btnDoneStyleWizard');
@@ -20852,6 +20856,8 @@ if (menuExportHtmlBtn) menuExportHtmlBtn.onclick = runInteractiveHtmlExport;
 const btnExpInteractiveHtml = document.getElementById('btnExpInteractiveHtml');
 if (btnExpInteractiveHtml) btnExpInteractiveHtml.onclick = runInteractiveHtmlExport;
 document.getElementById('menuPageSetupBtn').onclick = openPageSetupModal;
+const btnBackPageSetupWizardEl = document.getElementById('btnBackPageSetupWizard');
+if (btnBackPageSetupWizardEl) btnBackPageSetupWizardEl.onclick = closePageSetupModal;
 document.getElementById('btnClosePageSetup').onclick = closePageSetupModal;
 document.getElementById('pageSetupDoneBtn').onclick = closePageSetupModal;
 document.getElementById('pageSetupModal').onclick = (e) => { if (e.target.id === 'pageSetupModal') closePageSetupModal(); };
@@ -21880,6 +21886,7 @@ function renderImportAssistantUI() {
   if (cancelBtn) cancelBtn.classList.toggle('hidden', isWizardSub);
   if (autoBtn) autoBtn.classList.toggle('hidden', isWizardSub);
   if (wizDoneBtn) wizDoneBtn.classList.toggle('hidden', !isWizardSub);
+  document.getElementById('btnBackStepGenWizard')?.classList.toggle('hidden', !stepGenVis.showWizardBackButton);
 
   const keepSelected = isWizardSub && importWizardState.importMode === 'keep';
   if (keepBadge) keepBadge.classList.toggle('hidden', !keepSelected);
@@ -22256,11 +22263,24 @@ function openImportWizard(parsed, opts = {}) {
     importWizardState.activeProposal = null;
   }
 
-  // Apply fresh-import Wordless default (editable via Page Setup link)
-  const wlDefs = getWordlessSurfaceDefaults(DEFAULT_WORDLESS_MODE);
-  state.wordlessMode = DEFAULT_WORDLESS_MODE;
+  // Apply clean fresh-import project-level defaults (prior session state is snapshotted above
+  // and restored automatically if the user cancels the Import Wizard).
+  const freshDefs = getFreshImportWizardDefaults();
+  state.themeId = freshDefs.themeId;
+  applyActiveThemeStyleToState();
+  state.paperFormat = freshDefs.paperFormat;
+  state.orientation = freshDefs.orientation;
+  state.density = freshDefs.density;
+  state.layoutConfig = createDefaultPageLayoutSpec();
+  state.detectDuplicates = freshDefs.detectDuplicates;
+  state.showCover = freshDefs.showCover;
+  state.showBuildComplete = freshDefs.showBuildComplete;
+  state.showPartsList = freshDefs.showPartsList;
+  state.showBackCover = freshDefs.showBackCover;
+  const wlDefs = getWordlessSurfaceDefaults(freshDefs.wordlessMode);
+  state.wordlessMode = freshDefs.wordlessMode;
   state.bomShowTextFields = wlDefs.bomShowTextFields;
-  state.pageNumberFormat = resolvePageNumberFormatForMode(state.pageNumberFormat, DEFAULT_WORDLESS_MODE);
+  state.pageNumberFormat = wlDefs.pageNumberFormat;
   state.pendingImport = parsed;
 
   document.getElementById('impWizTitle').textContent = `Import ${parsed.title}`;
@@ -22272,6 +22292,8 @@ function openImportWizard(parsed, opts = {}) {
   syncMenuControls();
   renderImportWizardUI();
   document.getElementById('importWizardModal').classList.remove('hidden');
+  const wizScroll = document.getElementById('impWizScroll');
+  if (wizScroll) wizScroll.scrollTop = 0;
 }
 
 // Wire Import Wizard buttons
@@ -22397,6 +22419,8 @@ document.getElementById('impBtnKeep').onclick = () => {
     skipAutoFetch: impState.skipAutoFetch,
   });
 };
+const btnBackStepGenWizardEl = document.getElementById('btnBackStepGenWizard');
+if (btnBackStepGenWizardEl) btnBackStepGenWizardEl.onclick = () => closeImportAssistant(false);
 const impBtnWizardDoneEl = document.getElementById('impBtnWizardDone');
 if (impBtnWizardDoneEl) impBtnWizardDoneEl.onclick = () => closeImportAssistant(false);
 document.getElementById('impBtnCancel').onclick = () => closeImportAssistant(false);

@@ -8,7 +8,7 @@ Official LEGO building manuals communicate every instruction visually — using 
 
 ### Key Product Decisions
 1. **Default on Every Fresh Import**: Every newly imported `.io` / `.ldr` / `.mpd` model starts in **Wordless (LEGO-Style)** mode (`DEFAULT_WORDLESS_MODE = true`), hiding language-dependent titles, captions, rotation words, step hint phrases, and Parts List text labels by default.
-2. **Import-Time Discovery**: Inside the read-only **Import Wizard** (`#importWizardModal`) shown on every fresh model import, the **Instruction Language** row displays the selected default (**Wordless (LEGO-Style)**) and links directly to **Page Setup** (`#pageSetupModal`) to toggle it before generating steps.
+2. **Import-Time Discovery**: Inside the read-only **Import Wizard** (`#importWizardModal`) shown on every fresh model import, the **Text & Labels** row displays the selected default (**Wordless (LEGO-Style)**) and links directly to **Page Setup** (`#pageSetupModal`) to toggle it before generating steps.
 3. **Configurable in Page Setup**: Toggling **Wordless Instructions (LEGO-Style)** in **Page Setup** switches all configurable surfaces cleanly at once (while **Step Generation** stays focused strictly on slicing / build organization), and individual per-surface toggles remain independently configurable afterward:
    - Front Cover Title & Subtitle (`coverMeta.showText`) — also toggleable directly from the Front Cover Edit overlay (`Title Text`), while keeping the non-editable `Brick Instruction Works` attribution card + QR code intact per [`COVER_PAGE_DESIGN.md`](./COVER_PAGE_DESIGN.md).
    - Build Complete Text (`completeMeta.showText`).
@@ -74,9 +74,9 @@ All shared formatting rules, SVG builders, and Canvas 2D vector drawing primitiv
 ## 4. User Controls & Discovery
 
 1. **Import Wizard (`#importWizardModal`)**:
-   - Lists **Instruction Language** (`Wordless (LEGO-Style)` by default) as a read-only summary row linking directly to the **Instruction Language** section of **Page Setup** (`#pageSetupModal`) in project-level wizard mode.
+   - Lists **Text & Labels** (`Wordless (LEGO-Style)` by default) as a read-only summary row linking directly to the **Text & Labels** section of **Page Setup** (`#pageSetupModal`) in project-level wizard mode.
 2. **Page Setup Modal (`#pageSetupModal`)**:
-   - **Instruction Language** master checkbox: **Wordless Instructions (LEGO-Style)**.
+   - **Text & Labels** master checkbox: **Wordless Instructions (LEGO-Style)**.
    - **Page Number Format**: `"Page 1"` option is disabled with tooltip when Wordless is active.
    - **Model Title on Every Page** (both in Page Setup and Style Popover): disabled with a subtle `Wordless` pill badge while Wordless mode is active (preserving the underlying theme setting without forking the theme).
    - **Included Pages**: independent toggles for **Cover**, **Build Complete**, **Parts List**, and **Back Cover**, each showing a **Settings** link to the corresponding page when enabled (the duplicate per-page text & fireworks toggles previously under "Extra Pages" live on each individual page).

@@ -857,12 +857,20 @@ describe('studioRuntime safety checks', () => {
     expect(wizHtml).not.toContain('<select');
     expect(wizHtml).not.toContain('<textarea');
 
-    // Style modal supports wizard chrome and section targeting
+    // Style modal supports wizard chrome, top-left back arrow, and section targeting
     expect(html).toContain('id="styleWizardHeader"');
+    expect(html).toContain('id="btnBackStyleWizard"');
     expect(html).toContain('id="styleWizardFooter"');
     expect(html).toContain('id="styleStepDisplaySection"');
 
-    // Runtime wires Import Wizard summary, subpage links, and project-level visibility
+    // Page Setup and Step Generation include top-left back arrows for wizard mode & Text & Labels copy
+    expect(html).toContain('id="btnBackPageSetupWizard"');
+    expect(html).toContain('id="btnBackStepGenWizard"');
+    expect(html).toContain('Text &amp; Labels');
+    expect(html).not.toContain('Instruction Language');
+
+    // Runtime wires Import Wizard defaults, summary, subpage links, and project-level visibility
+    expect(runtime).toContain('getFreshImportWizardDefaults(');
     expect(runtime).toContain('buildImportWizardSummaryItems(');
     expect(runtime).toContain('getWizardSubpageVisibility(');
     expect(runtime).toContain('function openImportWizard(');

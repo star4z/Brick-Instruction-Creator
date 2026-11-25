@@ -86,6 +86,34 @@ export interface ImportWizardSummaryInput {
   density: 'compact' | 'balanced' | 'spacious';
 }
 
+export interface FreshImportWizardDefaults {
+  themeId: string;
+  paperFormat: string;
+  orientation: 'landscape' | 'portrait';
+  density: 'compact' | 'balanced' | 'spacious';
+  wordlessMode: boolean;
+  detectDuplicates: boolean;
+  showCover: boolean;
+  showBuildComplete: boolean;
+  showPartsList: boolean;
+  showBackCover: boolean;
+}
+
+export function getFreshImportWizardDefaults(): FreshImportWizardDefaults {
+  return {
+    themeId: 'blue',
+    paperFormat: 'screen',
+    orientation: 'landscape',
+    density: 'balanced',
+    wordlessMode: true,
+    detectDuplicates: true,
+    showCover: true,
+    showBuildComplete: true,
+    showPartsList: true,
+    showBackCover: true,
+  };
+}
+
 export interface WizardSubpageVisibility {
   /** Step Range Groups in Page Setup require rendered steps — hidden in wizard mode. */
   showStepRangeGroups: boolean;
@@ -103,6 +131,8 @@ export interface WizardSubpageVisibility {
   showStylePopoverTail: boolean;
   /** Modal header & Back-to-Wizard footer inside Style are shown only in wizard mode. */
   showStyleWizardChrome: boolean;
+  /** Top-left back arrow button shown on all editable subpages opened from the Import Wizard. */
+  showWizardBackButton: boolean;
 }
 
 function formatLineWeightLabel(weight?: string): string {
@@ -304,7 +334,7 @@ export function buildImportWizardSummaryItems(
     },
     {
       id: 'wordless',
-      label: 'Instruction Language',
+      label: 'Text & Labels',
       value: input.wordlessMode ? 'Wordless (LEGO-Style)' : 'With Text Labels',
       detail: input.wordlessMode
         ? 'Icons, diagrams & numbers only'
@@ -348,5 +378,6 @@ export function getWizardSubpageVisibility(isWizardMode: boolean): WizardSubpage
     showStepGenDestructiveNotice: !isWizardMode,
     showStylePopoverTail: !isWizardMode,
     showStyleWizardChrome: isWizardMode,
+    showWizardBackButton: isWizardMode,
   };
 }

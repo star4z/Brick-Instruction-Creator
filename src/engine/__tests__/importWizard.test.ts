@@ -4,6 +4,7 @@ import {
   formatWizardPageFormatSummary,
   formatWizardRenderingSummary,
   formatWizardSlicingSummary,
+  getFreshImportWizardDefaults,
   getWizardSubpageVisibility,
   type ImportWizardSummaryInput,
 } from '../importWizard';
@@ -39,6 +40,21 @@ function baseInput(overrides: Partial<ImportWizardSummaryInput> = {}): ImportWiz
 }
 
 describe('Import Wizard Engine', () => {
+  it('uses clean built-in defaults on every fresh import (Classic Blue, Screen Fit, Landscape, Balanced, Wordless)', () => {
+    expect(getFreshImportWizardDefaults()).toEqual({
+      themeId: 'blue',
+      paperFormat: 'screen',
+      orientation: 'landscape',
+      density: 'balanced',
+      wordlessMode: true,
+      detectDuplicates: true,
+      showCover: true,
+      showBuildComplete: true,
+      showPartsList: true,
+      showBackCover: true,
+    });
+  });
+
   it('builds all five read-only default summary items linked to their editable pages', () => {
     const items = buildImportWizardSummaryItems(baseInput());
     expect(items.map((item) => item.id)).toEqual([
@@ -61,6 +77,7 @@ describe('Import Wizard Engine', () => {
     expect(byId.theme.value).toBe('Classic Blue');
     expect(byId.theme.swatch?.bgColor).toBe('#d8ecfd');
 
+    expect(byId.wordless.label).toBe('Text & Labels');
     expect(byId.wordless.targetSubpage).toBe('pageSetup');
     expect(byId.wordless.targetSection).toBe('wordless');
     expect(byId.wordless.targetPageLabel).toBe('Page Setup');
@@ -182,7 +199,7 @@ describe('Import Wizard Engine', () => {
     });
   });
 
-  it('enforces project-level-only visibility on wizard sub-pages before steps are rendered', () => {
+  it('enforces project-level-only visibility and top-left back arrow on wizard sub-pages before steps are rendered', () => {
     const wizardVis = getWizardSubpageVisibility(true);
     expect(wizardVis.showStepRangeGroups).toBe(false);
     expect(wizardVis.showExtraPageSettingsLinks).toBe(false);
@@ -192,6 +209,7 @@ describe('Import Wizard Engine', () => {
     expect(wizardVis.showStepGenDestructiveNotice).toBe(false);
     expect(wizardVis.showStylePopoverTail).toBe(false);
     expect(wizardVis.showStyleWizardChrome).toBe(true);
+    expect(wizardVis.showWizardBackButton).toBe(true);
 
     const normalVis = getWizardSubpageVisibility(false);
     expect(normalVis.showStepRangeGroups).toBe(true);
@@ -202,5 +220,6 @@ describe('Import Wizard Engine', () => {
     expect(normalVis.showStepGenDestructiveNotice).toBe(true);
     expect(normalVis.showStylePopoverTail).toBe(true);
     expect(normalVis.showStyleWizardChrome).toBe(false);
+    expect(normalVis.showWizardBackButton).toBe(false);
   });
 });
