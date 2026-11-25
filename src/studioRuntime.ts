@@ -147,7 +147,6 @@ import {
   createDefaultBomConfig,
   formatDisplayPartId,
   getEnabledBomFields,
-  isBomFieldEnabled,
   normalizeBomConfig,
   packBomGridPages,
   projectPartDimensionsLdu,
@@ -16340,11 +16339,6 @@ function syncStylePanel() {
   const effBc = resolveEffectiveBomConfig(bc, Boolean(state.bomShowTextFields));
   const styleBomSum = document.getElementById('styleBomSummary');
   if (styleBomSum) styleBomSum.textContent = summarizeBomConfig(effBc);
-  document.querySelectorAll('.style-bom-format-btn').forEach(b => {
-    const act = b.getAttribute('data-style-bom-format') === bc.format;
-    b.className = `style-bom-format-btn py-1.5 px-2 rounded-md border font-semibold text-xs inline-flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--surface-sunken)] hover:border-[var(--primary)]'}`;
-  });
-  setChk('styleToggleBomPartId', isBomFieldEnabled(bc, 'partId'));
 }
 
 function populateThemeFontSelect(elId) {
@@ -17751,16 +17745,6 @@ document.querySelectorAll('.fade-chip').forEach(b => { b.onclick = () => patchAc
 document.querySelectorAll('.bom-format-btn').forEach(b => {
   b.onclick = () => patchBomConfig({ format: b.getAttribute('data-bom-format') === 'table' ? 'table' : 'grid' }, { immediate: true });
 });
-document.querySelectorAll('.style-bom-format-btn').forEach(b => {
-  b.onclick = () => patchBomConfig({ format: b.getAttribute('data-style-bom-format') === 'table' ? 'table' : 'grid' }, { immediate: true });
-});
-const styleBomPartIdEl = document.getElementById('styleToggleBomPartId');
-if (styleBomPartIdEl) {
-  styleBomPartIdEl.onchange = (e) => {
-    const nextFields = toggleBomField(normalizeBomConfig(state.bomConfig).fields, 'partId', e.target.checked);
-    patchBomConfig({ fields: nextFields }, { immediate: true });
-  };
-}
 const btnStyleOpenBomSetup = document.getElementById('btnStyleOpenBomSetup');
 if (btnStyleOpenBomSetup) {
   btnStyleOpenBomSetup.onclick = () => {

@@ -494,5 +494,36 @@ describe('studioRuntime safety checks', () => {
     expect(runtime).toContain('loadShortcutOverridesFromStorage()');
     expect(runtime).toContain('saveShortcutOverridesToStorage(');
   });
+
+  it('keeps the Parts List section in the Style popover to a direct link to the Parts List Setup dialog', () => {
+    const html = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf8');
+    const runtime = fs.readFileSync(path.resolve(process.cwd(), 'src/studioRuntime.ts'), 'utf8');
+
+    const styleStart = html.indexOf('id="stylePopover"');
+    const styleEnd = html.indexOf('id="overviewModal"', styleStart);
+    expect(styleStart).toBeGreaterThan(-1);
+    expect(styleEnd).toBeGreaterThan(styleStart);
+
+    const styleHtml = html.slice(styleStart, styleEnd);
+    const partsListStart = styleHtml.indexOf('<!-- Parts List');
+    expect(partsListStart).toBeGreaterThan(-1);
+    const partsListHtml = styleHtml.slice(partsListStart);
+
+    // Only the Parts List Setup link button (and live summary) remains — no inline format buttons or toggles
+    expect(partsListHtml).toContain('id="btnStyleOpenBomSetup"');
+    expect(partsListHtml).toContain('id="styleBomSummary"');
+    expect(partsListHtml).toContain('Parts List Setup');
+    expect(partsListHtml).not.toContain('style-bom-format-btn');
+    expect(partsListHtml).not.toContain('data-style-bom-format');
+    expect(partsListHtml).not.toContain('styleToggleBomPartId');
+    expect(partsListHtml).not.toContain('<input');
+    expect(partsListHtml.match(/<button\b/g)?.length).toBe(1);
+
+    // Runtime keeps link wiring and drops dead inline control references
+    expect(runtime).toContain("document.getElementById('btnStyleOpenBomSetup')");
+    expect(runtime).toContain('openBomSetupModal();');
+    expect(runtime).not.toContain('style-bom-format-btn');
+    expect(runtime).not.toContain('styleToggleBomPartId');
+  });
 });
 

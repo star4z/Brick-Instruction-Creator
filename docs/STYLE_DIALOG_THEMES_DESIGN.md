@@ -10,6 +10,7 @@ The Style dialog (`#stylePopover`) is now the only place to choose and edit them
 2. **Theme name** plus **Import / Export / Delete** (first section inside `#stylePopoverScroll`). Delete is disabled for built-ins. A hint explains that changing a built-in creates a custom copy.
 3. **Page Background**, **Text, Boxes & Accents**, **Typography**: the former editor controls. They apply live.
 4. **Step Display**: the former loose style toggles, now stored on the theme.
+5. **Parts List**: a direct link (`#btnStyleOpenBomSetup`) to the **Parts List Setup** dialog (`#bomSetupModal`) with a compact summary of the active theme's Parts List configuration.
 
 ## Editing Model
 
@@ -34,7 +35,7 @@ The Style dialog (`#stylePopover`) is now the only place to choose and edit them
 | `bomConfig` (Parts List format, grid sizing, flow, variable scaling, fields/columns, sorting) | `createDefaultBomConfig()` (Grid, Auto 0.5″ min, LTR/TTB, Image/Qty/Name/LEGO Part ID) |
 
 - Built-in themes use the defaults. `normalizeThemeStyleOptions()` checks types and clamps or sanitizes values (e.g. `fadeOpacity` is kept within 0.2–1, `highlightColor` must be a hex color, and `bomConfig` is sanitized by `normalizeBomConfig()`). All options including `bomConfig` are included in `.biwtheme` exports.
-- `applyActiveThemeStyleToState()` copies the active theme's options into `state` before every render, so the renderers are unchanged. Every control that used to write these `state` fields directly now goes through `patchActiveTheme()` (and `patchBomConfig()` for Parts List controls). That includes the Page Setup duplicates of Box Around Each Step and Model Title on Pages, the Step Edit modal's 1:1 Minifigure checkbox, `applyMinifigStyleChange()`, the Parts List quick controls in `#stylePopover`, and the full `#bomSetupModal` editor (see [`PARTS_LIST_DESIGN.md`](./PARTS_LIST_DESIGN.md)).
+- `applyActiveThemeStyleToState()` copies the active theme's options into `state` before every render, so the renderers are unchanged. Every control that used to write these `state` fields directly now goes through `patchActiveTheme()` (and `patchBomConfig()` for Parts List controls). That includes the Page Setup duplicates of Box Around Each Step and Model Title on Pages, the Step Edit modal's 1:1 Minifigure checkbox, `applyMinifigStyleChange()`, and the `#bomSetupModal` Parts List Setup dialog (linked directly from the **Parts List** section of `#stylePopover`; see [`PARTS_LIST_DESIGN.md`](./PARTS_LIST_DESIGN.md)).
 - **Migration:** `adoptLegacyStyleOptions()` reads the old top-level values (including legacy `bomConfig`) from saved session prefs and pre-theme `.biw` projects. If they differ from the active theme, it applies them to the theme (forking a built-in, or updating a custom theme in place), so existing users keep their settings without forking unmodified defaults.
 
 ## Export: One File
