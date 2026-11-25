@@ -637,7 +637,7 @@ function selectTheme(id) {
   const prevHlW = state.highlightLineWeight;
   state.themeId = resolveThemeById(id, customThemes).id;
   applyActiveThemeStyleToState();
-  if (prevStark !== Boolean(state.starkBlackOutlines) || prevOutW !== state.outlineLineWeight) pliThumbCache.clear();
+  if (prevStark !== Boolean(state.starkBlackOutlines) || prevOutW !== state.outlineLineWeight) { pliThumbCache.clear(); clearMinifigDiagramCaches(); }
   if (prevStark !== Boolean(state.starkBlackOutlines) || prevHq !== Boolean(state.highQualityStepRender) || prevOutW !== state.outlineLineWeight || prevHlW !== state.highlightLineWeight) {
     overviewThumbCache.bumpEpoch();
   }
@@ -2456,7 +2456,7 @@ function buildMeshBuffers(prevParts, newParts, opts) {
       const handCol = (isSelected || overrideHex || isGhost) ? baseCol : hexToRgb255(yellowInfo.hex, fadeMix);
       const handEdge = (isSelected || overrideHex || isGhost)
         ? edgeCol
-        : (shouldHighlight ? hexToRgb255(hlColorHex, 0) : hexToRgb255(yellowInfo.edge, fadeMix * 0.85));
+        : (shouldHighlight ? hexToRgb255(hlColorHex, 0) : (starkBlack ? [0, 0, 0] : hexToRgb255(yellowInfo.edge, fadeMix * 0.85)));
       addMinifigTorso(sh, true, m, ox, oy, oz, hingeRad, baseCol, edgeCol, handCol, handEdge, aByte);
     } else if (def.shape === 'mf_head') {
       // Authentic LEGO minifigure head proportions (matches LDraw 3626c / 28621: crown y=0, neck bottom y=-24)
@@ -3448,14 +3448,16 @@ function renderCoverHeroSnapshot(parts, az, el, zoom, targetW, targetH, theme) {
 }
 
 function renderMinifigOneToOne(parts, pagePxH, pageHIn, maxPxW, maxPxH, accent = '#1a73e8') {
-  const mesh = buildMeshBuffers([], parts, { highlightNew: false, fadePrev: false, showArrows: false, accent });
+  const sb = Boolean(state.starkBlackOutlines);
+  const outW = sb ? sanitizeLineWeight(state.outlineLineWeight, 'medium') : 'light';
+  const mesh = buildMeshBuffers([], parts, { highlightNew: false, fadePrev: false, showArrows: false, accent, starkBlackOutlines: sb });
   const widthLdu = Math.max(16, mesh.bounds.maxX - mesh.bounds.minX);
   const heightLdu = Math.max(24, mesh.bounds.maxY - mesh.bounds.minY);
   const layout = computeMinifigOneToOneLayout({ widthLdu, heightLdu }, pagePxH, pageHIn, maxPxW, maxPxH);
   const aspect = layout.worldSpanW / Math.max(1, layout.worldSpanH);
   const rh = Math.max(240, Math.min(960, Math.round(layout.displayPxH * 3.0)));
   const rw = Math.max(140, Math.round(rh * aspect));
-  snapshotEngine.draw(mesh, rw, rh, 0, 0, 1.0, layout.fixedHalfH);
+  snapshotEngine.draw(mesh, rw, rh, 0, 0, 1.0, layout.fixedHalfH, sb ? { starkBlackOutlines: true, outlineLineWeight: outW } : null);
   return { url: snapshotCanvas.toDataURL('image/png'), ...layout };
 }
 
@@ -3662,7 +3664,10 @@ function renderMinifigExplodedDiagram(step, cam, w, h, theme, zoom = 1.0) {
   const rh = Math.max(240, Math.round(h));
   const bgHex = toHexColor(theme?.bgColor || '#ffffff', '#ffffff');
   const darkBg = isDarkHexColor(bgHex);
-  const cacheKey = `exp|${step.id}|${(step.parts || []).length}|${Math.round(cam.az)}|${Math.round(cam.el)}|${Math.round(zoom * 100)}|${rw}x${rh}|${darkBg ? 'd' : 'l'}`;
+  const sb = Boolean(state.starkBlackOutlines);
+  const outW = sb ? sanitizeLineWeight(state.outlineLineWeight, 'medium') : 'light';
+  const mfDrawOpts = sb ? { tightFit: true, starkBlackOutlines: true, outlineLineWeight: outW } : { tightFit: true };
+  const cacheKey = `exp|${step.id}|${(step.parts || []).length}|${Math.round(cam.az)}|${Math.round(cam.el)}|${Math.round(zoom * 100)}|${rw}x${rh}|${darkBg ? 'd' : 'l'}|${sb ? outW : 'n'}`;
   if (minifigDiagramCache.has(cacheKey)) return minifigDiagramCache.get(cacheKey);
 
   const plan = buildMinifigExplodedPlan(step.parts || [], (pid) => resolvePart(pid).name, computeWorldBox);
@@ -3705,6 +3710,7 @@ function renderMinifigExplodedDiagram(step, cam, w, h, theme, zoom = 1.0) {
     showArrows: false,
     accent: theme?.accent || '#1a73e8',
     partOffsets: plan.stackOffsets,
+    starkBlackOutlines: sb,
   });
   const stackMvp = drawSupersampledMeshToCtx(
     ctx,
@@ -3717,7 +3723,7 @@ function renderMinifigExplodedDiagram(step, cam, w, h, theme, zoom = 1.0) {
     cam.el,
     Math.max(0.82, Math.min(1.18, zoom)),
     0,
-    { tightFit: true },
+    mfDrawOpts,
     1.5,
   );
 
@@ -3749,6 +3755,7 @@ function renderMinifigExplodedDiagram(step, cam, w, h, theme, zoom = 1.0) {
     fadePrev: false,
     showArrows: false,
     accent: theme?.accent || '#1a73e8',
+    starkBlackOutlines: sb,
   });
   const figMvp = drawSupersampledMeshToCtx(
     ctx,
@@ -3761,7 +3768,7 @@ function renderMinifigExplodedDiagram(step, cam, w, h, theme, zoom = 1.0) {
     cam.el,
     Math.max(0.75, Math.min(1.25, zoom)),
     0,
-    { tightFit: true },
+    mfDrawOpts,
     1.5,
   );
 
@@ -3836,6 +3843,7 @@ function renderMinifigExplodedDiagram(step, cam, w, h, theme, zoom = 1.0) {
         showArrows: false,
         accent: theme?.accent || '#1a73e8',
         partOffsets: acc.isMultiPart ? accDisplay.subassemblyOffsets : {},
+        starkBlackOutlines: sb,
       });
       const accMvp = drawSupersampledMeshToCtx(
         ctx,
@@ -3848,7 +3856,7 @@ function renderMinifigExplodedDiagram(step, cam, w, h, theme, zoom = 1.0) {
         cam.el,
         1.0,
         0,
-        { tightFit: true },
+        mfDrawOpts,
         2.0,
       );
 
@@ -3901,7 +3909,9 @@ function renderMinifigSequentialStage(step, stage, plan, cam, w, h, theme, zoom 
   const bgHex = toHexColor(theme?.bgColor || '#ffffff', '#ffffff');
   const darkBg = isDarkHexColor(bgHex);
   const textColor = theme?.text || (darkBg ? '#f8fafc' : '#1f2937');
-  const cacheKey = `seq|${step.id}|s${stage.stepNumber}|${(step.parts || []).length}|${Math.round(cam.az)}|${Math.round(cam.el)}|${Math.round(zoom * 100)}|${rw}x${rh}|${bgHex}|${textColor}`;
+  const sb = Boolean(state.starkBlackOutlines);
+  const outW = sb ? sanitizeLineWeight(state.outlineLineWeight, 'medium') : 'light';
+  const cacheKey = `seq|${step.id}|s${stage.stepNumber}|${(step.parts || []).length}|${Math.round(cam.az)}|${Math.round(cam.el)}|${Math.round(zoom * 100)}|${rw}x${rh}|${bgHex}|${textColor}|${sb ? outW : 'n'}`;
   if (minifigDiagramCache.has(cacheKey)) return minifigDiagramCache.get(cacheKey);
 
   const comp = document.createElement('canvas');
@@ -3925,6 +3935,7 @@ function renderMinifigSequentialStage(step, stage, plan, cam, w, h, theme, zoom 
     showArrows: false,
     accent: theme?.accent || '#1a73e8',
     partOffsets: stage.partOffsets || {},
+    starkBlackOutlines: sb,
   });
   const stageSs = clampRenderDimensions(
     Math.round(figW * 1.5),
@@ -3941,7 +3952,7 @@ function renderMinifigSequentialStage(step, stage, plan, cam, w, h, theme, zoom 
     cam.el,
     Math.max(0.65, Math.min(1.6, zoom)),
     plan.sharedHalfH,
-    { fixedCenter: plan.sharedCenter },
+    sb ? { fixedCenter: plan.sharedCenter, starkBlackOutlines: true, outlineLineWeight: outW } : { fixedCenter: plan.sharedCenter },
   );
 
   // 1. Celebratory starburst behind completed minifigure on the final sub-step (IMG_0315 Step 6!)
@@ -4025,6 +4036,7 @@ function renderMinifigSequentialStage(step, stage, plan, cam, w, h, theme, zoom 
       showArrows: false,
       accent: theme?.accent || '#1a73e8',
       partOffsets: accDisplay.subassemblyOffsets || {},
+      starkBlackOutlines: sb,
     });
     const pillMvp = drawSupersampledMeshToCtx(
       ctx,
@@ -4037,7 +4049,7 @@ function renderMinifigSequentialStage(step, stage, plan, cam, w, h, theme, zoom 
       cam.el,
       1.0,
       0,
-      { tightFit: true },
+      sb ? { tightFit: true, starkBlackOutlines: true, outlineLineWeight: outW } : { tightFit: true },
       2.0,
     );
 
@@ -19147,6 +19159,7 @@ document.querySelectorAll('.hl-weight-chip').forEach(b => {
 document.querySelectorAll('.outline-weight-chip').forEach(b => {
   b.onclick = () => {
     pliThumbCache.clear();
+    clearMinifigDiagramCaches();
     overviewThumbCache.bumpEpoch();
     patchActiveTheme({ outlineLineWeight: sanitizeLineWeight(b.getAttribute('data-outline-weight'), 'medium') });
   };
@@ -19325,6 +19338,7 @@ if (hqStepsToggleEl) hqStepsToggleEl.onchange = (e) => {
 const starkBlackToggleEl = document.getElementById('toggleStarkBlackOutlines');
 if (starkBlackToggleEl) starkBlackToggleEl.onchange = (e) => {
   pliThumbCache.clear();
+  clearMinifigDiagramCaches();
   overviewThumbCache.bumpEpoch();
   patchActiveTheme({ starkBlackOutlines: e.target.checked });
 };
