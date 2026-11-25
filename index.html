@@ -92,7 +92,10 @@
               <span>Export Project (.biw)</span>
             </button>
             <button id="menuErrorsBtn" type="button" class="hidden w-full py-2.5 px-3.5 rounded-lg border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold text-left flex items-center justify-between gap-2 transition-colors cursor-pointer">
-              <span>Model Issues</span>
+              <span class="flex items-center gap-2 shrink-0 whitespace-nowrap">
+                <svg id="menuErrorsIcon" class="w-4 h-4 text-[var(--primary)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>
+                <span>Model Issues</span>
+              </span>
               <span id="menuErrorCountBadge" class="px-2 py-0.5 rounded font-mono text-xs font-semibold bg-[var(--danger)] text-white">0</span>
             </button>
           </div>
