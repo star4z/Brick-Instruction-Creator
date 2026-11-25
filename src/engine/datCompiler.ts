@@ -99,11 +99,12 @@ export function normalizeDatRef(raw: string): string {
     .replace(/\.dat$/i, '');
 }
 
-// Only skip hidden underside anti-stud tubes (stud3/stud3a/stud4/stud4a).
+// Synthesize underside anti-studs (stud3/stud3a solid pins, stud4/stud4a hollow tubes)
+// cleanly with crisp rims and inner cavities tagged STUD_INNER_COLOR_FLAG.
 // Never skip axlehol* (used for visible exterior Technic cross-axle shafts in parts like
 // 2736 Technic Axle Towball, 32062, 32209 as well as axle holes), beamhol*/npeghol*
 // (visible Technic liftarm faces), or stud10/stud15 (visible top studs on 2x2 round parts).
-const SKIPPED_UNDERSIDE_RE = /^(stud3|stud3a|stud4|stud4a)$/;
+const FAST_ANTI_STUD_RE = /^(stud3|stud3a|stud4|stud4a)$/;
 const SYNTH_ARC_RE = /^(\d+)-(\d+)(cyli|cylo|cylc|disc|edge|ring\d+|rin\d+|chrd|ndis)$/;
 const FALLBACK_TORUS_RE = /^t(\d+)([oiq])(\d{4})$/;
 const FALLBACK_CONE_RE = /^(\d+)-(\d+)con(\d+)$/;
@@ -1024,6 +1025,68 @@ export function compileDatEntry(
     }
   };
 
+  // Underside anti-stud cylinder/tube:
+  // - stud3/stud3a: solid underside pin (r = 3.2 LDU, y = 0..1)
+  // - stud4/stud4a: hollow underside tube (rOut = 8.14, rIn = 6.0 LDU, y = 0..1)
+  //   with inner cylindrical wall and recessed inner ceiling cap tagged STUD_INNER_COLOR_FLAG
+  //   so anti-stud interiors render solid black when Part Outlines is enabled.
+  const emitFastAntiStud = (
+    px: number, py: number, pz: number, pm: Mat3, isTube: boolean, colId: number, edgeLimit: number, segs = 16,
+  ) => {
+    const rOut = isTube ? 8.14 : 3.2;
+    const rIn = 6.0;
+    const tp = (x: number, y: number, z: number): Vec3 => {
+      const v = mat3Vec(pm, x, y, z);
+      return [px + v[0], py + v[1], pz + v[2]];
+    };
+    const innerColId = colId === 16 ? STUD_INNER_COLOR_FLAG : colId;
+    const topPts: Vec3[] = [];
+    const botPts: Vec3[] = [];
+    const inTopPts: Vec3[] = [];
+    const inBotPts: Vec3[] = [];
+    for (let i = 0; i < segs; i++) {
+      const a = (i / segs) * Math.PI * 2;
+      const ca = Math.cos(a), sa = Math.sin(a);
+      topPts.push(tp(ca * rOut, 0, sa * rOut));
+      botPts.push(tp(ca * rOut, 1, sa * rOut));
+      if (isTube) {
+        inTopPts.push(tp(ca * rIn, 0.02, sa * rIn));
+        inBotPts.push(tp(ca * rIn, 1, sa * rIn));
+      }
+    }
+    const botC = tp(0, 1, 0);
+    const innerTopC = tp(0, 0.02, 0);
+    for (let i = 0; i < segs; i++) {
+      const next = (i + 1) % segs;
+      const prev = (i + segs - 1) % segs;
+      const t0 = topPts[i], t1 = topPts[next];
+      const b0 = botPts[i], b1 = botPts[next];
+      // Outer cylindrical wall (outward normal)
+      emitTri(b0, b1, t1, colId);
+      emitTri(b0, t1, t0, colId);
+      if (isTube) {
+        const it0 = inTopPts[i], it1 = inTopPts[next];
+        const ib0 = inBotPts[i], ib1 = inBotPts[next];
+        // Bottom flat ring at y = 1 (downward normal +Y LDraw / -Y GL)
+        emitTri(ib0, b1, b0, colId);
+        emitTri(ib0, ib1, b1, colId);
+        // Inner cylindrical wall (inward normal) + recessed inner ceiling cap (downward normal)
+        emitTri(ib0, it1, ib1, innerColId);
+        emitTri(ib0, it0, it1, innerColId);
+        emitTri(innerTopC, it1, it0, innerColId);
+        if (edges.length < edgeLimit) emitEdge(ib0, ib1);
+      } else {
+        // Solid pin bottom cap at y = 1 (downward normal +Y LDraw / -Y GL)
+        emitTri(botC, b1, b0, colId);
+      }
+      if (edges.length < edgeLimit) {
+        emitEdge(b0, b1);
+        emitEdge(t0, t1);
+      }
+      emitCondEdge(t0, b0, topPts[prev], topPts[next]);
+    }
+  };
+
   // Synthesize standard LDraw arc & rect primitives with high-resolution circular
   // substitution (8/ -> 8, standard 16 -> 48, 48/ -> 48). Because 48 = 3 * 16,
   // every 16-gon arc endpoint (1-16, 1-8, 1-4, 1-2, 3-4, 4-4) lands on the exact
@@ -1371,6 +1434,7 @@ export function compileDatEntry(
     let heavySubCount = 0;
     let lightSubCount = 0;
     let fastStudCount = 0;
+    let fastAntiStudCount = 0;
     for (const item of lines) {
       const raw = item.text;
       if (!isLineKind(raw, '1')) continue;
@@ -1379,11 +1443,13 @@ export function compileDatEntry(
       const ref = normalizeDatRef(t.slice(14).join(' '));
       const base = ref.split('/').pop() || '';
       if (isFastStudBase(base)) { fastStudCount++; continue; }
-      if (SKIPPED_UNDERSIDE_RE.test(base) || canSynthesizePrim(base)) continue;
+      if (FAST_ANTI_STUD_RE.test(base)) { fastAntiStudCount++; continue; }
+      if (canSynthesizePrim(base)) continue;
       if (isLightweightPrimitiveBase(base)) lightSubCount++;
       else heavySubCount++;
     }
     const studSegs = fastStudCount > 384 ? 12 : fastStudCount > 128 ? 16 : 24;
+    const antiStudSegs = fastAntiStudCount > 256 ? 8 : fastAntiStudCount > 96 ? 12 : 16;
 
     const totalSubCount = heavySubCount + lightSubCount;
     const availTriStart = Math.max(0, triLimit - totalTriFloats);
@@ -1596,16 +1662,17 @@ export function compileDatEntry(
           ? [...activeProjPeTex, ...childProjForPrim]
           : [];
 
-        // Fast studs & skip hidden underside tubes/recesses!
+        // Fast top studs & underside anti-studs (solid stud3 pins & hollow stud4 tubes)
         if (isFastStudBase(base)) {
           if (totalTriFloats < triLimit) {
             emitFastStud(nx, ny, nz, nm, base.startsWith('stud2'), childCol, edgeLimit, studSegs);
           }
           continue;
         }
-        if (SKIPPED_UNDERSIDE_RE.test(base)) {
-          // Preserve anti-stud tube occupancy for physical clutch detection without emitting render triangles
-          const r = base.startsWith('stud4') ? 8.14 : 3.2;
+        if (FAST_ANTI_STUD_RE.test(base)) {
+          const isTube = base.startsWith('stud4');
+          // Preserve anti-stud tube occupancy for physical clutch detection
+          const r = isTube ? 8.14 : 3.2;
           let uMinX = Infinity, uMinY = Infinity, uMinZ = Infinity;
           let uMaxX = -Infinity, uMaxY = -Infinity, uMaxZ = -Infinity;
           for (const lx of [-r, r]) {
@@ -1620,6 +1687,9 @@ export function compileDatEntry(
             }
           }
           undersideBoxes.push([uMinX, uMinY, uMinZ, uMaxX, uMaxY, uMaxZ]);
+          if (totalTriFloats < triLimit) {
+            emitFastAntiStud(nx, ny, nz, nm, isTube, childCol, edgeLimit, antiStudSegs);
+          }
           continue;
         }
 

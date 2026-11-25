@@ -364,7 +364,7 @@ describe('compileDatEntry — minifigure torso & sibling-fair budgeting', () => 
     expect(countShaftSpanningTris(meshNoBox2!.tris)).toBe(32);
   });
 
-  it('keeps beamhole/npeghole/stud10 visible while still skipping hidden underside stud3/stud4 tubes', () => {
+  it('keeps beamhole/npeghole/stud10 visible and synthesizes underside stud3/stud4 anti-studs locally', () => {
     const db = new Map<string, DatEntrySource>([
       ['beamhole', { key: 'beamhole', lines: makeTriangles(2, 10, 0, 0) }],
       ['npeghole', { key: 'npeghole', lines: makeTriangles(2, 20, 0, 0) }],
@@ -390,8 +390,11 @@ describe('compileDatEntry — minifigure torso & sibling-fair budgeting', () => 
     expect(hasVertexNearX(mesh!.tris, 10, 1.5)).toBe(true);
     expect(hasVertexNearX(mesh!.tris, 20, 1.5)).toBe(true);
     expect(hasVertexNearX(mesh!.tris, 30, 1.5)).toBe(true);
+    // stud3/stud4 are synthesized at origin (r=3.2 / r=8.14) rather than walking external db stubs at x=40/50
     expect(hasVertexNearX(mesh!.tris, 40, 1.5)).toBe(false);
     expect(hasVertexNearX(mesh!.tris, 50, 1.5)).toBe(false);
+    expect(hasVertexNearX(mesh!.tris, 8.14, 0.25)).toBe(true);
+    expect(hasVertexNearX(mesh!.tris, 3.2, 0.25)).toBe(true);
   });
 
   it('compiles BrickLink Studio dual-sided minifigure heads with PE_TEX_PATH 1/2 and PE_TEX_INFO base64 PNG decals', () => {
@@ -708,6 +711,33 @@ describe('compileDatEntry — smooth circular studs & crease-angle vertex normal
     const baseplate = compileDatEntry({ key: 'baseplate_16x16', lines: baseplateLines }, () => null);
     expect(baseplate).not.toBeNull();
     expect(baseplate!.tris.length / 9).toBe(256 * 48);
+  });
+
+  it('synthesizes underside stud3 pins and hollow stud4 anti-stud tubes with STUD_INNER_COLOR_FLAG on tube interiors', () => {
+    const antiPin = compileDatEntry(
+      { key: 'anti_pin', lines: ['1 16 0 4 0 1 0 0 0 4 0 0 0 1 stud3.dat'] },
+      () => null,
+    );
+    expect(antiPin).not.toBeNull();
+    // 16 segments: 16 * (2 outer wall + 1 bottom cap) = 48 tris, 32 rim edges, 16 silhouette condEdges
+    expect(antiPin!.tris.length / 9).toBe(48);
+    expect(antiPin!.edges.length / 6).toBe(32);
+    expect(antiPin!.condEdges?.length ?? 0).toBe(16 * 12);
+    expect(antiPin!.max[0]).toBeCloseTo(3.2, 2);
+    expect(Array.from(antiPin!.triCols ?? []).filter((c) => c === STUD_INNER_COLOR_FLAG).length).toBe(0);
+
+    const antiTube = compileDatEntry(
+      { key: 'anti_tube', lines: ['1 16 0 4 0 1 0 0 0 20 0 0 0 1 stud4.dat'] },
+      () => null,
+    );
+    expect(antiTube).not.toBeNull();
+    // 16 segments: 16 * (2 outer + 2 bottom ring + 2 inner wall + 1 inner cap) = 112 tris, 48 rim edges, 16 silhouette condEdges
+    expect(antiTube!.tris.length / 9).toBe(112);
+    expect(antiTube!.edges.length / 6).toBe(48);
+    expect(antiTube!.condEdges?.length ?? 0).toBe(16 * 12);
+    expect(antiTube!.max[0]).toBeCloseTo(8.14, 2);
+    // Inner wall (32 tris) + inner ceiling cap (16 tris) = 48 tris tagged STUD_INNER_COLOR_FLAG
+    expect(Array.from(antiTube!.triCols!).filter((c) => c === STUD_INNER_COLOR_FLAG).length).toBe(48);
   });
 
   it('computes smooth radial per-vertex normals on curved cylinders while keeping 90-degree top caps crisp', () => {
