@@ -261,6 +261,11 @@ body {
   touch-action: none;
 }
 
+.stage-viewport.is-panning {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
 /* Calibrated Proofing Table surface */
 .proofing-stage {
   position: relative;
@@ -616,9 +621,20 @@ body {
 .theme-strip {
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
+  scroll-padding-inline: 1rem;
 }
 .theme-strip::-webkit-scrollbar {
   display: none;
+}
+
+/* Show Shift+Scroll hint for the horizontal theme strip on desktop (fine pointer) only */
+.theme-strip-scroll-hint {
+  display: none;
+}
+@media (hover: hover) and (pointer: fine) {
+  .theme-strip-scroll-hint {
+    display: flex;
+  }
 }
 
 /* Draggable Parts List column/field list */

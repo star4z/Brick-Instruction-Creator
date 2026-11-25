@@ -22,7 +22,7 @@ export function RotationCueIcon({ cue, accentColor, compact = false }: Props) {
 
   return (
     <div
-      className="inline-flex items-center gap-2 rounded-full pl-1.5 pr-3.5 py-1 shadow-md select-none"
+      className="inline-flex items-center gap-2 rounded-full pl-1.5 pr-3.5 py-1 shadow-md"
       style={{
         backgroundColor: '#FFFFFF',
         border: `2.5px solid ${accentColor}`,

@@ -610,5 +610,104 @@ describe('studioRuntime safety checks', () => {
     expect(runtime).toContain('function switchStudioMode(nextMode)');
     expect(runtime).toContain('suppressedBlankResetEvent = e;');
   });
+
+  it('removes duplicate Extra Pages text toggles from Page Setup and exposes separate toggles with per-page Settings links', () => {
+    const html = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf8');
+    const runtime = fs.readFileSync(path.resolve(process.cwd(), 'src/studioRuntime.ts'), 'utf8');
+
+    const modalStart = html.indexOf('id="pageSetupModal"');
+    const modalEnd = html.indexOf('id="bomSetupModal"', modalStart);
+    expect(modalStart).toBeGreaterThan(-1);
+    expect(modalEnd).toBeGreaterThan(modalStart);
+
+    const pageSetupHtml = html.slice(modalStart, modalEnd);
+    for (const removed of [
+      'Extra Pages',
+      'toggleExtras',
+      'toggleCoverText',
+      'toggleCompleteText',
+      'toggleCompleteFireworks',
+      'toggleBomTextFields',
+    ]) {
+      expect(pageSetupHtml).not.toContain(removed);
+      expect(runtime).not.toContain(removed);
+    }
+
+    for (const requiredId of [
+      'toggleShowCover',
+      'toggleShowComplete',
+      'toggleShowPartsList',
+      'toggleShowBackCover',
+      'btnOpenCoverSettings',
+      'btnOpenCompleteSettings',
+      'btnOpenPartsListSettings',
+      'btnOpenBackCoverSettings',
+    ]) {
+      expect(pageSetupHtml).toContain(`id="${requiredId}"`);
+      expect(runtime).toContain(`'${requiredId}'`);
+    }
+
+    expect(runtime).toContain('if (state.showCover)');
+    expect(runtime).toContain('if (state.showBuildComplete)');
+    expect(runtime).toContain('if (state.showPartsList)');
+    expect(runtime).toContain('if (state.showBackCover)');
+    expect(runtime).toContain('openExtraPageSettings');
+  });
+
+  it('keeps text selectable across the app and exported HTML viewer', () => {
+    const html = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf8');
+    const exporter = fs.readFileSync(
+      path.resolve(process.cwd(), 'src/export/interactiveHtmlExporter.ts'),
+      'utf8',
+    );
+
+    const bodyMatch = html.match(/<body[^>]*>/);
+    expect(bodyMatch).not.toBeNull();
+    expect(bodyMatch![0]).not.toContain('select-none');
+
+    const activeBodyStart = exporter.indexOf('html.js-3d-active, html.js-3d-active body {');
+    const activeBodyEnd = exporter.indexOf('}', activeBodyStart);
+    expect(activeBodyStart).toBeGreaterThan(-1);
+    expect(exporter.slice(activeBodyStart, activeBodyEnd)).not.toContain('user-select: none');
+  });
+
+  it('includes a desktop Shift+Scroll hint and left-margin alignment on the Style dialog theme strip', () => {
+    const html = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf8');
+    const css = fs.readFileSync(path.resolve(process.cwd(), 'src/index.css'), 'utf8');
+    const runtime = fs.readFileSync(path.resolve(process.cwd(), 'src/studioRuntime.ts'), 'utf8');
+
+    const popStart = html.indexOf('id="stylePopover"');
+    const popEnd = html.indexOf('id="overviewModal"', popStart);
+    expect(popStart).toBeGreaterThan(-1);
+    expect(popEnd).toBeGreaterThan(popStart);
+
+    const styleHtml = html.slice(popStart, popEnd);
+    expect(styleHtml).toContain('id="themeStrip"');
+    expect(styleHtml).toContain('scroll-px-4');
+    expect(styleHtml).toContain('id="themeStripScrollHint"');
+    expect(styleHtml).toContain('Shift');
+    expect(styleHtml).toContain('Scroll');
+
+    expect(css).toContain('scroll-padding-inline: 1rem;');
+    expect(css).toContain('.theme-strip-scroll-hint');
+    expect(css).toContain('@media (hover: hover) and (pointer: fine)');
+    expect(runtime).toContain("themeStripWheelEl.addEventListener('wheel'");
+  });
+
+  it('does not include a redundant View Parts List button in the Parts List Setup dialog', () => {
+    const html = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf8');
+    const runtime = fs.readFileSync(path.resolve(process.cwd(), 'src/studioRuntime.ts'), 'utf8');
+
+    const modalStart = html.indexOf('id="bomSetupModal"');
+    const modalEnd = html.indexOf('id="applyAngleModal"', modalStart);
+    expect(modalStart).toBeGreaterThan(-1);
+    expect(modalEnd).toBeGreaterThan(modalStart);
+
+    const bomSetupHtml = html.slice(modalStart, modalEnd);
+    expect(bomSetupHtml).not.toContain('bomSetupJumpBtn');
+    expect(bomSetupHtml).not.toContain('View Parts List');
+    expect(bomSetupHtml).toContain('id="bomSetupDoneBtn"');
+    expect(runtime).not.toContain('bomSetupJumpBtn');
+  });
 });
 

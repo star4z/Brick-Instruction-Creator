@@ -443,7 +443,6 @@ export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload)
   /* Active 3D mode (enabled only when JavaScript + WebGL boot cleanly) */
   html.js-3d-active, html.js-3d-active body {
     height: 100%; height: 100dvh; overflow: hidden;
-    user-select: none; -webkit-user-select: none;
   }
   html.js-3d-active #noJsFallback { display: none; }
   #interactiveApp { display: none; }
@@ -537,6 +536,7 @@ export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload)
   canvas#glStage {
     position: absolute; inset: 0; width: 100%; height: 100%; display: block;
     touch-action: none; cursor: grab;
+    user-select: none; -webkit-user-select: none;
   }
   canvas#glStage:active { cursor: grabbing; }
   .glass {

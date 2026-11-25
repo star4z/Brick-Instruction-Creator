@@ -11,7 +11,7 @@
       content="Brick Instruction Works — Convert BrickLink Studio (.io) and LDraw (.ldr/.mpd) models into printable, non-breaking building instruction manuals."
     />
   </head>
-  <body class="bg-[var(--background)] text-[var(--foreground)] antialiased select-none">
+  <body class="bg-[var(--background)] text-[var(--foreground)] antialiased">
   <!-- Full-Screen App Shell -->
   <div id="appShell" class="relative w-full h-full overflow-hidden flex">
 
@@ -478,7 +478,11 @@
               <span>New from Current</span>
             </button>
           </div>
-          <div id="themeStrip" role="listbox" aria-label="Themes" class="theme-strip flex gap-2 overflow-x-auto overscroll-x-contain snap-x snap-mandatory -mx-4 px-4 py-1"></div>
+          <div id="themeStrip" role="listbox" aria-label="Themes" class="theme-strip flex gap-2 overflow-x-auto overscroll-x-contain snap-x snap-proximity -mx-4 px-4 scroll-px-4 py-1"></div>
+          <p id="themeStripScrollHint" class="theme-strip-scroll-hint items-center gap-1.5 text-[11px] text-[var(--muted-foreground)] leading-snug">
+            <kbd class="px-1.5 py-0.5 rounded border border-[var(--border)] bg-[var(--surface-sunken)] font-mono text-[10px] font-semibold text-[var(--foreground)]">Shift</kbd>
+            <span>+ Scroll to browse more themes</span>
+          </p>
         </div>
 
         <!-- Scrollable style options -->
@@ -1288,7 +1292,7 @@
             <label class="flex items-start justify-between gap-3 p-3 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)]/55 cursor-pointer">
               <div class="min-w-0">
                 <div class="font-semibold text-xs text-[var(--foreground)]">Wordless Instructions (LEGO-Style)</div>
-                <p class="text-[11px] text-[var(--muted-foreground)] mt-0.5 leading-snug">Communicate every step with icons, diagrams, and numbers only so no translation is needed. Individual cover &amp; parts-list text options below remain configurable.</p>
+                <p class="text-[11px] text-[var(--muted-foreground)] mt-0.5 leading-snug">Communicate every step with icons, diagrams, and numbers only so no translation is needed. Individual cover, build complete &amp; parts-list text options remain configurable on their own pages.</p>
               </div>
               <input id="toggleWordlessMode" type="checkbox" checked class="mt-0.5 w-4 h-4 accent-[var(--primary)] shrink-0 cursor-pointer" />
             </label>
@@ -1329,33 +1333,50 @@
               </span>
               <input id="togglePageTitleSetup" type="checkbox" checked class="w-4 h-4 accent-[var(--primary)] cursor-pointer" />
             </label>
-            <label class="flex items-center justify-between py-1 cursor-pointer">
-              <span class="font-medium">Cover, Build Complete, Parts List &amp; Back Cover</span>
-              <input id="toggleExtras" type="checkbox" checked class="w-4 h-4 accent-[var(--primary)] cursor-pointer" />
-            </label>
           </div>
 
-          <div class="space-y-2.5 pt-4 border-t border-[var(--border)]">
-            <div class="flex items-center justify-between gap-2">
-              <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Cover, Build Complete &amp; Parts List Text</div>
-              <span class="px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-[var(--surface-sunken)] text-[var(--muted-foreground)] border border-[var(--border)] whitespace-nowrap">Extra Pages</span>
+          <div class="space-y-2 pt-4 border-t border-[var(--border)]">
+            <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Included Pages</div>
+            <div class="flex items-center justify-between gap-2 min-h-[30px]">
+              <label for="toggleShowCover" class="font-medium cursor-pointer flex-1 min-w-0 py-1">Cover</label>
+              <div class="flex items-center gap-2.5 shrink-0">
+                <button id="btnOpenCoverSettings" type="button" title="Open Cover page settings" aria-label="Open Cover page settings" class="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] hover:border-[var(--primary)] hover:text-[var(--primary)] text-[11px] font-semibold transition-colors cursor-pointer">
+                  <span>Settings</span>
+                  <svg class="w-3 h-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+                </button>
+                <input id="toggleShowCover" type="checkbox" checked class="w-4 h-4 accent-[var(--primary)] cursor-pointer" />
+              </div>
             </div>
-            <label class="flex items-center justify-between py-1 cursor-pointer">
-              <span class="font-medium">Show Front Cover Title &amp; Subtitle</span>
-              <input id="toggleCoverText" type="checkbox" class="w-4 h-4 accent-[var(--primary)] cursor-pointer" />
-            </label>
-            <label class="flex items-center justify-between py-1 cursor-pointer">
-              <span class="font-medium">Show &ldquo;Build Complete!&rdquo; Text</span>
-              <input id="toggleCompleteText" type="checkbox" class="w-4 h-4 accent-[var(--primary)] cursor-pointer" />
-            </label>
-            <label class="flex items-center justify-between py-1 cursor-pointer">
-              <span class="font-medium">Celebration Fireworks Effect</span>
-              <input id="toggleCompleteFireworks" type="checkbox" checked class="w-4 h-4 accent-[var(--primary)] cursor-pointer" />
-            </label>
-            <label class="flex items-center justify-between py-1 cursor-pointer">
-              <span class="font-medium">Show Part Names &amp; Colors in Parts List</span>
-              <input id="toggleBomTextFields" type="checkbox" class="w-4 h-4 accent-[var(--primary)] cursor-pointer" />
-            </label>
+            <div class="flex items-center justify-between gap-2 min-h-[30px]">
+              <label for="toggleShowComplete" class="font-medium cursor-pointer flex-1 min-w-0 py-1">Build Complete</label>
+              <div class="flex items-center gap-2.5 shrink-0">
+                <button id="btnOpenCompleteSettings" type="button" title="Open Build Complete page settings" aria-label="Open Build Complete page settings" class="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] hover:border-[var(--primary)] hover:text-[var(--primary)] text-[11px] font-semibold transition-colors cursor-pointer">
+                  <span>Settings</span>
+                  <svg class="w-3 h-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+                </button>
+                <input id="toggleShowComplete" type="checkbox" checked class="w-4 h-4 accent-[var(--primary)] cursor-pointer" />
+              </div>
+            </div>
+            <div class="flex items-center justify-between gap-2 min-h-[30px]">
+              <label for="toggleShowPartsList" class="font-medium cursor-pointer flex-1 min-w-0 py-1">Parts List</label>
+              <div class="flex items-center gap-2.5 shrink-0">
+                <button id="btnOpenPartsListSettings" type="button" title="Open Parts List settings" aria-label="Open Parts List settings" class="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] hover:border-[var(--primary)] hover:text-[var(--primary)] text-[11px] font-semibold transition-colors cursor-pointer">
+                  <span>Settings</span>
+                  <svg class="w-3 h-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+                </button>
+                <input id="toggleShowPartsList" type="checkbox" checked class="w-4 h-4 accent-[var(--primary)] cursor-pointer" />
+              </div>
+            </div>
+            <div class="flex items-center justify-between gap-2 min-h-[30px]">
+              <label for="toggleShowBackCover" class="font-medium cursor-pointer flex-1 min-w-0 py-1">Back Cover</label>
+              <div class="flex items-center gap-2.5 shrink-0">
+                <button id="btnOpenBackCoverSettings" type="button" title="Open Back Cover page settings" aria-label="Open Back Cover page settings" class="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] hover:border-[var(--primary)] hover:text-[var(--primary)] text-[11px] font-semibold transition-colors cursor-pointer">
+                  <span>Settings</span>
+                  <svg class="w-3 h-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+                </button>
+                <input id="toggleShowBackCover" type="checkbox" checked class="w-4 h-4 accent-[var(--primary)] cursor-pointer" />
+              </div>
+            </div>
           </div>
         </div>
 
@@ -1783,8 +1804,7 @@
           </div>
         </div>
 
-        <div class="px-5 py-3.5 border-t border-[var(--border)] bg-[var(--chrome)] flex items-center gap-2.5 shrink-0">
-          <button id="bomSetupJumpBtn" type="button" class="flex-1 py-2.5 px-4 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold transition-colors cursor-pointer">View Parts List</button>
+        <div class="px-5 py-3.5 border-t border-[var(--border)] bg-[var(--chrome)] flex items-center justify-end gap-2.5 shrink-0">
           <button id="bomSetupDoneBtn" type="button" class="px-5 py-2.5 rounded-md bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] font-semibold transition-colors cursor-pointer">Done</button>
         </div>
       </div>
@@ -1995,7 +2015,7 @@
             </div>
             <div class="flex items-center justify-between gap-2.5 flex-wrap">
               <div id="libScopeFilterBar" class="flex items-center gap-1.5 overflow-x-auto no-scrollbar"></div>
-              <label class="flex items-center gap-2 text-xs text-[var(--muted-foreground)] cursor-pointer select-none shrink-0">
+              <label class="flex items-center gap-2 text-xs text-[var(--muted-foreground)] cursor-pointer shrink-0">
                 <input id="libIncludeHelpersToggle" type="checkbox" class="w-4 h-4 accent-[var(--primary)] cursor-pointer" />
                 <span>Show subparts &amp; primitives</span>
               </label>

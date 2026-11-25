@@ -133,6 +133,11 @@ import {
   withDerivedStepsPerPage,
 } from './engine/pageLayout';
 import {
+  createDefaultExtraPagesConfig,
+  getExtraPageSettingsAction,
+  normalizeExtraPagesConfig,
+} from './engine/extraPages';
+import {
   buildPagePreviewCacheKey,
   buildStepPreviewCacheKey,
   computeOverviewStepSignatures,
@@ -6320,7 +6325,7 @@ const state = {
   wordlessMode: DEFAULT_WORDLESS_MODE, // LEGO-style icon/number-only instructions (no translation needed)
   bomShowTextFields: initialWordlessDefaults.bomShowTextFields,
   pageNumberFormat: initialWordlessDefaults.pageNumberFormat, // 'number' | 'page_n' | 'n_of_total' | 'none'
-  showExtras: true,
+  ...createDefaultExtraPagesConfig(),
   overrides: {},           // keyed by stepId: { pin, side, corner, az, el, modelScale, pliScale, pliPos:{x,y}, calloutPos:{x,y}, calloutDir, calloutAsPages, minifigStyle, partOffsets:{ [partId]: {x,y,z,tilt,arrow} } }
   stepInserts: {},         // keyed by stepId: [ { id, kind:'text'|'image', text, src, corner, x, y, scale } ]
   pageInserts: {},         // legacy page-keyed inserts (auto-migrated to stepInserts on load)
@@ -6405,6 +6410,10 @@ function captureHistorySnap() {
     wordlessMode: state.wordlessMode,
     bomShowTextFields: state.bomShowTextFields,
     pageNumberFormat: state.pageNumberFormat,
+    showCover: state.showCover,
+    showBuildComplete: state.showBuildComplete,
+    showPartsList: state.showPartsList,
+    showBackCover: state.showBackCover,
     layoutConfig: state.layoutConfig,
     layoutGroups: state.layoutGroups,
   });
@@ -6428,6 +6437,19 @@ function applyHistorySnap(json) {
   if (typeof s.wordlessMode === 'boolean') state.wordlessMode = s.wordlessMode;
   if (typeof s.bomShowTextFields === 'boolean') state.bomShowTextFields = s.bomShowTextFields;
   if (s.pageNumberFormat) state.pageNumberFormat = s.pageNumberFormat;
+  if (
+    typeof s.showCover === 'boolean' ||
+    typeof s.showBuildComplete === 'boolean' ||
+    typeof s.showPartsList === 'boolean' ||
+    typeof s.showBackCover === 'boolean' ||
+    typeof s.showExtras === 'boolean'
+  ) {
+    const extraCfg = normalizeExtraPagesConfig(s);
+    state.showCover = extraCfg.showCover;
+    state.showBuildComplete = extraCfg.showBuildComplete;
+    state.showPartsList = extraCfg.showPartsList;
+    state.showBackCover = extraCfg.showBackCover;
+  }
   state.coverMeta = normalizeCoverMeta(s.coverMeta, !state.wordlessMode);
   if (s.completeMeta) state.completeMeta = normalizeCompleteMeta(s.completeMeta);
   state.backMeta = normalizeBackMeta(s.backMeta);
@@ -6776,7 +6798,7 @@ function rebuildPages() {
   const sectionPrevBoxes = new Map();
   const allStepChecks = [];
 
-  if (state.showExtras) pages.push({ id:'cover', kind:'cover', num:++pNum, label:'Cover' });
+  if (state.showCover) pages.push({ id:'cover', kind:'cover', num:++pNum, label:'Cover' });
 
   for (const ch of state.model.chapters) {
     let i = 0;
@@ -7045,7 +7067,6 @@ function rebuildPages() {
       }
     }
   }
-
   state.pageSizeWarning = analyzePageSizeFit({
     stepChecks: allStepChecks,
     currentFormatId: state.paperFormat,
@@ -7054,11 +7075,14 @@ function rebuildPages() {
     currentPageHeightIn: dims.heightIn,
     density: state.density,
   });
-  if (state.showExtras) {
-    // 1. Build Complete celebration page BEFORE Parts List
-    pages.push({ id:'complete', kind:'complete', num:++pNum, label:'Build Complete' });
 
-    // 2. Multi-page spillover Parts List (zero cut-off!) — Grid or Table format
+  // 1. Build Complete celebration page BEFORE Parts List
+  if (state.showBuildComplete) {
+    pages.push({ id:'complete', kind:'complete', num:++pNum, label:'Build Complete' });
+  }
+
+  // 2. Multi-page spillover Parts List (zero cut-off!) — Grid or Table format
+  if (state.showPartsList) {
     const allParts = getAllParts(state.model);
     const bomEntries = getSortedBomEntries(allParts);
     const bomCfg = getEffectiveBomConfig();
@@ -7116,8 +7140,10 @@ function rebuildPages() {
         });
       }
     }
+  }
 
-    // 3. Distinct Back Cover
+  // 3. Distinct Back Cover
+  if (state.showBackCover) {
     pages.push({ id:'back', kind:'back', num:++pNum, label:'Back Cover' });
   }
   const wasOnBom = state.pages[state.pageIdx]?.kind === 'bom';
@@ -8681,6 +8707,7 @@ function bindStepPageInteractions(page) {
 
       let dragging = false, moved = false, pushedUndo = false, startX = 0, startY = 0, lx = 0, ly = 0;
       liveCanvas.onpointerdown = (e) => {
+        e.preventDefault();
         e.stopPropagation();
         dragging = true;
         moved = false;
@@ -8743,6 +8770,7 @@ function bindStepPageInteractions(page) {
       const sid = el.getAttribute('data-step');
       const insId = el.getAttribute('data-insert-id');
       el.onpointerdown = (e) => {
+        e.preventDefault();
         e.stopPropagation();
         dragging = true; moved = false; pushedUndo = false;
         sx = e.clientX; sy = e.clientY;
@@ -9096,7 +9124,7 @@ function renderContextOverlay(page) {
 
       box.querySelector('#covOpenPageSetupBtn').onclick = () => openPageSetupModal();
       box.querySelector('#covOpenStyleBtn').onclick = () => setStylePopoverOpen(true);
-      box.querySelector('#covTextToggle').onclick = () => { pushUndo(); meta.showText = !(meta.showText !== false); renderAll(); };
+      box.querySelector('#covTextToggle').onclick = () => { pushUndo(); meta.showText = !(meta.showText !== false); overviewThumbCache.bumpEpoch(); renderAll(); };
       box.querySelector('#covTitleIn').onchange = (e) => { pushUndo(); meta.title = e.target.value; renderAll(); };
       box.querySelector('#covSubIn').onchange = (e) => { pushUndo(); meta.subtitle = e.target.value; renderAll(); };
       box.querySelector('#covCreatorLogoBtn').onclick = () => openCoverImagePicker('creatorLogo');
@@ -9112,6 +9140,10 @@ function renderContextOverlay(page) {
     }
 
     const hasBg = Boolean(meta.bgSrc);
+    const showCompText = meta.showText !== false;
+    const paperSpec = PAPER_FORMAT_SPECS[state.paperFormat] || PAPER_FORMAT_SPECS.screen;
+    const orientTxt = paperSpec.supportsOrientation ? (state.orientation === 'portrait' ? 'Portrait' : 'Landscape') : '';
+    const manualSummary = [paperSpec.shortName, orientTxt].filter(Boolean).join(' · ');
     box.innerHTML = `
       <div class="pointer-events-auto studio-surface rounded-xl p-3.5 w-full space-y-2.5 text-xs">
         <div class="flex items-center justify-between gap-2 flex-wrap">
@@ -9121,7 +9153,7 @@ function renderContextOverlay(page) {
           </div>
           <div class="flex items-center gap-1.5 flex-wrap">
             ${isComplete ? `
-              <button id="compToggleText" type="button" class="px-2.5 py-1.5 rounded-md font-semibold cursor-pointer ${meta.showText !== false ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'bg-[var(--surface-sunken)]'}">Text</button>
+              <button id="compToggleText" type="button" class="px-2.5 py-1.5 rounded-md font-semibold cursor-pointer ${showCompText ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'bg-[var(--surface-sunken)]'}">Text</button>
               <button id="compToggleFw" type="button" class="px-2.5 py-1.5 rounded-md font-semibold inline-flex items-center gap-1 cursor-pointer ${meta.showFireworks !== false ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'bg-[var(--surface-sunken)]'}">${icoSpark}<span>Fireworks</span></button>
             ` : ''}
             <div class="inline-flex items-center rounded-md overflow-hidden ${hasBg ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'bg-[var(--surface-sunken)]'}">
@@ -9131,18 +9163,30 @@ function renderContextOverlay(page) {
           </div>
         </div>
         ${!isBack ? `
-          <div class="grid grid-cols-2 gap-2">
+          <div class="grid grid-cols-2 gap-2 ${showCompText ? '' : 'hidden'}">
             <input id="covTitleIn" value="${escHtml(meta.title || defaultTitle)}" placeholder="Title" class="px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] outline-none focus:border-[var(--primary)]" />
             <input id="covSubIn" value="${escHtml(meta.subtitle || '')}" placeholder="Subtitle" class="px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] outline-none focus:border-[var(--primary)]" />
           </div>
         ` : ''}
+        <div class="pt-2 border-t border-[var(--border)] flex items-center justify-between gap-2 flex-wrap">
+          <div class="flex items-center gap-2 min-w-0 flex-1">
+            ${renderScopeBadge('manual', 'All Pages')}
+            <span class="font-mono text-[11px] text-[var(--muted-foreground)] truncate">${escHtml(manualSummary)}</span>
+          </div>
+          <div class="flex items-center gap-1.5 shrink-0">
+            <button id="covOpenPageSetupBtn" type="button" class="px-2.5 py-1 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold cursor-pointer">Page Setup…</button>
+            <button id="covOpenStyleBtn" type="button" class="px-2.5 py-1 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold cursor-pointer">Style…</button>
+          </div>
+        </div>
       </div>`;
+    box.querySelector('#covOpenPageSetupBtn').onclick = () => openPageSetupModal();
+    box.querySelector('#covOpenStyleBtn').onclick = () => setStylePopoverOpen(true);
     const titleIn = box.querySelector('#covTitleIn');
     if (titleIn) titleIn.onchange = (e) => { pushUndo(); meta.title = e.target.value; renderAll(); };
     const subIn = box.querySelector('#covSubIn');
     if (subIn) subIn.onchange = (e) => { pushUndo(); meta.subtitle = e.target.value; renderAll(); };
     const tText = box.querySelector('#compToggleText');
-    if (tText) tText.onclick = () => { pushUndo(); meta.showText = !(meta.showText !== false); renderAll(); };
+    if (tText) tText.onclick = () => { pushUndo(); meta.showText = !(meta.showText !== false); overviewThumbCache.bumpEpoch(); renderAll(); };
     const tFw = box.querySelector('#compToggleFw');
     if (tFw) tFw.onclick = () => { pushUndo(); meta.showFireworks = !(meta.showFireworks !== false); renderAll(); };
     box.querySelector('#covBgBtn').onclick = () => openCoverImagePicker('bg');
@@ -10979,7 +11023,6 @@ function syncMenuControls() {
   setVisible('menuBomSetupBtn', vis.showBomSetup);
   setVisible('menuPrintBtn', vis.showPrintPdf);
   setVisible('menuExportHtmlBtn', vis.showPrintPdf);
-  setVisible('bomSetupJumpBtn', vis.showBomSetup);
   setVisible('menuFetchLibWrap', vis.showFetchLibrary);
   setVisible('menuClearLibBtn', vis.showClearLibrary);
   setVisible('menuAutoGenSection', vis.showAutoGenerateSection);
@@ -11062,10 +11105,6 @@ function syncMenuControls() {
   setChk('togglePageTitleSetup', state.showPageTitle);
   const covShowText = normalizeCoverMeta(state.coverMeta, !state.wordlessMode).showText !== false;
   const compShowText = state.completeMeta.showText !== false;
-  setChk('toggleCoverText', covShowText);
-  setChk('toggleCompleteText', compShowText);
-  setChk('toggleCompleteFireworks', state.completeMeta.showFireworks !== false);
-  setChk('toggleBomTextFields', state.bomShowTextFields);
   const menuEditsSummary = getCurrentManualEditsSummary();
   applyDestructiveNoticeToEl(
     'wordlessToggleNotice',
@@ -11079,7 +11118,14 @@ function syncMenuControls() {
       hasCustomCompleteText: menuEditsSummary.hasCustomCompleteText,
     }),
   );
-  setChk('toggleExtras', state.showExtras);
+  setChk('toggleShowCover', state.showCover);
+  setChk('toggleShowComplete', state.showBuildComplete);
+  setChk('toggleShowPartsList', state.showPartsList);
+  setChk('toggleShowBackCover', state.showBackCover);
+  setVisible('btnOpenCoverSettings', Boolean(state.model && state.showCover));
+  setVisible('btnOpenCompleteSettings', Boolean(state.model && state.showBuildComplete));
+  setVisible('btnOpenPartsListSettings', Boolean(state.model && state.showPartsList));
+  setVisible('btnOpenBackCoverSettings', Boolean(state.model && state.showBackCover));
   setChk('toggleDetectDuplicates', state.detectDuplicates);
   setChk('toggleMinifig1to1', state.showMinifig1to1);
   const curMfStyleGlobal = normalizeMinifigStepStyle(state.minifigStyle);
@@ -11341,7 +11387,7 @@ function renderBomFieldsList(bc) {
     row.draggable = true;
     row.dataset.fieldIdx = String(idx);
     row.dataset.fieldId = f.id;
-    row.className = `bom-field-row flex items-center gap-2 px-2.5 py-2 rounded-lg border select-none ${
+    row.className = `bom-field-row flex items-center gap-2 px-2.5 py-2 rounded-lg border ${
       effEnabled
         ? 'border-[var(--border)] bg-[var(--card)]'
         : 'border-[var(--border)]/60 bg-[var(--surface-sunken)]/60 opacity-65'
@@ -11355,7 +11401,7 @@ function renderBomFieldsList(bc) {
 
     const isLastEnabled = effEnabled && enabledCount <= 1;
     row.innerHTML = `
-      <span class="bom-field-handle touch-none cursor-grab active:cursor-grabbing text-[var(--muted-foreground)] hover:text-[var(--foreground)] px-0.5 py-1" title="Drag to reorder" aria-hidden="true">
+      <span class="bom-field-handle touch-none select-none cursor-grab active:cursor-grabbing text-[var(--muted-foreground)] hover:text-[var(--foreground)] px-0.5 py-1" title="Drag to reorder" aria-hidden="true">
         <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>
       </span>
       <input type="checkbox" ${effEnabled ? 'checked' : ''} ${isLastEnabled ? 'disabled title="At least one field must stay enabled"' : ''} aria-label="Show ${escHtml(meta.label)}" class="bom-field-chk w-4 h-4 accent-[var(--primary)] cursor-pointer shrink-0 disabled:opacity-50" />
@@ -12091,7 +12137,7 @@ function renderOverviewModal(opts = {}) {
 
     if (startsWithBreak) {
       const divider = document.createElement('div');
-      divider.className = 'flex items-center gap-2 px-2 pt-1 text-xs font-bold text-[var(--primary)] select-none';
+      divider.className = 'flex items-center gap-2 px-2 pt-1 text-xs font-bold text-[var(--primary)]';
       divider.innerHTML = `
         <div class="flex-1 border-t border-dashed border-[var(--primary-border)]"></div>
         <span class="inline-flex items-center gap-1 whitespace-nowrap">
@@ -12428,20 +12474,34 @@ function scrollOverviewListTo(edge) {
 
   // Desktop mouse drag panning (Pan mode or read-only pages)
   let mouseDragging = false;
+  let mousePanMoved = false;
   stage.addEventListener('mousedown', (e) => {
     if (!state.model || !isPanGestureEnabled() || e.button !== 0) return;
     if (e.target?.closest?.('a[href]')) return;
     mouseDragging = true;
+    mousePanMoved = false;
     startPanX = state.panX; startPanY = state.panY;
     startX = e.clientX; startY = e.clientY;
   });
   window.addEventListener('mousemove', (e) => {
     if (!mouseDragging) return;
-    state.panX = startPanX + (e.clientX - startX);
-    state.panY = startPanY + (e.clientY - startY);
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    if (!mousePanMoved) {
+      if (Math.hypot(dx, dy) < 4) return;
+      mousePanMoved = true;
+      stage.classList.add('is-panning');
+      window.getSelection?.()?.removeAllRanges?.();
+    }
+    state.panX = startPanX + dx;
+    state.panY = startPanY + dy;
     applyStageTransform();
   });
-  window.addEventListener('mouseup', () => { mouseDragging = false; });
+  window.addEventListener('mouseup', () => {
+    if (mousePanMoved) stage.classList.remove('is-panning');
+    mouseDragging = false;
+    mousePanMoved = false;
+  });
 
   // Clicking/tapping blank proofing-table space outside #pageFrame switches editor mode back to Pan
   document.addEventListener('pointerdown', (e) => {
@@ -14603,6 +14663,11 @@ function openBomSetupModal() {
   if (page) syncModePillButtons(page);
 }
 
+function closePageSetupModal() {
+  closeLayoutGroupEditor();
+  document.getElementById('pageSetupModal').classList.add('hidden');
+}
+
 function closeBomSetupModal() {
   const el = document.getElementById('bomSetupModal');
   if (el) el.classList.add('hidden');
@@ -14626,7 +14691,9 @@ function scheduleSaveSessionPrefs() {
       showSizeGuides: state.showSizeGuides, minifigStyle: state.minifigStyle, showMinifig1to1: state.showMinifig1to1, showStepBorders: state.showStepBorders,
       showPageTitle: state.showPageTitle, wordlessMode: state.wordlessMode, bomShowTextFields: state.bomShowTextFields,
       pageNumberFormat: state.pageNumberFormat,
-      showExtras: state.showExtras, bomConfig: state.bomConfig,
+      showCover: state.showCover, showBuildComplete: state.showBuildComplete,
+      showPartsList: state.showPartsList, showBackCover: state.showBackCover,
+      bomConfig: state.bomConfig,
       overrides: state.overrides, stepInserts: state.stepInserts, pageInserts: state.pageInserts, dividerAfter: state.dividerAfter,
       coverMeta: state.coverMeta, completeMeta: state.completeMeta, backMeta: state.backMeta, pageIdx: state.pageIdx,
       seenDiagnosticKeys: serializeSeenDiagnosticKeys(state.seenDiagnosticKeys),
@@ -14679,7 +14746,11 @@ async function restoreLastSessionOnStart() {
     state.bomShowTextFields = typeof prefs.bomShowTextFields === 'boolean' ? prefs.bomShowTextFields : !state.wordlessMode;
     if (prefs.pageNumberFormat) state.pageNumberFormat = prefs.pageNumberFormat;
     else state.pageNumberFormat = getWordlessSurfaceDefaults(state.wordlessMode).pageNumberFormat;
-    if (typeof prefs.showExtras === 'boolean') state.showExtras = prefs.showExtras;
+    const extraCfg = normalizeExtraPagesConfig(prefs);
+    state.showCover = extraCfg.showCover;
+    state.showBuildComplete = extraCfg.showBuildComplete;
+    state.showPartsList = extraCfg.showPartsList;
+    state.showBackCover = extraCfg.showBackCover;
 
     let effectiveRec = rec;
     if (rec.kind === 'io' && rec.data) {
@@ -14723,7 +14794,14 @@ async function restoreLastSessionOnStart() {
     state.pageIdx = Math.max(0, prefs.pageIdx || 0);
     state.seenDiagnosticKeys = deserializeSeenDiagnosticKeys(prefs.seenDiagnosticKeys);
     // Sync checkboxes in DOM
-    document.getElementById('toggleExtras').checked = state.showExtras;
+    const covChk = document.getElementById('toggleShowCover');
+    if (covChk) covChk.checked = state.showCover;
+    const compChk = document.getElementById('toggleShowComplete');
+    if (compChk) compChk.checked = state.showBuildComplete;
+    const bomChk = document.getElementById('toggleShowPartsList');
+    if (bomChk) bomChk.checked = state.showPartsList;
+    const backChk = document.getElementById('toggleShowBackCover');
+    if (backChk) backChk.checked = state.showBackCover;
     document.getElementById('toggleHighlight').checked = state.highlightNew;
     document.getElementById('highlightColor').value = state.highlightColor;
     document.getElementById('toggleFade').checked = state.fadePrev;
@@ -14735,10 +14813,6 @@ async function restoreLastSessionOnStart() {
     if (dupEl) dupEl.checked = state.detectDuplicates;
     const wlEl = document.getElementById('toggleWordlessMode');
     if (wlEl) wlEl.checked = state.wordlessMode;
-    const covTxtEl = document.getElementById('toggleCoverText');
-    if (covTxtEl) covTxtEl.checked = state.coverMeta.showText !== false;
-    const bomTxtEl = document.getElementById('toggleBomTextFields');
-    if (bomTxtEl) bomTxtEl.checked = state.bomShowTextFields;
 
     computeModelDiagnostics();
     resetZoom();
@@ -16618,6 +16692,17 @@ document.querySelectorAll('.theme-angle-btn').forEach(b => {
 });
 document.getElementById('themeBlueprintGrid').onchange = (e) => patchActiveTheme({ bp: e.target.checked });
 
+const themeStripWheelEl = document.getElementById('themeStrip');
+if (themeStripWheelEl) {
+  themeStripWheelEl.addEventListener('wheel', (e) => {
+    if (e.shiftKey && Math.abs(e.deltaY) > 0 && Math.abs(e.deltaX) === 0) {
+      e.preventDefault();
+      const scale = e.deltaMode === 1 ? 32 : e.deltaMode === 2 ? themeStripWheelEl.clientWidth : 1;
+      themeStripWheelEl.scrollLeft += e.deltaY * scale;
+    }
+  }, { passive: false });
+}
+
 const themeNameInputEl = document.getElementById('themeNameInput');
 themeNameInputEl.oninput = (e) => {
   const v = String(e.target.value || '').slice(0, 40);
@@ -18107,7 +18192,53 @@ document.querySelectorAll('.bom-trows-btn').forEach(b => {
 document.getElementById('bomSortPrimary').onchange = (e) => patchBomConfig({ sortPrimary: e.target.value }, { immediate: true });
 document.getElementById('bomSortSecondary').onchange = (e) => patchBomConfig({ sortSecondary: e.target.value }, { immediate: true });
 
-document.getElementById('toggleExtras').onchange = (e) => { state.showExtras = e.target.checked; renderAll(); };
+const toggleExtraPage = (key, checked) => {
+  if (state.model) pushUndo();
+  const prevPageId = state.pages[state.pageIdx]?.id || null;
+  state[key] = Boolean(checked);
+  rebuildPages();
+  if (prevPageId) {
+    const keptIdx = state.pages.findIndex(p => p.id === prevPageId);
+    if (keptIdx >= 0) state.pageIdx = keptIdx;
+  }
+  overviewThumbCache.bumpEpoch();
+  renderAll();
+};
+const openExtraPageSettings = (kind) => {
+  closePageSetupModal();
+  if (!state.model) { showToast('Import a model first.'); return; }
+  const action = getExtraPageSettingsAction(kind);
+  const idx = state.pages.findIndex(p => p.kind === action.pageKind);
+  if (idx >= 0) {
+    state.pageIdx = idx;
+    state.mode = action.targetMode;
+    state.selectedPartIds.clear();
+    state.selectedArrangeEl = null;
+    resetZoom();
+    renderAll();
+  }
+  if (action.openBomModal) {
+    openBomSetupModal();
+  }
+};
+for (const [chkId, key] of [
+  ['toggleShowCover', 'showCover'],
+  ['toggleShowComplete', 'showBuildComplete'],
+  ['toggleShowPartsList', 'showPartsList'],
+  ['toggleShowBackCover', 'showBackCover'],
+]) {
+  const el = document.getElementById(chkId);
+  if (el) el.onchange = (e) => toggleExtraPage(key, e.target.checked);
+}
+for (const [btnId, kind] of [
+  ['btnOpenCoverSettings', 'cover'],
+  ['btnOpenCompleteSettings', 'complete'],
+  ['btnOpenPartsListSettings', 'bom'],
+  ['btnOpenBackCoverSettings', 'back'],
+]) {
+  const el = document.getElementById(btnId);
+  if (el) el.onclick = () => openExtraPageSettings(kind);
+}
 // Step display options are part of the active theme (built-ins fork on first edit)
 document.getElementById('toggleHighlight').onchange = (e) => patchActiveTheme({ highlightNew: e.target.checked });
 document.getElementById('highlightColor').oninput = (e) => patchActiveTheme({ highlightColor: e.target.value });
@@ -18128,31 +18259,6 @@ document.getElementById('togglePageTitleSetup').onchange = setPageTitle;
 const toggleWordlessEl = document.getElementById('toggleWordlessMode');
 if (toggleWordlessEl) {
   toggleWordlessEl.onchange = (e) => applyWordlessMode(e.target.checked);
-}
-const toggleCoverTextEl = document.getElementById('toggleCoverText');
-if (toggleCoverTextEl) {
-  toggleCoverTextEl.onchange = (e) => {
-    if (state.model) pushUndo();
-    state.coverMeta = { ...normalizeCoverMeta(state.coverMeta, !state.wordlessMode), showText: e.target.checked };
-    overviewThumbCache.bumpEpoch();
-    renderAll();
-  };
-}
-document.getElementById('toggleCompleteText').onchange = (e) => {
-  if (state.model) pushUndo();
-  state.completeMeta.showText = e.target.checked;
-  overviewThumbCache.bumpEpoch();
-  renderAll();
-};
-document.getElementById('toggleCompleteFireworks').onchange = (e) => { state.completeMeta.showFireworks = e.target.checked; renderAll(); };
-const toggleBomTextEl = document.getElementById('toggleBomTextFields');
-if (toggleBomTextEl) {
-  toggleBomTextEl.onchange = (e) => {
-    if (state.model) pushUndo();
-    state.bomShowTextFields = e.target.checked;
-    overviewThumbCache.bumpEpoch();
-    renderAll();
-  };
 }
 const btnBomEnableTextEl = document.getElementById('btnBomEnableTextFields');
 if (btnBomEnableTextEl) {
@@ -18709,7 +18815,6 @@ if (menuExportHtmlBtn) menuExportHtmlBtn.onclick = runInteractiveHtmlExport;
 const btnExpInteractiveHtml = document.getElementById('btnExpInteractiveHtml');
 if (btnExpInteractiveHtml) btnExpInteractiveHtml.onclick = runInteractiveHtmlExport;
 document.getElementById('menuPageSetupBtn').onclick = openPageSetupModal;
-function closePageSetupModal() { closeLayoutGroupEditor(); document.getElementById('pageSetupModal').classList.add('hidden'); }
 document.getElementById('btnClosePageSetup').onclick = closePageSetupModal;
 document.getElementById('pageSetupDoneBtn').onclick = closePageSetupModal;
 document.getElementById('pageSetupModal').onclick = (e) => { if (e.target.id === 'pageSetupModal') closePageSetupModal(); };
@@ -18718,13 +18823,6 @@ document.getElementById('menuBomSetupBtn').onclick = openBomSetupModal;
 document.getElementById('btnCloseBomSetup').onclick = closeBomSetupModal;
 document.getElementById('bomSetupDoneBtn').onclick = closeBomSetupModal;
 document.getElementById('bomSetupModal').onclick = (e) => { if (e.target.id === 'bomSetupModal') closeBomSetupModal(); };
-document.getElementById('bomSetupJumpBtn').onclick = () => {
-  closeBomSetupModal();
-  if (!state.model) { showToast('Import a model first.'); return; }
-  if (!state.showExtras) { state.showExtras = true; rebuildPages(); }
-  const idx = state.pages.findIndex(p => p.kind === 'bom');
-  if (idx >= 0) { state.pageIdx = idx; resetZoom(); renderAll(); }
-};
 document.getElementById('errorsModal').onclick = (e) => { if (e.target.id === 'errorsModal') document.getElementById('errorsModal').classList.add('hidden'); };
 document.getElementById('btnCloseExport').onclick = () => document.getElementById('exportModal').classList.add('hidden');
 document.getElementById('btnExpAllPdf').onclick = () => runPdfExport(state.pages);
@@ -18753,7 +18851,7 @@ async function exportProjectFile() {
   if (!state.model) return;
   const activeTheme = getActiveTheme();
   const embeddedCustomTheme = activeTheme && !activeTheme.builtIn && !BUILT_IN_THEME_IDS.has(activeTheme.id) ? activeTheme : undefined;
-  const payload = JSON.stringify({ format: PROJECT_FILE_FORMAT, version: PROJECT_FILE_STUDIO_VERSION, title: state.model.title, chapters: state.model.chapters, overrides: state.overrides, stepInserts: state.stepInserts, pageInserts: state.pageInserts, dividerAfter: state.dividerAfter, coverMeta: state.coverMeta, completeMeta: state.completeMeta, backMeta: state.backMeta, bomConfig: state.bomConfig, wordlessMode: state.wordlessMode, bomShowTextFields: state.bomShowTextFields, showStepBorders: state.showStepBorders, showPageTitle: state.showPageTitle, pageNumberFormat: state.pageNumberFormat, detectDuplicates: state.detectDuplicates, minifigStyle: state.minifigStyle, showMinifig1to1: state.showMinifig1to1, themeId: state.themeId, ...(embeddedCustomTheme ? { customTheme: embeddedCustomTheme } : {}), paperFormat: state.paperFormat, orientation: state.orientation, density: state.density, layout: state.layout, layoutConfig: state.layoutConfig, layoutGroups: state.layoutGroups }, null, 2);
+  const payload = JSON.stringify({ format: PROJECT_FILE_FORMAT, version: PROJECT_FILE_STUDIO_VERSION, title: state.model.title, chapters: state.model.chapters, overrides: state.overrides, stepInserts: state.stepInserts, pageInserts: state.pageInserts, dividerAfter: state.dividerAfter, coverMeta: state.coverMeta, completeMeta: state.completeMeta, backMeta: state.backMeta, bomConfig: state.bomConfig, wordlessMode: state.wordlessMode, bomShowTextFields: state.bomShowTextFields, showStepBorders: state.showStepBorders, showPageTitle: state.showPageTitle, pageNumberFormat: state.pageNumberFormat, showCover: state.showCover, showBuildComplete: state.showBuildComplete, showPartsList: state.showPartsList, showBackCover: state.showBackCover, detectDuplicates: state.detectDuplicates, minifigStyle: state.minifigStyle, showMinifig1to1: state.showMinifig1to1, themeId: state.themeId, ...(embeddedCustomTheme ? { customTheme: embeddedCustomTheme } : {}), paperFormat: state.paperFormat, orientation: state.orientation, density: state.density, layout: state.layout, layoutConfig: state.layoutConfig, layoutGroups: state.layoutGroups }, null, 2);
   const fileName = buildProjectFileName(state.model.title);
   closeMenu();
   await shareOrDownloadCustomFile(payload, fileName, 'Shared project file.', `Exported ${fileName}`);
@@ -18785,6 +18883,11 @@ async function handleIncomingProjectFile(f) {
     // Legacy .biw projects saved before Wordless mode keep their prior labeled appearance.
     state.wordlessMode = typeof data.wordlessMode === 'boolean' ? data.wordlessMode : false;
     state.bomShowTextFields = typeof data.bomShowTextFields === 'boolean' ? data.bomShowTextFields : !state.wordlessMode;
+    const extraCfg = normalizeExtraPagesConfig(data);
+    state.showCover = extraCfg.showCover;
+    state.showBuildComplete = extraCfg.showBuildComplete;
+    state.showPartsList = extraCfg.showPartsList;
+    state.showBackCover = extraCfg.showBackCover;
     state.coverMeta = normalizeCoverMeta(data.coverMeta, !state.wordlessMode);
     state.completeMeta = normalizeCompleteMeta(data.completeMeta ? data.completeMeta : { showText: !state.wordlessMode });
     state.backMeta = normalizeBackMeta(data.backMeta);

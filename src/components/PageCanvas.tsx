@@ -508,7 +508,7 @@ export function PageCanvas() {
                   <div className="flex items-start gap-2.5 flex-wrap">
                     <div className="flex items-center gap-1.5">
                       <span
-                        className="font-display font-extrabold leading-none select-none"
+                        className="font-display font-extrabold leading-none"
                         style={{
                           color: theme.textColor,
                           fontSize: `${Math.round((slots.length > 2 ? 26 : 36) * theme.stepNumberScale)}px`,

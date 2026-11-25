@@ -80,8 +80,9 @@ All shared formatting rules, SVG builders, and Canvas 2D vector drawing primitiv
    - **Instruction Language** master checkbox: **Wordless Instructions (LEGO-Style)**.
    - **Page Number Format**: `"Page 1"` option is disabled with tooltip when Wordless is active.
    - **Model Title on Every Page** (both in Page Setup and Style Popover): disabled with a subtle `Wordless` pill badge while Wordless mode is active (preserving the underlying theme setting without forking the theme).
-   - **Cover, Build Complete & Parts List Text**: independent toggles for **Show Front Cover Title & Subtitle**, **Show "Build Complete!" Text**, **Celebration Fireworks Effect**, and **Show Part Names & Colors in Parts List**.
-3. **Cover Page Edit Overlay**:
-   - Quick `Title Text` pill toggle right inside the Edit Cover Page toolbar, collapsing title/subtitle text inputs while hidden.
+   - **Included Pages**: independent toggles for **Cover**, **Build Complete**, **Parts List**, and **Back Cover**, each showing a **Settings** link to the corresponding page when enabled (the duplicate per-page text & fireworks toggles previously under "Extra Pages" live on each individual page).
+3. **Cover & Build Complete Page Edit Overlays**:
+   - Cover Page: quick `Title Text` pill toggle right inside the Edit Cover Page toolbar, collapsing title/subtitle text inputs while hidden.
+   - Build Complete Page: quick `Text` and `Fireworks` pill toggles right inside the Edit Build Complete toolbar, collapsing title/subtitle text inputs while hidden.
 4. **Parts List Setup (`#bomSetupModal`)**:
    - Displays a subtle **Wordless** notice banner with a 1-click **Show Text** button whenever `state.bomShowTextFields` is `false`, marks `Part Name` and `Color` field rows with a `Wordless` badge, and automatically re-enables `state.bomShowTextFields` if the user checks either field directly.
