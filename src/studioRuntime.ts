@@ -204,6 +204,7 @@ import {
   analyzePageSizeFit,
   buildSmartAutoPageContext,
   computeBoundingSphereFromBoxLists,
+  computePageDividerLines,
   computePageSlotRects,
   computeRepresentativeStepMetric,
   computeSmartAutoPreviewGrid,
@@ -218,6 +219,7 @@ import {
   normalizePageLayoutSpec,
   normalizePageNumberPosition,
   packSmartAutoPage,
+  resolveEffectiveStepBorderStyle,
   resolvePageNumberSide,
   withDerivedStepsPerPage,
 } from './engine/pageLayout';
@@ -376,8 +378,10 @@ import {
   saveThemeRecentsToStorage,
   serializeThemeExport,
   getLineWeightTapOffsets,
+  getStepDividerLineColor,
   sanitizeLineWeight,
   sanitizePlacementArrowStyle,
+  sanitizeStepBorderStyle,
   sanitizeStepLightingMode,
   themeCanvasFont,
   themeStyleOptionsEqual,
@@ -7330,8 +7334,8 @@ const state = {
   showSizeGuides: true,
   minifigStyle: 'exploded', // 'exploded' (IMG_0316) | 'sequential' (IMG_0315) | 'classic'
   showMinifig1to1: false,
-  showStepBorders: true,
-  stepDividerStyle: 'boxes',
+  stepBorderStyle: 'lines', // 'lines' (LEGO-style dividers) | 'boxes' | 'none'
+  showStepBorders: false,
   showPageTitle: true,
   showProgressBar: true,
   wordlessMode: DEFAULT_WORDLESS_MODE, // LEGO-style icon/number-only instructions (no translation needed)
@@ -9530,6 +9534,20 @@ function renderAll() {
     const isStepNotesMode = state.mode === 'step' && state.stepSubTab === 'notes';
     const isPartsMode = state.mode === 'parts';
     const isArrangeMode = false;
+    const effectiveBorderStyle = resolveEffectiveStepBorderStyle(
+      page.layoutGroup,
+      sanitizeStepBorderStyle(state.stepBorderStyle, 'lines'),
+    );
+    const dividerLines = effectiveBorderStyle === 'lines'
+      ? computePageDividerLines(slotRects, gridW, gridH, pageSpec.flow, {
+          junctionGap: Math.max(3, Math.round(gapPx * 0.5)),
+        })
+      : [];
+    const dividerLineColor = dividerLines.length > 0 ? getStepDividerLineColor(theme) : '';
+    const dividerStrokePx = Math.max(1, Number(typo.pt(1.1).toFixed(2)));
+    const dividerLinesSvg = dividerLines.length > 0
+      ? `<svg data-step-dividers="true" data-divider-flow="${pageSpec.flow}" class="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 ${gridW} ${gridH}" preserveAspectRatio="none" aria-hidden="true">${dividerLines.map((ln) => `<line data-divider-orientation="${ln.orientation}" data-divider-level="${ln.level}" x1="${ln.x1.toFixed(2)}" y1="${ln.y1.toFixed(2)}" x2="${ln.x2.toFixed(2)}" y2="${ln.y2.toFixed(2)}" stroke="${dividerLineColor}" stroke-width="${dividerStrokePx}" stroke-linecap="butt" vector-effect="non-scaling-stroke" />`).join('')}</svg>`
+      : '';
 
     frame.innerHTML = `
       <div class="relative w-full h-full flex flex-col overflow-hidden" style="padding:${padPx}px;padding-bottom:${padPx + footerH}px">
@@ -9546,6 +9564,7 @@ function renderAll() {
             <span class="shrink-0 inline-flex items-center rounded-full font-black text-white shadow-xs tabular-nums" style="gap:${Math.round(typo.pt(3.5))}px;background:${theme.accent};font-size:${st.introPillFont}px;padding:${Math.round(typo.pt(3))}px ${Math.round(typo.pt(10))}px">${page.submodelIntro.repeatCount > 1 ? `×${page.submodelIntro.repeatCount}` : (wordless ? `${buildBrickGlyphSvg(Math.max(11, Math.round(st.introPillFont * 1.05)))}<span>${page.submodelIntro.pieceCount || page.submodelIntro.canonicalParts.length}</span>` : `${page.submodelIntro.pieceCount || page.submodelIntro.canonicalParts.length} pcs`)}</span>
           </div>` : ''}
         <div class="relative flex-1 min-h-0">
+          ${dividerLinesSvg}
           ${slotData.map(({ ch, step, minifigSeqSlice, slotRect, estSlotW, estSlotH, prev, ov, snap, isMfExploded, isMfSeq, mfExploded, mfSeqStages, subImg, attSubImg, mfPrepImg, attMfImg, mf1to1, pli }) => {
             const isTightSlot = slotRect.isCompact || estSlotH < typo.pt(250) || estSlotW < typo.pt(230);
             const stepNumPx = (slots.length === 1 || slotRect.isFeatured) ? st.stepNum1Up : (isTightSlot ? st.stepNumTight : st.stepNum2Up);
@@ -9563,15 +9582,10 @@ function renderAll() {
             const calloutPos = ov.calloutPos || { x: 0, y: 0 };
             const calloutSel = isArrangeMode && state.selectedArrangeEl?.stepId === step.id && state.selectedArrangeEl?.kind === 'callout';
             const pliSel = isArrangeMode && state.selectedArrangeEl?.stepId === step.id && state.selectedArrangeEl?.kind === 'pli';
-            const effectiveBorders = typeof page.layoutGroup?.showStepBorders === 'boolean' ? page.layoutGroup.showStepBorders : state.showStepBorders;
-            const dividerMode = effectiveBorders ? (state.stepDividerStyle || 'boxes') : 'none';
-            const showSlotFrame = dividerMode === 'boxes' && !(isOfficialMfStyle && slots.length === 1);
-            const showHairlineLeft = dividerMode === 'hairlines' && slotRect.x > 4;
+            const showSlotFrame = effectiveBorderStyle === 'boxes' && !(isOfficialMfStyle && slots.length === 1);
             const slotBorderStyle = showSlotFrame
               ? (isSelStep && state.mode !== 'pan' ? `2px solid ${theme.accent}` : `1px solid ${theme.pliBorder}`)
-              : showHairlineLeft
-                ? `1px solid transparent;border-left:1.5px solid ${theme.pliBorder}`
-                : (isSelStep && state.mode !== 'pan' && slots.length > 1 ? `1.5px dashed ${theme.accent}` : '1px solid transparent');
+              : (isSelStep && state.mode !== 'pan' && slots.length > 1 ? `1.5px dashed ${theme.accent}` : '1px solid transparent');
             const slotBgStyle = showSlotFrame ? 'rgba(255,255,255,0.05)' : 'transparent';
 
             const calloutPliScale = ov.pliScale || 1.0;
@@ -12151,7 +12165,7 @@ function syncLegacyLayoutFlag() {
   if (lc.mode === 'auto') state.layout = 'auto';
   else if (lc.stepsPerPage === 1 && lc.mixedLayout === 'even') state.layout = '1-up';
   else if (lc.stepsPerPage === 2 && lc.mixedLayout === 'even') state.layout = '2-up';
-  else if (lc.stepsPerPage === 4 && lc.mixedLayout === 'even' && lc.flow === 'row') state.layout = '4-up';
+  else if (lc.stepsPerPage === 4 && lc.mixedLayout === 'even' && lc.flow === 'column') state.layout = '4-up';
   else state.layout = 'custom';
 }
 
@@ -12487,18 +12501,33 @@ function renderGridPreviewInto(containerEl, spec, maxW = 136, maxH = 92, autoPre
     gapPx,
     resolvedAuto?.grid || null,
   );
-  const showBorders = state.showStepBorders !== false;
+  const borderStyle = sanitizeStepBorderStyle(state.stepBorderStyle, 'lines');
+  const previewDividers = borderStyle === 'lines'
+    ? computePageDividerLines(rects, innerW, innerH, spec.flow, {
+        junctionGap: Math.max(1.5, gapPx * 0.5),
+      })
+    : [];
+  const previewDividerSvg = previewDividers.length > 0
+    ? `<svg data-preview-dividers="true" class="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 ${innerW} ${innerH}" preserveAspectRatio="none" aria-hidden="true">${previewDividers.map((ln) => `<line x1="${ln.x1.toFixed(2)}" y1="${ln.y1.toFixed(2)}" x2="${ln.x2.toFixed(2)}" y2="${ln.y2.toFixed(2)}" stroke="var(--foreground)" stroke-opacity="0.55" stroke-width="1.2" stroke-linecap="butt" vector-effect="non-scaling-stroke" />`).join('')}</svg>`
+    : '';
   const numFontPx = sampleCount > 12 ? 7 : sampleCount > 6 ? 8 : 10;
   containerEl.innerHTML = `
     <div class="relative rounded-[5px] border border-[var(--border-strong)] bg-[var(--card)] shadow-xs overflow-hidden transition-all duration-150" style="width:${pageBox.widthPx}px;height:${pageBox.heightPx}px;padding:${padPx}px">
       <div class="relative w-full h-full">
+        ${previewDividerSvg}
         ${rects.map((r, i) => {
           const leftPct = (r.x / innerW) * 100;
           const topPct = (r.y / innerH) * 100;
           const widthPct = (r.w / innerW) * 100;
           const heightPct = (r.h / innerH) * 100;
-          const accentFill = r.isFeatured ? 'bg-[var(--primary-soft)] border-[var(--primary)] text-[var(--primary)]' : 'bg-[var(--surface-sunken)] border-[var(--border-strong)] text-[var(--foreground)]';
-          const borderCls = showBorders ? 'border' : 'border border-dashed opacity-85';
+          const accentFill = borderStyle === 'lines'
+            ? (r.isFeatured ? 'bg-[var(--primary-soft)]/55 text-[var(--primary)]' : 'bg-transparent text-[var(--foreground)]')
+            : (r.isFeatured ? 'bg-[var(--primary-soft)] border-[var(--primary)] text-[var(--primary)]' : 'bg-[var(--surface-sunken)] border-[var(--border-strong)] text-[var(--foreground)]');
+          const borderCls = borderStyle === 'boxes'
+            ? 'border'
+            : borderStyle === 'none'
+              ? 'border border-dashed opacity-80'
+              : '';
           const radiusCls = r.w < 10 || r.h < 10 ? 'rounded-[1px]' : 'rounded-[3px]';
           const showLabel = r.w >= 11 && r.h >= 10;
           return `<div class="absolute ${radiusCls} ${borderCls} ${accentFill} flex items-center justify-center font-mono font-bold" style="left:${leftPct.toFixed(2)}%;top:${topPct.toFixed(2)}%;width:${widthPct.toFixed(2)}%;height:${heightPct.toFixed(2)}%;font-size:${numFontPx}px">${showLabel ? i + 1 : ''}</div>`;
@@ -12510,7 +12539,7 @@ function renderGridPreviewInto(containerEl, spec, maxW = 136, maxH = 92, autoPre
 function readGroupEditorDraftSpec() {
   const colsRaw = document.getElementById('grpColsSelect')?.value || 'auto';
   const rowsRaw = document.getElementById('grpRowsSelect')?.value || 'auto';
-  const flow = document.getElementById('grpFlowSelect')?.value === 'column' ? 'column' : 'row';
+  const flow = document.getElementById('grpFlowSelect')?.value === 'row' ? 'row' : 'column';
   const mixedLayout = document.getElementById('grpMixedSelect')?.value || 'even';
   return normalizePageLayoutSpec({
     cols: colsRaw === 'auto' ? 'auto' : parseInt(colsRaw, 10),
@@ -12634,7 +12663,7 @@ function openLayoutGroupEditor(existingGroup = null, prefillRange = null) {
   syncGroupRangeHintUI();
   document.getElementById('grpColsSelect').value = existingGroup ? String(existingGroup.layout.cols) : 'auto';
   document.getElementById('grpRowsSelect').value = existingGroup ? String(existingGroup.layout.rows) : 'auto';
-  document.getElementById('grpFlowSelect').value = existingGroup ? existingGroup.layout.flow : 'row';
+  document.getElementById('grpFlowSelect').value = existingGroup ? existingGroup.layout.flow : 'column';
   document.getElementById('grpMixedSelect').value = existingGroup ? existingGroup.layout.mixedLayout : 'even';
   populateGroupThemeOptions(existingGroup?.themeId || '');
   document.getElementById('btnGrpDelete').classList.toggle('hidden', !existingGroup);
@@ -12880,8 +12909,7 @@ function syncMenuControls() {
   }
   const setChk = (id, val) => { const el = document.getElementById(id); if (el) el.checked = Boolean(val); };
   setChk('toggleWordlessMode', state.wordlessMode);
-  setChk('toggleStepBorders', state.showStepBorders);
-  setChk('toggleStepBordersSetup', state.showStepBorders);
+  syncStepBorderStyleUI(state.stepBorderStyle);
   setChk('togglePageTitle', state.showPageTitle);
   setChk('togglePageTitleSetup', state.showPageTitle);
   setChk('toggleProgressBar', state.showProgressBar !== false);
@@ -12964,6 +12992,20 @@ function syncArrowStyleUI(opts = state) {
   if (outChk) outChk.checked = Boolean(opts?.arrowOutlines);
   const litChk = document.getElementById('toggleArrowLighting');
   if (litChk) litChk.checked = Boolean(opts?.arrowLighting);
+}
+
+function syncStepBorderStyleUI(mode = state.stepBorderStyle) {
+  const activeMode = sanitizeStepBorderStyle(mode, state.showStepBorders ? 'boxes' : 'lines');
+  document.querySelectorAll('.step-border-style-btn').forEach(b => {
+    const act = b.getAttribute('data-step-border-style') === activeMode;
+    b.className = `step-border-style-btn py-1.5 px-2 rounded-md border font-semibold text-xs transition-colors cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)]'}`;
+    b.setAttribute('aria-pressed', act ? 'true' : 'false');
+  });
+  document.querySelectorAll('.step-border-style-setup-btn').forEach(b => {
+    const act = b.getAttribute('data-step-border-style') === activeMode;
+    b.className = `step-border-style-setup-btn py-2.5 px-2 rounded-lg border font-semibold flex flex-col items-center gap-1.5 transition cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)]'}`;
+    b.setAttribute('aria-pressed', act ? 'true' : 'false');
+  });
 }
 
 function syncStepLightingUI(mode = state.stepLighting) {
@@ -17415,7 +17457,7 @@ function scheduleSaveSessionPrefs() {
       highlightLineWeight: state.highlightLineWeight,
       fadePrev: state.fadePrev, fadeOpacity: state.fadeOpacity, stepLighting: state.stepLighting, highQualityStepRender: state.highQualityStepRender,
       starkBlackOutlines: state.starkBlackOutlines, outlineLineWeight: state.outlineLineWeight, showRotCues: state.showRotCues,
-      showSizeGuides: state.showSizeGuides, minifigStyle: state.minifigStyle, showMinifig1to1: state.showMinifig1to1, showStepBorders: state.showStepBorders,
+      showSizeGuides: state.showSizeGuides, minifigStyle: state.minifigStyle, showMinifig1to1: state.showMinifig1to1, stepBorderStyle: state.stepBorderStyle, showStepBorders: state.showStepBorders,
       showPageTitle: state.showPageTitle, wordlessMode: state.wordlessMode, bomShowTextFields: state.bomShowTextFields,
       pageNumberFormat: state.pageNumberFormat,
       pageNumberPosition: normalizePageNumberPosition(state.pageNumberPosition),
@@ -18616,7 +18658,29 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
     const availW = Math.max(80, pxW - pad * 2);
     const availH = Math.max(80, pxH - topY - pad - footerH);
     const slotRects = computePageSlotRects(slots.length, pageSpec, isLand, availW, availH, gap, page.autoGrid);
-    const effectiveBorders = typeof page.layoutGroup?.showStepBorders === 'boolean' ? page.layoutGroup.showStepBorders : state.showStepBorders;
+    const effectiveBorderStyle = resolveEffectiveStepBorderStyle(
+      page.layoutGroup,
+      sanitizeStepBorderStyle(state.stepBorderStyle, 'lines'),
+    );
+
+    if (effectiveBorderStyle === 'lines' && slots.length > 1) {
+      const pdfDividers = computePageDividerLines(slotRects, availW, availH, pageSpec.flow, {
+        junctionGap: Math.max(3, Math.round(gap * 0.5)),
+      });
+      if (pdfDividers.length > 0) {
+        ctx.save();
+        ctx.strokeStyle = getStepDividerLineColor(theme);
+        ctx.lineWidth = Math.max(1.25, typo.pt(1.1));
+        ctx.lineCap = 'butt';
+        for (const ln of pdfDividers) {
+          ctx.beginPath();
+          ctx.moveTo(pad + ln.x1, topY + ln.y1);
+          ctx.lineTo(pad + ln.x2, topY + ln.y2);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+    }
 
     for (let idx = 0; idx < slots.length; idx++) {
       const { ch, step, minifigSeqSlice } = slots[idx];
@@ -18635,16 +18699,9 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       const isMfSeq = isMfBuild && mfStyle === 'sequential';
       const isOfficialMfStyle = isMfExploded || isMfSeq;
 
-      const pdfDivMode = effectiveBorders ? (state.stepDividerStyle || 'boxes') : 'none';
-      if (pdfDivMode === 'boxes' && !(isOfficialMfStyle && slots.length === 1)) {
+      if (effectiveBorderStyle === 'boxes' && !(isOfficialMfStyle && slots.length === 1)) {
         ctx.strokeStyle = theme.pliBorder; ctx.lineWidth = 1.5;
         ctx.strokeRect(sx, sy, slotW, slotH);
-      } else if (pdfDivMode === 'hairlines' && rect.x > 4) {
-        ctx.strokeStyle = theme.pliBorder; ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.moveTo(sx - gap * 0.5, sy);
-        ctx.lineTo(sx - gap * 0.5, sy + slotH);
-        ctx.stroke();
       }
 
       const cam = getStepCamera(step);
@@ -19579,10 +19636,7 @@ function syncStylePanel() {
   setChk('toggleRotCues', opts.showRotCues);
   setChk('toggleSizeGuides', opts.showSizeGuides);
   setChk('toggleMinifig1to1', opts.showMinifig1to1);
-  setChk('toggleStepBorders', opts.showStepBorders);
-  setChk('toggleStepBordersSetup', opts.showStepBorders);
-  const divSel = document.getElementById('stepDividerStyle');
-  if (divSel) divSel.value = opts.stepDividerStyle || (opts.showStepBorders ? 'boxes' : 'none');
+  syncStepBorderStyleUI(opts.stepBorderStyle);
   setChk('togglePageTitle', opts.showPageTitle);
   setChk('togglePageTitleSetup', opts.showPageTitle);
   setChk('toggleProgressBar', opts.showProgressBar !== false);
@@ -21214,7 +21268,7 @@ if (btnGrpSave) {
     const endStepNum = Math.max(rawStart, rawEnd);
     const colsRaw = document.getElementById('grpColsSelect')?.value || 'auto';
     const rowsRaw = document.getElementById('grpRowsSelect')?.value || 'auto';
-    const flow = document.getElementById('grpFlowSelect')?.value === 'column' ? 'column' : 'row';
+    const flow = document.getElementById('grpFlowSelect')?.value === 'row' ? 'row' : 'column';
     const mixedLayout = document.getElementById('grpMixedSelect')?.value || 'even';
     const themeId = (document.getElementById('grpThemeSelect')?.value || '').trim() || null;
     const name = (document.getElementById('grpNameInput')?.value || '').trim() || `Steps ${formatAbsRange(startStepNum, endStepNum)}`;
@@ -21569,11 +21623,14 @@ if (mf1to1ToggleEl) mf1to1ToggleEl.onchange = (e) => patchActiveTheme({ showMini
 document.querySelectorAll('.mf-style-btn').forEach(b => {
   b.onclick = () => applyMinifigStyleChange(b.getAttribute('data-mf-style'));
 });
-const setStepBorders = (e) => patchActiveTheme({ showStepBorders: e.target.checked, stepDividerStyle: e.target.checked ? 'boxes' : 'none' });
-const stepDividerStyleEl = document.getElementById('stepDividerStyle');
-if (stepDividerStyleEl) stepDividerStyleEl.onchange = (e) => patchActiveTheme({ stepDividerStyle: e.target.value, showStepBorders: e.target.value !== 'none' });
-document.getElementById('toggleStepBorders').onchange = setStepBorders;
-document.getElementById('toggleStepBordersSetup').onchange = setStepBorders;
+const applyStepBorderStyle = (mode) => {
+  const next = sanitizeStepBorderStyle(mode, 'lines');
+  overviewThumbCache.bumpEpoch();
+  patchActiveTheme({ stepBorderStyle: next, showStepBorders: next === 'boxes' });
+};
+document.querySelectorAll('.step-border-style-btn, .step-border-style-setup-btn').forEach(b => {
+  b.onclick = () => applyStepBorderStyle(b.getAttribute('data-step-border-style'));
+});
 const setPageTitle = (e) => patchActiveTheme({ showPageTitle: e.target.checked });
 document.getElementById('togglePageTitle').onchange = setPageTitle;
 document.getElementById('togglePageTitleSetup').onchange = setPageTitle;
@@ -22220,7 +22277,7 @@ async function exportProjectFile() {
   const activeTheme = getActiveTheme();
   const embeddedCustomTheme = activeTheme && !activeTheme.builtIn && !BUILT_IN_THEME_IDS.has(activeTheme.id) ? activeTheme : undefined;
   const embeddedCustomFonts = collectReferencedCustomFonts(activeTheme ? [activeTheme] : []);
-  const payload = JSON.stringify({ format: PROJECT_FILE_FORMAT, version: PROJECT_FILE_STUDIO_VERSION, title: state.model.title, chapters: state.model.chapters, overrides: state.overrides, stepInserts: state.stepInserts, pageInserts: state.pageInserts, dividerAfter: state.dividerAfter, coverMeta: state.coverMeta, completeMeta: state.completeMeta, backMeta: state.backMeta, bomConfig: state.bomConfig, wordlessMode: state.wordlessMode, bomShowTextFields: state.bomShowTextFields, showStepBorders: state.showStepBorders, showPageTitle: state.showPageTitle, pageNumberFormat: state.pageNumberFormat, pageNumberPosition: normalizePageNumberPosition(state.pageNumberPosition), showCover: state.showCover, showBuildComplete: state.showBuildComplete, showPartsList: state.showPartsList, showBackCover: state.showBackCover, detectDuplicates: state.detectDuplicates, minifigStyle: state.minifigStyle, showMinifig1to1: state.showMinifig1to1, themeId: state.themeId, ...(embeddedCustomTheme ? { customTheme: embeddedCustomTheme } : {}), ...(embeddedCustomFonts.length > 0 ? { customFonts: embeddedCustomFonts } : {}), paperFormat: state.paperFormat, orientation: state.orientation, density: state.density, layout: state.layout, layoutConfig: state.layoutConfig, layoutGroups: state.layoutGroups }, null, 2);
+  const payload = JSON.stringify({ format: PROJECT_FILE_FORMAT, version: PROJECT_FILE_STUDIO_VERSION, title: state.model.title, chapters: state.model.chapters, overrides: state.overrides, stepInserts: state.stepInserts, pageInserts: state.pageInserts, dividerAfter: state.dividerAfter, coverMeta: state.coverMeta, completeMeta: state.completeMeta, backMeta: state.backMeta, bomConfig: state.bomConfig, wordlessMode: state.wordlessMode, bomShowTextFields: state.bomShowTextFields, stepBorderStyle: state.stepBorderStyle, showStepBorders: state.showStepBorders, showPageTitle: state.showPageTitle, pageNumberFormat: state.pageNumberFormat, pageNumberPosition: normalizePageNumberPosition(state.pageNumberPosition), showCover: state.showCover, showBuildComplete: state.showBuildComplete, showPartsList: state.showPartsList, showBackCover: state.showBackCover, detectDuplicates: state.detectDuplicates, minifigStyle: state.minifigStyle, showMinifig1to1: state.showMinifig1to1, themeId: state.themeId, ...(embeddedCustomTheme ? { customTheme: embeddedCustomTheme } : {}), ...(embeddedCustomFonts.length > 0 ? { customFonts: embeddedCustomFonts } : {}), paperFormat: state.paperFormat, orientation: state.orientation, density: state.density, layout: state.layout, layoutConfig: state.layoutConfig, layoutGroups: state.layoutGroups }, null, 2);
   const fileName = buildProjectFileName(state.model.title);
   closeMenu();
   await shareOrDownloadCustomFile(payload, fileName, 'Shared project file.', `Exported ${fileName}`);

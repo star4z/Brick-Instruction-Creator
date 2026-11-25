@@ -144,6 +144,18 @@ export function sanitizePlacementArrowStyle(
   return fallback;
 }
 
+export type StepBorderStyle = 'lines' | 'boxes' | 'none';
+
+export const STEP_BORDER_STYLES: StepBorderStyle[] = ['lines', 'boxes', 'none'];
+
+export function sanitizeStepBorderStyle(
+  raw: unknown,
+  fallback: StepBorderStyle = 'lines',
+): StepBorderStyle {
+  if (raw === 'lines' || raw === 'boxes' || raw === 'none') return raw;
+  return fallback;
+}
+
 /**
  * Step rendering and display options that belong to a theme (formerly loose
  * Style popover toggles). Field names intentionally match the studio runtime
@@ -168,8 +180,8 @@ export interface ThemeStyleOptions {
   showSizeGuides: boolean;
   minifigStyle: ThemeMinifigStyle;
   showMinifig1to1: boolean;
+  stepBorderStyle: StepBorderStyle;
   showStepBorders: boolean;
-  stepDividerStyle: 'boxes' | 'hairlines' | 'none';
   showPageTitle: boolean;
   showProgressBar: boolean;
   bomConfig: BomConfig;
@@ -194,8 +206,8 @@ export const THEME_STYLE_OPTION_KEYS: Array<keyof ThemeStyleOptions> = [
   'showSizeGuides',
   'minifigStyle',
   'showMinifig1to1',
+  'stepBorderStyle',
   'showStepBorders',
-  'stepDividerStyle',
   'showPageTitle',
   'showProgressBar',
   'bomConfig',
@@ -220,8 +232,8 @@ export const DEFAULT_THEME_STYLE_OPTIONS: ThemeStyleOptions = {
   showSizeGuides: true,
   minifigStyle: 'exploded',
   showMinifig1to1: false,
-  showStepBorders: true,
-  stepDividerStyle: 'boxes',
+  stepBorderStyle: 'lines',
+  showStepBorders: false,
   showPageTitle: true,
   showProgressBar: true,
   bomConfig: createDefaultBomConfig(),
@@ -263,14 +275,25 @@ export function normalizeThemeStyleOptions(
     stepLighting = fbLighting;
   }
   const highQualityStepRender = stepLighting === 'studio';
-  const rawDiv = r.stepDividerStyle;
-  const stepDividerStyle: 'boxes' | 'hairlines' | 'none' =
-    rawDiv === 'boxes' || rawDiv === 'hairlines' || rawDiv === 'none'
-      ? rawDiv
-      : (typeof r.showStepBorders === 'boolean'
-          ? (r.showStepBorders ? 'boxes' : 'none')
-          : fb.stepDividerStyle);
-  const showStepBorders = stepDividerStyle !== 'none';
+
+  const fbBorderStyle: StepBorderStyle =
+    fb.stepBorderStyle === 'lines' || fb.stepBorderStyle === 'boxes' || fb.stepBorderStyle === 'none'
+      ? fb.stepBorderStyle
+      : (fb.showStepBorders ? 'boxes' : 'lines');
+  let stepBorderStyle: StepBorderStyle;
+  if (r.stepBorderStyle === 'lines' || r.stepBorderStyle === 'boxes' || r.stepBorderStyle === 'none') {
+    stepBorderStyle = r.stepBorderStyle;
+  } else if (r.stepDividerStyle === 'hairlines' || r.stepDividerStyle === 'boxes' || r.stepDividerStyle === 'none') {
+    stepBorderStyle = r.stepDividerStyle === 'hairlines' ? 'lines' : r.stepDividerStyle;
+  } else if (typeof r.showStepBorders === 'boolean') {
+    stepBorderStyle = r.showStepBorders
+      ? (fbBorderStyle === 'none' ? 'boxes' : fbBorderStyle)
+      : 'none';
+  } else {
+    stepBorderStyle = fbBorderStyle;
+  }
+  const showStepBorders = stepBorderStyle === 'boxes';
+
   return {
     autoPlacementArrows: bool('autoPlacementArrows'),
     arrowColor: sanitizeHexColor(r.arrowColor, sanitizeHexColor(fb.arrowColor, '#dc2626')),
@@ -290,8 +313,8 @@ export function normalizeThemeStyleOptions(
     showSizeGuides: bool('showSizeGuides'),
     minifigStyle: mf,
     showMinifig1to1: bool('showMinifig1to1'),
+    stepBorderStyle,
     showStepBorders,
-    stepDividerStyle,
     showPageTitle: bool('showPageTitle'),
     showProgressBar: bool('showProgressBar'),
     bomConfig: normalizeBomConfig(r.bomConfig, fb.bomConfig),
@@ -352,8 +375,8 @@ export interface ManualTheme {
   showSizeGuides?: boolean;
   minifigStyle?: ThemeMinifigStyle;
   showMinifig1to1?: boolean;
+  stepBorderStyle?: StepBorderStyle;
   showStepBorders?: boolean;
-  stepDividerStyle?: 'boxes' | 'hairlines' | 'none';
   showPageTitle?: boolean;
   showProgressBar?: boolean;
   bomConfig?: BomConfig;
@@ -451,6 +474,28 @@ export function toHexColor(color: string, backdropHex = '#ffffff'): string {
   const g = fg.g * fg.a + bg.g * (1 - fg.a);
   const b = fg.b * fg.a + bg.b * (1 - fg.a);
   return `#${channelToHex(r)}${channelToHex(g)}${channelToHex(b)}`;
+}
+
+/**
+ * Returns a crisp, theme-matched color for LEGO-style divider lines between
+ * steps on multi-step pages. Uses blueprint grid line cyan on blueprint themes
+ * and a contrast-calibrated translucent ink color derived from `theme.text`
+ * over `theme.bgColor` so divider lines remain clearly readable across solid,
+ * gradient, light, dark, and custom themes without overpowering the bricks.
+ */
+export function getStepDividerLineColor(
+  theme: Pick<ManualTheme, 'bp' | 'pliBorder' | 'text' | 'bgColor'>,
+): string {
+  if (theme.bp) {
+    return sanitizeCssColor(theme.pliBorder, '#5aa9e6');
+  }
+  const bgHex = toHexColor(theme.bgColor || '#ffffff', '#ffffff');
+  const bgRgb = parseRgbChannels(bgHex) || { r: 255, g: 255, b: 255, a: 1 };
+  const bgLuma = 0.299 * bgRgb.r + 0.587 * bgRgb.g + 0.114 * bgRgb.b;
+  const textHex = toHexColor(theme.text || '#1e293b', bgHex);
+  const textRgb = parseRgbChannels(textHex) || { r: 30, g: 41, b: 59, a: 1 };
+  const alpha = bgLuma < 128 ? 0.42 : 0.62;
+  return `rgba(${Math.round(textRgb.r)},${Math.round(textRgb.g)},${Math.round(textRgb.b)},${alpha})`;
 }
 
 export function buildThemeBgCss(
@@ -573,7 +618,6 @@ export const BUILT_IN_THEMES: Record<string, ManualTheme> = {
     headingFont: 'public-sans',
     bodyFont: 'public-sans',
     ...DEFAULT_THEME_STYLE_OPTIONS,
-    stepDividerStyle: 'hairlines',
   },
 };
 

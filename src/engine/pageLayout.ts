@@ -17,6 +17,7 @@
  *   the live Studio renderer and the PDF export pipeline.
  */
 
+import type { StepBorderStyle } from '../themes/customThemes';
 import type { Vec3, WorldBox } from './minifigPose';
 import { computePageTypography, type PageDensity } from './pageTypography';
 import type { WorldBounds3D } from './stepCamera';
@@ -89,6 +90,7 @@ export interface StepLayoutGroup {
   stepBasis?: 'absolute' | 'legacy';
   layout: PageLayoutSpec;
   themeId?: string | null;
+  stepBorderStyle?: StepBorderStyle | null;
   showStepBorders?: boolean | null;
 }
 
@@ -117,7 +119,7 @@ export function createDefaultPageLayoutSpec(): PageLayoutSpec {
     stepsPerPage: 2,
     cols: 'auto',
     rows: 'auto',
-    flow: 'row',
+    flow: 'column',
     mixedLayout: 'even',
     slotSizes: [],
   };
@@ -183,7 +185,7 @@ export function normalizePageLayoutSpec(
     return Math.max(1, Math.min(MAX_GRID_TRACKS, Math.round(n)));
   };
 
-  const flow: StepFlowDirection = obj.flow === 'column' ? 'column' : 'row';
+  const flow: StepFlowDirection = obj.flow === 'row' ? 'row' : 'column';
   const validMixed: MixedLayoutStyle[] = [
     'even',
     'hero_left',
@@ -569,6 +571,291 @@ export function computePageSlotRects(
   return tagCompact(rects);
 }
 
+export interface PageDividerLine {
+  orientation: 'vertical' | 'horizontal';
+  /** 0 = primary full-span divider, 1+ = secondary nested divider */
+  level: number;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
+export interface PageDividerLineOptions {
+  /**
+   * Visual gap left where a secondary divider stops short of a perpendicular
+   * higher-priority divider (clean LEGO T-junction spacing).
+   */
+  junctionGap?: number;
+}
+
+interface PartitionBounds {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+interface PartitionTouch {
+  left: boolean;
+  right: boolean;
+  top: boolean;
+  bottom: boolean;
+}
+
+function findGuillotineCuts(
+  subset: readonly ComputedSlotRect[],
+  axis: 'vertical' | 'horizontal',
+): number[] {
+  if (subset.length <= 1) return [];
+  const eps = 0.25;
+  const candidateEdges = subset
+    .map((r) => (axis === 'vertical' ? r.x + r.w : r.y + r.h))
+    .sort((a, b) => a - b);
+
+  const cuts: number[] = [];
+  for (let i = 0; i < candidateEdges.length; i++) {
+    const edge = candidateEdges[i];
+    if (i > 0 && Math.abs(edge - candidateEdges[i - 1]) <= eps) continue;
+
+    let beforeCount = 0;
+    let afterCount = 0;
+    let maxBefore = -Infinity;
+    let minAfter = Infinity;
+
+    for (let j = 0; j < subset.length; j++) {
+      const r = subset[j];
+      const start = axis === 'vertical' ? r.x : r.y;
+      const end = axis === 'vertical' ? r.x + r.w : r.y + r.h;
+      if (end <= edge + eps) {
+        beforeCount++;
+        if (end > maxBefore) maxBefore = end;
+      } else if (start >= edge - eps) {
+        afterCount++;
+        if (start < minAfter) minAfter = start;
+      } else {
+        // A slot rectangle crosses this candidate boundary — not a valid guillotine cut.
+        beforeCount = -1;
+        break;
+      }
+    }
+
+    if (beforeCount > 0 && afterCount > 0 && beforeCount + afterCount === subset.length) {
+      const mid = (maxBefore + minAfter) / 2;
+      if (cuts.length === 0 || Math.abs(mid - cuts[cuts.length - 1]) > eps) {
+        cuts.push(mid);
+      }
+    }
+  }
+  return cuts;
+}
+
+/**
+ * Computes LEGO-style divider lines between step slots inside `(0, 0) .. (contentW, contentH)`
+ * using pure recursive guillotine partitioning over the computed slot rectangles.
+ *
+ * Line priority follows the page's step reading orientation (`flow`):
+ * - **Column-first (`'column'`, default)**: Vertical dividers between columns take
+ *   priority and span continuously; vertically stacked steps inside a column flow
+ *   top-to-bottom without horizontal lines between them (matching official LEGO
+ *   multi-step layouts like `60↓61 | 62↓63` and `3↓4 | 5`). When no full-height
+ *   vertical cut exists (e.g. a full-width top/bottom hero step or a single-column
+ *   portrait page), a full-width horizontal divider is emitted first and any
+ *   side-by-side companion steps receive clean gapped vertical dividers.
+ * - **Row-first (`'row'`)**: Horizontal dividers between rows take priority and span
+ *   continuously; side-by-side steps within each row receive clean secondary vertical
+ *   dividers stopping short of the horizontal line (`junctionGap`). When no full-width
+ *   horizontal cut exists (e.g. side-by-side `2×1` or full-height left/right hero),
+ *   a full-height vertical divider is emitted first and stacked companion rows receive
+ *   clean gapped horizontal dividers.
+ *
+ * Used identically by the Live Studio renderer, Page Setup previews, and PDF export.
+ */
+export function computePageDividerLines(
+  rects: readonly ComputedSlotRect[],
+  contentW: number,
+  contentH: number,
+  flow: StepFlowDirection = 'column',
+  options?: PageDividerLineOptions,
+): PageDividerLine[] {
+  if (!rects || rects.length <= 1) return [];
+  const W = Math.max(1, contentW);
+  const H = Math.max(1, contentH);
+  const junctionGap = Math.max(0, Number(options?.junctionGap) || 0);
+  const lines: PageDividerLine[] = [];
+
+  const partition = (
+    subset: readonly ComputedSlotRect[],
+    bounds: PartitionBounds,
+    touch: PartitionTouch,
+    level: number,
+  ): void => {
+    if (subset.length <= 1) return;
+
+    const vCuts = findGuillotineCuts(subset, 'vertical');
+    const hCuts = findGuillotineCuts(subset, 'horizontal');
+
+    const emitVertical = (cuts: readonly number[]) => {
+      const y1 = bounds.y + (touch.top ? junctionGap : 0);
+      const y2 = bounds.y + bounds.h - (touch.bottom ? junctionGap : 0);
+      for (const x of cuts) {
+        if (y2 > y1 + 0.5) {
+          lines.push({ orientation: 'vertical', level, x1: x, y1, x2: x, y2 });
+        }
+      }
+
+      const edges = [bounds.x, ...cuts, bounds.x + bounds.w];
+      for (let i = 0; i < edges.length - 1; i++) {
+        const lo = edges[i];
+        const hi = edges[i + 1];
+        const strip = subset.filter((r) => {
+          const cx = r.x + r.w * 0.5;
+          return cx >= lo && cx <= hi;
+        });
+        if (strip.length <= 1) continue;
+
+        // In column-first flow, vertically stacked steps within a single column flow
+        // naturally top-to-bottom without horizontal lines between them; only recurse
+        // if the strip itself contains further side-by-side sub-columns.
+        if (flow === 'column' && findGuillotineCuts(strip, 'vertical').length === 0) {
+          continue;
+        }
+
+        const stripBounds: PartitionBounds = {
+          x: lo,
+          y: bounds.y,
+          w: hi - lo,
+          h: bounds.h,
+        };
+        const stripTouch: PartitionTouch = {
+          left: i > 0 || touch.left,
+          right: i < cuts.length || touch.right,
+          top: touch.top,
+          bottom: touch.bottom,
+        };
+        partition(strip, stripBounds, stripTouch, level + 1);
+      }
+    };
+
+    const emitHorizontal = (cuts: readonly number[]) => {
+      const x1 = bounds.x + (touch.left ? junctionGap : 0);
+      const x2 = bounds.x + bounds.w - (touch.right ? junctionGap : 0);
+      for (const y of cuts) {
+        if (x2 > x1 + 0.5) {
+          lines.push({ orientation: 'horizontal', level, x1, y1: y, x2, y2: y });
+        }
+      }
+
+      const edges = [bounds.y, ...cuts, bounds.y + bounds.h];
+      for (let i = 0; i < edges.length - 1; i++) {
+        const lo = edges[i];
+        const hi = edges[i + 1];
+        const strip = subset.filter((r) => {
+          const cy = r.y + r.h * 0.5;
+          return cy >= lo && cy <= hi;
+        });
+        if (strip.length <= 1) continue;
+
+        const stripBounds: PartitionBounds = {
+          x: bounds.x,
+          y: lo,
+          w: bounds.w,
+          h: hi - lo,
+        };
+        const stripTouch: PartitionTouch = {
+          left: touch.left,
+          right: touch.right,
+          top: i > 0 || touch.top,
+          bottom: i < cuts.length || touch.bottom,
+        };
+        partition(strip, stripBounds, stripTouch, level + 1);
+      }
+    };
+
+    // When forced to fall back to the secondary axis (because a spanning slot blocks
+    // any full-span primary-axis cut), keep only the secondary cuts needed to isolate
+    // the spanning blocker(s). Consecutive bands whose union admits a primary-axis cut
+    // stay merged so recursion immediately restores primary-axis divider priority.
+    const filterFallbackCuts = (
+      cuts: readonly number[],
+      secondaryAxis: 'vertical' | 'horizontal',
+      primaryAxis: 'vertical' | 'horizontal',
+    ): number[] => {
+      if (cuts.length <= 1) return [...cuts];
+      const rangeStart = secondaryAxis === 'vertical' ? bounds.x : bounds.y;
+      const rangeEnd = secondaryAxis === 'vertical' ? bounds.x + bounds.w : bounds.y + bounds.h;
+      const edges = [rangeStart, ...cuts, rangeEnd];
+      const bands: ComputedSlotRect[][] = [];
+      for (let i = 0; i < edges.length - 1; i++) {
+        const lo = edges[i];
+        const hi = edges[i + 1];
+        bands.push(
+          subset.filter((r) => {
+            const c = secondaryAxis === 'vertical' ? r.x + r.w * 0.5 : r.y + r.h * 0.5;
+            return c >= lo && c <= hi;
+          }),
+        );
+      }
+      const keptCuts: number[] = [];
+      let activeGroup: ComputedSlotRect[] = bands[0] ? [...bands[0]] : [];
+      for (let i = 1; i < bands.length; i++) {
+        const nextBand = bands[i];
+        const merged = [...activeGroup, ...nextBand];
+        if (
+          activeGroup.length > 0 &&
+          nextBand.length > 0 &&
+          findGuillotineCuts(merged, primaryAxis).length > 0
+        ) {
+          activeGroup = merged;
+        } else {
+          keptCuts.push(cuts[i - 1]);
+          activeGroup = [...nextBand];
+        }
+      }
+      return keptCuts;
+    };
+
+    if (flow === 'row') {
+      if (hCuts.length > 0) emitHorizontal(hCuts);
+      else if (vCuts.length > 0) emitVertical(filterFallbackCuts(vCuts, 'vertical', 'horizontal'));
+    } else {
+      if (vCuts.length > 0) emitVertical(vCuts);
+      else if (hCuts.length > 0) emitHorizontal(filterFallbackCuts(hCuts, 'horizontal', 'vertical'));
+    }
+  };
+
+  partition(
+    rects,
+    { x: 0, y: 0, w: W, h: H },
+    { left: false, right: false, top: false, bottom: false },
+    0,
+  );
+
+  return lines;
+}
+
+/**
+ * Resolves the effective step separation style for a page, honoring any
+ * StepLayoutGroup override (`stepBorderStyle` or legacy `showStepBorders`)
+ * before falling back to the active theme's `stepBorderStyle`.
+ */
+export function resolveEffectiveStepBorderStyle(
+  group: Pick<StepLayoutGroup, 'stepBorderStyle' | 'showStepBorders'> | null | undefined,
+  fallback: StepBorderStyle = 'lines',
+): StepBorderStyle {
+  if (
+    group?.stepBorderStyle === 'lines' ||
+    group?.stepBorderStyle === 'boxes' ||
+    group?.stepBorderStyle === 'none'
+  ) {
+    return group.stepBorderStyle;
+  }
+  if (typeof group?.showStepBorders === 'boolean') {
+    return group.showStepBorders ? 'boxes' : 'none';
+  }
+  return fallback === 'boxes' || fallback === 'none' ? fallback : 'lines';
+}
+
 /**
  * Finds the matching StepLayoutGroup for a given 1-based ABSOLUTE step number
  * (unique across the manual — never the printed per-submodel number).
@@ -606,6 +893,12 @@ export function normalizeLayoutGroups(raw: unknown): StepLayoutGroup[] {
     const id = typeof obj.id === 'string' && obj.id.trim() ? obj.id.trim() : `grp_${i + 1}`;
     if (seen.has(id)) continue;
     seen.add(id);
+    const stepBorderStyle: StepBorderStyle | null =
+      obj.stepBorderStyle === 'lines' ||
+      obj.stepBorderStyle === 'boxes' ||
+      obj.stepBorderStyle === 'none'
+        ? obj.stepBorderStyle
+        : null;
     out.push({
       id,
       name:
@@ -617,6 +910,7 @@ export function normalizeLayoutGroups(raw: unknown): StepLayoutGroup[] {
       stepBasis: obj.stepBasis === 'absolute' ? 'absolute' : 'legacy',
       layout: normalizePageLayoutSpec(obj.layout),
       themeId: typeof obj.themeId === 'string' && obj.themeId.trim() ? obj.themeId.trim() : null,
+      stepBorderStyle,
       showStepBorders: typeof obj.showStepBorders === 'boolean' ? obj.showStepBorders : null,
     });
   }
@@ -639,7 +933,9 @@ export function describePageLayoutSpec(spec: PageLayoutSpec): string {
     parts.push(`${spec.cols === 'auto' ? 'Auto' : spec.cols}×${spec.rows === 'auto' ? 'Auto' : spec.rows}`);
   }
 
-  if (spec.flow === 'column') {
+  if (spec.flow === 'row') {
+    parts.push('Rows →');
+  } else if (spec.cols !== 'auto' || spec.rows !== 'auto') {
     parts.push('Columns ↓');
   }
 
@@ -1135,7 +1431,7 @@ export function findBestSmartAutoGridForSteps(
     stepsPerPage: Math.max(1, k),
     cols: 'auto',
     rows: 'auto',
-    flow: spec?.flow === 'column' ? 'column' : 'row',
+    flow: spec?.flow === 'row' ? 'row' : 'column',
     mixedLayout,
     slotSizes: spec?.slotSizes || [],
   };
@@ -1593,7 +1889,7 @@ export function computeSmartAutoPreviewGrid(
       stepsPerPage: 1,
       cols: 'auto',
       rows: 'auto',
-      flow: spec?.flow === 'column' ? 'column' : 'row',
+      flow: spec?.flow === 'row' ? 'row' : 'column',
       mixedLayout: 'custom_weights',
       slotSizes: spec?.slotSizes || [],
     };

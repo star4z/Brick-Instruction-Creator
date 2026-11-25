@@ -6,6 +6,7 @@ import {
   analyzePageSizeFit,
   buildSmartAutoPageContext,
   computeBoundingSphereFromBoxLists,
+  computePageDividerLines,
   computePageSlotRects,
   computeRenderedStudSizeCm,
   computeRepresentativeStepMetric,
@@ -25,6 +26,7 @@ import {
   normalizePageLayoutSpec,
   normalizePageNumberPosition,
   packSmartAutoPage,
+  resolveEffectiveStepBorderStyle,
   resolveGridDimensions,
   resolvePageNumberSide,
   type PageLayoutSpec,
@@ -137,8 +139,10 @@ describe('pageLayout engine', () => {
     expect(rectsRight[2].w * rectsRight[2].h).toBeGreaterThan(rectsRight[0].w * rectsRight[0].h * 2);
   });
 
-  it('supports custom per-slot size weights (sm / md / lg)', () => {
-    const weighted: PageLayoutSpec = {
+  it('supports custom per-slot size weights (sm / md / lg) in both column-first (default) and row-first flows', () => {
+    expect(createDefaultPageLayoutSpec().flow).toBe('column');
+
+    const weightedCol: PageLayoutSpec = {
       ...createDefaultPageLayoutSpec(),
       mode: 'custom',
       stepsPerPage: 4,
@@ -147,10 +151,17 @@ describe('pageLayout engine', () => {
       mixedLayout: 'custom_weights',
       slotSizes: ['lg', 'sm', 'sm', 'md'],
     };
-    const rects = computePageSlotRects(4, weighted, true, 800, 600, 10);
-    expect(rects[0].w).toBeGreaterThan(rects[1].w * 2);
-    expect(rects[0].h).toBeGreaterThan(rects[2].h);
-    expect(rects[0].isFeatured).toBe(true);
+    const colRects = computePageSlotRects(4, weightedCol, true, 800, 600, 10);
+    // In column-first flow: col 0 has slots [0 ('lg'), 1 ('sm')], col 1 has slots [2 ('sm'), 3 ('md')]
+    expect(colRects[0].h).toBeGreaterThan(colRects[1].h * 2);
+    expect(colRects[0].w).toBeGreaterThan(colRects[2].w);
+    expect(colRects[0].isFeatured).toBe(true);
+
+    const weightedRow: PageLayoutSpec = { ...weightedCol, flow: 'row' };
+    const rowRects = computePageSlotRects(4, weightedRow, true, 800, 600, 10);
+    expect(rowRects[0].w).toBeGreaterThan(rowRects[1].w * 2);
+    expect(rowRects[0].h).toBeGreaterThan(rowRects[2].h);
+    expect(rowRects[0].isFeatured).toBe(true);
   });
 
   it('resolves overlapping step layout groups with latest group taking precedence', () => {
@@ -746,6 +757,227 @@ describe('pageLayout engine', () => {
     expect(resolvePageNumberSide(0, 'outside')).toBe('right');
     expect(resolvePageNumberSide(-2, 'outside')).toBe('right');
     expect(resolvePageNumberSide(Number.NaN, 'outside')).toBe('right');
+  });
+
+  it('computes LEGO-style step divider lines matching all reference edge cases and orientation priority', () => {
+    const W = 800;
+    const H = 600;
+    const gap = 12;
+    const jGap = 6;
+
+    // 1. Single step (1×1): zero divider lines
+    const oneRect = computePageSlotRects(1, createDefaultPageLayoutSpec(), true, W, H, gap);
+    expect(computePageDividerLines(oneRect, W, H, 'column', { junctionGap: jGap })).toEqual([]);
+
+    // 2. Side-by-side 2×1 (e.g. Steps 44 | 45): single full-height vertical line
+    const twoWide = computePageSlotRects(
+      2,
+      { ...createDefaultPageLayoutSpec(), cols: 2, rows: 1 },
+      true,
+      W,
+      H,
+      gap,
+    );
+    const twoWideLines = computePageDividerLines(twoWide, W, H, 'column', { junctionGap: jGap });
+    expect(twoWideLines).toHaveLength(1);
+    expect(twoWideLines[0]).toMatchObject({
+      orientation: 'vertical',
+      level: 0,
+      x1: W / 2,
+      y1: 0,
+      x2: W / 2,
+      y2: H,
+    });
+
+    // 3. Portrait 1×2 (single column, 2 stacked steps): single full-width horizontal line
+    const twoTall = computePageSlotRects(
+      2,
+      { ...createDefaultPageLayoutSpec(), cols: 1, rows: 2 },
+      false,
+      600,
+      800,
+      gap,
+    );
+    const twoTallLines = computePageDividerLines(twoTall, 600, 800, 'column', { junctionGap: jGap });
+    expect(twoTallLines).toHaveLength(1);
+    expect(twoTallLines[0]).toMatchObject({
+      orientation: 'horizontal',
+      level: 0,
+      x1: 0,
+      y1: 400,
+      x2: 600,
+      y2: 400,
+    });
+
+    // 4. 2×2 grid in default column-first flow (60↓61 | 62↓63):
+    //    ONLY 1 full-height vertical line between columns; NO horizontal lines between stacked steps
+    const grid2x2Col = computePageSlotRects(
+      4,
+      { ...createDefaultPageLayoutSpec(), cols: 2, rows: 2, flow: 'column' },
+      true,
+      W,
+      H,
+      gap,
+    );
+    const grid2x2ColLines = computePageDividerLines(grid2x2Col, W, H, 'column', { junctionGap: jGap });
+    expect(grid2x2ColLines).toHaveLength(1);
+    expect(grid2x2ColLines[0]).toMatchObject({
+      orientation: 'vertical',
+      level: 0,
+      x1: W / 2,
+      y1: 0,
+      x2: W / 2,
+      y2: H,
+    });
+
+    // 5. 2×2 grid in row-first flow (1→2 / 3→4):
+    //    Horizontal divider has priority (full-width), with secondary gapped verticals in each row
+    const grid2x2Row = computePageSlotRects(
+      4,
+      { ...createDefaultPageLayoutSpec(), cols: 2, rows: 2, flow: 'row' },
+      true,
+      W,
+      H,
+      gap,
+    );
+    const grid2x2RowLines = computePageDividerLines(grid2x2Row, W, H, 'row', { junctionGap: jGap });
+    const rowHoriz = grid2x2RowLines.filter((l) => l.orientation === 'horizontal');
+    const rowVerts = grid2x2RowLines.filter((l) => l.orientation === 'vertical');
+    expect(rowHoriz).toHaveLength(1);
+    expect(rowHoriz[0]).toMatchObject({ level: 0, x1: 0, y1: H / 2, x2: W, y2: H / 2 });
+    expect(rowVerts).toHaveLength(2);
+    expect(rowVerts[0]).toMatchObject({ level: 1, x1: W / 2, y1: 0, x2: W / 2, y2: H / 2 - jGap });
+    expect(rowVerts[1]).toMatchObject({ level: 1, x1: W / 2, y1: H / 2 + jGap, x2: W / 2, y2: H });
+
+    // 6. Hero Right 3-step (3↓4 on left, 5 full-height on right) in column-first flow:
+    //    ONLY 1 full-height vertical line; NO horizontal line between 3 and 4
+    const heroRightCol = computePageSlotRects(
+      3,
+      { ...createDefaultPageLayoutSpec(), mixedLayout: 'hero_right', flow: 'column' },
+      true,
+      W,
+      H,
+      gap,
+    );
+    const heroRightColLines = computePageDividerLines(heroRightCol, W, H, 'column', { junctionGap: jGap });
+    expect(heroRightColLines).toHaveLength(1);
+    expect(heroRightColLines[0].orientation).toBe('vertical');
+    expect(heroRightColLines[0].y1).toBe(0);
+    expect(heroRightColLines[0].y2).toBe(H);
+
+    // 7. Hero Left 3-step in row-first flow (full-height left | 2 over 3 right):
+    //    Full-height vertical line + gapped partial horizontal line only in right half
+    const heroLeftRow = computePageSlotRects(
+      3,
+      { ...createDefaultPageLayoutSpec(), mixedLayout: 'hero_left', flow: 'row' },
+      true,
+      W,
+      H,
+      gap,
+    );
+    const heroLeftRowLines = computePageDividerLines(heroLeftRow, W, H, 'row', { junctionGap: jGap });
+    expect(heroLeftRowLines).toHaveLength(2);
+    const hlVert = heroLeftRowLines.find((l) => l.orientation === 'vertical')!;
+    const hlHoriz = heroLeftRowLines.find((l) => l.orientation === 'horizontal')!;
+    expect(hlVert.level).toBe(0);
+    expect(hlVert.y1).toBe(0);
+    expect(hlVert.y2).toBe(H);
+    expect(hlHoriz.level).toBe(1);
+    expect(hlHoriz.x1).toBeCloseTo(hlVert.x1 + jGap, 2);
+    expect(hlHoriz.x2).toBe(W);
+
+    // 8. Two-over-one (40 | 41 on top, 42 full-width on bottom via custom_weights row-first):
+    //    Full-width horizontal line + partial vertical line only in top half stopping short of horizontal
+    const twoOverOne = computePageSlotRects(
+      3,
+      { ...createDefaultPageLayoutSpec(), cols: 2, rows: 2, flow: 'row', mixedLayout: 'custom_weights' },
+      true,
+      W,
+      H,
+      gap,
+    );
+    const twoOverOneLines = computePageDividerLines(twoOverOne, W, H, 'row', { junctionGap: jGap });
+    expect(twoOverOneLines).toHaveLength(2);
+    const tHoriz = twoOverOneLines.find((l) => l.orientation === 'horizontal')!;
+    const tVert = twoOverOneLines.find((l) => l.orientation === 'vertical')!;
+    expect(tHoriz).toMatchObject({ level: 0, x1: 0, x2: W });
+    expect(tVert.level).toBe(1);
+    expect(tVert.y1).toBe(0);
+    expect(tVert.y2).toBeCloseTo(tHoriz.y1 - jGap, 2);
+
+    // 9. Hero Top 3-step (1 full-width on top, 2 | 3 on bottom) in default column-first flow:
+    //    Full-width horizontal line + partial vertical line only in bottom half stopping short of horizontal
+    const heroTopCol = computePageSlotRects(
+      3,
+      { ...createDefaultPageLayoutSpec(), mixedLayout: 'hero_top', flow: 'column' },
+      true,
+      W,
+      H,
+      gap,
+    );
+    const heroTopColLines = computePageDividerLines(heroTopCol, W, H, 'column', { junctionGap: jGap });
+    expect(heroTopColLines).toHaveLength(2);
+    const htHoriz = heroTopColLines.find((l) => l.orientation === 'horizontal')!;
+    const htVert = heroTopColLines.find((l) => l.orientation === 'vertical')!;
+    expect(htHoriz).toMatchObject({ level: 0, x1: 0, x2: W });
+    expect(htVert.level).toBe(1);
+    expect(htVert.y1).toBeCloseTo(htHoriz.y1 + jGap, 2);
+    expect(htVert.y2).toBe(H);
+
+    // 10. Partial last row in row-first 2×2 (3 steps: 1|2 top, 3 bottom-left): zero orphan vertical in bottom row
+    const partialRow = computePageSlotRects(
+      3,
+      { ...createDefaultPageLayoutSpec(), cols: 2, rows: 2, flow: 'row' },
+      true,
+      W,
+      H,
+      gap,
+    );
+    const partialRowLines = computePageDividerLines(partialRow, W, H, 'row', { junctionGap: jGap });
+    expect(partialRowLines.filter((l) => l.orientation === 'horizontal')).toHaveLength(1);
+    expect(partialRowLines.filter((l) => l.orientation === 'vertical')).toHaveLength(1);
+    expect(partialRowLines.find((l) => l.orientation === 'vertical')!.y2).toBeLessThan(H / 2);
+
+    // 11. Hero Top with 5 steps in column-first flow (1 wide top, 2↓3 | 4↓5 bottom):
+    //     Full horizontal + 1 partial vertical in bottom half, no extra horizontal between 2&3 or 4&5
+    const heroTop5Col = computePageSlotRects(
+      5,
+      { ...createDefaultPageLayoutSpec(), mixedLayout: 'hero_top', flow: 'column' },
+      true,
+      W,
+      H,
+      gap,
+      { cols: 2, rows: 2 },
+    );
+    const heroTop5Lines = computePageDividerLines(heroTop5Col, W, H, 'column', { junctionGap: jGap });
+    expect(heroTop5Lines.filter((l) => l.orientation === 'horizontal')).toHaveLength(1);
+    expect(heroTop5Lines.filter((l) => l.orientation === 'vertical')).toHaveLength(1);
+
+    // 12. Hero Left with 5 steps in row-first flow (1 tall left, 2|3 over 4|5 right):
+    //     1 full-height vertical separating left from right, 1 partial horizontal across right half,
+    //     and 2 gapped vertical lines inside the two right-hand rows
+    const heroLeft5Row = computePageSlotRects(
+      5,
+      { ...createDefaultPageLayoutSpec(), mixedLayout: 'hero_left', flow: 'row' },
+      true,
+      W,
+      H,
+      gap,
+      { cols: 2, rows: 2 },
+    );
+    const heroLeft5Lines = computePageDividerLines(heroLeft5Row, W, H, 'row', { junctionGap: jGap });
+    expect(heroLeft5Lines.filter((l) => l.orientation === 'vertical' && l.level === 0)).toHaveLength(1);
+    expect(heroLeft5Lines.filter((l) => l.orientation === 'horizontal' && l.level === 1)).toHaveLength(1);
+    expect(heroLeft5Lines.filter((l) => l.orientation === 'vertical' && l.level === 2)).toHaveLength(2);
+  });
+
+  it('resolves effective step border style from StepLayoutGroup overrides and legacy flags', () => {
+    expect(resolveEffectiveStepBorderStyle(null, 'lines')).toBe('lines');
+    expect(resolveEffectiveStepBorderStyle(null, 'boxes')).toBe('boxes');
+    expect(resolveEffectiveStepBorderStyle({ stepBorderStyle: 'boxes' }, 'lines')).toBe('boxes');
+    expect(resolveEffectiveStepBorderStyle({ stepBorderStyle: 'none' }, 'lines')).toBe('none');
+    expect(resolveEffectiveStepBorderStyle({ showStepBorders: false }, 'lines')).toBe('none');
+    expect(resolveEffectiveStepBorderStyle({ showStepBorders: true }, 'lines')).toBe('boxes');
   });
 });
 

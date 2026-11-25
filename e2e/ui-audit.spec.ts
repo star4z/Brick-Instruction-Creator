@@ -324,7 +324,7 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     runtime.assertClean(`${testInfo.project.name}: Workspace & Navigation`);
   });
 
-  test('Style, Page Setup, Parts List Setup, Step Generation, Export, Issues, and Confirm Close', async ({
+  test('Style & Themes Popover, Arrow Style, Step Dividers, and Undo/Redo', async ({
     page,
   }, testInfo) => {
     const runtime = await attachRuntimeIssueCollector(page);
@@ -366,14 +366,14 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     await page.locator('#toggleArrowOutlines').click();
     await page.locator('#toggleArrowLighting').click();
 
-    // Verify Step Dividers selector & Build Progress Bar toggle inside Style Popover
-    await expect(page.locator('#stepDividerStyle')).toBeVisible();
-    await page.locator('#stepDividerStyle').selectOption('hairlines');
+    // Verify Step Dividers default to LEGO-style Lines and Build Progress Bar toggle inside Style Popover (auto-forking built-in theme)
     await expect(page.locator('#toggleProgressBar')).toBeVisible();
-
-    // Toggle a rendering option to verify built-in theme auto-forks to a custom theme
-    await page.locator('#toggleStarkBlackOutlines').click();
+    await expect(page.locator('#stylePopover .step-border-style-btn[data-step-border-style="lines"]')).toHaveAttribute('aria-pressed', 'true');
+    await page.locator('#stylePopover .step-border-style-btn[data-step-border-style="boxes"]').click();
+    await expect(page.locator('#stylePopover .step-border-style-btn[data-step-border-style="boxes"]')).toHaveAttribute('aria-pressed', 'true');
     await expect(page.locator('#btnDeleteTheme')).toBeEnabled();
+    await page.locator('#stylePopover .step-border-style-btn[data-step-border-style="lines"]').click();
+    await expect(page.locator('#stylePopover .step-border-style-btn[data-step-border-style="lines"]')).toHaveAttribute('aria-pressed', 'true');
     await page.locator('#btnStylePop').click();
     await expect(page.locator('#stylePopover')).toBeHidden();
 
@@ -389,7 +389,19 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     }
     await page.locator('#modePill [data-mode="pan"]').click();
 
-    // 2. Page Setup Modal (Paper formats + Custom size + Orientation + Page Number Position)
+    runtime.assertClean(`${testInfo.project.name}: Style Popover & Undo/Redo`);
+  });
+
+  test('Page Setup, Step Dividers Priority, Booklet Page Numbers, and Export', async ({
+    page,
+  }, testInfo) => {
+    const runtime = await attachRuntimeIssueCollector(page);
+
+    await page.goto('/');
+    await loadCleanManual(page);
+    await closeMenuOnMobile(page);
+
+    // Page Setup Modal (Paper formats + Custom size + Orientation + Step Dividers & Flow Priority + Page Number Position)
     await ensureMenuOpen(page);
     await expect(page.locator('#menuPageSetupBtn')).toHaveText(/^\s*Page Setup\s*$/);
     await expect(page.locator('#menuStyleBtn')).toHaveText(/^\s*Style\s*$/);
@@ -397,9 +409,24 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     await expect(page.locator('#menuStepGenBtn')).toHaveText(/^\s*Step Generation\s*$/);
     await page.locator('#menuPageSetupBtn').click();
     await expect(page.locator('#pageSetupModal')).toBeVisible();
+    await expect(page.locator('#pageSetupModal .step-border-style-setup-btn[data-step-border-style="lines"]')).toHaveAttribute('aria-pressed', 'true');
     await auditSurface(page, `${testInfo.project.name}: Page Setup Modal`, {
       activeContainerSelector: '#pageSetupModal',
     });
+
+    // Verify 2×2 preview divider priority switches cleanly between Columns (vertical-only) and Rows (horizontal + gapped verticals)
+    await page.locator('#layoutColsSelect').selectOption('2');
+    await page.locator('#layoutRowsSelect').selectOption('2');
+    await expect(page.locator('#layoutGridPreview svg[data-preview-dividers="true"] line')).toHaveCount(1);
+    await page.locator('#pageSetupModal .step-flow-btn[data-step-flow="row"]').click();
+    await expect(page.locator('#layoutGridPreview svg[data-preview-dividers="true"] line')).toHaveCount(3);
+    await page.locator('#pageSetupModal .step-flow-btn[data-step-flow="column"]').click();
+    await expect(page.locator('#layoutGridPreview svg[data-preview-dividers="true"] line')).toHaveCount(1);
+    await page.locator('#pageSetupModal .step-border-style-setup-btn[data-step-border-style="none"]').click();
+    await expect(page.locator('#layoutGridPreview svg[data-preview-dividers="true"]')).toHaveCount(0);
+    await page.locator('#pageSetupModal .step-border-style-setup-btn[data-step-border-style="lines"]').click();
+    await page.locator('#layoutColsSelect').selectOption('auto');
+    await page.locator('#layoutRowsSelect').selectOption('auto');
 
     await page.locator('#paperFormatSelect').selectOption('custom');
     await expect(page.locator('#customSizeWrap')).toBeVisible();
@@ -442,7 +469,30 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     }
     await page.locator('#firstPage').click();
 
-    // 3. Parts List (BOM) Setup Modal (Grid Auto, Grid Custom, Table)
+    // 3. Export & Print Modal (verifies booklet outside-edge summary note too)
+    await closeMenuOnMobile(page);
+    await page.locator('#btnHeaderExport').click();
+    await expect(page.locator('#exportModal')).toBeVisible();
+    await expect(page.locator('#expFormatSummary')).toContainText('Booklet outside page numbers');
+    await auditSurface(page, `${testInfo.project.name}: Export & Print Modal`, {
+      activeContainerSelector: '#exportModal',
+    });
+    await page.locator('#btnCloseExport').click();
+    await expect(page.locator('#exportModal')).toBeHidden();
+
+    runtime.assertClean(`${testInfo.project.name}: Style, Page Setup & Export`);
+  });
+
+  test('Parts List Setup, Step Generation, Issues, and Confirm Close', async ({
+    page,
+  }, testInfo) => {
+    const runtime = await attachRuntimeIssueCollector(page);
+
+    await page.goto('/');
+    await loadCleanManual(page);
+    await closeMenuOnMobile(page);
+
+    // 1. Parts List (BOM) Setup Modal (Grid Auto, Grid Custom, Table)
     await ensureMenuOpen(page);
     await page.locator('#menuBomSetupBtn').click();
     await expect(page.locator('#bomSetupModal')).toBeVisible();
@@ -464,7 +514,7 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     await page.locator('#btnCloseBomSetup').click();
     await expect(page.locator('#bomSetupModal')).toBeHidden();
 
-    // 4. Step Generation Modal (3D preview + Build Organization)
+    // 2. Step Generation Modal (3D preview + Build Organization)
     await ensureMenuOpen(page);
     await page.locator('#menuStepGenBtn').click();
     await expect(page.locator('#importModal')).toBeVisible();
@@ -474,18 +524,7 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     await page.locator('#impBtnCancel').click();
     await expect(page.locator('#importModal')).toBeHidden();
 
-    // 5. Export & Print Modal (verifies booklet outside-edge summary note too)
-    await closeMenuOnMobile(page);
-    await page.locator('#btnHeaderExport').click();
-    await expect(page.locator('#exportModal')).toBeVisible();
-    await expect(page.locator('#expFormatSummary')).toContainText('Booklet outside page numbers');
-    await auditSurface(page, `${testInfo.project.name}: Export & Print Modal`, {
-      activeContainerSelector: '#exportModal',
-    });
-    await page.locator('#btnCloseExport').click();
-    await expect(page.locator('#exportModal')).toBeHidden();
-
-    // 6. Model Issues Modal (when visible in menu)
+    // 3. Model Issues Modal (when visible in menu)
     await ensureMenuOpen(page);
     const errorsBtn = page.locator('#menuErrorsBtn');
     if (await errorsBtn.isVisible()) {
@@ -498,7 +537,7 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
       await expect(page.locator('#errorsModal')).toBeHidden();
     }
 
-    // 7. Destructive Action Confirmation Modal (Close Model -> Cancel, then Confirm)
+    // 4. Destructive Action Confirmation Modal (Close Model -> Cancel, then Confirm)
     await ensureMenuOpen(page);
     await page.locator('#menuCloseModelBtn').click();
     await expect(page.locator('#confirmActionModal')).toBeVisible();

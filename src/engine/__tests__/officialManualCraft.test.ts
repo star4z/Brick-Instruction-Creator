@@ -273,9 +273,9 @@ describe('Official Manual Craft — Contrast Arrows, Roadmap, Progress Bar, Regi
 
     expect(BUILT_IN_THEMES.gray).toBeDefined();
     expect(BUILT_IN_THEMES.gray.bgColor).toBe('#e3e4e5');
-    expect(BUILT_IN_THEMES.gray.stepDividerStyle).toBe('hairlines');
+    expect(BUILT_IN_THEMES.gray.stepBorderStyle).toBe('lines');
     expect(DEFAULT_THEME_STYLE_OPTIONS.showProgressBar).toBe(true);
-    expect(DEFAULT_THEME_STYLE_OPTIONS.stepDividerStyle).toBe('boxes');
+    expect(DEFAULT_THEME_STYLE_OPTIONS.stepBorderStyle).toBe('lines');
   });
 });
 

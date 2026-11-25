@@ -342,6 +342,32 @@ describe('theme style options, recents & naming', () => {
     const softFade = m.normalizeThemeStyleOptions({ fadeOpacity: 0.45 });
     expect(softFade.fadeOpacity).toBe(0.45);
     expect(softFade.fadePrev).toBe(true);
+
+    // Step divider style defaults to LEGO-style 'lines', supports 'boxes' and 'none', and migrates legacy booleans
+    expect(m.DEFAULT_THEME_STYLE_OPTIONS.stepBorderStyle).toBe('lines');
+    expect(m.DEFAULT_THEME_STYLE_OPTIONS.showStepBorders).toBe(false);
+    expect(t.stepBorderStyle).toBe('none');
+    expect(back.stepBorderStyle).toBe('none');
+    expect(createThemeDraftFromBase(t).stepBorderStyle).toBe('none');
+
+    const boxedTheme = normalizeCustomTheme({ name: 'Boxed', stepBorderStyle: 'boxes' })!;
+    expect(boxedTheme.stepBorderStyle).toBe('boxes');
+    expect(boxedTheme.showStepBorders).toBe(true);
+    const [boxedBack] = parseImportedThemesJson(serializeThemeExport(boxedTheme));
+    expect(boxedBack.stepBorderStyle).toBe('boxes');
+    expect(boxedBack.showStepBorders).toBe(true);
+
+    // Legacy showStepBorders=true over default 'lines' keeps 'lines' (avoids spuriously forking old sessions),
+    // while showStepBorders=true over 'none' upgrades to 'boxes' and showStepBorders=false maps to 'none'
+    expect(m.normalizeThemeStyleOptions({ showStepBorders: true }).stepBorderStyle).toBe('lines');
+    expect(m.normalizeThemeStyleOptions({ showStepBorders: false }).stepBorderStyle).toBe('none');
+    expect(m.normalizeThemeStyleOptions({ showStepBorders: true }, { stepBorderStyle: 'none' }).stepBorderStyle).toBe('boxes');
+    expect(m.sanitizeStepBorderStyle('invalid', 'lines')).toBe('lines');
+
+    // Theme-matched divider line colors across light, dark, and blueprint themes
+    expect(m.getStepDividerLineColor(BUILT_IN_THEMES.blueprint)).toBe(BUILT_IN_THEMES.blueprint.pliBorder);
+    expect(m.getStepDividerLineColor(BUILT_IN_THEMES.blue)).toMatch(/^rgba\(\d+,\d+,\d+,0\.62\)$/);
+    expect(m.getStepDividerLineColor(BUILT_IN_THEMES.dark)).toMatch(/^rgba\(\d+,\d+,\d+,0\.42\)$/);
   });
 
   it('orders themes current-first, then by last use, then default order', async () => {

@@ -19,7 +19,7 @@ Implemented in [`src/engine/pageLayout.ts`](../src/engine/pageLayout.ts) and [`s
     - `normalizePageLayoutSpec()` ignores saved `stepsPerPage` values from older projects; legacy `'1-up'` / `'4-up'` map to `1×1` / `2×2` grids, other legacy counts fall back to Auto. `withDerivedStepsPerPage()` re-syncs the derived fields after edits.
   - `cols`: `'auto' | 1..6`
   - `rows`: `'auto' | 1..6`
-  - `flow`: `'row'` (Left → Right, then Top → Bottom, e.g. `12 13 / 14 15`) or `'column'` (Top → Bottom, then Left → Right, e.g. `12 14 / 13 15`)
+  - `flow`: `'column'` (**default**, Top → Bottom, then Left → Right, e.g. `12 14 / 13 15` — matching LEGO vertical column dividers) or `'row'` (Left → Right, then Top → Bottom, e.g. `12 13 / 14 15`)
   - `mixedLayout` (**Step Proportions**):
     - `'even'`: Uniform `cols × rows` grid
     - `'hero_left'`: First step featured large on the left (~56–62% width); remaining steps packed dynamically on the right
@@ -28,8 +28,20 @@ Implemented in [`src/engine/pageLayout.ts`](../src/engine/pageLayout.ts) and [`s
     - `'custom_weights'`: Per-slot `S / M / L` relative sizing (`slotSizes: ('sm' | 'md' | 'lg')[]`) packed dynamically by physical min sizes
 - **`StepLayoutGroup`**:
   - Named, editable rule covering an inclusive 1-based **absolute** step range (`startStepNum..endStepNum`, `stepBasis: 'absolute'`; see [`ABSOLUTE_STEP_NUMBERING_DESIGN.md`](./ABSOLUTE_STEP_NUMBERING_DESIGN.md))
-  - Carries its own `PageLayoutSpec`, optional `themeId` style override, and optional `showStepBorders` override
+  - Carries its own `PageLayoutSpec`, optional `themeId` style override, and optional `stepBorderStyle` (`'lines' | 'boxes' | 'none'`, with legacy `showStepBorders` fallback) override
   - Multiple groups can coexist; overlapping ranges resolve with latest-group precedence so narrower overrides can refine broader sections.
+
+## LEGO-Style Step Divider Lines & Orientation-Based Priority
+Implemented via `computePageDividerLines()` and `resolveEffectiveStepBorderStyle()` in [`src/engine/pageLayout.ts`](../src/engine/pageLayout.ts) and `getStepDividerLineColor()` in [`src/themes/customThemes.ts`](../src/themes/customThemes.ts):
+
+- **Three Step Divider Modes (`StepBorderStyle`)**:
+  - **`'lines'` (Default)**: Open, borderless step slots separated purely by crisp LEGO-style divider lines drawn dead-center in the slot gutters with theme-calibrated ink contrast (`getStepDividerLineColor`).
+  - **`'boxes'`**: Classic full rectangular border + subtle tint around every step slot.
+  - **`'none'`**: Open borderless canvas with neither boxes nor divider lines.
+- **Recursive Guillotine-Partition Rules (Pure Geometry, Zero Hardcoded Layout Heuristics)**:
+  - Finds valid full-span vertical and horizontal guillotine cuts over the computed `ComputedSlotRect[]` rectangles and prioritizes the cut axis implied by the page's step reading direction (`flow`):
+  - **Column-first (`flow: 'column'`, default)**: Vertical dividers between columns take priority and span full height; vertically stacked steps within a single column flow top-to-bottom without horizontal lines between them (e.g., `60↓61 | 62↓63` in `2×2` and `3↓4 | 5` in `hero_right`). When no full-height vertical cut exists (e.g., `hero_top`, two-over-one asymmetric rows, or a single-column `1×2` portrait page), a full-width horizontal divider is emitted first and side-by-side companion steps receive secondary vertical dividers stopping short of the horizontal line (`junctionGap`).
+  - **Row-first (`flow: 'row'`)**: Horizontal dividers between rows take priority and span full width; side-by-side steps within each row receive clean secondary vertical dividers stopping short of the horizontal line (`junctionGap`, with zero orphan lines in partial final rows). When no full-width horizontal cut exists (e.g., `2×1` side-by-side or `hero_left` / `hero_right`), a full-height vertical divider is emitted first and stacked companion rows receive gapped partial horizontal dividers.
 
 ## Physical Smart Auto Grid & Page-Size Readability Warnings
 When Columns & Rows are left on Auto (`cols: 'auto'`, `rows: 'auto'`), `packSmartAutoPage()` in [`src/engine/pageLayout.ts`](../src/engine/pageLayout.ts) computes steps per page directly from physical page geometry, the active Step Proportions (`even`, `hero_*`, `custom_weights`), and each step's rendered piece scale—with **no artificial item limits**:
@@ -53,14 +65,15 @@ When Columns & Rows are left on Auto (`cols: 'auto'`, `rows: 'auto'`), `packSmar
 
 ## Live & PDF Rendering Parity
 - `computePageSlotRects(slotCount, spec, isLandscape, contentW, contentH, gap, resolvedGridOverride)` computes deterministic non-overlapping rectangles `{ x, y, w, h, isFeatured, isCompact }[]`, honoring `page.autoGrid` when Smart Auto Grid is active.
+- `computePageDividerLines(slotRects, contentW, contentH, flow, { junctionGap })` computes identical divider line segments for Live DOM SVG overlays, Page Setup grid previews, and PDF 2D canvas export.
 - `renderAll()` positions step slots inside `#pageFrame` using the exact percentage geometry from `computePageSlotRects`, scaling step numbers, PLI thumbnails, and WebGL snapshot resolutions per slot.
-- `renderPageToJpegBytes()` uses the exact same `computePageSlotRects` output (including `page.autoGrid`) for PDF canvas export.
+- `renderPageToJpegBytes()` uses the exact same `computePageSlotRects` and `computePageDividerLines` outputs (including `page.autoGrid`) for PDF canvas export.
 - `getThemeForPage(page)` resolves a group's `themeId` override (if set) for both live display and PDF rendering.
 
 ## Visual Guides in Page Setup (`#pageSetupModal`)
 1. **Page Format Dropdown + Live Proportion Box**: `<select id="paperFormatSelect">` on the left paired with `#paperFormatPreview` on the right showing the exact paper aspect ratio in the active orientation.
 2. **Orientation**: Separate horizontal (`Landscape`) and vertical (`Portrait`) rectangle icons, followed by the live `#pageSizeFitWarning` notice whenever the current page size is too small for any step.
-3. **Default Page Grid**: Live `#layoutGridPreview` rendered directly from `computePageSlotRects()` using `computeSmartAutoPreviewGrid()` for the active page dimensions, orientation, and margins—seeded with the loaded model's representative physical step metric via `computeRepresentativeStepMetric()` (falling back to compact placeholder steps only when no model is loaded), dynamically updating columns and rows as page size changes with **no max-step number or 24-cell cap** (`Smart Auto Grid · Dynamic by Page Size`)—plus Columns / Rows selects and inline mini-diagram icons on Step Order Direction (`Rows` / `Columns`), Mixed Layouts, Page Density & Margins, and Page Number Format. When any step exceeds the active paper sheet even at `1 step/page`, both the warning banner and the Smart Auto Grid caption explicitly note that oversized steps are already placed `1 step/page` and require a larger paper format (or Screen Fit) to maintain `1 stud ≥ 0.5 cm`.
+3. **Default Page Grid**: Live `#layoutGridPreview` rendered directly from `computePageSlotRects()` and `computePageDividerLines()` using `computeSmartAutoPreviewGrid()` for the active page dimensions, orientation, margins, flow, and Step Dividers mode—seeded with the loaded model's representative physical step metric via `computeRepresentativeStepMetric()` (falling back to compact placeholder steps only when no model is loaded), dynamically updating columns, rows, step numbers, and divider lines as settings change with **no max-step number or 24-cell cap** (`Smart Auto Grid · Dynamic by Page Size`)—plus Columns / Rows selects and inline mini-diagram icons on Step Order Direction (`Columns (1 ↓ 2)` / `Rows (1 → 2)`), Step Proportions, Step Dividers (`Lines` / `Boxes` / `None`), Page Density & Margins, and Page Number Format. When any step exceeds the active paper sheet even at `1 step/page`, both the warning banner and the Smart Auto Grid caption explicitly note that oversized steps are already placed `1 step/page` and require a larger paper format (or Screen Fit) to maintain `1 stud ≥ 0.5 cm`.
 4. **Step Range Groups**: Create, edit, and delete per-range layout/theme rules with a live `#grpGridPreview` inside the inline editor (`populateGroupThemeOptions()` iterates `Object.values(BUILT_IN_THEMES)`).
 5. **Included Pages** ([`src/engine/extraPages.ts`](../src/engine/extraPages.ts)): Independent toggles for **Cover** (`showCover`), **Build Complete** (`showBuildComplete`), **Parts List** (`showPartsList`), and **Back Cover** (`showBackCover`), replacing the legacy single `showExtras` switch (with automatic migration on restore/import). When enabled, each row displays a **Settings** link that jumps straight to that page's own settings (`page` mode overlay for Cover, Build Complete, and Back Cover; `#bomSetupModal` on the Parts List page for Parts List). When a page is disabled, its settings cannot be opened from anywhere (`canOpenExtraPageSettings()` hides and disables Page Setup's **Settings** button, hides **Parts List Setup** in the Menu drawer and Style popover, blocks the `openBomSetup` shortcut, and guards `openBomSetupModal()` / `openExtraPageSettings()`). Per-page text and fireworks controls live solely on their respective page settings rather than duplicated inside Page Setup.
 6. **Booklet Outside-Edge Page Number Position (`pageNumberPosition: 'right' | 'outside'`)**:
