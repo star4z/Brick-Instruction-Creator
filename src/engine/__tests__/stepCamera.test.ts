@@ -620,4 +620,27 @@ describe('Step Camera Stability & Steady Framing', () => {
     expect(fallbackFrustum.orthoHalfH).toBeCloseTo(200 * 1.12, 4);
     expect(fallbackFrustum.orthoHalfW).toBeCloseTo(200 * 1.12 * 1.33, 4);
   });
+
+  it('rotates Step 1 camera horizontally so overhanging stacked plates expose their attaching studs toward the camera', () => {
+    // Bottom 2x6 plate at z=[-40..0], upper 2x6 plate at z=[-20..+20] overhanging toward +Z (front_right).
+    // Viewing from the rear (back_left / back_right, cos(az) < 0) places the lower plate in front
+    // so the attaching 1x6 stud row and connection seam face directly toward the camera.
+    const bottomPlate = makeBox(-60, 0, -40, 60, 8, 0);
+    const upperPlate = makeBox(-60, 8, -20, 60, 16, 20);
+
+    const res = optimizeStudioStepCameraSequence([
+      {
+        stepBoxes: [bottomPlate, upperPlate],
+        occludersBefore: [],
+        occluderCountBefore: 0,
+        builtBoundsBefore: null,
+      },
+    ]);
+
+    expect(res).toHaveLength(1);
+    expect(res[0].side).toBe('top');
+    // Must rotate to a rear corner (cos(az) < 0) rather than staying on front_right (az = +38°)
+    expect(Math.cos((res[0].az * Math.PI) / 180)).toBeLessThan(0);
+    expect(res[0].corner === 'back_left' || res[0].corner === 'back_right').toBe(true);
+  });
 });

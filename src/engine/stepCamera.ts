@@ -510,6 +510,68 @@ export function stepCameraTransitionCost(
 }
 
 /**
+ * Evaluates how well a top-down camera azimuth `azDeg` reveals the attaching
+ * connection seam on Step 1 when an upper piece rests on and overhangs a lower
+ * piece. Looking from the lower piece toward the upper piece (like looking up a
+ * staircase) exposes the attaching studs directly toward the camera (negative
+ * cost), whereas viewing from the overhanging upper side hides the seam behind
+ * the overhang (positive cost).
+ */
+export function computeStep1ConnectionFacingCost(
+  stepBoxes: readonly WorldBox[],
+  azDeg: number,
+  isBottom: boolean,
+): number {
+  if (isBottom || stepBoxes.length < 2) return 0;
+
+  let sumDx = 0;
+  let sumDz = 0;
+  let totalWeight = 0;
+  const CONTACT_EPS = 5;
+
+  for (let i = 0; i < stepBoxes.length; i++) {
+    const lower = stepBoxes[i];
+    for (let j = 0; j < stepBoxes.length; j++) {
+      if (i === j) continue;
+      const upper = stepBoxes[j];
+      // Upper piece rests directly on top of lower piece
+      if (upper.min[1] < lower.max[1] - CONTACT_EPS || upper.min[1] > lower.max[1] + CONTACT_EPS) {
+        continue;
+      }
+      const ovX = Math.min(lower.max[0], upper.max[0]) - Math.max(lower.min[0], upper.min[0]);
+      const ovZ = Math.min(lower.max[2], upper.max[2]) - Math.max(lower.min[2], upper.min[2]);
+      if (ovX <= 2 || ovZ <= 2) continue;
+
+      const dx = upper.center[0] - lower.center[0];
+      const dz = upper.center[2] - lower.center[2];
+      const shift = Math.hypot(dx, dz);
+      if (shift < 6) continue;
+
+      const w = ovX * ovZ;
+      sumDx += (dx / shift) * w;
+      sumDz += (dz / shift) * w;
+      totalWeight += w;
+    }
+  }
+
+  if (totalWeight <= 0) return 0;
+  const dirLen = Math.hypot(sumDx, sumDz);
+  if (dirLen < 1e-4) return 0;
+  const ux = sumDx / dirLen;
+  const uz = sumDz / dirLen;
+
+  // Horizontal unit vector pointing from model toward the camera
+  const azRad = (azDeg * Math.PI) / 180;
+  const vx = Math.sin(azRad);
+  const vz = Math.cos(azRad);
+
+  // Positive alignment => upper overhang is between camera and attaching studs (bad)
+  // Negative alignment => lower base is in front, attaching studs face camera (good)
+  const alignment = ux * vx + uz * vz;
+  return 0.22 * alignment;
+}
+
+/**
  * Global Viterbi Dynamic Programming camera sequence optimizer for a continuous
  * section, bag chain, join sequence, or submodel.
  *
@@ -634,7 +696,12 @@ export function optimizeStudioStepCameraSequence(
         t === 0 && !initialCam && !view.isBottom && view.corner === DEFAULT_STUDIO_CAMERA.corner
           ? -0.08
           : 0;
-      const emissionCost = stepVisibilityPenalty(vis, deadband) + uprightBias + startAnchorBias;
+      const step1FacingCost =
+        occCount === 0 && !view.isBottom && step.stepBoxes.length >= 2
+          ? computeStep1ConnectionFacingCost(step.stepBoxes, view.az, view.isBottom)
+          : 0;
+      const emissionCost =
+        stepVisibilityPenalty(vis, deadband) + uprightBias + startAnchorBias + step1FacingCost;
 
       if (t === 0) {
         const initTransCost = initialCam ? stepCameraTransitionCost(initialCam, view) : 0;
