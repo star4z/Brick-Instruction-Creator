@@ -14634,7 +14634,9 @@ function updateLibraryStatusUI() {
   const { stats } = snapshot;
   const statusEl = document.getElementById('libStatusText');
   if (statusEl) {
-    statusEl.textContent = formatLibraryMenuSummary(stats);
+    const summary = formatLibraryMenuSummary(stats);
+    statusEl.textContent = summary;
+    statusEl.classList.toggle('hidden', !summary);
     statusEl.classList.toggle('text-amber-600', stats.modelMissingShapeCount > 0);
     statusEl.classList.toggle('dark:text-amber-400', stats.modelMissingShapeCount > 0);
     statusEl.classList.toggle('font-bold', stats.modelMissingShapeCount > 0);

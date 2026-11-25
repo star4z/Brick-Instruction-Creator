@@ -407,14 +407,14 @@ describe('bricksLibrary engine', () => {
       expect(copy.buttonEnabled).toBe(false);
     });
 
-    it('formats concise menu summary text', () => {
+    it('formats concise menu summary text without embedded/downloaded clutter', () => {
       expect(
         formatLibraryMenuSummary({
-          savedParts: 0,
+          savedParts: 333,
           savedHelpers: 0,
-          savedTotalFiles: 0,
+          savedTotalFiles: 333,
           savedTextures: 0,
-          embeddedParts: 0,
+          embeddedParts: 222,
           embeddedHelpers: 0,
           builtInParts: 95,
           modelUniqueParts: 0,
@@ -423,7 +423,7 @@ describe('bricksLibrary engine', () => {
           catalogOfficialParts: 0,
           catalogUnofficialParts: 0,
         }),
-      ).toBe('95 built-in');
+      ).toBe('');
 
       expect(
         formatLibraryMenuSummary({
@@ -440,7 +440,7 @@ describe('bricksLibrary engine', () => {
           catalogOfficialParts: 0,
           catalogUnofficialParts: 0,
         }),
-      ).toBe('3 missing · 15 downloaded');
+      ).toBe('3 missing');
     });
 
     it('extracts direct subfile refs and filters specifically to referenced subfiles including helpers', () => {

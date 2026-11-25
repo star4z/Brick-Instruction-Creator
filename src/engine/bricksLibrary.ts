@@ -717,15 +717,9 @@ export function computeStarterPackProgress(
 
 export function formatLibraryMenuSummary(stats: LibraryStats): string {
   if (stats.modelMissingShapeCount > 0) {
-    return `${stats.modelMissingShapeCount} missing${stats.savedParts > 0 ? ` · ${stats.savedParts.toLocaleString()} downloaded` : ''}`;
+    return `${stats.modelMissingShapeCount} missing`;
   }
-  if (stats.savedParts > 0) {
-    return `${stats.savedParts.toLocaleString()} part${stats.savedParts === 1 ? '' : 's'} downloaded`;
-  }
-  if (stats.embeddedParts > 0) {
-    return `${stats.embeddedParts.toLocaleString()} embedded (.io)`;
-  }
-  return `${stats.builtInParts.toLocaleString()} built-in`;
+  return '';
 }
 
 export function getModelFetchCopy(opts: {
