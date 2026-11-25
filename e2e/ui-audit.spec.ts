@@ -346,6 +346,11 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     await page.locator('#toggleArrowOutlines').click();
     await page.locator('#toggleArrowLighting').click();
 
+    // Verify Step Dividers selector & Build Progress Bar toggle inside Style Popover
+    await expect(page.locator('#stepDividerStyle')).toBeVisible();
+    await page.locator('#stepDividerStyle').selectOption('hairlines');
+    await expect(page.locator('#toggleProgressBar')).toBeVisible();
+
     // Toggle a rendering option to verify built-in theme auto-forks to a custom theme
     await page.locator('#toggleStarkBlackOutlines').click();
     await expect(page.locator('#btnDeleteTheme')).toBeEnabled();

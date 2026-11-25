@@ -409,7 +409,7 @@ describe('Step Toolbar & Scope-Based Editor Capabilities', () => {
 
   it('provides descriptive metadata for all minifigure styles and framing modes', () => {
     expect(MINIFIG_STYLE_OPTIONS.map((o) => o.id)).toEqual(['exploded', 'sequential', 'classic']);
-    expect(FOCUS_MODE_OPTIONS.map((o) => o.id)).toEqual(['auto', 'focus', 'full']);
+    expect(FOCUS_MODE_OPTIONS.map((o) => o.id)).toEqual(['auto', 'focus', 'regional', 'full']);
     for (const opt of [...MINIFIG_STYLE_OPTIONS, ...FOCUS_MODE_OPTIONS]) {
       expect(opt.label.length).toBeGreaterThan(2);
       expect(opt.description.length).toBeGreaterThan(15);

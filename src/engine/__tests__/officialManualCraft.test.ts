@@ -240,6 +240,71 @@ describe('Official Manual Craft — Contrast Arrows, Roadmap, Progress Bar, Regi
 
     expect(BUILT_IN_THEMES.gray).toBeDefined();
     expect(BUILT_IN_THEMES.gray.bgColor).toBe('#e3e4e5');
+    expect(BUILT_IN_THEMES.gray.stepDividerStyle).toBe('hairlines');
     expect(DEFAULT_THEME_STYLE_OPTIONS.showProgressBar).toBe(true);
+    expect(DEFAULT_THEME_STYLE_OPTIONS.stepDividerStyle).toBe('boxes');
   });
 });
+
+describe('Official Manual Craft Pass 2 — Substep Strips, Vertical Stacks, Celebration, Confusable Colors & Precision Lines', () => {
+  it('detects radial symmetric ring completion and plans horizontal numbered substep strips', async () => {
+    const { detectRadialSymmetricCompletion, planInlineSubstepStrip } = await import('../substepStrips');
+    const ringParts = [
+      { id: 'r1', partId: '24246', colorId: 71, center: [30, 0, 0] as [number, number, number] },
+      { id: 'r2', partId: '24246', colorId: 71, center: [0, 0, 30] as [number, number, number] },
+      { id: 'r3', partId: '24246', colorId: 71, center: [-30, 0, 0] as [number, number, number] },
+      { id: 'r4', partId: '24246', colorId: 71, center: [0, 0, -30] as [number, number, number] },
+    ];
+    const match = detectRadialSymmetricCompletion(ringParts);
+    expect(match).not.toBeNull();
+    expect(match!.count).toBe(4);
+
+    const strip = planInlineSubstepStrip([
+      { stepId: 's1', parts: [{ id: 'p0', partId: '3024', colorId: 4, center: [0, 0, 0] }] },
+      { stepId: 's2', parts: ringParts },
+    ]);
+    expect(strip).not.toBeNull();
+    expect(strip!.substeps).toHaveLength(2);
+    expect(strip!.radialCompletion).toBe(true);
+    expect(strip!.consolidatedPli.find((c) => c.partId === '24246')?.qty).toBe(4);
+  });
+
+  it('detects general 2-4 layer vertical exploded-stack columns', async () => {
+    const { detectVerticalStackColumn } = await import('../calloutCraft');
+    const stack = detectVerticalStackColumn([
+      { id: 'b1', box: { min: [-10, 0, -10], max: [10, 8, 10], center: [0, 4, 0] } },
+      { id: 'b2', box: { min: [-10, 8, -10], max: [10, 16, 10], center: [0, 12, 0] } },
+      { id: 'b3', box: { min: [-10, 16, -10], max: [10, 24, 10], center: [0, 20, 0] } },
+    ]);
+    expect(stack).not.toBeNull();
+    expect(stack!.orderedPartIds).toEqual(['b1', 'b2', 'b3']);
+  });
+
+  it('renders 2025 calm celebration SVG, flags confusable dark PLI colors, and emits precision dual alignment lines', async () => {
+    const { buildCalmCelebrationSvg, detectConfusablePliColors } = await import('../calloutCraft');
+    const { computePrecisionAlignmentLines } = await import('../placementArrows');
+    const { FOCUS_MODE_OPTIONS } = await import('../stepToolbar');
+
+    const celebSvg = buildCalmCelebrationSvg(800, 600);
+    expect(celebSvg).toContain('<polygon');
+    expect(celebSvg).toContain('fill="none"');
+
+    const flagged = detectConfusablePliColors([
+      { colorId: 0, hex: '#1b2a34', name: 'Black' },
+      { colorId: 72, hex: '#545955', name: 'Dark Bluish Gray' },
+      { colorId: 14, hex: '#f2cd37', name: 'Yellow' },
+    ]);
+    expect(flagged.has(0)).toBe(true);
+    expect(flagged.has(72)).toBe(true);
+    expect(flagged.has(14)).toBe(false);
+
+    const prec = computePrecisionAlignmentLines(
+      { min: [-6, -10, -20], max: [6, 10, 20], center: [0, 0, 0] },
+      [32, 0, 0],
+    );
+    expect(prec).toHaveLength(2);
+    expect(prec!.every((s) => s.isPrecisionLine)).toBe(true);
+    expect(FOCUS_MODE_OPTIONS.some((o) => o.id === 'regional')).toBe(true);
+  });
+});
+

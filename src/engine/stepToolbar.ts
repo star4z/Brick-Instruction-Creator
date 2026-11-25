@@ -3,7 +3,7 @@ export type StepEditorSubTab = 'camera' | 'layout' | 'notes';
 export type ScopeTier = 'local' | 'range' | 'manual';
 
 export type MinifigStyleOptionId = 'exploded' | 'sequential' | 'classic';
-export type StepFocusModeId = 'auto' | 'focus' | 'full';
+export type StepFocusModeId = 'auto' | 'focus' | 'regional' | 'full';
 export type StepInsertCorner = 'top-right' | 'bottom-right' | 'bottom-left' | 'top-left';
 
 export interface MinifigStyleOption {
@@ -297,6 +297,11 @@ export const FOCUS_MODE_OPTIONS: readonly StepFocusModeOption[] = [
     id: 'focus',
     label: 'Close-Up',
     description: 'Zooms closely onto the newly added bricks in this step.',
+  },
+  {
+    id: 'regional',
+    label: 'Regional Crop',
+    description: 'Frames the active build region with surrounding landmarks and a miniature full-model locator inset.',
   },
   {
     id: 'full',

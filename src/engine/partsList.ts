@@ -43,6 +43,12 @@ export interface BomConfig {
   align: BomHangingAlign;
   /** When true, physically larger bricks span strict integer multiples (2×1, 1×2, 2×2, 3×1, etc.) of the base grid cell. */
   variableSizing: boolean;
+  /** When true, thumbnails inside BOM cells scale proportionally to real physical part dimensions. */
+  relativeScale?: boolean;
+  /** When true, packs Parts List into variable-width vertical masonry columns (official LEGO style). */
+  variableWidthColumns?: boolean;
+  /** When true (default), renders circled (N) / squared [N] length badges on axles, bars, and liftarms. */
+  showLengthBadges?: boolean;
   /** Table format row count mode. */
   tableRowsMode: 'auto' | 'custom';
   /** Explicit rows per page when format === 'table' && tableRowsMode === 'custom'. */

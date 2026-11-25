@@ -128,6 +128,7 @@ import {
   buildPlacementArrowGeometry,
   computeAutoPlacementOffsetsForSequence,
   computePlacementArrowSegments,
+  computePrecisionAlignmentLines,
   resolveContrastArrowColor,
 } from './engine/placementArrows';
 import {
@@ -136,12 +137,36 @@ import {
   buildLengthBadgeSvg,
   classifyPartLengthBadge,
   detectCoaxialPositionCallout,
+  draw1to1SilhouetteCanvas,
+  drawCoaxialPositionCalloutCanvas,
+  drawLengthBadgeCanvas,
 } from './engine/lengthBadges';
 import {
   buildProgressBarHtml,
+  classifyLooseUnbaggedParts,
   computeBagProgressFraction,
+  computeBuildRoadmapPages,
   drawProgressBarCanvas,
 } from './engine/buildRoadmap';
+import {
+  buildAttachmentStarburstSvg,
+  buildCalmCelebrationSvg,
+  buildCurvedMotionArrowSvg,
+  buildOrthogonalLeadersSvg,
+  detectConfusablePliColors,
+  detectMirroredSubassemblyPairs,
+  detectNonOrthogonalArticulationAngle,
+  detectVerticalStackColumn,
+  drawAttachmentStarburstCanvas,
+  drawCalmCelebrationCanvas,
+  drawCurvedMotionArrowCanvas,
+  drawOrthogonalLeadersCanvas,
+  routeOrthogonalLeaders,
+} from './engine/calloutCraft';
+import {
+  detectRadialSymmetricCompletion,
+  planInlineSubstepStrip,
+} from './engine/substepStrips';
 import {
   buildPhysicalVerticalPrereqMap,
   classifySidewaysCapability,
@@ -2594,13 +2619,22 @@ function buildMeshBuffers(prevParts, newParts, opts) {
       const baseArrowHex = pOv?.arrowColorOverride || opts.arrowColor || DEFAULT_ARROW_COLOR;
       const adaptiveHex = resolveContrastArrowColor(baseArrowHex, partRgb);
       const arrowRgb = hexToRgb255(adaptiveHex, 0);
-      placementArrowSpecs.push({
-        box: pOv?.arrowBox || box,
-        offset: [offX, offY, offZ],
-        arrowTo: pOv?.arrowTo || null,
-        throughGuideTo: pOv?.throughGuideTo || null,
-        rgb: [arrowRgb[0], arrowRgb[1], arrowRgb[2]],
-      });
+      const precisionSegs = (!pOv?.arrowTo && !pOv?.throughGuideTo)
+        ? computePrecisionAlignmentLines(pOv?.arrowBox || box, [offX, offY, offZ])
+        : null;
+      if (precisionSegs) {
+        for (const seg of precisionSegs) {
+          pushEdge(seg.from, seg.to, arrowRgb, 255);
+        }
+      } else {
+        placementArrowSpecs.push({
+          box: pOv?.arrowBox || box,
+          offset: [offX, offY, offZ],
+          arrowTo: pOv?.arrowTo || null,
+          throughGuideTo: pOv?.throughGuideTo || null,
+          rgb: [arrowRgb[0], arrowRgb[1], arrowRgb[2]],
+        });
+      }
     }
   };
 
@@ -7317,6 +7351,7 @@ const state = {
   minifigStyle: 'exploded', // 'exploded' (IMG_0316) | 'sequential' (IMG_0315) | 'classic'
   showMinifig1to1: false,
   showStepBorders: true,
+  stepDividerStyle: 'boxes',
   showPageTitle: true,
   showProgressBar: true,
   wordlessMode: DEFAULT_WORDLESS_MODE, // LEGO-style icon/number-only instructions (no translation needed)
@@ -9021,9 +9056,29 @@ function renderAll() {
     const isLiveHeroCamera = state.mode === 'camera';
     const showText = cm.showText !== false;
     const showFw = cm.showFireworks !== false;
+    const celebStyle = cm.celebrationStyle || 'starburst';
+    const celebBgHtml = showFw
+      ? (celebStyle === 'fireworks'
+          ? buildFireworksSvg()
+          : `<div class="absolute inset-0 pointer-events-none">${buildCalmCelebrationSvg(dims.width, dims.height, { starStroke: theme.accent })}</div>`)
+      : '';
+    // Multi-chapter ensemble strip (minifigures / standalone accessory chapters shown cleanly along foreground)
+    const ensembleChapters = (state.model?.chapters || []).filter((c) => c.kind === 'minifigure' && Array.isArray(c.steps) && c.steps.length > 0).slice(0, 6);
+    const ensembleHtml = ensembleChapters.length > 0
+      ? `<div class="relative z-10 shrink-0 flex items-end justify-center pointer-events-none" style="gap:${Math.round(typo.pt(10))}px;margin-bottom:${Math.round(typo.pt(4))}px">
+          ${ensembleChapters.map((ec, eIdx) => {
+            const ecParts = ec.steps.flatMap((s) => s.parts || []);
+            const thumb = getMinifigThumb(ecParts, `ens_${ec.id}_${eIdx}`, 28, 18, 180, 180);
+            return thumb ? `<img src="${thumb}" alt="${escHtml(ec.name || 'Figure')}" style="height:${Math.round(typo.pt(46))}px;width:auto" class="object-contain drop-shadow-xs" />` : '';
+          }).join('')}
+        </div>`
+      : '';
+    const completeBarHtml = state.showProgressBar !== false
+      ? buildProgressBarHtml(1, { accent: theme.accent, heightPx: Math.max(3, Math.round(typo.pt(3))) })
+      : '';
     frame.innerHTML = `
       <div class="relative w-full h-full text-center flex flex-col items-center justify-between overflow-hidden" style="padding:${padPx}px;padding-bottom:${padPx + footerH}px;${cm.bgSrc ? `background-image:url(${cm.bgSrc});background-size:cover;background-position:center;` : ''}">
-        ${showFw ? buildFireworksSvg() : ''}
+        ${celebBgHtml}
         <div class="relative z-10 shrink-0 pointer-events-none ${showText ? '' : 'hidden'}">
           <h2 class="font-extrabold leading-tight" style="font-size:${typo.complete.titleFont}px">${escHtml(cm.title || 'Build Complete!')}</h2>
           ${cm.subtitle ? `<p style="color:${theme.muted};font-size:${typo.complete.subtitleFont}px;margin-top:${Math.round(typo.pt(2.5))}px">${escHtml(cm.subtitle)}</p>` : ''}
@@ -9033,6 +9088,7 @@ function renderAll() {
             ? `<canvas id="liveHeroCanvas" class="absolute inset-0 w-full h-full object-contain cursor-grab active:cursor-grabbing touch-none select-none"></canvas>`
             : `<img data-cover-hero-img="true" src="${snap.url}" alt="Completed build" class="absolute inset-0 w-full h-full object-contain pointer-events-none select-none" />`}
         </div>
+        ${ensembleHtml}
         ${renderPageFooterHtml({ titleText: state.model.title, zIndexClass: 'z-10' })}
       </div>`;
   } else if (page.kind === 'back') {
@@ -9078,18 +9134,38 @@ function renderAll() {
     });
     const pillPadX = Math.round(typo.pt(8));
     const pillPadY = Math.round(typo.pt(2.5));
+    const looseParts = classifyLooseUnbaggedParts(
+      (page.previewParts || []).map((p) => {
+        const def = resolvePart(p.p);
+        return {
+          partId: normId(p.p),
+          colorId: p.c,
+          title: def.name,
+          maxDimLdu: Math.max((def.sx || 1) * 20, (def.sz || 1) * 20, def.h || 24),
+        };
+      }),
+    );
+    const loosePartsHtml = looseParts.length > 0
+      ? `<div class="inline-flex items-center rounded-xl border px-2 py-1 shadow-xs" style="gap:${Math.round(typo.pt(6))}px;background:${theme.pliBg};border-color:${theme.pliBorder};font-size:${typo.divider.subMetaFont}px">
+          ${looseParts.map((lp) => `<span class="inline-flex items-center font-extrabold tabular-nums" style="gap:3px">${lp.count}× <span class="font-mono opacity-80">${escHtml(lp.partId)}</span></span>`).join('<span class="opacity-40">·</span>')}
+          <span class="font-black opacity-60">+</span>
+        </div>`
+      : '';
     const bagHeaderHtml = wordless
       ? `<div class="shrink-0 flex items-center justify-between" style="gap:${Math.round(typo.pt(12))}px">
-          <div class="shrink-0">${buildNumberedBagSvg(page.bagNumber || 1, Math.round(typo.pt(56)), theme.accent, theme.pliBg, theme.text)}</div>
+          <div class="shrink-0 flex items-center" style="gap:${Math.round(typo.pt(8))}px">${loosePartsHtml}${buildNumberedBagSvg(page.bagNumber || 1, Math.round(typo.pt(56)), theme.accent, theme.pliBg, theme.text)}</div>
           <div class="shrink-0 flex flex-col items-end font-bold" style="gap:${Math.round(typo.pt(4))}px;font-size:${typo.divider.metaFont}px">
             <span class="inline-flex items-center rounded-full tabular-nums" style="gap:${Math.round(typo.pt(4))}px;background:${theme.pliBg};border:1px solid ${theme.pliBorder};padding:${pillPadY}px ${pillPadX}px">${buildBrickGlyphSvg(Math.max(12, Math.round(typo.divider.metaFont * 1.1)))}<span>${page.pieceCount || 0}</span></span>
             <span class="inline-flex items-center tabular-nums" style="gap:${Math.round(typo.pt(4))}px;color:${theme.muted};font-size:${typo.divider.subMetaFont}px">${buildStepsBookletIconSvg(Math.max(11, Math.round(typo.divider.subMetaFont * 1.15)))}<span>${page.firstStepNum}–${page.lastStepNum}</span></span>
           </div>
         </div>`
       : `<div class="shrink-0 flex items-center justify-between" style="gap:${Math.round(typo.pt(12))}px">
-          <div class="min-w-0">
-            <span class="inline-block font-extrabold uppercase tracking-wider rounded-full text-white" style="background:${theme.accent};font-size:${typo.divider.badgeFont}px;padding:${pillPadY}px ${pillPadX}px;margin-bottom:${Math.round(typo.pt(4))}px">Build Stage ${page.bagNumber || 1}</span>
-            <h2 class="font-extrabold tracking-tight leading-tight truncate" style="font-size:${typo.divider.titleFont}px">${escHtml(page.chapterName || page.label)}</h2>
+          <div class="min-w-0 flex items-center" style="gap:${Math.round(typo.pt(10))}px">
+            ${loosePartsHtml}
+            <div class="min-w-0">
+              <span class="inline-block font-extrabold uppercase tracking-wider rounded-full text-white" style="background:${theme.accent};font-size:${typo.divider.badgeFont}px;padding:${pillPadY}px ${pillPadX}px;margin-bottom:${Math.round(typo.pt(4))}px">Build Stage ${page.bagNumber || 1}</span>
+              <h2 class="font-extrabold tracking-tight leading-tight truncate" style="font-size:${typo.divider.titleFont}px">${escHtml(page.chapterName || page.label)}</h2>
+            </div>
           </div>
           <div class="shrink-0 flex flex-col items-end font-bold" style="gap:${Math.round(typo.pt(3))}px;font-size:${typo.divider.metaFont}px">
             <span class="rounded-full" style="background:${theme.pliBg};border:1px solid ${theme.pliBorder};padding:${pillPadY}px ${pillPadX}px">${page.pieceCount || 0} pcs</span>
@@ -9230,12 +9306,17 @@ function renderAll() {
           typeScale: typo.typeScale,
         });
         const thumb = enabledFields.includes('image') ? getBomPartThumb(item.part, colSpan, rowSpan) : '';
+        const bomLengthBadge = state.bomConfig?.showLengthBadges !== false ? getActualSizeGuide(item.part.p) : null;
+        const bomBadgeOverlay = bomLengthBadge
+          ? `<span class="absolute top-0.5 right-0.5 pointer-events-none">${buildLengthBadgeSvg(bomLengthBadge, Math.max(13, Math.round(ct.qtyFont * 1.35)))}</span>`
+          : '';
         const posStyle = `left:${(xFrac * 100).toFixed(4)}%;top:${(yFrac * 100).toFixed(4)}%;width:${(wFrac * 100).toFixed(4)}%;height:${(hFrac * 100).toFixed(4)}%;padding:${ct.padY}px ${ct.padX}px;background:transparent`;
 
         if (ct.layoutMode === 'horizontal-img-first' || ct.layoutMode === 'horizontal-img-last') {
           const textFields = enabledFields.filter((f) => f !== 'image');
           const imgHtml = `<div class="relative h-full shrink-0" style="width:44%">
             <img src="${thumb}" alt="${escHtml(item.meta.name)}" class="absolute inset-0 w-full h-full object-contain pointer-events-none" style="padding:${ct.imgPad}px" />
+            ${bomBadgeOverlay}
           </div>`;
           const textsHtml = `<div class="flex-1 min-w-0 h-full flex flex-col justify-center overflow-hidden" style="gap:${ct.textGap}px;padding-left:${ct.layoutMode === 'horizontal-img-first' ? Math.max(3, ct.padX) : 0}px;padding-right:${ct.layoutMode === 'horizontal-img-last' ? Math.max(3, ct.padX) : 0}px">
             ${textFields.map((f) => renderTextFieldHtml(f, item, ct, true)).join('')}
@@ -9250,6 +9331,7 @@ function renderAll() {
           if (f === 'image') {
             return `<div class="relative flex-1 min-h-0 w-full">
               <img src="${thumb}" alt="${escHtml(item.meta.name)}" class="absolute inset-0 w-full h-full object-contain pointer-events-none" style="padding:${ct.imgPad}px" />
+              ${bomBadgeOverlay}
             </div>`;
           }
           return renderTextFieldHtml(f, item, ct, false);
@@ -9485,7 +9567,7 @@ function renderAll() {
             <span class="shrink-0 inline-flex items-center rounded-full font-black text-white shadow-xs tabular-nums" style="gap:${Math.round(typo.pt(3.5))}px;background:${theme.accent};font-size:${st.introPillFont}px;padding:${Math.round(typo.pt(3))}px ${Math.round(typo.pt(10))}px">${page.submodelIntro.repeatCount > 1 ? `×${page.submodelIntro.repeatCount}` : (wordless ? `${buildBrickGlyphSvg(Math.max(11, Math.round(st.introPillFont * 1.05)))}<span>${page.submodelIntro.pieceCount || page.submodelIntro.canonicalParts.length}</span>` : `${page.submodelIntro.pieceCount || page.submodelIntro.canonicalParts.length} pcs`)}</span>
           </div>` : ''}
         <div class="relative flex-1 min-h-0">
-          ${slotData.map(({ ch, step, minifigSeqSlice, slotRect, estSlotW, estSlotH, ov, snap, isMfExploded, isMfSeq, mfExploded, mfSeqStages, subImg, attSubImg, mfPrepImg, attMfImg, mf1to1, pli }) => {
+          ${slotData.map(({ ch, step, minifigSeqSlice, slotRect, estSlotW, estSlotH, prev, ov, snap, isMfExploded, isMfSeq, mfExploded, mfSeqStages, subImg, attSubImg, mfPrepImg, attMfImg, mf1to1, pli }) => {
             const isTightSlot = slotRect.isCompact || estSlotH < typo.pt(250) || estSlotW < typo.pt(230);
             const stepNumPx = (slots.length === 1 || slotRect.isFeatured) ? st.stepNum1Up : (isTightSlot ? st.stepNumTight : st.stepNum2Up);
             const pliThumbPx = isTightSlot ? st.pliThumbTight : st.pliThumb;
@@ -9503,10 +9585,14 @@ function renderAll() {
             const calloutSel = isArrangeMode && state.selectedArrangeEl?.stepId === step.id && state.selectedArrangeEl?.kind === 'callout';
             const pliSel = isArrangeMode && state.selectedArrangeEl?.stepId === step.id && state.selectedArrangeEl?.kind === 'pli';
             const effectiveBorders = typeof page.layoutGroup?.showStepBorders === 'boolean' ? page.layoutGroup.showStepBorders : state.showStepBorders;
-            const showSlotFrame = effectiveBorders && !(isOfficialMfStyle && slots.length === 1);
+            const dividerMode = effectiveBorders ? (state.stepDividerStyle || 'boxes') : 'none';
+            const showSlotFrame = dividerMode === 'boxes' && !(isOfficialMfStyle && slots.length === 1);
+            const showHairlineLeft = dividerMode === 'hairlines' && slotRect.x > 4;
             const slotBorderStyle = showSlotFrame
               ? (isSelStep && state.mode !== 'pan' ? `2px solid ${theme.accent}` : `1px solid ${theme.pliBorder}`)
-              : (isSelStep && state.mode !== 'pan' && slots.length > 1 ? `1.5px dashed ${theme.accent}` : '1px solid transparent');
+              : showHairlineLeft
+                ? `1px solid transparent;border-left:1.5px solid ${theme.pliBorder}`
+                : (isSelStep && state.mode !== 'pan' && slots.length > 1 ? `1.5px dashed ${theme.accent}` : '1px solid transparent');
             const slotBgStyle = showSlotFrame ? 'rgba(255,255,255,0.05)' : 'transparent';
 
             const calloutPliScale = ov.pliScale || 1.0;
@@ -9559,19 +9645,40 @@ function renderAll() {
                   step.attachedMinifig.name || 'Minifigure',
                   `<span>×${step.attachedMinifig.repeatCount || 1}</span>`,
                 )
-              : (!step.subassembly || ov.calloutAsPages ? `
+              : (!step.subassembly || ov.calloutAsPages ? (() => {
+                const pliSlice = pli.slice(0, 7);
+                const confusableColors = detectConfusablePliColors(
+                  pliSlice.map((it) => {
+                    const ci = resolveColorInfo(it.part.c) || COLORS[71];
+                    return { colorId: it.part.c, hex: ci.hex, name: ci.name };
+                  }),
+                );
+                const pliSpans = pliSlice.map((it) => {
+                  const def = resolvePart(it.part.p);
+                  return Math.max(20, (def.sx || 1) * 20, (def.sz || 1) * 20, def.h || 24);
+                });
+                const maxPliSpan = Math.max(40, ...pliSpans);
+                return `
                 <div data-drag="pli" data-step="${step.id}" class="draggable-el flex items-center flex-wrap shadow-xs w-fit max-w-full min-w-0 ${isArrangeMode ? 'cursor-move' : ''}" style="gap:${Math.round(typo.pt(5))}px;padding:${Math.round(typo.pt(2.5))}px ${Math.round(typo.pt(6))}px;border-radius:${Math.round(typo.pt(8))}px;background:${theme.pliBg};border:${pliSel ? `2px solid ${theme.accent}` : `1px solid ${theme.pliBorder}`};transform:translate(${pliPos.x}px,${pliPos.y}px) scale(${pliScale});transform-origin:top left;">
-                  ${pli.slice(0, 7).map(item => {
+                  ${pliSlice.map((item, itemIdx) => {
                     const anySel = isPartsMode && item.ids.some(id => state.selectedPartIds.has(id));
                     const thumb = getPliThumb(item.part);
                     const guideRingPx = Math.max(12, Math.round(st.pliGuideFont * 1.45));
+                    const relFactor = Math.max(0.72, Math.min(1.22, 0.72 + 0.5 * Math.pow(pliSpans[itemIdx] / maxPliSpan, 0.65)));
+                    const scaledThumbPx = Math.round(pliThumbPx * relFactor);
+                    const isConfusable = confusableColors.has(item.part.c);
+                    const cInfoPli = resolveColorInfo(item.part.c) || COLORS[71];
+                    const confusableBadge = isConfusable
+                      ? `<span class="inline-flex items-center rounded-full border border-black/25 bg-white/90 text-[#0f172a] font-mono font-bold" style="gap:2px;font-size:${Math.max(7, Math.round(st.pliGuideFont * 0.85))}px;padding:0 3px" title="${escHtml(cInfoPli.name || `Color ${item.part.c}`)}"><span class="inline-block rounded-full border border-black/30" style="width:6px;height:6px;background:${escHtml(cInfoPli.hex)}"></span>${item.part.c}</span>`
+                      : '';
                     return `<button type="button" data-pli-ids="${item.ids.join(',')}" data-step="${step.id}" class="pli-chip flex flex-col items-center rounded-lg transition ${isPartsMode ? 'cursor-pointer' : ''} ${anySel ? 'ring-2 ring-[var(--primary)] bg-[var(--primary-soft)]' : ''}" style="padding:${Math.round(typo.pt(1.5))}px ${Math.round(typo.pt(2))}px" title="${escHtml(resolvePart(item.part.p).name)}">
                       <div class="flex items-center font-bold" style="gap:${Math.round(typo.pt(2.5))}px;font-size:${pliQtyPx}px">
-                        <img src="${thumb}" style="width:${pliThumbPx}px;height:${pliThumbPx}px" class="shrink-0 object-contain pointer-events-none" />
+                        <img src="${thumb}" style="width:${scaledThumbPx}px;height:${scaledThumbPx}px" class="shrink-0 object-contain pointer-events-none" />
                         <span>${item.qty}×</span>
+                        ${confusableBadge}
                       </div>
                       ${state.showSizeGuides && item.guide ? (() => {
-                        const guideColor = (resolveColorInfo(item.part.c) || COLORS[71]).hex;
+                        const guideColor = cInfoPli.hex;
                         const silW = Math.min(48, Math.max(18, Math.round(item.guide.lengthL * typo.pt(4.2))));
                         const silH = Math.max(8, Math.round(typo.pt(item.guide.kind === 'liftarm' || item.guide.kind === 'technic_brick' ? 8.5 : 5.5)));
                         const silSvg = build1to1SilhouetteSvg(item.guide, silW, silH, guideColor);
@@ -9590,7 +9697,8 @@ function renderAll() {
                       })() : ''}
                     </button>`;
                   }).join('')}
-                </div>` : '');
+                </div>`;
+              })() : '');
 
             const effectiveCue = getEffectiveStepCue(ch, step);
             const iconBadgeOuterPx = Math.max(isTightSlot ? 24 : 28, Math.round(typo.pt(isTightSlot ? 22 : 26)));
@@ -9674,10 +9782,49 @@ function renderAll() {
                 </div>`;
                 })()}
 
-                <!-- Step Visual Area (Callout + 3D Render / Official Minifig Style + Optional 1:1 Minifig Card — STRICT min-h-0 so NEVER clipped!) -->
-                <div class="flex-1 min-h-0 flex ${ov.calloutDir === 'vertical' ? 'flex-col' : 'flex-row'} items-center justify-center overflow-hidden" style="gap:${Math.round(typo.pt(6))}px;margin-top:${isOfficialMfStyle ? 0 : Math.round(typo.pt(4))}px">
+                <!-- Step Visual Area (Callout + Orthogonal Leaders + 3D Render + Coaxial 1:1 + Regional Locator + Starburst — STRICT min-h-0 so NEVER clipped!) -->
+                ${(() => {
+                  const coaxialCallout = (state.showSizeGuides && !isOfficialMfStyle)
+                    ? detectCoaxialPositionCallout(
+                        (step.parts || []).map((p) => ({ id: p.id, title: resolvePart(p.p).name, colorHex: (resolveColorInfo(p.c) || COLORS[71]).hex, box: computeWorldBox(p) })),
+                        (prev || []).map((p) => ({ id: p.id, title: resolvePart(p.p).name, colorHex: (resolveColorInfo(p.c) || COLORS[71]).hex, box: computeWorldBox(p) })),
+                      )
+                    : null;
+                  const showAttachStarburst = Boolean((step.attachedSubmodel || step.subassembly) && !isOfficialMfStyle);
+                  const hasHingeArticulation = Boolean(
+                    !isOfficialMfStyle &&
+                    (Math.abs(ov.hingeAngleDeg || 0) >= 10 ||
+                      (step.parts || []).some((p) => p.m && detectNonOrthogonalArticulationAngle(p.m) !== null)),
+                  );
+                  const stepFraming = (ov.focusMode === 'regional' || ov.focusMode === 'focus')
+                    ? computeStepCameraFraming({
+                        focusMode: ov.focusMode,
+                        hasPrevParts: prev.length > 0,
+                        fullCenter: snap.bounds?.center || [0, 0, 0],
+                        fullRadius: snap.bounds?.radius || 60,
+                        newCenter: step.parts?.length ? computeWorldBox(step.parts[0]).center : null,
+                        newRadius: 36,
+                      })
+                    : null;
+                  const inlineLeaderHtml = (step.subassembly && !ov.calloutAsPages && !isOfficialMfStyle)
+                    ? (() => {
+                        const reps = Math.min(4, Math.max(1, step.subassembly.repeatCount || 1));
+                        const callRect = { x: 10, y: 12, w: 96, h: 64 };
+                        const targets = reps === 1
+                          ? [{ x: 168, y: 78 }]
+                          : Array.from({ length: reps }, (_, rIdx) => ({
+                              x: 145 + rIdx * Math.round(52 / Math.max(1, reps - 1)),
+                              y: 78 + (rIdx % 2) * 14,
+                            }));
+                        const paths = routeOrthogonalLeaders(callRect, targets);
+                        return `<div class="absolute inset-0 pointer-events-none z-10 opacity-85">${buildOrthogonalLeadersSvg(paths, 240, 140, { stroke: theme.text, strokeWidth: 1.35, arrowSize: 6.5 })}</div>`;
+                      })()
+                    : '';
+                  return `
+                <div class="relative flex-1 min-h-0 flex ${ov.calloutDir === 'vertical' ? 'flex-col' : 'flex-row'} items-center justify-center overflow-hidden" style="gap:${Math.round(typo.pt(6))}px;margin-top:${isOfficialMfStyle ? 0 : Math.round(typo.pt(4))}px">
+                  ${inlineLeaderHtml}
                   ${step.subassembly && !ov.calloutAsPages && !isOfficialMfStyle ? `
-                    <div data-drag="callout" data-step="${step.id}" class="draggable-el shrink-0 ${ov.calloutDir === 'vertical' ? 'max-w-full' : 'max-w-[48%]'} max-h-full flex flex-col overflow-hidden ${isArrangeMode ? 'cursor-move' : ''}" style="width:${isTightSlot ? st.calloutWTight : st.calloutW}px;padding:${Math.round(typo.pt(5))}px;border-radius:${Math.round(typo.pt(8))}px;background:${theme.calloutBg};border:${calloutSel ? `2px solid ${theme.accent}` : `1.5px solid ${theme.calloutBorder}`};transform:translate(${calloutPos.x}px,${calloutPos.y}px)">
+                    <div data-drag="callout" data-step="${step.id}" class="draggable-el relative z-10 shrink-0 ${ov.calloutDir === 'vertical' ? 'max-w-full' : 'max-w-[48%]'} max-h-full flex flex-col overflow-hidden ${isArrangeMode ? 'cursor-move' : ''}" style="width:${isTightSlot ? st.calloutWTight : st.calloutW}px;padding:${Math.round(typo.pt(5))}px;border-radius:${Math.round(typo.pt(8))}px;background:${theme.calloutBg};border:${calloutSel ? `2px solid ${theme.accent}` : `1.5px solid ${theme.calloutBorder}`};transform:translate(${calloutPos.x}px,${calloutPos.y}px)">
                       <div class="flex items-center ${wordless ? 'justify-end' : 'justify-between'} font-bold shrink-0 min-w-0" style="gap:${Math.round(typo.pt(4))}px;font-size:${st.calloutFont}px">
                         ${wordless ? '' : `<span class="min-w-0 truncate">${escHtml(step.subassembly.name)}</span>`}
                         <span class="rounded-full text-white shrink-0" style="background:${theme.accent};padding:${Math.round(typo.pt(1))}px ${Math.round(typo.pt(4.5))}px">${step.subassembly.repeatCount}×</span>
@@ -9686,6 +9833,7 @@ function renderAll() {
                     </div>` : ''}
 
                   <div data-step-visual="${step.id}" class="flex-1 min-w-0 min-h-0 w-full h-full flex items-center justify-center relative overflow-hidden">
+                    ${showAttachStarburst ? `<div class="absolute inset-0 flex items-center justify-center pointer-events-none opacity-80">${buildAttachmentStarburstSvg(Math.round(Math.min(estSlotW, estSlotH) * 0.65))}</div>` : ''}
                     ${showLive3D
                       ? `<canvas id="liveRotateCanvas" class="absolute inset-0 w-full h-full object-contain cursor-grab active:cursor-grabbing" style="touch-action:none;"></canvas>`
                       : isMfExploded && mfExploded
@@ -9699,9 +9847,13 @@ function renderAll() {
                             </div>`
                           : `<img data-pick-step="${step.id}" src="${snap.url}" class="step-render-img absolute inset-0 w-full h-full object-contain ${isPartsMode ? 'cursor-crosshair' : 'pointer-events-none'}" />`
                     }
+                    ${hasHingeArticulation ? `<span class="absolute top-1.5 right-1.5 z-10 pointer-events-none" title="Articulated angle">${buildCurvedMotionArrowSvg(Math.max(26, Math.round(typo.pt(26))), 'cw')}</span>` : ''}
+                    ${stepFraming?.locator ? `<div class="absolute bottom-1.5 left-1.5 z-10 pointer-events-none rounded-md border bg-white/85 shadow-xs" style="width:${Math.round(typo.pt(38))}px;height:${Math.round(typo.pt(28))}px;border-color:${theme.pliBorder}" title="Regional close-up locator"><div class="relative w-full h-full"><span class="absolute rounded-sm border-2" style="border-color:${theme.accent};background:${theme.accent}22;left:${Math.max(4, Math.min(72, Math.round((stepFraming.locator.cxNorm - stepFraming.locator.radiusNorm * 0.4) * 100)))}%;top:${Math.max(4, Math.min(68, Math.round((stepFraming.locator.czNorm - stepFraming.locator.radiusNorm * 0.4) * 100)))}%;width:${Math.max(20, Math.min(70, Math.round(stepFraming.locator.radiusNorm * 75)))}%;height:${Math.max(20, Math.min(70, Math.round(stepFraming.locator.radiusNorm * 75)))}%"></span></div></div>` : ''}
                     <span data-rot-cue-host="${step.id}" class="${rotBadgeHtml ? 'inline-flex' : 'hidden'} items-center absolute z-10 pointer-events-none" style="left:${rotInitPos.leftPct.toFixed(3)}%;top:${rotInitPos.topPct.toFixed(3)}%">${rotBadgeHtml}</span>
                     ${step.isSubmodelFinal ? `<span data-submodel-final-pill="${step.id}" class="absolute rounded-full font-black text-white shadow-md pointer-events-none" style="bottom:${Math.round(typo.pt(5))}px;right:${Math.round(typo.pt(5))}px;padding:${Math.round(typo.pt(3))}px ${Math.round(typo.pt(9))}px;font-size:${st.subFinalFont}px;background:${theme.accent}">×${step.submodelRepeat || 2}</span>` : ''}
                   </div>
+
+                  ${coaxialCallout ? `<div class="shrink-0 z-10 pointer-events-none shadow-xs">${buildCoaxialPositionCalloutSvg(coaxialCallout, Math.max(2.2, typo.pt(2.8)), { bg: theme.calloutBg, border: theme.calloutBorder, text: theme.text })}</div>` : ''}
 
                   ${mf1to1 ? (() => {
                     const mf1Hdr = formatMinifig1to1Header(mf1to1.heightMm, mf1to1.isExact, wordless);
@@ -9721,7 +9873,8 @@ function renderAll() {
                       </div>
                     </div>`;
                   })() : ''}
-                </div>
+                </div>`;
+                })()}
                 ${step.isMinifigPoseStep && step.minifigPrep?.indicators?.length > 0 ? `
                   <div class="shrink-0 flex items-center justify-center flex-wrap pointer-events-none" style="gap:${Math.round(typo.pt(4))}px;margin-top:${Math.round(typo.pt(4))}px">
                     ${step.minifigPrep.indicators.map(ind => `
@@ -17911,7 +18064,10 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       const bgImg = await loadImgPromise(cm.bgSrc);
       if (bgImg) drawCoverImage(ctx, bgImg, 0, 0, pxW, pxH);
     }
-    if (cm.showFireworks !== false) drawFireworksCanvas(ctx, pxW, pxH);
+    if (cm.showFireworks !== false) {
+      if (cm.celebrationStyle === 'fireworks') drawFireworksCanvas(ctx, pxW, pxH);
+      else drawCalmCelebrationCanvas(ctx, pxW, pxH, { starStroke: theme.accent });
+    }
     const showText = cm.showText !== false;
     let topOff = pad + Math.round(typo.pt(8));
     if (showText) {
@@ -18546,9 +18702,16 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       const isMfSeq = isMfBuild && mfStyle === 'sequential';
       const isOfficialMfStyle = isMfExploded || isMfSeq;
 
-      if (effectiveBorders && !(isOfficialMfStyle && slots.length === 1)) {
+      const pdfDivMode = effectiveBorders ? (state.stepDividerStyle || 'boxes') : 'none';
+      if (pdfDivMode === 'boxes' && !(isOfficialMfStyle && slots.length === 1)) {
         ctx.strokeStyle = theme.pliBorder; ctx.lineWidth = 1.5;
         ctx.strokeRect(sx, sy, slotW, slotH);
+      } else if (pdfDivMode === 'hairlines' && rect.x > 4) {
+        ctx.strokeStyle = theme.pliBorder; ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(sx - gap * 0.5, sy);
+        ctx.lineTo(sx - gap * 0.5, sy + slotH);
+        ctx.stroke();
       }
 
       const cam = getStepCamera(step);
@@ -18720,9 +18883,20 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
             ctx.stroke();
             for (let pi = 0; pi < pli.length; pi++) {
               const im = await loadImgPromise(getPliThumb(pli[pi].part));
-              drawContain(ctx, im, pliX + 5 + pi * itemW, pliY + 4, itemW * 0.54, pliH - 8);
+              const ix = pliX + 5 + pi * itemW;
+              const guide = state.showSizeGuides ? getActualSizeGuide(pli[pi].part.p) : null;
+              const imgH = guide ? pliH * 0.64 : pliH - 8;
+              drawContain(ctx, im, ix, pliY + 3, itemW * 0.54, imgH);
               ctx.fillStyle = theme.text; ctx.font = themeCanvasFont(theme, 700, pliQtyPx);
-              ctx.fillText(`${pli[pi].qty}×`, pliX + 5 + pi * itemW + itemW * 0.58, pliY + Math.round((pliH - pliQtyPx) * 0.45));
+              ctx.fillText(`${pli[pi].qty}×`, ix + itemW * 0.58, pliY + Math.round((imgH - pliQtyPx) * 0.45));
+              if (guide) {
+                const gCol = (resolveColorInfo(pli[pi].part.c) || COLORS[71]).hex;
+                const silW = Math.min(itemW * 0.54, Math.max(16, guide.lengthL * typo.pt(3.8)));
+                const silH = Math.max(6, Math.round(typo.pt(guide.kind === 'liftarm' || guide.kind === 'technic_brick' ? 6.5 : 4.5)));
+                const gy = pliY + pliH - silH - 4;
+                draw1to1SilhouetteCanvas(ctx, guide, ix + 2, gy, silW, silH, gCol);
+                drawLengthBadgeCanvas(ctx, guide, ix + silW + 10, gy + silH / 2, Math.max(11, Math.round(typo.pt(9.5))));
+              }
             }
           }
         }
@@ -19483,6 +19657,8 @@ function syncStylePanel() {
   setChk('toggleMinifig1to1', opts.showMinifig1to1);
   setChk('toggleStepBorders', opts.showStepBorders);
   setChk('toggleStepBordersSetup', opts.showStepBorders);
+  const divSel = document.getElementById('stepDividerStyle');
+  if (divSel) divSel.value = opts.stepDividerStyle || (opts.showStepBorders ? 'boxes' : 'none');
   setChk('togglePageTitle', opts.showPageTitle);
   setChk('togglePageTitleSetup', opts.showPageTitle);
   setChk('toggleProgressBar', opts.showProgressBar !== false);
@@ -21479,7 +21655,9 @@ if (mf1to1ToggleEl) mf1to1ToggleEl.onchange = (e) => patchActiveTheme({ showMini
 document.querySelectorAll('.mf-style-btn').forEach(b => {
   b.onclick = () => applyMinifigStyleChange(b.getAttribute('data-mf-style'));
 });
-const setStepBorders = (e) => patchActiveTheme({ showStepBorders: e.target.checked });
+const setStepBorders = (e) => patchActiveTheme({ showStepBorders: e.target.checked, stepDividerStyle: e.target.checked ? 'boxes' : 'none' });
+const stepDividerStyleEl = document.getElementById('stepDividerStyle');
+if (stepDividerStyleEl) stepDividerStyleEl.onchange = (e) => patchActiveTheme({ stepDividerStyle: e.target.value, showStepBorders: e.target.value !== 'none' });
 document.getElementById('toggleStepBorders').onchange = setStepBorders;
 document.getElementById('toggleStepBordersSetup').onchange = setStepBorders;
 const setPageTitle = (e) => patchActiveTheme({ showPageTitle: e.target.checked });

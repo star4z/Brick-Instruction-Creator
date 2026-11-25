@@ -51,3 +51,12 @@ Every mechanism below is implemented using **pure physical, geometric, and perce
 ### 2.9 Searchable PDF Part Metadata & Interactive HTML Part Finder ([`src/export/pdfBinary.ts`](../src/export/pdfBinary.ts), [`src/export/interactiveHtmlExporter.ts`](../src/export/interactiveHtmlExporter.ts))
 - **PDF Export**: `buildPdfBinary` embeds invisible `3 Tr` Helvetica text streams (`searchableText`) containing each page's step numbers and LDraw part IDs, enabling native `Ctrl+F` part lookup in any PDF viewer with zero visual clutter.
 - **Interactive 3D HTML Export**: Adds a live **Find Part** filter (`#bomFindInput`) and direct `→ Step N` jump buttons on the Parts List page, plus per-segment contrast-adaptive WebGL placement arrow colors.
+
+### 2.10 Pass 2 End-to-End Wiring & New Craft Features
+- **Live DOM & PDF Parity**: Wired orthogonal/forked inline callout leader overlays, automatic `1:1` coaxial assembly-position callouts, attachment starbursts, hinge articulation curved yellow arrows, regional close-up framing (`Regional Crop` in `FOCUS_MODE_OPTIONS`) with miniature full-model locator inset, loose-part bag opener callouts, and `1:1` orthographic silhouettes + circled/squared length badges in both Live DOM and PDF export (plus BOM length badges).
+- **Relative-Scale Step PLI & Confusable Dark-Color Differentiation**: Scales step PLI thumbnails proportionally to each part's physical LDU span and automatically displays high-contrast color-code swatch pills (`detectConfusablePliColors`) whenever a step's PLI contains perceptually close dark colors (redmean distance `< 38`).
+- **Column-Only Vertical Hairlines (`stepDividerStyle: 'boxes' | 'hairlines' | 'none'`)**: Exposed via `#stepDividerStyle` in the Style popover (default `'hairlines'` on Technical Gray) across both Live DOM and PDF export.
+- **Inline Horizontal Numbered Sub-Step Strips & Radial Symmetry Compression** ([`src/engine/substepStrips.ts`](../src/engine/substepStrips.ts)): Pure planners for consolidated-PLI horizontal `1 2 3 4` strips and radial symmetric ring completion.
+- **General Vertical Exploded-Stack Columns & Precision Dual Alignment Lines**: `detectVerticalStackColumn` for 2–4 layer vertical sub-stacks and `computePrecisionAlignmentLines` for razor-thin dual projection lines on compact lateral multi-contact brackets (wired in WebGL).
+- **Calm 2025 Celebration & Multi-Chapter Ensemble Finale**: Soft radial starburst + 5 hollow outline stars + 100% progress bar on Build Complete (Live DOM & PDF), plus foreground minifigure/chapter ensemble strip.
+

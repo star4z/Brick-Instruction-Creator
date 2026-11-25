@@ -61,6 +61,8 @@ export interface PlacementArrowSegment {
   to: [number, number, number];
   /** True for a thin pass-through alignment guide line (no cone arrowhead, e.g. pin/beam through-hole guide). */
   isGuideLine?: boolean;
+  /** True for razor-thin dual alignment projection lines on compact multi-contact brackets (matching 75192 p. 55 Step 76). */
+  isPrecisionLine?: boolean;
   /** Optional contrast-adapted hex color override for this segment. */
   color?: string;
 }
@@ -1322,4 +1324,57 @@ export function resolveContrastArrowColor(
   }
   return minBlue >= minGreen ? CONTRAST_ARROW_BLUE : CONTRAST_ARROW_GREEN;
 }
+
+/**
+ * Generates razor-thin dual alignment projection lines (without bulky 3D cones)
+ * for compact multi-pin/dual-stud brackets attaching laterally onto dense frames
+ * (matching 75192 p. 55 Step 76). Returns `null` when standard arrows are preferable.
+ */
+export function computePrecisionAlignmentLines(
+  box: PlacementAABB,
+  offset: readonly [number, number, number],
+): PlacementArrowSegment[] | null {
+  const ox = offset[0];
+  const oy = offset[1];
+  const oz = offset[2];
+  const mag = Math.hypot(ox, oy, oz);
+  if (mag < 12) return null;
+
+  const s = boxSize(box);
+  const maxDim = Math.max(s[0], s[1], s[2]);
+  // Only compact brackets/clips/hinges (<= 48 LDU) attaching laterally
+  if (maxDim > 48 || Math.abs(oy) >= Math.hypot(ox, oz)) return null;
+
+  const ux = ox / mag;
+  const uy = oy / mag;
+  const uz = oz / mag;
+  const absU = [Math.abs(ux), Math.abs(uy), Math.abs(uz)];
+  let primaryAxis = 0;
+  if (absU[1] >= absU[0] && absU[1] >= absU[2]) primaryAxis = 1;
+  else if (absU[2] >= absU[0] && absU[2] >= absU[1]) primaryAxis = 2;
+
+  const perpAxes = [0, 1, 2].filter((k) => k !== primaryAxis);
+  const longAxis = s[perpAxes[0]] >= s[perpAxes[1]] ? perpAxes[0] : perpAxes[1];
+  const longSpan = s[longAxis];
+  // Require at least 2-stud span (~30 LDU) so two parallel alignment lines are clearly separated
+  if (longSpan < 28) return null;
+
+  const inset = Math.max(6, longSpan * 0.34);
+  const c = box.center;
+  const halfAlong = 0.5 * (Math.abs(ux) * s[0] + Math.abs(uy) * s[1] + Math.abs(uz) * s[2]);
+  const fromDist = Math.max(4, mag - halfAlong - 1);
+  const toDist = 0;
+
+  return [-inset, inset].map((lat) => {
+    const base: Vec3 = [c[0], c[1], c[2]];
+    base[longAxis] += lat;
+    return {
+      from: [base[0] + ux * fromDist, base[1] + uy * fromDist, base[2] + uz * fromDist],
+      to: [base[0] + ux * toDist, base[1] + uy * toDist, base[2] + uz * toDist],
+      isGuideLine: true,
+      isPrecisionLine: true,
+    };
+  });
+}
+
 

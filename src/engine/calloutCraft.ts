@@ -533,3 +533,222 @@ export function detectNonOrthogonalArticulationAngle(rotMat3x3: ReadonlyArray<nu
   }
   return null;
 }
+
+export interface VerticalStackPartInput {
+  id: string;
+  box: {
+    min: [number, number, number];
+    max: [number, number, number];
+    center: [number, number, number];
+  };
+}
+
+export interface VerticalStackColumnPlan {
+  /** Ordered part IDs from bottom-most layer to top-most layer. */
+  orderedPartIds: string[];
+  /** Suggested vertical explosion spacing between layers in LDU. */
+  layerGapLdu: number;
+}
+
+/**
+ * Pure geometric detector for General Vertical Exploded-Stack Callouts (matching 31172 p. 60 Step 55):
+ * returns a bottom-to-top stack plan whenever 2–4 pieces form a single stud-aligned vertical column
+ * with minimal horizontal offset (`<= 10` LDU) and non-overlapping vertical strata.
+ */
+export function detectVerticalStackColumn(
+  parts: ReadonlyArray<VerticalStackPartInput>,
+): VerticalStackColumnPlan | null {
+  if (parts.length < 2 || parts.length > 4) return null;
+
+  // Sort bottom-to-top (in LDraw Y-down or canonical Y-up, we sort by ascending center Y
+  // and check strictly monotonic non-overlapping vertical layers)
+  const sorted = [...parts].sort((a, b) => a.box.center[1] - b.box.center[1]);
+  const refX = sorted[0].box.center[0];
+  const refZ = sorted[0].box.center[2];
+
+  for (let i = 0; i < sorted.length; i++) {
+    const p = sorted[i];
+    if (Math.hypot(p.box.center[0] - refX, p.box.center[2] - refZ) > 10) {
+      return null;
+    }
+    if (i > 0) {
+      const prev = sorted[i - 1];
+      const yGap = p.box.center[1] - prev.box.center[1];
+      if (yGap < 6) return null; // Side-by-side at same height, not a vertical stack
+    }
+  }
+
+  return {
+    orderedPartIds: sorted.map((p) => p.id),
+    layerGapLdu: 22,
+  };
+}
+
+/**
+ * Builds the calm 2025 LEGO Celebration page background SVG (radial white starburst rays
+ * + 5 crisp hollow outline stars, matching 31172 p. 105).
+ */
+export function buildCalmCelebrationSvg(
+  width: number,
+  height: number,
+  opts?: { rayColor?: string; starStroke?: string },
+): string {
+  const w = Math.max(100, Math.round(width));
+  const h = Math.max(100, Math.round(height));
+  const cx = w / 2;
+  const cy = h * 0.48;
+  const rMax = Math.hypot(w, h) * 0.62;
+  const rayColor = opts?.rayColor || '#ffffff';
+  const starStroke = opts?.starStroke || '#3b82f6';
+
+  const rays = 16;
+  const polys: string[] = [];
+  for (let i = 0; i < rays; i++) {
+    const a0 = (i / rays) * Math.PI * 2;
+    const a1 = ((i + 0.44) / rays) * Math.PI * 2;
+    const x1 = cx + Math.cos(a0) * rMax;
+    const y1 = cy + Math.sin(a0) * rMax;
+    const x2 = cx + Math.cos(a1) * rMax;
+    const y2 = cy + Math.sin(a1) * rMax;
+    polys.push(
+      `<polygon points="${cx.toFixed(1)},${cy.toFixed(1)} ${x1.toFixed(1)},${y1.toFixed(1)} ${x2.toFixed(1)},${y2.toFixed(1)}" fill="${rayColor}" fill-opacity="0.34"/>`,
+    );
+  }
+
+  // 5 balanced hollow 5-point outline stars framing the hero model
+  const starSpecs: Array<[number, number, number]> = [
+    [0.24, 0.14, 0.032],
+    [0.21, 0.27, 0.024],
+    [0.78, 0.17, 0.03],
+    [0.86, 0.42, 0.025],
+    [0.16, 0.8, 0.028],
+  ];
+  const minDim = Math.min(w, h);
+  const stars = starSpecs.map(([nx, ny, nr]) => {
+    const sx = w * nx;
+    const sy = h * ny;
+    const rOut = Math.max(10, minDim * nr);
+    const rIn = rOut * 0.42;
+    const pts: string[] = [];
+    for (let k = 0; k < 10; k++) {
+      const ang = -Math.PI / 2 + (k * Math.PI) / 5;
+      const r = k % 2 === 0 ? rOut : rIn;
+      pts.push(`${(sx + Math.cos(ang) * r).toFixed(1)},${(sy + Math.sin(ang) * r).toFixed(1)}`);
+    }
+    return `<polygon points="${pts.join(' ')}" fill="none" stroke="${starStroke}" stroke-width="1.6" stroke-linejoin="round" opacity="0.72"/>`;
+  });
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" class="pointer-events-none" aria-hidden="true">${polys.join('')}${stars.join('')}</svg>`;
+}
+
+/**
+ * Draws the calm 2025 LEGO Celebration background (radial starburst + hollow outline stars)
+ * directly onto a 2D Canvas (PDF export).
+ */
+export function drawCalmCelebrationCanvas(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  opts?: { rayColor?: string; starStroke?: string },
+): void {
+  const cx = w / 2;
+  const cy = h * 0.48;
+  const rMax = Math.hypot(w, h) * 0.62;
+  const rayColor = opts?.rayColor || '#ffffff';
+  const starStroke = opts?.starStroke || '#3b82f6';
+
+  ctx.save();
+  ctx.fillStyle = rayColor;
+  ctx.globalAlpha = 0.34;
+  const rays = 16;
+  for (let i = 0; i < rays; i++) {
+    const a0 = (i / rays) * Math.PI * 2;
+    const a1 = ((i + 0.44) / rays) * Math.PI * 2;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.cos(a0) * rMax, cy + Math.sin(a0) * rMax);
+    ctx.lineTo(cx + Math.cos(a1) * rMax, cy + Math.sin(a1) * rMax);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  const starSpecs: Array<[number, number, number]> = [
+    [0.24, 0.14, 0.032],
+    [0.21, 0.27, 0.024],
+    [0.78, 0.17, 0.03],
+    [0.86, 0.42, 0.025],
+    [0.16, 0.8, 0.028],
+  ];
+  const minDim = Math.min(w, h);
+  ctx.strokeStyle = starStroke;
+  ctx.lineWidth = Math.max(1.5, minDim * 0.0028);
+  ctx.lineJoin = 'round';
+  ctx.globalAlpha = 0.72;
+  for (const [nx, ny, nr] of starSpecs) {
+    const sx = w * nx;
+    const sy = h * ny;
+    const rOut = Math.max(10, minDim * nr);
+    const rIn = rOut * 0.42;
+    ctx.beginPath();
+    for (let k = 0; k < 10; k++) {
+      const ang = -Math.PI / 2 + (k * Math.PI) / 5;
+      const r = k % 2 === 0 ? rOut : rIn;
+      const px = sx + Math.cos(ang) * r;
+      const py = sy + Math.sin(ang) * r;
+      if (k === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+export interface PliColorSample {
+  colorId: number;
+  hex: string;
+  name?: string;
+}
+
+/**
+ * Detects pairs of distinct LDraw colors in the same step's PLI that are perceptually
+ * close (e.g. Black vs Dark Bluish Gray vs Dark Brown, redmean distance < 38), returning
+ * the set of `colorId`s that should display a high-contrast color-differentiation swatch pill.
+ */
+export function detectConfusablePliColors(
+  samples: ReadonlyArray<PliColorSample>,
+  threshold = 48,
+): Set<number> {
+  const unique = new Map<number, [number, number, number]>();
+  for (const s of samples) {
+    if (unique.has(s.colorId)) continue;
+    const h = (s.hex || '#888888').replace('#', '').trim();
+    const full = h.length === 3 ? `${h[0]}${h[0]}${h[1]}${h[1]}${h[2]}${h[2]}` : h.padEnd(6, '0').slice(0, 6);
+    unique.set(s.colorId, [
+      parseInt(full.slice(0, 2), 16) || 0,
+      parseInt(full.slice(2, 4), 16) || 0,
+      parseInt(full.slice(4, 6), 16) || 0,
+    ]);
+  }
+  const entries = Array.from(unique.entries());
+  const flagged = new Set<number>();
+  for (let i = 0; i < entries.length; i++) {
+    for (let j = i + 1; j < entries.length; j++) {
+      const a = entries[i][1];
+      const b = entries[j][1];
+      const rMean = (a[0] + b[0]) * 0.5;
+      const dr = a[0] - b[0];
+      const dg = a[1] - b[1];
+      const db = a[2] - b[2];
+      const dist = Math.sqrt(
+        ((2 + rMean / 256) * dr * dr + 4 * dg * dg + (2 + (255 - rMean) / 256) * db * db) / 9,
+      );
+      if (dist < threshold) {
+        flagged.add(entries[i][0]);
+        flagged.add(entries[j][0]);
+      }
+    }
+  }
+  return flagged;
+}
+

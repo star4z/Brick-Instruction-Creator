@@ -752,6 +752,14 @@
             <span class="font-medium">Box Around Each Step</span>
             <input id="toggleStepBorders" type="checkbox" checked class="w-4 h-4 accent-[var(--primary)] cursor-pointer" />
           </label>
+          <label class="flex items-center justify-between gap-2">
+            <span class="font-medium">Step Dividers</span>
+            <select id="stepDividerStyle" class="text-xs font-semibold rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] px-2 py-1 text-[var(--foreground)] cursor-pointer">
+              <option value="boxes">Boxes</option>
+              <option value="hairlines">Column Hairlines</option>
+              <option value="none">None</option>
+            </select>
+          </label>
           <label id="togglePageTitleLabel" class="flex items-center justify-between gap-2 cursor-pointer">
             <span class="font-medium inline-flex items-center gap-1.5 min-w-0">
               <span class="truncate">Model Title on Pages</span>

@@ -169,6 +169,7 @@ export interface ThemeStyleOptions {
   minifigStyle: ThemeMinifigStyle;
   showMinifig1to1: boolean;
   showStepBorders: boolean;
+  stepDividerStyle: 'boxes' | 'hairlines' | 'none';
   showPageTitle: boolean;
   showProgressBar: boolean;
   bomConfig: BomConfig;
@@ -194,6 +195,7 @@ export const THEME_STYLE_OPTION_KEYS: Array<keyof ThemeStyleOptions> = [
   'minifigStyle',
   'showMinifig1to1',
   'showStepBorders',
+  'stepDividerStyle',
   'showPageTitle',
   'showProgressBar',
   'bomConfig',
@@ -219,6 +221,7 @@ export const DEFAULT_THEME_STYLE_OPTIONS: ThemeStyleOptions = {
   minifigStyle: 'exploded',
   showMinifig1to1: false,
   showStepBorders: true,
+  stepDividerStyle: 'boxes',
   showPageTitle: true,
   showProgressBar: true,
   bomConfig: createDefaultBomConfig(),
@@ -260,6 +263,14 @@ export function normalizeThemeStyleOptions(
     stepLighting = fbLighting;
   }
   const highQualityStepRender = stepLighting === 'studio';
+  const rawDiv = r.stepDividerStyle;
+  const stepDividerStyle: 'boxes' | 'hairlines' | 'none' =
+    rawDiv === 'boxes' || rawDiv === 'hairlines' || rawDiv === 'none'
+      ? rawDiv
+      : (typeof r.showStepBorders === 'boolean'
+          ? (r.showStepBorders ? 'boxes' : 'none')
+          : fb.stepDividerStyle);
+  const showStepBorders = stepDividerStyle !== 'none';
   return {
     autoPlacementArrows: bool('autoPlacementArrows'),
     arrowColor: sanitizeHexColor(r.arrowColor, sanitizeHexColor(fb.arrowColor, '#dc2626')),
@@ -279,7 +290,8 @@ export function normalizeThemeStyleOptions(
     showSizeGuides: bool('showSizeGuides'),
     minifigStyle: mf,
     showMinifig1to1: bool('showMinifig1to1'),
-    showStepBorders: bool('showStepBorders'),
+    showStepBorders,
+    stepDividerStyle,
     showPageTitle: bool('showPageTitle'),
     showProgressBar: bool('showProgressBar'),
     bomConfig: normalizeBomConfig(r.bomConfig, fb.bomConfig),
@@ -341,6 +353,7 @@ export interface ManualTheme {
   minifigStyle?: ThemeMinifigStyle;
   showMinifig1to1?: boolean;
   showStepBorders?: boolean;
+  stepDividerStyle?: 'boxes' | 'hairlines' | 'none';
   showPageTitle?: boolean;
   showProgressBar?: boolean;
   bomConfig?: BomConfig;
@@ -560,6 +573,7 @@ export const BUILT_IN_THEMES: Record<string, ManualTheme> = {
     headingFont: 'public-sans',
     bodyFont: 'public-sans',
     ...DEFAULT_THEME_STYLE_OPTIONS,
+    stepDividerStyle: 'hairlines',
   },
 };
 
