@@ -557,6 +557,221 @@ function preprocessTexmapLines(
  * - Sibling-fair triangle & edge budgeting so dense prints never starve later subparts
  *   (minifigure arms `3818`/`3819`, hands `3820`, or head torus bevels `t04o6250`).
  */
+const SMOOTH_CREASE_COS_DEFAULT = Math.cos((42 * Math.PI) / 180);
+
+/**
+ * Computes angle-weighted smooth per-vertex normals for a compiled LDraw mesh in place.
+ * Smooths adjacent faces whose dihedral angle is within `creaseAngleDeg` (default 42°),
+ * while strictly preserving crisp creases across LDraw type-2 hard edges and sharp corners.
+ */
+export function smoothMeshNormals(
+  tris: Float32Array,
+  norms: Float32Array,
+  edges: Float32Array,
+  creaseAngleDeg = 42,
+): void {
+  const triCount = (tris.length / 9) | 0;
+  if (triCount < 2 || norms.length < tris.length) return;
+
+  const cosCrease =
+    creaseAngleDeg === 42
+      ? SMOOTH_CREASE_COS_DEFAULT
+      : Math.cos((creaseAngleDeg * Math.PI) / 180);
+
+  const slotCount = triCount * 3;
+  const triVids = new Int32Array(slotCount);
+  const cornerAngles = new Float32Array(slotCount);
+  const faceNorms = new Float32Array(triCount * 3);
+
+  const posMap = new Map<string, number>();
+  const vertSlots: number[][] = [];
+
+  for (let t = 0; t < triCount; t++) {
+    const t9 = t * 9;
+    const t3 = t * 3;
+    faceNorms[t3] = norms[t9];
+    faceNorms[t3 + 1] = norms[t9 + 1];
+    faceNorms[t3 + 2] = norms[t9 + 2];
+
+    const ax = tris[t9], ay = tris[t9 + 1], az = tris[t9 + 2];
+    const bx = tris[t9 + 3], by = tris[t9 + 4], bz = tris[t9 + 5];
+    const cx = tris[t9 + 6], cy = tris[t9 + 7], cz = tris[t9 + 8];
+
+    const coords: [number, number, number][] = [
+      [ax, ay, az],
+      [bx, by, bz],
+      [cx, cy, cz],
+    ];
+    for (let c = 0; c < 3; c++) {
+      const [px, py, pz] = coords[c];
+      const key = `${Math.round(px * 100) + 0},${Math.round(py * 100) + 0},${Math.round(pz * 100) + 0}`;
+      let vid = posMap.get(key);
+      if (vid === undefined) {
+        vid = vertSlots.length;
+        posMap.set(key, vid);
+        vertSlots.push([]);
+      }
+      const slot = t3 + c;
+      triVids[slot] = vid;
+      vertSlots[vid].push(slot);
+    }
+
+    // Corner interior angles (eliminates triangulation-diagonal bias on quads)
+    const abx = bx - ax, aby = by - ay, abz = bz - az;
+    const acx = cx - ax, acy = cy - ay, acz = cz - az;
+    const bcx = cx - bx, bcy = cy - by, bcz = cz - bz;
+    const lab = Math.hypot(abx, aby, abz);
+    const lac = Math.hypot(acx, acy, acz);
+    const lbc = Math.hypot(bcx, bcy, bcz);
+    if (lab > 1e-7 && lac > 1e-7 && lbc > 1e-7) {
+      const d0 = Math.max(-1, Math.min(1, (abx * acx + aby * acy + abz * acz) / (lab * lac)));
+      const d1 = Math.max(-1, Math.min(1, (-abx * bcx - aby * bcy - abz * bcz) / (lab * lbc)));
+      const a0 = Math.max(1e-4, Math.acos(d0));
+      const a1 = Math.max(1e-4, Math.acos(d1));
+      const a2 = Math.max(1e-4, Math.PI - a0 - a1);
+      cornerAngles[t3] = a0;
+      cornerAngles[t3 + 1] = a1;
+      cornerAngles[t3 + 2] = a2;
+    } else {
+      cornerAngles[t3] = 1;
+      cornerAngles[t3 + 1] = 1;
+      cornerAngles[t3 + 2] = 1;
+    }
+  }
+
+  const uniqueVerts = vertSlots.length;
+  const hasHardEdge = new Uint8Array(uniqueVerts);
+  const hardEdgeSet = new Set<number>();
+  const EDGE_STRIDE = 1048576;
+  const useIntEdgeKey = uniqueVerts < EDGE_STRIDE;
+  const hardEdgeStrSet = useIntEdgeKey ? null : new Set<string>();
+
+  for (let i = 0; i + 5 < edges.length; i += 6) {
+    const ka = `${Math.round(edges[i] * 100) + 0},${Math.round(edges[i + 1] * 100) + 0},${Math.round(edges[i + 2] * 100) + 0}`;
+    const va = posMap.get(ka);
+    if (va === undefined) continue;
+    const kb = `${Math.round(edges[i + 3] * 100) + 0},${Math.round(edges[i + 4] * 100) + 0},${Math.round(edges[i + 5] * 100) + 0}`;
+    const vb = posMap.get(kb);
+    if (vb === undefined || va === vb) continue;
+    hasHardEdge[va] = 1;
+    hasHardEdge[vb] = 1;
+    const lo = va < vb ? va : vb;
+    const hi = va < vb ? vb : va;
+    if (useIntEdgeKey) {
+      hardEdgeSet.add(lo * EDGE_STRIDE + hi);
+    } else {
+      hardEdgeStrSet!.add(`${lo},${hi}`);
+    }
+  }
+
+  const isHardEdge = (a: number, b: number): boolean => {
+    const lo = a < b ? a : b;
+    const hi = a < b ? b : a;
+    return useIntEdgeKey
+      ? hardEdgeSet.has(lo * EDGE_STRIDE + hi)
+      : hardEdgeStrSet!.has(`${lo},${hi}`);
+  };
+
+  for (let vid = 0; vid < uniqueVerts; vid++) {
+    const slots = vertSlots[vid];
+    const deg = slots.length;
+    if (deg <= 1) continue;
+
+    if (!hasHardEdge[vid]) {
+      for (let i = 0; i < deg; i++) {
+        const si = slots[i];
+        const ti3 = ((si / 3) | 0) * 3;
+        const fnx = faceNorms[ti3], fny = faceNorms[ti3 + 1], fnz = faceNorms[ti3 + 2];
+        let sx = 0, sy = 0, sz = 0;
+        for (let j = 0; j < deg; j++) {
+          const sj = slots[j];
+          const tj3 = ((sj / 3) | 0) * 3;
+          const jx = faceNorms[tj3], jy = faceNorms[tj3 + 1], jz = faceNorms[tj3 + 2];
+          if (fnx * jx + fny * jy + fnz * jz >= cosCrease) {
+            const w = cornerAngles[sj];
+            sx += jx * w;
+            sy += jy * w;
+            sz += jz * w;
+          }
+        }
+        const sl = Math.hypot(sx, sy, sz);
+        if (sl > 1e-6) {
+          const ni = si * 3;
+          norms[ni] = sx / sl;
+          norms[ni + 1] = sy / sl;
+          norms[ni + 2] = sz / sl;
+        }
+      }
+      continue;
+    }
+
+    // Vertex touches at least one LDraw type-2 hard edge: partition incident faces into
+    // smooth connected components that never cross a hard edge or exceed the crease angle.
+    const visited = new Uint8Array(deg);
+    const comp: number[] = [];
+    for (let i = 0; i < deg; i++) {
+      if (visited[i]) continue;
+      visited[i] = 1;
+      comp.length = 0;
+      comp.push(i);
+      let head = 0;
+      while (head < comp.length) {
+        const curIdx = comp[head++];
+        const sCur = slots[curIdx];
+        const tCur = (sCur / 3) | 0;
+        const cCur = sCur - tCur * 3;
+        const tCur3 = tCur * 3;
+        const oa1 = triVids[tCur3 + ((cCur + 1) % 3)];
+        const oa2 = triVids[tCur3 + ((cCur + 2) % 3)];
+        const fnx = faceNorms[tCur3], fny = faceNorms[tCur3 + 1], fnz = faceNorms[tCur3 + 2];
+
+        for (let j = 0; j < deg; j++) {
+          if (visited[j]) continue;
+          const sNext = slots[j];
+          const tNext = (sNext / 3) | 0;
+          const tNext3 = tNext * 3;
+          const jx = faceNorms[tNext3], jy = faceNorms[tNext3 + 1], jz = faceNorms[tNext3 + 2];
+          if (fnx * jx + fny * jy + fnz * jz < cosCrease) continue;
+
+          const cNext = sNext - tNext * 3;
+          const ob1 = triVids[tNext3 + ((cNext + 1) % 3)];
+          const ob2 = triVids[tNext3 + ((cNext + 2) % 3)];
+
+          let sharedOther = -1;
+          if (oa1 === ob1 || oa1 === ob2) sharedOther = oa1;
+          else if (oa2 === ob1 || oa2 === ob2) sharedOther = oa2;
+          if (sharedOther < 0 || sharedOther === vid) continue;
+          if (isHardEdge(vid, sharedOther)) continue;
+
+          visited[j] = 1;
+          comp.push(j);
+        }
+      }
+
+      if (comp.length <= 1) continue;
+      let sx = 0, sy = 0, sz = 0;
+      for (let k = 0; k < comp.length; k++) {
+        const sk = slots[comp[k]];
+        const tk3 = ((sk / 3) | 0) * 3;
+        const w = cornerAngles[sk];
+        sx += faceNorms[tk3] * w;
+        sy += faceNorms[tk3 + 1] * w;
+        sz += faceNorms[tk3 + 2] * w;
+      }
+      const sl = Math.hypot(sx, sy, sz);
+      if (sl > 1e-6) {
+        const nx = sx / sl, ny = sy / sl, nz = sz / sl;
+        for (let k = 0; k < comp.length; k++) {
+          const ni = slots[comp[k]] * 3;
+          norms[ni] = nx;
+          norms[ni + 1] = ny;
+          norms[ni + 2] = nz;
+        }
+      }
+    }
+  }
+}
+
 export function compileDatEntry(
   found: DatEntrySource,
   lookupSubfile: (ref: string) => DatEntrySource | null | undefined,
@@ -736,11 +951,13 @@ export function compileDatEntry(
     emitTri(la, lb, lc, colId);
   };
 
-  // Lightweight 8-sided cylinder stud (flush seated, with top rim & inner wall for hollow stud2/stud2a)
+  // Circular cylinder stud (flush seated, with top rim & inner wall for hollow stud2/stud2a).
+  // Defaults to 24 segments so studs render smoothly circular even zoomed in on mobile,
+  // stepping down gracefully only on huge baseplates (>128 studs) to stay within mesh budgets.
   const emitFastStud = (
-    px: number, py: number, pz: number, pm: Mat3, hollow: boolean, colId: number, edgeLimit: number,
+    px: number, py: number, pz: number, pm: Mat3, hollow: boolean, colId: number, edgeLimit: number, segs = 24,
   ) => {
-    const segs = 8, r = 6, rIn = 4;
+    const r = 6, rIn = 4;
     const tp = (x: number, y: number, z: number): Vec3 => {
       const v = mat3Vec(pm, x, y, z);
       return [px + v[0], py + v[1], pz + v[2]];
@@ -1102,6 +1319,7 @@ export function compileDatEntry(
     // or early subparts can never starve later siblings (e.g. torso sides, arms, hands, head toruses).
     let heavySubCount = 0;
     let lightSubCount = 0;
+    let fastStudCount = 0;
     for (const item of lines) {
       const raw = item.text;
       if (!isLineKind(raw, '1')) continue;
@@ -1109,10 +1327,12 @@ export function compileDatEntry(
       if (t.length < 15) continue;
       const ref = normalizeDatRef(t.slice(14).join(' '));
       const base = ref.split('/').pop() || '';
-      if (isFastStudBase(base) || SKIPPED_UNDERSIDE_RE.test(base) || canSynthesizePrim(base)) continue;
+      if (isFastStudBase(base)) { fastStudCount++; continue; }
+      if (SKIPPED_UNDERSIDE_RE.test(base) || canSynthesizePrim(base)) continue;
       if (isLightweightPrimitiveBase(base)) lightSubCount++;
       else heavySubCount++;
     }
+    const studSegs = fastStudCount > 384 ? 12 : fastStudCount > 128 ? 16 : 24;
 
     const totalSubCount = heavySubCount + lightSubCount;
     const availTriStart = Math.max(0, triLimit - totalTriFloats);
@@ -1309,7 +1529,7 @@ export function compileDatEntry(
         // Fast studs & skip hidden underside tubes/recesses!
         if (isFastStudBase(base)) {
           if (totalTriFloats < triLimit) {
-            emitFastStud(nx, ny, nz, nm, base.startsWith('stud2'), childCol, edgeLimit);
+            emitFastStud(nx, ny, nz, nm, base.startsWith('stud2'), childCol, edgeLimit, studSegs);
           }
           continue;
         }
@@ -1402,6 +1622,12 @@ export function compileDatEntry(
   }
 
   const trisArr = new Float32Array(tris);
+  const normsArr = new Float32Array(norms);
+  const edgesArr = new Float32Array(edges);
+  smoothMeshNormals(trisArr, normsArr, edgesArr);
+  for (const tb of texBatches) {
+    smoothMeshNormals(tb.tris, tb.norms, edgesArr);
+  }
   const subBoxes = buildLocalSubBoxes(
     trisArr,
     [minX, minY, minZ],
@@ -1412,8 +1638,8 @@ export function compileDatEntry(
 
   return {
     tris: trisArr,
-    norms: new Float32Array(norms),
-    edges: new Float32Array(edges),
+    norms: normsArr,
+    edges: edgesArr,
     triCols: hasSubColor ? new Int32Array(triCols) : null,
     ...(texBatches.length > 0 ? { texBatches } : {}),
     ...(subBoxes ? { subBoxes } : {}),

@@ -1350,7 +1350,7 @@ function buildMeshBuffers(prevParts, newParts, opts) {
   const lnPos = new FloatBuf(totalParts * 60), lnCol = new ByteBuf(totalParts * 80);
   const texGroups = new Map();
 
-  const smoothCurves = heroQuality || totalParts <= 320;
+  const smoothCurves = true;
 
   const pushTri = (a, b, c, n, col, aByte) => {
     const isTrans = aByte < 245;
@@ -1359,7 +1359,7 @@ function buildMeshBuffers(prevParts, newParts, opts) {
     N.push9(n[0],n[1],n[2], n[0],n[1],n[2], n[0],n[1],n[2]);
     C.push12(col[0], col[1], col[2], aByte);
   };
-  const pushTexTri = (texKey, fadeMix, isNewPart, a, b, c, n, uv0, uv1, uv2, col, aByte) => {
+  const pushTexTri = (texKey, fadeMix, isNewPart, a, b, c, na, nb, nc, uv0, uv1, uv2, col, aByte) => {
     const fadeKey = Math.round(fadeMix * 100);
     const gKey = `${texKey}|${fadeKey}`;
     let g = texGroups.get(gKey);
@@ -1377,7 +1377,7 @@ function buildMeshBuffers(prevParts, newParts, opts) {
     }
     if (!isNewPart) g.prevPosEnd = g.pos.len + 9;
     g.pos.push9(a[0],a[1],a[2], b[0],b[1],b[2], c[0],c[1],c[2]);
-    g.norm.push9(n[0],n[1],n[2], n[0],n[1],n[2], n[0],n[1],n[2]);
+    g.norm.push9(na[0],na[1],na[2], nb[0],nb[1],nb[2], nc[0],nc[1],nc[2]);
     g.uv.push6(uv0[0],uv0[1], uv1[0],uv1[1], uv2[0],uv2[1]);
     g.col.push12(col[0], col[1], col[2], aByte);
   };
@@ -1482,8 +1482,8 @@ function buildMeshBuffers(prevParts, newParts, opts) {
 
   const addCyl = (cx, cy, cz, rTop, rBot, h, axis, segs, m, ox, oy, oz, hinge, col, eCol, aByte, bevelTop = false) => {
     const effSegs = heroQuality
-      ? Math.max(segs, 20)
-      : (smoothCurves ? Math.max(segs, Math.max(rTop, rBot) > 7 ? 18 : 14) : segs);
+      ? Math.max(segs, 24)
+      : Math.max(segs, Math.max(rTop, rBot) > 7 ? 20 : 16);
     const hh = h / 2;
     const mk = (u, v, t) => axis === 'y' ? [cx+u,cy+t,cz+v] : axis === 'x' ? [cx+t,cy+u,cz+v] : [cx+u,cy+v,cz+t];
     const mkN = (u, v, t) => xformNorm(axis === 'y' ? [u, t, v] : axis === 'x' ? [t, u, v] : [u, v, t], m, hinge);
@@ -1536,7 +1536,7 @@ function buildMeshBuffers(prevParts, newParts, opts) {
     const isFull = Math.abs((endAng - startAng) - Math.PI * 2) < 1e-4;
     const effSegs = heroQuality
       ? Math.max(segs, isFull ? 24 : 16)
-      : (smoothCurves ? Math.max(segs, isFull ? 18 : 14) : segs);
+      : Math.max(segs, isFull ? 20 : 14);
     const hh = h / 2;
     const mk = (u, v, t) => axis === 'y' ? [cx+u,cy+t,cz+v] : axis === 'x' ? [cx+t,cy+u,cz+v] : [cx+u,cy+v,cz+t];
     const mkN = (u, v, t) => xformNorm(axis === 'y' ? [u, t, v] : axis === 'x' ? [t, u, v] : [u, v, t], m, hinge);
@@ -1811,7 +1811,7 @@ function buildMeshBuffers(prevParts, newParts, opts) {
 
   const addTopStuds = (def, m, ox, oy, oz, hinge, col, eCol, aByte) => {
     if (!def.studs) return;
-    const studSegs = heroQuality ? 18 : (totalParts <= 200 ? 14 : totalParts <= 450 ? 10 : 8);
+    const studSegs = heroQuality ? 24 : (totalParts <= 320 ? 20 : totalParts <= 650 ? 16 : 12);
     const emitStud = (x, z) => {
       addCyl(x, 1.8, z, 5.8, 5.8, 4.4, 'y', studSegs, m, ox, oy, oz, hinge, col, eCol, aByte, true);
     };
@@ -2069,14 +2069,16 @@ function buildMeshBuffers(prevParts, newParts, opts) {
         const a = xformPt([T[i],T[i+1],T[i+2]], m, ox, oy, oz, hingeRad);
         const b = xformPt([T[i+3],T[i+4],T[i+5]], m, ox, oy, oz, hingeRad);
         const c = xformPt([T[i+6],T[i+7],T[i+8]], m, ox, oy, oz, hingeRad);
-        const n = xformNorm([N[i],N[i+1],N[i+2]], m, hingeRad);
+        const na = xformNorm([N[i],N[i+1],N[i+2]], m, hingeRad);
+        const nb = xformNorm([N[i+3],N[i+4],N[i+5]], m, hingeRad);
+        const nc = xformNorm([N[i+6],N[i+7],N[i+8]], m, hingeRad);
         let triRgb = baseCol;
         let triAlpha = aByte;
         if (TC && subColCache) {
           const sc = resolveSubColor(TC[ti]);
           if (sc) { triRgb = sc.rgb; triAlpha = sc.alpha; }
         }
-        pushTri(a, b, c, n, triRgb, triAlpha);
+        pushTriSmooth(a, b, c, na, nb, nc, triRgb, triAlpha);
       }
       if (compiled.texBatches && compiled.texBatches.length > 0) {
         const useTextures = !isSelected && !overrideHex && !isGhost;
@@ -2086,7 +2088,9 @@ function buildMeshBuffers(prevParts, newParts, opts) {
             const a = xformPt([BT[i],BT[i+1],BT[i+2]], m, ox, oy, oz, hingeRad);
             const b = xformPt([BT[i+3],BT[i+4],BT[i+5]], m, ox, oy, oz, hingeRad);
             const c = xformPt([BT[i+6],BT[i+7],BT[i+8]], m, ox, oy, oz, hingeRad);
-            const n = xformNorm([BN[i],BN[i+1],BN[i+2]], m, hingeRad);
+            const na = xformNorm([BN[i],BN[i+1],BN[i+2]], m, hingeRad);
+            const nb = xformNorm([BN[i+3],BN[i+4],BN[i+5]], m, hingeRad);
+            const nc = xformNorm([BN[i+6],BN[i+7],BN[i+8]], m, hingeRad);
             let triRgb = baseCol;
             let triAlpha = aByte;
             if (BTC && subColCache) {
@@ -2098,7 +2102,7 @@ function buildMeshBuffers(prevParts, newParts, opts) {
                 tb.texKey,
                 fadeMix,
                 isNew,
-                a, b, c, n,
+                a, b, c, na, nb, nc,
                 [BU[ui], BU[ui+1]],
                 [BU[ui+2], BU[ui+3]],
                 [BU[ui+4], BU[ui+5]],
@@ -2106,7 +2110,7 @@ function buildMeshBuffers(prevParts, newParts, opts) {
                 triAlpha,
               );
             } else {
-              pushTri(a, b, c, n, triRgb, triAlpha);
+              pushTriSmooth(a, b, c, na, nb, nc, triRgb, triAlpha);
             }
           }
         }
@@ -2148,7 +2152,7 @@ function buildMeshBuffers(prevParts, newParts, opts) {
       addTopStuds(def, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
     } else if (def.shape === 'quarter_round') {
       // True 90° quarter-circle tile extrusion in XZ plane (center at back-left corner)
-      const segs = heroQuality ? 14 : 8;
+      const segs = heroQuality ? 16 : 12;
       const ox0 = -w / 2, oz0 = -d / 2, r = Math.min(w, d);
       const nTop = xformNorm([0, 1, 0], m, hingeRad);
       const nBot = xformNorm([0, -1, 0], m, hingeRad);
@@ -2161,18 +2165,11 @@ function buildMeshBuffers(prevParts, newParts, opts) {
         const t0 = pTop(a0), t1 = pTop(a1), b0 = pBot(a0), b1 = pBot(a1);
         pushTri(cTop, t1, t0, nTop, baseCol, aByte);
         pushTri(cBot, b0, b1, nBot, baseCol, aByte);
-        if (heroQuality) {
-          const sn0 = xformNorm([Math.cos(a0), 0, Math.sin(a0)], m, hingeRad);
-          const sn1 = xformNorm([Math.cos(a1), 0, Math.sin(a1)], m, hingeRad);
-          pushTriSmooth(b0, b1, t1, sn0, sn1, sn1, baseCol, aByte);
-          pushTriSmooth(b0, t1, t0, sn0, sn1, sn0, baseCol, aByte);
-        } else {
-          const am = (a0 + a1) / 2;
-          const sn = xformNorm([Math.cos(am), 0, Math.sin(am)], m, hingeRad);
-          pushTri(b0, b1, t1, sn, baseCol, aByte);
-          pushTri(b0, t1, t0, sn, baseCol, aByte);
-          if (includeEdges) { pushEdge(t0, t1, edgeCol, edgeAlpha); pushEdge(b0, b1, edgeCol, edgeAlpha); }
-        }
+        const sn0 = xformNorm([Math.cos(a0), 0, Math.sin(a0)], m, hingeRad);
+        const sn1 = xformNorm([Math.cos(a1), 0, Math.sin(a1)], m, hingeRad);
+        pushTriSmooth(b0, b1, t1, sn0, sn1, sn1, baseCol, aByte);
+        pushTriSmooth(b0, t1, t0, sn0, sn1, sn0, baseCol, aByte);
+        if (emitProcEdges) { pushEdge(t0, t1, edgeCol, edgeAlpha); pushEdge(b0, b1, edgeCol, edgeAlpha); }
       }
       // Two straight radial walls along -Z and -X
       const tStart = pTop(0), bStart = pBot(0), tEnd = pTop(Math.PI / 2), bEnd = pBot(Math.PI / 2);
@@ -2251,7 +2248,7 @@ function buildMeshBuffers(prevParts, newParts, opts) {
       addTopStuds(def, m,ox,oy,oz,hingeRad,baseCol,edgeCol,aByte);
     } else if (def.shape === 'curved_slope') {
       // Smooth curved arch slope with interpolated top normals
-      const steps = heroQuality ? 10 : 6;
+      const steps = heroQuality ? 14 : 10;
       const lipH = 3.2;
       const pts = [[-w/2, -h], [w/2, -h], [w/2, -h + lipH]];
       const norms = [null, null, null];

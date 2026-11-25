@@ -670,3 +670,115 @@ describe('textureStore — embedded PNG deduplication and scanning', () => {
     expect(names).toEqual(['3626cpx0a.png', '3626cpx0b.png']);
   });
 });
+
+describe('compileDatEntry — smooth circular studs & crease-angle vertex normals', () => {
+  it('emits 24-sided circular studs (solid and hollow) for normal parts and adapts on huge baseplates', () => {
+    const solidStud = compileDatEntry(
+      { key: 'stud_solid', lines: ['1 16 0 0 0 1 0 0 0 1 0 0 0 1 stud.dat'] },
+      () => null,
+    );
+    expect(solidStud).not.toBeNull();
+    // 24 segments: 24 * 2 side tris + 24 top cap tris = 72 tris, 24 rim edges
+    expect(solidStud!.tris.length / 9).toBe(72);
+    expect(solidStud!.edges.length / 6).toBe(24);
+
+    const hollowStud = compileDatEntry(
+      { key: 'stud_hollow', lines: ['1 16 0 0 0 1 0 0 0 1 0 0 0 1 stud2.dat'] },
+      () => null,
+    );
+    expect(hollowStud).not.toBeNull();
+    // 24 segments: 24 * (2 outer + 2 top rim + 2 inner) = 144 tris, 24 rim edges
+    expect(hollowStud!.tris.length / 9).toBe(144);
+    expect(hollowStud!.edges.length / 6).toBe(24);
+
+    // 16x16 baseplate (256 studs) steps down to 16 segments to stay well inside budgets
+    const baseplateLines: string[] = [];
+    for (let ix = 0; ix < 16; ix++) {
+      for (let iz = 0; iz < 16; iz++) {
+        baseplateLines.push(`1 16 ${ix * 20} 0 ${iz * 20} 1 0 0 0 1 0 0 0 1 stud.dat`);
+      }
+    }
+    const baseplate = compileDatEntry({ key: 'baseplate_16x16', lines: baseplateLines }, () => null);
+    expect(baseplate).not.toBeNull();
+    expect(baseplate!.tris.length / 9).toBe(256 * 48);
+  });
+
+  it('computes smooth radial per-vertex normals on curved cylinders while keeping 90-degree top caps crisp', () => {
+    const cyl = compileDatEntry(
+      {
+        key: 'round_cyl',
+        lines: [
+          '1 16 0 0 0 10 0 0 0 24 0 0 0 10 4-4cyli.dat',
+          '1 16 0 0 0 10 0 0 0 1 0 0 0 10 4-4disc.dat',
+          '1 16 0 0 0 10 0 0 0 1 0 0 0 10 4-4edge.dat',
+        ],
+      },
+      () => null,
+    );
+    expect(cyl).not.toBeNull();
+    const T = cyl!.tris;
+    const N = cyl!.norms;
+    let foundSmoothSideTri = false;
+    let checkedCapTris = 0;
+
+    for (let i = 0; i < T.length; i += 9) {
+      const ay = T[i + 1], by = T[i + 4], cy = T[i + 7];
+      const isCap = Math.abs(ay) < 1e-3 && Math.abs(by) < 1e-3 && Math.abs(cy) < 1e-3;
+      if (isCap) {
+        checkedCapTris++;
+        // Top disc cap must stay strictly vertical (|ny| == 1), never tilted toward the side wall
+        expect(Math.abs(N[i + 1])).toBeCloseTo(1, 3);
+        expect(Math.abs(N[i + 4])).toBeCloseTo(1, 3);
+        expect(Math.abs(N[i + 7])).toBeCloseTo(1, 3);
+      } else {
+        // Side wall triangles must have horizontal normals that vary across vertices along the arc
+        expect(Math.abs(N[i + 1])).toBeLessThan(1e-3);
+        const dotAB = N[i] * N[i + 3] + N[i + 1] * N[i + 4] + N[i + 2] * N[i + 5];
+        const dotAC = N[i] * N[i + 6] + N[i + 1] * N[i + 7] + N[i + 2] * N[i + 8];
+        if (dotAB < 0.99 || dotAC < 0.99) {
+          foundSmoothSideTri = true;
+        }
+      }
+    }
+    expect(checkedCapTris).toBe(16);
+    expect(foundSmoothSideTri).toBe(true);
+  });
+
+  it('preserves crisp creases across shallow LDraw type-2 hard edges (e.g. 18-degree slopes)', () => {
+    // Flat horizontal quad (y = 0, x in [-10, 0]) meeting an 18° slope (x in [0, 10])
+    // along the shared type-2 hard edge at x = 0, y = 0, z in [-10, 10].
+    const slopeDrop = 10 * Math.tan((18 * Math.PI) / 180);
+    const part = compileDatEntry(
+      {
+        key: 'shallow_slope',
+        lines: [
+          '4 16 -10 0 -10  0 0 -10  0 0 10  -10 0 10',
+          `4 16 0 0 -10  10 ${slopeDrop} -10  10 ${slopeDrop} 10  0 0 10`,
+          '2 24 0 0 -10  0 0 10',
+        ],
+      },
+      () => null,
+    );
+    expect(part).not.toBeNull();
+    const T = part!.tris;
+    const N = part!.norms;
+    // First 2 triangles belong to the flat horizontal quad: all vertex normals must stay pure vertical
+    for (let t = 0; t < 2; t++) {
+      for (let v = 0; v < 3; v++) {
+        const idx = t * 9 + v * 3;
+        expect(Math.abs(N[idx])).toBeLessThan(1e-4);
+        expect(Math.abs(N[idx + 1])).toBeCloseTo(1, 4);
+      }
+    }
+    // Next 2 triangles belong to the 18° slope: all vertex normals must stay tilted by ~18°
+    const expectedSin18 = Math.sin((18 * Math.PI) / 180);
+    for (let t = 2; t < 4; t++) {
+      for (let v = 0; v < 3; v++) {
+        const idx = t * 9 + v * 3;
+        expect(Math.abs(N[idx])).toBeCloseTo(expectedSin18, 3);
+      }
+    }
+    expect(T.length / 9).toBe(4);
+  });
+});
+
