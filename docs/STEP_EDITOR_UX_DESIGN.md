@@ -27,7 +27,7 @@ Whenever a control affects more than the currently focused part, step, or page, 
 - **Multi-Step / Range (`range`)** — warm amber pill (`--warning-soft` / `--warning`) with layers icon: `Affects Other Steps`, `Step Range`, `Affects Prev Step`, `Affects Later Pages`, `Adds / Removes Pages`.
 - **Whole-Manual (`manual`)** — sky blue pill (`--info-soft` / `--info`) with grid icon: `All Minifigures`, `All Pages`, `All Step Pages`, `All Parts List Pages`, `All Steps in Theme`.
 
-The same scope badges also appear inside `#stylePopover`, `#pageSetupModal`, `#bomSetupModal`, and `#applyAngleModal`.
+The same scope badges also appear inside `#stylePopover`, `#pageSetupModal`, `#bomSetupModal`, and `#applyAngleModal`. Whenever an action overwrites, clears, shifts, or permanently removes existing edits/overrides, a live inline `.destructive-notice` appears directly beside the button (see [`DESTRUCTIVE_ACTIONS_DESIGN.md`](./DESTRUCTIVE_ACTIONS_DESIGN.md)).
 
 ### 3. Apply Camera to Steps Modal (`#applyAngleModal`)
 Visual range-picker modal tagged **`Step Range`**:

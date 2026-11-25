@@ -258,11 +258,12 @@
             <div id="menuModelName" class="text-sm font-bold leading-snug break-words min-w-0">No model loaded</div>
             <div id="menuModelFileType" class="hidden text-xs text-[var(--muted-foreground)] break-words"></div>
             <div id="menuModelStats" class="hidden flex flex-wrap items-center gap-2 pt-0.5 font-mono text-xs font-medium"></div>
-            <div class="pt-2 border-t border-[var(--border)]">
+            <div class="pt-2 border-t border-[var(--border)] space-y-2">
               <button id="menuCloseModelBtn" type="button" class="hidden w-full py-2 px-3 rounded-md border border-[var(--border-strong)] bg-[var(--card)] hover:border-[var(--danger)] hover:text-[var(--danger)] hover:bg-[var(--danger-soft)] font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer">
                 <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
                 <span>Close Model</span>
               </button>
+              <div id="menuCloseModelNotice" role="note" class="hidden destructive-notice"></div>
             </div>
           </div>
 
@@ -424,6 +425,7 @@
             <button id="btnExportTheme" type="button" title="Export this theme (.biwtheme)" class="py-1.5 rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] hover:border-[var(--primary)] font-semibold transition-colors cursor-pointer">Export</button>
             <button id="btnDeleteTheme" type="button" title="Delete this custom theme" class="py-1.5 rounded-md border border-[var(--danger)]/35 bg-[var(--danger-soft)] text-[var(--danger)] font-semibold transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">Delete</button>
           </div>
+          <div id="themeDeleteNotice" role="note" class="hidden destructive-notice"></div>
         </div>
 
         <!-- Page Background -->
@@ -625,9 +627,12 @@
             <button id="btnOverviewRangeCreate" type="button" disabled class="px-3 py-1.5 rounded-md bg-[var(--primary)] text-[var(--primary-foreground)] font-semibold disabled:opacity-40 cursor-pointer">Style / Layout Group…</button>
           </div>
         </div>
-        <div id="overviewPinsBar" class="hidden px-5 py-2 border-b border-[var(--border)] bg-[var(--surface-sunken)] flex items-center justify-between gap-3 text-xs shrink-0">
-          <div id="overviewPinsStatus" class="flex items-center gap-2 min-w-0 font-semibold text-[var(--foreground)] truncate"></div>
-          <button id="btnClearAllPins" type="button" class="shrink-0 px-2.5 py-1 rounded-md text-xs font-semibold text-[var(--primary)] bg-[var(--primary-soft)] hover:bg-[var(--primary)] hover:text-[var(--primary-foreground)] whitespace-nowrap transition-colors cursor-pointer"></button>
+        <div id="overviewPinsBar" class="hidden px-5 py-2.5 border-b border-[var(--border)] bg-[var(--surface-sunken)] space-y-2 text-xs shrink-0">
+          <div class="flex items-center justify-between gap-3">
+            <div id="overviewPinsStatus" class="flex items-center gap-2 min-w-0 font-semibold text-[var(--foreground)] truncate"></div>
+            <button id="btnClearAllPins" type="button" class="shrink-0 px-2.5 py-1 rounded-md text-xs font-semibold text-[var(--warning)] bg-[var(--warning-soft)] border border-[var(--warning)]/35 hover:bg-[var(--warning)] hover:text-white whitespace-nowrap transition-colors cursor-pointer"></button>
+          </div>
+          <div id="overviewClearPinsNotice" role="note" class="hidden destructive-notice destructive-notice-compact"></div>
         </div>
         <div class="relative flex-auto min-h-0 flex flex-col overflow-hidden">
           <div id="overviewList" class="flex-auto min-h-0 overflow-y-auto overscroll-contain p-4 space-y-2.5 text-xs"></div>
@@ -720,15 +725,18 @@
         </div>
 
         <!-- Footer -->
-        <div class="px-5 py-3.5 border-t border-[var(--border)] bg-[var(--chrome)] flex flex-wrap items-center justify-between gap-2 shrink-0">
-          <div class="flex items-center gap-2">
-            <button id="mpBtnSkip" type="button" class="px-3.5 py-2 rounded-md text-xs font-semibold text-[var(--muted-foreground)] hover:bg-[var(--surface-hover)] transition-colors cursor-pointer">Skip &amp; Continue</button>
-            <button id="mpBtnImportLib" type="button" class="px-3.5 py-2 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] text-xs font-semibold transition-colors cursor-pointer">Import .zip / .dat</button>
+        <div class="px-5 py-3.5 border-t border-[var(--border)] bg-[var(--chrome)] space-y-2.5 shrink-0">
+          <div id="mpReplaceModelNotice" role="note" class="hidden destructive-notice"></div>
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div class="flex items-center gap-2">
+              <button id="mpBtnSkip" type="button" class="px-3.5 py-2 rounded-md text-xs font-semibold text-[var(--muted-foreground)] hover:bg-[var(--surface-hover)] transition-colors cursor-pointer">Skip &amp; Continue</button>
+              <button id="mpBtnImportLib" type="button" class="px-3.5 py-2 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] text-xs font-semibold transition-colors cursor-pointer">Import .zip / .dat</button>
+            </div>
+            <button id="mpBtnFetch" type="button" class="flex-1 sm:flex-initial px-4 py-2.5 rounded-md bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] text-xs font-semibold transition-colors inline-flex items-center justify-center gap-1.5 cursor-pointer">
+              <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              <span id="mpBtnFetchLabel">Fetch Missing Parts Online</span>
+            </button>
           </div>
-          <button id="mpBtnFetch" type="button" class="flex-1 sm:flex-initial px-4 py-2.5 rounded-md bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] text-xs font-semibold transition-colors inline-flex items-center justify-center gap-1.5 cursor-pointer">
-            <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            <span id="mpBtnFetchLabel">Fetch Missing Parts Online</span>
-          </button>
         </div>
       </div>
     </div>
@@ -822,21 +830,25 @@
             </div>
 
             <!-- Keep Existing File Steps -->
-            <div id="impKeepWrap" class="hidden pt-4 border-t border-[var(--border)]">
+            <div id="impKeepWrap" class="hidden pt-4 border-t border-[var(--border)] space-y-2">
               <button id="impBtnKeep" type="button" class="w-full text-left p-3.5 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] hover:border-[var(--primary)] transition-colors cursor-pointer">
                 <div class="text-sm font-semibold">Keep Existing File Steps</div>
                 <div class="text-xs text-[var(--muted-foreground)] mt-1">Preserves the exact STEP markers saved in your file without regenerating.</div>
               </button>
+              <div id="impKeepNotice" role="note" class="hidden destructive-notice"></div>
             </div>
           </div>
         </div>
 
         <!-- Sticky Action Footer -->
-        <div class="px-5 py-3.5 border-t border-[var(--border)] bg-[var(--chrome)] flex items-center justify-between gap-2 shrink-0">
-          <button id="impBtnCancel" type="button" class="px-4 py-2 rounded-md text-xs font-semibold text-[var(--muted-foreground)] hover:bg-[var(--surface-hover)] transition-colors cursor-pointer">Cancel</button>
-          <button id="impBtnAuto" type="button" class="flex-1 sm:flex-initial px-5 py-2.5 rounded-md bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] text-xs font-semibold transition-colors cursor-pointer">
-            Generate Manual
-          </button>
+        <div class="px-5 py-3.5 border-t border-[var(--border)] bg-[var(--chrome)] space-y-2.5 shrink-0">
+          <div id="impActionNotice" role="note" class="hidden destructive-notice"></div>
+          <div class="flex items-center justify-between gap-2">
+            <button id="impBtnCancel" type="button" class="px-4 py-2 rounded-md text-xs font-semibold text-[var(--muted-foreground)] hover:bg-[var(--surface-hover)] transition-colors cursor-pointer">Cancel</button>
+            <button id="impBtnAuto" type="button" class="flex-1 sm:flex-initial px-5 py-2.5 rounded-md bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] text-xs font-semibold transition-colors cursor-pointer">
+              Generate Manual
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -1173,6 +1185,8 @@
                 <div class="text-xs text-[var(--muted-foreground)]">Tap a slot to cycle size (S / M / L)</div>
                 <div id="grpSlotSizesList" class="flex flex-wrap gap-1.5"></div>
               </div>
+              <div id="grpOverlapNotice" role="note" class="hidden destructive-notice"></div>
+              <div id="grpDeleteNotice" role="note" class="hidden destructive-notice"></div>
               <div class="flex items-center justify-between gap-2 pt-1">
                 <button id="btnGrpDelete" type="button" class="hidden px-3 py-1.5 rounded-md border border-[var(--danger)]/40 bg-[var(--danger-soft)] text-[var(--danger)] font-semibold cursor-pointer">Delete</button>
                 <div class="flex items-center gap-2 ml-auto">
@@ -1225,6 +1239,7 @@
               </div>
               <input id="toggleWordlessMode" type="checkbox" checked class="mt-0.5 w-4 h-4 accent-[var(--primary)] shrink-0 cursor-pointer" />
             </label>
+            <div id="wordlessToggleNotice" role="note" class="hidden destructive-notice"></div>
           </div>
 
           <div class="space-y-2">
@@ -1786,9 +1801,12 @@
         <!-- Scrollable 3D Step List -->
         <div id="angleStepList" class="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 space-y-1.5"></div>
 
-        <div class="px-5 py-3.5 border-t border-[var(--border)] bg-[var(--chrome)] flex items-center justify-between gap-2.5 shrink-0">
-          <button id="btnCancelApplyAngle" type="button" class="px-4 py-2 rounded-md font-semibold text-[var(--muted-foreground)] hover:bg-[var(--surface-hover)] transition-colors cursor-pointer">Cancel</button>
-          <button id="btnConfirmApplyAngle" type="button" class="px-5 py-2.5 rounded-md bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] font-semibold transition-colors cursor-pointer">Apply Camera</button>
+        <div class="px-5 py-3.5 border-t border-[var(--border)] bg-[var(--chrome)] space-y-2.5 shrink-0">
+          <div id="applyAngleConflictNotice" role="status" aria-live="polite" class="hidden destructive-notice"></div>
+          <div class="flex items-center justify-between gap-2.5">
+            <button id="btnCancelApplyAngle" type="button" class="px-4 py-2 rounded-md font-semibold text-[var(--muted-foreground)] hover:bg-[var(--surface-hover)] transition-colors cursor-pointer">Cancel</button>
+            <button id="btnConfirmApplyAngle" type="button" class="px-5 py-2.5 rounded-md bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] font-semibold transition-colors cursor-pointer">Apply Camera</button>
+          </div>
         </div>
       </div>
     </div>
@@ -1822,6 +1840,7 @@
         </div>
 
         <div class="px-6 sm:px-8 py-5 border-t border-dashed border-[var(--border-strong)] bg-[var(--surface-sunken)]/45 space-y-3.5">
+          <div id="openModelReplaceNotice" role="note" class="hidden destructive-notice"></div>
           <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
             <button id="openModalImportBtn" type="button" class="sm:flex-1 shrink-0 h-11 px-5 rounded-full bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors cursor-pointer">
               <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
@@ -2106,6 +2125,7 @@
                 Clear Entire Saved Library
               </button>
             </div>
+            <div id="libClearModelImpactNotice" role="note" class="hidden destructive-notice"></div>
             <div id="libClearConfirmWrap" class="hidden p-3.5 rounded-lg bg-[var(--danger-soft)] flex items-center justify-between gap-2.5 flex-wrap">
               <span id="libClearConfirmText" class="text-xs font-semibold text-[var(--danger)]">Delete all saved library files from this browser?</span>
               <div class="flex items-center gap-2 shrink-0">

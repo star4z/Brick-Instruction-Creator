@@ -291,4 +291,52 @@ describe('studioRuntime safety checks', () => {
     expect(orbitBody).toContain('renderAll();');
     expect(orbitBody).not.toContain('renderContextOverlay(page);');
   });
+
+  it('wires destructive and override-impact inline notices near every destructive action control', () => {
+    const html = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf8');
+    const runtime = fs.readFileSync(path.resolve(process.cwd(), 'src/studioRuntime.ts'), 'utf8');
+    const css = fs.readFileSync(path.resolve(process.cwd(), 'src/index.css'), 'utf8');
+
+    expect(css).toContain('.destructive-notice');
+    expect(css).toContain('.destructive-notice[data-tone="warning"]');
+    expect(css).toContain('.destructive-notice[data-tone="danger"]');
+
+    for (const id of [
+      'menuCloseModelNotice',
+      'themeDeleteNotice',
+      'overviewClearPinsNotice',
+      'mpReplaceModelNotice',
+      'impKeepNotice',
+      'impActionNotice',
+      'grpOverlapNotice',
+      'grpDeleteNotice',
+      'wordlessToggleNotice',
+      'applyAngleConflictNotice',
+      'openModelReplaceNotice',
+      'libClearModelImpactNotice',
+    ]) {
+      expect(html).toContain(`id="${id}"`);
+      expect(runtime).toContain(`'${id}'`);
+    }
+
+    for (const fnName of [
+      'getApplyCameraDestructiveNotice(',
+      'getWordlessToggleDestructiveNotice(',
+      'getStepResetCameraDestructiveNotice(',
+      'getHeroResetCameraDestructiveNotice(',
+      'getMergeStepDestructiveNotice(',
+      'getPartsActionDestructiveNotices(',
+      'getClearAllPageBreaksDestructiveNotice(',
+      'getStepGenerationDestructiveNotice(',
+      'getCloseModelDestructiveNotice(',
+      'getReplaceModelModalDestructiveNotice(',
+      'getDeleteThemeDestructiveNotice(',
+      'getLayoutGroupDestructiveNotices(',
+      'getDeleteDividerDestructiveNotice(',
+      'getLibraryRemovePartDestructiveNotice(',
+      'getLibraryClearSavedDestructiveNotice(',
+    ]) {
+      expect(runtime).toContain(fnName);
+    }
+  });
 });
