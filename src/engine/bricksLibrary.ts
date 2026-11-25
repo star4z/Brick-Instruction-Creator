@@ -41,6 +41,8 @@ export interface LibraryPartItem {
   subpartRefCount: number;
   /** Precomputed normalized search haystack (memoized by `filterLibraryItems`). */
   searchText?: string;
+  /** Sorted real-world LDraw color IDs this part is actually produced in (when indexed). */
+  availableColors?: readonly number[];
 }
 
 /** Minimal catalog entry shape consumed by `buildLibraryIndex` (see `partsCatalog.ts`). */
@@ -345,6 +347,8 @@ export interface BuildLibraryIndexInput {
   savedTextureCount?: number;
   /** Bundled Online Parts Catalog entries keyed by normalized part ID (optional; loads lazily). */
   onlineCatalog?: ReadonlyMap<string, LibraryCatalogEntry> | null;
+  /** Bundled real-world part -> LDraw color IDs availability map (optional; loads lazily). */
+  partColors?: ReadonlyMap<string, readonly number[]> | null;
 }
 
 export interface BuildLibraryIndexResult {
@@ -410,6 +414,7 @@ export function buildLibraryIndex(input: BuildLibraryIndexInput): BuildLibraryIn
     resolveName,
     savedTextureCount = 0,
     onlineCatalog = null,
+    partColors = null,
   } = input;
 
   const savedCanonical = collectCanonicalMapKeys(userLibRaw);
@@ -554,6 +559,12 @@ export function buildLibraryIndex(input: BuildLibraryIndexInput): BuildLibraryIn
 
   let builtInParts = 0;
   for (const item of items) {
+    if (partColors) {
+      const cols = partColors.get(item.id);
+      if (cols && cols.length > 0) {
+        item.availableColors = cols;
+      }
+    }
     if (item.kind === 'part' && isBuiltInLibraryItem(item)) {
       builtInParts++;
     }
@@ -583,6 +594,8 @@ export interface FilterLibraryOptions {
   scope?: LibraryScopeFilter;
   category?: LibraryCategory | 'all';
   includeHelpers?: boolean;
+  /** When set to an LDraw color ID, only return parts actually produced in that color. */
+  availableColorId?: number | null;
 }
 
 export function filterLibraryItems(
@@ -594,7 +607,13 @@ export function filterLibraryItems(
     scope = 'all',
     category = 'all',
     includeHelpers = false,
+    availableColorId = null,
   } = options;
+
+  const filterColor =
+    typeof availableColorId === 'number' && Number.isFinite(availableColorId)
+      ? availableColorId
+      : null;
 
   const normQuery = normalizeLibrarySearchText(query);
   const queryTokens = normQuery ? normQuery.split(' ').filter(Boolean) : [];
@@ -614,6 +633,10 @@ export function filterLibraryItems(
     if (scope === 'missing' && !item.isMissingInModel) continue;
 
     if (category !== 'all' && item.category !== category) continue;
+
+    if (filterColor !== null) {
+      if (!item.availableColors || !item.availableColors.includes(filterColor)) continue;
+    }
 
     let score = 0;
     if (queryTokens.length > 0) {
@@ -755,6 +778,7 @@ export interface LibraryColorEntry extends LibraryColorDefinition {
   id: number;
   group: LibraryColorGroup;
   countInModel?: number;
+  availablePartCount?: number;
 }
 
 export interface LibraryColorSection {
@@ -817,6 +841,30 @@ function sortColorsPerceptually(list: LibraryColorEntry[]): LibraryColorEntry[] 
 }
 
 /**
+ * Sorts a list of LDraw color IDs perceptually (neutrals light -> dark, then hue bands)
+ * for scannable swatch strips such as "Available colors" in the Part Preview Inspector.
+ */
+export function sortLDrawColorIdsPerceptually(
+  colorIds: readonly number[],
+  colors: Readonly<Record<number, LibraryColorDefinition>>,
+): number[] {
+  const entries: LibraryColorEntry[] = [];
+  for (const id of colorIds) {
+    const def = colors[id];
+    if (!def || !def.hex) continue;
+    entries.push({
+      id,
+      name: def.name,
+      hex: def.hex,
+      edge: def.edge,
+      alpha: def.alpha,
+      group: classifyLDrawColorGroup(def),
+    });
+  }
+  return sortColorsPerceptually(entries).map((e) => e.id);
+}
+
+/**
  * Organizes the full LDraw color dictionary into scannable finish sections (plus an optional
  * "In Current Model" section) with instant search by color name or LDraw numeric ID.
  */
@@ -824,6 +872,8 @@ export function buildLibraryColorPalette(
   colors: Readonly<Record<number, LibraryColorDefinition>>,
   options: {
     modelColorCounts?: ReadonlyMap<number, number> | null;
+    availablePartCounts?: ReadonlyMap<number, number> | null;
+    onlyAvailable?: boolean;
     query?: string;
   } = {},
 ): LibraryColorSection[] {
@@ -834,6 +884,10 @@ export function buildLibraryColorPalette(
     if (name.toLowerCase().includes(rawQuery)) return true;
     if (idQuery && String(id).includes(idQuery)) return true;
     return false;
+  };
+  const passesAvailability = (id: number): boolean => {
+    if (!options.onlyAvailable || !options.availablePartCounts) return true;
+    return (options.availablePartCounts.get(id) ?? 0) > 0;
   };
 
   const buckets: Record<Exclude<LibraryColorGroup, 'model'>, LibraryColorEntry[]> = {
@@ -846,6 +900,7 @@ export function buildLibraryColorPalette(
   for (const [rawId, def] of Object.entries(colors)) {
     const id = Number(rawId);
     if (!Number.isFinite(id) || !def || !def.hex) continue;
+    if (!passesAvailability(id)) continue;
     if (!matchesQuery(id, def.name)) continue;
     const group = classifyLDrawColorGroup(def);
     buckets[group].push({
@@ -856,6 +911,7 @@ export function buildLibraryColorPalette(
       alpha: def.alpha,
       group,
       countInModel: options.modelColorCounts?.get(id),
+      availablePartCount: options.availablePartCounts?.get(id),
     });
   }
 
@@ -866,6 +922,7 @@ export function buildLibraryColorPalette(
     for (const [id, count] of options.modelColorCounts.entries()) {
       const def = colors[id];
       if (!def || !def.hex) continue;
+      if (!passesAvailability(id)) continue;
       if (!matchesQuery(id, def.name)) continue;
       modelEntries.push({
         id,
@@ -875,6 +932,7 @@ export function buildLibraryColorPalette(
         alpha: def.alpha,
         group: 'model',
         countInModel: count,
+        availablePartCount: options.availablePartCounts?.get(id),
       });
     }
     modelEntries.sort((a, b) => (b.countInModel ?? 0) - (a.countInModel ?? 0) || a.id - b.id);

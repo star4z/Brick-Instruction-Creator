@@ -380,8 +380,10 @@ import {
   getModelFetchCopy,
   isOnlineOnlyItem,
   parsePartIdListInput,
+  sortLDrawColorIdsPerceptually,
 } from './engine/bricksLibrary';
 import { loadPartsCatalog } from './engine/partsCatalog';
+import { loadPartColorsCatalog } from './engine/partColors';
 import {
   assignAbsoluteStepNumbers,
   formatAbsRange,
@@ -977,6 +979,8 @@ const KNOWN_EXTRA_PART_NAMES = {
 // Bricks Library open. Declared here (above getHumanPartName) to avoid TDZ issues during startup.
 let onlinePartsCatalog = null;
 let onlinePartsCatalogPromise = null;
+let partColorsCatalog = null;
+let partColorsCatalogPromise = null;
 
 function getHumanPartName(pid) {
   let k = normId(pid);
@@ -14072,9 +14076,14 @@ const libUiState = {
   scope: 'all',
   category: 'all',
   includeHelpers: false,
+  colorFilter: null, // null (all colors) | LDraw numeric color ID
+  colorFilterOpen: false,
+  colorFilterQuery: '',
   previewColor: 'model', // 'model' (match loaded model colors) | LDraw numeric color ID
+  previewColorBeforeFilter: null,
   colorPickerOpen: false,
   colorQuery: '',
+  expandedAvailableColorsForId: null,
   previewAz: 38,
   previewEl: 24,
   selectedId: null,
@@ -14169,6 +14178,7 @@ function getLibrarySnapshot(forceRebuild = false) {
     resolveName: (id) => getHumanPartName(id),
     savedTextureCount: textureStore.getLibraryCount(),
     onlineCatalog: onlinePartsCatalog?.entries || null,
+    partColors: partColorsCatalog?.byPart || null,
   });
   libCachedSnapshot = { ...built, modelColorCounts, modelPartColors };
   return libCachedSnapshot;
@@ -14195,8 +14205,30 @@ function getEffectivePreviewColorForPart(partId) {
   return 4; // Classic Red when no model is loaded
 }
 
+/** Lazily loads the bundled real-world part-color availability index (once per session). */
+function ensurePartColorsCatalog() {
+  if (partColorsCatalog || partColorsCatalogPromise) return partColorsCatalogPromise;
+  partColorsCatalogPromise = loadPartColorsCatalog('', fetch)
+    .then((catalog) => {
+      if (!catalog || catalog.byPart.size === 0) {
+        partColorsCatalogPromise = null; // allow retry on next open
+        return null;
+      }
+      partColorsCatalog = catalog;
+      libCachedSnapshot = null;
+      if (isBricksLibraryModalOpen()) renderBricksLibraryModal(false);
+      return catalog;
+    })
+    .catch(() => {
+      partColorsCatalogPromise = null;
+      return null;
+    });
+  return partColorsCatalogPromise;
+}
+
 /** Lazily loads the bundled official & unofficial parts catalog (once per session) and refreshes the library UI. */
 function ensureOnlinePartsCatalog() {
+  void ensurePartColorsCatalog();
   if (onlinePartsCatalog || onlinePartsCatalogPromise) return onlinePartsCatalogPromise;
   onlinePartsCatalogPromise = loadPartsCatalog('', fetch)
     .then((catalog) => {
@@ -15269,9 +15301,174 @@ function positionLibColorPopover(anchorEl = null) {
   }
 }
 
+function formatColorFilterReadoutHtml(colorId) {
+  if (colorId === null || colorId === undefined) {
+    const indexedCount = partColorsCatalog?.byPart.size || 0;
+    const note = indexedCount > 0 ? `${indexedCount.toLocaleString()} parts indexed` : 'No color filter';
+    return `<span class="inline-flex items-center gap-1.5 min-w-0"><span class="w-3 h-3 rounded-full border border-black/25 dark:border-white/25 shrink-0" style="background:${LIB_MODEL_MOSAIC_BG}"></span><span class="font-semibold text-[var(--foreground)] truncate">All Colors</span></span><span class="font-mono shrink-0">${escHtml(note)}</span>`;
+  }
+  const col = COLORS[colorId] || COLORS[4];
+  const availCount = partColorsCatalog?.partCountByColor.get(colorId) || 0;
+  const countNote = availCount > 0 ? ` · ${availCount.toLocaleString()} part${availCount === 1 ? '' : 's'}` : '';
+  return `<span class="inline-flex items-center gap-1.5 min-w-0"><span class="w-3 h-3 rounded-full border border-black/25 dark:border-white/25 shrink-0" style="${getSwatchStyleAttr(col)}"></span><span class="font-semibold text-[var(--foreground)] truncate">${escHtml(col?.name || `Color ${colorId}`)}</span></span><span class="font-mono shrink-0">#${colorId}${escHtml(countNote)}</span>`;
+}
+
+function setLibColorFilterOpen(open) {
+  libUiState.colorFilterOpen = Boolean(open);
+  if (libUiState.colorFilterOpen && libUiState.colorPickerOpen) {
+    setLibColorPickerOpen(false);
+  }
+  const popover = document.getElementById('libColorFilterPopover');
+  const btn = document.getElementById('libColorFilterBtn');
+  if (popover) popover.classList.toggle('hidden', !libUiState.colorFilterOpen);
+  if (btn) btn.setAttribute('aria-expanded', libUiState.colorFilterOpen ? 'true' : 'false');
+  if (libUiState.colorFilterOpen) {
+    void ensurePartColorsCatalog();
+    renderLibColorFilterControls();
+    const searchEl = document.getElementById('libColorFilterSearchInput');
+    if (searchEl) {
+      searchEl.value = libUiState.colorFilterQuery;
+      const isFinePointer = !window.matchMedia || window.matchMedia('(pointer: fine)').matches;
+      if (isFinePointer) {
+        requestAnimationFrame(() => searchEl.focus());
+      }
+    }
+  }
+}
+
+function applyLibColorFilter(nextColorId, closeAfter = true) {
+  const normalized = typeof nextColorId === 'number' && Number.isFinite(nextColorId) ? nextColorId : null;
+  if (normalized !== libUiState.colorFilter) {
+    if (normalized !== null) {
+      if (libUiState.colorFilter === null && libUiState.previewColorBeforeFilter === null) {
+        libUiState.previewColorBeforeFilter = libUiState.previewColor;
+      }
+      libUiState.colorFilter = normalized;
+      libUiState.previewColor = normalized;
+    } else {
+      libUiState.colorFilter = null;
+      if (libUiState.previewColorBeforeFilter !== null) {
+        libUiState.previewColor = libUiState.previewColorBeforeFilter;
+        libUiState.previewColorBeforeFilter = null;
+      }
+    }
+    renderLibColorSwatches();
+    renderLibBrowseTab(true);
+    renderLibPreviewInspector();
+  }
+  if (closeAfter) {
+    setLibColorFilterOpen(false);
+  }
+  renderLibColorFilterControls();
+}
+
+function renderLibColorFilterControls() {
+  const btn = document.getElementById('libColorFilterBtn');
+  const btnSwatch = document.getElementById('libColorFilterBtnSwatch');
+  const btnLabel = document.getElementById('libColorFilterBtnLabel');
+  const clearBtn = document.getElementById('libColorFilterClearBtn');
+  const popover = document.getElementById('libColorFilterPopover');
+  const activeColId = libUiState.colorFilter;
+  const isFiltering = activeColId !== null;
+  const activeCol = isFiltering ? (COLORS[activeColId] || COLORS[4]) : null;
+
+  if (btnSwatch) {
+    btnSwatch.setAttribute(
+      'style',
+      isFiltering ? getSwatchStyleAttr(activeCol) : `background:${LIB_MODEL_MOSAIC_BG}`,
+    );
+  }
+  if (btnLabel) {
+    btnLabel.textContent = isFiltering ? (activeCol?.name || `Color ${activeColId}`) : 'All Colors';
+  }
+  if (btn) {
+    btn.setAttribute('aria-expanded', libUiState.colorFilterOpen ? 'true' : 'false');
+    btn.classList.toggle('border-[var(--primary)]', isFiltering);
+    btn.classList.toggle('bg-[var(--primary-soft)]', isFiltering);
+    btn.classList.toggle('text-[var(--primary)]', isFiltering);
+    btn.classList.toggle('border-[var(--border)]', !isFiltering);
+    btn.classList.toggle('bg-[var(--surface-sunken)]', !isFiltering);
+  }
+  if (clearBtn) {
+    clearBtn.classList.toggle('hidden', !isFiltering);
+  }
+  if (!popover || !libUiState.colorFilterOpen) return;
+
+  const allBtn = document.getElementById('libColorFilterAllBtn');
+  const allBadge = document.getElementById('libColorFilterAllBadge');
+  if (allBtn) {
+    allBtn.className = `w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition cursor-pointer ${
+      !isFiltering
+        ? 'border-[var(--primary)] bg-[var(--primary-soft)] text-[var(--primary)]'
+        : 'border-[var(--border)] bg-[var(--surface-sunken)] hover:border-[var(--primary-border)] text-[var(--foreground)]'
+    }`;
+  }
+  if (allBadge) {
+    allBadge.textContent = !isFiltering ? 'Active' : 'Reset';
+  }
+
+  const sectionsEl = document.getElementById('libColorFilterSections');
+  const readoutEl = document.getElementById('libColorFilterReadout');
+  const { modelColorCounts } = getLibrarySnapshot();
+
+  if (sectionsEl) {
+    if (!partColorsCatalog && partColorsCatalogPromise) {
+      sectionsEl.innerHTML = `<div class="py-6 text-center text-xs text-[var(--muted-foreground)]">Loading LEGO part color availability…</div>`;
+    } else {
+      const sections = buildLibraryColorPalette(COLORS, {
+        modelColorCounts: state.model ? modelColorCounts : null,
+        availablePartCounts: partColorsCatalog?.partCountByColor || null,
+        onlyAvailable: Boolean(partColorsCatalog),
+        query: libUiState.colorFilterQuery,
+      });
+      if (sections.length === 0) {
+        sectionsEl.innerHTML = `<div class="py-6 text-center text-xs text-[var(--muted-foreground)]">No available LEGO colors matching “${escHtml(libUiState.colorFilterQuery)}”</div>`;
+      } else {
+        sectionsEl.innerHTML = sections.map((sec) => {
+          const swatches = sec.colors.map((c) => {
+            const active = activeColId === c.id;
+            const partNote = c.availablePartCount ? ` — ${c.availablePartCount.toLocaleString()} parts` : '';
+            const title = `${c.name} (#${c.id})${partNote}`;
+            return `<button type="button" data-lib-filter-color="${c.id}" title="${escHtml(title)}" aria-label="${escHtml(title)}" class="w-6 h-6 rounded-md border transition cursor-pointer ${active ? 'ring-2 ring-[var(--primary)] ring-offset-1 ring-offset-[var(--card)] scale-110 border-white/90 z-10' : 'border-black/25 dark:border-white/25 hover:scale-110'}" style="${getSwatchStyleAttr(c)}"></button>`;
+          }).join('');
+          return `
+            <div class="space-y-1.5">
+              <div class="flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">
+                <span>${escHtml(sec.label)}</span>
+                <span class="font-mono font-normal">${sec.colors.length}</span>
+              </div>
+              <div class="grid grid-cols-10 gap-1.5">${swatches}</div>
+            </div>
+          `;
+        }).join('');
+      }
+    }
+  }
+
+  if (readoutEl) {
+    readoutEl.innerHTML = formatColorFilterReadoutHtml(activeColId);
+  }
+
+  popover.querySelectorAll('button[data-lib-filter-color]').forEach((swBtn) => {
+    const colId = Number(swBtn.getAttribute('data-lib-filter-color'));
+    swBtn.onclick = () => {
+      applyLibColorFilter(colId, true);
+    };
+    swBtn.onmouseenter = () => {
+      if (readoutEl) readoutEl.innerHTML = formatColorFilterReadoutHtml(colId);
+    };
+    swBtn.onmouseleave = () => {
+      if (readoutEl) readoutEl.innerHTML = formatColorFilterReadoutHtml(activeColId);
+    };
+  });
+}
+
 function setLibColorPickerOpen(open, anchorEl = null) {
   libUiState.colorPickerOpen = Boolean(open);
   libColorPickerAnchorEl = libUiState.colorPickerOpen ? anchorEl : null;
+  if (libUiState.colorPickerOpen && libUiState.colorFilterOpen) {
+    setLibColorFilterOpen(false);
+  }
   const popover = document.getElementById('libColorPopover');
   const btn = document.getElementById('libColorPickerBtn');
   if (popover) popover.classList.toggle('hidden', !libUiState.colorPickerOpen);
@@ -15522,6 +15719,35 @@ function renderLibPreviewInspector() {
       </div>
     `
     : '';
+  const sortedAvailableColors = item.availableColors && item.availableColors.length > 0
+    ? sortLDrawColorIdsPerceptually(item.availableColors, COLORS)
+    : [];
+  const availExpanded = libUiState.expandedAvailableColorsForId === item.id;
+  const AVAIL_COLLAPSED_MAX = 24;
+  const visibleAvailableColors = availExpanded
+    ? sortedAvailableColors
+    : sortedAvailableColors.slice(0, AVAIL_COLLAPSED_MAX);
+  const hiddenAvailableCount = Math.max(0, sortedAvailableColors.length - visibleAvailableColors.length);
+  const availableColorsHtml = sortedAvailableColors.length > 0
+    ? `
+      <div class="space-y-1.5 pt-1">
+        <div class="flex items-center justify-between gap-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">
+          <span>Available colors (${sortedAvailableColors.length})</span>
+          ${sortedAvailableColors.length > AVAIL_COLLAPSED_MAX
+            ? `<button type="button" id="libInspectorToggleAvailColors" class="normal-case font-medium text-[var(--primary)] hover:underline cursor-pointer">${availExpanded ? 'Show fewer' : `+${hiddenAvailableCount} more`}</button>`
+            : ''}
+        </div>
+        <div class="flex items-center gap-1 flex-wrap">
+          ${visibleAvailableColors.map((cid) => {
+            const cDef = COLORS[cid];
+            const isSel = effectiveColor === cid;
+            const title = `${cDef?.name || `Color ${cid}`} (#${cid}) — click to preview`;
+            return `<button type="button" data-inspector-color="${cid}" title="${escHtml(title)}" aria-label="${escHtml(title)}" class="w-5 h-5 rounded border transition cursor-pointer ${isSel ? 'ring-2 ring-[var(--primary)] ring-offset-1 ring-offset-[var(--chrome)] scale-110 border-white/90 z-10' : 'border-black/25 dark:border-white/25 hover:scale-110'}" style="${getSwatchStyleAttr(cDef)}"></button>`;
+          }).join('')}
+        </div>
+      </div>
+    `
+    : '';
   const onlineHint = onlineOnly
     ? `<div class="text-xs text-[var(--muted-foreground)] pt-0.5">${
         isFetchingSelected || (!libThumbFetchNetworkBlocked && !notFoundDatCache.has(item.id))
@@ -15541,6 +15767,7 @@ function renderLibPreviewInspector() {
     <div class="flex items-center gap-1 flex-wrap pt-0.5">${sourceLabels.join('')}</div>
     ${onlineHint}
     ${modelColorsHtml}
+    ${availableColorsHtml}
     <div class="text-xs text-[var(--muted-foreground)] pt-0.5 flex items-center gap-1.5 flex-wrap">
       <span>Preview:</span>
       <button type="button" id="libInspectorColorBtn" class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-[var(--border)] bg-[var(--card)] hover:border-[var(--primary-border)] text-[var(--foreground)] font-semibold transition cursor-pointer" title="Choose from all 150+ LDraw preview colors">
@@ -15558,6 +15785,13 @@ function renderLibPreviewInspector() {
       if (Number.isFinite(nextCol)) applyLibPreviewColor(nextCol, false);
     };
   });
+  const toggleAvailBtn = metaEl.querySelector('#libInspectorToggleAvailColors');
+  if (toggleAvailBtn) {
+    toggleAvailBtn.onclick = () => {
+      libUiState.expandedAvailableColorsForId = availExpanded ? null : item.id;
+      renderLibPreviewInspector();
+    };
+  }
   const inspColorBtn = metaEl.querySelector('#libInspectorColorBtn');
   if (inspColorBtn) {
     inspColorBtn.onclick = (e) => {
@@ -15726,6 +15960,7 @@ function renderLibBrowseTab(resetLimit = false) {
     scope: libUiState.scope,
     category: libUiState.category,
     includeHelpers: libUiState.includeHelpers,
+    availableColorId: libUiState.colorFilter,
   });
 
   const summaryEl = document.getElementById('libBrowseSummary');
@@ -15735,10 +15970,21 @@ function renderLibBrowseTab(resetLimit = false) {
   const fetchBannerEl = document.getElementById('libSearchFetchBanner');
   if (!gridEl) return;
 
+  const activeFilterColName =
+    libUiState.colorFilter !== null
+      ? (COLORS[libUiState.colorFilter]?.name || `Color ${libUiState.colorFilter}`)
+      : null;
+
   if (summaryEl) {
-    summaryEl.textContent = filtered.length === 0
-      ? 'No matching parts'
-      : `${filtered.length.toLocaleString()} part${filtered.length === 1 ? '' : 's'}`;
+    if (filtered.length === 0) {
+      summaryEl.textContent = activeFilterColName
+        ? `No matching parts available in ${activeFilterColName}`
+        : 'No matching parts';
+    } else if (activeFilterColName) {
+      summaryEl.textContent = `${filtered.length.toLocaleString()} part${filtered.length === 1 ? '' : 's'} available in ${activeFilterColName}`;
+    } else {
+      summaryEl.textContent = `${filtered.length.toLocaleString()} part${filtered.length === 1 ? '' : 's'}`;
+    }
   }
 
   // Only offer a direct online fetch banner if the user typed an unlisted part ID that isn't already
@@ -15792,14 +16038,24 @@ function renderLibBrowseTab(resetLimit = false) {
   }
 
   if (filtered.length === 0) {
+    const clearColorBtnHtml = activeFilterColName
+      ? `<div class="pt-1"><button id="libEmptyClearColorFilterBtn" type="button" class="px-3 py-1.5 rounded-lg border border-[var(--primary-border)] bg-[var(--primary-soft)] text-[var(--primary)] text-xs font-semibold hover:opacity-90 transition cursor-pointer">Clear ${escHtml(activeFilterColName)} color filter</button></div>`
+      : '';
     gridEl.innerHTML = `
       <div class="col-span-full py-10 text-center space-y-2 text-[var(--muted-foreground)]">
         <div class="font-bold text-sm text-[var(--foreground)]">No parts found</div>
         <p class="text-xs max-w-sm mx-auto leading-relaxed">
-          Try a different part ID or name, switch filters above, or go to <b>Fetch &amp; Import</b> to download starter packs or import <b>complete.zip</b>.
+          ${activeFilterColName
+            ? `No parts in this view are indexed as produced in <b>${escHtml(activeFilterColName)}</b>. Try clearing the color filter or adjusting search &amp; category filters above.`
+            : 'Try a different part ID or name, switch filters above, or go to <b>Fetch &amp; Import</b> to download starter packs or import <b>complete.zip</b>.'}
         </p>
+        ${clearColorBtnHtml}
       </div>
     `;
+    const clearBtn = gridEl.querySelector('#libEmptyClearColorFilterBtn');
+    if (clearBtn) {
+      clearBtn.onclick = () => applyLibColorFilter(null, true);
+    }
     if (loadMoreWrap) loadMoreWrap.classList.add('hidden');
     return;
   }
@@ -16062,11 +16318,14 @@ function renderBricksLibraryModal(resetLimit = false) {
   if (managePanel) managePanel.classList.toggle('hidden', libUiState.tab !== 'manage');
 
   if (libUiState.tab === 'browse') {
+    renderLibColorFilterControls();
     renderLibColorSwatches();
     renderLibBrowseTab(resetLimit);
     renderLibPreviewInspector();
   } else {
     syncLibMobilePreviewPageState(false);
+    setLibColorFilterOpen(false);
+    setLibColorPickerOpen(false);
     stopLibThumbQueue();
     renderLibManageTab();
   }
@@ -16088,6 +16347,7 @@ function openBricksLibraryModal(preferredTab = null) {
 }
 
 function closeBricksLibraryModal() {
+  setLibColorFilterOpen(false);
   setLibColorPickerOpen(false);
   stopLibThumbQueue();
   const modal = document.getElementById('bricksLibraryModal');
@@ -19549,6 +19809,10 @@ function handleGlobalEscapeKey() {
     hidePageBreakHelpTooltip();
     return true;
   }
+  if (isBricksLibraryModalOpen() && libUiState.colorFilterOpen) {
+    setLibColorFilterOpen(false);
+    return true;
+  }
   if (isBricksLibraryModalOpen() && libUiState.colorPickerOpen) {
     setLibColorPickerOpen(false);
     return true;
@@ -21317,6 +21581,12 @@ document.getElementById('bricksLibraryModal').onclick = (e) => {
     closeBricksLibraryModal();
     return;
   }
+  if (libUiState.colorFilterOpen) {
+    const filterWrap = document.getElementById('libColorFilterWrap');
+    if (filterWrap && !filterWrap.contains(e.target)) {
+      setLibColorFilterOpen(false);
+    }
+  }
   if (libUiState.colorPickerOpen) {
     const popover = document.getElementById('libColorPopover');
     const pickerBtn = document.getElementById('libColorPickerBtn');
@@ -21329,6 +21599,35 @@ document.getElementById('bricksLibraryModal').onclick = (e) => {
     }
   }
 };
+const libColorFilterBtnEl = document.getElementById('libColorFilterBtn');
+if (libColorFilterBtnEl) {
+  libColorFilterBtnEl.onclick = (e) => {
+    e.stopPropagation();
+    setLibColorFilterOpen(!libUiState.colorFilterOpen);
+  };
+}
+const libColorFilterClearBtnEl = document.getElementById('libColorFilterClearBtn');
+if (libColorFilterClearBtnEl) {
+  libColorFilterClearBtnEl.onclick = (e) => {
+    e.stopPropagation();
+    applyLibColorFilter(null, true);
+  };
+}
+const libColorFilterPopoverCloseEl = document.getElementById('libColorFilterPopoverClose');
+if (libColorFilterPopoverCloseEl) {
+  libColorFilterPopoverCloseEl.onclick = () => setLibColorFilterOpen(false);
+}
+const libColorFilterAllBtnEl = document.getElementById('libColorFilterAllBtn');
+if (libColorFilterAllBtnEl) {
+  libColorFilterAllBtnEl.onclick = () => applyLibColorFilter(null, true);
+}
+const libColorFilterSearchInputEl = document.getElementById('libColorFilterSearchInput');
+if (libColorFilterSearchInputEl) {
+  libColorFilterSearchInputEl.oninput = (e) => {
+    libUiState.colorFilterQuery = e.target.value || '';
+    renderLibColorFilterControls();
+  };
+}
 const libColorPickerBtnEl = document.getElementById('libColorPickerBtn');
 if (libColorPickerBtnEl) {
   libColorPickerBtnEl.onclick = (e) => {

@@ -15,6 +15,7 @@ import {
   getModelFetchCopy,
   normalizeLibrarySearchText,
   parsePartIdListInput,
+  sortLDrawColorIdsPerceptually,
 } from '../bricksLibrary';
 
 describe('bricksLibrary engine', () => {
@@ -418,6 +419,28 @@ describe('bricksLibrary engine', () => {
       // Search by LDraw numeric ID (with or without #)
       const byId = buildLibraryColorPalette(sampleColors, { query: '#297' });
       expect(byId.flatMap((s) => s.colors.map((c) => c.id))).toEqual([297]);
+    });
+
+    it('filters palette to colors with available parts and sorts part color IDs perceptually', () => {
+      const counts = new Map<number, number>([
+        [4, 1500],
+        [378, 412],
+        [297, 89],
+      ]);
+      const sections = buildLibraryColorPalette(sampleColors, {
+        availablePartCounts: counts,
+        onlyAvailable: true,
+      });
+      const flat = sections.flatMap((s) => s.colors);
+      expect(flat.map((c) => c.id).sort((a, b) => a - b)).toEqual([4, 297, 378]);
+      expect(flat.find((c) => c.id === 378)?.availablePartCount).toBe(412);
+
+      // Neutrals (White 15 -> LBG 71 -> Black 0) sort ahead of chromatic colors (Red 4, Sand Green 378)
+      expect(sortLDrawColorIdsPerceptually([4, 0, 378, 15, 71, 99999], sampleColors).slice(0, 3)).toEqual([
+        15,
+        71,
+        0,
+      ]);
     });
   });
 
