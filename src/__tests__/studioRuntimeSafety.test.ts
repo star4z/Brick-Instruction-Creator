@@ -260,7 +260,7 @@ describe('studioRuntime safety checks', () => {
     const popChunk = html.slice(popStart, popEnd);
     expect(popChunk).toContain('id="toggleHighQualitySteps"');
     expect(popChunk).toContain('id="toggleStarkBlackOutlines"');
-    expect(popChunk).toContain('Part Outlines');
+    expect(popChunk).toContain('Outline All Parts');
     expect(popChunk).toContain('data-hl-weight="extra-heavy"');
     expect(popChunk).toContain('data-outline-weight="extra-heavy"');
 
