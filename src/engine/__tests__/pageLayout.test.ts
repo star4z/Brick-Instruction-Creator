@@ -18,6 +18,7 @@ import {
   findBestSmartAutoGridForSteps,
   findLayoutGroupForStep,
   formatPageSizeWarningForPage,
+  getPageSizeWarningStepLinks,
   getSpecStepsPerPageCap,
   normalizeLayoutGroups,
   normalizePageLayoutSpec,
@@ -652,4 +653,69 @@ describe('pageLayout engine', () => {
     expect(multiWarn.shortMessage).toContain('even at 1 step/page');
     expect(formatPageSizeWarningForPage(multiWarn, 'pg_4')).toContain('even at 1 step/page');
   });
+
+  it('builds deduplicated navigable step links in manual order with page scoping and worst-step tagging', () => {
+    const stepChecks = [
+      {
+        metric: { stepId: 's1', stepNum: 1, absStepNum: 1, viewRadiusLdu: 50, projHalfWLdu: 45, projHalfHLdu: 40, pliUniqueCount: 1 },
+        pageId: 'pg_1',
+        pageNum: 2,
+      },
+      {
+        metric: { stepId: 's2', stepNum: 2, absStepNum: 12, viewRadiusLdu: 380, projHalfWLdu: 360, projHalfHLdu: 340, pliUniqueCount: 2 },
+        pageId: 'pg_2',
+        pageNum: 3,
+      },
+      {
+        metric: { stepId: 's3', stepNum: 3, absStepNum: 13, viewRadiusLdu: 440, projHalfWLdu: 420, projHalfHLdu: 410, pliUniqueCount: 3 },
+        pageId: 'pg_3',
+        pageNum: 4,
+      },
+      {
+        metric: { stepId: 's4', stepNum: 4, absStepNum: 4, viewRadiusLdu: 400, projHalfWLdu: 390, projHalfHLdu: 370, pliUniqueCount: 2 },
+        pageId: 'pg_4',
+        pageNum: 5,
+      },
+    ];
+
+    const warn = analyzePageSizeFit({
+      stepChecks,
+      currentFormatId: 'letter',
+      currentOrientation: 'landscape',
+      currentPageWidthIn: 11,
+      currentPageHeightIn: 8.5,
+      density: 'balanced',
+    });
+    expect(warn.hasWarning).toBe(true);
+
+    const allLinks = getPageSizeWarningStepLinks(warn);
+    expect(allLinks.map((l) => l.stepId)).toEqual(['s2', 's3', 's4']);
+    expect(allLinks[0].label).toBe('Step 2 · #12');
+    expect(allLinks[2].label).toBe('Step 4');
+    expect(allLinks[1].isWorst).toBe(true);
+    expect(allLinks[0].isWorst).toBe(false);
+    expect(allLinks[1].detail).toMatch(/^\d+\.\d{2} cm\/stud$/);
+
+    // Page-scoped links match only the violating step on pg_2, and fall back to all on unaffected pg_1
+    const pg2Links = getPageSizeWarningStepLinks(warn, 'pg_2');
+    expect(pg2Links.map((l) => l.stepId)).toEqual(['s2']);
+    expect(pg2Links[0].isWorst).toBe(true);
+
+    const pg1Links = getPageSizeWarningStepLinks(warn, 'pg_1');
+    expect(pg1Links.map((l) => l.stepId)).toEqual(['s2', 's3', 's4']);
+
+    // Placeholder / no-model warnings return no navigable step links
+    const sampleWarn = analyzePageSizeFit({
+      stepChecks: [],
+      currentFormatId: 'custom',
+      currentOrientation: 'landscape',
+      currentPageWidthIn: 2,
+      currentPageHeightIn: 2,
+      density: 'balanced',
+    });
+    expect(sampleWarn.hasWarning).toBe(true);
+    expect(getPageSizeWarningStepLinks(sampleWarn)).toEqual([]);
+    expect(getPageSizeWarningStepLinks(null)).toEqual([]);
+  });
 });
+

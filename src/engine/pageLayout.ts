@@ -2018,3 +2018,70 @@ export function formatPageSizeWarningForPage(
   return `${pageViolations.length} steps on this page render below ${minStudStr}/stud even at 1 step/page (min ${studTxt}) — ${shortSuggest}`;
 }
 
+export interface PageSizeWarningStepLink {
+  stepId: string;
+  stepNum: number;
+  absStepNum?: number;
+  pageId?: string;
+  pageNum?: number;
+  label: string;
+  detail: string;
+  studSizeCm: number;
+  reason: PageSizeViolation['reason'];
+  isWorst: boolean;
+}
+
+/**
+ * Returns deduplicated, manual-ordered navigable step link descriptors for every real step
+ * violating the active page size. When `currentPageId` is supplied and matches one or more
+ * non-area-only violations on that page, returns only those page-scoped steps so the list
+ * stays in 1:1 parity with `formatPageSizeWarningForPage()`.
+ */
+export function getPageSizeWarningStepLinks(
+  summary: PageSizeWarningSummary | null | undefined,
+  currentPageId?: string | null,
+): PageSizeWarningStepLink[] {
+  if (!summary || !summary.hasWarning || summary.affectedStepCount <= 0) return [];
+  const realViolations = summary.violations.filter((v) => Boolean(v.stepId) && v.stepId !== 'sample');
+  if (realViolations.length === 0) return [];
+
+  let scoped = realViolations;
+  if (currentPageId) {
+    const pageMatches = realViolations.filter((v) => v.pageId === currentPageId);
+    if (pageMatches.length > 0 && !pageMatches.every((v) => v.reason === 'area')) {
+      scoped = pageMatches;
+    }
+  }
+
+  let worstId = summary.worstViolation?.stepId ?? null;
+  if (scoped !== realViolations) {
+    let worst = scoped[0];
+    for (let i = 1; i < scoped.length; i++) {
+      if (scoped[i].studSizeCm < worst.studSizeCm - 1e-4) worst = scoped[i];
+    }
+    worstId = worst.stepId;
+  }
+
+  const seen = new Set<string>();
+  const out: PageSizeWarningStepLink[] = [];
+  for (const v of scoped) {
+    if (seen.has(v.stepId)) continue;
+    seen.add(v.stepId);
+    const hasDistinctAbs = typeof v.absStepNum === 'number' && Number.isFinite(v.absStepNum) && v.absStepNum !== v.stepNum;
+    const label = hasDistinctAbs ? `Step ${v.stepNum} · #${v.absStepNum}` : `Step ${v.stepNum}`;
+    const detail = v.reason === 'area' ? 'area too small' : `${v.studSizeCm.toFixed(2)} cm/stud`;
+    out.push({
+      stepId: v.stepId,
+      stepNum: v.stepNum,
+      absStepNum: v.absStepNum,
+      pageId: v.pageId,
+      pageNum: v.pageNum,
+      label,
+      detail,
+      studSizeCm: v.studSizeCm,
+      reason: v.reason,
+      isWorst: worstId !== null && v.stepId === worstId,
+    });
+  }
+  return out;
+}

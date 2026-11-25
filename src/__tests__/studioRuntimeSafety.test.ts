@@ -498,6 +498,10 @@ describe('studioRuntime safety checks', () => {
     expect(runtime).toContain('packSmartAutoPage(');
     expect(runtime).toContain('analyzePageSizeFit(');
     expect(runtime).toContain('formatPageSizeWarningForPage(');
+    expect(runtime).toContain('getPageSizeWarningStepLinks(');
+    expect(runtime).toContain('function jumpToStepById(');
+    expect(runtime).toContain('function renderPageSizeWarningMessageHtml(');
+    expect(runtime).toContain('function bindPageSizeWarningStepLinks(');
     expect(runtime).toContain('computePageSlotRects(slots.length, pageSpec, dims.isLandscape, gridW, gridH, gapPx, page.autoGrid)');
     expect(runtime).toContain('computePageSlotRects(slots.length, pageSpec, isLand, availW, availH, gap, page.autoGrid)');
 

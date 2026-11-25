@@ -185,6 +185,7 @@ import {
   describePageLayoutSpec,
   findLayoutGroupForStep,
   formatPageSizeWarningForPage,
+  getPageSizeWarningStepLinks,
   getSpecStepsPerPageCap,
   normalizeLayoutGroups,
   normalizePageLayoutSpec,
@@ -11439,6 +11440,9 @@ function renderContextOverlay(page) {
     const pgWarn = state.pageSizeWarning?.hasWarning ? state.pageSizeWarning : null;
     const pgWarnAction = pgWarn ? getPrimaryPageSizeAction(pgWarn) : null;
     const pgWarnText = pgWarn ? formatPageSizeWarningForPage(pgWarn, page.id) : '';
+    const pgWarnLinks = pgWarn ? getPageSizeWarningStepLinks(pgWarn, page.id) : [];
+    const pgWarnTriggerHtml = pgWarn ? renderPageSizeWarningStepTriggerHtml(pgWarnLinks) : '';
+    const pgWarnListHtml = pgWarn ? renderPageSizeWarningStepListHtml(pgWarnLinks) : '';
 
     box.innerHTML = `
       <div class="pointer-events-auto studio-surface rounded-xl p-3.5 w-full max-h-[46vh] overflow-y-auto space-y-2.5 text-xs">
@@ -11451,11 +11455,16 @@ function renderContextOverlay(page) {
         </div>
 
         ${pgWarn ? `
-          <div role="alert" data-tone="warning" class="destructive-notice destructive-notice-compact">
+          <div id="pageCardSizeWarning" role="alert" data-tone="warning" class="destructive-notice destructive-notice-compact">
             ${DESTRUCTIVE_ALERT_SVG}
             <div class="min-w-0 flex-1 space-y-1.5">
-              <div>${escHtml(pgWarnText)}</div>
-              ${pgWarnAction ? `<button id="pageCardApplyLargerSizeBtn" type="button" class="px-2.5 py-1 rounded-md bg-[var(--warning)] text-white hover:opacity-90 font-semibold text-[11px] transition-opacity cursor-pointer">${escHtml(pgWarnAction.buttonLabel)}</button>` : ''}
+              <div>${renderPageSizeWarningMessageHtml(pgWarnText, pgWarnLinks)}</div>
+              ${(pgWarnAction || pgWarnTriggerHtml) ? `
+                <div class="flex items-center gap-1.5 flex-wrap">
+                  ${pgWarnAction ? `<button id="pageCardApplyLargerSizeBtn" type="button" class="px-2.5 py-1 rounded-md bg-[var(--warning)] text-white hover:opacity-90 font-semibold text-[11px] transition-opacity cursor-pointer">${escHtml(pgWarnAction.buttonLabel)}</button>` : ''}
+                  ${pgWarnTriggerHtml}
+                </div>` : ''}
+              ${pgWarnListHtml}
             </div>
           </div>` : ''}
 
@@ -11511,6 +11520,7 @@ function renderContextOverlay(page) {
     if (pgWarnBtn && pgWarnAction) {
       pgWarnBtn.onclick = () => applySuggestedPageSize(pgWarnAction);
     }
+    bindPageSizeWarningStepLinks(box.querySelector('#pageCardSizeWarning'));
     box.querySelectorAll('.page-break-slot-btn').forEach(b => {
       b.onclick = () => {
         const sid = b.getAttribute('data-page-break-step');
@@ -12125,6 +12135,102 @@ function applySuggestedPageSize(action) {
   }
 }
 
+function jumpToStepById(stepId, opts = {}) {
+  if (!stepId) return false;
+  const pIdx = state.pages.findIndex(pg => pg.slots?.some(sl => sl.step.id === stepId));
+  if (pIdx < 0) return false;
+  state.pageIdx = pIdx;
+  state.selectedStepId = stepId;
+  state.selectedPartIds.clear();
+  if (opts.closePageSetup) {
+    closePageSetupModal();
+  }
+  if (opts.closeErrorsModal) {
+    document.getElementById('errorsModal')?.classList.add('hidden');
+  }
+  resetZoom();
+  renderAll();
+  return true;
+}
+
+function renderPageSizeWarningMessageHtml(text, stepLinks) {
+  let html = escHtml(text);
+  if (!Array.isArray(stepLinks) || stepLinks.length === 0) return html;
+
+  const linkCls = 'inline p-0 border-0 bg-transparent text-inherit font-bold underline decoration-current/60 underline-offset-2 hover:opacity-80 cursor-pointer';
+  if (stepLinks.length > 1) {
+    const countRe = new RegExp(`(^|[\\s(])${stepLinks.length} steps\\b`);
+    html = html.replace(
+      countRe,
+      `$1<button type="button" data-toggle-warn-steps aria-expanded="false" class="${linkCls}">${stepLinks.length} steps</button>`,
+    );
+  }
+
+  const worstStep = stepLinks.find((s) => s.isWorst) || (stepLinks.length === 1 ? stepLinks[0] : null);
+  if (worstStep) {
+    const stepRe = new RegExp(`(^|[\\s(])Step ${worstStep.stepNum}\\b`);
+    const tip = `${worstStep.label}${worstStep.pageNum ? ` (Page ${worstStep.pageNum})` : ''} · ${worstStep.detail}`;
+    html = html.replace(
+      stepRe,
+      `$1<button type="button" data-jump-step="${escHtml(worstStep.stepId)}" title="${escHtml(`Go to ${tip}`)}" class="${linkCls}">Step ${worstStep.stepNum}</button>`,
+    );
+  }
+  return html;
+}
+
+function renderPageSizeWarningStepTriggerHtml(stepLinks) {
+  if (!Array.isArray(stepLinks) || stepLinks.length === 0) return '';
+  if (stepLinks.length === 1) {
+    const only = stepLinks[0];
+    return `<button type="button" data-jump-step="${escHtml(only.stepId)}" class="px-2.5 py-1 rounded-md border border-[var(--warning)]/40 bg-[var(--card)]/85 text-[var(--warning)] hover:bg-[var(--card)] font-semibold text-[11px] transition-colors cursor-pointer">Go to ${escHtml(only.label)} →</button>`;
+  }
+  return `<button type="button" data-toggle-warn-steps aria-expanded="false" class="px-2.5 py-1 rounded-md border border-[var(--warning)]/40 bg-[var(--card)]/85 text-[var(--warning)] hover:bg-[var(--card)] font-semibold text-[11px] transition-colors cursor-pointer inline-flex items-center gap-1"><span data-warn-steps-toggle-label>View ${stepLinks.length} steps</span><span data-warn-steps-caret aria-hidden="true">▾</span></button>`;
+}
+
+function renderPageSizeWarningStepListHtml(stepLinks) {
+  if (!Array.isArray(stepLinks) || stepLinks.length <= 1) return '';
+  return `
+    <div data-warn-steps-list class="hidden pt-1.5 mt-0.5 border-t border-[var(--warning)]/20">
+      <div class="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto pr-0.5">
+        ${stepLinks.map((lnk) => `
+          <button type="button" data-jump-step="${escHtml(lnk.stepId)}" title="${escHtml(`Go to ${lnk.label}${lnk.pageNum ? ` · Page ${lnk.pageNum}` : ''} · ${lnk.detail}`)}" class="inline-flex items-center gap-1 px-2 py-1 rounded-md border ${lnk.isWorst ? 'border-[var(--warning)] bg-[var(--card)] font-bold' : 'border-[var(--warning)]/35 bg-[var(--card)]/80 font-semibold'} text-[11px] text-[var(--warning)] hover:border-[var(--warning)] hover:bg-[var(--card)] transition-colors cursor-pointer">
+            <span>${escHtml(lnk.label)}</span>
+            ${lnk.reason !== 'area' ? `<span class="font-mono text-[10px] opacity-75">${escHtml(lnk.studSizeCm.toFixed(2))} cm</span>` : ''}
+          </button>`).join('')}
+      </div>
+    </div>`;
+}
+
+function bindPageSizeWarningStepLinks(containerEl, opts = {}) {
+  if (!containerEl) return;
+  const listEl = containerEl.querySelector('[data-warn-steps-list]');
+  const toggles = Array.from(containerEl.querySelectorAll('[data-toggle-warn-steps]'));
+  const stepCount = containerEl.querySelectorAll('[data-warn-steps-list] [data-jump-step]').length;
+
+  if (listEl && toggles.length > 0) {
+    const toggleList = () => {
+      const expanded = listEl.classList.toggle('hidden') === false;
+      toggles.forEach((btn) => {
+        btn.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+        const labelEl = btn.querySelector('[data-warn-steps-toggle-label]');
+        if (labelEl && stepCount > 0) {
+          labelEl.textContent = expanded ? `Hide ${stepCount} steps` : `View ${stepCount} steps`;
+        }
+        const caretEl = btn.querySelector('[data-warn-steps-caret]');
+        if (caretEl) caretEl.textContent = expanded ? '▴' : '▾';
+      });
+    };
+    toggles.forEach((btn) => { btn.onclick = toggleList; });
+  }
+
+  containerEl.querySelectorAll('[data-jump-step]').forEach((btn) => {
+    btn.onclick = () => {
+      const sid = btn.getAttribute('data-jump-step');
+      if (sid) jumpToStepById(sid, opts);
+    };
+  });
+}
+
 function syncPageSizeWarningUI() {
   const warn = state.model && state.pageSizeWarning?.hasWarning ? state.pageSizeWarning : null;
   const action = warn ? getPrimaryPageSizeAction(warn) : null;
@@ -12140,16 +12246,25 @@ function syncPageSizeWarningUI() {
       setupEl.removeAttribute('data-tone');
       setupEl.innerHTML = '';
     } else {
+      const stepLinks = getPageSizeWarningStepLinks(warn);
+      const triggerHtml = renderPageSizeWarningStepTriggerHtml(stepLinks);
+      const listHtml = renderPageSizeWarningStepListHtml(stepLinks);
       setupEl.setAttribute('data-tone', 'warning');
       setupEl.innerHTML = `
         ${DESTRUCTIVE_ALERT_SVG}
         <div class="min-w-0 flex-1 space-y-1.5">
-          <div>${escHtml(warn.message)}</div>
-          ${action ? `<button id="btnSetupApplySuggestedPageSize" type="button" class="px-2.5 py-1 rounded-md bg-[var(--warning)] text-white hover:opacity-90 font-semibold text-[11px] transition-opacity cursor-pointer">${escHtml(action.buttonLabel)}</button>` : ''}
+          <div>${renderPageSizeWarningMessageHtml(warn.message, stepLinks)}</div>
+          ${(action || triggerHtml) ? `
+            <div class="flex items-center gap-1.5 flex-wrap">
+              ${action ? `<button id="btnSetupApplySuggestedPageSize" type="button" class="px-2.5 py-1 rounded-md bg-[var(--warning)] text-white hover:opacity-90 font-semibold text-[11px] transition-opacity cursor-pointer">${escHtml(action.buttonLabel)}</button>` : ''}
+              ${triggerHtml}
+            </div>` : ''}
+          ${listHtml}
         </div>`;
       setupEl.classList.remove('hidden');
       const setupBtn = setupEl.querySelector('#btnSetupApplySuggestedPageSize');
       if (setupBtn && action) setupBtn.onclick = () => applySuggestedPageSize(action);
+      bindPageSizeWarningStepLinks(setupEl, { closePageSetup: true });
     }
   }
 }
@@ -17020,17 +17135,26 @@ function renderErrorsModal() {
       </div>`;
   }
 
+  const activeLayoutLinks = activeLayoutWarn ? getPageSizeWarningStepLinks(activeLayoutWarn) : [];
   html += filtered.map(d => {
     const isErr = d.severity === 'error';
+    const isLayoutMulti = d.category === 'layout' && activeLayoutLinks.length > 0;
+    const detailHtml = isLayoutMulti
+      ? renderPageSizeWarningMessageHtml(d.detail, activeLayoutLinks)
+      : escHtml(d.detail);
+    const extraStepListHtml = isLayoutMulti
+      ? renderPageSizeWarningStepListHtml(activeLayoutLinks)
+      : '';
     return `
-      <div class="p-3 rounded-2xl border border-[var(--border)] bg-[var(--background)] flex items-start justify-between gap-2.5">
-        <div class="space-y-1 min-w-0">
+      <div ${isLayoutMulti ? 'data-layout-diag-card' : ''} class="p-3 rounded-2xl border border-[var(--border)] bg-[var(--background)] flex items-start justify-between gap-2.5">
+        <div class="space-y-1 min-w-0 flex-1">
           <div class="flex items-center gap-1.5 flex-wrap">
             <span class="px-2 py-0.5 rounded-md text-xs font-bold ${isErr ? 'bg-[var(--danger-soft)] text-[var(--danger)]' : 'bg-[var(--warning-soft)] text-[var(--warning)]'}">${isErr ? 'Error' : 'Warning'}</span>
             <span class="font-bold break-words">${escHtml(d.title)}</span>
             ${d.partCode ? `<span class="px-1.5 py-0.5 rounded-md text-xs font-mono bg-black/5 dark:bg-white/10 text-[var(--muted-foreground)] break-all">${escHtml(d.partCode)}</span>` : ''}
           </div>
-          <p class="text-xs text-[var(--muted-foreground)] leading-relaxed break-words">${escHtml(d.detail)}</p>
+          <p class="text-xs text-[var(--muted-foreground)] leading-relaxed break-words">${detailHtml}</p>
+          ${extraStepListHtml}
         </div>
         ${d.stepId ? `<button data-jump-step="${escHtml(d.stepId)}" class="jump-step-btn shrink-0 px-2.5 py-1.5 rounded-md border border-[var(--border)] bg-[var(--card)] font-semibold hover:border-[var(--primary)] hover:text-[var(--primary)]">Step ${d.stepNum}${d.stepAbsNum && d.stepAbsNum !== d.stepNum ? ` · #${d.stepAbsNum}` : ''} →</button>` : ''}
       </div>`;
@@ -17063,15 +17187,13 @@ function renderErrorsModal() {
     document.getElementById('errorsModal').classList.add('hidden');
     openPageSetupModal();
   };
+  body.querySelectorAll('[data-layout-diag-card]').forEach((cardEl) => {
+    bindPageSizeWarningStepLinks(cardEl, { closeErrorsModal: true });
+  });
   body.querySelectorAll('.jump-step-btn').forEach(btn => {
     btn.onclick = () => {
       const sid = btn.getAttribute('data-jump-step');
-      const pIdx = state.pages.findIndex(pg => pg.slots?.some(sl => sl.step.id === sid));
-      if (pIdx >= 0) {
-        state.pageIdx = pIdx; state.selectedStepId = sid; state.selectedPartIds.clear();
-        document.getElementById('errorsModal').classList.add('hidden');
-        resetZoom(); renderAll();
-      }
+      if (sid) jumpToStepById(sid, { closeErrorsModal: true });
     };
   });
 }
