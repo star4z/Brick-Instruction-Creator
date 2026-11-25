@@ -138,6 +138,8 @@ export function sanitizeStepLightingMode(
  * `state` keys so the active theme can be mirrored into state with a simple copy.
  */
 export interface ThemeStyleOptions {
+  autoPlacementArrows: boolean;
+  arrowColor: string;
   highlightNew: boolean;
   highlightColor: string;
   highlightLineWeight: LineWeightId;
@@ -157,6 +159,8 @@ export interface ThemeStyleOptions {
 }
 
 export const THEME_STYLE_OPTION_KEYS: Array<keyof ThemeStyleOptions> = [
+  'autoPlacementArrows',
+  'arrowColor',
   'highlightNew',
   'highlightColor',
   'highlightLineWeight',
@@ -176,7 +180,9 @@ export const THEME_STYLE_OPTION_KEYS: Array<keyof ThemeStyleOptions> = [
 ];
 
 export const DEFAULT_THEME_STYLE_OPTIONS: ThemeStyleOptions = {
-  highlightNew: true,
+  autoPlacementArrows: true,
+  arrowColor: '#dc2626',
+  highlightNew: false,
   highlightColor: '#ff2d55',
   highlightLineWeight: 'medium',
   fadePrev: true,
@@ -231,6 +237,8 @@ export function normalizeThemeStyleOptions(
   }
   const highQualityStepRender = stepLighting === 'studio';
   return {
+    autoPlacementArrows: bool('autoPlacementArrows'),
+    arrowColor: sanitizeHexColor(r.arrowColor, sanitizeHexColor(fb.arrowColor, '#dc2626')),
     highlightNew: bool('highlightNew'),
     highlightColor: sanitizeHexColor(r.highlightColor, sanitizeHexColor(fb.highlightColor, '#ff2d55')),
     highlightLineWeight: sanitizeLineWeight(r.highlightLineWeight, sanitizeLineWeight(fb.highlightLineWeight, 'medium')),
@@ -286,6 +294,8 @@ export interface ManualTheme {
   /** Font for labels, part names & body text (defaults to `public-sans`). */
   bodyFont?: ThemeFontId;
   // Rendering style, step display & Parts List style options (see ThemeStyleOptions)
+  autoPlacementArrows?: boolean;
+  arrowColor?: string;
   highlightNew?: boolean;
   highlightColor?: string;
   highlightLineWeight?: LineWeightId;

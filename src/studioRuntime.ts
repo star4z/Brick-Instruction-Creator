@@ -108,6 +108,11 @@ import {
   resolveStudioStepCamera,
 } from './engine/stepCamera';
 import {
+  DEFAULT_ARROW_COLOR,
+  computeAutoPlacementOffsetsForSequence,
+  computePlacementArrowSegments,
+} from './engine/placementArrows';
+import {
   buildPhysicalVerticalPrereqMap,
   classifySidewaysCapability,
   minSubBoxGap,
@@ -1717,9 +1722,12 @@ function buildMeshBuffers(prevParts, newParts, opts) {
     const bl = Math.hypot(bx, by, bz) || 1; bx/=bl; by/=bl; bz/=bl;
     const cx = by*uz - bz*uy, cy = bz*ux - bx*uz, cz = bx*uy - by*ux;
 
-    const headLen = Math.min(12, len * 0.45);
+    const headLen = Math.min(9.5, len * 0.42);
     const shaftEnd = [t[0] - ux*headLen, t[1] - uy*headLen, t[2] - uz*headLen];
     const segs = 10;
+    const shaftR = 1.35;
+    const headR = 4.2;
+    const ink = [Math.max(0, Math.round(col[0] * 0.35)), Math.max(0, Math.round(col[1] * 0.35)), Math.max(0, Math.round(col[2] * 0.35))];
     const ring = (center, r, ang) => [
       center[0] + (Math.cos(ang)*bx + Math.sin(ang)*cx)*r,
       center[1] + (Math.cos(ang)*by + Math.sin(ang)*cy)*r,
@@ -1730,13 +1738,16 @@ function buildMeshBuffers(prevParts, newParts, opts) {
       const am = (a0+a1)/2;
       const sn = [Math.cos(am)*bx + Math.sin(am)*cx, Math.cos(am)*by + Math.sin(am)*cy, Math.cos(am)*bz + Math.sin(am)*cz];
       // Shaft
-      const s0 = ring(s, 1.7, a0), s1 = ring(s, 1.7, a1), e0 = ring(shaftEnd, 1.7, a0), e1 = ring(shaftEnd, 1.7, a1);
+      const s0 = ring(s, shaftR, a0), s1 = ring(s, shaftR, a1), e0 = ring(shaftEnd, shaftR, a0), e1 = ring(shaftEnd, shaftR, a1);
       pushTri(s0, s1, e1, sn, col, 255); pushTri(s0, e1, e0, sn, col, 255);
       // Arrowhead cone
-      const h0 = ring(shaftEnd, 5.2, a0), h1 = ring(shaftEnd, 5.2, a1);
+      const h0 = ring(shaftEnd, headR, a0), h1 = ring(shaftEnd, headR, a1);
       pushTri(h0, h1, t, sn, col, 255);
       pushTri(shaftEnd, h1, h0, [-ux,-uy,-uz], col, 255);
+      pushEdge(h0, h1, ink, 175);
     }
+    pushEdge(ring(shaftEnd, headR, 0), t, ink, 175);
+    pushEdge(ring(shaftEnd, headR, Math.PI), t, ink, 175);
   };
 
   // Curved 3D Rotation Arc Arrow (shows FROM starting pose -> TO target pose around any 3D joint/axis!)
@@ -2522,9 +2533,11 @@ function buildMeshBuffers(prevParts, newParts, opts) {
     const arrowEnabled = pOv ? (pOv.arrow !== false) : (opts.showArrows !== false);
     if (isNew && hasOffset && arrowEnabled) {
       const box = computeWorldBox(part);
-      const from = [box.center[0] + offX, box.center[1] + offY, box.center[2] + offZ];
-      const to = [box.center[0], box.center[1], box.center[2]];
-      addArrow3D(from, to, hexToRgb255(opts.accent || '#1a73e8', 0));
+      const arrowRgb = hexToRgb255(opts.arrowColor || DEFAULT_ARROW_COLOR, 0);
+      const segments = computePlacementArrowSegments(box, [offX, offY, offZ]);
+      for (const seg of segments) {
+        addArrow3D(seg.from, seg.to, arrowRgb);
+      }
     }
   };
 
@@ -5559,6 +5572,75 @@ function optimizeManualStepCameras(chapters) {
   for (const list of sectionSteps.values()) {
     optimizeStepList(list);
   }
+
+  // 3. Assign LEGO-style automatic placement offsets & arrows (first steps + hard-to-notice pieces)
+  assignAutoPlacementOffsets(chapters);
+}
+
+function assignAutoPlacementOffsets(chapters) {
+  if (!Array.isArray(chapters)) return;
+  const partToInput = (part) => {
+    const cInfo = resolveColorInfo(part.c) || COLORS[71];
+    const rgb = hexToRgb255(cInfo.hex || '#9ca3af', 0);
+    return {
+      id: part.id,
+      box: computeWorldBox(part),
+      rgb: [rgb[0], rgb[1], rgb[2]],
+      sku: `${part.p}:${part.c}`,
+    };
+  };
+
+  const applyToSequence = (steps) => {
+    if (!Array.isArray(steps) || steps.length === 0) return;
+    const inputs = steps.map((step) => {
+      const hasStructuralOffsets = Boolean(
+        step.defaultPartOffsets && Object.keys(step.defaultPartOffsets).length > 0,
+      );
+      const skip = Boolean(
+        step.isStandaloneFigure ||
+        step.isMinifigPoseStep ||
+        step.attachedMinifig ||
+        step.attachedSubmodel?.isSectionAttach ||
+        hasStructuralOffsets,
+      );
+      return {
+        id: step.id,
+        parts: (step.parts || []).map(partToInput),
+        camera: {
+          az: typeof step.az === 'number' ? step.az : DEFAULT_STUDIO_CAMERA.az,
+          el: typeof step.el === 'number' ? step.el : DEFAULT_STUDIO_CAMERA.el,
+          side: step.side === 'bottom' ? 'bottom' : 'top',
+        },
+        skip,
+      };
+    });
+
+    const offsetMap = computeAutoPlacementOffsetsForSequence(inputs);
+    for (const step of steps) {
+      const autoOffs = offsetMap.get(step.id);
+      if (autoOffs && Object.keys(autoOffs).length > 0) {
+        step.autoPartOffsets = autoOffs;
+      } else {
+        delete step.autoPartOffsets;
+      }
+    }
+  };
+
+  const sectionSteps = new Map();
+  for (const ch of chapters) {
+    if (ch.kind === 'minifigure') continue;
+    if (ch.kind === 'submodel') {
+      applyToSequence(ch.steps || []);
+      continue;
+    }
+    const secKey = ch.sectionId || ch.id;
+    if (!sectionSteps.has(secKey)) sectionSteps.set(secKey, []);
+    const list = sectionSteps.get(secKey);
+    for (const s of ch.steps || []) list.push(s);
+  }
+  for (const list of sectionSteps.values()) {
+    applyToSequence(list);
+  }
 }
 
 // ZERO-FLOATING CHASSIS-FIRST STEP GENERATOR (with dynamic cognitive-budget step sizing, sticky camera-corner selection, duplicate submodels & subdivision chapters!)
@@ -6863,7 +6945,9 @@ const state = {
   layoutConfig: createDefaultPageLayoutSpec(),
   layoutGroups: [],        // editable StepLayoutGroup[] for per-range layouts & styles
   detectDuplicates: true,  // auto-detect explicit + geometric duplicate submodels
-  highlightNew: true,
+  autoPlacementArrows: true,
+  arrowColor: DEFAULT_ARROW_COLOR,
+  highlightNew: false,
   highlightColor: '#ff2d55',
   highlightLineWeight: 'medium',
   fadePrev: true,
@@ -6906,6 +6990,24 @@ const state = {
   undoStack: [],
   redoStack: [],
 };
+
+function getBaseDefaultPartOffsets(step) {
+  const auto = state.autoPlacementArrows !== false ? (step?.autoPartOffsets || null) : null;
+  const def = step?.defaultPartOffsets || null;
+  if (!auto && !def) return null;
+  if (!auto) return def;
+  if (!def) return auto;
+  return { ...auto, ...def };
+}
+
+function getEffectivePartOffsets(step, ov) {
+  const base = getBaseDefaultPartOffsets(step);
+  const manual = ov?.partOffsets || null;
+  if (!base && !manual) return {};
+  if (!base) return manual;
+  if (!manual) return base;
+  return { ...base, ...manual };
+}
 
 // Customizable keyboard shortcuts state (persisted in localStorage)
 const isMacShortcutsPlatform = detectMacPlatform();
@@ -7401,9 +7503,7 @@ function rebuildPages() {
 
     const stepMetrics = ch.steps.map((step) => {
       const ov = state.overrides[step.id] || {};
-      const effectivePartOffsets = step.defaultPartOffsets
-        ? { ...step.defaultPartOffsets, ...(ov.partOffsets || {}) }
-        : (ov.partOffsets || {});
+      const effectivePartOffsets = getEffectivePartOffsets(step, ov);
       const stepParts = step.parts || [];
       const canonicalNewBoxes = stepParts.map(getCachedPartBox);
       const shiftedNewBoxes = canonicalNewBoxes.map((b, idx) => {
@@ -8855,9 +8955,7 @@ function renderAll() {
       const mfStyle = isMfBuild ? getEffectiveMinifigStyle(step) : 'classic';
       const isMfExploded = isMfBuild && mfStyle === 'exploded';
       const isMfSeq = isMfBuild && mfStyle === 'sequential';
-      const effectivePartOffsets = step.defaultPartOffsets
-        ? { ...step.defaultPartOffsets, ...(ov.partOffsets || {}) }
-        : (ov.partOffsets || {});
+      const effectivePartOffsets = getEffectivePartOffsets(step, ov);
       const mfPrep = step.isMinifigPoseStep ? step.minifigPrep : null;
       const darkThemeBg = isDarkHexColor(toHexColor(theme.bgColor || '#ffffff', '#ffffff'));
       const opts = {
@@ -8870,7 +8968,7 @@ function renderAll() {
         starkBlackOutlines: state.starkBlackOutlines,
         outlineLineWeight: state.starkBlackOutlines ? state.outlineLineWeight : 'light',
         darkBackground: darkThemeBg,
-        showArrows: true, accent: theme.accent, ov,
+        showArrows: true, arrowColor: state.arrowColor, accent: theme.accent, ov,
         partOffsets: effectivePartOffsets,
         selectedPartIds: state.mode === 'parts' && state.selectedStepId === step.id ? state.selectedPartIds : null,
         ...(mfPrep ? {
@@ -9521,7 +9619,8 @@ function bindStepPageInteractions(page) {
       let bestId = null, bestScore = 0.28;
       const ov = info.ov || {};
       for (const p of info.step.parts) {
-        const pOv = ov.partOffsets?.[p.id] || info.step.defaultPartOffsets?.[p.id] || {};
+        const baseDefOffs = getBaseDefaultPartOffsets(info.step);
+        const pOv = ov.partOffsets?.[p.id] || baseDefOffs?.[p.id] || {};
         const box = computeWorldBox(p);
         const dx = (pOv.x || 0) + (ov.offX || 0), dy = (pOv.y || 0) + (ov.offY || 0), dz = (pOv.z || 0) + (ov.offZ || 0);
         const c = projectWorldToNdc([box.center[0]+dx, box.center[1]+dy, box.center[2]+dz], info.snap.mvp);
@@ -10229,7 +10328,8 @@ function renderContextOverlay(page) {
 
     const selectedPartIdsArr = Array.from(state.selectedPartIds);
     const firstId = selectedPartIdsArr[0];
-    const pOv = ov.partOffsets?.[firstId] || step.defaultPartOffsets?.[firstId] || { x:0, y:0, z:0, tilt:0, arrow:true };
+    const baseDefOffs = getBaseDefaultPartOffsets(step);
+    const pOv = ov.partOffsets?.[firstId] || baseDefOffs?.[firstId] || { x:0, y:0, z:0, tilt:0, arrow:true };
     const studY = Math.round((pOv.y || 0) / 20);
     const studX = Math.round((pOv.x || 0) / 20);
     const studZ = Math.round((pOv.z || 0) / 20);
@@ -10239,7 +10339,7 @@ function renderContextOverlay(page) {
       totalPartsInStep: step.parts.length,
       selectedPartCount: selCount,
       override: ov,
-      defaultPartOffsets: step.defaultPartOffsets,
+      defaultPartOffsets: baseDefOffs,
       insertCount: (state.stepInserts[step.id] || []).length,
       hasSubassembly: Boolean(step.subassembly),
     });
@@ -10317,7 +10417,7 @@ function renderContextOverlay(page) {
       const curOv = state.overrides[step.id] || {};
       const po = { ...(curOv.partOffsets || {}) };
       for (const id of state.selectedPartIds) {
-        const cur = po[id] || step.defaultPartOffsets?.[id] || { x:0, y:0, z:0, tilt:0, arrow:true };
+        const cur = po[id] || baseDefOffs?.[id] || { x:0, y:0, z:0, tilt:0, arrow:true };
         po[id] = { x: cur.x + dx, y: cur.y + dy, z: cur.z + dz, tilt: cur.tilt + dtilt, arrow: cur.arrow };
       }
       state.overrides[step.id] = { ...curOv, partOffsets: po };
@@ -10335,7 +10435,7 @@ function renderContextOverlay(page) {
       const po = { ...(curOv.partOffsets || {}) };
       const nextVal = pOv.arrow === false;
       for (const id of state.selectedPartIds) {
-        const cur = po[id] || step.defaultPartOffsets?.[id] || { x:0, y:0, z:0, tilt:0, arrow:true };
+        const cur = po[id] || baseDefOffs?.[id] || { x:0, y:0, z:0, tilt:0, arrow:true };
         po[id] = { ...cur, arrow: nextVal };
       }
       state.overrides[step.id] = { ...curOv, partOffsets: po };
@@ -10346,7 +10446,7 @@ function renderContextOverlay(page) {
       const curOv = state.overrides[step.id] || {};
       const po = { ...(curOv.partOffsets || {}) };
       for (const id of state.selectedPartIds) {
-        if (step.defaultPartOffsets?.[id]) po[id] = { x:0, y:0, z:0, tilt:0, arrow:false };
+        if (baseDefOffs?.[id]) po[id] = { x:0, y:0, z:0, tilt:0, arrow:false };
         else delete po[id];
       }
       state.overrides[step.id] = { ...curOv, partOffsets: po };
@@ -10565,7 +10665,7 @@ function renderContextOverlay(page) {
           override: ov,
           insertCount: stepInserts.length,
           hasSubassembly: Boolean(step.subassembly),
-          defaultPartOffsets: step.defaultPartOffsets,
+          defaultPartOffsets: getBaseDefaultPartOffsets(step),
         });
         sections.push(`
           <div class="space-y-2">
@@ -13251,9 +13351,7 @@ function renderOverviewModal(opts = {}) {
       const cam = getStepCamera(step);
       const ov = state.overrides[step.id] || {};
       const modelScale = ov.modelScale || 1.0;
-      const effectivePartOffsets = step.defaultPartOffsets
-        ? { ...step.defaultPartOffsets, ...(ov.partOffsets || {}) }
-        : (ov.partOffsets || {});
+      const effectivePartOffsets = getEffectivePartOffsets(step, ov);
       const sigInfo = stepSigs.get(step.id) || {
         prevCount: 0,
         prevSignature: '0:0',
@@ -16066,7 +16164,8 @@ function scheduleSaveSessionPrefs() {
       customWidth: state.customWidth, customHeight: state.customHeight, customUnit: state.customUnit,
       density: state.density, layout: state.layout,
       layoutConfig: state.layoutConfig, layoutGroups: state.layoutGroups,
-      detectDuplicates: state.detectDuplicates, highlightNew: state.highlightNew, highlightColor: state.highlightColor,
+      detectDuplicates: state.detectDuplicates, autoPlacementArrows: state.autoPlacementArrows, arrowColor: state.arrowColor,
+      highlightNew: state.highlightNew, highlightColor: state.highlightColor,
       highlightLineWeight: state.highlightLineWeight,
       fadePrev: state.fadePrev, fadeOpacity: state.fadeOpacity, stepLighting: state.stepLighting, highQualityStepRender: state.highQualityStepRender,
       starkBlackOutlines: state.starkBlackOutlines, outlineLineWeight: state.outlineLineWeight, showRotCues: state.showRotCues,
@@ -16194,6 +16293,10 @@ async function restoreLastSessionOnStart() {
     if (bomChk) bomChk.checked = state.showPartsList;
     const backChk = document.getElementById('toggleShowBackCover');
     if (backChk) backChk.checked = state.showBackCover;
+    const arrChk = document.getElementById('toggleAutoPlacementArrows');
+    if (arrChk) arrChk.checked = state.autoPlacementArrows !== false;
+    const arrCol = document.getElementById('arrowColor');
+    if (arrCol) arrCol.value = state.arrowColor || DEFAULT_ARROW_COLOR;
     document.getElementById('toggleHighlight').checked = state.highlightNew;
     document.getElementById('highlightColor').value = state.highlightColor;
     syncStepLightingUI(state.stepLighting);
@@ -17532,9 +17635,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
           drawContain(ctx, stImg, sx + st.slotPad + si * (stCellW + stGap), renderTopY, stCellW, renderAvailH);
         }
       } else {
-        const effectivePartOffsets = step.defaultPartOffsets
-          ? { ...step.defaultPartOffsets, ...(ov.partOffsets || {}) }
-          : (ov.partOffsets || {});
+        const effectivePartOffsets = getEffectivePartOffsets(step, ov);
         const pdfStepDims = computeStepSlotRenderSize({
           slotWidth: mainAvailW,
           slotHeight: renderAvailH,
@@ -17553,7 +17654,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
           starkBlackOutlines: state.starkBlackOutlines,
           outlineLineWeight: state.starkBlackOutlines ? state.outlineLineWeight : 'light',
           darkBackground: isDarkHexColor(toHexColor(theme.bgColor || '#ffffff', '#ffffff')),
-          showArrows: true, accent: theme.accent, ov, partOffsets: effectivePartOffsets,
+          showArrows: true, arrowColor: state.arrowColor, accent: theme.accent, ov, partOffsets: effectivePartOffsets,
           ...(mfPrep ? {
             minifigIndicators: mfPrep.indicators || [],
             ghostParts: mfPrep.ghostParts || [],
@@ -18074,6 +18175,7 @@ function syncStylePanel() {
 
   const opts = getThemeStyleOptions(t);
   const setChk = (id, val) => { const el = document.getElementById(id); if (el) el.checked = Boolean(val); };
+  setChk('toggleAutoPlacementArrows', opts.autoPlacementArrows);
   setChk('toggleHighlight', opts.highlightNew);
   syncFadeVisibilityPreview(opts);
   syncStepLightingUI(opts.stepLighting);
@@ -18100,6 +18202,8 @@ function syncStylePanel() {
     }
     if (note) note.classList.toggle('hidden', !wordlessOn);
   }
+  const arrColEl = document.getElementById('arrowColor');
+  if (arrColEl && arrColEl.value !== opts.arrowColor) arrColEl.value = opts.arrowColor;
   const hlEl = document.getElementById('highlightColor');
   if (hlEl && hlEl.value !== opts.highlightColor) hlEl.value = opts.highlightColor;
 
@@ -18663,9 +18767,10 @@ function nudgeSelectedPartsByKeyboard(dx, dy, dz) {
   const { step } = active;
   pushUndo();
   const curOv = state.overrides[step.id] || {};
+  const baseDef = getBaseDefaultPartOffsets(step);
   const po = { ...(curOv.partOffsets || {}) };
   for (const id of state.selectedPartIds) {
-    const cur = po[id] || step.defaultPartOffsets?.[id] || { x: 0, y: 0, z: 0, tilt: 0, arrow: true };
+    const cur = po[id] || baseDef?.[id] || { x: 0, y: 0, z: 0, tilt: 0, arrow: true };
     po[id] = { x: cur.x + dx, y: cur.y + dy, z: cur.z + dz, tilt: cur.tilt, arrow: cur.arrow };
   }
   state.overrides[step.id] = { ...curOv, partOffsets: po };
@@ -18679,12 +18784,13 @@ function toggleSelectedPartsArrow() {
   const { step } = active;
   const firstId = Array.from(state.selectedPartIds)[0];
   const curOv = state.overrides[step.id] || {};
-  const firstOv = curOv.partOffsets?.[firstId] || step.defaultPartOffsets?.[firstId] || { x: 0, y: 0, z: 0, tilt: 0, arrow: true };
+  const baseDef = getBaseDefaultPartOffsets(step);
+  const firstOv = curOv.partOffsets?.[firstId] || baseDef?.[firstId] || { x: 0, y: 0, z: 0, tilt: 0, arrow: true };
   const nextVal = firstOv.arrow === false;
   pushUndo();
   const po = { ...(curOv.partOffsets || {}) };
   for (const id of state.selectedPartIds) {
-    const cur = po[id] || step.defaultPartOffsets?.[id] || { x: 0, y: 0, z: 0, tilt: 0, arrow: true };
+    const cur = po[id] || baseDef?.[id] || { x: 0, y: 0, z: 0, tilt: 0, arrow: true };
     po[id] = { ...cur, arrow: nextVal };
   }
   state.overrides[step.id] = { ...curOv, partOffsets: po };
@@ -19988,6 +20094,10 @@ for (const [btnId, kind] of [
   if (el) el.onclick = () => openExtraPageSettings(kind);
 }
 // Rendering style & step display options are part of the active theme (built-ins fork on first edit)
+const toggleAutoArrowsEl = document.getElementById('toggleAutoPlacementArrows');
+if (toggleAutoArrowsEl) toggleAutoArrowsEl.onchange = (e) => patchActiveTheme({ autoPlacementArrows: e.target.checked });
+const arrowColorEl = document.getElementById('arrowColor');
+if (arrowColorEl) arrowColorEl.oninput = (e) => patchActiveTheme({ arrowColor: e.target.value });
 document.getElementById('toggleHighlight').onchange = (e) => patchActiveTheme({ highlightNew: e.target.checked });
 document.getElementById('highlightColor').oninput = (e) => patchActiveTheme({ highlightColor: e.target.value });
 const starkBlackToggleEl = document.getElementById('toggleStarkBlackOutlines');
@@ -20331,11 +20441,20 @@ async function runInteractiveHtmlExport() {
           const prev = getPreviousPartsForStep(state.model, ch, step);
           const cam = getStepCamera(step);
           const ov = state.overrides[step.id] || {};
-          const effOffsets = step.defaultPartOffsets
-            ? { ...step.defaultPartOffsets, ...(ov.partOffsets || {}) }
-            : (ov.partOffsets || {});
+          const effOffsets = getEffectivePartOffsets(step, ov);
           const prevPartIdx = prev.map((p) => registerPart(p));
           const newPartIdx = (step.parts || []).map((p) => registerPart(p, effOffsets[p.id] || null));
+          const stepArrows = [];
+          for (const p of step.parts || []) {
+            const pOv = effOffsets[p.id];
+            if (!pOv || pOv.arrow === false) continue;
+            const ox = Number(pOv.x) || 0;
+            const oy = Number(pOv.y) || 0;
+            const oz = Number(pOv.z) || 0;
+            if (Math.hypot(ox, oy, oz) < 6) continue;
+            const segs = computePlacementArrowSegments(computeWorldBox(p), [ox, oy, oz]);
+            for (const seg of segs) stepArrows.push(seg);
+          }
 
           const pliMap = new Map();
           for (const p of step.parts || []) {
@@ -20370,9 +20489,10 @@ async function runInteractiveHtmlExport() {
             rotationCueKind: hasCue ? effectiveCue : undefined,
             subLabel,
             pli: Array.from(pliMap.values()),
-            previewUrl: renderFallbackPreview(prev, step.parts || [], cam.az, cam.el, ov.modelScale || 1.0, { partOffsets: effOffsets }),
+            previewUrl: renderFallbackPreview(prev, step.parts || [], cam.az, cam.el, ov.modelScale || 1.0, { partOffsets: effOffsets, arrowColor: state.arrowColor }),
             prevPartIdx,
             newPartIdx,
+            arrows: stepArrows.length > 0 ? stepArrows : undefined,
             az: cam.az,
             el: cam.el,
             zoom: ov.modelScale || 1.0,
@@ -20419,6 +20539,7 @@ async function runInteractiveHtmlExport() {
       },
       highlightNew: state.highlightNew,
       highlightColor: state.highlightColor,
+      arrowColor: state.arrowColor,
       fadePrev: state.fadePrev,
       fadeOpacity: state.fadeOpacity,
       unlit: state.stepLighting === 'none',
@@ -21849,6 +21970,7 @@ function renderImportWizardUI() {
     highQualityStepRender: Boolean(state.highQualityStepRender),
     starkBlackOutlines: Boolean(state.starkBlackOutlines),
     outlineLineWeight: state.outlineLineWeight,
+    autoPlacementArrows: state.autoPlacementArrows !== false,
     highlightNew: Boolean(state.highlightNew),
     highlightLineWeight: state.highlightLineWeight,
     fadeOpacity: Number(state.fadeOpacity ?? 0.82),

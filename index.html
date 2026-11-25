@@ -593,11 +593,18 @@
               <button data-step-lighting="studio" type="button" class="step-lighting-chip py-1.5 px-2 rounded-md border font-semibold text-xs transition cursor-pointer" title="Cover-quality studio lighting, bevels &amp; soft shadows">Studio</button>
             </div>
           </div>
+          <label class="flex items-center justify-between gap-2 cursor-pointer" title="Automatically offset hard-to-notice pieces and first-step connections with LEGO-style placement arrows">
+            <span class="font-medium">Placement Arrows &amp; Offsets</span>
+            <div class="flex items-center gap-2">
+              <input id="arrowColor" type="color" value="#dc2626" class="w-6 h-6 rounded border border-[var(--border)] bg-transparent cursor-pointer" />
+              <input id="toggleAutoPlacementArrows" type="checkbox" checked class="w-4 h-4 accent-[var(--primary)] cursor-pointer" />
+            </div>
+          </label>
           <label class="flex items-center justify-between gap-2 cursor-pointer">
             <span class="font-medium">Outline New Parts</span>
             <div class="flex items-center gap-2">
               <input id="highlightColor" type="color" value="#ff2d55" class="w-6 h-6 rounded border border-[var(--border)] bg-transparent cursor-pointer" />
-              <input id="toggleHighlight" type="checkbox" checked class="w-4 h-4 accent-[var(--primary)] cursor-pointer" />
+              <input id="toggleHighlight" type="checkbox" class="w-4 h-4 accent-[var(--primary)] cursor-pointer" />
             </div>
           </label>
           <div id="highlightWeightWrap" class="space-y-1.5">

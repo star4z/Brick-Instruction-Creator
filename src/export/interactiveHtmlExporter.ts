@@ -111,6 +111,7 @@ export interface InteractiveSceneSpec {
   el: number;
   zoom: number;
   hero?: boolean;
+  arrows?: Array<{ from: [number, number, number]; to: [number, number, number] }>;
 }
 
 export interface InteractiveStepScene extends InteractiveSceneSpec {
@@ -213,6 +214,7 @@ export interface InteractiveHtmlPayload {
   theme: InteractiveViewerTheme;
   highlightNew: boolean;
   highlightColor: string;
+  arrowColor?: string;
   fadePrev: boolean;
   fadeOpacity: number;
   /** When true, renders instruction steps with flat unlit colors (no lighting or specular shading). */
@@ -1266,6 +1268,57 @@ ${staticFallbackHtml}
   let highlightNew = DATA.highlightNew !== false;
   let fadePrev = DATA.fadePrev !== false;
   const hlRgb = hexToRgb01(DATA.highlightColor || '#ff2d55');
+  const arrowRgb01 = hexToRgb01(DATA.arrowColor || '#dc2626');
+  const arrowColBytes = [Math.round(arrowRgb01[0] * 255), Math.round(arrowRgb01[1] * 255), Math.round(arrowRgb01[2] * 255), 255];
+  const ID_M4 = new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]);
+  const ID_N3 = new Float32Array([1,0,0, 0,1,0, 0,0,1]);
+  const arrowGpuCache = new WeakMap();
+  function ensureArrowGpu(scene) {
+    if (!scene || !Array.isArray(scene.arrows) || scene.arrows.length === 0) return null;
+    if (arrowGpuCache.has(scene)) return arrowGpuCache.get(scene);
+    const pos = [], norm = [], col = [];
+    const pushT = (a, b, c, n) => {
+      pos.push(a[0],a[1],a[2], b[0],b[1],b[2], c[0],c[1],c[2]);
+      norm.push(n[0],n[1],n[2], n[0],n[1],n[2], n[0],n[1],n[2]);
+      for (let k = 0; k < 3; k++) col.push(arrowColBytes[0], arrowColBytes[1], arrowColBytes[2], 255);
+    };
+    for (const arr of scene.arrows) {
+      const s = arr.from, t = arr.to;
+      if (!s || !t) continue;
+      const dx = t[0]-s[0], dy = t[1]-s[1], dz = t[2]-s[2];
+      const len = Math.hypot(dx, dy, dz);
+      if (len < 6) continue;
+      const ux = dx/len, uy = dy/len, uz = dz/len;
+      const rx = Math.abs(uy) < 0.9 ? 0 : 1, ry = Math.abs(uy) < 0.9 ? 1 : 0, rz = 0;
+      let bx = uy*rz - uz*ry, by = uz*rx - ux*rz, bz = ux*ry - uy*rx;
+      const bl = Math.hypot(bx, by, bz) || 1; bx/=bl; by/=bl; bz/=bl;
+      const cx = by*uz - bz*uy, cy = bz*ux - bx*uz, cz = bx*uy - by*ux;
+      const headLen = Math.min(9.5, len * 0.42);
+      const shaftEnd = [t[0] - ux*headLen, t[1] - uy*headLen, t[2] - uz*headLen];
+      const segs = 10;
+      const ring = (ctr, r, ang) => [
+        ctr[0] + (Math.cos(ang)*bx + Math.sin(ang)*cx)*r,
+        ctr[1] + (Math.cos(ang)*by + Math.sin(ang)*cy)*r,
+        ctr[2] + (Math.cos(ang)*bz + Math.sin(ang)*cz)*r,
+      ];
+      for (let i = 0; i < segs; i++) {
+        const a0 = (i/segs)*Math.PI*2, a1 = ((i+1)/segs)*Math.PI*2, am = (a0+a1)*0.5;
+        const sn = [Math.cos(am)*bx + Math.sin(am)*cx, Math.cos(am)*by + Math.sin(am)*cy, Math.cos(am)*bz + Math.sin(am)*cz];
+        const s0 = ring(s, 1.35, a0), s1 = ring(s, 1.35, a1), e0 = ring(shaftEnd, 1.35, a0), e1 = ring(shaftEnd, 1.35, a1);
+        pushT(s0, s1, e1, sn); pushT(s0, e1, e0, sn);
+        const h0 = ring(shaftEnd, 4.2, a0), h1 = ring(shaftEnd, 4.2, a1);
+        pushT(h0, h1, t, sn);
+        pushT(shaftEnd, h1, h0, [-ux,-uy,-uz]);
+      }
+    }
+    if (pos.length === 0) { arrowGpuCache.set(scene, null); return null; }
+    const tp = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, tp); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(pos), gl.STATIC_DRAW);
+    const tn = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, tn); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(norm), gl.STATIC_DRAW);
+    const tc = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, tc); gl.bufferData(gl.ARRAY_BUFFER, new Uint8Array(col), gl.STATIC_DRAW);
+    const gpu = { tp, tn, tc, count: pos.length / 3 };
+    arrowGpuCache.set(scene, gpu);
+    return gpu;
+  }
   const fadeMixVal = Math.max(0, Math.min(0.76, (1 - (DATA.fadeOpacity ?? 0.68)) * 0.95 + ((DATA.fadeOpacity ?? 0.68) < 0.99 ? 0.16 : 0)));
   const checkedBom = new Set();
   let drawQueued = false;
@@ -1355,6 +1408,17 @@ ${staticFallbackHtml}
         gl.bindBuffer(gl.ARRAY_BUFFER, gpu.tc); gl.vertexAttribPointer(progs.tri.col, 4, gl.UNSIGNED_BYTE, true, 0, 0);
         gl.drawArrays(gl.TRIANGLES, 0, pr.oc);
       }
+    }
+
+    const arrowGpu = ensureArrowGpu(activeScene);
+    if (arrowGpu && arrowGpu.count > 0) {
+      gl.uniform1f(progs.tri.fade, 0.0);
+      gl.uniformMatrix4fv(progs.tri.model, false, ID_M4);
+      gl.uniformMatrix3fv(progs.tri.nmat, false, ID_N3);
+      gl.bindBuffer(gl.ARRAY_BUFFER, arrowGpu.tp); gl.vertexAttribPointer(progs.tri.pos, 3, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, arrowGpu.tn); gl.vertexAttribPointer(progs.tri.norm, 3, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, arrowGpu.tc); gl.vertexAttribPointer(progs.tri.col, 4, gl.UNSIGNED_BYTE, true, 0, 0);
+      gl.drawArrays(gl.TRIANGLES, 0, arrowGpu.count);
     }
 
     // 2. Textured decal triangles

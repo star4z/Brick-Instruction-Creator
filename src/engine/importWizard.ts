@@ -68,6 +68,7 @@ export interface ImportWizardSummaryInput {
   highQualityStepRender: boolean;
   starkBlackOutlines: boolean;
   outlineLineWeight?: string;
+  autoPlacementArrows?: boolean;
   highlightNew: boolean;
   highlightLineWeight?: string;
   fadeOpacity: number;
@@ -176,6 +177,7 @@ export function formatWizardRenderingSummary(input: {
   highQualityStepRender: boolean;
   starkBlackOutlines: boolean;
   outlineLineWeight?: string;
+  autoPlacementArrows?: boolean;
   highlightNew: boolean;
   highlightLineWeight?: string;
   fadeOpacity: number;
@@ -189,11 +191,15 @@ export function formatWizardRenderingSummary(input: {
         : 'Standard Lighting';
   const parts: string[] = [];
 
+  if (input.autoPlacementArrows) {
+    parts.push('Placement arrows');
+  }
+
   if (input.starkBlackOutlines) {
     parts.push(`Outline all parts (${formatLineWeightLabel(input.outlineLineWeight)})`);
   } else if (input.highlightNew) {
     parts.push(`Outline new parts (${formatLineWeightLabel(input.highlightLineWeight)})`);
-  } else {
+  } else if (!input.autoPlacementArrows) {
     parts.push('No outlines');
   }
 
@@ -250,6 +256,7 @@ export function buildImportWizardSummaryItems(
     highQualityStepRender: input.highQualityStepRender,
     starkBlackOutlines: input.starkBlackOutlines,
     outlineLineWeight: input.outlineLineWeight,
+    autoPlacementArrows: input.autoPlacementArrows,
     highlightNew: input.highlightNew,
     highlightLineWeight: input.highlightLineWeight,
     fadeOpacity: input.fadeOpacity,
