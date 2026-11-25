@@ -11964,7 +11964,7 @@ function renderGridPreviewInto(containerEl, spec, maxW = 136, maxH = 92, autoPre
   const padPx = maxTracks > 10 ? Math.min(basePadPx, 3) : basePadPx;
   const gapPx = maxTracks > 14 ? 1 : maxTracks > 7 ? Math.min(baseGapPx, 1.5) : baseGapPx;
   const innerW = Math.max(24, pageBox.widthPx - padPx * 2);
-  const innerH = Math.max(20, pageBox.heightPx - padPx * 2 - 6);
+  const innerH = Math.max(20, pageBox.heightPx - padPx * 2);
   const rects = computePageSlotRects(
     sampleCount,
     spec,
@@ -11977,7 +11977,7 @@ function renderGridPreviewInto(containerEl, spec, maxW = 136, maxH = 92, autoPre
   const showBorders = state.showStepBorders !== false;
   const numFontPx = sampleCount > 12 ? 7 : sampleCount > 6 ? 8 : 10;
   containerEl.innerHTML = `
-    <div class="relative rounded-[5px] border border-[var(--border-strong)] bg-[var(--card)] shadow-xs overflow-hidden transition-all duration-150" style="width:${pageBox.widthPx}px;height:${pageBox.heightPx}px;padding:${padPx}px ${padPx}px ${padPx + 5}px">
+    <div class="relative rounded-[5px] border border-[var(--border-strong)] bg-[var(--card)] shadow-xs overflow-hidden transition-all duration-150" style="width:${pageBox.widthPx}px;height:${pageBox.heightPx}px;padding:${padPx}px">
       <div class="relative w-full h-full">
         ${rects.map((r, i) => {
           const leftPct = (r.x / innerW) * 100;
@@ -11991,7 +11991,6 @@ function renderGridPreviewInto(containerEl, spec, maxW = 136, maxH = 92, autoPre
           return `<div class="absolute ${radiusCls} ${borderCls} ${accentFill} flex items-center justify-center font-mono font-bold" style="left:${leftPct.toFixed(2)}%;top:${topPct.toFixed(2)}%;width:${widthPct.toFixed(2)}%;height:${heightPct.toFixed(2)}%;font-size:${numFontPx}px">${showLabel ? i + 1 : ''}</div>`;
         }).join('')}
       </div>
-      <div class="absolute bottom-1 right-1.5 font-mono text-[7px] text-[var(--muted-foreground)] leading-none pointer-events-none">${spec.flow === 'column' ? '↓' : '→'}</div>
     </div>`;
 }
 
