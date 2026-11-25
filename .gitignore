@@ -4,6 +4,8 @@ dist
 *.local
 coverage
 *.tsbuildinfo
+playwright-report
+test-results
 
 # impeccable-ignore-start
 # Ephemeral output, runtime state, and per-dev overrides.

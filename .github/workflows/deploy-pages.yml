@@ -41,6 +41,22 @@ jobs:
       - name: Build static bundle (with Neocities size verification)
         run: npm run build
 
+      - name: Install Playwright Chromium
+        run: npx playwright install chromium --with-deps
+
+      - name: Run Desktop & Mobile UI E2E audit
+        run: npm run test:e2e
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-deploy
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
