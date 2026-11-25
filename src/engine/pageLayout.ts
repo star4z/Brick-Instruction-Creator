@@ -497,8 +497,8 @@ export function computePageSlotRects(
         rows: Math.round(resolvedGridOverride!.rows),
       }
     : resolveGridDimensions(n, spec, isLandscape);
-  const cellW = Math.max(10, (W - g * (cols - 1)) / cols);
-  const cellH = Math.max(10, (H - g * (rows - 1)) / rows);
+  const cellW = Math.max(1, (W - g * (cols - 1)) / cols);
+  const cellH = Math.max(1, (H - g * (rows - 1)) / rows);
   const rects: ComputedSlotRect[] = [];
 
   for (let i = 0; i < n; i++) {
@@ -615,9 +615,6 @@ export const SMART_AUTO_MIN_STEP_AREA_HEIGHT_IN = 1.0;
 
 /** Minimum physical rendered size of 1 LEGO stud (20 LDU): 0.5 cm. */
 export const SMART_AUTO_MIN_STUD_SIZE_CM = 0.5;
-
-/** Generous upper bound on smart auto grid tracks for very large poster/custom sheets. */
-export const MAX_SMART_AUTO_GRID_TRACKS = 24;
 
 export interface BoundingSphereLdu {
   center: Vec3;
@@ -1116,12 +1113,10 @@ export function findBestSmartAutoGridForSteps(
   const minRawCellH = ctx.minStepAreaHeightIn + ctx.slotPadIn * 2;
   const maxCols = Math.min(
     k,
-    MAX_SMART_AUTO_GRID_TRACKS,
     Math.max(1, Math.floor((ctx.gridWidthIn + ctx.gapIn) / Math.max(0.5, minRawCellW + ctx.gapIn))),
   );
   const maxRows = Math.min(
     k,
-    MAX_SMART_AUTO_GRID_TRACKS,
     Math.max(1, Math.floor((ctx.gridHeightIn + ctx.gapIn) / Math.max(0.5, minRawCellH + ctx.gapIn))),
   );
 
@@ -1266,13 +1261,13 @@ export function computeSmartAutoPreviewGrid(
 
   const minCellW = ctx.minStepAreaWidthIn + ctx.slotPadIn * 2;
   const minCellH = ctx.minStepAreaHeightIn + ctx.slotPadIn * 2;
-  const maxCols = Math.min(
-    MAX_SMART_AUTO_GRID_TRACKS,
-    Math.max(1, Math.floor((ctx.gridWidthIn + ctx.gapIn) / Math.max(0.5, minCellW + ctx.gapIn))),
+  const maxCols = Math.max(
+    1,
+    Math.floor((ctx.gridWidthIn + ctx.gapIn) / Math.max(0.5, minCellW + ctx.gapIn)),
   );
-  const maxRows = Math.min(
-    MAX_SMART_AUTO_GRID_TRACKS,
-    Math.max(1, Math.floor((ctx.gridHeightIn + ctx.gapIn) / Math.max(0.5, minCellH + ctx.gapIn))),
+  const maxRows = Math.max(
+    1,
+    Math.floor((ctx.gridHeightIn + ctx.gapIn) / Math.max(0.5, minCellH + ctx.gapIn)),
   );
 
   let bestCols = 1;

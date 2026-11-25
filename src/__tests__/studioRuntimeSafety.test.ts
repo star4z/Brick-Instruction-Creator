@@ -468,9 +468,11 @@ describe('studioRuntime safety checks', () => {
     const html = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf8');
     const runtime = fs.readFileSync(path.resolve(process.cwd(), 'src/studioRuntime.ts'), 'utf8');
 
-    // Old 1–2 step auto copy is gone
+    // Old 1–2 step auto copy and "Up to N Steps/Page" max-number framing are gone
     expect(html).not.toContain('fits 1–2 steps per page');
     expect(runtime).not.toContain('chooses 1–2 steps per page');
+    expect(runtime).not.toContain('Smart Auto Grid · Up to ');
+    expect(runtime).toContain('Smart Auto Grid · Dynamic by Page Size');
 
     // Intrusive floating canvas overlay banner is removed
     expect(html).not.toContain('id="pageSizeWarningBanner"');

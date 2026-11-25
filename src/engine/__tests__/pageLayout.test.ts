@@ -462,4 +462,39 @@ describe('pageLayout engine', () => {
     expect(bestGrid.cols).toBe(3);
     expect(bestGrid.rows).toBe(2);
   });
+
+  it('scales Smart Auto Grid dynamically with page size without any artificial track or step-count cap', () => {
+    const letterPreview = computeSmartAutoPreviewGrid(
+      buildSmartAutoPageContext({ pageWidthIn: 11, pageHeightIn: 8.5, density: 'balanced' }),
+    );
+    const tabloidPreview = computeSmartAutoPreviewGrid(
+      buildSmartAutoPageContext({ pageWidthIn: 17, pageHeightIn: 11, density: 'balanced' }),
+    );
+    const posterPreview = computeSmartAutoPreviewGrid(
+      buildSmartAutoPageContext({ pageWidthIn: 48, pageHeightIn: 36, density: 'balanced' }),
+    );
+
+    expect(letterPreview.cols).toBeGreaterThan(2);
+    expect(tabloidPreview.cols).toBeGreaterThan(letterPreview.cols);
+    // Poster sheets scale cleanly past the old 24-track cap
+    expect(posterPreview.cols).toBeGreaterThan(24);
+    expect(posterPreview.maxSteps).toBe(posterPreview.cols * posterPreview.rows);
+
+    // Compact preview container renders dense grids without overflowing bounds
+    const autoSpec = createDefaultPageLayoutSpec();
+    const denseRects = computePageSlotRects(
+      posterPreview.cols * posterPreview.rows,
+      autoSpec,
+      true,
+      128,
+      84,
+      1,
+      { cols: posterPreview.cols, rows: posterPreview.rows },
+    );
+    expect(denseRects).toHaveLength(posterPreview.cols * posterPreview.rows);
+    for (const r of denseRects) {
+      expect(r.x + r.w).toBeLessThanOrEqual(128.5);
+      expect(r.y + r.h).toBeLessThanOrEqual(84.5);
+    }
+  });
 });

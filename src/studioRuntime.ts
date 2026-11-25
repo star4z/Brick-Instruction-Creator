@@ -7993,8 +7993,8 @@ function animateResetZoom(durationMs = STAGE_RESET_ANIM_DURATION_MS) {
 function getActivePagePhysicalInches() {
   if (state.paperFormat === 'custom') {
     const div = state.customUnit === 'cm' ? 2.54 : 1;
-    const wIn = Math.max(2, Math.min(48, (Number(state.customWidth) || 10) / div));
-    const hIn = Math.max(2, Math.min(48, (Number(state.customHeight) || 8) / div));
+    const wIn = Math.max(2, Math.min(120, (Number(state.customWidth) || 10) / div));
+    const hIn = Math.max(2, Math.min(120, (Number(state.customHeight) || 8) / div));
     return [wIn, hIn];
   }
   const fmt = PAPER_FORMATS[state.paperFormat] || PAPER_FORMATS.letter;
@@ -11634,31 +11634,6 @@ function syncPageSizeWarningUI() {
 }
 
 function getSmartAutoPreviewSample() {
-  const autoPages = (state.pages || []).filter((p) => p.kind === 'steps' && p.autoGrid && p.slots?.length > 0);
-  if (autoPages.length > 0) {
-    let minSteps = Infinity;
-    let maxSteps = 0;
-    for (const p of autoPages) {
-      const n = p.slots.length;
-      if (n < minSteps) minSteps = n;
-      if (n > maxSteps) maxSteps = n;
-    }
-    const curPage = state.pages[state.pageIdx];
-    let sample = (curPage && curPage.kind === 'steps' && curPage.autoGrid && curPage.slots?.length > 0)
-      ? curPage
-      : null;
-    if (!sample) {
-      const sorted = [...autoPages].sort((a, b) => a.slots.length - b.slots.length);
-      sample = sorted[Math.floor(sorted.length / 2)];
-    }
-    return {
-      count: sample.slots.length,
-      grid: sample.autoGrid,
-      minSteps,
-      maxSteps,
-      hasModelSample: true,
-    };
-  }
   const dims = computePageFrameDimensions();
   const ctx = buildSmartAutoPageContext({
     pageWidthIn: dims.widthIn,
@@ -11667,20 +11642,22 @@ function getSmartAutoPreviewSample() {
     hasSubmodelIntro: false,
   });
   const est = computeSmartAutoPreviewGrid(ctx);
+  const cols = Math.max(1, est.cols);
+  const rows = Math.max(1, est.rows);
   return {
-    count: Math.max(1, Math.min(24, est.maxSteps)),
-    grid: { cols: est.cols, rows: est.rows },
-    minSteps: 1,
-    maxSteps: est.maxSteps,
-    hasModelSample: false,
+    count: cols * rows,
+    grid: { cols, rows },
+    widthIn: dims.widthIn,
+    heightIn: dims.heightIn,
+    isScreenFit: state.paperFormat === 'screen',
   };
 }
 
 function renderGridPreviewInto(containerEl, spec, maxW = 136, maxH = 92, autoPreview = null) {
   if (!containerEl) return;
   const cDiv = state.customUnit === 'cm' ? 2.54 : 1;
-  const cWIn = Math.max(2, (Number(state.customWidth) || 10) / cDiv);
-  const cHIn = Math.max(2, (Number(state.customHeight) || 8) / cDiv);
+  const cWIn = Math.max(2, Math.min(120, (Number(state.customWidth) || 10) / cDiv));
+  const cHIn = Math.max(2, Math.min(120, (Number(state.customHeight) || 8) / cDiv));
   const wsGrid = getWorkspaceViewportSize();
   const screenAspect = Math.max(0.62, Math.min(1.68, (wsGrid.width - 24) / Math.max(300, wsGrid.height - 170)));
   const pageBox = computePaperPreviewBox({
@@ -11692,15 +11669,18 @@ function renderGridPreviewInto(containerEl, spec, maxW = 136, maxH = 92, autoPre
     maxWidthPx: maxW,
     maxHeightPx: maxH,
   });
-  const padPx = state.density === 'compact' ? 4 : state.density === 'spacious' ? 9 : 6;
-  const gapPx = state.density === 'compact' ? 2 : state.density === 'spacious' ? 4 : 3;
-  const innerW = Math.max(24, pageBox.widthPx - padPx * 2);
-  const innerH = Math.max(20, pageBox.heightPx - padPx * 2 - 6);
+  const basePadPx = state.density === 'compact' ? 4 : state.density === 'spacious' ? 9 : 6;
+  const baseGapPx = state.density === 'compact' ? 2 : state.density === 'spacious' ? 4 : 3;
   const derivedCap = getSpecStepsPerPageCap(spec);
   const resolvedAuto = derivedCap === null ? (autoPreview || getSmartAutoPreviewSample()) : null;
   const sampleCount = derivedCap === null
-    ? Math.max(1, Math.min(24, resolvedAuto.count))
+    ? Math.max(1, resolvedAuto.count)
     : Math.max(1, Math.min(24, derivedCap));
+  const maxTracks = resolvedAuto?.grid ? Math.max(resolvedAuto.grid.cols, resolvedAuto.grid.rows) : 1;
+  const padPx = maxTracks > 10 ? Math.min(basePadPx, 3) : basePadPx;
+  const gapPx = maxTracks > 14 ? 1 : maxTracks > 7 ? Math.min(baseGapPx, 1.5) : baseGapPx;
+  const innerW = Math.max(24, pageBox.widthPx - padPx * 2);
+  const innerH = Math.max(20, pageBox.heightPx - padPx * 2 - 6);
   const rects = computePageSlotRects(
     sampleCount,
     spec,
@@ -11722,7 +11702,9 @@ function renderGridPreviewInto(containerEl, spec, maxW = 136, maxH = 92, autoPre
           const heightPct = (r.h / innerH) * 100;
           const accentFill = r.isFeatured ? 'bg-[var(--primary-soft)] border-[var(--primary)] text-[var(--primary)]' : 'bg-[var(--surface-sunken)] border-[var(--border-strong)] text-[var(--foreground)]';
           const borderCls = showBorders ? 'border' : 'border border-dashed opacity-85';
-          return `<div class="absolute rounded-[3px] ${borderCls} ${accentFill} flex items-center justify-center font-mono font-bold" style="left:${leftPct.toFixed(2)}%;top:${topPct.toFixed(2)}%;width:${widthPct.toFixed(2)}%;height:${heightPct.toFixed(2)}%;font-size:${numFontPx}px">${i + 1}</div>`;
+          const radiusCls = r.w < 10 || r.h < 10 ? 'rounded-[1px]' : 'rounded-[3px]';
+          const showLabel = r.w >= 11 && r.h >= 10;
+          return `<div class="absolute ${radiusCls} ${borderCls} ${accentFill} flex items-center justify-center font-mono font-bold" style="left:${leftPct.toFixed(2)}%;top:${topPct.toFixed(2)}%;width:${widthPct.toFixed(2)}%;height:${heightPct.toFixed(2)}%;font-size:${numFontPx}px">${showLabel ? i + 1 : ''}</div>`;
         }).join('')}
       </div>
       <div class="absolute bottom-1 right-1.5 font-mono text-[7px] text-[var(--muted-foreground)] leading-none pointer-events-none">${spec.flow === 'column' ? '↓' : '→'}</div>
@@ -11886,13 +11868,7 @@ function syncPageLayoutControlsUI() {
   const autoPreview = derivedCap === null ? getSmartAutoPreviewSample() : null;
   const chip = document.getElementById('layoutSummaryChip');
   if (chip) {
-    if (derivedCap === null && autoPreview?.hasModelSample) {
-      chip.textContent = autoPreview.minSteps === autoPreview.maxSteps
-        ? `Auto · ${autoPreview.minSteps}/page`
-        : `Auto · ${autoPreview.minSteps}–${autoPreview.maxSteps}/page`;
-    } else {
-      chip.textContent = describePageLayoutSpec(lc);
-    }
+    chip.textContent = derivedCap === null ? 'Auto · Dynamic' : describePageLayoutSpec(lc);
   }
 
   // Render live default grid preview & explanatory text
@@ -11901,15 +11877,11 @@ function syncPageLayoutControlsUI() {
   const gridDesc = document.getElementById('layoutGridPreviewDesc');
   if (gridTitle && gridDesc) {
     if (derivedCap === null) {
-      if (autoPreview?.hasModelSample) {
-        gridTitle.textContent = autoPreview.minSteps === autoPreview.maxSteps
-          ? `Smart Auto Grid · ${autoPreview.minSteps} Step${autoPreview.minSteps === 1 ? '' : 's'}/Page`
-          : `Smart Auto Grid · ${autoPreview.minSteps}–${autoPreview.maxSteps} Steps/Page`;
-      } else {
-        const upTo = autoPreview?.maxSteps || 1;
-        gridTitle.textContent = `Smart Auto Grid · Up to ${upTo} Step${upTo === 1 ? '' : 's'}/Page`;
-      }
-      gridDesc.textContent = `Automatically packs as many steps per page as fit with at least ${SMART_AUTO_MIN_STEP_AREA_WIDTH_IN}″ × ${SMART_AUTO_MIN_STEP_AREA_HEIGHT_IN}″ step area (+ margins) and 1 stud ≥ ${SMART_AUTO_MIN_STUD_SIZE_CM} cm. Page breaks always start a new page.`;
+      gridTitle.textContent = 'Smart Auto Grid · Dynamic by Page Size';
+      const pageLabel = autoPreview?.isScreenFit
+        ? 'the viewport'
+        : `${autoPreview.widthIn.toFixed(1)}″ × ${autoPreview.heightIn.toFixed(1)}″`;
+      gridDesc.textContent = `Adapts columns and rows dynamically to ${pageLabel} and each step's physical size—keeping at least ${SMART_AUTO_MIN_STEP_AREA_WIDTH_IN}″ × ${SMART_AUTO_MIN_STEP_AREA_HEIGHT_IN}″ per step (+ margins) and 1 stud ≥ ${SMART_AUTO_MIN_STUD_SIZE_CM} cm, with no fixed step limit. Page breaks always start a new page.`;
     } else {
       const flowTxt = lc.flow === 'column' ? 'top-to-bottom columns' : 'left-to-right rows';
       const mixedTxt = lc.mixedLayout === 'hero_left' ? 'with Step 1 featured large on the left'
