@@ -2578,7 +2578,7 @@ function buildMeshBuffers(prevParts, newParts, opts) {
     if (isNew && hasOffset && arrowEnabled) {
       const box = computeWorldBox(part);
       const arrowRgb = hexToRgb255(opts.arrowColor || DEFAULT_ARROW_COLOR, 0);
-      const segments = computePlacementArrowSegments(box, [offX, offY, offZ], pOv?.arrowTo || null);
+      const segments = computePlacementArrowSegments(pOv?.arrowBox || box, [offX, offY, offZ], pOv?.arrowTo || null);
       for (const seg of segments) {
         addArrow3D(seg.from, seg.to, arrowRgb);
       }
@@ -21355,7 +21355,7 @@ async function runInteractiveHtmlExport() {
             const oy = Number(pOv.y) || 0;
             const oz = Number(pOv.z) || 0;
             if (Math.hypot(ox, oy, oz) < 6) continue;
-            const segs = computePlacementArrowSegments(computeWorldBox(p), [ox, oy, oz], pOv.arrowTo || null);
+            const segs = computePlacementArrowSegments(pOv.arrowBox || computeWorldBox(p), [ox, oy, oz], pOv.arrowTo || null);
             for (const seg of segs) stepArrows.push(seg);
           }
 

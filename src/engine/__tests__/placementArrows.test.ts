@@ -399,4 +399,36 @@ describe('placementArrows — LEGO-style automatic placement arrows & offsets', 
     expect(segs[0].to[1]).toBeGreaterThanOrEqual(61);
     expect(segs[0].from[1] - segs[0].to[1]).toBeGreaterThanOrEqual(12);
   });
+
+  it('anchors arrows directly over the overlapping stud strip and lifts high enough for overhanging plates to clear the camera sightline', () => {
+    // Two 2x6 plates (120x8x40) overlapping by 1x6 studs (z in [-20, 0]),
+    // with the top plate overhanging 1 stud toward +Z (toward the camera at az=38, el=28).
+    const step1: PlacementStepInput = {
+      id: 's1',
+      camera: { az: 38, el: 28, side: 'top' },
+      parts: [
+        makePart('bottom_2x6', 0, 0, -20, 120, 8, 40, RED), // z in [-40, 0]
+        makePart('top_2x6', 0, 8, 0, 120, 8, 40, RED),      // z in [-20, +20]
+      ],
+    };
+
+    const res = computeAutoPlacementOffsetsForSequence([step1]);
+    const offs = res.get('s1');
+    expect(offs).toBeDefined();
+    expect(offs!['bottom_2x6']).toBeUndefined();
+    const topOff = offs!['top_2x6'];
+    expect(topOff).toBeDefined();
+    // Must lift high enough (>= 38 LDU) so the front overhang clears the sightline to the attaching studs & arrows
+    expect(topOff.y).toBeGreaterThanOrEqual(38);
+    // arrowBox must be clipped to the exact 1x6 attaching stud strip (z in [-20, 0], center z = -10)
+    expect(topOff.arrowBox).toBeDefined();
+    expect(topOff.arrowBox!.center[2]).toBeCloseTo(-10, 2);
+
+    const segs = computePlacementArrowSegments(topOff.arrowBox!, [topOff.x, topOff.y, topOff.z], topOff.arrowTo);
+    expect(segs).toHaveLength(2);
+    expect(segs[0].to[2]).toBeCloseTo(-10, 2);
+    expect(segs[1].to[2]).toBeCloseTo(-10, 2);
+    expect(segs[0].to[0]).toBeCloseTo(-50, 2);
+    expect(segs[1].to[0]).toBeCloseTo(50, 2);
+  });
 });

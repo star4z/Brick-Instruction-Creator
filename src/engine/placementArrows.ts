@@ -29,6 +29,8 @@ export interface AutoPartOffset {
   arrow: boolean;
   /** Optional world-space landing point along the insertion axis (e.g. tip of a coaxial axle) so the arrowhead never clips inside an obstacle. */
   arrowTo?: [number, number, number];
+  /** Optional contact-overlap box (matching the lifted part's thickness along the offset axis, clipped perpendicularly to the actual attaching stud/contact overlap). */
+  arrowBox?: PlacementAABB;
 }
 
 export interface PlacementPartInput {
@@ -349,24 +351,129 @@ function analyzeContacts(
 const MIN_CORRIDOR_ARROW_GAP = 16;
 
 /**
+ * Computes the perpendicular overlap box between `partBox` and its contacting
+ * supporting refs along `axis` (e.g. the exact XZ stud-overlap strip when one
+ * plate overhangs another). Returns `null` if the part is fully supported with
+ * no meaningful overhang shift.
+ */
+function computeContactArrowBox(
+  partBox: PlacementAABB,
+  touchingRefs: ReadonlyArray<PlacementPartInput>,
+  axis: number,
+  sign: number,
+): PlacementAABB | null {
+  if (touchingRefs.length === 0) return null;
+  const perpA = (axis + 1) % 3;
+  const perpB = (axis + 2) % 3;
+
+  let minA = Infinity;
+  let maxA = -Infinity;
+  let minB = Infinity;
+  let maxB = -Infinity;
+  let found = false;
+
+  for (let i = 0; i < touchingRefs.length; i++) {
+    const rb = touchingRefs[i].box;
+    // Check that ref is actually on the target/contacting side along `axis`
+    const touchesAlong =
+      sign > 0
+        ? Math.abs(partBox.min[axis] - rb.max[axis]) <= CONTACT_EPS ||
+          (rb.max[axis] > partBox.min[axis] - CONTACT_EPS && rb.min[axis] < partBox.max[axis] + CONTACT_EPS)
+        : Math.abs(rb.min[axis] - partBox.max[axis]) <= CONTACT_EPS ||
+          (rb.min[axis] < partBox.max[axis] + CONTACT_EPS && rb.max[axis] > partBox.min[axis] - CONTACT_EPS);
+    if (!touchesAlong) continue;
+
+    const loA = Math.max(partBox.min[perpA], rb.min[perpA]);
+    const hiA = Math.min(partBox.max[perpA], rb.max[perpA]);
+    const loB = Math.max(partBox.min[perpB], rb.min[perpB]);
+    const hiB = Math.min(partBox.max[perpB], rb.max[perpB]);
+    if (hiA - loA < 4 || hiB - loB < 4) continue;
+
+    if (loA < minA) minA = loA;
+    if (hiA > maxA) maxA = hiA;
+    if (loB < minB) minB = loB;
+    if (hiB > maxB) maxB = hiB;
+    found = true;
+  }
+
+  if (!found) return null;
+
+  const spanA = partBox.max[perpA] - partBox.min[perpA];
+  const spanB = partBox.max[perpB] - partBox.min[perpB];
+  const ovSpanA = maxA - minA;
+  const ovSpanB = maxB - minB;
+  // Only return a clipped contact box when there is an actual overhang (>= 6 LDU narrower on at least one axis)
+  if (spanA - ovSpanA < 6 && spanB - ovSpanB < 6) return null;
+
+  const mn: Vec3 = [partBox.min[0], partBox.min[1], partBox.min[2]];
+  const mx: Vec3 = [partBox.max[0], partBox.max[1], partBox.max[2]];
+  mn[perpA] = minA;
+  mx[perpA] = maxA;
+  mn[perpB] = minB;
+  mx[perpB] = maxB;
+  return {
+    min: mn,
+    max: mx,
+    center: [(mn[0] + mx[0]) * 0.5, (mn[1] + mx[1]) * 0.5, (mn[2] + mx[2]) * 0.5],
+  };
+}
+
+/**
+ * Exact 2D horizontal ray-exit distance from `anchorXZ` toward the orthographic
+ * camera (`azDeg`) to exit `box`'s XZ footprint. Used to guarantee a lifted
+ * overhanging plate clears the camera's sightline to the attaching studs and arrows.
+ */
+function computeHorizontalFrontOverhangDist(
+  box: PlacementAABB,
+  anchor: Vec3,
+  azDeg: number,
+): number {
+  const az = (azDeg * Math.PI) / 180;
+  const vx = Math.sin(az);
+  const vz = Math.cos(az);
+  let tExit = Infinity;
+  if (Math.abs(vx) > 1e-5) {
+    const tx = vx > 0 ? (box.max[0] - anchor[0]) / vx : (box.min[0] - anchor[0]) / vx;
+    if (tx >= 0 && tx < tExit) tExit = tx;
+  }
+  if (Math.abs(vz) > 1e-5) {
+    const tz = vz > 0 ? (box.max[2] - anchor[2]) / vz : (box.min[2] - anchor[2]) / vz;
+    if (tz >= 0 && tz < tExit) tExit = tz;
+  }
+  return Number.isFinite(tExit) ? Math.max(0, tExit) : 0;
+}
+
+/**
  * Picks a clean, collision-free offset vector along the physical insertion axis.
- * When lifting a sleeve/bush off a coaxial axle or pin, guarantees a crisp open
- * air gap past the obstacle tip and sets `arrowTo` at the entry tip so the red
- * arrow never buries itself inside the axle geometry.
+ * - Guarantees a crisp open air gap past any coaxial obstacle tip (`arrowTo`).
+ * - Anchors arrows directly over the actual contact/stud overlap (`arrowBox`).
+ * - For vertical lifts, accounts for orthographic camera elevation so a wide
+ *   overhanging plate never blocks the camera's view of its arrows or attaching studs.
  */
 function resolveOffsetAlongAxis(
   part: PlacementPartInput,
   preferredDir: Vec3,
   fallbackDirs: ReadonlyArray<Vec3>,
   obstacles: ReadonlyArray<PlacementPartInput>,
+  camera?: { az: number; el: number },
+  touchingRefs: ReadonlyArray<PlacementPartInput> = [],
 ): AutoPartOffset {
   const s = boxSize(part.box);
   const dirs: Vec3[] = [preferredDir, ...fallbackDirs];
 
-  const computeBaseMag = (d: Vec3): number => {
+  const computeBaseMag = (d: Vec3, arrowAnchor: Vec3): number => {
     const dimAlong = Math.abs(d[0]) * s[0] + Math.abs(d[1]) * s[1] + Math.abs(d[2]) * s[2];
     // Target ~20 LDU crisp visible arrow gap between lifted piece and seated destination
-    return Math.round(Math.max(26, Math.min(48, dimAlong + 20)));
+    let mag = Math.max(26, Math.min(48, dimAlong + 20));
+    // For vertical lifts, ensure the lifted piece's front-bottom edge clears the camera's
+    // sightline to the attaching studs & red arrows (exact orthographic optics).
+    if (camera && Math.abs(d[1]) >= 0.5) {
+      const absEl = Math.min(58, Math.max(8, Math.abs(camera.el)));
+      const tFront = computeHorizontalFrontOverhangDist(part.box, arrowAnchor, camera.az);
+      const sightlineLift = Math.ceil(tFront * Math.tan((absEl * Math.PI) / 180) + 20);
+      mag = Math.max(mag, Math.min(68, sightlineLift));
+    }
+    return Math.round(mag);
   };
 
   for (const dir of dirs) {
@@ -374,6 +481,9 @@ function resolveOffsetAlongAxis(
     const sign = dir[axis] >= 0 ? 1 : -1;
     const perpA = (axis + 1) % 3;
     const perpB = (axis + 2) % 3;
+
+    const arrowBox = computeContactArrowBox(part.box, touchingRefs, axis, sign);
+    const arrowAnchor = arrowBox ? arrowBox.center : part.box.center;
 
     // Find any coaxial / corridor obstacle directly along the insertion path (e.g., vertical axle inside a bush)
     let corridorObsTip: number | null = null;
@@ -396,7 +506,7 @@ function resolveOffsetAlongAxis(
       }
     }
 
-    const baseMag = computeBaseMag(dir);
+    const baseMag = computeBaseMag(dir, arrowAnchor);
     for (let extra = 0; extra <= 96; extra += 8) {
       const mag = baseMag + extra;
       const dx = Math.round(dir[0] * mag);
@@ -421,13 +531,14 @@ function resolveOffsetAlongAxis(
       }
       if (!collides) {
         const res: AutoPartOffset = { x: dx, y: dy, z: dz, tilt: 0, arrow: true };
+        if (arrowBox) res.arrowBox = arrowBox;
         // If a coaxial obstacle extends beyond the seated center, stop the arrowhead cleanly at its entry tip
         if (corridorObsTip !== null) {
           const pastCenter = sign > 0
             ? corridorObsTip - part.box.center[axis]
             : part.box.center[axis] - corridorObsTip;
           if (pastCenter > 2) {
-            const arrowTo: Vec3 = [part.box.center[0], part.box.center[1], part.box.center[2]];
+            const arrowTo: Vec3 = [arrowAnchor[0], arrowAnchor[1], arrowAnchor[2]];
             arrowTo[axis] = corridorObsTip + sign * 2;
             res.arrowTo = arrowTo;
           }
@@ -437,7 +548,7 @@ function resolveOffsetAlongAxis(
     }
   }
 
-  const mag = computeBaseMag(preferredDir);
+  const mag = computeBaseMag(preferredDir, part.box.center);
   return {
     x: Math.round(preferredDir[0] * mag),
     y: Math.round(preferredDir[1] * mag),
@@ -588,7 +699,7 @@ function computeFirstStepOffsets(
     const contacts = analyzeContacts(p, baseParts);
     const isLateral = contacts.lateralCount > 0 && !contacts.supportedFromBelow && !contacts.supportedFromAbove;
     const { preferred, fallbacks } = chooseInsertionDirs(contacts, cameraSide, isLateral);
-    out[p.id] = resolveOffsetAlongAxis(p, preferred, fallbacks, baseParts);
+    out[p.id] = resolveOffsetAlongAxis(p, preferred, fallbacks, baseParts, step.camera, contacts.touchingRefs);
   }
   return out;
 }
@@ -686,7 +797,7 @@ function computeSubsequentStepOffsets(
   const out: Record<string, AutoPartOffset> = {};
   for (const c of chosen) {
     const { preferred, fallbacks } = chooseInsertionDirs(c.contacts, cameraSide, c.isLateral);
-    out[c.part.id] = resolveOffsetAlongAxis(c.part, preferred, fallbacks, obstacles);
+    out[c.part.id] = resolveOffsetAlongAxis(c.part, preferred, fallbacks, obstacles, step.camera, c.contacts.touchingRefs);
   }
   return out;
 }
