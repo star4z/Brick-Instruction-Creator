@@ -93,17 +93,12 @@ export function createDefaultPageLayoutSpec(): PageLayoutSpec {
   };
 }
 
-/** Default slot count for mixed layouts when the grid is left on Auto. */
-const MIXED_HERO_DEFAULT_SLOTS = 3;
-const CUSTOM_WEIGHTS_DEFAULT_SLOTS = 4;
-
 /**
- * Derives how many steps fit on a page purely from the layout:
+ * Derives how many steps fit on a page purely from explicit grid tracks:
  * - explicit columns × rows → cols * rows
- * - mixed "Large Left / Top / Right" with an Auto grid → hero + 2 companions (3)
- * - custom S/M/L weights with an Auto grid → 4 slots
  * - only columns (or only rows) set → a single row (or column) of that many steps
- * - everything Auto → `null` (smart auto pagination by step complexity)
+ * - Columns & Rows both Auto → `null` (dynamic Smart Auto pagination by physical
+ *   page size & minimum step readability, for all Step Proportions)
  *
  * Page breaks then split pages further; the count is never edited directly.
  */
@@ -114,9 +109,6 @@ export function deriveStepsPerPageFromLayout(
   const r = typeof spec.rows === 'number' && spec.rows >= 1 ? Math.round(spec.rows) : null;
   let n: number | null;
   if (c && r) n = c * r;
-  else if (spec.mixedLayout === 'hero_left' || spec.mixedLayout === 'hero_top' || spec.mixedLayout === 'hero_right') {
-    n = MIXED_HERO_DEFAULT_SLOTS;
-  } else if (spec.mixedLayout === 'custom_weights') n = CUSTOM_WEIGHTS_DEFAULT_SLOTS;
   else if (c) n = c;
   else if (r) n = r;
   else n = null;
@@ -260,6 +252,7 @@ function layoutSubGrid(
   preferHorizontal: boolean,
   flow: StepFlowDirection,
   startIndex: number,
+  subGridOverride?: ResolvedGridDims | null,
 ): ComputedSlotRect[] {
   if (count <= 0) return [];
   if (count === 1) {
@@ -278,18 +271,33 @@ function layoutSubGrid(
 
   let cols: number;
   let rows: number;
-  if (preferHorizontal) {
-    // Bottom strip (hero_top): 1 row up to 4 items, then 2 rows
-    cols = count <= 4 ? count : Math.ceil(count / 2);
-    rows = Math.ceil(count / cols);
+  const hasValidSubOverride =
+    Boolean(subGridOverride) &&
+    Number.isFinite(subGridOverride!.cols) &&
+    Number.isFinite(subGridOverride!.rows) &&
+    Math.round(subGridOverride!.cols) >= 1 &&
+    Math.round(subGridOverride!.rows) >= 1 &&
+    Math.round(subGridOverride!.cols) * Math.round(subGridOverride!.rows) >= count;
+
+  if (hasValidSubOverride) {
+    cols = Math.round(subGridOverride!.cols);
+    rows = Math.round(subGridOverride!.rows);
+  } else if (count <= 4) {
+    if (preferHorizontal) {
+      cols = count;
+      rows = 1;
+    } else {
+      cols = 1;
+      rows = count;
+    }
   } else {
-    // Side strip (hero_left / hero_right): 1 col up to 4 items, then 2 cols
-    rows = count <= 4 ? count : Math.ceil(count / 2);
-    cols = Math.ceil(count / rows);
+    const aspect = availW / Math.max(1, availH);
+    cols = Math.max(1, Math.min(count, Math.round(Math.sqrt(count * aspect))));
+    rows = Math.ceil(count / cols);
   }
 
-  const cellW = Math.max(10, (availW - gap * (cols - 1)) / cols);
-  const cellH = Math.max(10, (availH - gap * (rows - 1)) / rows);
+  const cellW = Math.max(1, (availW - gap * (cols - 1)) / cols);
+  const cellH = Math.max(1, (availH - gap * (rows - 1)) / rows);
   const out: ComputedSlotRect[] = [];
 
   for (let i = 0; i < count; i++) {
@@ -341,11 +349,11 @@ export function computePageSlotRects(
       return { ...r, isCompact };
     });
 
-  // Mixed Layout: Hero Left (first step large on left, rest smaller on right)
+  // Step Proportion: Large Left (first step large on left, rest smaller on right)
   if (spec.mixedLayout === 'hero_left') {
     const heroRatio = n === 2 ? 0.62 : n === 3 ? 0.58 : 0.56;
-    const heroW = Math.max(20, (W - g) * heroRatio);
-    const sideW = Math.max(20, W - g - heroW);
+    const heroW = Math.max(1, (W - g) * heroRatio);
+    const sideW = Math.max(1, W - g - heroW);
     const hero: ComputedSlotRect = {
       slotIndex: 0,
       x: 0,
@@ -355,16 +363,16 @@ export function computePageSlotRects(
       isFeatured: true,
       isCompact: false,
     };
-    const rest = layoutSubGrid(n - 1, heroW + g, 0, sideW, H, g, false, spec.flow, 1);
+    const rest = layoutSubGrid(n - 1, heroW + g, 0, sideW, H, g, false, spec.flow, 1, resolvedGridOverride);
     return tagCompact([hero, ...rest]);
   }
 
-  // Mixed Layout: Hero Right (earlier steps smaller on left, final step large on right)
+  // Step Proportion: Large Right (earlier steps smaller on left, final step large on right)
   if (spec.mixedLayout === 'hero_right') {
     const heroRatio = n === 2 ? 0.62 : n === 3 ? 0.58 : 0.56;
-    const heroW = Math.max(20, (W - g) * heroRatio);
-    const sideW = Math.max(20, W - g - heroW);
-    const rest = layoutSubGrid(n - 1, 0, 0, sideW, H, g, false, spec.flow, 0);
+    const heroW = Math.max(1, (W - g) * heroRatio);
+    const sideW = Math.max(1, W - g - heroW);
+    const rest = layoutSubGrid(n - 1, 0, 0, sideW, H, g, false, spec.flow, 0, resolvedGridOverride);
     const hero: ComputedSlotRect = {
       slotIndex: n - 1,
       x: sideW + g,
@@ -377,11 +385,11 @@ export function computePageSlotRects(
     return tagCompact([...rest, hero]);
   }
 
-  // Mixed Layout: Hero Top (first step large across top, rest smaller along bottom)
+  // Step Proportion: Large Top (first step large across top, rest smaller along bottom)
   if (spec.mixedLayout === 'hero_top') {
     const heroRatio = n === 2 ? 0.62 : n === 3 ? 0.58 : 0.56;
-    const heroH = Math.max(20, (H - g) * heroRatio);
-    const stripH = Math.max(20, H - g - heroH);
+    const heroH = Math.max(1, (H - g) * heroRatio);
+    const stripH = Math.max(1, H - g - heroH);
     const hero: ComputedSlotRect = {
       slotIndex: 0,
       x: 0,
@@ -391,14 +399,26 @@ export function computePageSlotRects(
       isFeatured: true,
       isCompact: false,
     };
-    const rest = layoutSubGrid(n - 1, 0, heroH + g, W, stripH, g, true, spec.flow, 1);
+    const rest = layoutSubGrid(n - 1, 0, heroH + g, W, stripH, g, true, spec.flow, 1, resolvedGridOverride);
     return tagCompact([hero, ...rest]);
   }
 
-  // Mixed Layout: Custom Per-Slot Weights (S / M / L)
+  // Step Proportion: Custom Per-Slot Weights (S / M / L)
   if (spec.mixedLayout === 'custom_weights') {
     const weights = Array.from({ length: n }, (_, i) => weightValue(spec.slotSizes?.[i]));
-    const { cols, rows } = resolveGridDimensions(n, spec, isLandscape);
+    const hasValidOverride =
+      Boolean(resolvedGridOverride) &&
+      Number.isFinite(resolvedGridOverride!.cols) &&
+      Number.isFinite(resolvedGridOverride!.rows) &&
+      Math.round(resolvedGridOverride!.cols) >= 1 &&
+      Math.round(resolvedGridOverride!.rows) >= 1 &&
+      Math.round(resolvedGridOverride!.cols) * Math.round(resolvedGridOverride!.rows) >= n;
+    const { cols, rows } = hasValidOverride
+      ? {
+          cols: Math.round(resolvedGridOverride!.cols),
+          rows: Math.round(resolvedGridOverride!.rows),
+        }
+      : resolveGridDimensions(n, spec, isLandscape);
     const rects: ComputedSlotRect[] = new Array(n);
 
     if (spec.flow === 'column') {
@@ -1060,17 +1080,38 @@ export function evaluateStepInSlot(
 }
 
 /**
- * Finds the best tight `(cols, rows)` uniform grid for `steps` on a page with
- * physical context `ctx` where EVERY step meets both minimum step area and
- * minimum rendered stud size.
+ * Finds the best tight `(cols, rows)` grid for `steps` on a page with physical
+ * context `ctx` and Step Proportions `spec` where EVERY step meets both minimum
+ * step area and minimum rendered stud size.
+ *
+ * - For `'even'` and `'custom_weights'`, `(cols, rows)` is the full page grid.
+ * - For `'hero_left' | 'hero_right' | 'hero_top'`, `(cols, rows)` is the companion
+ *   sub-grid for the `k - 1` companion steps alongside the featured hero step.
  *
  * Returns `fits: false` (with the 1×1 evaluation) when no valid grid satisfies all steps.
  */
 export function findBestSmartAutoGridForSteps(
   steps: readonly SmartAutoStepMetric[],
   ctx: SmartAutoPageContext,
+  spec?: Pick<PageLayoutSpec, 'mixedLayout' | 'flow' | 'slotSizes'> | null,
 ): SmartAutoGridResolution {
   const k = steps.length;
+  const mixedLayout: MixedLayoutStyle = spec?.mixedLayout ?? 'even';
+  const isHero =
+    mixedLayout === 'hero_left' || mixedLayout === 'hero_right' || mixedLayout === 'hero_top';
+  const isCustomWeights = mixedLayout === 'custom_weights';
+  const fullSpec: PageLayoutSpec = {
+    mode: 'auto',
+    stepsPerPage: Math.max(1, k),
+    cols: 'auto',
+    rows: 'auto',
+    flow: spec?.flow === 'column' ? 'column' : 'row',
+    mixedLayout,
+    slotSizes: spec?.slotSizes || [],
+  };
+  const isLandscape = ctx.gridWidthIn >= ctx.gridHeightIn;
+  const PT = 72;
+
   if (k <= 0) {
     const fallbackStep: SmartAutoStepMetric = { stepId: '', stepNum: 1, viewRadiusLdu: 40 };
     const ev = evaluateStepInSlot(fallbackStep, ctx.gridWidthIn, ctx.gridHeightIn, ctx, 1);
@@ -1087,22 +1128,27 @@ export function findBestSmartAutoGridForSteps(
     };
   }
 
-  const evalGrid = (cols: number, rows: number) => {
-    const slotW = (ctx.gridWidthIn - ctx.gapIn * (cols - 1)) / cols;
-    const slotH = (ctx.gridHeightIn - ctx.gapIn * (rows - 1)) / rows;
+  const evalRects = (cols: number, rows: number, rectsIn: readonly { slotIndex: number; w: number; h: number }[]) => {
     let allFit = true;
     let minStud = Infinity;
     let minModelW = Infinity;
     let minModelH = Infinity;
     let minModelSide = Infinity;
+    let minSlotW = Infinity;
+    let minSlotH = Infinity;
     let worstEval: StepSlotPhysicalEvaluation | null = null;
 
-    for (let i = 0; i < k; i++) {
-      const ev = evaluateStepInSlot(steps[i], slotW, slotH, ctx, k);
+    for (let i = 0; i < rectsIn.length; i++) {
+      const r = rectsIn[i];
+      const step = steps[r.slotIndex];
+      if (!step) continue;
+      const ev = evaluateStepInSlot(step, r.w, r.h, ctx, k);
       if (!ev.fits) allFit = false;
       if (ev.studSizeCm < minStud) minStud = ev.studSizeCm;
       if (ev.modelAreaWidthIn < minModelW) minModelW = ev.modelAreaWidthIn;
       if (ev.modelAreaHeightIn < minModelH) minModelH = ev.modelAreaHeightIn;
+      if (r.w < minSlotW) minSlotW = r.w;
+      if (r.h < minSlotH) minSlotH = r.h;
       const side = Math.min(ev.modelAreaWidthIn, ev.modelAreaHeightIn);
       if (side < minModelSide) minModelSide = side;
       if (
@@ -1122,10 +1168,68 @@ export function findBestSmartAutoGridForSteps(
       minModelWidthIn: minModelW,
       minModelHeightIn: minModelH,
       minModelSide,
-      slotWidthIn: slotW,
-      slotHeightIn: slotH,
+      slotWidthIn: minSlotW,
+      slotHeightIn: minSlotH,
       worstEval: worstEval!,
     };
+  };
+
+  const evalGrid = (cols: number, rows: number) => {
+    if (!isHero && !isCustomWeights) {
+      const slotW = (ctx.gridWidthIn - ctx.gapIn * (cols - 1)) / cols;
+      const slotH = (ctx.gridHeightIn - ctx.gapIn * (rows - 1)) / rows;
+      let allFit = true;
+      let minStud = Infinity;
+      let minModelW = Infinity;
+      let minModelH = Infinity;
+      let minModelSide = Infinity;
+      let worstEval: StepSlotPhysicalEvaluation | null = null;
+
+      for (let i = 0; i < k; i++) {
+        const ev = evaluateStepInSlot(steps[i], slotW, slotH, ctx, k);
+        if (!ev.fits) allFit = false;
+        if (ev.studSizeCm < minStud) minStud = ev.studSizeCm;
+        if (ev.modelAreaWidthIn < minModelW) minModelW = ev.modelAreaWidthIn;
+        if (ev.modelAreaHeightIn < minModelH) minModelH = ev.modelAreaHeightIn;
+        const side = Math.min(ev.modelAreaWidthIn, ev.modelAreaHeightIn);
+        if (side < minModelSide) minModelSide = side;
+        if (
+          !worstEval ||
+          (!ev.fits && worstEval.fits) ||
+          (ev.fits === worstEval.fits && ev.studSizeCm < worstEval.studSizeCm)
+        ) {
+          worstEval = ev;
+        }
+      }
+
+      return {
+        cols,
+        rows,
+        fits: allFit,
+        minStudSizeCm: minStud,
+        minModelWidthIn: minModelW,
+        minModelHeightIn: minModelH,
+        minModelSide,
+        slotWidthIn: slotW,
+        slotHeightIn: slotH,
+        worstEval: worstEval!,
+      };
+    }
+
+    const ptRects = computePageSlotRects(
+      k,
+      fullSpec,
+      isLandscape,
+      ctx.gridWidthIn * PT,
+      ctx.gridHeightIn * PT,
+      ctx.gapIn * PT,
+      { cols, rows },
+    );
+    return evalRects(
+      cols,
+      rows,
+      ptRects.map((r) => ({ slotIndex: r.slotIndex, w: r.w / PT, h: r.h / PT })),
+    );
   };
 
   if (k === 1) {
@@ -1145,23 +1249,37 @@ export function findBestSmartAutoGridForSteps(
 
   const minRawCellW = ctx.minStepAreaWidthIn + ctx.slotPadIn * 2;
   const minRawCellH = ctx.minStepAreaHeightIn + ctx.slotPadIn * 2;
+
+  let searchCount = k;
+  let regionWIn = ctx.gridWidthIn;
+  let regionHIn = ctx.gridHeightIn;
+  if (isHero) {
+    searchCount = k - 1;
+    const heroRatio = k === 2 ? 0.62 : k === 3 ? 0.58 : 0.56;
+    if (mixedLayout === 'hero_top') {
+      regionHIn = Math.max(0, (ctx.gridHeightIn - ctx.gapIn) * (1 - heroRatio));
+    } else {
+      regionWIn = Math.max(0, (ctx.gridWidthIn - ctx.gapIn) * (1 - heroRatio));
+    }
+  }
+
   const maxCols = Math.min(
-    k,
-    Math.max(1, Math.floor((ctx.gridWidthIn + ctx.gapIn) / Math.max(0.5, minRawCellW + ctx.gapIn))),
+    searchCount,
+    Math.max(1, Math.floor((regionWIn + ctx.gapIn) / Math.max(0.5, minRawCellW + ctx.gapIn))),
   );
   const maxRows = Math.min(
-    k,
-    Math.max(1, Math.floor((ctx.gridHeightIn + ctx.gapIn) / Math.max(0.5, minRawCellH + ctx.gapIn))),
+    searchCount,
+    Math.max(1, Math.floor((regionHIn + ctx.gapIn) / Math.max(0.5, minRawCellH + ctx.gapIn))),
   );
 
   let best: SmartAutoGridResolution | null = null;
   let bestScore = -Infinity;
 
   for (let cols = 1; cols <= maxCols; cols++) {
-    const rows = Math.ceil(k / cols);
+    const rows = Math.ceil(searchCount / cols);
     if (rows > maxRows) continue;
     // Ensure tight grid with no completely empty column (rows already satisfies no empty row)
-    if (cols > 1 && (cols - 1) * rows >= k) continue;
+    if (cols > 1 && (cols - 1) * rows >= searchCount) continue;
 
     const cand = evalGrid(cols, rows);
     if (!cand.fits) continue;
@@ -1170,7 +1288,7 @@ export function findBestSmartAutoGridForSteps(
     const idealAspect = 1.15;
     const distortion = Math.max(aspect / idealAspect, idealAspect / aspect);
     const aspectFactor = 1 / Math.pow(distortion, 0.12);
-    const fillRatio = k / (cols * rows);
+    const fillRatio = searchCount / (cols * rows);
     const fillFactor = 0.95 + 0.05 * fillRatio;
     // Primary driver is physical model scale (`minModelSide`), with mild aspect & fullness tie-breakers
     const score = cand.minModelSide * aspectFactor * fillFactor;
@@ -1210,7 +1328,8 @@ export function findBestSmartAutoGridForSteps(
 /**
  * Greedily packs as many contiguous `eligibleSteps` onto a single Smart Auto Grid
  * page as can simultaneously satisfy BOTH minimum step area (`1" × 1"` + margins)
- * AND minimum piece scale (`1 stud ≥ 0.5 cm`) with zero artificial 1–2 step cap.
+ * AND minimum piece scale (`1 stud ≥ 0.5 cm`) with zero artificial step cap,
+ * adapting dynamically for all Step Proportions (`even`, `hero_*`, `custom_weights`).
  *
  * Always emits at least 1 step so no step is ever dropped; when even 1 step cannot
  * satisfy the physical minimums, returns `fits: false` along with its 1×1 evaluation
@@ -1219,9 +1338,10 @@ export function findBestSmartAutoGridForSteps(
 export function packSmartAutoPage(
   eligibleSteps: readonly SmartAutoStepMetric[],
   ctx: SmartAutoPageContext,
+  spec?: Pick<PageLayoutSpec, 'mixedLayout' | 'flow' | 'slotSizes'> | null,
 ): SmartAutoPageGroupResult {
   if (eligibleSteps.length === 0) {
-    const emptyRes = findBestSmartAutoGridForSteps([], ctx);
+    const emptyRes = findBestSmartAutoGridForSteps([], ctx, spec);
     return {
       count: 0,
       grid: { cols: 1, rows: 1 },
@@ -1230,7 +1350,7 @@ export function packSmartAutoPage(
     };
   }
 
-  const firstRes = findBestSmartAutoGridForSteps([eligibleSteps[0]], ctx);
+  const firstRes = findBestSmartAutoGridForSteps([eligibleSteps[0]], ctx, spec);
   if (!firstRes.fits) {
     return {
       count: 1,
@@ -1244,7 +1364,7 @@ export function packSmartAutoPage(
   let bestRes = firstRes;
 
   for (let k = 2; k <= eligibleSteps.length; k++) {
-    const candidate = findBestSmartAutoGridForSteps(eligibleSteps.slice(0, k), ctx);
+    const candidate = findBestSmartAutoGridForSteps(eligibleSteps.slice(0, k), ctx, spec);
     if (!candidate.fits) break;
     bestCount = k;
     bestRes = candidate;
@@ -1257,7 +1377,7 @@ export function packSmartAutoPage(
     eligibleSteps[bestCount - 1]?.isMinifigPoseStep &&
     eligibleSteps[bestCount]?.hasAttachedMinifig
   ) {
-    const trimmed = findBestSmartAutoGridForSteps(eligibleSteps.slice(0, bestCount - 1), ctx);
+    const trimmed = findBestSmartAutoGridForSteps(eligibleSteps.slice(0, bestCount - 1), ctx, spec);
     if (trimmed.fits) {
       bestCount -= 1;
       bestRes = trimmed;
@@ -1273,13 +1393,14 @@ export function packSmartAutoPage(
 }
 
 /**
- * Estimates the maximum Smart Auto Grid layout for a homogeneous page of typical
- * compact steps at the active page size (used for live Page Setup previews when
- * no model or smart-auto page sample is present).
+ * Computes the dynamic Smart Auto Grid layout for a homogeneous page of typical
+ * compact steps at the active page size and Step Proportions (used for live Page
+ * Setup & Step Range Group previews).
  */
 export function computeSmartAutoPreviewGrid(
   ctx: SmartAutoPageContext,
   typicalRadiusLdu = 45,
+  spec?: Pick<PageLayoutSpec, 'mixedLayout' | 'flow' | 'slotSizes'> | null,
 ): { cols: number; rows: number; maxSteps: number; fits: boolean } {
   const sampleStep: SmartAutoStepMetric = {
     stepId: 'preview',
@@ -1293,8 +1414,68 @@ export function computeSmartAutoPreviewGrid(
     return { cols: 1, rows: 1, maxSteps: 1, fits: false };
   }
 
+  const mixedLayout: MixedLayoutStyle = spec?.mixedLayout ?? 'even';
   const minCellW = ctx.minStepAreaWidthIn + ctx.slotPadIn * 2;
   const minCellH = ctx.minStepAreaHeightIn + ctx.slotPadIn * 2;
+
+  if (mixedLayout === 'hero_left' || mixedLayout === 'hero_right' || mixedLayout === 'hero_top') {
+    let bestCols = 1;
+    let bestRows = 1;
+    let bestCount = 1;
+    let bestMinSide = Math.min(single.modelAreaWidthIn, single.modelAreaHeightIn);
+
+    const maxRegionW =
+      mixedLayout === 'hero_top'
+        ? ctx.gridWidthIn
+        : Math.max(0, (ctx.gridWidthIn - ctx.gapIn) * 0.44);
+    const maxRegionH =
+      mixedLayout === 'hero_top'
+        ? Math.max(0, (ctx.gridHeightIn - ctx.gapIn) * 0.44)
+        : ctx.gridHeightIn;
+    const maxSubCols = Math.max(
+      1,
+      Math.floor((maxRegionW + ctx.gapIn) / Math.max(0.5, minCellW + ctx.gapIn)),
+    );
+    const maxSubRows = Math.max(
+      1,
+      Math.floor((maxRegionH + ctx.gapIn) / Math.max(0.5, minCellH + ctx.gapIn)),
+    );
+
+    for (let c = 1; c <= maxSubCols; c++) {
+      for (let r = 1; r <= maxSubRows; r++) {
+        const count = 1 + c * r;
+        if (count < bestCount) continue;
+        const heroRatio = count === 2 ? 0.62 : count === 3 ? 0.58 : 0.56;
+        const heroW = mixedLayout === 'hero_top' ? ctx.gridWidthIn : (ctx.gridWidthIn - ctx.gapIn) * heroRatio;
+        const heroH = mixedLayout === 'hero_top' ? (ctx.gridHeightIn - ctx.gapIn) * heroRatio : ctx.gridHeightIn;
+        const sideW = mixedLayout === 'hero_top' ? ctx.gridWidthIn : ctx.gridWidthIn - ctx.gapIn - heroW;
+        const sideH = mixedLayout === 'hero_top' ? ctx.gridHeightIn - ctx.gapIn - heroH : ctx.gridHeightIn;
+        const compW = (sideW - ctx.gapIn * (c - 1)) / c;
+        const compH = (sideH - ctx.gapIn * (r - 1)) / r;
+
+        const heroEv = evaluateStepInSlot(sampleStep, heroW, heroH, ctx, count);
+        if (!heroEv.fits) continue;
+        const compEv = evaluateStepInSlot(sampleStep, compW, compH, ctx, count);
+        if (!compEv.fits) continue;
+
+        const minSide = Math.min(
+          heroEv.modelAreaWidthIn,
+          heroEv.modelAreaHeightIn,
+          compEv.modelAreaWidthIn,
+          compEv.modelAreaHeightIn,
+        );
+        if (count > bestCount || (count === bestCount && minSide > bestMinSide + 1e-4)) {
+          bestCount = count;
+          bestCols = c;
+          bestRows = r;
+          bestMinSide = minSide;
+        }
+      }
+    }
+
+    return { cols: bestCols, rows: bestRows, maxSteps: bestCount, fits: true };
+  }
+
   const maxCols = Math.max(
     1,
     Math.floor((ctx.gridWidthIn + ctx.gapIn) / Math.max(0.5, minCellW + ctx.gapIn)),
@@ -1308,6 +1489,56 @@ export function computeSmartAutoPreviewGrid(
   let bestRows = 1;
   let bestCount = 1;
   let bestMinSide = Math.min(single.modelAreaWidthIn, single.modelAreaHeightIn);
+
+  if (mixedLayout === 'custom_weights') {
+    const PT = 72;
+    const isLandscape = ctx.gridWidthIn >= ctx.gridHeightIn;
+    const fullSpec: PageLayoutSpec = {
+      mode: 'auto',
+      stepsPerPage: 1,
+      cols: 'auto',
+      rows: 'auto',
+      flow: spec?.flow === 'column' ? 'column' : 'row',
+      mixedLayout: 'custom_weights',
+      slotSizes: spec?.slotSizes || [],
+    };
+    for (let c = 1; c <= maxCols; c++) {
+      let anyRowFit = false;
+      for (let r = 1; r <= maxRows; r++) {
+        const count = c * r;
+        const rects = computePageSlotRects(
+          count,
+          fullSpec,
+          isLandscape,
+          ctx.gridWidthIn * PT,
+          ctx.gridHeightIn * PT,
+          ctx.gapIn * PT,
+          { cols: c, rows: r },
+        );
+        let allFit = true;
+        let minSide = Infinity;
+        for (let i = 0; i < rects.length; i++) {
+          const ev = evaluateStepInSlot(sampleStep, rects[i].w / PT, rects[i].h / PT, ctx, count);
+          if (!ev.fits) {
+            allFit = false;
+            break;
+          }
+          const side = Math.min(ev.modelAreaWidthIn, ev.modelAreaHeightIn);
+          if (side < minSide) minSide = side;
+        }
+        if (!allFit) break;
+        anyRowFit = true;
+        if (count > bestCount || (count === bestCount && minSide > bestMinSide + 1e-4)) {
+          bestCount = count;
+          bestCols = c;
+          bestRows = r;
+          bestMinSide = minSide;
+        }
+      }
+      if (!anyRowFit && c > 1) break;
+    }
+    return { cols: bestCols, rows: bestRows, maxSteps: bestCount, fits: true };
+  }
 
   for (let c = 1; c <= maxCols; c++) {
     for (let r = 1; r <= maxRows; r++) {

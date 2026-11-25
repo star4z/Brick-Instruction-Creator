@@ -7863,7 +7863,7 @@ function rebuildPages() {
           eligibleIndices.push(j);
         }
         const eligibleMetrics = eligibleIndices.map((idx) => stepMetrics[idx]);
-        const packed = packSmartAutoPage(eligibleMetrics, pageAutoCtx);
+        const packed = packSmartAutoPage(eligibleMetrics, pageAutoCtx, pageLayoutSpec);
         const takeCount = Math.max(1, Math.min(eligibleIndices.length, packed.count));
         for (let k = 0; k < takeCount; k++) {
           const idx = eligibleIndices[k];
@@ -11917,7 +11917,7 @@ function syncPageSizeWarningUI() {
   }
 }
 
-function getSmartAutoPreviewSample() {
+function getSmartAutoPreviewSample(spec = state.layoutConfig) {
   const dims = computePageFrameDimensions();
   const ctx = buildSmartAutoPageContext({
     pageWidthIn: dims.widthIn,
@@ -11925,11 +11925,11 @@ function getSmartAutoPreviewSample() {
     density: state.density,
     hasSubmodelIntro: false,
   });
-  const est = computeSmartAutoPreviewGrid(ctx);
+  const est = computeSmartAutoPreviewGrid(ctx, 45, spec);
   const cols = Math.max(1, est.cols);
   const rows = Math.max(1, est.rows);
   return {
-    count: cols * rows,
+    count: Math.max(1, est.maxSteps),
     grid: { cols, rows },
     widthIn: dims.widthIn,
     heightIn: dims.heightIn,
@@ -11956,7 +11956,7 @@ function renderGridPreviewInto(containerEl, spec, maxW = 136, maxH = 92, autoPre
   const basePadPx = state.density === 'compact' ? 4 : state.density === 'spacious' ? 9 : 6;
   const baseGapPx = state.density === 'compact' ? 2 : state.density === 'spacious' ? 4 : 3;
   const derivedCap = getSpecStepsPerPageCap(spec);
-  const resolvedAuto = derivedCap === null ? (autoPreview || getSmartAutoPreviewSample()) : null;
+  const resolvedAuto = derivedCap === null ? (autoPreview || getSmartAutoPreviewSample(spec)) : null;
   const sampleCount = derivedCap === null
     ? Math.max(1, resolvedAuto.count)
     : Math.max(1, Math.min(24, derivedCap));
@@ -12136,7 +12136,10 @@ function syncGroupEditorSlotSizesUI() {
   if (!wrap || !list) return;
   wrap.classList.toggle('hidden', mixed !== 'custom_weights');
   if (mixed === 'custom_weights') {
-    const count = Math.max(2, Math.min(12, getSpecStepsPerPageCap(readGroupEditorDraftSpec()) ?? 4));
+    const draftSpec = readGroupEditorDraftSpec();
+    const draftCap = getSpecStepsPerPageCap(draftSpec);
+    const dynamicCount = draftCap ?? getSmartAutoPreviewSample(draftSpec).count;
+    const count = Math.max(2, Math.min(12, dynamicCount));
     renderSlotSizeButtons(list, count, layoutGroupEditorState.slotSizes, (next) => {
       layoutGroupEditorState.slotSizes = next;
       syncGroupEditorSlotSizesUI();
@@ -12148,10 +12151,12 @@ function syncGroupEditorSlotSizesUI() {
 function syncPageLayoutControlsUI() {
   const lc = state.layoutConfig;
   const derivedCap = getSpecStepsPerPageCap(lc);
-  const autoPreview = derivedCap === null ? getSmartAutoPreviewSample() : null;
+  const autoPreview = derivedCap === null ? getSmartAutoPreviewSample(lc) : null;
   const chip = document.getElementById('layoutSummaryChip');
   if (chip) {
-    chip.textContent = derivedCap === null ? 'Auto · Dynamic' : describePageLayoutSpec(lc);
+    chip.textContent = derivedCap === null
+      ? (lc.mixedLayout === 'even' ? 'Auto · Dynamic' : describePageLayoutSpec(lc))
+      : describePageLayoutSpec(lc);
   }
 
   // Render live default grid preview & explanatory text
@@ -12160,7 +12165,12 @@ function syncPageLayoutControlsUI() {
   const gridDesc = document.getElementById('layoutGridPreviewDesc');
   if (gridTitle && gridDesc) {
     if (derivedCap === null) {
-      gridTitle.textContent = 'Smart Auto Grid · Dynamic by Page Size';
+      const proportionTitle = lc.mixedLayout === 'hero_left' ? 'Large Left'
+        : lc.mixedLayout === 'hero_top' ? 'Large Top'
+        : lc.mixedLayout === 'hero_right' ? 'Large Right'
+        : lc.mixedLayout === 'custom_weights' ? 'Custom Sizes'
+        : 'Dynamic by Page Size';
+      gridTitle.textContent = `Smart Auto Grid · ${proportionTitle}`;
       const pageLabel = autoPreview?.isScreenFit
         ? 'the viewport'
         : `${autoPreview.widthIn.toFixed(1)}″ × ${autoPreview.heightIn.toFixed(1)}″`;
@@ -12197,7 +12207,7 @@ function syncPageLayoutControlsUI() {
   if (defWrap && defList) {
     defWrap.classList.toggle('hidden', lc.mixedLayout !== 'custom_weights');
     if (lc.mixedLayout === 'custom_weights') {
-      const slotCount = Math.max(2, Math.min(12, derivedCap ?? 4));
+      const slotCount = Math.max(2, Math.min(12, derivedCap ?? autoPreview?.count ?? 4));
       renderSlotSizeButtons(defList, slotCount, lc.slotSizes || [], (next) => {
         state.layoutConfig = { ...state.layoutConfig, slotSizes: next };
         renderAll();

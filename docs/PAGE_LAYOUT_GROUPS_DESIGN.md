@@ -11,30 +11,28 @@ Implemented in [`src/engine/pageLayout.ts`](../src/engine/pageLayout.ts) and [`s
   - `computePaperPreviewBox()` computes exact scaled miniature sheet proportions in the active orientation for the live preview box beside the Page Format dropdown.
 - **`PageLayoutSpec`**:
   - `mode`: `'auto' | 'custom'` — **derived**, never user-set
-  - `stepsPerPage`: **derived, read-only** — there is no "Steps per Page" control. `deriveStepsPerPageFromLayout()` computes it from the layout:
+  - `stepsPerPage`: **derived, read-only** — there is no "Steps per Page" control. `deriveStepsPerPageFromLayout()` computes it from explicit grid tracks:
     - explicit `cols × rows` → `cols * rows`
-    - `hero_left` / `hero_top` / `hero_right` with an Auto grid → `3` (hero + 2 companions)
-    - `custom_weights` with an Auto grid → `4`
     - only `cols` (or only `rows`) set → a single row (or column) of that many steps
-    - everything Auto → `null` = **physical Smart Auto Grid** (no artificial 1–2 step cap; see below)
+    - `cols: 'auto'` and `rows: 'auto'` → `null` = **physical Smart Auto Grid** for **all Step Proportions** (`even`, `hero_left`, `hero_top`, `hero_right`, `custom_weights`), with no hardcoded item limits
     - The result is an upper bound: **page breaks** (step `pin` overrides), group boundaries, sequential minifig builds, and full-page submodel callouts still start a new page.
     - `normalizePageLayoutSpec()` ignores saved `stepsPerPage` values from older projects; legacy `'1-up'` / `'4-up'` map to `1×1` / `2×2` grids, other legacy counts fall back to Auto. `withDerivedStepsPerPage()` re-syncs the derived fields after edits.
   - `cols`: `'auto' | 1..6`
   - `rows`: `'auto' | 1..6`
   - `flow`: `'row'` (Left → Right, then Top → Bottom, e.g. `12 13 / 14 15`) or `'column'` (Top → Bottom, then Left → Right, e.g. `12 14 / 13 15`)
-  - `mixedLayout`:
+  - `mixedLayout` (**Step Proportions**):
     - `'even'`: Uniform `cols × rows` grid
-    - `'hero_left'`: First step featured large on the left (~56–62% width); remaining steps stacked smaller on the right
-    - `'hero_top'`: First step featured full-width along the top; remaining steps arranged smaller along the bottom
-    - `'hero_right'`: Companion steps stacked smaller on the left; final step featured large on the right
-    - `'custom_weights'`: Per-slot `S / M / L` relative sizing (`slotSizes: ('sm' | 'md' | 'lg')[]`)
+    - `'hero_left'`: First step featured large on the left (~56–62% width); remaining steps packed dynamically on the right
+    - `'hero_top'`: First step featured full-width along the top; remaining steps packed dynamically along the bottom
+    - `'hero_right'`: Companion steps packed dynamically on the left; final step featured large on the right
+    - `'custom_weights'`: Per-slot `S / M / L` relative sizing (`slotSizes: ('sm' | 'md' | 'lg')[]`) packed dynamically by physical min sizes
 - **`StepLayoutGroup`**:
   - Named, editable rule covering an inclusive 1-based **absolute** step range (`startStepNum..endStepNum`, `stepBasis: 'absolute'`; see [`ABSOLUTE_STEP_NUMBERING_DESIGN.md`](./ABSOLUTE_STEP_NUMBERING_DESIGN.md))
   - Carries its own `PageLayoutSpec`, optional `themeId` style override, and optional `showStepBorders` override
   - Multiple groups can coexist; overlapping ranges resolve with latest-group precedence so narrower overrides can refine broader sections.
 
 ## Physical Smart Auto Grid & Page-Size Readability Warnings
-When the grid is left on Auto (`cols: 'auto'`, `rows: 'auto'`, `mixedLayout: 'even'`), `packSmartAutoPage()` in [`src/engine/pageLayout.ts`](../src/engine/pageLayout.ts) computes steps per page directly from physical page geometry and each step's rendered piece scale—with **no artificial 1–2 step limit**:
+When Columns & Rows are left on Auto (`cols: 'auto'`, `rows: 'auto'`), `packSmartAutoPage()` in [`src/engine/pageLayout.ts`](../src/engine/pageLayout.ts) computes steps per page directly from physical page geometry, the active Step Proportions (`even`, `hero_*`, `custom_weights`), and each step's rendered piece scale—with **no artificial item limits**:
 
 1. **Physical Page Context (`buildSmartAutoPageContext`)**:
    - Uses exact physical sheet dimensions (`widthIn × heightIn`) and print-calibrated margins, grid gaps, footer height, optional submodel intro banner, and slot padding from `computePageTypography()` for the active density (`compact` / `balanced` / `spacious`).

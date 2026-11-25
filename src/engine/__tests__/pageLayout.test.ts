@@ -41,8 +41,10 @@ describe('pageLayout engine', () => {
     expect(deriveStepsPerPageFromLayout({ cols: 'auto', rows: 'auto', mixedLayout: 'even' })).toBeNull();
     expect(deriveStepsPerPageFromLayout({ cols: 3, rows: 'auto', mixedLayout: 'even' })).toBe(3);
     expect(deriveStepsPerPageFromLayout({ cols: 'auto', rows: 2, mixedLayout: 'even' })).toBe(2);
-    expect(deriveStepsPerPageFromLayout({ cols: 'auto', rows: 'auto', mixedLayout: 'hero_left' })).toBe(3);
-    expect(deriveStepsPerPageFromLayout({ cols: 'auto', rows: 'auto', mixedLayout: 'custom_weights' })).toBe(4);
+    expect(deriveStepsPerPageFromLayout({ cols: 'auto', rows: 'auto', mixedLayout: 'hero_left' })).toBeNull();
+    expect(deriveStepsPerPageFromLayout({ cols: 'auto', rows: 'auto', mixedLayout: 'hero_top' })).toBeNull();
+    expect(deriveStepsPerPageFromLayout({ cols: 'auto', rows: 'auto', mixedLayout: 'hero_right' })).toBeNull();
+    expect(deriveStepsPerPageFromLayout({ cols: 'auto', rows: 'auto', mixedLayout: 'custom_weights' })).toBeNull();
     expect(deriveStepsPerPageFromLayout({ cols: 2, rows: 3, mixedLayout: 'hero_top' })).toBe(6);
     expect(getSpecStepsPerPageCap(normalizePageLayoutSpec({ cols: 2, rows: 2 }))).toBe(4);
     expect(getSpecStepsPerPageCap(createDefaultPageLayoutSpec())).toBeNull();
@@ -496,6 +498,50 @@ describe('pageLayout engine', () => {
       expect(r.x + r.w).toBeLessThanOrEqual(128.5);
       expect(r.y + r.h).toBeLessThanOrEqual(84.5);
     }
+  });
+
+  it('adapts all non-even Step Proportions (hero_left, hero_top, hero_right, custom_weights) dynamically by page size & min sizes', () => {
+    const letterCtx = buildSmartAutoPageContext({ pageWidthIn: 11, pageHeightIn: 8.5, density: 'balanced' });
+    const tabloidCtx = buildSmartAutoPageContext({ pageWidthIn: 17, pageHeightIn: 11, density: 'balanced' });
+    const compactSteps: SmartAutoStepMetric[] = Array.from({ length: 24 }, (_, i) => ({
+      stepId: `p_${i + 1}`,
+      stepNum: i + 1,
+      viewRadiusLdu: 45,
+      pliUniqueCount: 2,
+    }));
+
+    for (const mixedLayout of ['hero_left', 'hero_top', 'hero_right'] as const) {
+      const spec = { mixedLayout, flow: 'row' as const, slotSizes: [] };
+      const packedLetter = packSmartAutoPage(compactSteps, letterCtx, spec);
+      const packedTabloid = packSmartAutoPage(compactSteps, tabloidCtx, spec);
+      // Scales past the old hardcoded 3-step limit based on physical min sizes
+      expect(packedLetter.fits).toBe(true);
+      expect(packedLetter.count).toBeGreaterThan(3);
+      expect(packedTabloid.count).toBeGreaterThan(packedLetter.count);
+      expect(packedLetter.worstEval.modelAreaWidthIn).toBeGreaterThanOrEqual(SMART_AUTO_MIN_STEP_AREA_WIDTH_IN - 1e-3);
+      expect(packedLetter.worstEval.modelAreaHeightIn).toBeGreaterThanOrEqual(SMART_AUTO_MIN_STEP_AREA_HEIGHT_IN - 1e-3);
+      expect(packedLetter.worstEval.studSizeCm).toBeGreaterThanOrEqual(SMART_AUTO_MIN_STUD_SIZE_CM - 1e-3);
+
+      const prevLetter = computeSmartAutoPreviewGrid(letterCtx, 45, spec);
+      const prevTabloid = computeSmartAutoPreviewGrid(tabloidCtx, 45, spec);
+      expect(prevLetter.maxSteps).toBeGreaterThan(3);
+      expect(prevTabloid.maxSteps).toBeGreaterThan(prevLetter.maxSteps);
+    }
+
+    const customSpec = {
+      mixedLayout: 'custom_weights' as const,
+      flow: 'row' as const,
+      slotSizes: ['lg' as const, 'sm' as const, 'md' as const, 'sm' as const],
+    };
+    const customLetter = packSmartAutoPage(compactSteps, letterCtx, customSpec);
+    const customTabloid = packSmartAutoPage(compactSteps, tabloidCtx, customSpec);
+    // Scales past the old hardcoded 4-step limit based on physical min sizes
+    expect(customLetter.fits).toBe(true);
+    expect(customLetter.count).toBeGreaterThan(4);
+    expect(customTabloid.count).toBeGreaterThan(customLetter.count);
+    expect(customLetter.worstEval.modelAreaWidthIn).toBeGreaterThanOrEqual(SMART_AUTO_MIN_STEP_AREA_WIDTH_IN - 1e-3);
+    expect(customLetter.worstEval.modelAreaHeightIn).toBeGreaterThanOrEqual(SMART_AUTO_MIN_STEP_AREA_HEIGHT_IN - 1e-3);
+    expect(customLetter.worstEval.studSizeCm).toBeGreaterThanOrEqual(SMART_AUTO_MIN_STUD_SIZE_CM - 1e-3);
   });
 
   it('computes tighter aspect-aware stud sizes using projected half-extents and suggests rotating the same sheet when it resolves the warning', () => {

@@ -485,7 +485,9 @@ describe('studioRuntime safety checks', () => {
     expect(html).not.toContain('fits 1–2 steps per page');
     expect(runtime).not.toContain('chooses 1–2 steps per page');
     expect(runtime).not.toContain('Smart Auto Grid · Up to ');
-    expect(runtime).toContain('Smart Auto Grid · Dynamic by Page Size');
+    expect(runtime).toContain('Smart Auto Grid · ${proportionTitle}');
+    expect(html).not.toContain('Step Proportions (Mixed Layouts)');
+    expect(html).toContain('>Step Proportions<');
 
     // Intrusive floating canvas overlay banner is removed
     expect(html).not.toContain('id="pageSizeWarningBanner"');
