@@ -7,6 +7,7 @@ import {
   classifyLDrawColorGroup,
   classifyLibraryCategory,
   computeStarterPackProgress,
+  computeViewportPopoverPlacement,
   extractFetchablePartIdFromQuery,
   filterLibraryItems,
   formatLibraryMenuSummary,
@@ -419,4 +420,66 @@ describe('bricksLibrary engine', () => {
       expect(byId.flatMap((s) => s.colors.map((c) => c.id))).toEqual([297]);
     });
   });
+
+  describe('computeViewportPopoverPlacement', () => {
+    it('places below and right-aligned on desktop viewports with ample room', () => {
+      const p = computeViewportPopoverPlacement(
+        { top: 280, right: 950, bottom: 308, left: 820 },
+        { width: 1440, height: 900 },
+      );
+      expect(p.placement).toBe('below');
+      expect(p.top).toBe(314);
+      expect(p.bottom).toBeNull();
+      expect(p.width).toBe(336);
+      expect(p.left).toBe(614);
+      expect(p.maxHeight).toBe(460);
+    });
+
+    it('clamps maxHeight to remaining viewport space below the trigger on mobile portrait', () => {
+      const p = computeViewportPopoverPlacement(
+        { top: 400, right: 370, bottom: 428, left: 230 },
+        { width: 390, height: 844 },
+      );
+      expect(p.placement).toBe('below');
+      expect(p.top).toBe(434);
+      expect(p.bottom).toBeNull();
+      expect(p.top! + p.maxHeight).toBeLessThanOrEqual(844 - 12);
+      expect(p.maxHeight).toBe(398);
+      expect(p.left).toBeGreaterThanOrEqual(12);
+      expect(p.left + p.width).toBeLessThanOrEqual(390 - 12);
+    });
+
+    it('flips above the trigger when a virtual keyboard shrinks visualViewport height below the button', () => {
+      const p = computeViewportPopoverPlacement(
+        { top: 400, right: 370, bottom: 428, left: 230 },
+        { width: 390, height: 470, layoutHeight: 844 },
+      );
+      expect(p.placement).toBe('above');
+      expect(p.top).toBeNull();
+      expect(p.bottom).toBe(844 - (400 - 6));
+      expect(p.maxHeight).toBe(382);
+    });
+
+    it('uses the full viewport height on short landscape screens when neither above nor below has comfortable room', () => {
+      const p = computeViewportPopoverPlacement(
+        { top: 180, right: 540, bottom: 208, left: 400 },
+        { width: 844, height: 360 },
+      );
+      expect(p.placement).toBe('viewport');
+      expect(p.top).toBe(12);
+      expect(p.bottom).toBeNull();
+      expect(p.maxHeight).toBe(336);
+    });
+
+    it('clamps width and horizontal position inside narrow viewports', () => {
+      const p = computeViewportPopoverPlacement(
+        { top: 100, right: 200, bottom: 128, left: 60 },
+        { width: 320, height: 568 },
+      );
+      expect(p.width).toBe(296);
+      expect(p.left).toBe(12);
+      expect(p.left + p.width).toBe(308);
+    });
+  });
 });
+

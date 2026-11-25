@@ -2149,24 +2149,6 @@
                     <span id="libColorBtnLabel" class="font-semibold text-[var(--foreground)] max-w-[140px] truncate">Red</span>
                     <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
                   </button>
-                  <div id="libColorPopover" role="dialog" aria-label="3D Preview Color" class="hidden absolute right-0 top-full mt-1.5 z-30 w-[336px] max-w-[calc(100vw-2.5rem)] rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-2xl p-3 space-y-2.5 text-[var(--foreground)]">
-                    <div class="flex items-start justify-between gap-2">
-                      <div>
-                        <div class="text-xs font-bold leading-tight">3D Preview Color</div>
-                        <div class="text-[11px] text-[var(--muted-foreground)]">Changes how shapes render — does not filter parts</div>
-                      </div>
-                      <button id="libColorPopoverClose" type="button" aria-label="Close color picker" class="w-6 h-6 rounded-md hover:bg-[var(--surface-hover)] text-[var(--muted-foreground)] flex items-center justify-center shrink-0 cursor-pointer">
-                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
-                      </button>
-                    </div>
-                    <div class="relative">
-                      <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-                      <input id="libColorSearchInput" type="search" placeholder="Search 150+ LDraw colors by name or ID…" class="w-full pl-8 pr-2.5 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] text-xs outline-none focus:border-[var(--primary)]" />
-                    </div>
-                    <div id="libColorModelModeWrap" class="hidden"></div>
-                    <div id="libColorPaletteSections" class="max-h-[250px] overflow-y-auto overscroll-contain space-y-3 pr-1"></div>
-                    <div id="libColorHoverReadout" class="pt-2 border-t border-[var(--border)] flex items-center justify-between gap-2 text-[11px] text-[var(--muted-foreground)]"></div>
-                  </div>
                 </div>
               </div>
               <div id="libSearchFetchBanner" class="hidden p-3.5 rounded-lg border border-[var(--primary-border)] bg-[var(--primary-soft)] flex items-center justify-between gap-2.5 flex-wrap"></div>
@@ -2311,6 +2293,26 @@
           <span id="libFooterHint" class="text-xs text-[var(--muted-foreground)] truncate">Saved parts stay cached locally in this browser.</span>
           <button id="bricksLibDoneBtn" type="button" class="px-5 py-2.5 rounded-md bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] font-semibold shrink-0 transition-colors cursor-pointer">Done</button>
         </div>
+      </div>
+
+      <!-- 3D Preview Color Popover (rendered outside .studio-sheet so it is never clipped by modal/grid overflow) -->
+      <div id="libColorPopover" role="dialog" aria-label="3D Preview Color" class="hidden fixed z-[60] w-[336px] max-w-[calc(100vw-1.5rem)] rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-2xl p-3 flex flex-col gap-2.5 overflow-hidden text-[var(--foreground)]">
+        <div class="flex items-start justify-between gap-2 shrink-0">
+          <div>
+            <div class="text-xs font-bold leading-tight">3D Preview Color</div>
+            <div class="text-[11px] text-[var(--muted-foreground)]">Changes how shapes render — does not filter parts</div>
+          </div>
+          <button id="libColorPopoverClose" type="button" aria-label="Close color picker" class="w-6 h-6 rounded-md hover:bg-[var(--surface-hover)] text-[var(--muted-foreground)] flex items-center justify-center shrink-0 cursor-pointer">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
+        </div>
+        <div class="relative shrink-0">
+          <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <input id="libColorSearchInput" type="search" placeholder="Search 150+ LDraw colors by name or ID…" class="w-full pl-8 pr-2.5 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] text-xs outline-none focus:border-[var(--primary)]" />
+        </div>
+        <div id="libColorModelModeWrap" class="hidden shrink-0"></div>
+        <div id="libColorPaletteSections" class="flex-1 min-h-0 overflow-y-auto overscroll-contain space-y-3 pr-1"></div>
+        <div id="libColorHoverReadout" class="pt-2 border-t border-[var(--border)] flex items-center justify-between gap-2 text-[11px] text-[var(--muted-foreground)] shrink-0"></div>
       </div>
     </div>
 

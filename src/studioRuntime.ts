@@ -372,6 +372,7 @@ import {
   buildLibraryIndex,
   classifyDatEntryKind,
   computeStarterPackProgress,
+  computeViewportPopoverPlacement,
   extractFetchablePartIdFromQuery,
   filterLibraryItems,
   formatLibraryMenuSummary,
@@ -15222,6 +15223,36 @@ function formatColorReadoutHtml(colorMode) {
   return `<span class="inline-flex items-center gap-1.5 min-w-0"><span class="w-3 h-3 rounded-full border border-black/25 dark:border-white/25 shrink-0" style="${getSwatchStyleAttr(col)}"></span><span class="font-semibold text-[var(--foreground)] truncate">${escHtml(col?.name || `Color ${colId}`)}</span></span><span class="font-mono shrink-0">#${colId}${escHtml(countNote)}</span>`;
 }
 
+function positionLibColorPopover() {
+  if (!libUiState.colorPickerOpen) return;
+  const popover = document.getElementById('libColorPopover');
+  const btn = document.getElementById('libColorPickerBtn');
+  if (!popover || !btn) return;
+  const rect = btn.getBoundingClientRect();
+  const vv = window.visualViewport;
+  const placement = computeViewportPopoverPlacement(
+    { top: rect.top, right: rect.right, bottom: rect.bottom, left: rect.left },
+    {
+      width: vv ? vv.width : window.innerWidth,
+      height: vv ? vv.height : window.innerHeight,
+      offsetLeft: vv ? vv.offsetLeft : 0,
+      offsetTop: vv ? vv.offsetTop : 0,
+      layoutHeight: window.innerHeight,
+    },
+    { preferredWidth: 336, maxHeight: 460, minComfortableHeight: 260, margin: 12, gap: 6 },
+  );
+  popover.style.left = `${placement.left}px`;
+  popover.style.width = `${placement.width}px`;
+  popover.style.maxHeight = `${placement.maxHeight}px`;
+  if (placement.top !== null) {
+    popover.style.top = `${placement.top}px`;
+    popover.style.bottom = 'auto';
+  } else {
+    popover.style.top = 'auto';
+    popover.style.bottom = `${placement.bottom ?? 12}px`;
+  }
+}
+
 function setLibColorPickerOpen(open) {
   libUiState.colorPickerOpen = Boolean(open);
   const popover = document.getElementById('libColorPopover');
@@ -15230,11 +15261,16 @@ function setLibColorPickerOpen(open) {
   if (btn) btn.setAttribute('aria-expanded', libUiState.colorPickerOpen ? 'true' : 'false');
   if (libUiState.colorPickerOpen) {
     renderLibColorSwatches();
+    positionLibColorPopover();
     const searchEl = document.getElementById('libColorSearchInput');
     if (searchEl) {
       searchEl.value = libUiState.colorQuery;
-      requestAnimationFrame(() => searchEl.focus());
+      const isFinePointer = !window.matchMedia || window.matchMedia('(pointer: fine)').matches;
+      if (isFinePointer) {
+        requestAnimationFrame(() => searchEl.focus());
+      }
     }
+    requestAnimationFrame(() => positionLibColorPopover());
   }
 }
 
@@ -15305,7 +15341,7 @@ function renderLibColorSwatches() {
         const swatches = sec.colors.map((c) => {
           const active = !isModelMode && libUiState.previewColor === c.id;
           const title = `${c.name} (#${c.id})${c.countInModel ? ` — ${c.countInModel} in model` : ''}`;
-          return `<button type="button" data-lib-color="${c.id}" title="${escHtml(title)}" aria-label="${escHtml(title)}" class="w-6 h-6 rounded-md border transition cursor-pointer ${active ? 'ring-2 ring-[var(--primary)] ring-offset-1 ring-offset-[var(--card)] scale-110 border-white/90 z-10' : 'border-black/25 dark:border-white/25 hover:scale-110'}" style="${getSwatchStyleAttr(c)}"></button>`;
+          return `<button type="button" data-lib-color="${c.id}" title="${escHtml(title)}" aria-label="${escHtml(title)}" class="aspect-square w-full rounded-md border transition cursor-pointer ${active ? 'ring-2 ring-[var(--primary)] ring-offset-1 ring-offset-[var(--card)] scale-110 border-white/90 z-10' : 'border-black/25 dark:border-white/25 hover:scale-110'}" style="${getSwatchStyleAttr(c)}"></button>`;
         }).join('');
         return `
           <div class="space-y-1.5">
@@ -15984,6 +16020,7 @@ function openBricksLibraryModal(preferredTab = null) {
 }
 
 function closeBricksLibraryModal() {
+  setLibColorPickerOpen(false);
   stopLibThumbQueue();
   const modal = document.getElementById('bricksLibraryModal');
   if (modal) modal.classList.add('hidden');
@@ -21210,7 +21247,10 @@ document.getElementById('bricksLibraryModal').onclick = (e) => {
   }
   if (libUiState.colorPickerOpen) {
     const wrap = document.getElementById('libColorPickerWrap');
-    if (wrap && !wrap.contains(e.target)) {
+    const popover = document.getElementById('libColorPopover');
+    const insideTrigger = wrap && wrap.contains(e.target);
+    const insidePopover = popover && popover.contains(e.target);
+    if (!insideTrigger && !insidePopover) {
       setLibColorPickerOpen(false);
     }
   }
@@ -21231,13 +21271,26 @@ if (libColorSearchInputEl) {
   libColorSearchInputEl.oninput = (e) => {
     libUiState.colorQuery = e.target.value || '';
     renderLibColorSwatches();
+    positionLibColorPopover();
   };
+}
+window.addEventListener('resize', positionLibColorPopover, { passive: true });
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', positionLibColorPopover, { passive: true });
+  window.visualViewport.addEventListener('scroll', positionLibColorPopover, { passive: true });
+}
+const libBrowseGridWrapForPopover = document.getElementById('libBrowseGridWrap');
+if (libBrowseGridWrapForPopover) {
+  libBrowseGridWrapForPopover.addEventListener('scroll', positionLibColorPopover, { passive: true });
 }
 
 document.querySelectorAll('.lib-tab-btn').forEach((btn) => {
   btn.onclick = () => {
     const nextTab = btn.getAttribute('data-lib-tab');
     if (nextTab === 'browse' || nextTab === 'manage') {
+      if (nextTab !== libUiState.tab) {
+        setLibColorPickerOpen(false);
+      }
       libUiState.tab = nextTab;
       renderBricksLibraryModal(false);
     }

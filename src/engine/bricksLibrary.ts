@@ -903,3 +903,88 @@ export function buildLibraryColorPalette(
   return sections;
 }
 
+export interface ViewportPopoverRect {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+}
+
+export interface ViewportPopoverBounds {
+  width: number;
+  height: number;
+  offsetLeft?: number;
+  offsetTop?: number;
+  layoutHeight?: number;
+}
+
+export interface ViewportPopoverPlacementOptions {
+  preferredWidth?: number;
+  maxHeight?: number;
+  minComfortableHeight?: number;
+  margin?: number;
+  gap?: number;
+}
+
+export interface ViewportPopoverPlacement {
+  left: number;
+  width: number;
+  top: number | null;
+  bottom: number | null;
+  maxHeight: number;
+  placement: 'below' | 'above' | 'viewport';
+}
+
+/**
+ * Computes fixed-position coordinates and max-height for a popover anchored to a
+ * trigger rect so it never overflows or gets clipped by any viewport edge (desktop,
+ * mobile portrait/landscape, or shrunk visualViewport when a virtual keyboard is open).
+ */
+export function computeViewportPopoverPlacement(
+  anchor: ViewportPopoverRect,
+  viewport: ViewportPopoverBounds,
+  options: ViewportPopoverPlacementOptions = {},
+): ViewportPopoverPlacement {
+  const margin = Math.max(0, options.margin ?? 12);
+  const gap = Math.max(0, options.gap ?? 6);
+  const preferredWidth = Math.max(160, options.preferredWidth ?? 336);
+  const maxHeightCap = Math.max(120, options.maxHeight ?? 460);
+  const minComfortableHeight = Math.max(120, options.minComfortableHeight ?? 260);
+
+  const vpLeft = viewport.offsetLeft ?? 0;
+  const vpTop = viewport.offsetTop ?? 0;
+  const vpWidth = Math.max(1, viewport.width);
+  const vpHeight = Math.max(1, viewport.height);
+  const vpRight = vpLeft + vpWidth;
+  const vpBottom = vpTop + vpHeight;
+  const layoutHeight = Math.max(1, viewport.layoutHeight ?? vpHeight);
+
+  const availableWidth = Math.max(160, vpWidth - margin * 2);
+  const width = Math.min(preferredWidth, availableWidth);
+  const desiredLeft = anchor.right - width;
+  const maxLeft = Math.max(vpLeft + margin, vpRight - margin - width);
+  const left = Math.round(Math.max(vpLeft + margin, Math.min(desiredLeft, maxLeft)));
+
+  const spaceBelow = vpBottom - margin - (anchor.bottom + gap);
+  const spaceAbove = anchor.top - gap - (vpTop + margin);
+  const totalAvailableHeight = Math.max(120, vpHeight - margin * 2);
+
+  if (spaceBelow >= minComfortableHeight) {
+    const top = Math.round(Math.max(vpTop + margin, anchor.bottom + gap));
+    const maxHeight = Math.round(Math.max(120, Math.min(maxHeightCap, vpBottom - margin - top)));
+    return { left, width: Math.round(width), top, bottom: null, maxHeight, placement: 'below' };
+  }
+
+  if (spaceAbove >= minComfortableHeight && spaceAbove >= spaceBelow) {
+    const anchorBottomEdge = Math.min(vpBottom - margin, anchor.top - gap);
+    const maxHeight = Math.round(Math.max(120, Math.min(maxHeightCap, anchorBottomEdge - (vpTop + margin))));
+    const bottom = Math.round(Math.max(margin, layoutHeight - anchorBottomEdge));
+    return { left, width: Math.round(width), top: null, bottom, maxHeight, placement: 'above' };
+  }
+
+  const top = Math.round(vpTop + margin);
+  const maxHeight = Math.round(Math.min(maxHeightCap, totalAvailableHeight));
+  return { left, width: Math.round(width), top, bottom: null, maxHeight, placement: 'viewport' };
+}
+
+
