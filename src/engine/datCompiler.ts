@@ -1787,11 +1787,117 @@ export function compileDatEntry(
 
   const trisArr = new Float32Array(tris);
   const normsArr = new Float32Array(norms);
-  const edgesArr = new Float32Array(edges);
-  smoothMeshNormals(trisArr, normsArr, edgesArr);
+  const explicitEdgesArr = new Float32Array(edges);
+  smoothMeshNormals(trisArr, normsArr, explicitEdgesArr);
   for (const tb of texBatches) {
-    smoothMeshNormals(tb.tris, tb.norms, edgesArr);
+    smoothMeshNormals(tb.tris, tb.norms, explicitEdgesArr);
   }
+
+  // Synthesize missing sharp crease edges (>= 40°) and smooth curved-surface conditional
+  // silhouette edges (1.8°..40°) directly from shared triangle adjacency across the full
+  // mesh (including across subpart/primitive seams such as 3-4cyli + 1-4cyli and Studio .io
+  // parts that omit type-5 conditional lines). Coplanar diagonals and already-authored edges
+  // are skipped so flat faces stay clean and explicit LDraw edges are never duplicated.
+  {
+    const qKey = (x: number, y: number, z: number): string =>
+      `${Math.round(x * 100) + 0},${Math.round(y * 100) + 0},${Math.round(z * 100) + 0}`;
+    const pairKey = (ka: string, kb: string): string => (ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`);
+
+    const existingEdges = new Set<string>();
+    for (let i = 0; i + 5 < edges.length; i += 6) {
+      existingEdges.add(
+        pairKey(qKey(edges[i], edges[i + 1], edges[i + 2]), qKey(edges[i + 3], edges[i + 4], edges[i + 5])),
+      );
+    }
+    for (let i = 0; i + 11 < condEdges.length; i += 12) {
+      existingEdges.add(
+        pairKey(
+          qKey(condEdges[i], condEdges[i + 1], condEdges[i + 2]),
+          qKey(condEdges[i + 3], condEdges[i + 4], condEdges[i + 5]),
+        ),
+      );
+    }
+
+    interface HalfEdgeEntry {
+      ax: number; ay: number; az: number;
+      bx: number; by: number; bz: number;
+      nx: number; ny: number; nz: number;
+      ox: number; oy: number; oz: number;
+      colId: number;
+      done: boolean;
+    }
+    const adj = new Map<string, HalfEdgeEntry>();
+    const COPLANAR_COS = 0.9995; // ~1.8°: skip flat face diagonals
+    const CREASE_COS = 0.766;    // ~40°: sharp corner -> hard edge; smoother -> conditional silhouette
+
+    const processTriBuffer = (buf: Float32Array, cols: Int32Array | number[] | null) => {
+      for (let i = 0, ti = 0; i + 8 < buf.length; i += 9, ti++) {
+        const x0 = buf[i], y0 = buf[i + 1], z0 = buf[i + 2];
+        const x1 = buf[i + 3], y1 = buf[i + 4], z1 = buf[i + 5];
+        const x2 = buf[i + 6], y2 = buf[i + 7], z2 = buf[i + 8];
+        const e1x = x1 - x0, e1y = y1 - y0, e1z = z1 - z0;
+        const e2x = x2 - x0, e2y = y2 - y0, e2z = z2 - z0;
+        let nx = e1y * e2z - e1z * e2y;
+        let ny = e1z * e2x - e1x * e2z;
+        let nz = e1x * e2y - e1y * e2x;
+        const nLen = Math.hypot(nx, ny, nz);
+        if (nLen < 1e-6) continue;
+        nx /= nLen; ny /= nLen; nz /= nLen;
+
+        const rawCol = cols ? cols[ti] : 16;
+        if (rawCol === STUD_SIDE_COLOR_FLAG || rawCol === STUD_INNER_COLOR_FLAG) continue;
+        const colId = rawCol < 0 ? 16 : rawCol;
+        const k0 = qKey(x0, y0, z0);
+        const k1 = qKey(x1, y1, z1);
+        const k2 = qKey(x2, y2, z2);
+
+        const triEdges: [string, string, number, number, number, number, number, number, number, number, number][] = [
+          [k0, k1, x0, y0, z0, x1, y1, z1, x2, y2, z2],
+          [k1, k2, x1, y1, z1, x2, y2, z2, x0, y0, z0],
+          [k2, k0, x2, y2, z2, x0, y0, z0, x1, y1, z1],
+        ];
+
+        for (let e = 0; e < 3; e++) {
+          const [ka, kb, ax, ay, az, bx, by, bz, ox, oy, oz] = triEdges[e];
+          if (ka === kb) continue;
+          const ek = pairKey(ka, kb);
+          if (existingEdges.has(ek)) continue;
+          const prev = adj.get(ek);
+          if (!prev) {
+            adj.set(ek, { ax, ay, az, bx, by, bz, nx, ny, nz, ox, oy, oz, colId, done: false });
+          } else if (!prev.done) {
+            prev.done = true;
+            const absDot = Math.abs(prev.nx * nx + prev.ny * ny + prev.nz * nz);
+            if (absDot >= COPLANAR_COS) continue;
+            const outCol = prev.colId !== 16 ? prev.colId : colId;
+            if (absDot <= CREASE_COS) {
+              if (edges.length < maxEdgeFloats) {
+                edges.push(prev.ax, prev.ay, prev.az, prev.bx, prev.by, prev.bz);
+                edgeCols.push(outCol);
+                if (outCol !== 16) hasSubEdgeColor = true;
+              }
+            } else if (condEdges.length < maxCondFloats) {
+              condEdges.push(
+                prev.ax, prev.ay, prev.az,
+                prev.bx, prev.by, prev.bz,
+                prev.ox, prev.oy, prev.oz,
+                ox, oy, oz,
+              );
+              condEdgeCols.push(outCol);
+              if (outCol !== 16) hasSubCondEdgeColor = true;
+            }
+          }
+        }
+      }
+    };
+
+    processTriBuffer(trisArr, hasSubColor ? triCols : null);
+    for (const tb of texBatches) {
+      processTriBuffer(tb.tris, tb.triCols);
+    }
+  }
+
+  const edgesArr = edges.length === explicitEdgesArr.length ? explicitEdgesArr : new Float32Array(edges);
   const subBoxes = buildLocalSubBoxes(
     trisArr,
     [minX, minY, minZ],

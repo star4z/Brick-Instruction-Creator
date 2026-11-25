@@ -986,6 +986,34 @@ describe('compileDatEntry — smooth circular studs & crease-angle vertex normal
     expect(singleCompiled!.edgeCols).toBeUndefined();
     expect(singleCompiled!.condEdgeCols).toBeUndefined();
   });
+
+  it('synthesizes missing sharp crease edges and curved-surface conditional silhouette edges from triangle adjacency', () => {
+    // A mesh with ZERO authored type-2 or type-5 lines:
+    // 1) A flat quad split into two coplanar triangles (diagonal must NOT get an edge)
+    // 2) A 90° sharp corner (must get a synthesized hard edge)
+    // 3) A 20° smooth curved fold (must get a synthesized conditional silhouette edge)
+    const sin20 = Math.sin((20 * Math.PI) / 180);
+    const cos20 = Math.cos((20 * Math.PI) / 180);
+    const bareMesh: DatEntrySource = {
+      key: 'bare_curved_and_sharp',
+      lines: [
+        // Flat quad on y = 0 split diagonally: (0,0,0)-(10,0,0)-(10,0,10) and (0,0,0)-(10,0,10)-(0,0,10)
+        '3 16 0 0 0  10 0 0  10 0 10',
+        '3 16 0 0 0  10 0 10  0 0 10',
+        // 90° vertical wall meeting at edge (0,0,0)-(0,0,10)
+        '3 16 0 0 0  0 0 10  0 10 0',
+        // 20° curved facet meeting at edge (10,0,0)-(10,0,10)
+        `3 16 10 0 0  10 0 10  ${(10 + 10 * cos20).toFixed(4)} ${(10 * sin20).toFixed(4)} 5`,
+      ],
+    };
+    const compiled = compileDatEntry(bareMesh, () => null);
+    expect(compiled).not.toBeNull();
+    // Exactly 1 hard crease edge (the 90° corner), NOT the coplanar diagonal
+    expect(compiled!.edges.length / 6).toBe(1);
+    // Exactly 1 conditional silhouette edge (the 20° curved fold), NOT the coplanar diagonal
+    expect((compiled!.condEdges?.length ?? 0) / 12).toBe(1);
+  });
 });
+
 
 
