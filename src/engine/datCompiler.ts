@@ -1152,6 +1152,7 @@ export function compileDatEntry(
     if (kind === 'cyli' || kind === 'cylo' || kind === 'cylc') {
       const topC = kind === 'cylc' ? tp(0, 0, 0) : null;
       const botC = kind === 'cylc' ? tp(0, 1, 0) : null;
+      const emitRimEdges = kind === 'cylo' || kind === 'cylc';
       const isFullCircle = frac >= 0.999;
       const topPts: Vec3[] = new Array(segs + 1);
       const botPts: Vec3[] = new Array(segs + 1);
@@ -1168,6 +1169,10 @@ export function compileDatEntry(
         if (topC && botC) {
           emitT(topC, t0, t1);
           emitT(botC, b1, b0);
+        }
+        if (emitRimEdges && edges.length < edgeLimit) {
+          emitEdge(t0, t1, colId);
+          emitEdge(b0, b1, colId);
         }
         if (isFullCircle) {
           const prev = (i + segs - 1) % segs;

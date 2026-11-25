@@ -886,6 +886,30 @@ describe('compileDatEntry — smooth circular studs & crease-angle vertex normal
     expect(oct!.tris.length / 9).toBe(16);
   });
 
+  it('emits top and bottom rim edges for LDraw cylo and cylc primitives (matching official LDraw spec) while keeping cyli rimless', () => {
+    const cylo = compileDatEntry(
+      { key: 'half_cylo', lines: ['1 16 0 0 0 6 0 0 0 10 0 0 0 6 2-4cylo.dat'] },
+      () => null,
+    );
+    const cylc = compileDatEntry(
+      { key: 'full_cylc', lines: ['1 16 0 0 0 6 0 0 0 10 0 0 0 6 4-4cylc.dat'] },
+      () => null,
+    );
+    const cyli = compileDatEntry(
+      { key: 'half_cyli', lines: ['1 16 0 0 0 6 0 0 0 10 0 0 0 6 2-4cyli.dat'] },
+      () => null,
+    );
+    expect(cylo).not.toBeNull();
+    expect(cylc).not.toBeNull();
+    expect(cyli).not.toBeNull();
+    // 2-4cylo (24 segments) emits 24 top + 24 bottom rim edges = 48 edges
+    expect(cylo!.edges.length / 6).toBe(48);
+    // 4-4cylc (48 segments) emits 48 top + 48 bottom rim edges = 96 edges
+    expect(cylc!.edges.length / 6).toBe(96);
+    // 2-4cyli emits no rim edges (only conditional silhouette lines)
+    expect(cyli!.edges.length).toBe(0);
+  });
+
   it('preserves crisp creases across shallow LDraw type-2 hard edges (e.g. 18-degree slopes)', () => {
     // Flat horizontal quad (y = 0, x in [-10, 0]) meeting an 18° slope (x in [0, 10])
     // along the shared type-2 hard edge at x = 0, y = 0, z in [-10, 10].
