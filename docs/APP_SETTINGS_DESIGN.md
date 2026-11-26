@@ -10,7 +10,7 @@ The **App Settings** modal (`#settingsModal`), accessible from the Side Menu (`#
 
 ### 2.1 New Manual Defaults
 - **Defaults Mode**:
-  - **Built-in** *(default)*: Always start fresh imports with `Classic Blue` (Flat / No Lighting, Outline All Parts, No Fade), `Screen Fit`, `Landscape`, `Auto` grid, `Balanced` margins, `Bottom Right` page numbers, `Wordless (LEGO-Style)`, and all four included booklet pages enabled.
+  - **Built-in** *(default)*: Always start fresh imports with `Classic Blue` (Flat / No Lighting, Outline All Parts, No Fade), `Screen Fit`, `Landscape`, `Auto` grid, `Balanced` margins, `Bottom Right` page numbers, `Wordless`, and all four included booklet pages enabled.
   - **Custom Defaults**: Configure preferred Default Theme (built-in or custom), Page Format & Orientation, Grid Columns × Rows, Page Margins, Page Number Position (`Bottom Right` / `Outside Edge (Booklet)`), Wordless mode, and Included Pages. Includes a one-click **Copy from Current Project** action when a model is open.
   - **Remember Last Used**: Carry over the previous project's theme, format, orientation, grid, margins, page number position, Wordless mode, and included pages into the next import (falling back to `Classic Blue` if a custom theme was deleted).
 - **Show Import Wizard on Import**:

@@ -71,18 +71,20 @@ describe('Import Wizard Engine', () => {
     expect(byId.slicing.targetSubpage).toBe('slicing');
     expect(byId.slicing.targetPageLabel).toBe('Step Generation');
     expect(byId.slicing.value).toBe('Single Continuous Build');
+    expect(byId.slicing.detail).toBe('');
 
     expect(byId.theme.targetSubpage).toBe('style');
     expect(byId.theme.targetSection).toBe('theme');
     expect(byId.theme.targetPageLabel).toBe('Style & Themes');
     expect(byId.theme.value).toBe('Classic Blue');
+    expect(byId.theme.detail).toBe('');
     expect(byId.theme.swatch?.bgColor).toBe('#d8ecfd');
 
     expect(byId.wordless.label).toBe('Text & Labels');
     expect(byId.wordless.targetSubpage).toBe('pageSetup');
     expect(byId.wordless.targetSection).toBe('wordless');
     expect(byId.wordless.targetPageLabel).toBe('Page Setup');
-    expect(byId.wordless.value).toBe('Wordless (LEGO-Style)');
+    expect(byId.wordless.value).toBe('Wordless');
 
     expect(byId.rendering.targetSubpage).toBe('style');
     expect(byId.rendering.targetSection).toBe('rendering');
@@ -102,16 +104,16 @@ describe('Import Wizard Engine', () => {
     expect(bookletFormat?.detail).toBe('Auto grid · Balanced margins · Outside page numbers');
   });
 
-  it('formats slicing summaries for modular sections, non-modular sections, single build, and keep-file-steps', () => {
+  it('formats slicing summaries with the slicing method name and no wizard description', () => {
     expect(
       formatWizardSlicingSummary({
         importMode: 'keep',
-        activeProposal: { title: '3 Sections', sections: [{}, {}, {}] },
+        activeProposal: { title: 'Modular Floors', sections: [{}, {}, {}] },
         detectDuplicates: true,
       }),
     ).toEqual({
       value: 'Keep Existing File Steps',
-      detail: 'Preserves STEP markers saved in your file',
+      detail: '',
     });
 
     expect(
@@ -125,8 +127,8 @@ describe('Import Wizard Engine', () => {
         detectDuplicates: true,
       }),
     ).toEqual({
-      value: '2 Sections + Join',
-      detail: 'Modular Floors · Duplicate submodels on',
+      value: 'Modular Floors',
+      detail: '',
     });
 
     expect(
@@ -137,7 +139,7 @@ describe('Import Wizard Engine', () => {
       }),
     ).toEqual({
       value: 'Single Continuous Build',
-      detail: 'Auto-generated steps · Duplicate submodels off',
+      detail: '',
     });
   });
 

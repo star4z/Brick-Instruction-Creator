@@ -172,9 +172,25 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     await page.locator('#mpBtnSkip').click();
     await expect(page.locator('#missingPartsModal')).toBeHidden();
     await expect(page.locator('#importWizardModal')).toBeVisible();
+    await expect(page.locator('#impWizItemsList')).not.toContainText('LEGO-Style');
+    await expect(page.locator('#impWizItemsList button[data-wiz-section="slicing"] > span').nth(1).locator('> span')).toHaveCount(2);
+    await expect(page.locator('#impWizItemsList button[data-wiz-section="theme"] > span').nth(1).locator('> span')).toHaveCount(2);
     await auditSurface(page, `${testInfo.project.name}: Import Wizard Modal`, {
       activeContainerSelector: '#importWizardModal',
     });
+
+    // Click into Step Generation — Slicing from Import Wizard and verify back-navigation
+    const wizardSlicingBtn = page.locator('#impWizItemsList button[data-wiz-section="slicing"]');
+    if (await wizardSlicingBtn.isVisible()) {
+      await wizardSlicingBtn.click();
+      await expect(page.locator('#importModal')).toBeVisible();
+      await expect(page.locator('#btnBackStepGenWizard')).toBeVisible();
+      await auditSurface(page, `${testInfo.project.name}: Import Wizard -> Step Generation`, {
+        activeContainerSelector: '#importModal',
+      });
+      await page.locator('#btnBackStepGenWizard').click();
+      await expect(page.locator('#importWizardModal')).toBeVisible();
+    }
 
     // Click into Page Setup from Import Wizard and verify back-navigation
     const wizardPageSetupBtn = page.locator('#impWizItemsList button').filter({ hasText: /Page Format|Wordless/i }).first();

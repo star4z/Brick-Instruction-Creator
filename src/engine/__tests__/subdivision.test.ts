@@ -103,11 +103,16 @@ describe('Large & Elongated Model Subdivision Analyzer', () => {
     const { assessment, proposals } = analyzeModelSubdivisions(parts, adjacency);
     expect(assessment.shouldPrompt).toBe(true);
     expect(assessment.aspectRatio).toBeGreaterThanOrEqual(3.0);
+    expect(assessment.reasons.some((r) => /^\d+ studs long$/.test(r))).toBe(true);
+    const elongatedReason = assessment.reasons.find((r) => r.startsWith('elongated '));
+    expect(elongatedReason).toBeDefined();
+    expect(elongatedReason).not.toMatch(/\(\d+ studs\)/);
     expect(proposals.length).toBeGreaterThanOrEqual(2);
 
     // Top recommendation for an elongated train chassis should be longitudinal halves!
     const top = proposals[0];
     expect(top.strategy).toBe('longitudinal_halves');
+    expect(top.title).toBe('Split into Halves');
     expect(top.outputMode).toBe('modular_chapters');
     expect(top.zoomGainEstimate).toBeGreaterThanOrEqual(1.5);
 

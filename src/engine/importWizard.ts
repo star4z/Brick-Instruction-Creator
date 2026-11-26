@@ -175,31 +175,21 @@ export function formatWizardSlicingSummary(input: {
   if (input.importMode === 'keep') {
     return {
       value: 'Keep Existing File Steps',
-      detail: 'Preserves STEP markers saved in your file',
+      detail: '',
     };
   }
 
-  const dupText = input.detectDuplicates
-    ? 'Duplicate submodels on'
-    : 'Duplicate submodels off';
-
   const prop = input.activeProposal;
   if (prop && prop.sections.length > 0) {
-    const isMod = prop.outputMode === 'modular_chapters';
-    const primaryCount = prop.sections.filter((s) => s.role !== 'join').length;
-    const hasJoin = prop.sections.some((s) => s.role === 'join');
-    const countLabel = isMod
-      ? `${primaryCount} Section${primaryCount === 1 ? '' : 's'}${hasJoin ? ' + Join' : ''}`
-      : `${prop.sections.length} Section${prop.sections.length === 1 ? '' : 's'}`;
     return {
-      value: countLabel,
-      detail: `${prop.title} · ${dupText}`,
+      value: prop.title,
+      detail: '',
     };
   }
 
   return {
     value: 'Single Continuous Build',
-    detail: `Auto-generated steps · ${dupText}`,
+    detail: '',
   };
 }
 
@@ -322,9 +312,7 @@ export function buildImportWizardSummaryItems(
       id: 'theme',
       label: 'Theme',
       value: input.themeName || 'Classic Blue',
-      detail: input.themeBuiltIn
-        ? 'Built-in theme · Colors, fonts & page style'
-        : 'Custom theme · Colors, fonts & page style',
+      detail: '',
       targetSubpage: 'style',
       targetSection: 'theme',
       targetPageLabel: 'Style & Themes',
@@ -339,7 +327,7 @@ export function buildImportWizardSummaryItems(
     {
       id: 'wordless',
       label: 'Text & Labels',
-      value: input.wordlessMode ? 'Wordless (LEGO-Style)' : 'With Text Labels',
+      value: input.wordlessMode ? 'Wordless' : 'With Text Labels',
       detail: input.wordlessMode
         ? 'Icons, diagrams & numbers only'
         : 'Titles, section names & part names',

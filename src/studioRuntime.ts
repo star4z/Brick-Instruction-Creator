@@ -25238,7 +25238,7 @@ function renderImportWizardUI() {
         <span class="min-w-0 flex-1">
           <span class="block text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">${escHtml(item.label)}</span>
           <span class="block text-sm font-bold text-[var(--foreground)] truncate mt-0.5">${escHtml(item.value)}</span>
-          <span class="block text-[11px] text-[var(--muted-foreground)] truncate mt-0.5">${escHtml(item.detail)}</span>
+          ${item.detail ? `<span class="block text-[11px] text-[var(--muted-foreground)] truncate mt-0.5">${escHtml(item.detail)}</span>` : ''}
         </span>
         <span class="shrink-0 inline-flex items-center gap-1 text-[11px] font-semibold text-[var(--primary)]">
           <span>${escHtml(item.targetPageLabel)}</span>
@@ -25395,8 +25395,9 @@ function openImportWizard(parsed, opts = {}) {
   state.pendingImport = parsed;
 
   document.getElementById('impWizTitle').textContent = `Import ${parsed.title}`;
-  const reasonStr = assessment.reasons.length > 0
-    ? `${formatPartCount(parsed.parts.length)} · Detected ${assessment.reasons.join(' · ')}.`
+  const wizardReasons = assessment.reasons.filter((r) => !/^\d[\d,]* parts$/.test(r));
+  const reasonStr = wizardReasons.length > 0
+    ? `${formatPartCount(parsed.parts.length)} · ${wizardReasons.join(' · ')}.`
     : `${formatPartCount(parsed.parts.length)}${parsed.submodelCount ? ` across ${parsed.submodelCount} submodels` : ''}.`;
   document.getElementById('impWizSummary').textContent = reasonStr;
 

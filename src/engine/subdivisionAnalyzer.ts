@@ -571,7 +571,11 @@ export function assessModelSubdivisionNeed(parts: SubdivisionPartInput[]): Subdi
     reasons.push(`${longestStuds} studs long`);
   }
   if (aspectRatio >= 3.0 && longestSpanLdu >= 360) {
-    reasons.push(`elongated ${aspectRatio.toFixed(1)}:1 shape (${longestStuds} studs)`);
+    reasons.push(
+      longestSpanLdu >= 560
+        ? `elongated ${aspectRatio.toFixed(1)}:1 shape`
+        : `elongated ${aspectRatio.toFixed(1)}:1 shape (${longestStuds} studs)`,
+    );
   }
   if (readabilityRatio < 0.045 && active.length >= 40) {
     reasons.push('small bricks relative to full model size');
@@ -2580,14 +2584,9 @@ export function buildLongitudinalHalvesProposal(
   );
 
   const capCount = capsBySeg.reduce((acc, list) => acc + list.length, 0);
-  const title =
-    cleanSegments.length === 2
-      ? isIdenticalHalves
-        ? 'Build 2× Identical Halves, Then Connect'
-        : capCount > 0
-          ? `Build Halves & ${capCount} Removable Roof${capCount === 1 ? '' : 's'}, Then Connect`
-          : 'Build Halves First, Then Connect'
-      : `Build in ${cleanSegments.length} Segments, Then Connect`;
+  const title = cleanSegments.length === 2
+    ? 'Split into Halves'
+    : 'Lengthwise Segments';
 
   const joinNote =
     joinIndices.length > 0
@@ -2811,9 +2810,7 @@ export function buildHorizontalFloorsProposal(
     id: `prop_floors_${nonEmpty.length}`,
     strategy: 'horizontal_floors',
     outputMode,
-    title: hasModularTileSeams
-      ? `Modular Floors (${nonEmpty.length} Levels)`
-      : `Build Bottom-to-Top in ${nonEmpty.length} Vertical Layers`,
+    title: hasModularTileSeams ? 'Modular Floors' : 'Vertical Layers',
     rationale: hasModularTileSeams
       ? `Detected ${chosen.length} smooth-tile floor seam${chosen.length === 1 ? '' : 's'} with minimal anchor studs between levels.`
       : `Separates the ${Math.round(bounds.spanY / 24)}-brick-tall build into ${nonEmpty.length} connected vertical stages.`,
@@ -2968,7 +2965,7 @@ export function buildStructuralModulesProposal(
           id: `prop_modules_${sections.length}`,
           strategy: 'structural_modules',
           outputMode: 'modular_chapters',
-          title: `Natural Sub-Assemblies (${sections.length} Modules)`,
+          title: 'Natural Sub-Assemblies',
           rationale: `Splits cleanly along weak joints (clips, hinges, round-hole axles, and tile-majority seams) into ${sections.length} intact, connected modules.`,
           zoomGainEstimate,
           confidence: 87,
@@ -3191,7 +3188,7 @@ export function buildStructuralModulesProposal(
     id: `prop_modules_${validGroups.length}`,
     strategy: 'structural_modules',
     outputMode,
-    title: `Structural Modules (${validGroups.length} Sub-Builds)`,
+    title: 'Structural Modules',
     rationale: `Groups densely connected parts into ${validGroups.length} cohesive modules (${Math.round(cutRatio * 100)}% seam edges) before final assembly.`,
     zoomGainEstimate,
     confidence,
@@ -3371,7 +3368,7 @@ export function buildNumberedBagsProposal(
     id: `prop_bags_${sections.length}`,
     strategy: 'numbered_bags',
     outputMode: 'numbered_bags',
-    title: `Numbered Build Bags (${sections.length} Bags)`,
+    title: 'Numbered Build Bags',
     rationale: `Keeps one continuous build divided into ${sections.length} connected numbered bags (~${avgBag} parts per bag).`,
     confidence,
     sections,
@@ -3472,7 +3469,7 @@ export function buildSpatialSectorsProposal(
     id: `prop_sectors_${segments.length}`,
     strategy: 'spatial_sectors',
     outputMode,
-    title: `Footprint Quadrants (${segments.length} Sectors)`,
+    title: 'Footprint Quadrants',
     rationale: `Splits the wide ${Math.round(bounds.spanX / 20)}×${Math.round(bounds.spanZ / 20)}-stud footprint into ${segments.length} connected quadrants.`,
     zoomGainEstimate,
     confidence: heavySeam ? 74 : 88,
@@ -3712,7 +3709,7 @@ export function buildBaseplateSplitProposal(
     id: `prop_baseplates_${plateCount}`,
     strategy: 'baseplates',
     outputMode: 'modular_chapters',
-    title: `Split by Baseplate (${plateCount} Baseplates)`,
+    title: 'Split by Baseplate',
     rationale: `Builds everything on each of the ${plateCount} baseplates as its own section, then sets the baseplates side by side.`,
     confidence: 93,
     sections,
