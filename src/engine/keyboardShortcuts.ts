@@ -972,6 +972,13 @@ export function findShortcutConflict(
     if (getEffectiveShortcut(action.id, overrides) === norm) {
       return action.id;
     }
+    if (
+      !(action.id in overrides) &&
+      action.secondaryDefaultCombo &&
+      normalizeShortcutCombo(action.secondaryDefaultCombo) === norm
+    ) {
+      return action.id;
+    }
   }
   return null;
 }

@@ -136,6 +136,9 @@ export interface PartOffsetLike {
   tilt?: number;
   arrow?: boolean;
   arrowSide?: string;
+  arrowColorOverride?: string;
+  arrowTo?: number[] | null;
+  throughGuideTo?: number[] | null;
 }
 
 function hashPartOffsets(offsets: Record<string, PartOffsetLike> | null | undefined): string {
@@ -154,7 +157,10 @@ function hashPartOffsets(offsets: Record<string, PartOffsetLike> | null | undefi
     const tilt = Math.round((o.tilt || 0) * 10);
     const arr = o.arrow === false ? '0' : o.arrow === true ? '1' : '';
     const side = o.arrowSide || '';
-    h = hashString32(h, `${k}:${x},${y},${z},${tilt},${arr},${side};`);
+    const col = o.arrowColorOverride || '';
+    const to = Array.isArray(o.arrowTo) ? o.arrowTo.map((v) => Math.round((v || 0) * 10)).join(',') : '';
+    const tg = Array.isArray(o.throughGuideTo) ? o.throughGuideTo.map((v) => Math.round((v || 0) * 10)).join(',') : '';
+    h = hashString32(h, `${k}:${x},${y},${z},${tilt},${arr},${side},${col},${to},${tg};`);
   }
   return `${keys.length}:${h.toString(36)}`;
 }
@@ -203,6 +209,7 @@ export interface LiveStepRenderCacheKeyInput {
   offZ?: number;
   panX?: number;
   panY?: number;
+  hingeDeg?: number;
   partOffsets?: Record<string, PartOffsetLike> | null;
   selectedPartIds?: Iterable<string> | null;
   minifigPrepId?: string | null;
@@ -218,6 +225,7 @@ export function buildLiveStepRenderCacheKey(input: LiveStepRenderCacheKeyInput):
   const panShift = (input.panX || input.panY)
     ? `${Math.round((input.panX || 0) * 100)},${Math.round((input.panY || 0) * 100)}`
     : '';
+  const hingeKey = input.hingeDeg ? `hg:${Math.round(input.hingeDeg * 10)}` : '';
 
   return [
     'lstep',
@@ -242,6 +250,7 @@ export function buildLiveStepRenderCacheKey(input: LiveStepRenderCacheKeyInput):
     input.framingTag || '',
     ovShift,
     panShift,
+    hingeKey,
     offHash,
     selHash,
     input.minifigPrepId ? `mp:${input.minifigPrepId}:${input.minifigIndicatorCount || 0}` : '',

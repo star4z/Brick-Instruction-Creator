@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Brick Instruction Works</title>
     <link rel="icon" type="image/svg+xml" href="./logo.svg" />
     <link rel="apple-touch-icon" href="./logo.svg" />
@@ -379,19 +379,19 @@
       <!-- ================================================================ -->
       <!-- DISMISSIBLE BOTTOM IMPORT ERROR NOTIFICATION                     -->
       <!-- ================================================================ -->
-      <div id="errorBanner" class="no-print hidden absolute left-1/2 -translate-x-1/2 bottom-[114px] z-45 max-w-[calc(100%-24px)] transition-opacity duration-300">
-        <div class="flex items-center gap-3 px-4 py-2.5 rounded-full bg-[var(--ink-bar)] text-[var(--ink-bar-foreground)] shadow-[var(--shadow-sheet)] border border-white/15 text-xs font-semibold">
+      <div id="errorBanner" role="alert" class="no-print hidden absolute left-1/2 -translate-x-1/2 bottom-[164px] z-45 max-w-[calc(100%-24px)] transition-opacity duration-300">
+        <div class="flex items-center gap-3 px-4 py-2.5 rounded-full bg-[var(--ink-bar)] text-[var(--ink-bar-foreground)] shadow-[var(--shadow-sheet)] border border-white/25 text-xs font-semibold">
           <span id="errorBannerDot" class="w-2 h-2 rounded-full bg-[var(--primary)] shrink-0"></span>
           <span id="errorBannerText" class="whitespace-nowrap">There are 0 issues.</span>
-          <button id="btnBannerSeeErrors" type="button" class="px-2.5 py-1 rounded-full bg-white/12 hover:bg-white/20 text-[var(--ink-bar-accent)] font-semibold whitespace-nowrap transition-colors cursor-pointer">See issues</button>
-          <button id="btnBannerDismiss" type="button" title="Dismiss" aria-label="Dismiss notification" class="w-7 h-7 rounded-full hover:bg-white/15 flex items-center justify-center opacity-80 cursor-pointer">
-            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          <button id="btnBannerSeeErrors" type="button" class="px-2.5 py-1 rounded-full bg-white/20 hover:bg-white/30 text-[var(--ink-bar-foreground)] font-semibold whitespace-nowrap transition-colors cursor-pointer">See issues</button>
+          <button id="btnBannerDismiss" type="button" title="Dismiss" aria-label="Dismiss notification" class="w-7 h-7 rounded-full hover:bg-white/20 flex items-center justify-center opacity-90 cursor-pointer">
+            <svg class="w-3.5 h-3.5" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
           </button>
         </div>
       </div>
 
       <!-- Toast Banner -->
-      <div id="toast" class="no-print hidden absolute top-16 left-1/2 -translate-x-1/2 z-[60] px-4 py-2 rounded-2xl text-xs font-semibold bg-[var(--ink-bar)] text-[var(--ink-bar-foreground)] shadow-[var(--shadow-sheet)] border border-white/15 max-w-[calc(100%-24px)] text-center pointer-events-none"></div>
+      <div id="toast" role="status" aria-live="polite" class="no-print hidden absolute top-[108px] lg:top-16 left-1/2 -translate-x-1/2 z-[65] px-4 py-2 rounded-2xl text-xs font-semibold bg-[var(--ink-bar)] text-[var(--ink-bar-foreground)] shadow-[var(--shadow-sheet)] border border-white/20 max-w-[calc(100%-24px)] text-center pointer-events-none"></div>
     </div>
 
     <!-- ================================================================ -->
@@ -582,13 +582,13 @@
               <button data-step-lighting="studio" type="button" class="step-lighting-chip py-1.5 px-2 rounded-md border font-semibold text-xs transition cursor-pointer" title="Cover-quality studio lighting, bevels &amp; soft shadows">Studio</button>
             </div>
           </div>
-          <label class="flex items-center justify-between gap-2 cursor-pointer" title="Automatically offset hard-to-notice pieces and first-step connections with LEGO-style placement arrows">
-            <span class="font-medium">Placement Arrows &amp; Offsets</span>
+          <div class="flex items-center justify-between gap-2" title="Automatically offset hard-to-notice pieces and first-step connections with LEGO-style placement arrows">
+            <label for="toggleAutoPlacementArrows" class="font-medium cursor-pointer flex-1">Placement Arrows &amp; Offsets</label>
             <div class="flex items-center gap-2">
-              <input id="arrowColor" type="color" value="#dc2626" class="w-6 h-6 rounded border border-[var(--border)] bg-transparent cursor-pointer" />
+              <input id="arrowColor" type="color" value="#dc2626" aria-label="Placement arrow color" class="w-6 h-6 rounded border border-[var(--border)] bg-transparent cursor-pointer" />
               <input id="toggleAutoPlacementArrows" type="checkbox" checked class="w-4 h-4 accent-[var(--primary)] cursor-pointer" />
             </div>
-          </label>
+          </div>
           <div id="arrowStyleWrap" class="space-y-2 pl-2.5 border-l-2 border-[var(--border)]">
             <div class="space-y-1">
               <div class="text-xs text-[var(--muted-foreground)]">Arrow Style</div>
@@ -608,13 +608,13 @@
               </label>
             </div>
           </div>
-          <label class="flex items-center justify-between gap-2 cursor-pointer">
-            <span class="font-medium">Outline New Parts</span>
+          <div class="flex items-center justify-between gap-2">
+            <label for="toggleHighlight" class="font-medium cursor-pointer flex-1">Outline New Parts</label>
             <div class="flex items-center gap-2">
-              <input id="highlightColor" type="color" value="#ff2d55" class="w-6 h-6 rounded border border-[var(--border)] bg-transparent cursor-pointer" />
+              <input id="highlightColor" type="color" value="#ff2d55" aria-label="New parts outline color" class="w-6 h-6 rounded border border-[var(--border)] bg-transparent cursor-pointer" />
               <input id="toggleHighlight" type="checkbox" class="w-4 h-4 accent-[var(--primary)] cursor-pointer" />
             </div>
-          </label>
+          </div>
           <div id="highlightWeightWrap" class="space-y-1.5">
             <div class="text-xs text-[var(--muted-foreground)]">New Piece Line Weight</div>
             <div class="grid grid-cols-4 gap-1">
@@ -765,7 +765,7 @@
     <!-- ================================================================ -->
     <!-- FLOATING PAGE & STEP OVERVIEW OVERLAY                            -->
     <!-- ================================================================ -->
-    <div id="overviewModal" class="no-print hidden fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+    <div id="overviewModal" role="dialog" aria-modal="true" aria-label="Manual overview" class="no-print hidden fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4">
       <div class="w-full max-w-xl max-h-[85vh] rounded-t-xl sm:rounded-xl studio-sheet flex flex-col overflow-hidden">
         <div class="px-5 py-4 border-b border-[var(--border)] bg-[var(--chrome)] flex items-center justify-between gap-3 shrink-0">
           <div>
@@ -805,7 +805,7 @@
     <!-- ================================================================ -->
     <!-- AUTO-FETCH LDRAW PARTS PROGRESS OVERLAY (session restore)        -->
     <!-- ================================================================ -->
-    <div id="importFetchOverlay" class="no-print hidden fixed inset-0 z-[55] bg-black/50 flex items-center justify-center p-4">
+    <div id="importFetchOverlay" role="dialog" aria-modal="true" aria-label="Fetching missing parts" class="no-print hidden fixed inset-0 z-[55] bg-black/50 flex items-center justify-center p-4">
       <div class="w-full max-w-sm rounded-xl studio-sheet p-5 space-y-4 text-xs">
         <div class="flex items-start gap-3">
           <div class="w-10 h-10 rounded-lg bg-[var(--primary-soft)] text-[var(--primary)] flex items-center justify-center shrink-0">
@@ -825,7 +825,7 @@
             <span id="impFetchPct" class="font-mono">0%</span>
           </div>
           <div class="w-full h-2 rounded-full bg-[var(--surface-sunken)] overflow-hidden">
-            <div id="impFetchBar" class="h-full bg-[var(--primary)] transition-all duration-100" style="width:0%"></div>
+            <div id="impFetchBar" role="progressbar" aria-valuemin="0" aria-valuemax="100" class="h-full bg-[var(--primary)] transition-all duration-100" style="width:0%"></div>
           </div>
         </div>
         <div class="flex justify-end">
@@ -839,7 +839,7 @@
     <!-- ================================================================ -->
     <!-- PRE-IMPORT MISSING PARTS PROMPT                                  -->
     <!-- ================================================================ -->
-    <div id="missingPartsModal" class="no-print hidden fixed inset-0 z-50 bg-black/55 flex items-end sm:items-center justify-center p-0 sm:p-4">
+    <div id="missingPartsModal" role="dialog" aria-modal="true" aria-label="Missing parts found" class="no-print hidden fixed inset-0 z-50 bg-black/55 flex items-end sm:items-center justify-center p-0 sm:p-4">
       <div class="w-full sm:max-w-lg max-h-[90vh] rounded-t-xl sm:rounded-xl studio-sheet flex flex-col overflow-hidden text-xs">
         <!-- Header -->
         <div class="px-5 py-4 border-b border-[var(--border)] bg-[var(--chrome)] flex items-start justify-between gap-3 shrink-0">
@@ -873,7 +873,7 @@
               <span id="mpProgressPct" class="shrink-0 font-mono text-[var(--primary)]">0%</span>
             </div>
             <div class="w-full h-2 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden">
-              <div id="mpProgressBar" class="h-full bg-[var(--primary)] transition-all duration-100" style="width:0%"></div>
+              <div id="mpProgressBar" role="progressbar" aria-valuemin="0" aria-valuemax="100" class="h-full bg-[var(--primary)] transition-all duration-100" style="width:0%"></div>
             </div>
           </div>
 
@@ -932,7 +932,7 @@
     <!-- ================================================================ -->
     <!-- STEP GENERATION / SLICING MODAL (Mobile Sheet + Desktop 2P)      -->
     <!-- ================================================================ -->
-    <div id="importModal" class="no-print hidden fixed inset-0 z-50 bg-black/55 flex items-end sm:items-center justify-center p-0 sm:p-4">
+    <div id="importModal" role="dialog" aria-modal="true" aria-label="Step generation" class="no-print hidden fixed inset-0 z-50 bg-black/55 flex items-end sm:items-center justify-center p-0 sm:p-4">
       <div class="w-full sm:max-w-4xl max-h-[93vh] sm:max-h-[88vh] rounded-t-xl sm:rounded-xl studio-sheet flex flex-col overflow-hidden text-xs">
         <!-- Header -->
         <div class="px-4 sm:px-5 py-4 border-b border-[var(--border)] bg-[var(--chrome)] flex items-start justify-between gap-2.5 shrink-0">
@@ -1031,7 +1031,7 @@
     <!-- ================================================================ -->
     <!-- PRINT & EXPORT PDF MODAL (Works in iOS WebView & Desktop)        -->
     <!-- ================================================================ -->
-    <div id="exportModal" class="no-print hidden fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+    <div id="exportModal" role="dialog" aria-modal="true" aria-label="Print and export PDF" class="no-print hidden fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
       <div class="w-full max-w-md rounded-xl studio-sheet overflow-hidden text-xs">
         <div class="px-5 py-4 border-b border-[var(--border)] bg-[var(--chrome)] flex items-start justify-between gap-3">
           <div>
@@ -1070,7 +1070,7 @@
               <span id="expProgressPct" class="font-mono">0%</span>
             </div>
             <div class="w-full h-2 rounded-full bg-[var(--surface-sunken)] overflow-hidden">
-              <div id="expProgressBar" class="h-full bg-[var(--primary)] transition-all duration-75" style="width:0%"></div>
+              <div id="expProgressBar" role="progressbar" aria-valuemin="0" aria-valuemax="100" class="h-full bg-[var(--primary)] transition-all duration-75" style="width:0%"></div>
             </div>
           </div>
 
@@ -1090,7 +1090,7 @@
     <!-- ================================================================ -->
     <!-- PAGE SETUP PAGE MODAL                                            -->
     <!-- ================================================================ -->
-    <div id="pageSetupModal" class="no-print hidden fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+    <div id="pageSetupModal" role="dialog" aria-modal="true" aria-label="Page setup" class="no-print hidden fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4">
       <div class="w-full max-w-xl max-h-[86vh] rounded-t-xl sm:rounded-xl studio-sheet flex flex-col overflow-hidden text-xs">
         <div class="px-4 sm:px-5 py-4 border-b border-[var(--border)] bg-[var(--chrome)] flex items-center justify-between gap-2.5 shrink-0">
           <div class="flex items-center gap-2 min-w-0">
@@ -1595,7 +1595,7 @@
     <!-- ================================================================ -->
     <!-- PARTS LIST SETUP PAGE MODAL                                      -->
     <!-- ================================================================ -->
-    <div id="bomSetupModal" class="no-print hidden fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+    <div id="bomSetupModal" role="dialog" aria-modal="true" aria-label="Parts list setup" class="no-print hidden fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4">
       <div class="w-full max-w-2xl max-h-[92vh] sm:max-h-[88vh] rounded-t-xl sm:rounded-xl studio-sheet flex flex-col overflow-hidden text-xs">
         <div class="px-5 py-3.5 sm:py-4 border-b border-[var(--border)] bg-[var(--chrome)] flex items-center justify-between gap-3 shrink-0">
           <div class="min-w-0">
@@ -2151,7 +2151,7 @@
     <!-- ================================================================ -->
     <!-- ERRORS & DIAGNOSTICS PAGE MODAL                                  -->
     <!-- ================================================================ -->
-    <div id="errorsModal" class="no-print hidden fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+    <div id="errorsModal" role="dialog" aria-modal="true" aria-label="Model issues" class="no-print hidden fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4">
       <div class="w-full max-w-xl max-h-[85vh] rounded-t-xl sm:rounded-xl studio-sheet flex flex-col overflow-hidden text-xs">
         <div class="px-5 py-4 border-b border-[var(--border)] bg-[var(--chrome)] flex items-center justify-between gap-3 shrink-0">
           <div>
@@ -2163,14 +2163,14 @@
           </button>
         </div>
         <div id="errFilterBar" class="px-5 py-3 border-b border-[var(--border)] bg-[var(--surface-sunken)] flex items-center gap-1.5 overflow-x-auto no-scrollbar shrink-0"></div>
-        <div id="errListBody" class="flex-1 min-h-0 min-h-[240px] overflow-y-auto overscroll-contain p-4 space-y-2.5"></div>
+        <div id="errListBody" class="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 space-y-2.5"></div>
       </div>
     </div>
 
     <!-- ================================================================ -->
     <!-- BRICKS LIBRARY SCREEN MODAL (Browse/Search + Fetch/Manage)       -->
     <!-- ================================================================ -->
-    <div id="bricksLibraryModal" role="dialog" aria-label="Bricks Library" class="no-print hidden fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+    <div id="bricksLibraryModal" role="dialog" aria-modal="true" aria-label="Bricks Library" class="no-print hidden fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4">
       <div class="relative w-full max-w-4xl h-[92vh] sm:h-[86vh] rounded-t-xl sm:rounded-xl studio-sheet flex flex-col overflow-hidden text-xs">
         <!-- Modal Header -->
         <div class="px-5 py-4 border-b border-[var(--border)] bg-[var(--chrome)] flex items-center justify-between gap-3 shrink-0">
@@ -2211,7 +2211,7 @@
             </div>
           </div>
           <div class="w-full h-1.5 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden">
-            <div id="libProgressBar" class="h-full bg-[var(--primary)] transition-[width] duration-150" style="width:0%"></div>
+            <div id="libProgressBar" role="progressbar" aria-valuemin="0" aria-valuemax="100" class="h-full bg-[var(--primary)] transition-[width] duration-150" style="width:0%"></div>
           </div>
         </div>
 
@@ -2222,7 +2222,7 @@
             <div class="flex items-center gap-2.5 flex-wrap">
               <div class="relative flex-1 min-w-[200px]">
                 <svg class="w-4 h-4 text-[var(--muted-foreground)] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-                <input id="libSearchInput" type="search" placeholder="Search by part ID or name (e.g. 3001, brick 2x4, slope, minifig)…" class="w-full pl-9 pr-9 py-2.5 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] text-xs outline-none focus:border-[var(--primary)]" />
+                <input id="libSearchInput" aria-label="Search bricks library" type="search" placeholder="Search by part ID or name (e.g. 3001, brick 2x4, slope, minifig)…" class="w-full pl-9 pr-9 py-2.5 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] text-xs outline-none focus:border-[var(--primary)]" />
                 <button id="libSearchClearBtn" type="button" title="Clear search" aria-label="Clear search" class="hidden absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 rounded hover:bg-[var(--surface-hover)] text-[var(--muted-foreground)] flex items-center justify-center cursor-pointer">
                   <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
                 </button>
@@ -2369,7 +2369,7 @@
             <div class="pt-3 border-t border-[var(--border)] space-y-2">
               <div class="text-xs font-semibold">Fetch Specific LDraw Part IDs</div>
               <div class="flex items-center gap-2">
-                <input id="libCustomIdsInput" type="text" placeholder="Enter part IDs separated by commas or spaces (e.g. 3001, 3069b, 3626c)" class="flex-1 py-2.5 px-3 rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] text-xs outline-none focus:border-[var(--primary)]" />
+                <input id="libCustomIdsInput" aria-label="Custom part IDs to download" type="text" placeholder="Enter part IDs separated by commas or spaces (e.g. 3001, 3069b, 3626c)" class="flex-1 py-2.5 px-3 rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] text-xs outline-none focus:border-[var(--primary)]" />
                 <button id="libFetchCustomIdsBtn" type="button" class="px-4 py-2.5 rounded-md border border-[var(--primary-border)] bg-[var(--primary-soft)] text-[var(--primary)] font-semibold shrink-0 transition-colors cursor-pointer">Fetch IDs</button>
               </div>
             </div>
@@ -2431,7 +2431,7 @@
         </div>
         <div class="relative shrink-0">
           <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-          <input id="libColorSearchInput" type="search" placeholder="Search 150+ LDraw colors by name or ID…" class="w-full pl-8 pr-2.5 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] text-xs outline-none focus:border-[var(--primary)]" />
+          <input id="libColorSearchInput" aria-label="Search brick colors" type="search" placeholder="Search 150+ LDraw colors by name or ID…" class="w-full pl-8 pr-2.5 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] text-xs outline-none focus:border-[var(--primary)]" />
         </div>
         <div id="libColorModelModeWrap" class="hidden shrink-0"></div>
         <div id="libColorPaletteSections" class="flex-1 min-h-0 overflow-y-auto overscroll-contain space-y-3 pr-1"></div>
@@ -2451,7 +2451,7 @@
         </div>
         <div class="relative shrink-0">
           <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-          <input id="libColorFilterSearchInput" type="search" placeholder="Search available LEGO colors by name or ID…" class="w-full pl-8 pr-2.5 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] text-xs outline-none focus:border-[var(--primary)]" />
+          <input id="libColorFilterSearchInput" aria-label="Filter library by brick color" type="search" placeholder="Search available LEGO colors by name or ID…" class="w-full pl-8 pr-2.5 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] text-xs outline-none focus:border-[var(--primary)]" />
         </div>
         <button id="libColorFilterAllBtn" type="button" class="w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition cursor-pointer shrink-0">
           <span class="inline-flex items-center gap-2 min-w-0">

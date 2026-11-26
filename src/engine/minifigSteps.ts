@@ -890,7 +890,8 @@ export function buildMinifigSequentialPlan(
     } else if (isLast) {
       celebrationAccessories = [...acc.parts];
     } else {
-      const dy = 24;
+      const accHeight = Math.max(0, acc.box.max[1] - acc.box.min[1]);
+      const dy = Math.max(24, Math.ceil(accHeight + 12));
       const partOffsets: Record<string, MinifigPartOffset> = {};
       for (const p of acc.parts) partOffsets[p.id] = { x: 0, y: dy, z: 0, arrow: false };
       maxStageY = Math.max(maxStageY, acc.box.max[1] + dy);

@@ -368,9 +368,9 @@ export function compareFrontierCandidates(
     if (multiA !== multiB) return multiB - multiA;
   }
 
-  const dotA = cornerAlignmentDot(a.box, activeCorner, refBounds);
-  const dotB = cornerAlignmentDot(b.box, activeCorner, refBounds);
-  if (Math.abs(dotA - dotB) > 0.15) return dotB - dotA;
+  const dotBucketA = Math.round(cornerAlignmentDot(a.box, activeCorner, refBounds) * 6);
+  const dotBucketB = Math.round(cornerAlignmentDot(b.box, activeCorner, refBounds) * 6);
+  if (dotBucketA !== dotBucketB) return dotBucketB - dotBucketA;
 
   return a.partId.localeCompare(b.partId);
 }

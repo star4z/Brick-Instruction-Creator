@@ -249,16 +249,37 @@ export interface InteractiveHtmlPayload {
 export function encodeTypedArrayBase64(arr: Float32Array | Uint8Array): string {
   const bytes = new Uint8Array(arr.buffer, arr.byteOffset, arr.byteLength);
   if (bytes.length === 0) return '';
-  let binary = '';
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    const slice = bytes.subarray(i, Math.min(i + chunk, bytes.length));
-    binary += String.fromCharCode(...slice);
-  }
   if (typeof btoa === 'function') {
-    return btoa(binary);
+    const parts: string[] = [];
+    const chunk = 0x4000;
+    for (let i = 0; i < bytes.length; i += chunk) {
+      const slice = bytes.subarray(i, Math.min(i + chunk, bytes.length));
+      parts.push(String.fromCharCode.apply(null, slice as unknown as number[]));
+    }
+    return btoa(parts.join(''));
   }
   return Buffer.from(bytes).toString('base64');
+}
+
+const SAFE_CSS_COLOR_RE =
+  /^(?:#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})|rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}(?:\s*,\s*(?:0|1|0?\.\d+|1\.0+))?\s*\)|transparent)$/i;
+
+function sanitizeExportCssColor(raw: string | undefined, fallback: string): string {
+  const v = String(raw ?? '').trim();
+  return SAFE_CSS_COLOR_RE.test(v) ? v : fallback;
+}
+
+function sanitizeExportHttpUrl(raw: string | undefined, fallback: string): string {
+  const v = String(raw ?? '').trim();
+  return /^https?:\/\//i.test(v) ? escapeHtmlText(v) : escapeHtmlText(fallback);
+}
+
+function sanitizeExportImageUrl(raw: string | undefined): string {
+  const v = String(raw ?? '').trim();
+  if (!/^data:image\/(?:png|jpeg|jpg|webp|gif|svg\+xml);base64,[a-z0-9+/=\s]+$/i.test(v)) {
+    return '';
+  }
+  return escapeHtmlText(v);
 }
 
 /**
@@ -328,7 +349,7 @@ function buildStaticFallbackHtml(payload: InteractiveHtmlPayload, safeEditorUrl:
                 .map(
                   (p) =>
                     `<div class="sf-pli-item">${
-                      p.thumb ? `<img src="${p.thumb}" alt="${escapeHtmlText(p.name)}" />` : ''
+                      sanitizeExportImageUrl(p.thumb) ? `<img src="${sanitizeExportImageUrl(p.thumb)}" alt="${escapeHtmlText(p.name)}" />` : ''
                     }<div><strong>${p.qty}×</strong>${wordless ? '' : `<span>${escapeHtmlText(p.partId.toUpperCase())}</span>`}</div></div>`,
                 )
                 .join('')}</div>`
@@ -347,8 +368,8 @@ function buildStaticFallbackHtml(payload: InteractiveHtmlPayload, safeEditorUrl:
             </div>
             ${pliHtml}
             ${
-              st.previewUrl
-                ? `<img class="sf-img" src="${st.previewUrl}" alt="${wordless ? String(st.stepNum) : `Step ${st.stepNum}`}" />`
+              sanitizeExportImageUrl(st.previewUrl)
+                ? `<img class="sf-img" src="${sanitizeExportImageUrl(st.previewUrl)}" alt="${wordless ? String(st.stepNum) : `Step ${st.stepNum}`}" />`
                 : ''
             }
           </section>`);
@@ -373,8 +394,9 @@ function buildStaticFallbackHtml(payload: InteractiveHtmlPayload, safeEditorUrl:
             color: 'Color',
           };
       const renderColorChip = (b: InteractivePliEntry) => {
-        const sw = b.colorHex
-          ? `<span class="bom-swatch" style="background:${escapeHtmlText(b.colorHex)}"></span>`
+        const safeHex = b.colorHex ? sanitizeExportCssColor(b.colorHex, '') : '';
+        const sw = safeHex
+          ? `<span class="bom-swatch" style="background:${safeHex}"></span>`
           : '';
         return `<span class="bom-color-cell">${sw}<span>${escapeHtmlText(b.colorName || '')}</span></span>`;
       };
@@ -386,7 +408,7 @@ function buildStaticFallbackHtml(payload: InteractiveHtmlPayload, safeEditorUrl:
               (b) =>
                 `<tr>${fields
                   .map((f) => {
-                    if (f === 'image') return `<td class="col-image">${b.thumb ? `<img src="${b.thumb}" alt="${escapeHtmlText(b.name)}" />` : ''}</td>`;
+                    if (f === 'image') return `<td class="col-image">${sanitizeExportImageUrl(b.thumb) ? `<img src="${sanitizeExportImageUrl(b.thumb)}" alt="${escapeHtmlText(b.name)}" />` : ''}</td>`;
                     if (f === 'qty') return `<td class="col-qty"><strong>${b.qty}×</strong></td>`;
                     if (f === 'name') return `<td class="col-name">${escapeHtmlText(b.name)}</td>`;
                     if (f === 'partId') return `<td class="col-partId"><code>${escapeHtmlText(b.partId)}</code></td>`;
@@ -400,7 +422,7 @@ function buildStaticFallbackHtml(payload: InteractiveHtmlPayload, safeEditorUrl:
               (b) =>
                 `<div class="sf-bom-item">${fields
                   .map((f) => {
-                    if (f === 'image') return b.thumb ? `<img src="${b.thumb}" alt="${escapeHtmlText(b.name)}" />` : '';
+                    if (f === 'image') return sanitizeExportImageUrl(b.thumb) ? `<img src="${sanitizeExportImageUrl(b.thumb)}" alt="${escapeHtmlText(b.name)}" />` : '';
                     if (f === 'qty') return `<strong>${b.qty}×</strong>`;
                     if (f === 'name') return `<span>${escapeHtmlText(b.name)}</span>`;
                     if (f === 'partId') return `<small class="bom-mono">${escapeHtmlText(b.partId)}</small>`;
@@ -439,8 +461,8 @@ function buildStaticFallbackHtml(payload: InteractiveHtmlPayload, safeEditorUrl:
             <span class="sf-pg-num">${pgLabel(pg.num)}</span>
           </div>
           ${
-            pg.previewUrl
-              ? `<img class="sf-img" src="${pg.previewUrl}" alt="${escapeHtmlText(headingText || String(pg.num))}" />`
+            sanitizeExportImageUrl(pg.previewUrl)
+              ? `<img class="sf-img" src="${sanitizeExportImageUrl(pg.previewUrl)}" alt="${escapeHtmlText(headingText || String(pg.num))}" />`
               : ''
           }
           ${
@@ -477,12 +499,22 @@ function buildStaticFallbackHtml(payload: InteractiveHtmlPayload, safeEditorUrl:
 export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload): string {
   const wordless = Boolean(payload.wordless);
   const safeTitle = escapeHtmlText(payload.title || TOOL_DISPLAY_NAME);
-  const safeEditorUrl = escapeHtmlText(payload.editorUrl || DEFAULT_EDITOR_URL);
+  const safeEditorUrl = sanitizeExportHttpUrl(payload.editorUrl, DEFAULT_EDITOR_URL);
   const t = payload.theme;
+  const safeBg = sanitizeExportCssColor(t.bg, '#c8e1f8');
+  const safeBgEnd = t.bgEnd ? sanitizeExportCssColor(t.bgEnd, safeBg) : '';
+  const safeBgAngle = Number.isFinite(t.bgAngle) ? Math.max(-360, Math.min(360, Number(t.bgAngle))) : 180;
   const pageBgCss =
-    t.bgType === 'gradient' && t.bgEnd
-      ? `linear-gradient(${t.bgAngle ?? 180}deg, ${t.bg}, ${t.bgEnd})`
-      : t.bg;
+    t.bgType === 'gradient' && safeBgEnd
+      ? `linear-gradient(${safeBgAngle}deg, ${safeBg}, ${safeBgEnd})`
+      : safeBg;
+  const safeText = sanitizeExportCssColor(t.text, '#0f172a');
+  const safeMuted = sanitizeExportCssColor(t.muted, '#475569');
+  const safeAccent = sanitizeExportCssColor(t.accent, '#0055bf');
+  const safePliBg = sanitizeExportCssColor(t.pliBg, '#ffffff');
+  const safePliBorder = sanitizeExportCssColor(t.pliBorder, '#cbd5e1');
+  const safeCalloutBg = sanitizeExportCssColor(t.calloutBg, '#f8fafc');
+  const safeCalloutBorder = sanitizeExportCssColor(t.calloutBorder, '#94a3b8');
   const bodyFontStack = sanitizeFontStack(t.bodyFont);
   const headingFontStack = sanitizeFontStack(t.headingFont, bodyFontStack);
   const customFontFacesCss = buildCustomFontFacesCss(t.customFontFaces);
@@ -494,6 +526,9 @@ export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload)
   const { customFontFaces: _cf, ...runtimeTheme } = payload.theme;
   const runtimePayload: InteractiveHtmlPayload = {
     ...payload,
+    editorUrl: /^https?:\/\//i.test(String(payload.editorUrl || '').trim())
+      ? String(payload.editorUrl).trim()
+      : DEFAULT_EDITOR_URL,
     theme: runtimeTheme,
     pages: payload.pages.map((pg) => {
       const { previewUrl: _p, steps, ...rest } = pg;
@@ -518,13 +553,15 @@ export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload)
 <style>
 ${customFontFacesCss}  :root {
     --page-bg: ${pageBgCss};
-    --text: ${t.text};
-    --muted: ${t.muted};
-    --accent: ${t.accent};
-    --pli-bg: ${t.pliBg};
-    --pli-border: ${t.pliBorder};
-    --callout-bg: ${t.calloutBg};
-    --callout-border: ${t.calloutBorder};
+    --text: ${safeText};
+    --muted: ${safeMuted};
+    --accent: ${safeAccent};
+    --pli-bg: ${safePliBg};
+    --pli-border: ${safePliBorder};
+    --border: ${safePliBorder};
+    --surface: ${safePliBg};
+    --callout-bg: ${safeCalloutBg};
+    --callout-border: ${safeCalloutBorder};
     --glass-bg: ${glassBg};
     --glass-border: ${glassBorder};
     --font-body: ${bodyFontStack};
@@ -899,11 +936,11 @@ ${staticFallbackHtml}
     <div id="viewerProgressBead" style="position:absolute;top:50%;left:0%;width:9px;height:9px;transform:translate(-50%,-50%);border-radius:999px;background:var(--accent);border:1.5px solid #0f172a;transition:left .18s ease"></div>
   </div>
 
-  <div id="drawerBackdrop" class="drawer-backdrop">
+  <div id="drawerBackdrop" class="drawer-backdrop" role="dialog" aria-modal="true" aria-label="Pages and steps">
     <div class="drawer glass">
       <div class="drawer-head">
         <span>${wordless ? `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="7" height="7" rx="1.4"/><rect x="14" y="4" width="7" height="7" rx="1.4"/><rect x="3" y="13" width="7" height="7" rx="1.4"/><rect x="14" y="13" width="7" height="7" rx="1.4"/></svg>` : 'Pages &amp; Steps'}</span>
-        <button id="btnCloseDrawer" class="nav-btn" type="button" style="height:30px;padding:0 10px">✕</button>
+        <button id="btnCloseDrawer" class="nav-btn" type="button" aria-label="Close pages drawer" style="height:30px;padding:0 10px">✕</button>
       </div>
       <div class="drawer-body">
         <div id="drawerList" class="drawer-list"></div>
@@ -922,7 +959,6 @@ ${staticFallbackHtml}
 (function() {
   try {
   const DATA = ${jsonPayload};
-
   function b64ToBytes(b64) {
     if (!b64) return new Uint8Array(0);
     const bin = atob(b64);
@@ -937,14 +973,21 @@ ${staticFallbackHtml}
   function hexToRgb01(hex) {
     const clean = String(hex || '#ff2d55').replace('#', '');
     const full = clean.length === 3 ? clean.split('').map(c => c + c).join('') : clean.padEnd(6, '0');
+    const r = parseInt(full.slice(0, 2), 16);
+    const g = parseInt(full.slice(2, 4), 16);
+    const b = parseInt(full.slice(4, 6), 16);
     return [
-      (parseInt(full.slice(0, 2), 16) || 255) / 255,
-      (parseInt(full.slice(2, 4), 16) || 45) / 255,
-      (parseInt(full.slice(4, 6), 16) || 85) / 255,
+      (Number.isNaN(r) ? 255 : r) / 255,
+      (Number.isNaN(g) ? 45 : g) / 255,
+      (Number.isNaN(b) ? 85 : b) / 255,
     ];
   }
   function esc(s) {
     return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+  function safeImgSrc(u) {
+    const s = String(u || '').trim();
+    return /^data:image\\/(?:png|jpeg|jpg|webp|gif|svg\\+xml);base64,[a-z0-9+/=\\s]+$/i.test(s) ? esc(s) : '';
   }
 
   function orthoMat4(l, r, b, t, n, f) {
@@ -1011,6 +1054,12 @@ ${staticFallbackHtml}
   const gl = canvas.getContext('webgl', { antialias: true, alpha: true, powerPreference: 'default' })
     || canvas.getContext('experimental-webgl', { antialias: true, alpha: true });
   if (!gl) return; // Keep #noJsFallback visible cleanly if WebGL is unavailable
+  canvas.addEventListener('webglcontextlost', (e) => {
+    e.preventDefault();
+  }, false);
+  canvas.addEventListener('webglcontextrestored', () => {
+    try { requestDraw(); } catch (_) {}
+  }, false);
 
   const cmp = (type, src) => {
     const s = gl.createShader(type);
@@ -1042,7 +1091,8 @@ ${staticFallbackHtml}
     uniform float uHeroMode; uniform float uUnlit; uniform float uFadeMix; uniform vec3 uViewDir;
     varying vec3 vNorm; varying vec4 vCol;
     void main() {
-      vec3 n = normalize(vNorm);
+      float nLen = length(vNorm);
+      vec3 n = nLen > 1e-4 ? (vNorm / nLen) : vec3(0.0, 1.0, 0.0);
       if (!gl_FrontFacing) n = -n;
       vec3 base = mix(vCol.rgb, vec3(0.855, 0.871, 0.894), uFadeMix);
       if (uUnlit > 0.5) {
@@ -1078,7 +1128,8 @@ ${staticFallbackHtml}
     uniform sampler2D uTex; uniform float uUseTex; uniform float uFadeMix; uniform float uHeroMode; uniform float uUnlit; uniform vec3 uViewDir;
     varying vec3 vNorm; varying vec2 vUv; varying vec4 vCol;
     void main() {
-      vec3 n = normalize(vNorm);
+      float nLen = length(vNorm);
+      vec3 n = nLen > 1e-4 ? (vNorm / nLen) : vec3(0.0, 1.0, 0.0);
       if (!gl_FrontFacing) n = -n;
       vec3 base = mix(vCol.rgb, vec3(0.855, 0.871, 0.894), uFadeMix);
       if (uUseTex > 0.5 && vUv.x >= 0.0 && vUv.x <= 1.0 && vUv.y >= 0.0 && vUv.y <= 1.0) {
@@ -1090,10 +1141,20 @@ ${staticFallbackHtml}
         gl_FragColor = vec4(base, vCol.a);
         return;
       }
-      float key = max(dot(n, normalize(vec3(0.55, 0.85, 0.55))), 0.0);
-      float fill = max(dot(n, normalize(vec3(-0.7, 0.35, -0.5))), 0.0);
-      float shade = min(1.08, 0.50 + 0.15*n.y + key*0.44 + fill*0.18);
-      gl_FragColor = vec4(base * shade, vCol.a);
+      if (uHeroMode > 0.5) {
+        vec3 v = normalize(uViewDir);
+        vec3 keyDir = normalize(vec3(0.42, 0.86, 0.52));
+        vec3 fillDir = normalize(vec3(-0.68, 0.38, 0.34));
+        vec3 rimDir = normalize(vec3(-0.22, 0.58, -0.78));
+        float diff = min(1.06, 0.50 + 0.14*n.y + 0.05*max(-n.y,0.0) + max(dot(n,keyDir),0.0)*0.44 + max(dot(n,fillDir),0.0)*0.18 + max(dot(n,rimDir),0.0)*0.12);
+        float spec = pow(max(dot(n, normalize(keyDir+v)), 0.0), 42.0)*0.16 + pow(max(dot(n, normalize(rimDir+v)), 0.0), 26.0)*0.07;
+        gl_FragColor = vec4(min(vec3(1.0), base * diff + vec3(spec)), vCol.a);
+      } else {
+        float key = max(dot(n, normalize(vec3(0.55, 0.85, 0.55))), 0.0);
+        float fill = max(dot(n, normalize(vec3(-0.7, 0.35, -0.5))), 0.0);
+        float shade = min(1.08, 0.50 + 0.15*n.y + key*0.44 + fill*0.18);
+        gl_FragColor = vec4(base * shade, vCol.a);
+      }
     }\`;
 
   const vsLine = \`
@@ -1719,7 +1780,7 @@ ${staticFallbackHtml}
 
   canvas.addEventListener('pointerdown', (e) => {
     try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
-    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, btn: e.button, shift: e.shiftKey });
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, startX: e.clientX, startY: e.clientY, dragged: false, btn: e.button, shift: e.shiftKey });
     targetCam = null;
     if (pointers.size === 2) {
       const pts = Array.from(pointers.values());
@@ -1734,6 +1795,7 @@ ${staticFallbackHtml}
       const dx = e.clientX - prev.x;
       const dy = e.clientY - prev.y;
       prev.x = e.clientX; prev.y = e.clientY;
+      if (Math.hypot(e.clientX - prev.startX, e.clientY - prev.startY) > 6) prev.dragged = true;
       if (Math.hypot(dx, dy) > 1) hideHintSoon();
       if (e.shiftKey || prev.btn === 2 || e.buttons === 2 || e.buttons === 4) {
         const rect = canvas.getBoundingClientRect();
@@ -1745,7 +1807,7 @@ ${staticFallbackHtml}
       }
       requestDraw();
     } else if (pointers.size === 2) {
-      prev.x = e.clientX; prev.y = e.clientY;
+      prev.x = e.clientX; prev.y = e.clientY; prev.dragged = true;
       const pts = Array.from(pointers.values());
       const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
       const mid = { x: (pts[0].x + pts[1].x) * 0.5, y: (pts[0].y + pts[1].y) * 0.5 };
@@ -1768,8 +1830,17 @@ ${staticFallbackHtml}
   };
   canvas.addEventListener('pointerup', (e) => {
     const now = Date.now();
-    if (pointers.size === 1 && now - lastTapTime < 280) resetCameraSmooth();
-    lastTapTime = now;
+    const ptr = pointers.get(e.pointerId);
+    if (pointers.size === 1 && ptr && !ptr.dragged) {
+      if (now - lastTapTime < 280) {
+        resetCameraSmooth();
+        lastTapTime = 0;
+      } else {
+        lastTapTime = now;
+      }
+    } else {
+      lastTapTime = 0;
+    }
     endPtr(e);
   });
   canvas.addEventListener('pointercancel', endPtr);
@@ -1941,9 +2012,10 @@ ${staticFallbackHtml}
           '</tr></thead><tbody>' +
             items.map((b, bi) => {
               const key = pg.id + ':' + bi;
-              return '<tr class="' + (checkedBom.has(key) ? 'checked' : '') + '" data-bom="' + key + '">' +
+              const imgUrl = safeImgSrc(b.thumb);
+              return '<tr class="' + (checkedBom.has(key) ? 'checked' : '') + '" data-bom="' + key + '" tabindex="0" role="checkbox" aria-checked="' + (checkedBom.has(key) ? 'true' : 'false') + '">' +
                 fields.map((f) => {
-                  if (f === 'image') return '<td class="col-image">' + (b.thumb ? '<img src="' + b.thumb + '" alt="' + esc(b.name) + '" />' : '') + '</td>';
+                  if (f === 'image') return '<td class="col-image">' + (imgUrl ? '<img src="' + imgUrl + '" alt="' + esc(b.name) + '" />' : '') + '</td>';
                   if (f === 'qty') return '<td class="col-qty"><span class="bom-qty">' + b.qty + '×</span></td>';
                   if (f === 'name') return '<td class="col-name">' + esc(b.name) + '</td>';
                   if (f === 'partId') return '<td class="col-partId"><code>' + esc(b.partId) + '</code></td>';
@@ -1953,9 +2025,10 @@ ${staticFallbackHtml}
           '</tbody></table>'
         : '<div class="bom-grid">' + items.map((b, bi) => {
             const key = pg.id + ':' + bi;
-            return '<div class="bom-card ' + (checkedBom.has(key) ? 'checked' : '') + '" data-bom="' + key + '">' +
+            const imgUrl = safeImgSrc(b.thumb);
+            return '<div class="bom-card ' + (checkedBom.has(key) ? 'checked' : '') + '" data-bom="' + key + '" tabindex="0" role="checkbox" aria-checked="' + (checkedBom.has(key) ? 'true' : 'false') + '">' +
               fields.map((f) => {
-                if (f === 'image') return b.thumb ? '<img src="' + b.thumb + '" alt="' + esc(b.name) + '" />' : '';
+                if (f === 'image') return imgUrl ? '<img src="' + imgUrl + '" alt="' + esc(b.name) + '" />' : '';
                 if (f === 'qty') return '<div class="bom-qty">' + b.qty + '×</div>';
                 if (f === 'name') return '<div class="bom-name">' + esc(b.name) + '</div>';
                 if (f === 'partId') return '<div class="bom-sub bom-mono">' + esc(b.partId) + '</div>';
@@ -1971,10 +2044,10 @@ ${staticFallbackHtml}
         : '<span style="font-size:12px;color:var(--muted);font-weight:600">Tap parts to check them off · ' + DATA.totalPieces + ' total pcs</span>';
       const partStepMap = new Map();
       viewerItems.forEach((vi, vIdx) => {
-        if (vi.kind === 'step' && vi.step && Array.isArray(vi.step.pli)) {
+        if (vi.step && Array.isArray(vi.step.pli)) {
           vi.step.pli.forEach((entry) => {
             const pid = String(entry.partId || '').toLowerCase();
-            if (pid && !partStepMap.has(pid)) partStepMap.set(pid, { vIdx, stepNum: vi.step.num });
+            if (pid && !partStepMap.has(pid)) partStepMap.set(pid, { vIdx, stepNum: vi.step.stepNum });
           });
         }
       });
@@ -2004,10 +2077,19 @@ ${staticFallbackHtml}
           jump.onclick = (ev) => { ev.stopPropagation(); curIdx = hit.vIdx; renderView(); };
           card.appendChild(jump);
         }
-        card.onclick = () => {
+        const toggleCheck = () => {
           const k = card.getAttribute('data-bom');
           if (checkedBom.has(k)) checkedBom.delete(k); else checkedBom.add(k);
-          card.classList.toggle('checked', checkedBom.has(k));
+          const isChecked = checkedBom.has(k);
+          card.classList.toggle('checked', isChecked);
+          card.setAttribute('aria-checked', isChecked ? 'true' : 'false');
+        };
+        card.onclick = toggleCheck;
+        card.onkeydown = (ev) => {
+          if (ev.key === 'Enter' || ev.key === ' ') {
+            ev.preventDefault();
+            toggleCheck();
+          }
         };
       });
       const bomFindInput = document.getElementById('bomFindInput');
@@ -2127,6 +2209,11 @@ ${staticFallbackHtml}
   if (explodeSliderEl) explodeSliderEl.oninput = (e) => { explodeLift = Number(e.target.value) || 0; requestDraw(); };
 
   window.addEventListener('keydown', (e) => {
+    const tgt = e.target;
+    if (tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA' || tgt.tagName === 'SELECT' || tgt.isContentEditable)) {
+      if (e.key === 'Escape') tgt.blur();
+      return;
+    }
     if (e.key === 'ArrowRight' || e.key === ' ') { if (curIdx < viewerItems.length - 1) { curIdx++; renderView(); } }
     else if (e.key === 'ArrowLeft') { if (curIdx > 0) { curIdx--; renderView(); } }
     else if (e.key === 'Home') { if (curIdx > 0) { curIdx = 0; renderView(); } }

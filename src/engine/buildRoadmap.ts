@@ -308,6 +308,13 @@ export function computeProgressBarSegmentRender(
  * Builds the sleek bottom-edge horizontal progress bar HTML with circular marker bead
  * for Live DOM Preview & Interactive HTML Export.
  */
+function sanitizeProgressColor(raw: string | undefined, fallback: string): string {
+  const v = String(raw ?? '').trim();
+  return /^(?:#(?:[0-9a-f]{3}|[0-9a-f]{6})|rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}(?:\s*,\s*(?:0|1|0?\.\d+|1\.0+))?\s*\))$/i.test(v)
+    ? v
+    : fallback;
+}
+
 export function buildProgressBarHtml(
   fraction: number,
   opts?: { accent?: string; trackBg?: string; heightPx?: number; segment?: ProgressBarSegment },
@@ -316,8 +323,8 @@ export function buildProgressBarHtml(
   const segment: ProgressBarSegment = opts?.segment === 'left' || opts?.segment === 'right' ? opts.segment : 'full';
   const seg = computeProgressBarSegmentRender(f, segment);
   const fillPct = (seg.localFill * 100).toFixed(2);
-  const accent = opts?.accent || '#1d4ed8';
-  const trackBg = opts?.trackBg || 'rgba(100,116,139,0.28)';
+  const accent = sanitizeProgressColor(opts?.accent, '#1d4ed8');
+  const trackBg = sanitizeProgressColor(opts?.trackBg, 'rgba(100,116,139,0.28)');
   const h = Math.max(3, Math.round(opts?.heightPx ?? 4));
   const bead = Math.max(9, h * 2 + 2);
   const trackRadius = `${seg.roundLeft ? '999px' : '0'} ${seg.roundRight ? '999px' : '0'} ${seg.roundRight ? '999px' : '0'} ${seg.roundLeft ? '999px' : '0'}`;
@@ -350,8 +357,8 @@ export function drawProgressBarCanvas(
   const f = Math.max(0, Math.min(1, Number.isFinite(fraction) ? fraction : 0));
   const segment: ProgressBarSegment = opts?.segment === 'left' || opts?.segment === 'right' ? opts.segment : 'full';
   const seg = computeProgressBarSegmentRender(f, segment);
-  const accent = opts?.accent || '#1d4ed8';
-  const trackBg = opts?.trackBg || 'rgba(100,116,139,0.32)';
+  const accent = sanitizeProgressColor(opts?.accent, '#1d4ed8');
+  const trackBg = sanitizeProgressColor(opts?.trackBg, 'rgba(100,116,139,0.32)');
   const h = Math.max(3, opts?.barHeight ?? 4.5);
   const r = h / 2;
   const rL = seg.roundLeft ? r : 0;
@@ -362,7 +369,8 @@ export function drawProgressBarCanvas(
   // Full track
   ctx.fillStyle = trackBg;
   ctx.beginPath();
-  ctx.roundRect(x, yCenter - r, width, h, [rL, rR, rR, rL]);
+  if (typeof ctx.roundRect === 'function') ctx.roundRect(x, yCenter - r, width, h, [rL, rR, rR, rL]);
+  else ctx.rect(x, yCenter - r, width, h);
   ctx.fill();
 
   // Filled portion
@@ -371,7 +379,8 @@ export function drawProgressBarCanvas(
     const fillRR = seg.roundRight || seg.localFill < 0.999 ? r : 0;
     ctx.fillStyle = accent;
     ctx.beginPath();
-    ctx.roundRect(x, yCenter - r, fillW, h, [rL, fillRR, fillRR, rL]);
+    if (typeof ctx.roundRect === 'function') ctx.roundRect(x, yCenter - r, fillW, h, [rL, fillRR, fillRR, rL]);
+    else ctx.rect(x, yCenter - r, fillW, h);
     ctx.fill();
   }
 

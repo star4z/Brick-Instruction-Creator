@@ -97,7 +97,7 @@ export function createOnSitePartsChunkLoader(
 
   const getManifest = (): Promise<PartsChunksManifest | null> => {
     if (manifestPromise) return manifestPromise;
-    manifestPromise = (async () => {
+    const p = (async () => {
       try {
         const res = await fetchImpl(`${baseUrl}manifest.json`, { cache: 'default' });
         if (!res.ok) return null;
@@ -114,13 +114,37 @@ export function createOnSitePartsChunkLoader(
         return null;
       }
     })();
+    manifestPromise = p.then((res) => {
+      if (!res) manifestPromise = null;
+      return res;
+    });
     return manifestPromise;
+  };
+
+  const raceWithSignal = <T>(promise: Promise<T>, signal?: AbortSignal): Promise<T | null> => {
+    if (!signal) return promise;
+    if (signal.aborted) return Promise.resolve(null);
+    return new Promise<T | null>((resolve) => {
+      const onAbort = () => resolve(null);
+      signal.addEventListener('abort', onAbort, { once: true });
+      promise.then(
+        (val) => {
+          signal.removeEventListener('abort', onAbort);
+          resolve(signal.aborted ? null : val);
+        },
+        () => {
+          signal.removeEventListener('abort', onAbort);
+          resolve(null);
+        },
+      );
+    });
   };
 
   const loadChunk = async (
     file: string,
     signal?: AbortSignal,
   ): Promise<Record<string, string> | null> => {
+    if (signal?.aborted) return null;
     const cached = chunkCache.get(file);
     if (cached) {
       // Refresh LRU position
@@ -130,11 +154,11 @@ export function createOnSitePartsChunkLoader(
     }
 
     const existing = chunkInFlight.get(file);
-    if (existing) return existing;
+    if (existing) return raceWithSignal(existing, signal);
 
     const promise = (async (): Promise<Record<string, string> | null> => {
       try {
-        const res = await fetchImpl(`${baseUrl}${file}`, { cache: 'force-cache', signal });
+        const res = await fetchImpl(`${baseUrl}${file}`, { cache: 'default' });
         if (!res.ok) return null;
         const buf = await res.arrayBuffer();
         let text: string;
@@ -163,7 +187,7 @@ export function createOnSitePartsChunkLoader(
     })();
 
     chunkInFlight.set(file, promise);
-    return promise;
+    return raceWithSignal(promise, signal);
   };
 
   const resolveDat = async (normKey: string, signal?: AbortSignal): Promise<string | null> => {

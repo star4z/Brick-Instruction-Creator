@@ -430,7 +430,7 @@ export interface ThemeExportPackPayload {
 export const CUSTOM_THEMES_STORAGE_KEY = 'bic_custom_themes_v1';
 
 const SAFE_HEX_RE = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
-const SAFE_RGBA_RE = /^rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}(?:\s*,\s*(?:0|1|0?\.\d+))?\s*\)$/;
+const SAFE_RGBA_RE = /^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})(?:\s*,\s*(0|1|0?\.\d+|1\.0+))?\s*\)$/;
 
 export function sanitizeCssColor(value: unknown, fallback: string): string {
   if (typeof value !== 'string') return fallback;
@@ -444,8 +444,16 @@ export function sanitizeCssColor(value: unknown, fallback: string): string {
     }
     return trimmed.toLowerCase();
   }
-  if (SAFE_RGBA_RE.test(trimmed)) {
-    return trimmed;
+  const m = SAFE_RGBA_RE.exec(trimmed);
+  if (m) {
+    const r = Math.min(255, Number(m[1]));
+    const g = Math.min(255, Number(m[2]));
+    const b = Math.min(255, Number(m[3]));
+    if (m[4] !== undefined) {
+      const a = Math.max(0, Math.min(1, Number(m[4])));
+      return `rgba(${r}, ${g}, ${b}, ${a})`;
+    }
+    return `rgb(${r}, ${g}, ${b})`;
   }
   return fallback;
 }
@@ -797,7 +805,7 @@ export function createThemeDraftFromBase(base: ManualTheme, name?: string): Manu
   const bgColorEnd = sanitizeHexColor(base.bgColorEnd, bgColor);
   return {
     id: generateCustomThemeId(),
-    name: name || (base.builtIn ? `${base.name} Custom` : `${base.name} Copy`).slice(0, 40),
+    name: (name || (base.builtIn ? `${base.name} Custom` : `${base.name} Copy`)).slice(0, 40),
     builtIn: false,
     bgType: base.bgType,
     bgColor,
@@ -836,7 +844,8 @@ export function resolveThemeById(themeId: string, customThemes: ManualTheme[]): 
  * Applies a theme's background (solid, gradient, and optional blueprint grid) to a DOM element.
  */
 export function applyThemeBackgroundToElement(el: HTMLElement, theme: ManualTheme): void {
-  const baseBg = buildThemeBgCss(theme.bgType, theme.bgColor, theme.bgColorEnd, theme.bgAngle);
+  const safeBgColor = sanitizeHexColor(theme.bgColor, '#0b2545');
+  const baseBg = buildThemeBgCss(theme.bgType, safeBgColor, theme.bgColorEnd, theme.bgAngle);
   if (theme.bp) {
     const gridLayers = [
       'linear-gradient(to right, rgba(116, 211, 255, 0.16) 1px, transparent 1px)',
@@ -845,7 +854,7 @@ export function applyThemeBackgroundToElement(el: HTMLElement, theme: ManualThem
       'linear-gradient(to bottom, rgba(116, 211, 255, 0.28) 1px, transparent 1px)',
     ];
     el.style.background = '';
-    el.style.backgroundColor = theme.bgColor;
+    el.style.backgroundColor = safeBgColor;
     if (theme.bgType === 'gradient') {
       el.style.backgroundImage = `${gridLayers.join(', ')}, ${baseBg}`;
       el.style.backgroundSize = '16px 16px, 16px 16px, 80px 80px, 80px 80px, 100% 100%';
@@ -925,8 +934,8 @@ export function fillThemeBackgroundCanvas(
 }
 
 export function loadCustomThemesFromStorage(): ManualTheme[] {
-  if (typeof localStorage === 'undefined') return [];
   try {
+    if (typeof localStorage === 'undefined') return [];
     const raw = localStorage.getItem(CUSTOM_THEMES_STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
@@ -947,8 +956,8 @@ export function loadCustomThemesFromStorage(): ManualTheme[] {
 }
 
 export function saveCustomThemesToStorage(themes: ManualTheme[]): void {
-  if (typeof localStorage === 'undefined') return;
   try {
+    if (typeof localStorage === 'undefined') return;
     const clean = themes.filter((t) => !t.builtIn && !BUILT_IN_THEME_IDS.has(t.id));
     localStorage.setItem(CUSTOM_THEMES_STORAGE_KEY, JSON.stringify(clean));
   } catch {
@@ -1171,8 +1180,8 @@ export function touchThemeRecent(recentIds: string[], id: string, max = 64): str
 }
 
 export function loadThemeRecentsFromStorage(): string[] {
-  if (typeof localStorage === 'undefined') return [];
   try {
+    if (typeof localStorage === 'undefined') return [];
     const parsed = JSON.parse(localStorage.getItem(THEME_RECENTS_STORAGE_KEY) || '[]');
     return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string').slice(0, 64) : [];
   } catch {
@@ -1181,8 +1190,8 @@ export function loadThemeRecentsFromStorage(): string[] {
 }
 
 export function saveThemeRecentsToStorage(recentIds: string[]): void {
-  if (typeof localStorage === 'undefined') return;
   try {
+    if (typeof localStorage === 'undefined') return;
     localStorage.setItem(THEME_RECENTS_STORAGE_KEY, JSON.stringify(recentIds.slice(0, 64)));
   } catch {
     // Ignore storage quota or private browsing errors
@@ -1198,5 +1207,5 @@ export function makeUniqueThemeName(desired: string, existingNames: string[]): s
     const candidate = `${base} ${i}`;
     if (!taken.has(candidate.toLowerCase())) return candidate;
   }
-  return base;
+  return `${base.slice(0, 30)} ${Date.now().toString(36).slice(-5)}`;
 }

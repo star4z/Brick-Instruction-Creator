@@ -376,6 +376,8 @@ export function shouldShowGhostSubmodelPreview(stepCount: number, isSubmodelSequ
  * Builds a subtle radiant white starburst SVG to sit behind a newly attached subassembly
  * (matching 31172 p. 30 & p. 103).
  */
+let starburstGradCounter = 0;
+
 export function buildAttachmentStarburstSvg(
   sizePx = 160,
   opts?: { color?: string; rays?: number },
@@ -402,7 +404,8 @@ export function buildAttachmentStarburstSvg(
       `<polygon points="${x0.toFixed(1)},${y0.toFixed(1)} ${x2.toFixed(1)},${y2.toFixed(1)} ${x1.toFixed(1)},${y1.toFixed(1)}" fill="${color}" fill-opacity="0.52"/>`,
     );
   }
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${s}" height="${s}" viewBox="0 0 ${s} ${s}" class="pointer-events-none" aria-hidden="true"><defs><radialGradient id="sbGrad" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="${color}" stop-opacity="0.72"/><stop offset="100%" stop-color="${color}" stop-opacity="0"/></radialGradient></defs><circle cx="${c}" cy="${c}" r="${rOuter.toFixed(1)}" fill="url(#sbGrad)"/>${polygons.join('')}</svg>`;
+  const gradId = `sbGrad_${++starburstGradCounter}`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${s}" height="${s}" viewBox="0 0 ${s} ${s}" class="pointer-events-none" aria-hidden="true"><defs><radialGradient id="${gradId}" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="${color}" stop-opacity="0.72"/><stop offset="100%" stop-color="${color}" stop-opacity="0"/></radialGradient></defs><circle cx="${c}" cy="${c}" r="${rOuter.toFixed(1)}" fill="url(#${gradId})"/>${polygons.join('')}</svg>`;
 }
 
 /**
@@ -456,7 +459,7 @@ export function buildCurvedMotionArrowSvg(
   const s = Math.max(24, Math.round(sizePx));
   const fill = opts?.fill || '#facc15';
   const stroke = opts?.stroke || '#1e293b';
-  const flip = direction === 'ccw' ? ` transform="translate(${s},0) scale(-1,1)"` : '';
+  const flip = direction === 'ccw' ? ' transform="translate(44,0) scale(-1,1)"' : '';
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${s}" height="${s}" viewBox="0 0 44 44" class="pointer-events-none" aria-hidden="true"><g${flip}><path d="M8 29 A16 16 0 0 1 28 11 L28 6 L38 14.5 L28 23 L28 18 A9 9 0 0 0 15 29 Z" fill="${fill}" stroke="${stroke}" stroke-width="1.6" stroke-linejoin="round"/><line x1="12.5" y1="22.5" x2="17" y2="25" stroke="${stroke}" stroke-width="1.2"/><line x1="17.5" y1="16.5" x2="20.5" y2="20.5" stroke="${stroke}" stroke-width="1.2"/></g></svg>`;
 }

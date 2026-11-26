@@ -58,6 +58,23 @@ export function buildThemeFileName(name: string): string {
   return `${slug || 'custom-theme'}${THEME_FILE_EXT}`;
 }
 
+const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+function stripPrototypePollutionKeys(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(stripPrototypePollutionKeys);
+  }
+  if (value && typeof value === 'object') {
+    const clean: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (DANGEROUS_KEYS.has(k)) continue;
+      clean[k] = stripPrototypePollutionKeys(v);
+    }
+    return clean;
+  }
+  return value;
+}
+
 export function parseStudioProjectJson(rawText: string): Record<string, unknown> {
   let parsed: unknown;
   try {
@@ -70,7 +87,7 @@ export function parseStudioProjectJson(rawText: string): Record<string, unknown>
     throw new Error(`Invalid Brick Instruction Works project (${PROJECT_FILE_EXT}) file.`);
   }
 
-  const obj = parsed as Record<string, unknown>;
+  const obj = stripPrototypePollutionKeys(parsed) as Record<string, unknown>;
   if (
     obj.format !== PROJECT_FILE_FORMAT ||
     obj.version !== PROJECT_FILE_STUDIO_VERSION ||

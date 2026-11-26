@@ -61,6 +61,18 @@ if (totalBytes > MAX_TOTAL_BYTES) {
   errors.push(`Total dist size ${(totalBytes / 1024 / 1024).toFixed(2)} MB exceeds 500 MB budget.`);
 }
 
+const chunksManifestPath = path.join(DIST_DIR, 'parts-chunks', 'manifest.json');
+if (fs.existsSync(chunksManifestPath)) {
+  try {
+    const manifest = JSON.parse(fs.readFileSync(chunksManifestPath, 'utf8'));
+    if (!manifest || !Array.isArray(manifest.chunks) || manifest.chunks.length === 0) {
+      errors.push('dist/parts-chunks/manifest.json is missing a non-empty chunks array.');
+    }
+  } catch (err) {
+    errors.push(`dist/parts-chunks/manifest.json is invalid JSON: ${err.message}`);
+  }
+}
+
 if (errors.length > 0) {
   console.error('Neocities compliance check FAILED:');
   for (const err of errors) console.error('  -', err);

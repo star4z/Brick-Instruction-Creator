@@ -7,21 +7,33 @@ import tailwindcss from '@tailwindcss/vite';
 function thirdpartyPartsChunksPlugin(): Plugin {
   const srcDir = path.resolve(process.cwd(), 'thirdparty/parts-chunks');
   const distDir = path.resolve(process.cwd(), 'dist/parts-chunks');
+  const attachMiddleware = (middlewares: { use: (fn: (req: { url?: string }, res: { setHeader: (k: string, v: string) => void; statusCode: number; end: (msg?: string) => void; headersSent?: boolean }, next: () => void) => void) => void }) => {
+    middlewares.use((req, res, next) => {
+      const urlPath = (req.url || '').split('?')[0];
+      if (!urlPath.startsWith('/parts-chunks/')) return next();
+      const rel = path.basename(urlPath.slice('/parts-chunks/'.length));
+      const filePath = path.join(srcDir, rel);
+      if (!rel || !fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) return next();
+      const isJson = rel.endsWith('.json');
+      res.setHeader('Content-Type', isJson ? 'application/json; charset=utf-8' : 'application/octet-stream');
+      res.setHeader('Cache-Control', isJson ? 'no-cache' : 'public, max-age=3600');
+      const stream = fs.createReadStream(filePath);
+      stream.on('error', () => {
+        if (!res.headersSent) {
+          res.statusCode = 500;
+          res.end('Error reading part chunk');
+        }
+      });
+      stream.pipe(res as unknown as NodeJS.WritableStream);
+    });
+  };
   return {
     name: 'thirdparty-parts-chunks',
     configureServer(server) {
-      server.middlewares.use((req, res, next) => {
-        const urlPath = (req.url || '').split('?')[0];
-        if (!urlPath.startsWith('/parts-chunks/')) return next();
-        const rel = path.basename(urlPath.slice('/parts-chunks/'.length));
-        const filePath = path.join(srcDir, rel);
-        if (!rel || !fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) return next();
-        res.setHeader(
-          'Content-Type',
-          rel.endsWith('.json') ? 'application/json; charset=utf-8' : 'application/octet-stream',
-        );
-        fs.createReadStream(filePath).pipe(res);
-      });
+      attachMiddleware(server.middlewares);
+    },
+    configurePreviewServer(server) {
+      attachMiddleware(server.middlewares);
     },
     closeBundle() {
       if (!fs.existsSync(path.join(srcDir, 'manifest.json'))) return;

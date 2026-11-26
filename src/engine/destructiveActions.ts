@@ -258,7 +258,7 @@ export function summarizeManualEdits(input: {
       if (!step?.id || seenStepIds.has(step.id)) continue;
       seenStepIds.add(step.id);
 
-      if (step.id.includes('_s_')) {
+      if (step.id.includes('_s_') || step.id.includes('_step_split_')) {
         manualSplitSteps += 1;
       }
 
@@ -331,7 +331,8 @@ export function summarizeManualEdits(input: {
       (typeof comp.showText === 'boolean' && comp.showText !== wlDefs.completeShowText) ||
       comp.showFireworks === false ||
       bm.bgSrc ||
-      (typeof bm.az === 'number' && Math.abs(bm.az - defBack.az) > 0.5),
+      (typeof bm.az === 'number' && Math.abs(bm.az - defBack.az) > 0.5) ||
+      (typeof bm.el === 'number' && Math.abs(bm.el - defBack.el) > 0.5),
   );
 
   const stepItems: string[] = [];

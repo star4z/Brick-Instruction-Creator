@@ -23,6 +23,12 @@ function getDb(): Promise<IDBPDatabase> | null {
           db.createObjectStore(STORE_NAME);
         }
       },
+      terminated() {
+        dbPromise = null;
+      },
+    }).catch((err) => {
+      dbPromise = null;
+      throw err;
     });
   }
   return dbPromise;
@@ -59,14 +65,22 @@ export function downloadProjectFile(project: BicProjectFile): void {
     ...project,
     format: PROJECT_FILE_FORMAT,
   };
-  const json = JSON.stringify(payload, null, 2);
+  const json = JSON.stringify(payload);
   const blob = new Blob([json], { type: CUSTOM_FILE_MIME_TYPE });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
   a.download = buildProjectFileName(project.model.name);
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  if (a.style) a.style.display = 'none';
+  if (document.body && typeof document.body.appendChild === 'function') {
+    document.body.appendChild(a);
+  }
+  try {
+    a.click();
+  } finally {
+    if (typeof a.remove === 'function') a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
 }
 
 export async function parseProjectFile(file: File): Promise<BicProjectFile> {

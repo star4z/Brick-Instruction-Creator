@@ -1994,8 +1994,8 @@ export function buildPlacementArrowGeometry(
           const sR: Vec3 = [s[0] + wx * gw, s[1] + wy * gw, s[2] + wz * gw];
           const tL: Vec3 = [t[0] - wx * gw, t[1] - wy * gw, t[2] - wz * gw];
           const tR: Vec3 = [t[0] + wx * gw, t[1] + wy * gw, t[2] + wz * gw];
-          pushTri(sL, sR, tR, viewNorm, col);
-          pushTri(sL, tR, tL, viewNorm, col);
+          pushTri(sL, tR, sR, viewNorm, col);
+          pushTri(sL, tL, tR, viewNorm, col);
           if (outlines) {
             pushEdge(sL, tL, ink, 210);
             pushEdge(sR, tR, ink, 210);
@@ -2030,9 +2030,9 @@ export function buildPlacementArrowGeometry(
         const hL: Vec3 = [shaftEnd[0] - wx * headHalfW, shaftEnd[1] - wy * headHalfW, shaftEnd[2] - wz * headHalfW];
         const hR: Vec3 = [shaftEnd[0] + wx * headHalfW, shaftEnd[1] + wy * headHalfW, shaftEnd[2] + wz * headHalfW];
 
-        pushTri(sL, sR, eR, viewNorm, col);
-        pushTri(sL, eR, eL, viewNorm, col);
-        pushTri(hL, hR, t, viewNorm, col);
+        pushTri(sL, eR, sR, viewNorm, col);
+        pushTri(sL, eL, eR, viewNorm, col);
+        pushTri(hL, t, hR, viewNorm, col);
 
         if (outlines) {
           pushEdge(sL, sR, ink, 220);
@@ -2111,14 +2111,15 @@ export function buildPlacementArrowGeometry(
 }
 
 function parseHexToRgb255(hex: string): [number, number, number] {
-  const clean = (hex || DEFAULT_ARROW_COLOR).replace('#', '').trim();
-  const full = clean.length === 3
-    ? `${clean[0]}${clean[0]}${clean[1]}${clean[1]}${clean[2]}${clean[2]}`
-    : clean.padEnd(6, '0').slice(0, 6);
+  const raw = (hex || DEFAULT_ARROW_COLOR).replace('#', '').trim();
+  const valid = /^[0-9a-f]{3}$|^[0-9a-f]{6}$/i.test(raw) ? raw : DEFAULT_ARROW_COLOR.replace('#', '');
+  const full = valid.length === 3
+    ? `${valid[0]}${valid[0]}${valid[1]}${valid[1]}${valid[2]}${valid[2]}`
+    : valid.slice(0, 6);
   return [
-    parseInt(full.slice(0, 2), 16) || 0,
-    parseInt(full.slice(2, 4), 16) || 0,
-    parseInt(full.slice(4, 6), 16) || 0,
+    parseInt(full.slice(0, 2), 16),
+    parseInt(full.slice(2, 4), 16),
+    parseInt(full.slice(4, 6), 16),
   ];
 }
 

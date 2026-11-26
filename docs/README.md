@@ -39,6 +39,7 @@ All architecture specifications and feature design proposals for **Brick Instruc
 - [`MULTI_MANUAL_CRAFT_AUDIT.md`](./MULTI_MANUAL_CRAFT_AUDIT.md) — Comprehensive 165-finding audit across 8 official LEGO manuals (1,680 pages spanning UCS, Creator 2025, Technic Bugatti Chiron #42083, Icons Modular Police Station #10278, Botanicals Bonsai Tree #10281, Ideas Saturn V #92176, LEGO Art Iron Man Mosaic #31199, and Speed Champions Porsche 911 #75895) organized across 12 engineering domains and 5 implementation phases.
 - [`UI_E2E_TESTING_DESIGN.md`](./UI_E2E_TESTING_DESIGN.md) — Automated Playwright E2E UI & feature audit suite running against Desktop (`1280×800`) and Mobile (`390×844`) layouts on every update, checking all pages, modals, drawers, popovers, overflow, clipping, overlapping chrome, and zero console/page errors.
 - [`PAGE_RENDER_CACHING_DESIGN.md`](./PAGE_RENDER_CACHING_DESIGN.md) — Zero-encode offscreen `<canvas>` mounting, pixel-budget LRU page/minifig/1:1 caching (`src/engine/pageRenderCache.ts`), official minifigure wasted-snapshot elimination & adaptive sub-render supersampling, `pageNavigationOnly` fast path, PLI thumbnail ordering, direct PDF canvas drawing, and paint-aware adjacent-page idle pre-warming.
+- [`REMEDIATION_AUDIT_2026.md`](./REMEDIATION_AUDIT_2026.md) — Comprehensive 2026 static-analysis & live-runtime audit remediation across security, streaming PDF & async Interactive 3D HTML export, WebGL shaders/conditional-line rendering, core layout/step algorithms, accessibility, and CI/build hygiene.
 
 ## Conventions
 

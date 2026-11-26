@@ -757,4 +757,41 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
 
     runtime.assertClean(`${testInfo.project.name}: Minifigure & Cached Navigation`);
   });
+
+  test('Accessibility semantics and async Interactive 3D HTML export', async ({ page }, testInfo) => {
+    const runtime = await attachRuntimeIssueCollector(page);
+    await page.goto('/');
+    await loadCleanManual(page);
+
+    // Viewport meta must not disable user pinch-zoom
+    const viewportContent = await page.locator('meta[name="viewport"]').getAttribute('content');
+    expect(viewportContent || '').not.toMatch(/user-scalable\s*=\s*no/i);
+
+    // Live regions & modal ARIA roles
+    await expect(page.locator('#errorBanner')).toHaveAttribute('role', 'alert');
+    await expect(page.locator('#toast')).toHaveAttribute('role', 'status');
+    await expect(page.locator('#toast')).toHaveAttribute('aria-live', 'polite');
+
+    for (const modalId of [
+      '#exportModal',
+      '#pageSetupModal',
+      '#settingsModal',
+      '#shortcutsModal',
+      '#bricksLibraryModal',
+    ]) {
+      await expect(page.locator(modalId)).toHaveAttribute('role', 'dialog');
+      await expect(page.locator(modalId)).toHaveAttribute('aria-modal', 'true');
+    }
+    await expect(page.locator('#confirmActionModal')).toHaveAttribute('role', 'alertdialog');
+    await expect(page.locator('#confirmActionModal')).toHaveAttribute('aria-modal', 'true');
+
+    // Trigger Interactive 3D HTML export and verify it completes cleanly without hanging
+    await ensureMenuOpen(page);
+    const downloadPromise = page.waitForEvent('download', { timeout: 25_000 });
+    await page.locator('#menuExportHtmlBtn').click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toMatch(/\.html$/i);
+
+    runtime.assertClean(`${testInfo.project.name}: Accessibility & Interactive HTML Export`);
+  });
 });

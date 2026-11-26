@@ -36,7 +36,7 @@ export async function attachRuntimeIssueCollector(page: Page): Promise<RuntimeIs
       const text = msg.text();
       // Network resource errors from aborted external mirrors are expected in offline E2E;
       // local asset 4xx/5xx are captured strictly via localHttpErrors above.
-      if (text.startsWith('Failed to load resource:')) return;
+      if (text.startsWith('Failed to load resource:') && /ERR_FAILED|404 \(Not Found\)/.test(text)) return;
       consoleErrors.push(text);
     }
   });

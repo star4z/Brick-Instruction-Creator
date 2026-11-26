@@ -482,6 +482,17 @@ body {
   }
 }
 
+@keyframes pressRevealUp {
+  from {
+    opacity: 0;
+    transform: scale(0.992);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
 @keyframes pressFadeIn {
   from {
     opacity: 0;
@@ -494,11 +505,11 @@ body {
 @keyframes pressSheetIn {
   from {
     opacity: 0;
-    transform: translateY(8px);
+    transform: scale(0.992);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: scale(1);
   }
 }
 
@@ -515,7 +526,6 @@ body {
   animation: pressFadeIn 180ms var(--ease-press);
 }
 
-#themeEditorModal:not(.hidden) .studio-sheet,
 #overviewModal:not(.hidden) .studio-sheet,
 #importFetchOverlay:not(.hidden) .studio-sheet,
 #missingPartsModal:not(.hidden) .studio-sheet,
@@ -528,12 +538,14 @@ body {
 #applyAngleModal:not(.hidden) .studio-sheet,
 #openModelModal:not(.hidden) .studio-sheet,
 #errorsModal:not(.hidden) .studio-sheet,
+#shortcutsModal:not(.hidden) .studio-sheet,
+#confirmActionModal:not(.hidden) .studio-sheet,
 #bricksLibraryModal:not(.hidden) .studio-sheet {
   animation: pressSheetIn 180ms var(--ease-press);
 }
 
-/* Hide bottom-right zoom box on touch/mobile devices where pinch-to-zoom is native */
-@media (pointer: coarse) {
+/* Hide bottom-right zoom box on narrow phones where pinch-to-zoom is primary, but keep on tablets & hybrid laptops */
+@media (pointer: coarse) and (max-width: 639px) {
   #zoomControlsBar {
     display: none !important;
   }
@@ -625,6 +637,9 @@ body {
 }
 
 @media print {
+  @page {
+    margin: 0;
+  }
   .no-print {
     display: none !important;
   }

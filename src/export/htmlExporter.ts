@@ -126,26 +126,26 @@ export function exportInteractiveHtmlViewer(
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>${(cover.title || model.name).replace(/</g, '&lt;')} — Interactive Instructions</title>
+<title>${(cover.title || model.name).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')} — Interactive Instructions</title>
 <style>
   * { box-sizing: border-box; }
-  body { margin: 0; font-family: system-ui, -apple-system, sans-serif; background: ${theme.backgroundColor}; color: ${theme.textColor}; min-height: 100vh; display: flex; flex-direction: column; }
+  body { margin: 0; font-family: system-ui, -apple-system, sans-serif; background: ${String(theme.backgroundColor || '#ffffff').replace(/[^#a-zA-Z0-9(),.\s%-]/g, '')}; color: ${String(theme.textColor || '#0f172a').replace(/[^#a-zA-Z0-9(),.\s%-]/g, '')}; min-height: 100vh; display: flex; flex-direction: column; }
   header { display: flex; align-items: center; justify-content: space-between; padding: 12px 18px; background: rgba(0,0,0,0.08); backdrop-filter: blur(8px); gap: 12px; flex-wrap: wrap; }
   h1 { margin: 0; font-size: 18px; }
   main { flex: 1; max-width: 1080px; width: 100%; margin: 0 auto; padding: 18px; display: flex; flex-direction: column; gap: 16px; }
-  .stage { background: ${theme.pliBackground}; border: 1px solid ${theme.pliBorderColor}; border-radius: 14px; padding: 18px; display: grid; gap: 16px; }
+  .stage { background: ${String(theme.pliBackground || '#ffffff').replace(/[^#a-zA-Z0-9(),.\s%-]/g, '')}; border: 1px solid ${String(theme.pliBorderColor || '#cbd5e1').replace(/[^#a-zA-Z0-9(),.\s%-]/g, '')}; border-radius: 14px; padding: 18px; display: grid; gap: 16px; }
   .step-head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
   .step-num { font-size: 36px; font-weight: 800; line-height: 1; }
-  .badge { background: ${theme.accentColor}; color: #fff; padding: 5px 11px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+  .badge { background: ${String(theme.accentColor || '#0055bf').replace(/[^#a-zA-Z0-9(),.\s%-]/g, '')}; color: #fff; padding: 5px 11px; border-radius: 999px; font-size: 12px; font-weight: 700; }
   .pli { display: flex; gap: 10px; flex-wrap: wrap; }
-  .pli-item { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 10px; border: 1px solid ${theme.pliBorderColor}; background: ${theme.calloutBackground}; }
+  .pli-item { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 10px; border: 1px solid ${String(theme.pliBorderColor || '#cbd5e1').replace(/[^#a-zA-Z0-9(),.\s%-]/g, '')}; background: ${String(theme.calloutBackground || '#f8fafc').replace(/[^#a-zA-Z0-9(),.\s%-]/g, '')}; }
   .pli-item img { width: 40px; height: 40px; object-fit: contain; }
   .hero { width: 100%; max-height: 56vh; object-fit: contain; display: block; margin: 0 auto; }
   .nav { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-  button { cursor: pointer; border: 1px solid ${theme.pliBorderColor}; background: ${theme.pliBackground}; color: ${theme.textColor}; padding: 10px 18px; border-radius: 10px; font-weight: 700; font-size: 14px; }
-  button.primary { background: ${theme.accentColor}; color: #fff; border-color: transparent; }
+  button { cursor: pointer; border: 1px solid ${String(theme.pliBorderColor || '#cbd5e1').replace(/[^#a-zA-Z0-9(),.\s%-]/g, '')}; background: ${String(theme.pliBackground || '#ffffff').replace(/[^#a-zA-Z0-9(),.\s%-]/g, '')}; color: ${String(theme.textColor || '#0f172a').replace(/[^#a-zA-Z0-9(),.\s%-]/g, '')}; padding: 10px 18px; border-radius: 10px; font-weight: 700; font-size: 14px; }
+  button.primary { background: ${String(theme.accentColor || '#0055bf').replace(/[^#a-zA-Z0-9(),.\s%-]/g, '')}; color: #fff; border-color: transparent; }
   .bom-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
-  .bom-card { background: ${theme.pliBackground}; border: 1px solid ${theme.pliBorderColor}; border-radius: 10px; padding: 10px; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 4px; }
+  .bom-card { background: ${String(theme.pliBackground || '#ffffff').replace(/[^#a-zA-Z0-9(),.\s%-]/g, '')}; border: 1px solid ${String(theme.pliBorderColor || '#cbd5e1').replace(/[^#a-zA-Z0-9(),.\s%-]/g, '')}; border-radius: 10px; padding: 10px; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 4px; }
   .bom-card img { width: 56px; height: 56px; object-fit: contain; }
 </style>
 </head>
@@ -161,7 +161,10 @@ export function exportInteractiveHtmlViewer(
 </header>
 <main id="app"></main>
 <script>
-const DATA = ${payload};
+const DATA = ${payload.replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')};
+const esc = (s) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const safeImg = (u) => /^data:image\\/(?:png|jpeg|jpg|webp|gif);base64,[a-z0-9+/=\\s]+$/i.test(String(u || '').trim()) ? esc(u) : '';
+const safeCss = (c) => String(c || '').replace(/[^#a-zA-Z0-9(),.\\s%-]/g, '');
 let idx = 0;
 let showBom = false;
 document.getElementById('title').textContent = DATA.title;
@@ -177,22 +180,22 @@ function render() {
   document.getElementById('toggleBom').textContent = showBom ? 'Back to Steps' : 'Parts Inventory (' + DATA.bom.length + ')';
   if (showBom) {
     app.innerHTML = '<div class="bom-grid">' + DATA.bom.map(b =>
-      '<div class="bom-card"><img src="' + b.thumb + '" /><strong>' + b.quantity + '×</strong><span style="font-size:12px">' + b.partName + '</span><small style="opacity:.7">' + b.colorName + ' • ' + b.partId.toUpperCase() + '</small></div>'
+      '<div class="bom-card"><img src="' + safeImg(b.thumb) + '" /><strong>' + Number(b.quantity) + '×</strong><span style="font-size:12px">' + esc(b.partName) + '</span><small style="opacity:.7">' + esc(b.colorName) + ' • ' + esc(String(b.partId || '').toUpperCase()) + '</small></div>'
     ).join('') + '</div>';
     return;
   }
   const s = DATA.steps[idx];
   if (!s) return;
-  const cue = s.rotationCue && s.rotationCue !== 'none' ? '<span class="badge">↻ ' + s.rotationCue.replace(/_/g,' ').toUpperCase() + '</span>' : '';
+  const cue = s.rotationCue && s.rotationCue !== 'none' ? '<span class="badge">↻ ' + esc(String(s.rotationCue).replace(/_/g,' ').toUpperCase()) + '</span>' : '';
   const subs = s.subassemblies.map(sub =>
-    '<div style="border:1px dashed ' + DATA.theme.calloutBorderColor + ';border-radius:10px;padding:10px;background:' + DATA.theme.calloutBackground + '"><strong>' + sub.name + '</strong>' + (sub.requiresRotation ? ' <span class="badge">Rotate to attach</span>' : '') + '<img src="' + sub.imageUrl + '" style="max-height:150px;display:block;margin-top:6px" /></div>'
+    '<div style="border:1px dashed ' + safeCss(DATA.theme.calloutBorderColor) + ';border-radius:10px;padding:10px;background:' + safeCss(DATA.theme.calloutBackground) + '"><strong>' + esc(sub.name) + '</strong>' + (sub.requiresRotation ? ' <span class="badge">Rotate to attach</span>' : '') + '<img src="' + safeImg(sub.imageUrl) + '" style="max-height:150px;display:block;margin-top:6px" /></div>'
   ).join('');
   app.innerHTML =
     '<div class="stage">' +
-      '<div class="step-head"><div><div style="font-size:12px;opacity:.75">' + s.chapterName + '</div><div class="step-num">' + s.stepNumber + '</div></div>' + cue + '</div>' +
-      '<div class="pli">' + s.pli.map(p => '<div class="pli-item"><img src="' + p.thumb + '" /><div><strong>' + p.qty + '×</strong><div style="font-size:11px;opacity:.75">' + p.partId.toUpperCase() + '</div></div></div>').join('') + '</div>' +
+      '<div class="step-head"><div><div style="font-size:12px;opacity:.75">' + esc(s.chapterName) + '</div><div class="step-num">' + Number(s.stepNumber) + '</div></div>' + cue + '</div>' +
+      '<div class="pli">' + s.pli.map(p => '<div class="pli-item"><img src="' + safeImg(p.thumb) + '" /><div><strong>' + Number(p.qty) + '×</strong><div style="font-size:11px;opacity:.75">' + esc(String(p.partId || '').toUpperCase()) + '</div></div></div>').join('') + '</div>' +
       subs +
-      '<img class="hero" src="' + s.imageUrl + '" alt="Step ' + s.stepNumber + '" />' +
+      '<img class="hero" src="' + safeImg(s.imageUrl) + '" alt="Step ' + Number(s.stepNumber) + '" />' +
     '</div>' +
     '<div class="nav">' +
       '<button id="prevBtn"' + (idx === 0 ? ' disabled' : '') + '>← Previous</button>' +

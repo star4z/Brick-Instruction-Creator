@@ -428,10 +428,18 @@ export interface QrRenderOptions {
   ariaLabel?: string;
 }
 
+function escapeQrAttr(s: string): string {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 export function buildQrSvg(text: string, options: QrRenderOptions = {}): string {
-  const fg = options.fg ?? '#111827';
-  const bg = options.bg ?? '#ffffff';
-  const quiet = Math.max(0, options.quietZone ?? 2);
+  const fg = escapeQrAttr(options.fg ?? '#111827');
+  const bg = escapeQrAttr(options.bg ?? '#ffffff');
+  const quiet = Math.max(0, options.quietZone ?? 4);
   const qr = generateQrMatrix(text, options.ecLevel ?? 'M');
   const viewSize = qr.size + quiet * 2;
 
@@ -451,7 +459,7 @@ export function buildQrSvg(text: string, options: QrRenderOptions = {}): string 
   }
 
   const labelAttr = options.ariaLabel
-    ? ` role="img" aria-label="${options.ariaLabel.replace(/"/g, '&quot;')}"`
+    ? ` role="img" aria-label="${escapeQrAttr(options.ariaLabel)}"`
     : ' aria-hidden="true"';
 
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${viewSize} ${viewSize}" shape-rendering="crispEdges"${labelAttr}><rect width="${viewSize}" height="${viewSize}" fill="${bg}"/><path d="${pathParts.join('')}" fill="${fg}"/></svg>`;
@@ -467,7 +475,7 @@ export function drawQrCanvas(
 ): void {
   const fg = options.fg ?? '#111827';
   const bg = options.bg ?? '#ffffff';
-  const quiet = Math.max(0, options.quietZone ?? 2);
+  const quiet = Math.max(0, options.quietZone ?? 4);
   const qr = generateQrMatrix(text, options.ecLevel ?? 'M');
   const totalModules = qr.size + quiet * 2;
   const cell = sizePx / totalModules;
@@ -476,14 +484,22 @@ export function drawQrCanvas(
   ctx.fillStyle = bg;
   ctx.fillRect(x, y, sizePx, sizePx);
   ctx.fillStyle = fg;
+  // Draw contiguous horizontal runs with exact edge-to-edge coordinates to avoid overlap seams
   for (let r = 0; r < qr.size; r++) {
-    for (let c = 0; c < qr.size; c++) {
-      if (!qr.modules[r][c]) continue;
-      const rx = Math.floor(x + (c + quiet) * cell);
-      const ry = Math.floor(y + (r + quiet) * cell);
-      const rw = Math.ceil(x + (c + quiet + 1) * cell) - rx;
-      const rh = Math.ceil(y + (r + quiet + 1) * cell) - ry;
-      ctx.fillRect(rx, ry, rw, rh);
+    const ry0 = Math.round(y + (r + quiet) * cell);
+    const ry1 = Math.round(y + (r + quiet + 1) * cell);
+    const rh = Math.max(1, ry1 - ry0);
+    let c = 0;
+    while (c < qr.size) {
+      if (!qr.modules[r][c]) {
+        c++;
+        continue;
+      }
+      const start = c;
+      while (c < qr.size && qr.modules[r][c]) c++;
+      const rx0 = Math.round(x + (start + quiet) * cell);
+      const rx1 = Math.round(x + (c + quiet) * cell);
+      ctx.fillRect(rx0, ry0, Math.max(1, rx1 - rx0), rh);
     }
   }
   ctx.restore();

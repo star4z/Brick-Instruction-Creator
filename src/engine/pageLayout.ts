@@ -1804,9 +1804,14 @@ export function packSmartAutoPage(
 
   for (let k = 2; k <= eligibleSteps.length; k++) {
     const candidate = findBestSmartAutoGridForSteps(eligibleSteps.slice(0, k), ctx, spec);
-    if (!candidate.fits) break;
-    bestCount = k;
-    bestRes = candidate;
+    if (candidate.fits) {
+      bestCount = k;
+      bestRes = candidate;
+    } else if (k !== 3 || eligibleSteps.length < 4) {
+      // k = 3 (3x1 or 1x3 strip) can fail readability while k = 4 (2x2 grid) fits cleanly;
+      // for all other k, stop searching once layout no longer fits.
+      break;
+    }
   }
 
   // Keep a minifigure Pose + Place pair together rather than stranding Pose as the final slot

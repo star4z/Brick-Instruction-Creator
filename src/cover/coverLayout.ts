@@ -157,7 +157,7 @@ export function normalizeBackMeta(raw: unknown): BackCoverMeta {
     // Program credit on the back cover is fixed and non-editable.
     subtitle: BACK_COVER_CREDIT,
     az: typeof r.az === 'number' && Number.isFinite(r.az) ? ((r.az % 360) + 360) % 360 : def.az,
-    el: typeof r.el === 'number' && Number.isFinite(r.el) ? r.el : def.el,
+    el: typeof r.el === 'number' && Number.isFinite(r.el) ? clampCoverElevation(r.el) : def.el,
     bgSrc: typeof r.bgSrc === 'string' && r.bgSrc.length > 0 ? r.bgSrc : null,
   };
 }
@@ -343,19 +343,27 @@ export interface TightOrthoBounds {
 export function computeCameraBasis(azDeg: number, elDeg: number): CameraBasis {
   const az = (azDeg * Math.PI) / 180;
   const el = (elDeg * Math.PI) / 180;
+  const cosEl = Math.cos(el);
   // Direction from target to eye
-  const fx = Math.sin(az) * Math.cos(el);
+  const fx = Math.sin(az) * cosEl;
   const fy = Math.sin(el);
-  const fz = Math.cos(az) * Math.cos(el);
+  const fz = Math.cos(az) * cosEl;
   // right = normalize(worldUp × forward) where worldUp flips to (0, -1, 0) for underside views
-  // so the model turns upside down on the table instead of placing the camera underneath.
+  // so the model turns upside down on the table instead of placing the camera underneath,
+  // falling back cleanly to azimuth-aligned horizontal right at ±90° poles.
   const upSign = elDeg < 0 ? -1 : 1;
   let rx = upSign * fz;
   let ry = 0;
   let rz = -upSign * fx;
-  const rLen = Math.hypot(rx, ry, rz) || 1;
-  rx /= rLen;
-  rz /= rLen;
+  const rLen = Math.hypot(rx, ry, rz);
+  if (rLen < 1e-5) {
+    rx = upSign * Math.cos(az);
+    ry = 0;
+    rz = -upSign * Math.sin(az);
+  } else {
+    rx /= rLen;
+    rz /= rLen;
+  }
   // up = forward × right
   const ux = fy * rz - fz * ry;
   const uy = fz * rx - fx * rz;

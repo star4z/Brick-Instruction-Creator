@@ -567,12 +567,13 @@ export function assessModelSubdivisionNeed(parts: SubdivisionPartInput[]): Subdi
     reasons.push(`${partCount.toLocaleString()} parts`);
   }
   const longestStuds = Math.round(longestSpanLdu / 20);
-  if (longestSpanLdu >= 560) {
+  const addedLongReason = longestSpanLdu >= 560;
+  if (addedLongReason) {
     reasons.push(`${longestStuds} studs long`);
   }
   if (aspectRatio >= 3.0 && longestSpanLdu >= 360) {
     reasons.push(
-      longestSpanLdu >= 560
+      addedLongReason
         ? `elongated ${aspectRatio.toFixed(1)}:1 shape`
         : `elongated ${aspectRatio.toFixed(1)}:1 shape (${longestStuds} studs)`,
     );
@@ -3820,9 +3821,10 @@ export function mergeProposedSections(
     return proposal;
   }
 
+  const mergedId = secA.id.endsWith('_m') ? secA.id : `${secA.id}_m`;
   const merged: ProposedSection = {
     ...secA,
-    id: `${secA.id}_m`,
+    id: mergedId,
     name: `${secA.name} + ${secB.name}`,
     partIndices: mergedIndices,
     partIds: mergedIndices.map((i) => allParts[i].id),
@@ -3838,7 +3840,13 @@ export function mergeProposedSections(
     ],
   };
 
-  const nextSections = proposal.sections.filter((_, i) => i !== lo && i !== hi);
+  const nextSections = proposal.sections
+    .filter((_, i) => i !== lo && i !== hi)
+    .map((s) =>
+      s.attachToSectionId === secA.id || s.attachToSectionId === secB.id
+        ? { ...s, attachToSectionId: mergedId }
+        : s,
+    );
   nextSections.splice(lo, 0, merged);
   return {
     ...proposal,

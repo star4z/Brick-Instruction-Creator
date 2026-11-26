@@ -238,6 +238,8 @@ export interface CoverHeroRenderSizeInput {
   mode?: 'screen' | 'pdf';
   /** WebGL hardware max viewport/renderbuffer/texture edge. */
   gpuMaxDim?: number;
+  /** Optional screen pixel area ceiling (e.g. DeviceGpuBudget.screenMaxPixels on iOS/mobile). */
+  screenMaxPixels?: number;
 }
 
 /**
@@ -252,6 +254,10 @@ export function computeCoverHeroRenderSize(input: CoverHeroRenderSizeInput): Ren
   const mode = input.mode ?? 'screen';
   const gpuLimit = Math.max(1024, Math.floor(input.gpuMaxDim || DEFAULT_GPU_MAX_DIM));
   const maxEdge = Math.min(COVER_HERO_MAX_EDGE, gpuLimit);
+  const maxPixels =
+    mode === 'screen' && Number.isFinite(input.screenMaxPixels) && (input.screenMaxPixels as number) > 0
+      ? Math.min(COVER_HERO_MAX_PIXELS, Math.floor(input.screenMaxPixels as number))
+      : COVER_HERO_MAX_PIXELS;
 
   const rawW = Math.max(120, Number.isFinite(input.heroWidth) ? input.heroWidth : 800);
   const rawH = Math.max(120, Number.isFinite(input.heroHeight) ? input.heroHeight : 600);
@@ -278,7 +284,7 @@ export function computeCoverHeroRenderSize(input: CoverHeroRenderSizeInput): Ren
 
   const targetW = aspect >= 1 ? desiredLong : Math.round(desiredLong * aspect);
   const targetH = aspect >= 1 ? Math.round(desiredLong / aspect) : desiredLong;
-  return clampRenderDimensions(targetW, targetH, maxEdge, COVER_HERO_MAX_PIXELS, 480);
+  return clampRenderDimensions(targetW, targetH, maxEdge, maxPixels, 480);
 }
 
 /**

@@ -16,6 +16,8 @@ export type LibraryCategory =
 /**
  * `official` / `unofficial` = listed in the bundled Online Parts Catalog (geometry downloaded on demand).
  */
+const NUMERIC_ID_COLLATOR = new Intl.Collator(undefined, { numeric: true });
+
 export type LibraryPartSource = 'embedded' | 'saved' | 'builtin' | 'official' | 'unofficial';
 
 export type LibraryScopeFilter =
@@ -657,10 +659,7 @@ export function filterLibraryItems(
 
     let score = 0;
     if (queryTokens.length > 0) {
-      if (item.searchText === undefined) {
-        item.searchText = normalizeLibrarySearchText(`${item.id} ${item.name} ${item.category}`);
-      }
-      const haystack = item.searchText;
+      const haystack = item.searchText ?? normalizeLibrarySearchText(`${item.id} ${item.name} ${item.category}`);
       let allMatch = true;
       for (const tok of queryTokens) {
         if (!haystack.includes(tok)) {
@@ -672,7 +671,7 @@ export function filterLibraryItems(
 
       if (item.id === rawQueryLower) score += 1000;
       else if (item.id.startsWith(rawQueryLower)) score += 500;
-      else if (normalizeLibrarySearchText(item.name).startsWith(normQuery)) score += 300;
+      else if (haystack.includes(` ${normQuery}`) || normalizeLibrarySearchText(item.name).startsWith(normQuery)) score += 300;
       else score += 100;
     }
 
@@ -689,7 +688,7 @@ export function filterLibraryItems(
 
   scored.sort((a, b) => {
     if (b.score !== a.score) return b.score - a.score;
-    return a.item.id.localeCompare(b.item.id, undefined, { numeric: true });
+    return NUMERIC_ID_COLLATOR.compare(a.item.id, b.item.id);
   });
 
   return scored.map((entry) => entry.item);

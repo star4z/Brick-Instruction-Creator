@@ -161,7 +161,7 @@ class EmbeddedTextureStore {
     for (let i = 0; i < lines.length; i++) {
       const l = lines[i];
       if (l.length < 30 || l[0] !== '0') continue;
-      if (!l.includes('PE_TEX_INFO') && !l.includes('pe_tex_info')) continue;
+      if (!/pe_tex_info/i.test(l)) continue;
       const b64 = extractBase64FromPeTexInfoLine(l);
       if (b64) {
         const key = this.registerBase64Texture(b64, { source });
@@ -185,22 +185,23 @@ class EmbeddedTextureStore {
     const p = new Promise<void>((resolve) => {
       const img = new Image();
       let settled = false;
-      const finish = (ok: boolean) => {
+      const finish = (ok: boolean, permanentFailure: boolean) => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
         if (ok && img.naturalWidth > 0 && img.naturalHeight > 0) {
           rec.image = img;
           if (onReady) onReady();
-        } else {
+        } else if (permanentFailure) {
           rec.failed = true;
         }
         rec.decoding = null;
         resolve();
       };
-      const timer = setTimeout(() => finish(false), 6000);
-      img.onload = () => finish(true);
-      img.onerror = () => finish(false);
+      // Timeout leaves rec.failed = false so a later render can retry once main-thread load clears
+      const timer = setTimeout(() => finish(false, false), 6000);
+      img.onload = () => finish(true, false);
+      img.onerror = () => finish(false, true);
       img.src = `data:${rec.mimeType};base64,${rec.base64Png}`;
     });
 

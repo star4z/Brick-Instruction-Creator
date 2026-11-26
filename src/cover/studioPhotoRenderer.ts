@@ -891,16 +891,19 @@ void main() {
   vec2 s2 = p2.xy / max(0.0001, abs(p2.w));
   vec2 sc1 = c1.xy / max(0.0001, abs(c1.w));
   vec2 sc2 = c2.xy / max(0.0001, abs(c2.w));
-  vec2 d = s2 - s1;
-  float cr1 = d.x * (sc1.y - s1.y) - d.y * (sc1.x - s1.x);
-  float cr2 = d.x * (sc2.y - s1.y) - d.y * (sc2.x - s1.x);
+  bool swapOrder = (s1.x > s2.x) || (s1.x == s2.x && s1.y > s2.y);
+  vec2 pa = swapOrder ? s2 : s1;
+  vec2 pb = swapOrder ? s1 : s2;
+  vec2 d = pb - pa;
+  float cr1 = d.x * (sc1.y - pa.y) - d.y * (sc1.x - pa.x);
+  float cr2 = d.x * (sc2.y - pa.y) - d.y * (sc2.x - pa.x);
   if ((cr1 > 0.0 && cr2 > 0.0) || (cr1 < 0.0 && cr2 < 0.0)) {
     p1.xy += uLineOffset * p1.w;
     p1.z -= 0.0009 * p1.w;
     gl_Position = p1;
     vCol = aCol;
   } else {
-    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+    gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
     vCol = vec4(0.0);
   }
 }
@@ -1067,7 +1070,12 @@ function createFboTarget(gl: WebGLRenderingContext, w: number, h: number, linear
   const tex = gl.createTexture();
   const fbo = gl.createFramebuffer();
   const depthRb = gl.createRenderbuffer();
-  if (!tex || !fbo || !depthRb) return null;
+  if (!tex || !fbo || !depthRb) {
+    if (tex) gl.deleteTexture(tex);
+    if (depthRb) gl.deleteRenderbuffer(depthRb);
+    if (fbo) gl.deleteFramebuffer(fbo);
+    return null;
+  }
 
   gl.bindTexture(gl.TEXTURE_2D, tex);
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
@@ -1258,6 +1266,15 @@ export class StudioPhotoRenderer {
     this.fillFbo = createFboTarget(gl, auxShadowDim, auxShadowDim, false);
     this.overFbo = createFboTarget(gl, auxShadowDim, auxShadowDim, false);
 
+    this.canvas.addEventListener('webglcontextlost', (e) => {
+      e.preventDefault();
+      this.ready = false;
+    }, false);
+    this.canvas.addEventListener('webglcontextrestored', () => {
+      this.uploadedMesh = null;
+      this.glTextures.clear();
+    }, false);
+
     this.ready = Boolean(this.keyFbo && this.fillFbo && this.overFbo);
   }
 
@@ -1265,12 +1282,22 @@ export class StudioPhotoRenderer {
     return this.maxDim;
   }
 
+  clearDecalTextures(): void {
+    const gl = this.gl;
+    if (gl && !gl.isContextLost()) {
+      for (const tex of this.glTextures.values()) {
+        gl.deleteTexture(tex);
+      }
+    }
+    this.glTextures.clear();
+  }
+
   private getOrCreateDecalTexture(
     texKey: string,
     getTextureImage?: (key: string) => TexImageSource | null,
   ): WebGLTexture | null {
     const gl = this.gl;
-    if (!gl) return null;
+    if (!gl || gl.isContextLost()) return null;
     const cached = this.glTextures.get(texKey);
     if (cached) return cached;
     const img = getTextureImage?.(texKey) ?? null;
@@ -1281,19 +1308,27 @@ export class StudioPhotoRenderer {
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+    const w = (img as HTMLImageElement).naturalWidth || (img as HTMLCanvasElement).width || 0;
+    const h = (img as HTMLImageElement).naturalHeight || (img as HTMLCanvasElement).height || 0;
+    const isPot = w > 0 && h > 0 && (w & (w - 1)) === 0 && (h & (h - 1)) === 0;
+    if (isPot) {
+      gl.generateMipmap(gl.TEXTURE_2D);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    } else {
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    }
     if (this.anisoExt && this.maxAniso > 1) {
       gl.texParameterf(gl.TEXTURE_2D, this.anisoExt.TEXTURE_MAX_ANISOTROPY_EXT, this.maxAniso);
     }
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 0);
     this.glTextures.set(texKey, tex);
     return tex;
   }
 
   isAvailable(): boolean {
-    return this.ready && Boolean(this.gl);
+    return this.ready && Boolean(this.gl) && !this.gl!.isContextLost();
   }
 
   private ensureScreenFbos(w: number, h: number): boolean {

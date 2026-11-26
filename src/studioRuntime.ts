@@ -447,7 +447,7 @@ import {
 } from './cover/coverLayout';
 import { buildQrSvg, drawQrCanvas } from './cover/qrCode';
 import { StudioPhotoRenderer } from './cover/studioPhotoRenderer';
-import { buildPdfBinary, canvasRectToPdfLink } from './export/pdfBinary';
+import { buildPdfBinary, buildPdfBinaryChunks, canvasRectToPdfLink } from './export/pdfBinary';
 import { buildBrickLinkWantedXml, buildRebrickableCsv } from './export/bomExporters';
 import {
   computeCanonicalPageMetrics,
@@ -1224,7 +1224,21 @@ function xformNorm(n, m, hingeRad = 0) {
     const c = Math.cos(hingeRad), s = Math.sin(hingeRad);
     const ny = y*c - z*s, nz = y*s + z*c; y = ny; z = nz;
   }
-  const rx = m[0]*x+m[1]*y+m[2]*z, ry = m[3]*x+m[4]*y+m[5]*z, rz = m[6]*x+m[7]*y+m[8]*z;
+  // Inverse-transpose (cofactor) of 3x3 matrix m handles reflections & non-uniform scaling accurately
+  const c00 = m[4]*m[8] - m[5]*m[7];
+  const c01 = -(m[3]*m[8] - m[5]*m[6]);
+  const c02 = m[3]*m[7] - m[4]*m[6];
+  const c10 = -(m[1]*m[8] - m[2]*m[7]);
+  const c11 = m[0]*m[8] - m[2]*m[6];
+  const c12 = -(m[0]*m[7] - m[1]*m[6]);
+  const c20 = m[1]*m[5] - m[2]*m[4];
+  const c21 = -(m[0]*m[5] - m[2]*m[3]);
+  const c22 = m[0]*m[4] - m[1]*m[3];
+  const det = m[0]*c00 + m[1]*c01 + m[2]*c02;
+  const sign = det < 0 ? -1 : 1;
+  const rx = (c00*x + c01*y + c02*z) * sign;
+  const ry = (c10*x + c11*y + c12*z) * sign;
+  const rz = (c20*x + c21*y + c22*z) * sign;
   const l = Math.hypot(rx, ry, rz) || 1;
   return [rx/l, ry/l, rz/l];
 }
@@ -2894,12 +2908,18 @@ class WebGLBrickEngine {
     const gl = canvas.getContext('webgl', { antialias: true, alpha: true, preserveDrawingBuffer: true, powerPreference: 'default' });
     this.gl = gl;
     if (!gl) return;
+    canvas.addEventListener('webglcontextlost', (e) => {
+      e.preventDefault();
+      this.uploadedMesh = null;
+      this.glTextures.clear();
+    }, false);
     const safeCap = Math.max(1024, Math.min(4096, Math.floor(maxDimCap || 4096)));
     try {
       const vp = gl.getParameter(gl.MAX_VIEWPORT_DIMS);
       const rb = gl.getParameter(gl.MAX_RENDERBUFFER_SIZE) || 2048;
+      const texMax = gl.getParameter(gl.MAX_TEXTURE_SIZE) || 2048;
       const vpMin = vp && vp.length >= 2 ? Math.min(vp[0], vp[1]) : 2048;
-      this.maxDim = Math.max(1024, Math.min(vpMin, rb, safeCap));
+      this.maxDim = Math.max(1024, Math.min(vpMin, rb, texMax, safeCap));
       this.anisoExt = gl.getExtension('EXT_texture_filter_anisotropic')
         || gl.getExtension('WEBKIT_EXT_TEXTURE_FILTER_ANISOTROPIC')
         || gl.getExtension('MOZ_EXT_TEXTURE_FILTER_ANISOTROPIC');
@@ -2907,6 +2927,7 @@ class WebGLBrickEngine {
         this.maxAniso = Math.min(8, gl.getParameter(this.anisoExt.MAX_TEXTURE_MAX_ANISOTROPY_EXT) || 1);
       }
     } catch (_) {}
+    const fragPrec = `#ifdef GL_FRAGMENT_PRECISION_HIGH\nprecision highp float;\n#else\nprecision mediump float;\n#endif\n`;
     const vsTri = `attribute vec3 aPos; attribute vec3 aNorm; attribute vec4 aCol; uniform mat4 uMVP; varying vec3 vPos; varying vec3 vNorm; varying vec4 vCol; void main(){ gl_Position = uMVP * vec4(aPos,1.0); vPos = aPos; vNorm = aNorm; vCol = aCol; }`;
     const absPbrGlsl = `
       float ggxDist(float NdotH, float rough) {
@@ -2939,7 +2960,8 @@ class WebGLBrickEngine {
         return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
       }
       vec4 shadeAbsPlastic(vec3 baseRgb, float alpha, vec3 worldPos, vec3 rawNorm, float heroMode, vec3 eyePos, vec3 keyDirIn, vec3 fillDirIn, vec3 rimDirIn, vec3 camUpIn) {
-        vec3 N = normalize(rawNorm);
+        float nLen = length(rawNorm);
+        vec3 N = nLen > 1e-4 ? (rawNorm / nLen) : vec3(0.0, 1.0, 0.0);
         if (!gl_FrontFacing) N = -N;
         vec3 V = normalize(eyePos - worldPos);
         float NdotV = max(dot(N, V), 0.002);
@@ -3009,7 +3031,7 @@ class WebGLBrickEngine {
         return vec4(srgb, outAlpha);
       }
     `;
-    const fsTri = `precision mediump float;
+    const fsTri = `${fragPrec}
       uniform float uHeroMode;
       uniform float uUnlit;
       uniform vec3 uEyePos;
@@ -3029,7 +3051,7 @@ class WebGLBrickEngine {
         gl_FragColor = shadeAbsPlastic(vCol.rgb, vCol.a, vPos, vNorm, uHeroMode, uEyePos, uKeyDir, uFillDir, uRimDir, uCamUp);
       }`;
     const vsTex = `attribute vec3 aPos; attribute vec3 aNorm; attribute vec2 aUv; attribute vec4 aCol; uniform mat4 uMVP; varying vec3 vPos; varying vec3 vNorm; varying vec2 vUv; varying vec4 vCol; void main(){ gl_Position = uMVP * vec4(aPos,1.0); vPos = aPos; vNorm = aNorm; vUv = aUv; vCol = aCol; }`;
-    const fsTex = `precision mediump float;
+    const fsTex = `${fragPrec}
       uniform float uHeroMode;
       uniform float uUnlit;
       uniform vec3 uEyePos;
@@ -3059,14 +3081,52 @@ class WebGLBrickEngine {
         gl_FragColor = shadeAbsPlastic(baseRgb, vCol.a, vPos, vNorm, uHeroMode, uEyePos, uKeyDir, uFillDir, uRimDir, uCamUp);
       }`;
     const vsLine = `attribute vec3 aPos; attribute vec4 aCol; uniform mat4 uMVP; uniform vec2 uLineOffset; varying vec4 vCol; void main(){ gl_Position = uMVP * vec4(aPos,1.0); gl_Position.xy += uLineOffset * gl_Position.w; gl_Position.z -= 0.0009 * gl_Position.w; vCol = aCol; }`;
-    const vsCondLine = `attribute vec3 aPos; attribute vec3 aOther; attribute vec3 aCtrl1; attribute vec3 aCtrl2; attribute vec4 aCol; uniform mat4 uMVP; uniform vec2 uLineOffset; varying vec4 vCol; void main(){ vec4 p1 = uMVP * vec4(aPos, 1.0); vec4 p2 = uMVP * vec4(aOther, 1.0); vec4 c1 = uMVP * vec4(aCtrl1, 1.0); vec4 c2 = uMVP * vec4(aCtrl2, 1.0); vec2 s1 = p1.xy / max(0.0001, abs(p1.w)); vec2 s2 = p2.xy / max(0.0001, abs(p2.w)); vec2 sc1 = c1.xy / max(0.0001, abs(c1.w)); vec2 sc2 = c2.xy / max(0.0001, abs(c2.w)); vec2 d = s2 - s1; float cr1 = d.x * (sc1.y - s1.y) - d.y * (sc1.x - s1.x); float cr2 = d.x * (sc2.y - s1.y) - d.y * (sc2.x - s1.x); if ((cr1 > 0.0 && cr2 > 0.0) || (cr1 < 0.0 && cr2 < 0.0)) { p1.xy += uLineOffset * p1.w; p1.z -= 0.0009 * p1.w; gl_Position = p1; vCol = aCol; } else { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); vCol = vec4(0.0); } }`;
+    const vsCondLine = `attribute vec3 aPos; attribute vec3 aOther; attribute vec3 aCtrl1; attribute vec3 aCtrl2; attribute vec4 aCol; uniform mat4 uMVP; uniform vec2 uLineOffset; varying vec4 vCol; void main(){ vec4 p1 = uMVP * vec4(aPos, 1.0); vec4 p2 = uMVP * vec4(aOther, 1.0); vec4 c1 = uMVP * vec4(aCtrl1, 1.0); vec4 c2 = uMVP * vec4(aCtrl2, 1.0); vec2 s1 = p1.xy / max(0.0001, abs(p1.w)); vec2 s2 = p2.xy / max(0.0001, abs(p2.w)); vec2 sc1 = c1.xy / max(0.0001, abs(c1.w)); vec2 sc2 = c2.xy / max(0.0001, abs(c2.w)); bool swapOrder = (s1.x > s2.x) || (s1.x == s2.x && s1.y > s2.y); vec2 pa = swapOrder ? s2 : s1; vec2 pb = swapOrder ? s1 : s2; vec2 d = pb - pa; float cr1 = d.x * (sc1.y - pa.y) - d.y * (sc1.x - pa.x); float cr2 = d.x * (sc2.y - pa.y) - d.y * (sc2.x - pa.x); if ((cr1 > 0.0 && cr2 > 0.0) || (cr1 < 0.0 && cr2 < 0.0)) { p1.xy += uLineOffset * p1.w; p1.z -= 0.0009 * p1.w; gl_Position = p1; vCol = aCol; } else { gl_Position = vec4(0.0, 0.0, 2.0, 1.0); vCol = vec4(0.0); } }`;
     const fsLine = `precision mediump float; uniform float uLineAlpha; varying vec4 vCol; void main(){ gl_FragColor = vec4(vCol.rgb, vCol.a * uLineAlpha); }`;
-    const cmp = (t, s) => { const sh = gl.createShader(t); gl.shaderSource(sh, s); gl.compileShader(sh); return sh; };
-    const lnk = (v, f) => { const p = gl.createProgram(); gl.attachShader(p, cmp(gl.VERTEX_SHADER, v)); gl.attachShader(p, cmp(gl.FRAGMENT_SHADER, f)); gl.linkProgram(p); return p; };
+    const cmp = (t, s) => {
+      const sh = gl.createShader(t);
+      if (!sh) return null;
+      gl.shaderSource(sh, s);
+      gl.compileShader(sh);
+      if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+        gl.deleteShader(sh);
+        return null;
+      }
+      return sh;
+    };
+    const lnk = (v, f) => {
+      const vs = cmp(gl.VERTEX_SHADER, v);
+      const fs = cmp(gl.FRAGMENT_SHADER, f);
+      if (!vs || !fs) {
+        if (vs) gl.deleteShader(vs);
+        if (fs) gl.deleteShader(fs);
+        return null;
+      }
+      const p = gl.createProgram();
+      if (!p) {
+        gl.deleteShader(vs);
+        gl.deleteShader(fs);
+        return null;
+      }
+      gl.attachShader(p, vs);
+      gl.attachShader(p, fs);
+      gl.linkProgram(p);
+      gl.deleteShader(vs);
+      gl.deleteShader(fs);
+      if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+        gl.deleteProgram(p);
+        return null;
+      }
+      return p;
+    };
     this.triProg = lnk(vsTri, fsTri);
     this.texProg = lnk(vsTex, fsTex);
     this.lineProg = lnk(vsLine, fsLine);
     this.condProg = lnk(vsCondLine, fsLine);
+    if (!this.triProg || !this.texProg || !this.lineProg || !this.condProg) {
+      this.gl = null;
+      return;
+    }
     this.loc = {
       tMVP: gl.getUniformLocation(this.triProg, 'uMVP'),
       tHeroMode: gl.getUniformLocation(this.triProg, 'uHeroMode'),
@@ -3282,7 +3342,7 @@ class WebGLBrickEngine {
   draw(mesh, w, h, azDeg, elDeg, zoom = 1, fixedHalfH = 0, drawOpts = null) {
     const gl = this.gl;
     const hasTexDraws = Boolean(mesh.texDraws && mesh.texDraws.length > 0);
-    if (!gl || (mesh.triPos.length === 0 && !hasTexDraws)) return null;
+    if (!gl || gl.isContextLost() || (mesh.triPos.length === 0 && !hasTexDraws)) return null;
     const clamped = clampRenderDimensions(w, h, this.maxDim || 2048, (this.maxDim || 2048) * (this.maxDim || 2048), 32);
     const dw = clamped.width;
     const dh = clamped.height;
@@ -3292,7 +3352,7 @@ class WebGLBrickEngine {
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL);
-    gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.enable(gl.BLEND); gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     gl.enable(gl.POLYGON_OFFSET_FILL); gl.polygonOffset(1.0, 1.0);
 
     const tightFit = Boolean(drawOpts?.tightFit);
@@ -3909,8 +3969,22 @@ function getCoverHeroGpuMaxDim() {
   return snapshotEngine?.maxDim || 4096;
 }
 
+function computeCoverPartsSig(parts) {
+  let h = 2166136261;
+  for (let i = 0; i < parts.length; i++) {
+    const p = parts[i];
+    const s = `${p.p}:${p.c}:${Math.round((p.x || 0) * 2)},${Math.round((p.y || 0) * 2)},${Math.round((p.z || 0) * 2)}`;
+    for (let j = 0; j < s.length; j++) {
+      h ^= s.charCodeAt(j);
+      h = Math.imul(h, 16777619);
+    }
+  }
+  return `${parts.length}_${(h >>> 0).toString(36)}`;
+}
+
 function getCoverHeroMesh(parts, theme) {
-  const meshCacheKey = `__hero_mesh_${parts.length}`;
+  const partsSig = computeCoverPartsSig(parts);
+  const meshCacheKey = `__hero_mesh_${partsSig}`;
   let mesh = coverHeroMeshCache.get(meshCacheKey);
   if (!mesh) {
     mesh = buildMeshBuffers([], parts, {
@@ -3922,7 +3996,7 @@ function getCoverHeroMesh(parts, theme) {
     });
     coverHeroMeshCache.set(meshCacheKey, mesh);
   }
-  return { mesh, meshCacheKey };
+  return { mesh, meshCacheKey, partsSig };
 }
 
 function renderCoverHeroSnapshot(parts, az, el, zoom, targetW, targetH, theme) {
@@ -3932,7 +4006,8 @@ function renderCoverHeroSnapshot(parts, az, el, zoom, targetW, targetH, theme) {
   const rw = Math.max(480, Math.min(maxDim, Math.round(targetW)));
   const rh = Math.max(320, Math.min(maxDim, Math.round(targetH)));
   const darkTheme = isDarkHexColor(toHexColor(theme?.bgColor || '#ffffff', '#ffffff'));
-  const cacheKey = `${parts.length}|${Math.round(az * 10)}|${Math.round(el * 10)}|${safeZoom}|${rw}x${rh}|${darkTheme ? 'd' : 'l'}`;
+  const partsSig = computeCoverPartsSig(parts);
+  const cacheKey = `${partsSig}|${Math.round(az * 10)}|${Math.round(el * 10)}|${safeZoom}|${rw}x${rh}|${darkTheme ? 'd' : 'l'}`;
   const cached = coverHeroCache.get(cacheKey);
   if (isRenderEntryUsable(cached)) return cached;
 
@@ -16207,17 +16282,40 @@ function scrollOverviewListTo(edge) {
 // 11. INDEXEDDB PERSISTENCE, BRICKS LIBRARY IMPORTER & ERRORS/DIAGNOSTICS
 // =========================================================================
 const DB_NAME = 'BrickInstructionCreatorDB', DB_STORE = 'session', LIB_STORE = 'partsLib';
+let cachedSessionDbPromise = null;
+let warnedIdbQuota = false;
 function openSessionDB() {
-  return new Promise((resolve, reject) => {
-    if (!('indexedDB' in window)) return reject(new Error('No IndexedDB'));
+  if (cachedSessionDbPromise) return cachedSessionDbPromise;
+  cachedSessionDbPromise = new Promise((resolve, reject) => {
+    if (!('indexedDB' in window)) {
+      cachedSessionDbPromise = null;
+      return reject(new Error('No IndexedDB'));
+    }
     const req = indexedDB.open(DB_NAME, 2);
     req.onupgradeneeded = () => {
       if (!req.result.objectStoreNames.contains(DB_STORE)) req.result.createObjectStore(DB_STORE);
       if (!req.result.objectStoreNames.contains(LIB_STORE)) req.result.createObjectStore(LIB_STORE);
     };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
+    req.onsuccess = () => {
+      const db = req.result;
+      db.onversionchange = () => {
+        try { db.close(); } catch (_) {}
+        cachedSessionDbPromise = null;
+      };
+      db.onclose = () => {
+        cachedSessionDbPromise = null;
+      };
+      resolve(db);
+    };
+    req.onerror = () => {
+      cachedSessionDbPromise = null;
+      reject(req.error);
+    };
+    req.onblocked = () => {
+      cachedSessionDbPromise = null;
+    };
   });
+  return cachedSessionDbPromise;
 }
 async function dbPut(key, val, storeName = DB_STORE) {
   try {
@@ -16225,9 +16323,16 @@ async function dbPut(key, val, storeName = DB_STORE) {
     await new Promise((res, rej) => {
       const tx = db.transaction(storeName, 'readwrite');
       tx.objectStore(storeName).put(val, key);
-      tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error);
+      tx.oncomplete = () => res();
+      tx.onerror = () => rej(tx.error);
+      tx.onabort = () => rej(tx.error || new Error('IndexedDB transaction aborted'));
     });
-  } catch (_) {}
+  } catch (err) {
+    if (!warnedIdbQuota && err && (err.name === 'QuotaExceededError' || /quota/i.test(String(err.message || '')))) {
+      warnedIdbQuota = true;
+      if (typeof showToast === 'function') showToast('Browser storage full — autosave or library cache could not be saved.');
+    }
+  }
 }
 async function dbGet(key, storeName = DB_STORE) {
   try {
@@ -16957,6 +17062,7 @@ async function fetchPartsOnline(opts = {}) {
   }
   if (onProgress) onProgress({ phase: 'scan', fetched: 0, fetchedTex: 0, processed: 0, total: 0, pct: 0 });
 
+  const startingModelRef = state.model;
   const mirrors = getSelectedMirrorConfigs();
   const db = await openSessionDB().catch(() => null);
   let fetchedParts = 0;
@@ -17021,7 +17127,7 @@ async function fetchPartsOnline(opts = {}) {
     if (totalDatFetched > 0 || fetchedTex > 0) {
       invalidateLibraryRenderCaches();
       updateLibraryStatusUI();
-      if (!parsedOverride && state.model) {
+      if (!parsedOverride && state.model && (!startingModelRef || state.model === startingModelRef)) {
         if (totalDatFetched > 0 && state.model._parsed) {
           const nextPlan = refreshSubdivisionPlanForParsed(state.model._parsed, state.model._subdivisionPlan || null);
           state.model = buildManualFromParsed(state.model._parsed, state.model._mode || 'auto', nextPlan);
@@ -21133,48 +21239,77 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
 }
 
 let lastGeneratedPdfBlob = null, lastGeneratedPdfUrl = null, lastGeneratedPdfName = 'manual.pdf';
+let pdfExportInFlight = false;
 async function runPdfExport(pagesToExport) {
-  const [pageWpt, pageHpt] = getPdfPaperPts();
-  document.getElementById('expProgressWrap').classList.remove('hidden');
-  document.getElementById('expReadyWrap').classList.add('hidden');
-  const jpegPages = [];
-  for (let i = 0; i < pagesToExport.length; i++) {
-    const pct = Math.round(((i + 1) / pagesToExport.length) * 100);
-    document.getElementById('expProgressLabel').textContent = `Rendering page ${i + 1} of ${pagesToExport.length}…`;
-    document.getElementById('expProgressPct').textContent = pct + '%';
-    document.getElementById('expProgressBar').style.width = pct + '%';
-    await new Promise(r => setTimeout(r, 8));
-    const pg = pagesToExport[i];
-    const pgDims = computePdfPagePixelDimensions(pageWpt, pageHpt, pg.kind);
-    const renderedPg = await renderPageToJpegBytes(pg, pgDims.width, pgDims.height, pageWpt, pageHpt);
-    const bmTitle = pg.kind === 'cover'
-      ? 'Cover'
-      : pg.kind === 'complete'
-        ? 'Build Complete'
-        : pg.kind === 'bom'
-          ? `Parts List${pg.bomPageCount > 1 ? ` (${pg.bomPageIdx + 1}/${pg.bomPageCount})` : ''}`
-          : pg.kind === 'back'
-            ? 'Back Cover'
-            : (pg.label || `Page ${pg.num || i + 1}`);
-    jpegPages.push({ ...renderedPg, bookmarkTitle: bmTitle });
+  if (pdfExportInFlight) {
+    showToast('PDF export is already in progress.');
+    return;
   }
-  const pdfBytes = buildPdfBinary(jpegPages, pageWpt, pageHpt);
-  if (lastGeneratedPdfUrl) URL.revokeObjectURL(lastGeneratedPdfUrl);
-  lastGeneratedPdfBlob = new Blob([pdfBytes], { type: 'application/pdf' });
-  lastGeneratedPdfUrl = URL.createObjectURL(lastGeneratedPdfBlob);
-  lastGeneratedPdfName = `${state.model.title.replace(/[^a-z0-9_-]+/gi, '_')}_${pagesToExport.length === 1 ? 'page' + pagesToExport[0].num : 'manual'}.pdf`;
+  pdfExportInFlight = true;
+  const [pageWpt, pageHpt] = getPdfPaperPts();
+  const progWrap = document.getElementById('expProgressWrap');
+  const readyWrap = document.getElementById('expReadyWrap');
+  progWrap.classList.remove('hidden');
+  readyWrap.classList.add('hidden');
+  try {
+    const jpegPages = [];
+    let firstPreviewDataUrl = '';
+    const bookmarks = [];
+    const seenChapters = new Set();
+    for (let i = 0; i < pagesToExport.length; i++) {
+      const pct = Math.round(((i + 1) / Math.max(1, pagesToExport.length)) * 100);
+      document.getElementById('expProgressLabel').textContent = `Rendering page ${i + 1} of ${pagesToExport.length}…`;
+      document.getElementById('expProgressPct').textContent = pct + '%';
+      document.getElementById('expProgressBar').style.width = pct + '%';
+      await new Promise(r => setTimeout(r, 8));
+      const pg = pagesToExport[i];
+      if (pg.kind === 'cover') bookmarks.push({ title: 'Cover', pageIndex: i });
+      else if (pg.kind === 'bom' && !seenChapters.has('__bom__')) { seenChapters.add('__bom__'); bookmarks.push({ title: 'Parts List', pageIndex: i }); }
+      else if (pg.kind === 'complete') bookmarks.push({ title: 'Complete Model', pageIndex: i });
+      else if (pg.kind === 'steps' && pg.chapterName && !seenChapters.has(pg.chapterName)) {
+        seenChapters.add(pg.chapterName);
+        bookmarks.push({ title: pg.chapterName, pageIndex: i });
+      }
+      const pgDims = computePdfPagePixelDimensions(pageWpt, pageHpt, pg.kind);
+      const rendered = await renderPageToJpegBytes(pg, pgDims.width, pgDims.height, pageWpt, pageHpt);
+      if (i === 0 && rendered.dataUrl) firstPreviewDataUrl = rendered.dataUrl;
+      // Drop base64 dataUrl on pages after page 0 to cut peak RAM in half
+      jpegPages.push({
+        bytes: rendered.bytes,
+        pxW: rendered.pxW,
+        pxH: rendered.pxH,
+        links: rendered.links,
+        searchableText: rendered.searchableText,
+      });
+    }
+    const pdfChunks = buildPdfBinaryChunks(jpegPages, pageWpt, pageHpt, {
+      title: state.coverMeta?.title || state.model?.title || 'Brick Instruction Manual',
+      author: state.coverMeta?.creatorName || undefined,
+      creator: 'Brick Instruction Works',
+      bookmarks,
+    });
+    if (lastGeneratedPdfUrl) URL.revokeObjectURL(lastGeneratedPdfUrl);
+    lastGeneratedPdfBlob = new Blob(pdfChunks, { type: 'application/pdf' });
+    lastGeneratedPdfUrl = URL.createObjectURL(lastGeneratedPdfBlob);
+    lastGeneratedPdfName = `${state.model.title.replace(/[^a-z0-9_-]+/gi, '_')}_${pagesToExport.length === 1 ? 'page' + pagesToExport[0].num : 'manual'}.pdf`;
 
-  document.getElementById('expProgressWrap').classList.add('hidden');
-  document.getElementById('expReadyWrap').classList.remove('hidden');
-  document.getElementById('expReadyNote').textContent = `PDF Ready (${(pdfBytes.length / 1024).toFixed(0)} KB · ${pagesToExport.length} page${pagesToExport.length > 1 ? 's' : ''})`;
-  const prevImg = document.getElementById('expPreviewImg');
-  if (prevImg && jpegPages[0]?.dataUrl) prevImg.src = jpegPages[0].dataUrl;
-  const dlLink = document.getElementById('linkDownloadPdf');
-  dlLink.href = lastGeneratedPdfUrl; dlLink.download = lastGeneratedPdfName;
+    progWrap.classList.add('hidden');
+    readyWrap.classList.remove('hidden');
+    document.getElementById('expReadyNote').textContent = `PDF Ready (${(lastGeneratedPdfBlob.size / 1024).toFixed(0)} KB · ${pagesToExport.length} page${pagesToExport.length > 1 ? 's' : ''})`;
+    const prevImg = document.getElementById('expPreviewImg');
+    if (prevImg && firstPreviewDataUrl) prevImg.src = firstPreviewDataUrl;
+    const dlLink = document.getElementById('linkDownloadPdf');
+    dlLink.href = lastGeneratedPdfUrl; dlLink.download = lastGeneratedPdfName;
 
-  const shareBtn = document.getElementById('btnSharePdf');
-  const canShareFiles = Boolean(navigator.share && navigator.canShare && navigator.canShare({ files: [new File([lastGeneratedPdfBlob], lastGeneratedPdfName, { type: 'application/pdf' })] }));
-  shareBtn.classList.toggle('hidden', !canShareFiles);
+    const shareBtn = document.getElementById('btnSharePdf');
+    const canShareFiles = Boolean(navigator.share && navigator.canShare && navigator.canShare({ files: [new File([lastGeneratedPdfBlob], lastGeneratedPdfName, { type: 'application/pdf' })] }));
+    shareBtn.classList.toggle('hidden', !canShareFiles);
+  } catch (err) {
+    progWrap.classList.add('hidden');
+    showToast(`PDF export failed: ${err?.message || 'unexpected error'}`);
+  } finally {
+    pdfExportInFlight = false;
+  }
 }
 
 // =========================================================================
@@ -23861,7 +23996,10 @@ async function runInteractiveHtmlExport() {
           subtitle: divMeta.note || '',
         });
       } else if (pg.kind === 'steps' && pg.slots?.length > 0) {
-        const stepScenes = pg.slots.map(({ ch, step }) => {
+        const stepScenes = [];
+        for (let si = 0; si < pg.slots.length; si++) {
+          if (si > 0 && si % 2 === 0) await new Promise((r) => setTimeout(r, 0));
+          const { ch, step } = pg.slots[si];
           const prev = getPreviousPartsForStep(state.model, ch, step);
           const cam = getStepCamera(step);
           const ov = state.overrides[step.id] || {};
@@ -23918,7 +24056,7 @@ async function runInteractiveHtmlExport() {
                 ? (wordless ? `×${step.submodelRepeat || 2}` : `Repeat ×${step.submodelRepeat || 2}`)
                 : undefined;
 
-          return {
+          stepScenes.push({
             stepId: step.id,
             stepNum: step.num,
             label: wordless ? String(step.num) : `Step ${step.num}`,
@@ -23940,8 +24078,9 @@ async function runInteractiveHtmlExport() {
             az: cam.az,
             el: cam.el,
             zoom: ov.modelScale || 1.0,
-          };
-        });
+          });
+        }
+        await new Promise((r) => setTimeout(r, 0));
         exportPages.push({
           id: pg.id,
           kind: 'steps',
@@ -24219,7 +24358,56 @@ async function exportProjectFile() {
   const activeTheme = getActiveTheme();
   const embeddedCustomTheme = activeTheme && !activeTheme.builtIn && !BUILT_IN_THEME_IDS.has(activeTheme.id) ? activeTheme : undefined;
   const embeddedCustomFonts = collectReferencedCustomFonts(activeTheme ? [activeTheme] : []);
-  const payload = JSON.stringify({ format: PROJECT_FILE_FORMAT, version: PROJECT_FILE_STUDIO_VERSION, title: state.model.title, chapters: state.model.chapters, overrides: state.overrides, stepInserts: state.stepInserts, pageInserts: state.pageInserts, dividerAfter: state.dividerAfter, coverMeta: state.coverMeta, completeMeta: state.completeMeta, backMeta: state.backMeta, bomConfig: state.bomConfig, wordlessMode: state.wordlessMode, bomShowTextFields: state.bomShowTextFields, stepBorderStyle: state.stepBorderStyle, showStepBorders: state.showStepBorders, showPageTitle: state.showPageTitle, pageNumberFormat: state.pageNumberFormat, pageNumberPosition: normalizePageNumberPosition(state.pageNumberPosition), showCover: state.showCover, showBuildComplete: state.showBuildComplete, showPartsList: state.showPartsList, showBackCover: state.showBackCover, detectDuplicates: state.detectDuplicates, minifigStyle: state.minifigStyle, showMinifig1to1: state.showMinifig1to1, themeId: state.themeId, ...(embeddedCustomTheme ? { customTheme: embeddedCustomTheme } : {}), ...(embeddedCustomFonts.length > 0 ? { customFonts: embeddedCustomFonts } : {}), paperFormat: state.paperFormat, orientation: state.orientation, density: state.density, layout: state.layout, layoutConfig: state.layoutConfig, layoutGroups: state.layoutGroups }, null, 2);
+  const payload = JSON.stringify({
+    format: PROJECT_FILE_FORMAT,
+    version: PROJECT_FILE_STUDIO_VERSION,
+    title: state.model.title,
+    chapters: state.model.chapters,
+    overrides: state.overrides,
+    stepInserts: state.stepInserts,
+    pageInserts: state.pageInserts,
+    dividerAfter: state.dividerAfter,
+    coverMeta: state.coverMeta,
+    completeMeta: state.completeMeta,
+    backMeta: state.backMeta,
+    bomConfig: state.bomConfig,
+    wordlessMode: state.wordlessMode,
+    bomShowTextFields: state.bomShowTextFields,
+    stepBorderStyle: state.stepBorderStyle,
+    showStepBorders: state.showStepBorders,
+    showPageTitle: state.showPageTitle,
+    showProgressBar: state.showProgressBar,
+    arrowColor: state.arrowColor,
+    arrowStyle: state.arrowStyle,
+    arrowOutlines: state.arrowOutlines,
+    arrowLighting: state.arrowLighting,
+    stepLighting: state.stepLighting,
+    highlightNew: state.highlightNew,
+    highlightColor: state.highlightColor,
+    fadePrev: state.fadePrev,
+    fadeOpacity: state.fadeOpacity,
+    showRotCues: state.showRotCues,
+    pageNumberFormat: state.pageNumberFormat,
+    pageNumberPosition: normalizePageNumberPosition(state.pageNumberPosition),
+    showCover: state.showCover,
+    showBuildComplete: state.showBuildComplete,
+    showPartsList: state.showPartsList,
+    showBackCover: state.showBackCover,
+    detectDuplicates: state.detectDuplicates,
+    minifigStyle: state.minifigStyle,
+    showMinifig1to1: state.showMinifig1to1,
+    themeId: state.themeId,
+    ...(embeddedCustomTheme ? { customTheme: embeddedCustomTheme } : {}),
+    ...(embeddedCustomFonts.length > 0 ? { customFonts: embeddedCustomFonts } : {}),
+    paperFormat: state.paperFormat,
+    customPaperW: state.customPaperW,
+    customPaperH: state.customPaperH,
+    orientation: state.orientation,
+    density: state.density,
+    layout: state.layout,
+    layoutConfig: state.layoutConfig,
+    layoutGroups: state.layoutGroups,
+  });
   const fileName = buildProjectFileName(state.model.title);
   closeMenu();
   await shareOrDownloadCustomFile(payload, fileName, 'Shared project file.', `Exported ${fileName}`);
@@ -24263,6 +24451,17 @@ async function handleIncomingProjectFile(f) {
     else state.pageNumberFormat = getWordlessSurfaceDefaults(state.wordlessMode).pageNumberFormat;
     state.pageNumberPosition = normalizePageNumberPosition(data.pageNumberPosition);
     if (typeof data.detectDuplicates === 'boolean') state.detectDuplicates = data.detectDuplicates;
+    if (typeof data.showProgressBar === 'boolean') state.showProgressBar = data.showProgressBar;
+    if (typeof data.arrowColor === 'string') state.arrowColor = data.arrowColor;
+    if (typeof data.arrowStyle === 'string') state.arrowStyle = data.arrowStyle;
+    if (typeof data.arrowOutlines === 'boolean') state.arrowOutlines = data.arrowOutlines;
+    if (typeof data.arrowLighting === 'boolean') state.arrowLighting = data.arrowLighting;
+    if (typeof data.stepLighting === 'boolean') state.stepLighting = data.stepLighting;
+    if (typeof data.highlightNew === 'boolean') state.highlightNew = data.highlightNew;
+    if (typeof data.highlightColor === 'string') state.highlightColor = data.highlightColor;
+    if (typeof data.fadePrev === 'boolean') state.fadePrev = data.fadePrev;
+    if (typeof data.fadeOpacity === 'number' && Number.isFinite(data.fadeOpacity)) state.fadeOpacity = data.fadeOpacity;
+    if (typeof data.showRotCues === 'boolean') state.showRotCues = data.showRotCues;
     if (Array.isArray(data.customFonts) && data.customFonts.length > 0) {
       await hydrateCustomUploadedFonts(data.customFonts);
       persistCustomUploadedFonts();
@@ -24284,6 +24483,8 @@ async function handleIncomingProjectFile(f) {
     // Pre-theme projects stored step display & parts list options at the top level.
     if (!data.customTheme) adoptLegacyStyleOptions(data);
     if (data.paperFormat) state.paperFormat = data.paperFormat;
+    if (typeof data.customPaperW === 'number' && Number.isFinite(data.customPaperW)) state.customPaperW = data.customPaperW;
+    if (typeof data.customPaperH === 'number' && Number.isFinite(data.customPaperH)) state.customPaperH = data.customPaperH;
     if (data.orientation) state.orientation = data.orientation;
     if (data.density) state.density = data.density;
     if (data.layout) state.layout = data.layout;
@@ -24771,6 +24972,10 @@ function closeImportAssistant(keepPendingRaw = false) {
   impState.isWizardSubpage = false;
   impState.pickerOpen = false;
   impPreviewMesh = null;
+  if (impPreviewEngine) {
+    try { impPreviewEngine.dispose(); } catch (_) {}
+    impPreviewEngine = null;
+  }
   document.getElementById('importModal').classList.add('hidden');
   if (wasWizardSubpage && !keepPendingRaw) {
     returnToImportWizard();
@@ -24870,7 +25075,7 @@ function getPreviewPartMaps() {
 function rebuildAndDrawImportPreview() {
   const canvas = document.getElementById('impPreviewCanvas');
   if (!canvas || !impState.parsed) return;
-  if (!impPreviewEngine) impPreviewEngine = new WebGLBrickEngine(canvas);
+  if (!impPreviewEngine) impPreviewEngine = new WebGLBrickEngine(canvas, deviceGpuBudget.maxWebGlDim);
 
   const { parts, partOffsets, partColorOverrides } = getPreviewPartMaps();
   impPreviewMesh = buildMeshBuffers([], parts, {
@@ -25711,7 +25916,7 @@ function openImportWizard(parsed, opts = {}) {
   state.pendingImport = parsed;
 
   document.getElementById('impWizTitle').textContent = `Import ${parsed.title}`;
-  const wizardReasons = assessment.reasons.filter((r) => !/^\d[\d,]* parts$/.test(r));
+  const wizardReasons = assessment.reasons.filter((r) => !/^\d[\d,]*\s+parts$/i.test(r));
   const reasonStr = wizardReasons.length > 0
     ? `${formatPartCount(parsed.parts.length)} · ${wizardReasons.join(' · ')}.`
     : `${formatPartCount(parsed.parts.length)}${parsed.submodelCount ? ` across ${parsed.submodelCount} submodels` : ''}.`;

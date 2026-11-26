@@ -1301,8 +1301,8 @@ export function compileDatEntry(
       const sweepSegs = Math.max(1, Math.round(circleRes / sweepDiv));
       const maxA = (Math.PI * 2) / sweepDiv;
       const phiStart = mode === 'i' ? Math.PI / 2 : 0;
-      const phiEnd = mode === 'o' ? Math.PI / 2 : mode === 'i' ? Math.PI : Math.PI * 2;
-      const tubeSegs = mode === 'q' ? 16 : circleRes === 48 ? 6 : 4;
+      const phiEnd = mode === 'o' || mode === 'q' ? Math.PI / 2 : mode === 'i' ? Math.PI : Math.PI * 2;
+      const tubeSegs = mode === 'q' ? 8 : circleRes === 48 ? 6 : 4;
       const torusPt = (a: number, phi: number): Vec3 => {
         const rad = 1 + minorR * Math.cos(phi);
         return tp(rad * Math.cos(a), minorR * Math.sin(phi), rad * Math.sin(a));
@@ -1367,7 +1367,7 @@ export function compileDatEntry(
     }
 
     if (base === 'box' || base === 'box5' || base === 'box4') {
-      const yMin = base === 'box' ? -1 : 0;
+      const yMin = -1;
       const yMax = 1;
       const p000 = tp(-1, yMin, -1), p100 = tp(1, yMin, -1);
       const p101 = tp(1, yMin, 1), p001 = tp(-1, yMin, 1);

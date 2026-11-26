@@ -43,6 +43,14 @@ export function parsePartColorsPayload(payload: unknown): PartColorsCatalog {
     if (deduped.size === 0) continue;
 
     const sorted = Array.from(deduped).sort((a, b) => a - b);
+    const prev = byPart.get(id);
+    if (prev) {
+      for (const colId of prev) {
+        const next = (partCountByColor.get(colId) ?? 1) - 1;
+        if (next <= 0) partCountByColor.delete(colId);
+        else partCountByColor.set(colId, next);
+      }
+    }
     byPart.set(id, sorted);
     byPartSet.set(id, deduped);
     for (const colId of sorted) {

@@ -350,7 +350,7 @@ export async function registerCustomUploadedFont(font: CustomUploadedFont): Prom
       registeredFontFaces.delete(safe.id);
     }
     try {
-      const face = new FontFace(safe.family, `url(${safe.dataUrl})`);
+      const face = new FontFace(safe.family, `url("${safe.dataUrl}")`);
       const loaded = await face.load();
       document.fonts.add(loaded);
       registeredFontFaces.set(safe.id, loaded);
@@ -402,12 +402,12 @@ export async function hydrateCustomUploadedFonts(rawList: unknown): Promise<Cust
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
-  let binary = '';
-  const chunk = 0x8000;
+  const parts: string[] = [];
+  const chunk = 0x4000;
   for (let i = 0; i < bytes.length; i += chunk) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+    parts.push(String.fromCharCode.apply(null, bytes.subarray(i, Math.min(i + chunk, bytes.length)) as unknown as number[]));
   }
-  return btoa(binary);
+  return btoa(parts.join(''));
 }
 
 /**

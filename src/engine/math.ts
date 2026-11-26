@@ -112,8 +112,9 @@ export function mat3AlignVectors(fromNormal: Vec3, toNormal: Vec3): Mat3 {
   const dot = vec3Dot(f, t);
   if (dot > 0.999) return [...IDENTITY_MAT3];
   if (dot < -0.999) {
-    // 180 deg flip around X (or Z if parallel to X)
-    const axis: Vec3 = Math.abs(f[0]) < 0.9 ? [1, 0, 0] : [0, 0, 1];
+    // 180 deg flip around an axis guaranteed orthogonal to f
+    const basis: Vec3 = Math.abs(f[0]) < 0.9 ? [1, 0, 0] : [0, 0, 1];
+    const axis = vec3Normalize(vec3Cross(f, basis));
     return mat3FromAxisAngle(axis, Math.PI);
   }
   const axis = vec3Normalize(vec3Cross(f, t));
@@ -122,6 +123,7 @@ export function mat3AlignVectors(fromNormal: Vec3, toNormal: Vec3): Mat3 {
 }
 
 export function quantize(val: number, step = 1): number {
+  if (!Number.isFinite(step) || step <= 0) return val;
   return Math.round(val / step) * step;
 }
 

@@ -223,7 +223,7 @@ export function analyzeUndersideAssembly(
   const mechFlags = parts.map((p) => isTechnicMechanismPart(p));
   const looseHoleFlags = parts.map((p) => isLooseHoleBearing(p));
 
-  let chosenDeckY = -1;
+  let chosenDeckY: number | null = null;
   let chosenDeckComp: number[] = [];
   let chosenBelowComps: number[][] = [];
 
@@ -292,7 +292,7 @@ export function analyzeUndersideAssembly(
     break;
   }
 
-  if (chosenDeckY < 0 || chosenBelowComps.length === 0) {
+  if (chosenDeckY === null || chosenBelowComps.length === 0) {
     return emptyPlan();
   }
 

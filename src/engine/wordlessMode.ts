@@ -245,7 +245,7 @@ export function buildNumberedBagSvg(
   const h = Math.max(36, Math.round(heightPx));
   const w = Math.round(h * 0.84);
   const numStr = String(bagNumber || 1);
-  const fontSize = numStr.length >= 2 ? 24 : 30;
+  const fontSize = numStr.length >= 3 ? 18 : numStr.length >= 2 ? 24 : 30;
   return `<svg width="${w}" height="${h}" viewBox="0 0 64 76" fill="none" aria-hidden="true" style="width:${w}px;height:${h}px;flex-shrink:0;display:block">
     <path d="M12 4 L52 4 L56 14 L58 68 A4 4 0 0 1 54 72 L10 72 A4 4 0 0 1 6 68 L8 14 Z" fill="${fillBg}" stroke="${accentColor}" stroke-width="3.2" stroke-linejoin="round"/>
     <path d="M11 14 L53 14" stroke="${accentColor}" stroke-width="2.4" stroke-linecap="round"/>

@@ -26,6 +26,12 @@ function getDb(): Promise<IDBPDatabase> | null {
           db.createObjectStore(STORE_NAME);
         }
       },
+      terminated() {
+        dbPromise = null;
+      },
+    }).catch((err) => {
+      dbPromise = null;
+      throw err;
     });
   }
   return dbPromise;
@@ -443,7 +449,11 @@ class LayeredPartsProvider {
     if (!db) return this.rawSources.size;
     try {
       const handle = await db;
-      return (await handle.count(STORE_NAME)) + this.rawSources.size;
+      const keys = await handle.getAllKeys(STORE_NAME);
+      const unique = new Set<string>();
+      for (const k of keys) unique.add(String(k));
+      for (const k of this.rawSources.keys()) unique.add(k);
+      return unique.size;
     } catch {
       return this.rawSources.size;
     }

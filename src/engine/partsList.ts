@@ -296,6 +296,9 @@ function isUnmodifiedLegacyBomConfig(r: Record<string, unknown>): boolean {
     r.horizontalDir !== undefined ||
     r.verticalDir !== undefined ||
     r.variableSizing !== undefined ||
+    r.relativeScale !== undefined ||
+    r.variableWidthColumns !== undefined ||
+    r.showLengthBadges !== undefined ||
     r.tableRowsMode !== undefined ||
     r.tableRowsPerPage !== undefined ||
     r.fields !== undefined;

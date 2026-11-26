@@ -132,7 +132,24 @@ export function computeOverviewStepSignatures(
 }
 
 function serializePartOffsets(
-  offsets: Record<string, { dx?: number; dy?: number; dz?: number; rx?: number; ry?: number; rz?: number }> | null | undefined,
+  offsets:
+    | Record<
+        string,
+        {
+          x?: number;
+          y?: number;
+          z?: number;
+          tilt?: number;
+          dx?: number;
+          dy?: number;
+          dz?: number;
+          rx?: number;
+          ry?: number;
+          rz?: number;
+        }
+      >
+    | null
+    | undefined,
 ): string {
   if (!offsets) return '';
   const keys = Object.keys(offsets);
@@ -142,7 +159,14 @@ function serializePartOffsets(
   for (const k of keys) {
     const o = offsets[k];
     if (!o) continue;
-    const token = `${k}:${Math.round((o.dx || 0) * 10)},${Math.round((o.dy || 0) * 10)},${Math.round((o.dz || 0) * 10)},${Math.round((o.rx || 0) * 10)},${Math.round((o.ry || 0) * 10)},${Math.round((o.rz || 0) * 10)};`;
+    const x = Math.round(((o.x ?? o.dx) || 0) * 10);
+    const y = Math.round(((o.y ?? o.dy) || 0) * 10);
+    const z = Math.round(((o.z ?? o.dz) || 0) * 10);
+    const tilt = Math.round((o.tilt || 0) * 10);
+    const rx = Math.round((o.rx || 0) * 10);
+    const ry = Math.round((o.ry || 0) * 10);
+    const rz = Math.round((o.rz || 0) * 10);
+    const token = `${k}:${x},${y},${z},${tilt},${rx},${ry},${rz};`;
     h = hashString32(h, token);
   }
   return `${keys.length}:${h.toString(36)}`;
