@@ -64,15 +64,12 @@ export interface CameraRotationStep {
   /** Accessible tooltip / title */
   title: string;
   /** Icon direction hint */
-  icon: 'ccw' | 'cw' | 'flip';
+  icon: 'ccw' | 'cw';
 }
 
 export const CAMERA_ROTATION_STEPS: readonly CameraRotationStep[] = [
   { deltaDeg: -90, label: '−90°', title: 'Rotate camera −90° (counter-clockwise)', icon: 'ccw' },
-  { deltaDeg: -45, label: '−45°', title: 'Rotate camera −45° (counter-clockwise)', icon: 'ccw' },
-  { deltaDeg: 45, label: '+45°', title: 'Rotate camera +45° (clockwise)', icon: 'cw' },
   { deltaDeg: 90, label: '+90°', title: 'Rotate camera +90° (clockwise)', icon: 'cw' },
-  { deltaDeg: 180, label: '180°', title: 'Rotate camera 180° (opposite side)', icon: 'flip' },
 ];
 
 export const PAPER_FORMAT_SPECS: Readonly<Record<string, PaperFormatSpec>> = {

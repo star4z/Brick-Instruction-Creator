@@ -221,6 +221,7 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     if (await cameraModeBtn.isVisible()) {
       await cameraModeBtn.click();
       await expect(page.locator('#contextOverlay')).toBeVisible();
+      await expect(page.locator('#contextOverlay .hero-rotate-btn')).toHaveText(['−90°', '+90°']);
       await auditSurface(page, `${testInfo.project.name}: Cover Page (Camera Mode)`, {
         checkWorkspaceChrome: true,
         hasModel: true,
@@ -252,6 +253,7 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
 
     await page.locator('#modePill [data-mode="step"]').click();
     await expect(page.locator('#contextOverlay')).toBeVisible();
+    await expect(page.locator('#contextOverlay .step-rotate-btn')).toHaveText(['−90°', '+90°']);
     await auditSurface(page, `${testInfo.project.name}: Step Page (Step Mode)`, {
       checkWorkspaceChrome: true,
       hasModel: true,

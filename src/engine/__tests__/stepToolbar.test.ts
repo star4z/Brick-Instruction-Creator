@@ -281,9 +281,9 @@ describe('Step Toolbar & Scope-Based Editor Capabilities', () => {
     expect(getCameraAngleLabel('back_right')).toBe('135°');
   });
 
-  it('provides relative camera rotation steps (−90°, −45°, +45°, +90°, 180°) and wrap-safe azimuth math', () => {
-    expect(CAMERA_ROTATION_STEPS.map((s) => s.deltaDeg)).toEqual([-90, -45, 45, 90, 180]);
-    expect(CAMERA_ROTATION_STEPS.map((s) => s.label)).toEqual(['−90°', '−45°', '+45°', '+90°', '180°']);
+  it('provides relative camera rotation steps (−90°, +90°) and wrap-safe azimuth math', () => {
+    expect(CAMERA_ROTATION_STEPS.map((s) => s.deltaDeg)).toEqual([-90, 90]);
+    expect(CAMERA_ROTATION_STEPS.map((s) => s.label)).toEqual(['−90°', '+90°']);
 
     // Basic relative rotation from default isometric 38°
     expect(rotateCameraAzimuth(38, 90)).toBe(128);
