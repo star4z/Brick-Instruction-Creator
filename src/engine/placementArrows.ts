@@ -37,11 +37,18 @@ export interface AutoPartOffset {
   arrowColorOverride?: string;
 }
 
+/** World-space external stud descriptor: [baseX, baseY, baseZ, dirX, dirY, dirZ] where dir is a unit outward stud normal. */
+export type PlacementStud = readonly [number, number, number, number, number, number];
+
 export interface PlacementPartInput {
   id: string;
   box: PlacementAABB;
   rgb: [number, number, number];
   sku?: string;
+  /** Optional world-space unit vector pointing from the part's underside (anti-studs) toward its top face (local +Y transformed by part.m). */
+  localUp?: readonly [number, number, number];
+  /** Optional world-space outward studs belonging to this part (from compiled .dat geometry). */
+  studs?: ReadonlyArray<PlacementStud>;
 }
 
 export interface PlacementStepInput {
@@ -269,9 +276,227 @@ interface ContactSummary {
   lateralCount: number;
   /** Outward lateral normal from contacting reference parts toward this part. */
   lateralNormal: Vec3 | null;
+  /** Physical pull-off unit direction dictated by engaged studs (or SNOT/inverted localUp stud-face contact). */
+  studPullDir: Vec3 | null;
+  /** World-space base coordinates of engaged studs along `studPullDir` (empty when inferred without compiled studs). */
+  engagedStudPoints: Vec3[];
   touchingRefs: PlacementPartInput[];
   /** Directly touching refs (within 4 LDU with real contact area) used for color-camouflage checks. */
   colorTouchingRefs: PlacementPartInput[];
+}
+
+function snapCardinalOrUnit(dx: number, dy: number, dz: number): Vec3 {
+  const len = Math.hypot(dx, dy, dz);
+  if (len < 1e-6) return [0, 1, 0];
+  const ux = dx / len;
+  const uy = dy / len;
+  const uz = dz / len;
+  const ax = Math.abs(ux);
+  const ay = Math.abs(uy);
+  const az = Math.abs(uz);
+  if (ax >= ay && ax >= az) {
+    if (ax >= 0.94) return [ux >= 0 ? 1 : -1, 0, 0];
+  } else if (ay >= ax && ay >= az) {
+    if (ay >= 0.94) return [0, uy >= 0 ? 1 : -1, 0];
+  } else if (az >= 0.94) {
+    return [0, 0, uz >= 0 ? 1 : -1];
+  }
+  return [ux, uy, uz];
+}
+
+/**
+ * Returns true when an external stud `[bx, by, bz, nx, ny, nz]` (base at `(bx,by,bz)`,
+ * extending 4 LDU along unit outward normal `n`) physically engages `targetBox` through
+ * `targetBox`'s entry face facing `-n`.
+ */
+function isStudEngagingBox(stud: PlacementStud, targetBox: PlacementAABB): boolean {
+  const bx = stud[0], by = stud[1], bz = stud[2];
+  const nx = stud[3], ny = stud[4], nz = stud[5];
+  const ax = Math.abs(nx), ay = Math.abs(ny), az = Math.abs(nz);
+  const maxComp = Math.max(ax, ay, az);
+
+  if (maxComp >= 0.94) {
+    const axis = ax >= ay && ax >= az ? 0 : (ay >= az ? 1 : 2);
+    const sign = stud[3 + axis] >= 0 ? 1 : -1;
+    const perpA = (axis + 1) % 3;
+    const perpB = (axis + 2) % 3;
+    // Stud center must sit strictly inside targetBox on both perpendicular axes (rejects grazing neighbor studs)
+    if (stud[perpA] < targetBox.min[perpA] + 2 || stud[perpA] > targetBox.max[perpA] - 2) return false;
+    if (stud[perpB] < targetBox.min[perpB] + 2 || stud[perpB] > targetBox.max[perpB] - 2) return false;
+    const entryFace = sign > 0 ? targetBox.min[axis] : targetBox.max[axis];
+    const exitFace = sign > 0 ? targetBox.max[axis] : targetBox.min[axis];
+    const basePos = stud[axis];
+    const faceDelta = (basePos - entryFace) * sign;
+    const penetration = (exitFace - basePos) * sign;
+    return faceDelta >= -2.5 && faceDelta <= 6.0 && penetration >= 3.5;
+  }
+
+  // General angled (non-cardinal SNOT) stud engagement test
+  const inside = (x: number, y: number, z: number, pad: number): boolean =>
+    x >= targetBox.min[0] - pad && x <= targetBox.max[0] + pad &&
+    y >= targetBox.min[1] - pad && y <= targetBox.max[1] + pad &&
+    z >= targetBox.min[2] - pad && z <= targetBox.max[2] + pad;
+  const midIn = inside(bx + nx * 2, by + ny * 2, bz + nz * 2, 0.5);
+  const tipIn = inside(bx + nx * 3.8, by + ny * 3.8, bz + nz * 3.8, 0.5);
+  const centerAhead =
+    (targetBox.center[0] - bx) * nx +
+    (targetBox.center[1] - by) * ny +
+    (targetBox.center[2] - bz) * nz;
+  return midIn && tipIn && centerAhead >= 2.0;
+}
+
+interface EngagedStudSummary {
+  pullDir: Vec3;
+  count: number;
+  studPoints: Vec3[];
+}
+
+function findEngagedStuds(
+  part: PlacementPartInput,
+  touchingRefs: ReadonlyArray<PlacementPartInput>,
+): EngagedStudSummary | null {
+  if (touchingRefs.length === 0) return null;
+
+  type Bucket = {
+    dir: Vec3;
+    weight: number;
+    count: number;
+    points: Vec3[];
+    alignBonus: number;
+  };
+  const buckets = new Map<string, Bucket>();
+
+  const addVote = (rawDir: Vec3, weight: number, point: Vec3, alignBonus: number) => {
+    const dir = snapCardinalOrUnit(rawDir[0], rawDir[1], rawDir[2]);
+    const key = `${Math.round(dir[0] * 20)},${Math.round(dir[1] * 20)},${Math.round(dir[2] * 20)}`;
+    let b = buckets.get(key);
+    if (!b) {
+      b = { dir, weight: 0, count: 0, points: [], alignBonus: 0 };
+      buckets.set(key, b);
+    }
+    b.weight += weight;
+    b.count += 1;
+    b.alignBonus = Math.max(b.alignBonus, alignBonus);
+    b.points.push(point);
+  };
+
+  // 1. Existing ref studs engaging `part` (pulling `part` off moves in +studNormal)
+  for (let i = 0; i < touchingRefs.length; i++) {
+    const ref = touchingRefs[i];
+    if (!ref.studs || ref.studs.length === 0) continue;
+    for (let j = 0; j < ref.studs.length; j++) {
+      const st = ref.studs[j];
+      if (!isStudEngagingBox(st, part.box)) continue;
+      let weight = 1.0;
+      let alignBonus = 0;
+      if (part.localUp) {
+        const align = st[3] * part.localUp[0] + st[4] * part.localUp[1] + st[5] * part.localUp[2];
+        if (align <= -0.7) continue;
+        if (align >= 0.7) {
+          weight = 2.0;
+          alignBonus = 1;
+        } else {
+          weight = 0.75;
+        }
+      }
+      addVote([st[3], st[4], st[5]], weight, [st[0], st[1], st[2]], alignBonus);
+    }
+  }
+
+  // 2. `part`'s own studs engaging an existing ref (pulling `part` off moves in -studNormal)
+  if (part.studs && part.studs.length > 0) {
+    for (let j = 0; j < part.studs.length; j++) {
+      const st = part.studs[j];
+      for (let i = 0; i < touchingRefs.length; i++) {
+        const ref = touchingRefs[i];
+        if (!isStudEngagingBox(st, ref.box)) continue;
+        let weight = 1.0;
+        let alignBonus = 0;
+        if (ref.localUp) {
+          const align = st[3] * ref.localUp[0] + st[4] * ref.localUp[1] + st[5] * ref.localUp[2];
+          if (align <= -0.7) continue;
+          if (align >= 0.7) {
+            weight = 2.0;
+            alignBonus = 1;
+          } else {
+            weight = 0.75;
+          }
+        }
+        addVote([-st[3], -st[4], -st[5]], weight, [st[0], st[1], st[2]], alignBonus);
+        break;
+      }
+    }
+  }
+
+  let best: Bucket | null = null;
+  for (const b of buckets.values()) {
+    if (
+      !best ||
+      b.weight > best.weight + 1e-6 ||
+      (Math.abs(b.weight - best.weight) <= 1e-6 &&
+        (b.alignBonus > best.alignBonus || (b.alignBonus === best.alignBonus && b.count > best.count)))
+    ) {
+      best = b;
+    }
+  }
+  if (!best) return null;
+  return {
+    pullDir: best.dir,
+    count: best.count,
+    studPoints: best.points,
+  };
+}
+
+/**
+ * Fallback stud-axis inference for sideways (SNOT) or inverted parts when explicit
+ * compiled stud primitives aren't available: checks whether a contacting reference
+ * sits directly against the part's underside (-localUp) or top (+localUp) face.
+ */
+function findLocalUpStudDir(
+  part: PlacementPartInput,
+  touchingRefs: ReadonlyArray<PlacementPartInput>,
+): Vec3 | null {
+  if (!part.localUp || touchingRefs.length === 0) return null;
+  const u = snapCardinalOrUnit(part.localUp[0], part.localUp[1], part.localUp[2]);
+  if (u[1] >= 0.7) return null;
+
+  const ax = Math.abs(u[0]), ay = Math.abs(u[1]), az = Math.abs(u[2]);
+  if (Math.max(ax, ay, az) < 0.94) return null;
+  const axis = ax >= ay && ax >= az ? 0 : (ay >= az ? 1 : 2);
+  const sign = u[axis] >= 0 ? 1 : -1;
+  const perpA = (axis + 1) % 3;
+  const perpB = (axis + 2) % 3;
+  const b = part.box;
+
+  let undersideContacts = 0;
+  let topContacts = 0;
+
+  for (let i = 0; i < touchingRefs.length; i++) {
+    const rb = touchingRefs[i].box;
+    const ovA = overlap1D(b.min[perpA], b.max[perpA], rb.min[perpA], rb.max[perpA]);
+    const ovB = overlap1D(b.min[perpB], b.max[perpB], rb.min[perpB], rb.max[perpB]);
+    if (ovA <= 2 || ovB <= 2) continue;
+    // Ignore refs that symmetrically enclose `part` along `axis` (e.g. beam surrounding a shaft)
+    if (rb.min[axis] < b.min[axis] - 2 && rb.max[axis] > b.max[axis] + 2) continue;
+
+    if (sign > 0) {
+      if (rb.max[axis] >= b.min[axis] - CONTACT_EPS && rb.max[axis] <= b.min[axis] + CONTACT_EPS && rb.min[axis] < b.min[axis] + 2) {
+        undersideContacts++;
+      } else if (rb.min[axis] <= b.max[axis] + CONTACT_EPS && rb.min[axis] >= b.max[axis] - CONTACT_EPS && rb.max[axis] > b.max[axis] - 2) {
+        topContacts++;
+      }
+    } else {
+      if (rb.min[axis] <= b.max[axis] + CONTACT_EPS && rb.min[axis] >= b.max[axis] - CONTACT_EPS && rb.max[axis] > b.max[axis] - 2) {
+        undersideContacts++;
+      } else if (rb.max[axis] >= b.min[axis] - CONTACT_EPS && rb.max[axis] <= b.min[axis] + CONTACT_EPS && rb.min[axis] < b.min[axis] + 2) {
+        topContacts++;
+      }
+    }
+  }
+
+  if (undersideContacts > 0 && undersideContacts >= topContacts) return u;
+  if (topContacts > 0) return [-u[0], -u[1], -u[2]];
+  return null;
 }
 
 function analyzeContacts(
@@ -323,6 +548,9 @@ function analyzeContacts(
     // Coaxial / through-hole penetration (overlapping in all 3 axes):
     // Distinguish vertical through-hole/sleeve insertions (±Y) from horizontal pin/axle insertions (±X/±Z).
     const nestedXZ = ovX > 1.5 && ovZ > 1.5;
+    const coaxialXZ =
+      ovX >= Math.min(s[0], rs[0]) * 0.72 &&
+      ovZ >= Math.min(s[2], rs[2]) * 0.72;
     if (ovY > 3 && nestedXZ) {
       const partVertElongated = s[1] >= Math.max(s[0], s[2]) * 1.1;
       const partHorizElongated = Math.max(s[0], s[2]) >= s[1] * 1.15;
@@ -334,14 +562,17 @@ function analyzeContacts(
         partWrapsRefXZ &&
         rs[1] >= Math.max(rs[0], rs[2]) * 1.8 &&
         (rb.max[1] > b.max[1] + 2 || rb.min[1] < b.min[1] - 2);
-      if ((partVertElongated && (partProtrudesVert || refHorizWider)) || (partProtrudesVert && refHorizWider) || refVertRod) {
+      if (coaxialXZ && ((partVertElongated && (partProtrudesVert || refHorizWider)) || (partProtrudesVert && refHorizWider) || refVertRod)) {
         verticalCoaxial = true;
         continue;
       }
 
-      // Horizontal pin/axle embedded coaxially inside a Technic brick/beam side hole
+      // Horizontal pin/axle embedded coaxially inside a Technic brick/beam side hole:
+      // MUST be vertically contained inside the host brick's Y span (`nestedInsideRefY`),
+      // so stacked horizontal plates overlapping by 4 LDU of top/bottom studs are NEVER
+      // misclassified as horizontal coaxial pins!
       const nestedInsideRefY = b.min[1] >= rb.min[1] + 1.5 && b.max[1] <= rb.max[1] - 1.5;
-      if (partHorizElongated || nestedInsideRefY) {
+      if (nestedInsideRefY && (partHorizElongated || ovY >= s[1] * 0.72)) {
         horizontalCoaxial = true;
         horizontalCoaxialAxis = s[0] >= s[2] ? 0 : 2;
       }
@@ -384,6 +615,13 @@ function analyzeContacts(
     }
   }
 
+  const engaged = findEngagedStuds(part, touchingRefs);
+  let studPullDir: Vec3 | null = engaged ? engaged.pullDir : null;
+  const engagedStudPoints: Vec3[] = engaged ? engaged.studPoints : [];
+  if (!studPullDir && !verticalCoaxial && !horizontalCoaxial) {
+    studPullDir = findLocalUpStudDir(part, touchingRefs);
+  }
+
   return {
     supportedFromBelow,
     supportedFromAbove,
@@ -392,6 +630,8 @@ function analyzeContacts(
     horizontalCoaxialAxis,
     lateralCount,
     lateralNormal,
+    studPullDir,
+    engagedStudPoints,
     touchingRefs,
     colorTouchingRefs,
   };
@@ -596,12 +836,57 @@ function buildSweptCorridorBox(
   };
 }
 
+function computeEngagedStudArrowBox(
+  partBox: PlacementAABB,
+  studPoints: ReadonlyArray<Vec3>,
+  axis: number,
+): PlacementAABB | null {
+  if (studPoints.length === 0) return null;
+  const perpA = (axis + 1) % 3;
+  const perpB = (axis + 2) % 3;
+
+  let minA = Infinity;
+  let maxA = -Infinity;
+  let minB = Infinity;
+  let maxB = -Infinity;
+  for (let i = 0; i < studPoints.length; i++) {
+    const p = studPoints[i];
+    if (p[perpA] < minA) minA = p[perpA];
+    if (p[perpA] > maxA) maxA = p[perpA];
+    if (p[perpB] < minB) minB = p[perpB];
+    if (p[perpB] > maxB) maxB = p[perpB];
+  }
+
+  // Expand by half a stud (10 LDU) around outermost engaged stud centers and clamp to partBox
+  const loA = Math.max(partBox.min[perpA], minA - 10);
+  const hiA = Math.min(partBox.max[perpA], maxA + 10);
+  const loB = Math.max(partBox.min[perpB], minB - 10);
+  const hiB = Math.min(partBox.max[perpB], maxB + 10);
+  if (hiA - loA < 4 || hiB - loB < 4) return null;
+
+  const spanA = partBox.max[perpA] - partBox.min[perpA];
+  const spanB = partBox.max[perpB] - partBox.min[perpB];
+  if (spanA - (hiA - loA) < 6 && spanB - (hiB - loB) < 6) return null;
+
+  const mn: Vec3 = [partBox.min[0], partBox.min[1], partBox.min[2]];
+  const mx: Vec3 = [partBox.max[0], partBox.max[1], partBox.max[2]];
+  mn[perpA] = loA;
+  mx[perpA] = hiA;
+  mn[perpB] = loB;
+  mx[perpB] = hiB;
+  return {
+    min: mn,
+    max: mx,
+    center: [(mn[0] + mx[0]) * 0.5, (mn[1] + mx[1]) * 0.5, (mn[2] + mx[2]) * 0.5],
+  };
+}
+
 /**
  * Picks a clean, collision-free offset vector along the physical insertion axis.
  * - Guarantees a crisp open air gap past any coaxial obstacle tip (`arrowTo`).
  * - Rejects directions whose swept withdrawal corridor passes through a blocking
  *   sibling part or non-coaxial solid obstacle.
- * - Anchors arrows directly over the actual contact/stud overlap (`arrowBox`).
+ * - Anchors arrows directly over the actual engaged studs or contact overlap (`arrowBox`).
  * - For vertical lifts, accounts for orthographic camera elevation so a wide
  *   overhanging plate never blocks the camera's view of its arrows or attaching studs.
  * - Returns `null` when every candidate direction is blocked/colliding so trapped
@@ -615,10 +900,16 @@ function resolveOffsetAlongAxis(
   camera?: { az: number; el: number },
   touchingRefs: ReadonlyArray<PlacementPartInput> = [],
   siblingObstacles: ReadonlyArray<PlacementPartInput> = [],
-  options: { preferShortestDir?: boolean } = {},
+  options: {
+    preferShortestDir?: boolean;
+    studPullDir?: Vec3 | null;
+    engagedStudPoints?: ReadonlyArray<Vec3>;
+  } = {},
 ): AutoPartOffset | null {
   const s = boxSize(part.box);
   const dirs: Vec3[] = [preferredDir, ...fallbackDirs];
+  const studPullDir = options.studPullDir ?? null;
+  const engagedStudPoints = options.engagedStudPoints ?? [];
 
   const computeBaseMag = (d: Vec3, arrowAnchor: Vec3): number => {
     const dimAlong = Math.abs(d[0]) * s[0] + Math.abs(d[1]) * s[1] + Math.abs(d[2]) * s[2];
@@ -649,32 +940,45 @@ function resolveOffsetAlongAxis(
 
   for (let dirIdx = 0; dirIdx < dirs.length; dirIdx++) {
     const dir = dirs[dirIdx];
-    const axis = Math.abs(dir[0]) >= 0.5 ? 0 : (Math.abs(dir[1]) >= 0.5 ? 1 : 2);
+    const ax = Math.abs(dir[0]), ay = Math.abs(dir[1]), az = Math.abs(dir[2]);
+    const axis = ax >= ay && ax >= az ? 0 : (ay >= az ? 1 : 2);
+    const isCardinal = Math.max(ax, ay, az) >= 0.94;
     const sign = dir[axis] >= 0 ? 1 : -1;
     const perpA = (axis + 1) % 3;
     const perpB = (axis + 2) % 3;
 
-    const arrowBox = computeContactArrowBox(part.box, touchingRefs, axis, sign);
+    const alignsWithEngagedStuds =
+      studPullDir !== null &&
+      engagedStudPoints.length > 0 &&
+      dir[0] * studPullDir[0] + dir[1] * studPullDir[1] + dir[2] * studPullDir[2] >= 0.94;
+
+    const arrowBox = !isCardinal
+      ? null
+      : alignsWithEngagedStuds
+        ? computeEngagedStudArrowBox(part.box, engagedStudPoints, axis)
+        : computeContactArrowBox(part.box, touchingRefs, axis, sign);
     const arrowAnchor = arrowBox ? arrowBox.center : part.box.center;
 
     // Find any coaxial / corridor obstacle directly along the insertion path (e.g., vertical axle inside a bush
     // or Technic brick hole face around a horizontal pin). Only `obstacles` (never non-host siblings) qualify.
     let corridorObsTip: number | null = null;
-    for (let i = 0; i < obstacles.length; i++) {
-      const obs = obstacles[i];
-      if (obs.id === part.id) continue;
-      const ob = obs.box;
-      const ovA = overlap1D(part.box.min[perpA], part.box.max[perpA], ob.min[perpA], ob.max[perpA]);
-      const ovB = overlap1D(part.box.min[perpB], part.box.max[perpB], ob.min[perpB], ob.max[perpB]);
-      if (ovA <= 1.5 || ovB <= 1.5) continue;
-      if (!seatedIntersectingObs.has(obs.id)) continue;
-      if (sign > 0) {
-        if (ob.max[axis] > part.box.min[axis] + 1 && ob.min[axis] < part.box.max[axis] + 24) {
-          if (corridorObsTip === null || ob.max[axis] > corridorObsTip) corridorObsTip = ob.max[axis];
-        }
-      } else {
-        if (ob.min[axis] < part.box.max[axis] - 1 && ob.max[axis] > part.box.min[axis] - 24) {
-          if (corridorObsTip === null || ob.min[axis] < corridorObsTip) corridorObsTip = ob.min[axis];
+    if (isCardinal) {
+      for (let i = 0; i < obstacles.length; i++) {
+        const obs = obstacles[i];
+        if (obs.id === part.id) continue;
+        const ob = obs.box;
+        const ovA = overlap1D(part.box.min[perpA], part.box.max[perpA], ob.min[perpA], ob.max[perpA]);
+        const ovB = overlap1D(part.box.min[perpB], part.box.max[perpB], ob.min[perpB], ob.max[perpB]);
+        if (ovA <= 1.5 || ovB <= 1.5) continue;
+        if (!seatedIntersectingObs.has(obs.id)) continue;
+        if (sign > 0) {
+          if (ob.max[axis] > part.box.min[axis] + 1 && ob.min[axis] < part.box.max[axis] + 24) {
+            if (corridorObsTip === null || ob.max[axis] > corridorObsTip) corridorObsTip = ob.max[axis];
+          }
+        } else {
+          if (ob.min[axis] < part.box.max[axis] - 1 && ob.max[axis] > part.box.min[axis] - 24) {
+            if (corridorObsTip === null || ob.min[axis] < corridorObsTip) corridorObsTip = ob.min[axis];
+          }
         }
       }
     }
@@ -687,30 +991,33 @@ function resolveOffsetAlongAxis(
       const dy = Math.round(dir[1] * mag);
       const dz = Math.round(dir[2] * mag);
       const shifted = shiftBox(part.box, dx, dy, dz);
-      const corridor = buildSweptCorridorBox(part.box, axis, sign, mag);
 
-      // Reject this direction if any sibling part or non-coaxial solid obstacle sits inside
-      // the swept withdrawal corridor ahead of `part` (prevents jumping through stacked bricks/ceilings).
-      for (let i = 0; i < siblingObstacles.length; i++) {
-        const obs = siblingObstacles[i];
-        if (obs.id === part.id) continue;
-        if (boxesIntersectStrict(corridor, obs.box, 1.5)) {
-          corridorBlockedDir = true;
-          break;
-        }
-      }
-      if (corridorBlockedDir) break;
+      if (isCardinal) {
+        const corridor = buildSweptCorridorBox(part.box, axis, sign, mag);
 
-      for (let i = 0; i < obstacles.length; i++) {
-        const obs = obstacles[i];
-        if (obs.id === part.id) continue;
-        if (seatedIntersectingObs.has(obs.id)) continue; // coaxial pin/axle handled via corridorObsTip
-        if (boxesIntersectStrict(corridor, obs.box, 1.5)) {
-          corridorBlockedDir = true;
-          break;
+        // Reject this direction if any sibling part or non-coaxial solid obstacle sits inside
+        // the swept withdrawal corridor ahead of `part` (prevents jumping through stacked bricks/ceilings).
+        for (let i = 0; i < siblingObstacles.length; i++) {
+          const obs = siblingObstacles[i];
+          if (obs.id === part.id) continue;
+          if (boxesIntersectStrict(corridor, obs.box, 1.5)) {
+            corridorBlockedDir = true;
+            break;
+          }
         }
+        if (corridorBlockedDir) break;
+
+        for (let i = 0; i < obstacles.length; i++) {
+          const obs = obstacles[i];
+          if (obs.id === part.id) continue;
+          if (seatedIntersectingObs.has(obs.id)) continue; // coaxial pin/axle handled via corridorObsTip
+          if (boxesIntersectStrict(corridor, obs.box, 1.5)) {
+            corridorBlockedDir = true;
+            break;
+          }
+        }
+        if (corridorBlockedDir) break;
       }
-      if (corridorBlockedDir) break;
 
       // Ensure crisp open air gap past any coaxial obstacle tip (e.g., bush lifted above axle tip)
       if (corridorObsTip !== null) {
@@ -779,6 +1086,16 @@ function chooseInsertionDirs(
 ): { preferred: Vec3; fallbacks: Vec3[]; preferShortestDir?: boolean } {
   const verticalDefault: Vec3 = cameraSide === 'bottom' ? [0, -1, 0] : [0, 1, 0];
   const verticalOpposite: Vec3 = cameraSide === 'bottom' ? [0, 1, 0] : [0, -1, 0];
+
+  // Physical stud-clutch direction always takes top priority:
+  // a piece attached to (or via) studs can ONLY be inserted/removed along the direction of those studs
+  // (never slid sideways off studs or teleported backward through its host brick).
+  if (contacts.studPullDir) {
+    return {
+      preferred: contacts.studPullDir,
+      fallbacks: [],
+    };
+  }
 
   if (contacts.verticalCoaxial) {
     return {
@@ -939,7 +1256,10 @@ function computeFirstStepOffsets(
     const contacts = analyzeContacts(p, seatedRefs);
     if (contacts.touchingRefs.length === 0) continue;
 
-    const isLateral = contacts.lateralCount > 0 && !contacts.supportedFromBelow && !contacts.supportedFromAbove;
+    const isStudDrivenLateral = contacts.studPullDir !== null && Math.abs(contacts.studPullDir[1]) < 0.94;
+    const isLateral =
+      isStudDrivenLateral ||
+      (contacts.lateralCount > 0 && !contacts.supportedFromBelow && !contacts.supportedFromAbove);
     const { preferred, fallbacks, preferShortestDir } = chooseInsertionDirs(
       contacts,
       cameraSide,
@@ -955,7 +1275,11 @@ function computeFirstStepOffsets(
       step.camera,
       contacts.touchingRefs,
       [...otherSiblings, ...acceptedShiftedObstacles],
-      { preferShortestDir },
+      {
+        preferShortestDir,
+        studPullDir: contacts.studPullDir,
+        engagedStudPoints: contacts.engagedStudPoints,
+      },
     );
     if (!resolved) continue;
 
@@ -1102,13 +1426,15 @@ function computeSubsequentStepOffsets(
     const minHoriz = Math.min(s[0], s[2]);
     const height = s[1];
 
+    const isStudDrivenLateral = contacts.studPullDir !== null && Math.abs(contacts.studPullDir[1]) < 0.94;
     const isLateral =
-      contacts.lateralCount > 0 &&
-      !contacts.supportedFromBelow &&
-      !contacts.supportedFromAbove;
+      isStudDrivenLateral ||
+      (contacts.lateralCount > 0 &&
+        !contacts.supportedFromBelow &&
+        !contacts.supportedFromAbove);
     const isCoaxialOrLateral = isLateral || contacts.verticalCoaxial || contacts.horizontalCoaxial;
 
-    // 1. Lateral / horizontal insertion or coaxial through-hole/sleeve insertion (pins, axles, bushes, beams)
+    // 1. Lateral / horizontal insertion or coaxial through-hole/sleeve insertion (pins, axles, bushes, beams, SNOT)
     let score = 0;
     if (isCoaxialOrLateral) {
       // Sideways and coaxial insertions are hard to read from an isometric view without an arrow
@@ -1200,7 +1526,11 @@ function computeSubsequentStepOffsets(
       step.camera,
       c.contacts.touchingRefs,
       [...otherSiblings, ...acceptedShiftedObstacles],
-      { preferShortestDir },
+      {
+        preferShortestDir,
+        studPullDir: c.contacts.studPullDir,
+        engagedStudPoints: c.contacts.engagedStudPoints,
+      },
     );
     if (!resolved) continue;
 
@@ -1387,23 +1717,18 @@ export function computePlacementArrowSegments(
       anchorOffsets = [[0, 0, 0]];
     }
   } else {
-    // Lateral horizontal insertion (±X or ±Z): align along the perpendicular horizontal stud axis
+    // Lateral horizontal insertion (±X or ±Z): align on the perpendicular stud plane
+    // (horizPerpAxis × Y) to the nearest and furthest stud centers (diagonal when > 1 stud in both axes).
     const horizPerpAxis = primaryAxis === 0 ? 2 : 0;
     const hPerp = studAxisHalfOffset(s[horizPerpAxis]);
+    const hy = studAxisHalfOffset(s[1]);
     const sHoriz = horizPerpAxis === 0 ? sx : sz;
-    if (hPerp > 0) {
-      const nearOff: Vec3 = [0, 0, 0];
-      const farOff: Vec3 = [0, 0, 0];
+    if (hPerp > 0 || hy > 0) {
+      const nearOff: Vec3 = [0, hy, 0];
+      const farOff: Vec3 = [0, -hy, 0];
       nearOff[horizPerpAxis] = sHoriz * hPerp;
       farOff[horizPerpAxis] = -sHoriz * hPerp;
       anchorOffsets = [nearOff, farOff];
-    } else if (s[1] >= 60 && s[1] >= s[horizPerpAxis] * 2.2) {
-      // Tall 1-stud-wide vertical wall/panel inserted laterally
-      const hy = Math.max(0, s[1] * 0.5 - 10);
-      anchorOffsets = [
-        [0, -hy, 0],
-        [0, hy, 0],
-      ];
     } else {
       anchorOffsets = [[0, 0, 0]];
     }

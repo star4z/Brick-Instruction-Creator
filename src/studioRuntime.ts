@@ -6089,14 +6089,37 @@ function optimizeManualStepCameras(chapters, targetAspect = getActivePageLayoutA
 
 function assignAutoPlacementOffsets(chapters) {
   if (!Array.isArray(chapters)) return;
+  const computeLeafWorldStuds = (leaf, out) => {
+    const compiled = compileEmbeddedDat(leaf.p);
+    if (!compiled || !compiled.studs || compiled.studs.length === 0 || compiled.studs.length > 512) return;
+    const m = leaf.m || R_ID;
+    const ox = leaf.x || 0, oy = leaf.y || 0, oz = leaf.z || 0;
+    for (let i = 0; i < compiled.studs.length; i++) {
+      const st = compiled.studs[i];
+      const wb = xformPt([st[0], st[1], st[2]], m, ox, oy, oz, 0);
+      const wn = xformNorm([st[3], st[4], st[5]], m, 0);
+      out.push([wb[0], wb[1], wb[2], wn[0], wn[1], wn[2]]);
+    }
+  };
   const partToInput = (part) => {
     const cInfo = resolveColorInfo(part.c) || COLORS[71];
     const rgb = hexToRgb255(cInfo.hex || '#9ca3af', 0);
+    const studs = [];
+    if (part.children && part.children.length > 0) {
+      for (const ch of part.children) computeLeafWorldStuds(ch, studs);
+    } else {
+      computeLeafWorldStuds(part, studs);
+    }
+    const localUp = (!part.children || part.children.length === 0)
+      ? xformNorm([0, 1, 0], part.m || R_ID, 0)
+      : undefined;
     return {
       id: part.id,
       box: computeWorldBox(part),
       rgb: [rgb[0], rgb[1], rgb[2]],
       sku: `${part.p}:${part.c}`,
+      ...(localUp ? { localUp } : {}),
+      ...(studs.length > 0 ? { studs } : {}),
     };
   };
 

@@ -1154,6 +1154,40 @@ describe('compileDatEntry — smooth circular studs & crease-angle vertex normal
     expect(compiled!.edges.length / 6).toBe(0);
     expect((compiled!.condEdges?.length ?? 0) / 12).toBeGreaterThanOrEqual(1);
   });
+
+  it('extracts WebGL local positions and outward unit normals for top and rotated SNOT side studs while excluding anti-studs', () => {
+    const snotBrick: DatEntrySource = {
+      key: 'snot_brick_test',
+      lines: [
+        // Top stud at LDraw (0, 0, 0) pointing LDraw -Y => WebGL (0, 0, 0), dir (0, +1, 0)
+        '1 16 0 0 0 1 0 0 0 1 0 0 0 1 stud.dat',
+        // Side stud at LDraw (0, 12, -10) rotated +90° around X (local -Y -> LDraw -Z => WebGL +Z)
+        '1 16 0 12 -10 1 0 0 0 0 -1 0 1 0 stud2.dat',
+        // Underside anti-stud tube must NOT be recorded as an external stud
+        '1 16 0 4 0 1 0 0 0 20 0 0 0 1 stud4.dat',
+      ],
+    };
+    const compiled = compileDatEntry(snotBrick, () => null);
+    expect(compiled).not.toBeNull();
+    expect(compiled!.studs).toBeDefined();
+    expect(compiled!.studs).toHaveLength(2);
+
+    // Top stud
+    expect(compiled!.studs![0][0]).toBeCloseTo(0, 4);
+    expect(compiled!.studs![0][1]).toBeCloseTo(0, 4);
+    expect(compiled!.studs![0][2]).toBeCloseTo(0, 4);
+    expect(compiled!.studs![0][3]).toBeCloseTo(0, 4);
+    expect(compiled!.studs![0][4]).toBeCloseTo(1, 4);
+    expect(compiled!.studs![0][5]).toBeCloseTo(0, 4);
+
+    // Side stud at WebGL (0, -12, +10), pointing WebGL +Z (0, 0, +1)
+    expect(compiled!.studs![1][0]).toBeCloseTo(0, 4);
+    expect(compiled!.studs![1][1]).toBeCloseTo(-12, 4);
+    expect(compiled!.studs![1][2]).toBeCloseTo(10, 4);
+    expect(compiled!.studs![1][3]).toBeCloseTo(0, 4);
+    expect(compiled!.studs![1][4]).toBeCloseTo(0, 4);
+    expect(compiled!.studs![1][5]).toBeCloseTo(1, 4);
+  });
 });
 
 

@@ -45,6 +45,9 @@ export interface CompiledTexBatch {
   triCols: Int32Array | null;
 }
 
+/** Compact WebGL Y-up part-local stud descriptor: [baseX, baseY, baseZ, dirX, dirY, dirZ]. */
+export type LocalStud = readonly [number, number, number, number, number, number];
+
 export interface CompiledDatMesh {
   tris: Float32Array;
   norms: Float32Array;
@@ -60,6 +63,8 @@ export interface CompiledDatMesh {
   texBatches?: CompiledTexBatch[];
   /** Compact local-space tight sub-boxes for concave parts (undefined for solid/convex bricks). */
   subBoxes?: LocalBox6[];
+  /** Local-space outward external stud positions & unit normals (top & SNOT side studs). */
+  studs?: LocalStud[];
   min: [number, number, number];
   max: [number, number, number];
 }
@@ -110,6 +115,7 @@ export function normalizeDatRef(raw: string): string {
 // 2736 Technic Axle Towball, 32062, 32209 as well as axle holes), beamhol*/npeghol*
 // (visible Technic liftarm faces), or stud10/stud15 (visible top studs on 2x2 round parts).
 const FAST_ANTI_STUD_RE = /^(stud3|stud3a|stud4|stud4a)$/;
+const EXTRA_OUTER_STUD_RE = /^(stud10|stud15|stud20|studel|stud2el)$/;
 const SYNTH_ARC_RE = /^(\d+)-(\d+)(cyli|cylo|cylc|disc|edge|ring\d+|rin\d+|chrd|ndis)$/;
 const FALLBACK_TORUS_RE = /^t(\d+)([oiq])(\d{4})$/;
 const FALLBACK_CONE_RE = /^(\d+)-(\d+)con(\d+)$/;
@@ -827,6 +833,7 @@ export function compileDatEntry(
   let minX = Infinity, minY = Infinity, minZ = Infinity;
   let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
   const undersideBoxes: LocalBox6[] = [];
+  const localStuds: LocalStud[] = [];
 
   const upd = (p: Vec3) => {
     if (p[0] < minX) minX = p[0]; if (p[0] > maxX) maxX = p[0];
@@ -835,6 +842,19 @@ export function compileDatEntry(
   };
 
   const ld2gl = (pt: Vec3): Vec3 => [pt[0], -pt[1], -pt[2]];
+
+  const recordLocalStud = (px: number, py: number, pz: number, pm: Mat3) => {
+    const baseGl = ld2gl([px, py, pz]);
+    const topV = mat3Vec(pm, 0, -4, 0);
+    const topGl = ld2gl([px + topV[0], py + topV[1], pz + topV[2]]);
+    const ddx = topGl[0] - baseGl[0];
+    const ddy = topGl[1] - baseGl[1];
+    const ddz = topGl[2] - baseGl[2];
+    const dLen = Math.hypot(ddx, ddy, ddz);
+    if (dLen > 0.5) {
+      localStuds.push([baseGl[0], baseGl[1], baseGl[2], ddx / dLen, ddy / dLen, ddz / dLen]);
+    }
+  };
 
   const emitTri = (
     la: Vec3,
@@ -1706,10 +1726,14 @@ export function compileDatEntry(
 
         // Fast top studs & underside anti-studs (solid stud3 pins & hollow stud4 tubes)
         if (isFastStudBase(base)) {
+          recordLocalStud(nx, ny, nz, nm);
           if (totalTriFloats < triLimit) {
             emitFastStud(nx, ny, nz, nm, base.startsWith('stud2'), childCol, edgeLimit, studSegs);
           }
           continue;
+        }
+        if (EXTRA_OUTER_STUD_RE.test(base)) {
+          recordLocalStud(nx, ny, nz, nm);
         }
         if (FAST_ANTI_STUD_RE.test(base)) {
           const isTube = base.startsWith('stud4');
@@ -2181,6 +2205,7 @@ export function compileDatEntry(
     triCols: hasSubColor ? new Int32Array(triCols) : null,
     ...(texBatches.length > 0 ? { texBatches } : {}),
     ...(subBoxes ? { subBoxes } : {}),
+    ...(localStuds.length > 0 ? { studs: localStuds } : {}),
     min: [minX, minY, minZ],
     max: [maxX, maxY, maxZ],
   };

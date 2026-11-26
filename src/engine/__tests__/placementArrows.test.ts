@@ -784,4 +784,273 @@ describe('placementArrows — LEGO-style automatic placement arrows & offsets', 
     // Should never explode all 4 adjacent bricks on top of each other — cap <= 2 and skip crowding neighbors
     expect(Object.keys(offs!).length).toBeLessThanOrEqual(2);
   });
+
+  it('never misclassifies stacked or underside-attached plates with 4 LDU top-stud overlap as horizontal coaxial pins', () => {
+    // Compiled LDraw plates have total height 12 LDU (8 LDU body + 4 LDU top studs),
+    // so stacking a 2x6 plate at y=0..12 onto a 2x6 plate at y=-8..4 creates ovY = 4 > 3!
+    // Similarly, attaching a 1x12 plate at y=-8..4 underneath an overhanging 2x6 plate at y=0..12 creates ovY = 4 > 3.
+    // Both MUST offset purely vertically along the direction of the studs (NEVER shot sideways!).
+    const steps: PlacementStepInput[] = [
+      {
+        id: 's1',
+        camera: { az: 38, el: 28, side: 'top' },
+        parts: [
+          makePart('plate_2x6_bot', 0, -8, -20, 120, 12, 40, RED), // y in [-8, 4], z in [-40, 0]
+          makePart('plate_2x6_top', 0, 0, 0, 120, 12, 40, RED),    // y in [0, 12], z in [-20, 20]
+        ],
+      },
+      {
+        id: 's2',
+        camera: { az: 38, el: 28, side: 'top' },
+        parts: [
+          // 1x12 red plate tucked under the overhanging row of plate_2x6_top (z in [0, 20]) and flush with plate_2x6_bot
+          makePart('plate_1x12_under', 50, -8, 120, 20, 12, 240, RED), // y in [-8, 4], z in [0, 240]
+        ],
+      },
+    ];
+
+    const res = computeAutoPlacementOffsetsForSequence(steps);
+
+    // Step 1: upper 2x6 plate must lift strictly UP (+Y), zero X/Z sideways slide!
+    const s1Off = res.get('s1')?.['plate_2x6_top'];
+    expect(s1Off).toBeDefined();
+    expect(s1Off!.x).toBe(0);
+    expect(s1Off!.z).toBe(0);
+    expect(s1Off!.y).toBeGreaterThanOrEqual(24);
+
+    // Step 2: if plate_1x12_under is offset (e.g. occlusion/camouflage), it must move strictly along Y (NEVER shot horizontally along Z!)
+    const s2Off = res.get('s2')?.['plate_1x12_under'];
+    if (s2Off) {
+      expect(s2Off.x).toBe(0);
+      expect(s2Off.z).toBe(0);
+      expect(s2Off.y).toBeLessThanOrEqual(-24);
+    }
+  });
+
+  it('offsets a vertical SNOT tile purely in the direction of its engaged side studs even when its bottom edge rests on a brick and side walls graze it', () => {
+    const steps: PlacementStepInput[] = [
+      {
+        id: 's1',
+        camera: { az: 38, el: 28, side: 'top' },
+        parts: [
+          makePart('lower_bumper', 30, 0, 4, 20, 24, 16, DARK_GRAY), // top at y=24 directly under tile bottom
+          {
+            ...makePart('snot_bot', 30, 24, -8, 20, 24, 24, BLACK), // z in [-20, +4] incl. 4 LDU side stud
+            localUp: [0, 1, 0],
+            studs: [
+              [30, 48, -10, 0, 1, 0],
+              [30, 34, 0, 0, 0, 1], // side stud pointing +Z!
+            ],
+          },
+          {
+            ...makePart('snot_top', 30, 120, -8, 20, 24, 24, BLACK), // z in [-20, +4] incl. 4 LDU side stud
+            localUp: [0, 1, 0],
+            studs: [
+              [30, 144, -10, 0, 1, 0],
+              [30, 134, 0, 0, 0, 1], // side stud pointing +Z!
+            ],
+          },
+          // 3 wall bricks grazing the tile's smooth -X side
+          makePart('side_wall_1', 10, 24, 4, 20, 24, 8, DARK_GRAY),
+          makePart('side_wall_2', 10, 48, 4, 20, 24, 8, DARK_GRAY),
+          makePart('side_wall_3', 10, 72, 4, 20, 24, 8, DARK_GRAY),
+        ],
+      },
+      {
+        id: 's2',
+        camera: { az: 38, el: 28, side: 'top' },
+        parts: [
+          {
+            ...makePart('red_snot_1x6', 30, 24, 4, 20, 120, 8, RED), // x:[20..40], y:[24..144], z:[0..8]
+            localUp: [0, 0, 1],
+          },
+        ],
+      },
+    ];
+
+    const res = computeAutoPlacementOffsetsForSequence(steps);
+    const off = res.get('s2')?.['red_snot_1x6'];
+    expect(off).toBeDefined();
+    expect(off!.z).toBeGreaterThanOrEqual(24);
+    expect(off!.x).toBe(0);
+    expect(off!.y).toBe(0);
+    expect(off!.arrow).toBe(true);
+
+    const segs = computePlacementArrowSegments(off!.arrowBox || steps[1].parts[0].box, [off!.x, off!.y, off!.z], off!.arrowTo, null, 38);
+    expect(segs).toHaveLength(2);
+    expect(segs[0].to[0]).toBeCloseTo(30, 2);
+    expect(segs[0].to[1]).toBeCloseTo(134, 2);
+    expect(segs[1].to[0]).toBeCloseTo(30, 2);
+    expect(segs[1].to[1]).toBeCloseTo(34, 2);
+  });
+
+  it('anchors arrows to the exact engaged side studs when a SNOT tile overhangs beyond its studs', () => {
+    const steps: PlacementStepInput[] = [
+      {
+        id: 's1',
+        camera: { az: 38, el: 28, side: 'top' },
+        parts: [
+          {
+            ...makePart('snot_single', 30, 24, -8, 20, 24, 24, BLACK),
+            localUp: [0, 1, 0],
+            studs: [[30, 34, 0, 0, 0, 1]],
+          },
+        ],
+      },
+      {
+        id: 's2',
+        camera: { az: 38, el: 28, side: 'top' },
+        parts: [
+          {
+            ...makePart('red_overhang_1x6', 30, 24, 4, 20, 120, 8, RED),
+            localUp: [0, 0, 1],
+          },
+        ],
+      },
+    ];
+
+    const res = computeAutoPlacementOffsetsForSequence(steps);
+    const off = res.get('s2')?.['red_overhang_1x6'];
+    expect(off).toBeDefined();
+    expect(off!.z).toBeGreaterThanOrEqual(24);
+    expect(off!.y).toBe(0);
+    expect(off!.arrowBox).toBeDefined();
+    expect(off!.arrowBox!.center[1]).toBeCloseTo(34, 2);
+
+    const segs = computePlacementArrowSegments(off!.arrowBox!, [off!.x, off!.y, off!.z], off!.arrowTo, null, 38);
+    expect(segs).toHaveLength(1);
+    expect(segs[0].to[1]).toBeCloseTo(34, 2);
+  });
+
+  it('still offsets a SNOT tile along its stud axis via localUp fallback when compiled stud primitives are absent', () => {
+    const steps: PlacementStepInput[] = [
+      {
+        id: 's1',
+        camera: { az: 38, el: 28, side: 'top' },
+        parts: [
+          makePart('lower_bumper', 30, 0, 4, 20, 24, 16, DARK_GRAY),
+          makePart('snot_back_no_studs', 30, 24, -8, 20, 24, 24, BLACK),
+        ],
+      },
+      {
+        id: 's2',
+        camera: { az: 38, el: 28, side: 'top' },
+        parts: [
+          {
+            ...makePart('red_tile_localup', 30, 24, 4, 20, 120, 8, RED),
+            localUp: [0, 0, 1],
+          },
+        ],
+      },
+    ];
+
+    const res = computeAutoPlacementOffsetsForSequence(steps);
+    const off = res.get('s2')?.['red_tile_localup'];
+    expect(off).toBeDefined();
+    expect(off!.z).toBeGreaterThanOrEqual(24);
+    expect(off!.x).toBe(0);
+    expect(off!.y).toBe(0);
+  });
+
+  it('offsets in -studNormal when a newly placed part plugs its own side studs into an existing vertical plate, and keeps upright SNOT bricks lifting +Y when placed on top studs', () => {
+    const stepsSelfStud: PlacementStepInput[] = [
+      {
+        id: 's1',
+        camera: { az: 38, el: 28, side: 'top' },
+        parts: [
+          { ...makePart('vert_wall', 0, 0, -4, 40, 80, 8, DARK_GRAY), localUp: [0, 0, -1] },
+        ],
+      },
+      {
+        id: 's2',
+        camera: { az: 38, el: 28, side: 'top' },
+        parts: [
+          {
+            ...makePart('snot_plugger', 0, 24, 10, 20, 24, 20, YELLOW),
+            localUp: [0, 1, 0],
+            studs: [
+              [0, 48, 10, 0, 1, 0],
+              [0, 34, 0, 0, 0, -1],
+            ],
+          },
+        ],
+      },
+    ];
+    const selfRes = computeAutoPlacementOffsetsForSequence(stepsSelfStud);
+    const selfOff = selfRes.get('s2')?.['snot_plugger'];
+    expect(selfOff).toBeDefined();
+    expect(selfOff!.z).toBeGreaterThanOrEqual(24);
+    expect(selfOff!.y).toBe(0);
+
+    const stepsUprightSnot: PlacementStepInput[] = [
+      {
+        id: 's1',
+        camera: { az: 38, el: 28, side: 'top' },
+        parts: [
+          {
+            ...makePart('base_plate', 0, 0, 0, 80, 12, 20, DARK_GRAY),
+            localUp: [0, 1, 0],
+            studs: [[-30, 8, 0, 0, 1, 0], [-10, 8, 0, 0, 1, 0], [10, 8, 0, 0, 1, 0], [30, 8, 0, 0, 1, 0]],
+          },
+          {
+            ...makePart('upright_snot', 10, 8, 0, 20, 28, 20, BLACK),
+            localUp: [0, 1, 0],
+            studs: [[10, 32, 0, 0, 1, 0], [10, 18, 10, 0, 0, 1]],
+          },
+        ],
+      },
+    ];
+    const upRes = computeAutoPlacementOffsetsForSequence(stepsUprightSnot);
+    const upOff = upRes.get('s1')?.['upright_snot'];
+    expect(upOff).toBeDefined();
+    expect(upOff!.y).toBeGreaterThanOrEqual(24);
+    expect(upOff!.z).toBe(0);
+  });
+
+  it('offsets angled 45-degree SNOT tiles cleanly along the 45-degree stud normal and aligns lateral SNOT 1x2 and 2x4 arrows to stud centers', () => {
+    const invSqrt2 = Math.SQRT1_2;
+    const stepsAngled: PlacementStepInput[] = [
+      {
+        id: 's1',
+        camera: { az: 38, el: 28, side: 'top' },
+        parts: [
+          {
+            ...makePart('angled_snot_base', 0, 0, 0, 24, 24, 24, BLACK),
+            studs: [[10, 22, 0, invSqrt2, invSqrt2, 0]],
+          },
+        ],
+      },
+      {
+        id: 's2',
+        camera: { az: 38, el: 28, side: 'top' },
+        parts: [
+          {
+            ...makePart('angled_tile', 14, 16, 0, 20, 20, 20, RED),
+            localUp: [invSqrt2, invSqrt2, 0],
+          },
+        ],
+      },
+    ];
+    const angledRes = computeAutoPlacementOffsetsForSequence(stepsAngled);
+    const angledOff = angledRes.get('s2')?.['angled_tile'];
+    expect(angledOff).toBeDefined();
+    expect(angledOff!.x).toBeGreaterThanOrEqual(16);
+    expect(angledOff!.y).toBeGreaterThanOrEqual(16);
+    expect(Math.abs(angledOff!.x - angledOff!.y)).toBeLessThanOrEqual(2);
+    expect(angledOff!.z).toBe(0);
+
+    const snot1x2 = makeBox(0, 0, 0, 20, 40, 8);
+    const segs1x2 = computePlacementArrowSegments(snot1x2, [0, 0, 28], null, null, 38);
+    expect(segs1x2).toHaveLength(2);
+    expect(segs1x2[0].to[1]).toBeCloseTo(30, 2);
+    expect(segs1x2[1].to[1]).toBeCloseTo(10, 2);
+
+    const snot2x4 = makeBox(0, 0, 0, 40, 80, 8);
+    const segs2x4 = computePlacementArrowSegments(snot2x4, [0, 0, 28], null, null, 38);
+    expect(segs2x4).toHaveLength(2);
+    expect(segs2x4[0].to[0]).toBeCloseTo(10, 2);
+    expect(segs2x4[0].to[1]).toBeCloseTo(70, 2);
+    expect(segs2x4[1].to[0]).toBeCloseTo(-10, 2);
+    expect(segs2x4[1].to[1]).toBeCloseTo(10, 2);
+  });
 });
