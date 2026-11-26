@@ -9906,16 +9906,12 @@ function renderAll(renderOpts = {}) {
   document.getElementById('bottomDock').classList.toggle('hidden', !hasModel);
 
   const desktopNameEl = document.getElementById('desktopModelName');
-  const mobileModelSepEl = document.getElementById('mobileEditorModelSep');
-  const mobileModelNameEl = document.getElementById('mobileEditorModelName');
 
   const fileTypeEl = document.getElementById('menuModelFileType');
   const statsEl = document.getElementById('menuModelStats');
 
   if (!hasModel) {
     if (desktopNameEl) desktopNameEl.textContent = '';
-    if (mobileModelSepEl) mobileModelSepEl.classList.add('hidden');
-    if (mobileModelNameEl) { mobileModelNameEl.textContent = ''; mobileModelNameEl.classList.add('hidden'); }
     document.getElementById('menuModelName').textContent = 'No model loaded';
     if (fileTypeEl) { fileTypeEl.textContent = 'Import a model below to get started.'; fileTypeEl.classList.remove('hidden'); }
     if (statsEl) { statsEl.innerHTML = ''; statsEl.classList.add('hidden'); }
@@ -9952,8 +9948,6 @@ function renderAll(renderOpts = {}) {
     const fileTypeLabel = getModelFileTypeLabel();
 
     if (desktopNameEl) desktopNameEl.textContent = state.model.title;
-    if (mobileModelSepEl) mobileModelSepEl.classList.remove('hidden');
-    if (mobileModelNameEl) { mobileModelNameEl.textContent = state.model.title; mobileModelNameEl.classList.remove('hidden'); }
     document.getElementById('menuModelName').textContent = state.model.title;
     if (fileTypeEl) {
       fileTypeEl.textContent = fileTypeLabel;
@@ -20921,7 +20915,6 @@ function syncSideMenuLayout({ animate = false } = {}) {
   const brandChipEl = document.getElementById('desktopModelChip');
   const desktopSepEl = document.getElementById('desktopModelSep');
   const desktopNameEl = document.getElementById('desktopModelName');
-  const mobileBrandPillEl = document.getElementById('mobileEditorBrandPill');
   const menuDotEl = document.getElementById('menuBtnErrorBadge');
 
   if (drawerEl) {
@@ -20957,10 +20950,6 @@ function syncSideMenuLayout({ animate = false } = {}) {
   }
   if (desktopNameEl) {
     desktopNameEl.classList.toggle('hidden', !layout.showModelNameInHeader);
-  }
-  if (mobileBrandPillEl) {
-    mobileBrandPillEl.classList.toggle('hidden', !layout.showMobileEditorBrandPill);
-    mobileBrandPillEl.classList.toggle('flex', layout.showMobileEditorBrandPill);
   }
   if (menuDotEl) {
     const diags = Array.isArray(state.diagnostics) ? state.diagnostics : [];
@@ -21017,8 +21006,6 @@ document.getElementById('btnOpenMenu').onclick = toggleMenu;
 document.getElementById('desktopModelChip').onclick = () => {
   if (!getSideMenuLayout().isExpanded) openMenu();
 };
-const mobileEditorBrandPillEl = document.getElementById('mobileEditorBrandPill');
-if (mobileEditorBrandPillEl) mobileEditorBrandPillEl.onclick = openMenu;
 const menuBackdropEl = document.getElementById('menuBackdrop');
 if (menuBackdropEl) menuBackdropEl.onclick = closeMenu;
 

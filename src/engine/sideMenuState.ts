@@ -44,7 +44,6 @@ export interface SideMenuLayout {
   workspaceLeftInsetPx: number;
   showBrandTitleInHeader: boolean;
   showModelNameInHeader: boolean;
-  showMobileEditorBrandPill: boolean;
   showMenuButtonErrorBadge: boolean;
   isCompactPill: boolean;
 }
@@ -74,18 +73,18 @@ export function computeSideMenuLayout(input: SideMenuLayoutInput): SideMenuLayou
   const isOverlay = !isDesktop && isExpanded;
   const mode: SideMenuMode = isDocked ? 'docked' : isOverlay ? 'overlay' : 'collapsed';
 
-  // The menu button + site title always stay combined when expanded and on md+
-  // viewports. On narrow mobile (<768px) when collapsed, compact to the circular
-  // menu button so it never collides with top-right editor pills or duplicates
-  // the welcome sheet headline right below it.
-  const showBrandTitleInHeader = isExpanded || isTabletOrLarger;
+  // The menu button + logo + site title stay combined when expanded, on md+
+  // viewports, and in the mobile editor (when a model is loaded). On narrow
+  // mobile (<768px) welcome state with no model loaded, compact to the circular
+  // menu button so it does not duplicate the welcome sheet headline right below it.
+  const showBrandTitleInHeader = isExpanded || isTabletOrLarger || hasModel;
 
   // When collapsed on md+ with a loaded model, surface the active model title
-  // inline next to the site title. When expanded, #menuModelCard directly below
-  // the header already presents the model name, file type, and stats.
+  // inline next to the site title. On mobile (<768px) and when expanded
+  // (#menuModelCard directly below the header already shows the model name),
+  // omit the model title from the header.
   const showModelNameInHeader = !isExpanded && hasModel && isTabletOrLarger;
 
-  const showMobileEditorBrandPill = !isExpanded && hasModel && !isTabletOrLarger;
   const showMenuButtonErrorBadge = !isExpanded && errorBadgeCount > 0;
   const isCompactPill = !isExpanded && !showBrandTitleInHeader;
 
@@ -99,7 +98,6 @@ export function computeSideMenuLayout(input: SideMenuLayoutInput): SideMenuLayou
     workspaceLeftInsetPx: isDocked ? SIDE_MENU_DESKTOP_WORKSPACE_INSET_PX : 0,
     showBrandTitleInHeader,
     showModelNameInHeader,
-    showMobileEditorBrandPill,
     showMenuButtonErrorBadge,
     isCompactPill,
   };

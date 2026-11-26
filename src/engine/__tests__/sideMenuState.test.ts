@@ -32,7 +32,6 @@ describe('sideMenuState', () => {
       workspaceLeftInsetPx: SIDE_MENU_DESKTOP_WORKSPACE_INSET_PX,
       showBrandTitleInHeader: true,
       showModelNameInHeader: false,
-      showMobileEditorBrandPill: false,
       showMenuButtonErrorBadge: false,
       isCompactPill: false,
     });
@@ -100,21 +99,32 @@ describe('sideMenuState', () => {
     expect(reopenedLayout.showMenuButtonErrorBadge).toBe(false);
   });
 
-  it('keeps mobile collapsed as a compact menu pill and combines with the site title when opened', () => {
+  it('keeps mobile welcome compact, shows logo + site title (without model title) in mobile editor, and combines when opened', () => {
     const initial = createInitialSideMenuState();
-    const collapsedMobile = computeSideMenuLayout({
+    const welcomeMobile = computeSideMenuLayout({
+      state: initial,
+      viewportWidth: TABLET_BRAND_BREAKPOINT_PX - 1,
+      hasModel: false,
+      errorBadgeCount: 0,
+    });
+    expect(welcomeMobile.isExpanded).toBe(false);
+    expect(welcomeMobile.isCompactPill).toBe(true);
+    expect(welcomeMobile.showBrandTitleInHeader).toBe(false);
+    expect(welcomeMobile.showModelNameInHeader).toBe(false);
+
+    const collapsedMobileEditor = computeSideMenuLayout({
       state: initial,
       viewportWidth: TABLET_BRAND_BREAKPOINT_PX - 1,
       hasModel: true,
       errorBadgeCount: 1,
     });
 
-    expect(collapsedMobile.isExpanded).toBe(false);
-    expect(collapsedMobile.isCompactPill).toBe(true);
-    expect(collapsedMobile.showBrandTitleInHeader).toBe(false);
-    expect(collapsedMobile.showMobileEditorBrandPill).toBe(true);
-    expect(collapsedMobile.showMenuButtonErrorBadge).toBe(true);
-    expect(collapsedMobile.showBackdrop).toBe(false);
+    expect(collapsedMobileEditor.isExpanded).toBe(false);
+    expect(collapsedMobileEditor.isCompactPill).toBe(false);
+    expect(collapsedMobileEditor.showBrandTitleInHeader).toBe(true);
+    expect(collapsedMobileEditor.showModelNameInHeader).toBe(false);
+    expect(collapsedMobileEditor.showMenuButtonErrorBadge).toBe(true);
+    expect(collapsedMobileEditor.showBackdrop).toBe(false);
 
     const openedState = openSideMenuState(initial, 390);
     const openedMobile = computeSideMenuLayout({
@@ -129,7 +139,7 @@ describe('sideMenuState', () => {
     expect(openedMobile.mode).toBe('overlay');
     expect(openedMobile.showBackdrop).toBe(true);
     expect(openedMobile.showBrandTitleInHeader).toBe(true);
-    expect(openedMobile.showMobileEditorBrandPill).toBe(false);
+    expect(openedMobile.showModelNameInHeader).toBe(false);
     expect(openedMobile.showMenuButtonErrorBadge).toBe(false);
     expect(openedMobile.workspaceLeftInsetPx).toBe(0);
   });

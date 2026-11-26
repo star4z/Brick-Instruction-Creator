@@ -15,14 +15,14 @@
 |---|---|---|---|---|
 | **Desktop (`>= 1024px`)** | Expanded | Docked (`z-40`, no backdrop, `340px` workspace inset) | `☰` + Logo + `Brick Instruction Works` (+ `\| Model Name` when loaded) | Same `☰` + Logo + `Brick Instruction Works` (zero positional shift; model summary moves directly into `#menuModelCard` below) |
 | **Tablet (`768px–1023px`)** | Collapsed | Overlay (`z-47` over `z-46` scrim, `0px` workspace inset) | `☰` + Logo + `Brick Instruction Works` (+ `\| Model Name` when loaded) | Same `☰` + Logo + `Brick Instruction Works` directly above the unfolded menu body |
-| **Mobile (`< 768px`)** | Collapsed | Overlay (`z-47` over `z-46` scrim, `0px` workspace inset) | Compact `40×40` circular `☰` pill (`#mobileEditorBrandPill` displays title below when a model is loaded) | Expands in place from `(12px, 12px)` into `☰` + Logo + `Brick Instruction Works` + menu body |
+| **Mobile (`< 768px`)** | Collapsed | Overlay (`z-47` over `z-46` scrim, `0px` workspace inset) | Compact `40×40` circular `☰` pill on welcome screen; `☰` + Logo + `Brick Instruction Works` (without model title) when a model is loaded | Expands in place from `(12px, 12px)` into `☰` + Logo + `Brick Instruction Works` + menu body |
 
 ## 3. Interaction & State Invariants
 
 - **Single Continuous Header (`#menuHeaderBar`)**: `#btnOpenMenu` (`32×32` circular toggle inside a `38px` inner header bar) and `#desktopModelChip` (logo + `"Brick Instruction Works"`) stay in the exact same DOM node and `(x, y)` coordinates across collapsed and expanded states. The dividing hairline sits on `#menuDrawerPanel` (`border-t`) so the header height never shifts.
 - **Toggle Semantics**:
   - Clicking `#btnOpenMenu` (`☰`) toggles expanded ↔ collapsed on all viewports (`aria-expanded`, `aria-label`, and `title` update live).
-  - Clicking `#desktopModelChip` (or `#mobileEditorBrandPill`) when collapsed opens the side menu.
+  - Clicking `#desktopModelChip` when collapsed opens the side menu.
   - On desktop, opening modals (Page Setup, Parts List Setup, Bricks Library, Export, Step Generation, Model Issues) or triggering menu actions keeps the docked side menu open (`closeSideMenuOverlayState` only dismisses `< 1024px` overlay drawers).
   - On tablet/mobile, tapping `#menuBackdrop`, pressing `Escape`, or selecting a menu action dismisses the overlay drawer.
 - **Explicit Preference Preservation**: Collapsing the side menu on desktop is preserved if the window narrows below `1024px` and later returns to desktop width.

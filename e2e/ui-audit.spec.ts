@@ -227,6 +227,14 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
 
     // Front Cover Page (Page 1)
     await expect(page.locator('#pageLabelText')).not.toBeEmpty();
+    if (!isDesktop) {
+      await expect(page.locator('#desktopModelChip')).toBeVisible();
+      await expect(page.locator('#headerBrandLogo')).toBeVisible();
+      await expect(page.locator('#headerBrandTitle')).toBeVisible();
+      await expect(page.locator('#headerBrandTitle')).toHaveText('Brick Instruction Works');
+      await expect(page.locator('#desktopModelSep')).toBeHidden();
+      await expect(page.locator('#desktopModelName')).toBeHidden();
+    }
     await auditSurface(page, `${testInfo.project.name}: Cover Page (Pan)`, {
       checkWorkspaceChrome: true,
       hasModel: true,

@@ -28,7 +28,7 @@ Every UI state transition calls `auditSurface(...)` and verifies:
    - Every open modal/popover sheet has valid non-zero dimensions and fits within `[0, viewportWidth]` and `[0, viewportHeight]`.
    - Visible interactive `<button>` and `<a href>` controls inside active sheets are not clipped off the horizontal edges of the viewport.
 5. **Non-Overlapping Floating Chrome**:
-   - `#menuHeaderBar`, `#topRightPills`, `#mobileEditorBrandPill` (mobile), `#bottomDock`, and `#contextOverlay` do not overlap each other or clip outside the viewport.
+   - `#menuHeaderBar`, `#topRightPills`, `#bottomDock`, and `#contextOverlay` do not overlap each other or clip outside the viewport.
 
 ## Covered UI Surfaces & Features (`e2e/ui-audit.spec.ts`)
 

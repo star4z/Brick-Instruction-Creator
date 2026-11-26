@@ -226,15 +226,19 @@ export async function auditSurface(
         const topRight = document.getElementById('topRightPills');
         const bottomDock = document.getElementById('bottomDock');
         const contextOverlay = document.getElementById('contextOverlay');
-        const mobileBrand = document.getElementById('mobileEditorBrandPill');
 
-        if (isVisible(menuHeader) && isVisible(topRight)) {
+        if (isVisible(menuHeader)) {
           const mRect = menuHeader.getBoundingClientRect();
-          const tRect = topRight.getBoundingClientRect();
-          if (overlaps(mRect, tRect)) {
-            issues.push(
-              `menuHeaderBar (${Math.round(mRect.left)}..${Math.round(mRect.right)}) overlaps topRightPills (${Math.round(tRect.left)}..${Math.round(tRect.right)})`
-            );
+          if (mRect.left < -eps || mRect.right > vw + eps) {
+            issues.push(`menuHeaderBar clipped horizontally: [${Math.round(mRect.left)}, ${Math.round(mRect.right)}]`);
+          }
+          if (isVisible(topRight)) {
+            const tRect = topRight.getBoundingClientRect();
+            if (overlaps(mRect, tRect)) {
+              issues.push(
+                `menuHeaderBar (${Math.round(mRect.left)}..${Math.round(mRect.right)}) overlaps topRightPills (${Math.round(tRect.left)}..${Math.round(tRect.right)})`
+              );
+            }
           }
         }
 
@@ -242,19 +246,6 @@ export async function auditSurface(
           const tRect = topRight.getBoundingClientRect();
           if (tRect.left < -eps || tRect.right > vw + eps) {
             issues.push(`topRightPills clipped horizontally: [${Math.round(tRect.left)}, ${Math.round(tRect.right)}]`);
-          }
-        }
-
-        if (!isDesktop && hasModel && isVisible(mobileBrand)) {
-          const bRect = mobileBrand.getBoundingClientRect();
-          if (bRect.left < -eps || bRect.right > vw + eps) {
-            issues.push(`mobileEditorBrandPill clipped horizontally: [${Math.round(bRect.left)}, ${Math.round(bRect.right)}]`);
-          }
-          if (isVisible(menuHeader) && overlaps(bRect, menuHeader.getBoundingClientRect())) {
-            issues.push('mobileEditorBrandPill overlaps menuHeaderBar');
-          }
-          if (isVisible(topRight) && overlaps(bRect, topRight.getBoundingClientRect())) {
-            issues.push('mobileEditorBrandPill overlaps topRightPills');
           }
         }
 

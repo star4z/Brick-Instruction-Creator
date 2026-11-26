@@ -468,11 +468,11 @@ describe('studioRuntime safety checks', () => {
     expect(svgPaths).toHaveLength(3);
     expect(svgPaths.map(([, fill]) => fill)).toEqual(['#38bdf8', '#7c152e', '#ed7d1f']);
 
-    // Every path in public/logo.svg appears in all 4 inline SVG logos in index.html
-    // (unified menu header, mobile editor brand pill, welcome sheet, open-model modal) and in BRAND_LOGO_PATHS
+    // Every path in public/logo.svg appears in all 3 inline SVG logos in index.html
+    // (unified menu header, welcome sheet, open-model modal) and in BRAND_LOGO_PATHS
     for (const [d, fill] of svgPaths) {
       const htmlTag = `<path d="${d}" fill="${fill}"/>`;
-      expect(html.split(htmlTag).length - 1).toBe(4);
+      expect(html.split(htmlTag).length - 1).toBe(3);
       expect(runtime).toContain(`['${d}', '${fill}']`);
     }
   });
