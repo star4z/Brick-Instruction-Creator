@@ -1,6 +1,7 @@
 import type { Mat3 } from './minifigPose';
 import { R_IDENTITY, mat3Multiply, mat3Vec } from './minifigPose';
 import { buildLocalSubBoxes, type LocalBox6 } from './partContact';
+import { computeMeshCavityOcclusion } from './cavityOcclusion';
 import { hashTextureBase64 } from './textureStore';
 import { isUnconvertedStudioDatLines, mapBrickLinkColorToLDraw } from '../data/bricklinkColors';
 
@@ -65,6 +66,8 @@ export interface CompiledDatMesh {
   subBoxes?: LocalBox6[];
   /** Local-space outward external stud positions & unit normals (top & SNOT side studs). */
   studs?: LocalStud[];
+  /** Optional per-vertex concave-cavity ambient occlusion (0..255; undefined when no cavities exist). */
+  cavityAo?: Uint8Array;
   min: [number, number, number];
   max: [number, number, number];
 }
@@ -2191,6 +2194,15 @@ export function compileDatEntry(
     texBatches.length > 0 ? texBatches : undefined,
   );
 
+  const triColsArr = hasSubColor ? new Int32Array(triCols) : null;
+  const cavityAo = computeMeshCavityOcclusion(
+    trisArr,
+    normsArr,
+    triColsArr,
+    [minX, minY, minZ],
+    [maxX, maxY, maxZ],
+  );
+
   return {
     tris: trisArr,
     norms: normsArr,
@@ -2202,10 +2214,11 @@ export function compileDatEntry(
           ...(hasSubCondEdgeColor ? { condEdgeCols: new Int32Array(condEdgeCols) } : {}),
         }
       : {}),
-    triCols: hasSubColor ? new Int32Array(triCols) : null,
+    triCols: triColsArr,
     ...(texBatches.length > 0 ? { texBatches } : {}),
     ...(subBoxes ? { subBoxes } : {}),
     ...(localStuds.length > 0 ? { studs: localStuds } : {}),
+    ...(cavityAo ? { cavityAo } : {}),
     min: [minX, minY, minZ],
     max: [maxX, maxY, maxZ],
   };

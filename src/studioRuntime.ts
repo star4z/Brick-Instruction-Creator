@@ -1543,6 +1543,21 @@ function buildMeshBuffers(prevParts, newParts, opts) {
     N.push9(na[0],na[1],na[2], nb[0],nb[1],nb[2], nc[0],nc[1],nc[2]);
     C.push12(col[0], col[1], col[2], aByte);
   };
+  const pushTriSmoothAo = (a, b, c, na, nb, nc, col, aByte, aoA, aoB, aoC) => {
+    const isTrans = aByte < 245;
+    const P = isTrans ? trPos : opPos, N = isTrans ? trNorm : opNorm, C = isTrans ? trCol : opCol;
+    P.push9(a[0],a[1],a[2], b[0],b[1],b[2], c[0],c[1],c[2]);
+    N.push9(na[0],na[1],na[2], nb[0],nb[1],nb[2], nc[0],nc[1],nc[2]);
+    // Darken deeply recessed concave cavities (bins, cups, buckets, holes, open tubes)
+    // so hollow interiors read clearly even in flat unlit step mode while exterior faces stay untouched.
+    const darken = 0.36;
+    const kA = 1 - (aoA / 255) * darken;
+    const kB = 1 - (aoB / 255) * darken;
+    const kC = 1 - (aoC / 255) * darken;
+    C.push4(Math.round(col[0] * kA), Math.round(col[1] * kA), Math.round(col[2] * kA), aByte);
+    C.push4(Math.round(col[0] * kB), Math.round(col[1] * kB), Math.round(col[2] * kB), aByte);
+    C.push4(Math.round(col[0] * kC), Math.round(col[1] * kC), Math.round(col[2] * kC), aByte);
+  };
   const pushEdge = (a, b, col, aByte) => {
     const P = activeLineHighlighted ? hlLnPos : lnPos;
     const C = activeLineHighlighted ? hlLnCol : lnCol;
@@ -2272,7 +2287,8 @@ function buildMeshBuffers(prevParts, newParts, opts) {
         subEdgeColCache.set(cid, cached);
         return cached;
       };
-      for (let i = 0, ti = 0; i < T.length; i += 9, ti++) {
+      const CAO = compiled.cavityAo;
+      for (let i = 0, ti = 0, vi = 0; i < T.length; i += 9, ti++, vi += 3) {
         const a = xformPt([T[i],T[i+1],T[i+2]], m, ox, oy, oz, hingeRad);
         const b = xformPt([T[i+3],T[i+4],T[i+5]], m, ox, oy, oz, hingeRad);
         const c = xformPt([T[i+6],T[i+7],T[i+8]], m, ox, oy, oz, hingeRad);
@@ -2284,6 +2300,13 @@ function buildMeshBuffers(prevParts, newParts, opts) {
         if (TC && subColCache) {
           const sc = resolveSubColor(TC[ti]);
           if (sc) { triRgb = sc.rgb; triAlpha = sc.alpha; }
+        }
+        if (CAO && !isGhost) {
+          const aoA = CAO[vi], aoB = CAO[vi + 1], aoC = CAO[vi + 2];
+          if (aoA || aoB || aoC) {
+            pushTriSmoothAo(a, b, c, na, nb, nc, triRgb, triAlpha, aoA, aoB, aoC);
+            continue;
+          }
         }
         pushTriSmooth(a, b, c, na, nb, nc, triRgb, triAlpha);
       }
