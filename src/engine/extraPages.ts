@@ -6,10 +6,11 @@
  * backward compatibility with older IndexedDB sessions and `.biw` projects.
  */
 
-export type ExtraPageKind = 'cover' | 'complete' | 'bom' | 'back';
+export type ExtraPageKind = 'cover' | 'play_features' | 'complete' | 'bom' | 'back';
 
 export interface ExtraPagesConfig {
   showCover: boolean;
+  showPlayFeatures?: boolean;
   showBuildComplete: boolean;
   showPartsList: boolean;
   showBackCover: boolean;
@@ -28,6 +29,7 @@ export interface ExtraPageSettingsAction {
 export function createDefaultExtraPagesConfig(): ExtraPagesConfig {
   return {
     showCover: true,
+    showPlayFeatures: false,
     showBuildComplete: true,
     showPartsList: true,
     showBackCover: true,
@@ -44,6 +46,7 @@ export function normalizeExtraPagesConfig(
   const fallback = typeof raw?.showExtras === 'boolean' ? raw.showExtras : true;
   return {
     showCover: typeof raw?.showCover === 'boolean' ? raw.showCover : fallback,
+    showPlayFeatures: typeof raw?.showPlayFeatures === 'boolean' ? raw.showPlayFeatures : false,
     showBuildComplete:
       typeof raw?.showBuildComplete === 'boolean' ? raw.showBuildComplete : fallback,
     showPartsList: typeof raw?.showPartsList === 'boolean' ? raw.showPartsList : fallback,
@@ -58,6 +61,8 @@ export function isExtraPageEnabled(
   switch (kind) {
     case 'cover':
       return Boolean(config.showCover);
+    case 'play_features':
+      return Boolean(config.showPlayFeatures);
     case 'complete':
       return Boolean(config.showBuildComplete);
     case 'bom':

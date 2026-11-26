@@ -174,6 +174,11 @@ import {
   planInlineSubstepStrip,
 } from './engine/substepStrips';
 import {
+  buildPlayFeatureArrowSvg,
+  detectPlayFeaturePanels,
+  drawPlayFeatureArrowCanvas,
+} from './engine/playFeatures';
+import {
   buildPhysicalVerticalPrereqMap,
   classifySidewaysCapability,
   createHorizontalFastenerGuards,
@@ -9153,6 +9158,11 @@ function rebuildPages() {
   });
   syncLayoutDiagnostic();
 
+  // 0. Optional Play Features demonstration spread BEFORE Build Complete
+  if (state.showPlayFeatures) {
+    pages.push({ id:'play_features', kind:'play_features', num:++pNum, label:'Play Features' });
+  }
+
   // 1. Build Complete celebration page BEFORE Parts List
   if (state.showBuildComplete) {
     pages.push({ id:'complete', kind:'complete', num:++pNum, label:'Build Complete' });
@@ -10245,7 +10255,7 @@ function renderAll(renderOpts = {}) {
     studioPhotoEngine.releaseTransientBuffers();
   }
   const theme = getThemeForPage(page);
-  const allParts = (page.kind === 'cover' || page.kind === 'complete' || !pageNavOnly)
+  const allParts = (page.kind === 'cover' || page.kind === 'complete' || page.kind === 'play_features' || !pageNavOnly)
     ? getAllParts(state.model)
     : null;
 
@@ -10524,6 +10534,55 @@ function renderAll(renderOpts = {}) {
         mountedCanvases,
       );
     }
+  } else if (page.kind === 'play_features') {
+    const pfParts = allParts || getAllParts(state.model);
+    const panels = detectPlayFeaturePanels(
+      pfParts.map((p) => ({ id: p.id, partId: p.p, title: resolvePart(p.p).name || '', m: p.m })),
+      (state.model?.chapters || []).map((c) => ({ id: c.id, kind: c.kind, name: c.name, isSectionModule: Boolean(c.isSectionModule) })),
+    );
+    const isLand = dims.width >= dims.height;
+    const cols = isLand ? panels.length : 1;
+    const rows = isLand ? 1 : panels.length;
+    const panelW = Math.max(200, Math.round((dims.width - padPx * 2 - (cols - 1) * 14) / cols));
+    const panelH = Math.max(180, Math.round((dims.height - padPx * 2 - footerH - 36 - (rows - 1) * 14) / rows));
+    const snaps = panels.map((pn) => renderSnapshot([], pfParts, pn.az, pn.el, Math.min(900, panelW * 2), Math.min(900, panelH * 2), 1.0, {
+      highlightNew: false,
+      fadePrev: false,
+      showArrows: false,
+      stepLighting: state.stepLighting,
+      highQualityStepRender: state.highQualityStepRender,
+      starkBlackOutlines: state.starkBlackOutlines,
+      outlineLineWeight: state.starkBlackOutlines ? state.outlineLineWeight : 'light',
+      darkBackground: isDarkHexColor(toHexColor(theme.bgColor || '#ffffff', '#ffffff')),
+      accent: theme.accent,
+    }));
+    frame.innerHTML = `
+      <div class="relative w-full h-full flex flex-col overflow-hidden" style="padding:${padPx}px;padding-bottom:${padPx + footerH}px;gap:${Math.round(typo.pt(10))}px">
+        ${wordless ? '' : `
+          <div class="shrink-0 flex items-center justify-between">
+            <div class="font-extrabold tracking-tight" style="font-size:${Math.round(typo.pt(15))}px;color:${theme.text}">Play &amp; Display Features</div>
+            <span class="text-xs font-bold uppercase tracking-wider opacity-60" style="color:${theme.muted}">${panels.length} Views</span>
+          </div>`}
+        <div class="flex-1 min-h-0 grid" style="grid-template-columns:repeat(${cols},minmax(0,1fr));grid-template-rows:repeat(${rows},minmax(0,1fr));gap:${Math.round(typo.pt(10))}px">
+          ${panels.map((pn, idx) => `
+            <div class="relative rounded-xl overflow-hidden flex flex-col items-center justify-center p-2" style="background:${theme.calloutBg};border:1.5px solid ${theme.calloutBorder}">
+              <div class="relative flex-1 min-h-0 w-full flex items-center justify-center overflow-hidden">
+                <span data-canvas-mount="pf_${idx}" class="w-full h-full flex items-center justify-center"></span>
+                <div class="absolute top-2 right-2 pointer-events-none drop-shadow-xs">${buildPlayFeatureArrowSvg(pn.kind, Math.max(32, Math.round(typo.pt(32))))}</div>
+              </div>
+              ${wordless ? '' : `<div class="shrink-0 font-bold tracking-tight pt-1" style="font-size:${Math.round(typo.pt(9.5))}px;color:${theme.text}">${escHtml(pn.label)}</div>`}
+            </div>
+          `).join('')}
+        </div>
+      </div>`;
+    panels.forEach((pn, idx) => {
+      mountRenderedCanvas(
+        frame.querySelector(`[data-canvas-mount="pf_${idx}"]`),
+        snaps[idx],
+        { className: 'w-full h-full object-contain pointer-events-none select-none', alt: pn.label },
+        mountedCanvases,
+      );
+    });
   } else if (page.kind === 'complete') {
     state.completeMeta = normalizeCompleteMeta(state.completeMeta);
     const cm = state.completeMeta;
@@ -14640,6 +14699,7 @@ function syncMenuControls() {
       : null,
   );
   setChk('toggleShowCover', state.showCover);
+  setChk('toggleShowPlayFeatures', state.showPlayFeatures);
   setChk('toggleShowComplete', state.showBuildComplete);
   setChk('toggleShowPartsList', state.showPartsList);
   setChk('toggleShowBackCover', state.showBackCover);
@@ -19879,6 +19939,63 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       // Register clickable PDF hyperlink over the program attribution + QR code
       links.push(canvasRectToPdfLink(actualGroupRect, pxW, pxH, pageWpt, pageHpt, PROGRAM_URL));
     }
+  } else if (page.kind === 'play_features') {
+    const pfParts = getAllParts(state.model);
+    const panels = detectPlayFeaturePanels(
+      pfParts.map((p) => ({ id: p.id, partId: p.p, title: resolvePart(p.p).name || '', m: p.m })),
+      (state.model?.chapters || []).map((c) => ({ id: c.id, kind: c.kind, name: c.name, isSectionModule: Boolean(c.isSectionModule) })),
+    );
+    const isLand = pxW >= pxH;
+    const cols = isLand ? panels.length : 1;
+    const rows = isLand ? 1 : panels.length;
+    const headerH = wordless ? 0 : Math.round(typo.pt(26));
+    if (!wordless) {
+      ctx.fillStyle = theme.text;
+      ctx.font = themeCanvasFont(theme, 800, Math.round(typo.pt(15)));
+      ctx.fillText('Play & Display Features', pad, pad);
+    }
+    const gapPx = Math.round(typo.pt(10));
+    const gridTop = pad + headerH;
+    const gridW = pxW - pad * 2;
+    const gridH = pxH - gridTop - pad - footerH;
+    const cardW = (gridW - (cols - 1) * gapPx) / cols;
+    const cardH = (gridH - (rows - 1) * gapPx) / rows;
+    for (let idx = 0; idx < panels.length; idx++) {
+      const pn = panels[idx];
+      const c = idx % cols;
+      const r = Math.floor(idx / cols);
+      const cx = pad + c * (cardW + gapPx);
+      const cy = gridTop + r * (cardH + gapPx);
+      ctx.beginPath();
+      ctx.roundRect(cx, cy, cardW, cardH, Math.round(typo.pt(10)));
+      ctx.fillStyle = theme.calloutBg;
+      ctx.fill();
+      ctx.strokeStyle = theme.calloutBorder;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      const snap = renderSnapshot([], pfParts, pn.az, pn.el, Math.min(1100, Math.round(cardW * 1.6)), Math.min(1100, Math.round(cardH * 1.6)), 1.0, {
+        highlightNew: false,
+        fadePrev: false,
+        showArrows: false,
+        stepLighting: state.stepLighting,
+        highQualityStepRender: state.highQualityStepRender,
+        starkBlackOutlines: state.starkBlackOutlines,
+        outlineLineWeight: state.starkBlackOutlines ? state.outlineLineWeight : 'light',
+        darkBackground: isDarkHexColor(toHexColor(theme.bgColor || '#ffffff', '#ffffff')),
+        accent: theme.accent,
+      });
+      const img = await resolveRenderDrawable(snap);
+      const labelSpace = wordless ? 0 : Math.round(typo.pt(18));
+      drawContain(ctx, img, cx + 8, cy + 8, cardW - 16, cardH - 16 - labelSpace);
+      drawPlayFeatureArrowCanvas(ctx, pn.kind, cx + cardW - Math.round(typo.pt(22)), cy + Math.round(typo.pt(22)), Math.round(typo.pt(32)));
+      if (!wordless) {
+        ctx.fillStyle = theme.text;
+        ctx.font = themeCanvasFont(theme, 700, Math.round(typo.pt(9.5)));
+        ctx.textAlign = 'center';
+        ctx.fillText(pn.label, cx + cardW / 2, cy + cardH - labelSpace + 2);
+        ctx.textAlign = 'left';
+      }
+    }
   } else if (page.kind === 'complete') {
     const cm = normalizeCompleteMeta(state.completeMeta);
     if (cm.bgSrc) {
@@ -23580,6 +23697,7 @@ const openExtraPageSettings = (kind) => {
 };
 for (const [chkId, key] of [
   ['toggleShowCover', 'showCover'],
+  ['toggleShowPlayFeatures', 'showPlayFeatures'],
   ['toggleShowComplete', 'showBuildComplete'],
   ['toggleShowPartsList', 'showPartsList'],
   ['toggleShowBackCover', 'showBackCover'],

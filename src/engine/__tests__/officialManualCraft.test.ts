@@ -610,7 +610,34 @@ describe('Official Manual Craft Pass 2 — Substep Strips, Vertical Stacks, Cele
       'multi-booklet-hint',
     ]);
   });
+
+  it('detects Play Features demonstration panels and renders yellow motion arrows', async () => {
+    const { detectPlayFeaturePanels, buildPlayFeatureArrowSvg } = await import('../playFeatures');
+    const panels = detectPlayFeaturePanels(
+      [
+        { id: 'p1', partId: '3937', title: 'Hinge Brick 1x2 Base', m: [0.707, 0, 0.707, 0, 1, 0, -0.707, 0, 0.707] },
+        { id: 'p2', partId: '3648', title: 'Technic Gear 24 Tooth' },
+      ],
+      [
+        { id: 'c1', kind: 'submodel', name: 'Roof' },
+        { id: 'c2', kind: 'submodel', name: 'Wing' },
+      ],
+    );
+    expect(panels).toHaveLength(3);
+    expect(panels.map((p) => p.kind)).toEqual(['hinge', 'rotate', 'detach']);
+    expect(buildPlayFeatureArrowSvg('hinge')).toContain('#facc15');
+    expect(buildPlayFeatureArrowSvg('rotate')).toContain('#facc15');
+    expect(buildPlayFeatureArrowSvg('detach')).toContain('#facc15');
+
+    // Static model without hinges/wheels/submodels still gets 2 clean showcase views
+    const fallbackPanels = detectPlayFeaturePanels([
+      { id: 'b1', partId: '3001', title: 'Brick 2x4' },
+    ]);
+    expect(fallbackPanels).toHaveLength(2);
+    expect(fallbackPanels.every((p) => p.kind === 'view')).toBe(true);
+  });
 });
+
 
 
 

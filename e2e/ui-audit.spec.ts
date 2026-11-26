@@ -452,6 +452,11 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     await expect(page.locator('#menuStepGenBtn')).toHaveText(/^\s*Step Generation\s*$/);
     await page.locator('#menuPageSetupBtn').click();
     await expect(page.locator('#pageSetupModal')).toBeVisible();
+    await expect(page.locator('#toggleShowPlayFeatures')).toBeVisible();
+    await page.locator('#toggleShowPlayFeatures').click();
+    await expect(page.locator('#toggleShowPlayFeatures')).toBeChecked();
+    await page.locator('#toggleShowPlayFeatures').click();
+    await expect(page.locator('#toggleShowPlayFeatures')).not.toBeChecked();
     await expect(page.locator('#pageSetupModal .step-border-style-setup-btn[data-step-border-style="lines"]')).toHaveAttribute('aria-pressed', 'true');
     await auditSurface(page, `${testInfo.project.name}: Page Setup Modal`, {
       activeContainerSelector: '#pageSetupModal',
