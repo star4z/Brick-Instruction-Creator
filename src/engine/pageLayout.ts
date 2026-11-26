@@ -20,7 +20,7 @@
 import type { StepBorderStyle } from '../themes/customThemes';
 import type { Vec3, WorldBox } from './minifigPose';
 import { computePageTypography, type PageDensity } from './pageTypography';
-import type { WorldBounds3D } from './stepCamera';
+import { STEP_CAMERA_FRAMING_MARGIN, type WorldBounds3D } from './stepCamera';
 import { PAPER_FORMAT_ORDER, PAPER_FORMAT_SPECS, type PaperFormatSpec } from './stepToolbar';
 
 export type StepFlowDirection = 'row' | 'column';
@@ -953,8 +953,8 @@ export function describePageLayoutSpec(spec: PageLayoutSpec): string {
 
 export const CM_PER_INCH = 2.54;
 export const LDU_PER_STUD = 20;
-/** Exact orthographic half-height framing margin used by WebGLBrickEngine.computeMVP (`mesh.radius * 1.12 / zoom`). */
-export const STEP_CAMERA_RADIUS_MARGIN = 1.12;
+/** Exact orthographic framing margin shared with WebGLBrickEngine.computeMVP and computeStepOrthoFrustum. */
+export const STEP_CAMERA_RADIUS_MARGIN = STEP_CAMERA_FRAMING_MARGIN;
 
 /** Minimum physical 3D step visual area (excluding margins/padding & header chrome): 1" × 1". */
 export const SMART_AUTO_MIN_STEP_AREA_WIDTH_IN = 1.0;
@@ -1020,6 +1020,14 @@ export interface SmartAutoStepMetric {
   isMinifigPoseStep?: boolean;
   /** True when this step places a minifigure onto the model. */
   hasAttachedMinifig?: boolean;
+  /** True when the step has extra right-side header badges (e.g. step hint / prepare pill) that occupy top-right. */
+  hasHeaderBadges?: boolean;
+  /**
+   * True when the step's projected 2D silhouette clears the compact top-left step-number + PLI
+   * pill on a 1-up full page (either naturally or via a bounded collision-free 2D shift),
+   * allowing the 3D render to reclaim the vertical header strip cleanly.
+   */
+  canOverlayPli?: boolean;
 }
 
 export interface StepSlotPhysicalEvaluation {
@@ -1277,6 +1285,102 @@ export function computeRequiredModelSideForStudCm(
   );
 }
 
+export interface PliOverlaySpec {
+  /** True when the step header is compact enough to float cleanly in the top-left corner of a 1-up slot. */
+  eligible: boolean;
+  /** Normalized width [0..1] of the top-left step number + PLI obstacle inside the full slot interior. */
+  widthFrac: number;
+  /** Normalized height [0..1] of the top-left step number + PLI obstacle inside the full slot interior. */
+  heightFrac: number;
+  /** Physical width of the full slot interior (inches, excluding slot padding). */
+  fullInnerWidthIn: number;
+  /** Physical height of the full slot interior (inches, excluding slot padding & pose legend). */
+  fullInnerHeightIn: number;
+}
+
+/**
+ * Computes whether a step's top-left step-number + PLI box is compact enough to
+ * float over the top-left corner of a 1-up full-page slot (like official LEGO
+ * instruction spreads) and returns its normalized obstacle rectangle inside the
+ * full slot interior.
+ */
+export function computeStepPliOverlaySpec(
+  step: Pick<
+    SmartAutoStepMetric,
+    | 'pliUniqueCount'
+    | 'hasInlineCallout'
+    | 'hasMinifig1to1'
+    | 'hasPoseLegend'
+    | 'isOfficialMinifigStyle'
+    | 'hasHeaderBadges'
+  >,
+  slotWidthIn: number,
+  slotHeightIn: number,
+  ctx: SmartAutoPageContext,
+  slotCount = 1,
+): PliOverlaySpec {
+  const safeSlotW = Math.max(0, slotWidthIn);
+  const safeSlotH = Math.max(0, slotHeightIn);
+  const ts = ctx.typeScale;
+  const slotPadIn = ctx.slotPadIn;
+  const poseLegendHIn = step.hasPoseLegend ? (22 / 72) * ts : 0;
+  const fullInnerWidthIn = Math.max(0, safeSlotW - slotPadIn * 2);
+  const fullInnerHeightIn = Math.max(0, safeSlotH - slotPadIn * 2 - poseLegendHIn);
+
+  if (
+    slotCount !== 1 ||
+    step.isOfficialMinifigStyle ||
+    step.hasInlineCallout ||
+    step.hasMinifig1to1 ||
+    step.hasHeaderBadges ||
+    fullInnerWidthIn < 2.5 ||
+    fullInnerHeightIn < 2.5
+  ) {
+    return {
+      eligible: false,
+      widthFrac: 0,
+      heightFrac: 0,
+      fullInnerWidthIn,
+      fullInnerHeightIn,
+    };
+  }
+
+  const pliCount = Math.max(0, Math.min(7, Math.round(step.pliUniqueCount ?? 1)));
+  const pliThumbIn = (25 / 72) * ts;
+  const singlePliRowHIn = pliThumbIn + (10 / 72) * ts;
+  const headerGapIn = (8 / 72) * ts;
+  const stepNumPt = 21;
+  const stepNumWIn = ((stepNumPt * 1.45) / 72) * ts;
+  const chipWIn = pliThumbIn + (24 / 72) * ts;
+  const availPliWIn = Math.max(0.35, fullInnerWidthIn - stepNumWIn - (8 / 72) * ts);
+  const chipsPerRow = Math.max(1, Math.floor(availPliWIn / Math.max(0.3, chipWIn)));
+  const pliRows = pliCount <= 1 ? 1 : Math.min(3, Math.ceil(pliCount / chipsPerRow));
+
+  if (pliRows > 1) {
+    return {
+      eligible: false,
+      widthFrac: 1,
+      heightFrac: Math.min(1, (singlePliRowHIn * pliRows + headerGapIn) / Math.max(0.5, fullInnerHeightIn)),
+      fullInnerWidthIn,
+      fullInnerHeightIn,
+    };
+  }
+
+  const pliBoxWIn = pliCount > 0 ? pliCount * chipWIn + (18 / 72) * ts : 0;
+  const headerWIn = stepNumWIn + (pliCount > 0 ? (10 / 72) * ts + pliBoxWIn : 0) + (12 / 72) * ts;
+  const headerHIn = singlePliRowHIn + headerGapIn + (6 / 72) * ts;
+  const widthFrac = Math.min(1, headerWIn / fullInnerWidthIn);
+  const heightFrac = Math.min(1, headerHIn / fullInnerHeightIn);
+
+  return {
+    eligible: widthFrac <= 0.56 && heightFrac <= 0.26,
+    widthFrac,
+    heightFrac,
+    fullInnerWidthIn,
+    fullInnerHeightIn,
+  };
+}
+
 /**
  * Evaluates whether a single step fits inside a slot of physical size
  * `(slotWidthIn × slotHeightIn)` while satisfying BOTH:
@@ -1336,12 +1440,21 @@ export function evaluateStepInSlot(
       pliRows > 1 ? Math.min(rawHeaderHIn, Math.max(singleRowHeaderHIn, safeSlotH * 0.36)) : singleRowHeaderHIn;
   }
 
+  // When verified collision-free on a 1-up slot, floating the compact top-left PLI pill
+  // reclaims the full vertical slot height for the 3D render (matching official LEGO manuals).
+  const overlayPli = Boolean(
+    step.canOverlayPli &&
+      slotCount === 1 &&
+      computeStepPliOverlaySpec(step, safeSlotW, safeSlotH, ctx, slotCount).eligible,
+  );
+  const effectiveHeaderHIn = overlayPli ? 0 : headerHIn;
+
   const poseLegendHIn = step.hasPoseLegend ? (22 / 72) * ts : 0;
 
   const modelAreaWidthIn = Math.max(0, safeSlotW - slotPadIn * 2 - calloutReserveWIn - mf1to1ReserveWIn);
   const modelAreaHeightIn = Math.max(
     0,
-    safeSlotH - slotPadIn * 2 - headerHIn - calloutReserveHIn - poseLegendHIn,
+    safeSlotH - slotPadIn * 2 - effectiveHeaderHIn - calloutReserveHIn - poseLegendHIn,
   );
 
   const modelScale = Math.max(0.4, Number.isFinite(step.modelScale) ? step.modelScale! : 1.0);
@@ -1389,7 +1502,7 @@ export function evaluateStepInSlot(
 
   const requiredSlotWidthIn = reqModelW + slotPadIn * 2 + reqCalloutW + reqMf1to1W;
   const requiredSlotHeightIn =
-    reqModelH + slotPadIn * 2 + singleRowHeaderHIn + reqCalloutH + poseLegendHIn;
+    reqModelH + slotPadIn * 2 + (overlayPli ? 0 : singleRowHeaderHIn) + reqCalloutH + poseLegendHIn;
 
   return {
     slotWidthIn: safeSlotW,

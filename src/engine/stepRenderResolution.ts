@@ -26,6 +26,10 @@ export interface StepSlotRenderSizeInput {
   slotWidth: number;
   /** Estimated visual height of the step slot (CSS px on screen, or canvas px in PDF). */
   slotHeight: number;
+  /** Optional exact 3D visual box width inside the slot (overrides heuristic 0.94× slotWidth). */
+  visualWidth?: number;
+  /** Optional exact 3D visual box height inside the slot (overrides heuristic 0.78×/0.74× slotHeight). */
+  visualHeight?: number;
   /** Number of step slots on the page. */
   slotCount: number;
   isFeatured?: boolean;
@@ -118,11 +122,13 @@ export function computeStepSlotRenderSize(input: StepSlotRenderSizeInput): Rende
   const isLargeSlot = slotCount === 1 || Boolean(input.isFeatured);
   const isCompact = Boolean(input.isCompact);
 
-  // Estimate usable model box inside the slot (subtracting top step-number/PLI strip)
+  // Estimate usable model box inside the slot (subtracting top step-number/PLI strip unless exact dims passed)
   const rawW = Math.max(120, Number.isFinite(input.slotWidth) ? input.slotWidth : 640);
   const rawH = Math.max(120, Number.isFinite(input.slotHeight) ? input.slotHeight : 440);
-  const visualW = mode === 'pdf' ? rawW : rawW * 0.94;
-  const visualH = mode === 'pdf' ? rawH : rawH * (isLargeSlot ? 0.78 : 0.74);
+  const hasExactW = typeof input.visualWidth === 'number' && Number.isFinite(input.visualWidth) && input.visualWidth > 40;
+  const hasExactH = typeof input.visualHeight === 'number' && Number.isFinite(input.visualHeight) && input.visualHeight > 40;
+  const visualW = hasExactW ? input.visualWidth! : (mode === 'pdf' ? rawW : rawW * 0.94);
+  const visualH = hasExactH ? input.visualHeight! : (mode === 'pdf' ? rawH : rawH * (isLargeSlot ? 0.78 : 0.74));
 
   // Clamp aspect ratio to a sensible framing range so extreme slots don't distort
   const aspect = Math.max(0.72, Math.min(2.25, visualW / Math.max(1, visualH)));

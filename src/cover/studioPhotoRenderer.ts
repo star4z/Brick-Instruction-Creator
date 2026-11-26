@@ -7,7 +7,14 @@
 //   5. Screen-Space Ambient Occlusion (SSAO) + depth-aware bilateral smooth composite
 
 import { computeCameraBasis } from './coverLayout';
-import { computeStepOrthoFrustum, type WorldBounds3D } from '../engine/stepCamera';
+import type { WorldBox } from '../engine/minifigPose';
+import {
+  STEP_CAMERA_FRAMING_MARGIN,
+  computeStepOrthoFrustum,
+  type StepOrthoFrustumOptions,
+  type StepPliObstacleRect,
+  type WorldBounds3D,
+} from '../engine/stepCamera';
 import { getLineWeightTapOffsets, type LineWeightId, type PlacementArrowStyle } from '../themes/customThemes';
 import { buildPlacementArrowGeometry, type PlacementArrowSpec } from '../engine/placementArrows';
 
@@ -45,6 +52,12 @@ export interface StudioMeshData {
   center: [number, number, number];
   radius: number;
   fullRadius: number;
+  isZoomedIn?: boolean;
+  partBoxes?: readonly WorldBox[];
+  newPartBoxes?: readonly WorldBox[];
+  targetHalfW?: number;
+  targetHalfH?: number;
+  pliObstacle?: StepPliObstacleRect | null;
   bounds: {
     minX: number;
     minY: number;
@@ -291,6 +304,7 @@ export function computeStudioOrthoCamera(
   panX = 0,
   panY = 0,
   bounds?: WorldBounds3D | null,
+  frustumOptions?: StepOrthoFrustumOptions | null,
 ): StudioCameraResult {
   const az = (azDeg * Math.PI) / 180;
   const el = (elDeg * Math.PI) / 180;
@@ -310,6 +324,8 @@ export function computeStudioOrthoCamera(
   const safeZoom = Math.max(0.4, zoom);
   let halfW: number;
   let halfH: number;
+  let centerOffsetR = 0;
+  let centerOffsetU = 0;
   if (fixedHalfH > 0) {
     halfH = fixedCenter ? fixedHalfH / safeZoom : fixedHalfH;
     halfW = halfH * aspect;
@@ -322,13 +338,24 @@ export function computeStudioOrthoCamera(
       elDeg,
       aspect,
       safeZoom,
+      STEP_CAMERA_FRAMING_MARGIN,
+      frustumOptions ? { ...frustumOptions, origin: target } : null,
     );
     halfW = frustum.orthoHalfW;
     halfH = frustum.orthoHalfH;
+    centerOffsetR = frustum.centerOffsetR;
+    centerOffsetU = frustum.centerOffsetU;
   }
   const pxX = panX * halfW * safeZoom;
   const pxY = panY * halfH * safeZoom;
-  const proj = orthoMat4(-halfW - pxX, halfW - pxX, -halfH + pxY, halfH + pxY, near, far);
+  const proj = orthoMat4(
+    centerOffsetR - halfW - pxX,
+    centerOffsetR + halfW - pxX,
+    centerOffsetU - halfH + pxY,
+    centerOffsetU + halfH + pxY,
+    near,
+    far,
+  );
   const mvp = mulMat4(proj, view);
 
   // Place shading eye far along view ray so orthographic Fresnel & specular match parallel view rays
@@ -1383,6 +1410,16 @@ export class StudioPhotoRenderer {
           options.panX ?? 0,
           options.panY ?? 0,
           mesh.bounds,
+          mesh.partBoxes?.length
+            ? {
+                partBoxes: mesh.partBoxes,
+                newPartBoxes: mesh.newPartBoxes,
+                isZoomedIn: mesh.isZoomedIn,
+                targetHalfW: mesh.targetHalfW,
+                targetHalfH: mesh.targetHalfH,
+                pliObstacle: mesh.pliObstacle,
+              }
+            : null,
         )
       : computeStudioTelephotoCamera(
           mesh.triPos.length >= 9 ? mesh.triPos : mesh.texDraws![0].triPos,

@@ -427,42 +427,114 @@ function nearestCornerForAzimuth(azDeg: number, preferCorner: StudioCornerId): S
   return bestId;
 }
 
+export interface MinifigPlacementCameraOptions {
+  /** Target viewport aspect ratio (`width / height`) so elongated models align with the page layout. */
+  targetAspect?: number | null;
+  /** Optional layout-aligned base 3/4 azimuth in `[24°, 66°]` (defaults to 38°). */
+  baseAzimuthDeg?: number | null;
+}
+
+function projectModelHalfExtents(
+  boxes: readonly WorldBox[],
+  azDeg: number,
+  elDeg: number,
+): { halfW: number; halfH: number } {
+  const { right, up } = cameraBasis(azDeg, elDeg);
+  const rx = right[0], ry = right[1], rz = right[2];
+  const ux = up[0], uy = up[1], uz = up[2];
+  let minR = Infinity;
+  let maxR = -Infinity;
+  let minU = Infinity;
+  let maxU = -Infinity;
+  for (let i = 0; i < boxes.length; i++) {
+    const b = boxes[i];
+    const loR =
+      (rx >= 0 ? b.min[0] : b.max[0]) * rx +
+      (ry >= 0 ? b.min[1] : b.max[1]) * ry +
+      (rz >= 0 ? b.min[2] : b.max[2]) * rz;
+    const hiR =
+      (rx >= 0 ? b.max[0] : b.min[0]) * rx +
+      (ry >= 0 ? b.max[1] : b.min[1]) * ry +
+      (rz >= 0 ? b.max[2] : b.min[2]) * rz;
+    const loU =
+      (ux >= 0 ? b.min[0] : b.max[0]) * ux +
+      (uy >= 0 ? b.min[1] : b.max[1]) * uy +
+      (uz >= 0 ? b.min[2] : b.max[2]) * uz;
+    const hiU =
+      (ux >= 0 ? b.max[0] : b.min[0]) * ux +
+      (uy >= 0 ? b.max[1] : b.min[1]) * uy +
+      (uz >= 0 ? b.max[2] : b.min[2]) * uz;
+    if (loR < minR) minR = loR;
+    if (hiR > maxR) maxR = hiR;
+    if (loU < minU) minU = loU;
+    if (hiU > maxU) maxU = hiU;
+  }
+  if (!Number.isFinite(minR)) return { halfW: 20, halfH: 20 };
+  return {
+    halfW: Math.max(12, (maxR - minR) * 0.5),
+    halfH: Math.max(12, (maxU - minU) * 0.5),
+  };
+}
+
 /**
  * Chooses the clearest, unobstructed camera viewpoint for placing a minifigure onto
  * an already-built model. Never leaves the minifigure hiding behind the model when
  * a clear viewpoint exists, prefers seeing the minifigure's front/face when views
- * are equally clear, and falls back to elevated or cardinal viewpoints for interior
- * cabs and alcoves.
+ * are equally clear, aligns elongated models with the active page aspect ratio when
+ * `options.targetAspect` is provided, and falls back to elevated or cardinal viewpoints
+ * for interior cabs and alcoves.
  */
 export function chooseMinifigPlacementCamera(
   targets: MinifigTargetBox[],
   occluders: OccluderBox[],
   minifigForward?: Vec3,
   prevCamera: StudioCameraPose = DEFAULT_STUDIO_CAMERA,
+  options?: MinifigPlacementCameraOptions | null,
 ): PlacementCameraChoice {
   const precomputed = buildTargetSamples(targets);
 
+  const rawTheta =
+    typeof options?.baseAzimuthDeg === 'number' && Number.isFinite(options.baseAzimuthDeg)
+      ? Math.round(Math.max(24, Math.min(66, options.baseAzimuthDeg)))
+      : 38;
+  const activeCorners: ReadonlyArray<{ id: StudioCornerId; az: number }> =
+    rawTheta === 38
+      ? STUDIO_CORNERS
+      : [
+          { id: 'front_right', az: rawTheta },
+          { id: 'back_right', az: 180 - rawTheta },
+          { id: 'back_left', az: 180 + rawTheta },
+          { id: 'front_left', az: 360 - rawTheta },
+        ];
+
   const candidates: CandidateView[] = [
     // Tier 1: Standard official 4 canonical top 3/4 corners (el = 30 deg)
-    ...STUDIO_CORNERS.map((c) => ({
+    ...activeCorners.map((c) => ({
       corner: c.id,
       az: c.az,
       el: 30,
       tierPenalty: 0,
     })),
     // Tier 2a: Elevated top 3/4 corners (el = 52 deg) for open-top interiors / cabs
-    ...STUDIO_CORNERS.map((c) => ({
+    ...activeCorners.map((c) => ({
       corner: c.id,
       az: c.az,
       el: 52,
       tierPenalty: 0.1,
     })),
     // Tier 2b: Low eye-level top 3/4 corners (el = 14 deg) for roof overhangs / canopies
-    ...STUDIO_CORNERS.map((c) => ({
+    ...activeCorners.map((c) => ({
       corner: c.id,
       az: c.az,
       el: 14,
       tierPenalty: 0.11,
+    })),
+    // Tier 2c: Steep elevated top 3/4 corners (el = 66 deg) for narrow walled open-top interiors
+    ...activeCorners.map((c) => ({
+      corner: c.id,
+      az: c.az,
+      el: 66,
+      tierPenalty: 0.14,
     })),
     // Tier 3: Cardinal front/back/side views (el = 30 deg) for alcoves / doorways
     ...[0, 90, 180, 270].map((az) => ({
@@ -485,11 +557,46 @@ export function chooseMinifigPlacementCamera(
       el: 52,
       tierPenalty: 0.19,
     })),
+    // Tier 4c: Steep elevated cardinal views (el = 66 deg) for deep narrow channels aligned with layout
+    ...[0, 90, 180, 270].map((az) => ({
+      corner: nearestCornerForAzimuth(az, prevCamera.corner),
+      az,
+      el: 66,
+      tierPenalty: 0.2,
+    })),
   ];
+
+  // Optional layout-aspect efficiency scoring (aligns elongated models horizontally on Landscape / vertically on Portrait)
+  const targetAspect =
+    typeof options?.targetAspect === 'number' &&
+    Number.isFinite(options.targetAspect) &&
+    options.targetAspect > 0.1
+      ? options.targetAspect
+      : 0;
+  let candidateScales: number[] | null = null;
+  let maxCandidateScale = 0;
+  if (targetAspect > 0 && occluders.length > 0) {
+    const modelBoxes: WorldBox[] = [];
+    const stride = occluders.length > 300 ? occluders.length / 300 : 1;
+    const count = Math.min(occluders.length, 300);
+    for (let k = 0; k < count; k++) {
+      modelBoxes.push(occluders[Math.min(occluders.length - 1, Math.floor(k * stride))].box);
+    }
+    for (let i = 0; i < targets.length; i++) modelBoxes.push(targets[i].box);
+
+    candidateScales = new Array<number>(candidates.length);
+    for (let i = 0; i < candidates.length; i++) {
+      const ext = projectModelHalfExtents(modelBoxes, candidates[i].az, candidates[i].el);
+      const sc = Math.min(targetAspect / ext.halfW, 1 / ext.halfH);
+      candidateScales[i] = sc;
+      if (sc > maxCandidateScale) maxCandidateScale = sc;
+    }
+  }
 
   let best: PlacementCameraChoice | null = null;
 
-  for (const cand of candidates) {
+  for (let i = 0; i < candidates.length; i++) {
+    const cand = candidates[i];
     const metrics = evaluateMinifigCameraVisibility(
       targets,
       occluders,
@@ -501,6 +608,10 @@ export function chooseMinifigPlacementCamera(
 
     const absDeltaAz = Math.abs(normalizeDeltaDeg(cand.az - prevCamera.az));
     const rotPenalty = absDeltaAz < 20 ? 0 : absDeltaAz <= 115 ? 0.09 : 0.12;
+    const layoutPenalty =
+      candidateScales && maxCandidateScale > 0
+        ? (1 - candidateScales[i] / maxCandidateScale) * 0.34
+        : 0;
 
     const score =
       metrics.bodyVisibility * 0.65 +
@@ -508,7 +619,8 @@ export function chooseMinifigPlacementCamera(
       metrics.haloVisibility * 0.14 +
       metrics.frontAlignment * 0.08 -
       rotPenalty -
-      cand.tierPenalty;
+      cand.tierPenalty -
+      layoutPenalty;
 
     if (!best || score > best.score + 1e-6) {
       best = {

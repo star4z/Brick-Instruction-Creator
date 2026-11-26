@@ -260,4 +260,61 @@ describe('Visibility-Aware Minifigure Placement Camera', () => {
     expect(choice.coreVisibility).toBe(1);
     expect(elapsedMs).toBeLessThan(100);
   });
+
+  it('aligns an elongated open-top model horizontally on Landscape pages and vertically on Portrait pages without sacrificing visibility', () => {
+    // Elongated open-top partitioned cabin running along Z (X in [-50..50], Z in [-320..320], walls up to Y=76)
+    // with interior cross-bulkheads fore and aft of the seating bay so an elevated view is required.
+    const longCabin: OccluderBox[] = [
+      { box: makeBox(-50, 0, -320, 50, 12, 320) },     // floor
+      { box: makeBox(-50, 12, -320, -40, 76, 320) },   // -X wall
+      { box: makeBox(40, 12, -320, 50, 76, 320) },     // +X wall
+      { box: makeBox(-50, 12, -320, 50, 76, -310) },   // -Z end bulkhead
+      { box: makeBox(-50, 12, 310, 50, 76, 320) },     // +Z end bulkhead
+      { box: makeBox(-40, 12, 85, 40, 76, 95) },       // forward interior partition
+      { box: makeBox(-40, 12, -25, 40, 76, -15) },     // aft interior partition
+    ];
+    const seatedPassenger = makeStandingMinifig(0, 12, 40);
+
+    // On a Landscape page (targetAspect = 1.5), camera must turn to align the long Z axis horizontally
+    // (|sin(az)| > |cos(az)|) rather than standing the model vertically along az = 0° / 180°.
+    const landChoice = chooseMinifigPlacementCamera(
+      seatedPassenger,
+      longCabin,
+      [0, 0, 1],
+      { side: 'top', corner: 'front_right', az: 54, el: 30 },
+      { targetAspect: 1.5, baseAzimuthDeg: 54 },
+    );
+    const landRad = (landChoice.az * Math.PI) / 180;
+    expect(Math.abs(Math.sin(landRad))).toBeGreaterThan(Math.abs(Math.cos(landRad)));
+    expect(landChoice.coreVisibility).toBeGreaterThan(0.7);
+
+    // On a Portrait page (targetAspect = 0.7), camera aligns the long Z axis more vertically
+    const portChoice = chooseMinifigPlacementCamera(
+      seatedPassenger,
+      longCabin,
+      [0, 0, 1],
+      { side: 'top', corner: 'front_right', az: 26, el: 30 },
+      { targetAspect: 0.7, baseAzimuthDeg: 26 },
+    );
+    const portRad = (portChoice.az * Math.PI) / 180;
+    expect(Math.abs(Math.cos(portRad))).toBeGreaterThan(Math.abs(Math.sin(portRad)));
+
+    // Visibility STILL takes precedence over layout alignment inside a narrow alcove open ONLY toward +Z
+    const alcoveWalls: OccluderBox[] = [
+      { box: makeBox(-44, 0, -240, -24, 120, 90) },
+      { box: makeBox(24, 0, -240, 44, 120, 90) },
+      { box: makeBox(-44, 0, -240, 44, 120, -24) },
+      { box: makeBox(-44, 112, -240, 44, 124, 90) },
+    ];
+    const figInAlcove = makeStandingMinifig(0, 0, 0);
+    const alcoveChoice = chooseMinifigPlacementCamera(
+      figInAlcove,
+      alcoveWalls,
+      [0, 0, 1],
+      DEFAULT_STUDIO_CAMERA,
+      { targetAspect: 1.5, baseAzimuthDeg: 54 },
+    );
+    expect(alcoveChoice.az).toBe(0);
+    expect(alcoveChoice.coreVisibility).toBeGreaterThan(0.8);
+  });
 });

@@ -14,7 +14,10 @@ import {
 } from '../dynamicStepSizer';
 import {
   AUTO_FOCUS_MIN_FULL_RADIUS_LDU,
+  STEP_CAMERA_FRAMING_MARGIN,
   STEP_VISIBILITY_DEADBAND,
+  computeLayoutAlignedCanonicalAzimuth,
+  computeProjectedBoxesExtents,
   computeProjectedOrthoHalfExtents,
   computeStepCameraFraming,
   computeStepOrthoFrustum,
@@ -599,7 +602,7 @@ describe('Step Camera Stability & Steady Framing', () => {
       0.78,
       1.0,
     );
-    expect(portraitFrustum.orthoHalfW).toBeCloseTo(fullProj.halfW * 1.12, 3);
+    expect(portraitFrustum.orthoHalfW).toBeCloseTo(fullProj.halfW * STEP_CAMERA_FRAMING_MARGIN, 3);
     expect(portraitFrustum.orthoHalfW).toBeLessThan(fullRadius * 0.85);
 
     // Tall narrow model (6×50×6 studs = 120×1000×120 LDU) is height-limited
@@ -617,8 +620,203 @@ describe('Step Camera Stability & Steady Framing', () => {
 
     // Fallback when bounds are omitted preserves exact sphere-radius framing
     const fallbackFrustum = computeStepOrthoFrustum(null, 200, 200, 38, 28, 1.33, 1.0);
-    expect(fallbackFrustum.orthoHalfH).toBeCloseTo(200 * 1.12, 4);
-    expect(fallbackFrustum.orthoHalfW).toBeCloseTo(200 * 1.12 * 1.33, 4);
+    expect(fallbackFrustum.orthoHalfH).toBeCloseTo(200 * STEP_CAMERA_FRAMING_MARGIN, 4);
+    expect(fallbackFrustum.orthoHalfW).toBeCloseTo(200 * STEP_CAMERA_FRAMING_MARGIN * 1.33, 4);
+  });
+
+  it('eliminates phantom union-AABB bloat and visually centers asymmetric models using per-part 2D projected bounds', () => {
+    // Elongated body along Z with a lower undercarriage near center and a tall offset piece at the +Z front end
+    const body = makeBox(-50, 0, -240, 50, 96, 240);
+    const under = makeBox(-40, -32, -60, 40, 0, 60);
+    const frontOffsetPart = makeBox(-10, 120, 200, 10, 220, 240);
+    const parts = [body, under, frontOffsetPart];
+    const unionBounds = { minX: -50, maxX: 50, minY: -32, maxY: 220, minZ: -240, maxZ: 240 };
+    const fullR = Math.hypot(50, 126, 240);
+
+    const aabbOnly = computeProjectedOrthoHalfExtents(unionBounds, fullR, fullR, 38, 30);
+    const perPart = computeProjectedOrthoHalfExtents(unionBounds, fullR, fullR, 38, 30, parts);
+
+    // Per-part 2D projection drops the phantom back-top & front-bottom corners -> significantly tighter height!
+    expect(perPart.halfH).toBeLessThan(aabbOnly.halfH * 0.85);
+
+    const frustum = computeStepOrthoFrustum(unionBounds, fullR, fullR, 38, 30, 1.45, 1.0, STEP_CAMERA_FRAMING_MARGIN, {
+      partBoxes: parts,
+      origin: [0, 94, 0],
+    });
+    expect(frustum.halfH).toBeCloseTo(perPart.halfH, 3);
+    // Asymmetric vertical protrusion shifts the 2D silhouette midpoint away from the union-AABB midpoint
+    expect(Math.abs(frustum.centerOffsetU)).toBeGreaterThan(5);
+  });
+
+  it('aligns elongated models with Landscape and Portrait layouts identically regardless of X vs Z orientation', () => {
+    // Cube stays cleanly at classic 38°
+    const cube = [makeBox(-80, 0, -80, 80, 120, 80)];
+    expect(computeLayoutAlignedCanonicalAzimuth(cube, 1.45)).toBe(38);
+    expect(computeLayoutAlignedCanonicalAzimuth(cube, 0.72)).toBe(38);
+
+    // Long along Z vs identical model rotated 90° along X
+    const longZ = [makeBox(-60, 0, -320, 60, 110, 320)];
+    const longX = [makeBox(-320, 0, -60, 320, 110, 60)];
+
+    // Landscape (1.45): Z-elongated turns toward broadside (> 38°) so its projected aspect matches 1.45 and scale matches X-elongated!
+    const azZLand = computeLayoutAlignedCanonicalAzimuth(longZ, 1.45);
+    const azXLand = computeLayoutAlignedCanonicalAzimuth(longX, 1.45);
+    expect(azZLand).toBeGreaterThan(38);
+    const extZ = computeProjectedBoxesExtents(longZ, [], [0, 55, 0], azZLand, 30)!;
+    const extX = computeProjectedBoxesExtents(longX, [], [0, 55, 0], azXLand, 30)!;
+    const scaleZ = Math.min(1.45 / extZ.halfW, 1 / extZ.halfH);
+    const scaleX = Math.min(1.45 / extX.halfW, 1 / extX.halfH);
+    expect(Math.abs(scaleZ - scaleX) / Math.max(scaleZ, scaleX)).toBeLessThan(0.06);
+
+    // Portrait (0.72): Z-elongated turns toward a steeper angle (< 32°) while X-elongated turns toward > 56°
+    const azZPort = computeLayoutAlignedCanonicalAzimuth(longZ, 0.72);
+    const azXPort = computeLayoutAlignedCanonicalAzimuth(longX, 0.72);
+    expect(azZPort).toBeLessThanOrEqual(32);
+    expect(azXPort).toBeGreaterThanOrEqual(56);
+
+    // optimizeStudioStepCameraSequence adopts the layout-aligned azimuth when targetAspect is supplied
+    const seq = optimizeStudioStepCameraSequence(
+      [{ stepBoxes: longZ, occludersBefore: [], occluderCountBefore: 0, builtBoundsBefore: null }],
+      { targetAspect: 1.45 },
+    );
+    expect(seq[0].az).toBe(azZLand);
+  });
+
+  it('auto-zooms large unreadable full-model steps just enough to keep studs >= 0.5 cm without cropping new parts, and clamps 2D frustum bounds', () => {
+    // 1. Model that ALREADY fits within the physical page readable budget stays 100% steady full-model
+    const fitsFraming = computeStepCameraFraming({
+      focusMode: 'auto',
+      hasPrevParts: true,
+      fullCenter: [0, 60, 0],
+      fullRadius: 260,
+      newCenter: [0, 60, 180],
+      newRadius: 28,
+      readableTarget: {
+        maxHalfW: 450,
+        maxHalfH: 310,
+        fullHalfW: 240,
+        fullHalfH: 180,
+        newHalfW: 24,
+        newHalfH: 24,
+      },
+    });
+    expect(fitsFraming.isZoomedIn).toBe(false);
+    expect(fitsFraming.targetHalfW).toBeUndefined();
+
+    // 2. Massive 64-stud model exceeding page readable budget with a small local addition auto-zooms to <= maxHalf
+    const zoomedFraming = computeStepCameraFraming({
+      focusMode: 'auto',
+      hasPrevParts: true,
+      fullCenter: [0, 60, 0],
+      fullRadius: 640,
+      newCenter: [0, 60, -260],
+      newRadius: 32,
+      readableTarget: {
+        maxHalfW: 450,
+        maxHalfH: 310,
+        fullHalfW: 540,
+        fullHalfH: 390,
+        newHalfW: 30,
+        newHalfH: 30,
+      },
+    });
+    expect(zoomedFraming.isZoomedIn).toBe(true);
+    expect(zoomedFraming.targetHalfW).toBeLessThanOrEqual(450);
+    expect(zoomedFraming.targetHalfH).toBeLessThanOrEqual(310);
+    expect(zoomedFraming.locator).toBeDefined();
+
+    // 3. Huge step whose NEW parts themselves exceed maxHalfW keeps all new parts uncropped
+    const hugeNewFraming = computeStepCameraFraming({
+      focusMode: 'auto',
+      hasPrevParts: true,
+      fullCenter: [0, 60, 0],
+      fullRadius: 640,
+      newCenter: [0, 60, 0],
+      newRadius: 600,
+      readableTarget: {
+        maxHalfW: 450,
+        maxHalfH: 310,
+        fullHalfW: 560,
+        fullHalfH: 390,
+        newHalfW: 520,
+        newHalfH: 360,
+      },
+    });
+    expect(hugeNewFraming.isZoomedIn).toBe(false);
+
+    // 4. Zoomed-in 2D bounds clamping prevents wasting empty air past the focused end of the model
+    const endA = makeBox(-40, 0, -600, 40, 100, -560);
+    const endB = makeBox(-40, 0, 560, 40, 100, 600);
+    const focusPart = makeBox(-20, 20, -580, 20, 80, -540);
+    const parts = [endA, endB, focusPart];
+    const bounds = { minX: -40, maxX: 40, minY: 0, maxY: 100, minZ: -600, maxZ: 600 };
+    const fullExt = computeProjectedBoxesExtents(parts, [], [0, 50, -560], 56, 30)!;
+    const clampedFrustum = computeStepOrthoFrustum(
+      bounds,
+      620,
+      360,
+      56,
+      30,
+      1.45,
+      1.0,
+      STEP_CAMERA_FRAMING_MARGIN,
+      {
+        partBoxes: parts,
+        newPartBoxes: [focusPart],
+        origin: [0, 50, -560],
+        isZoomedIn: true,
+        targetHalfW: 380,
+        targetHalfH: 260,
+      },
+    );
+    // Frustum center must shift inward from the extreme end (-560) so the viewport does not show empty air beyond endA
+    expect(Math.hypot(clampedFrustum.centerOffsetR, clampedFrustum.centerOffsetU)).toBeGreaterThan(20);
+    // And the model's extreme edge must stay near the frustum edge (not floating far inside with empty void)
+    const camR = clampedFrustum.centerOffsetR;
+    expect(camR + clampedFrustum.orthoHalfW).toBeLessThanOrEqual(fullExt.maxR + fullExt.halfW * 0.1 + 1);
+  });
+
+  it('detects and clears top-left PLI obstacles via bounded 2D shifts without overlapping model geometry', () => {
+    // Diagonal/compact model whose top-left quadrant is naturally clear of a compact top-left PLI pill
+    const diagParts = [
+      makeBox(-120, 0, 120, -40, 40, 200),
+      makeBox(40, 0, -200, 120, 40, -120),
+    ];
+    const clearFrustum = computeStepOrthoFrustum(
+      { minX: -120, maxX: 120, minY: 0, maxY: 40, minZ: -200, maxZ: 200 },
+      240,
+      240,
+      38,
+      30,
+      1.45,
+      1.0,
+      STEP_CAMERA_FRAMING_MARGIN,
+      {
+        partBoxes: diagParts,
+        origin: [0, 20, 0],
+        pliObstacle: { widthFrac: 0.24, heightFrac: 0.12 },
+      },
+    );
+    expect(clearFrustum.pliCleared).toBe(true);
+
+    // Tall full-bleed square slab that fills both top-left and bottom-right with zero spare margin cannot clear a huge obstacle
+    const fullSlab = [makeBox(-200, -200, -200, 200, 200, 200)];
+    const blockedFrustum = computeStepOrthoFrustum(
+      { minX: -200, maxX: 200, minY: -200, maxY: 200, minZ: -200, maxZ: 200 },
+      350,
+      350,
+      0,
+      0,
+      1.0,
+      1.0,
+      STEP_CAMERA_FRAMING_MARGIN,
+      {
+        partBoxes: fullSlab,
+        origin: [0, 0, 0],
+        pliObstacle: { widthFrac: 0.5, heightFrac: 0.25 },
+      },
+    );
+    expect(blockedFrustum.pliCleared).toBe(false);
   });
 
   it('rotates Step 1 camera horizontally so the lower piece is closer to the camera than an overhanging upper piece', () => {

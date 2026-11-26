@@ -41,6 +41,25 @@ export interface OptimizableStepCameraInput {
 export interface OptimizeStepCameraOptions {
   /** Starting camera carried over from a previous segment (e.g. prior bag or minifigure placement). */
   initialCamera?: StudioCameraPose | null;
+  /** Optional target viewport aspect ratio (width / height) to align elongated models with the page layout. */
+  targetAspect?: number | null;
+  /** Optional explicit base 3/4 azimuth angle in [24°, 66°] overriding automatic aspect alignment. */
+  baseAzimuthDeg?: number | null;
+}
+
+export interface StepFramingReadableTarget {
+  /** Maximum projected half-width (LDU) that still renders >= minStudSizeCm on a 1-up page. */
+  maxHalfW: number;
+  /** Maximum projected half-height (LDU) that still renders >= minStudSizeCm on a 1-up page. */
+  maxHalfH: number;
+  /** Current full-model projected half-width (LDU) at the active camera angle. */
+  fullHalfW: number;
+  /** Current full-model projected half-height (LDU) at the active camera angle. */
+  fullHalfH: number;
+  /** Newly added parts' projected half-width (LDU) at the active camera angle. */
+  newHalfW: number;
+  /** Newly added parts' projected half-height (LDU) at the active camera angle. */
+  newHalfH: number;
 }
 
 export interface StepFramingInput {
@@ -50,12 +69,17 @@ export interface StepFramingInput {
   fullRadius: number;
   newCenter: Vec3 | null;
   newRadius: number;
+  /** Optional physical-page readability bounds so auto framing zooms in cleanly when full view < 0.5 cm/stud. */
+  readableTarget?: StepFramingReadableTarget | null;
 }
 
 export interface StepFramingResult {
   center: Vec3;
   radius: number;
   isZoomedIn: boolean;
+  /** Optional per-axis target half-extents (LDU) when readability-aware auto zoom is active. */
+  targetHalfW?: number;
+  targetHalfH?: number;
   /** Normalized 0..1 regional crop center & radius within the full model (for optional locator inset). */
   locator?: {
     cxNorm: number;
@@ -69,24 +93,43 @@ export interface CanonicalStudioView extends StudioCameraPose {
   isBottom: boolean;
 }
 
-export const CANONICAL_STUDIO_VIEWS: readonly CanonicalStudioView[] = [
-  ...STUDIO_CORNERS.map((c) => ({
-    side: 'top' as const,
-    corner: c.id,
-    az: c.az,
-    el: 30,
-    yawIndex: c.yawIndex,
-    isBottom: false,
-  })),
-  ...STUDIO_CORNERS.map((c) => ({
-    side: 'bottom' as const,
-    corner: c.id,
-    az: c.az,
-    el: -30,
-    yawIndex: c.yawIndex,
-    isBottom: true,
-  })),
-];
+/**
+ * Builds the 8 symmetric top/bottom canonical 3/4 views for a given base azimuth
+ * `baseAzDeg` in `[24°, 66°]`. At the default `38°`, produces `[38, 142, 218, 322]`.
+ */
+export function buildCanonicalViewsForBaseAzimuth(baseAzDeg = 38): readonly CanonicalStudioView[] {
+  const theta = Math.round(clamp(Number.isFinite(baseAzDeg) ? baseAzDeg : 38, 24, 66));
+  const corners: ReadonlyArray<{ id: StudioCornerId; az: number; yawIndex: number }> = [
+    { id: 'front_right', az: theta, yawIndex: 0 },
+    { id: 'back_right', az: 180 - theta, yawIndex: 1 },
+    { id: 'back_left', az: 180 + theta, yawIndex: 2 },
+    { id: 'front_left', az: 360 - theta, yawIndex: 3 },
+  ];
+  return [
+    ...corners.map((c) => ({
+      side: 'top' as const,
+      corner: c.id,
+      az: c.az,
+      el: 30,
+      yawIndex: c.yawIndex,
+      isBottom: false,
+    })),
+    ...corners.map((c) => ({
+      side: 'bottom' as const,
+      corner: c.id,
+      az: c.az,
+      el: -30,
+      yawIndex: c.yawIndex,
+      isBottom: true,
+    })),
+  ];
+}
+
+export const CANONICAL_STUDIO_VIEWS: readonly CanonicalStudioView[] =
+  buildCanonicalViewsForBaseAzimuth(38);
+
+/** Shared orthographic framing margin (6% breathing room around projected bounds). */
+export const STEP_CAMERA_FRAMING_MARGIN = 1.06;
 
 /** Visibility at or above this threshold is clearly readable and incurs ZERO penalty to stay put. */
 export const STEP_VISIBILITY_DEADBAND = 0.72;
@@ -598,6 +641,175 @@ export function computeStep1ConnectionFacingCost(
  * - Permits underside flips only when bricks are strictly tucked underneath overhead structure
  *   and occluded from top views.
  */
+export interface ProjectedBoxesExtents {
+  minR: number;
+  maxR: number;
+  minU: number;
+  maxU: number;
+  halfW: number;
+  halfH: number;
+  centerOffsetR: number;
+  centerOffsetU: number;
+}
+
+/**
+ * Projects one or two lists of per-part `WorldBox`es onto the exact orthographic
+ * camera `(right, up)` plane at `(azDeg, elDeg)`.
+ *
+ * Unlike projecting a single union AABB (which inflates 8 phantom corners for
+ * asymmetric protrusions, L-shapes, or offset parts), per-part projection computes
+ * the exact tight 2D silhouette bounds and visual center offset in O(N) time.
+ */
+export function computeProjectedBoxesExtents(
+  firstBoxes: ReadonlyArray<WorldBox | OccluderBox>,
+  secondBoxes: ReadonlyArray<WorldBox | OccluderBox> = [],
+  origin: Vec3 = [0, 0, 0],
+  azDeg = 38,
+  elDeg = 30,
+  firstCountLimit?: number,
+): ProjectedBoxesExtents | null {
+  const { right, up } = cameraBasis(azDeg, elDeg);
+  const rx = right[0], ry = right[1], rz = right[2];
+  const ux = up[0], uy = up[1], uz = up[2];
+
+  let minR = Infinity;
+  let maxR = -Infinity;
+  let minU = Infinity;
+  let maxU = -Infinity;
+
+  const scan = (list: ReadonlyArray<WorldBox | OccluderBox>, limit: number) => {
+    for (let i = 0; i < limit; i++) {
+      const item = list[i];
+      if (!item) continue;
+      const b = extractBox(item);
+      const loR =
+        (rx >= 0 ? b.min[0] : b.max[0]) * rx +
+        (ry >= 0 ? b.min[1] : b.max[1]) * ry +
+        (rz >= 0 ? b.min[2] : b.max[2]) * rz;
+      const hiR =
+        (rx >= 0 ? b.max[0] : b.min[0]) * rx +
+        (ry >= 0 ? b.max[1] : b.min[1]) * ry +
+        (rz >= 0 ? b.max[2] : b.min[2]) * rz;
+      const loU =
+        (ux >= 0 ? b.min[0] : b.max[0]) * ux +
+        (uy >= 0 ? b.min[1] : b.max[1]) * uy +
+        (uz >= 0 ? b.min[2] : b.max[2]) * uz;
+      const hiU =
+        (ux >= 0 ? b.max[0] : b.min[0]) * ux +
+        (uy >= 0 ? b.max[1] : b.min[1]) * uy +
+        (uz >= 0 ? b.max[2] : b.min[2]) * uz;
+      if (loR < minR) minR = loR;
+      if (hiR > maxR) maxR = hiR;
+      if (loU < minU) minU = loU;
+      if (hiU > maxU) maxU = hiU;
+    }
+  };
+
+  const firstLen = Math.min(firstBoxes.length, firstCountLimit ?? firstBoxes.length);
+  scan(firstBoxes, firstLen);
+  scan(secondBoxes, secondBoxes.length);
+
+  if (!Number.isFinite(minR)) return null;
+
+  const originR = origin[0] * rx + origin[1] * ry + origin[2] * rz;
+  const originU = origin[0] * ux + origin[1] * uy + origin[2] * uz;
+  const midR = (minR + maxR) * 0.5;
+  const midU = (minU + maxU) * 0.5;
+
+  return {
+    minR,
+    maxR,
+    minU,
+    maxU,
+    halfW: Math.max(12, (maxR - minR) * 0.5),
+    halfH: Math.max(12, (maxU - minU) * 0.5),
+    centerOffsetR: midR - originR,
+    centerOffsetU: midU - originU,
+  };
+}
+
+/**
+ * Computes the optimal base 3/4 canonical azimuth `theta` in `[24°, 66°]`
+ * (generating symmetric corners `[theta, 180-theta, 180+theta, 360-theta]`)
+ * that best aligns a model's 3D geometry with a target viewport aspect ratio
+ * `targetAspect = width / height`.
+ *
+ * - Compact / near-square models stay at the classic `38°` LEGO 3/4 angle.
+ * - Elongated models naturally rotate to align their long axis with the page's
+ *   wider (Landscape) or taller (Portrait) dimension, making X- and Z-oriented
+ *   models achieve identical rendered stud scale.
+ */
+export function computeLayoutAlignedCanonicalAzimuth(
+  boxes: ReadonlyArray<WorldBox | OccluderBox>,
+  targetAspect?: number | null,
+  elDeg = 30,
+): number {
+  if (
+    !targetAspect ||
+    !Number.isFinite(targetAspect) ||
+    targetAspect <= 0.1 ||
+    boxes.length === 0
+  ) {
+    return 38;
+  }
+
+  // Keep horizontally compact / near-square models at the classic 38° LEGO 3/4 isometric angle
+  // rather than flattening them toward a face-on view purely to shave off corner diagonal width.
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  for (let i = 0; i < boxes.length; i++) {
+    const b = extractBox(boxes[i]);
+    if (b.min[0] < minX) minX = b.min[0];
+    if (b.max[0] > maxX) maxX = b.max[0];
+    if (b.min[2] < minZ) minZ = b.min[2];
+    if (b.max[2] > maxZ) maxZ = b.max[2];
+  }
+  if (!Number.isFinite(minX)) return 38;
+  const spanX = Math.max(20, maxX - minX);
+  const spanZ = Math.max(20, maxZ - minZ);
+  const horizRatio = Math.max(spanX, spanZ) / Math.min(spanX, spanZ);
+  if (horizRatio < 1.35) return 38;
+
+  // Subsample evenly if there are thousands of boxes so alignment runs in <0.2ms
+  let sampled: ReadonlyArray<WorldBox | OccluderBox> = boxes;
+  if (boxes.length > 320) {
+    const picked: Array<WorldBox | OccluderBox> = [];
+    const stride = boxes.length / 320;
+    for (let k = 0; k < 320; k++) {
+      picked.push(boxes[Math.min(boxes.length - 1, Math.floor(k * stride))]);
+    }
+    sampled = picked;
+  }
+
+  const evalScale = (thetaDeg: number): number => {
+    const extA = computeProjectedBoxesExtents(sampled, [], [0, 0, 0], thetaDeg, elDeg);
+    if (!extA) return 0;
+    const scaleA = Math.min(targetAspect / extA.halfW, 1 / extA.halfH);
+    const extB = computeProjectedBoxesExtents(sampled, [], [0, 0, 0], 180 - thetaDeg, elDeg);
+    if (!extB) return scaleA;
+    const scaleB = Math.min(targetAspect / extB.halfW, 1 / extB.halfH);
+    return (scaleA + scaleB) * 0.5;
+  };
+
+  const baseScale = evalScale(38);
+  if (baseScale <= 0) return 38;
+
+  let bestTheta = 38;
+  let bestScore = 1.0;
+
+  for (let theta = 24; theta <= 66; theta += 2) {
+    const gain = evalScale(theta) / baseScale;
+    const anchorPenalty = 0.045 * Math.pow((theta - 38) / 28, 2);
+    const score = gain - anchorPenalty;
+    if (score > bestScore + 1e-6) {
+      bestScore = score;
+      bestTheta = theta;
+    }
+  }
+
+  // Only deviate from classic 38° when layout alignment gives a meaningful (>=3%) scale improvement
+  return bestScore >= 1.03 ? bestTheta : 38;
+}
+
 export function optimizeStudioStepCameraSequence(
   steps: readonly OptimizableStepCameraInput[],
   options: OptimizeStepCameraOptions = {},
@@ -605,7 +817,29 @@ export function optimizeStudioStepCameraSequence(
   const T = steps.length;
   if (T === 0) return [];
 
-  const V = CANONICAL_STUDIO_VIEWS.length;
+  // Resolve layout-aligned canonical 3/4 views for this sequence (defaults to classic 38° when targetAspect omitted)
+  let baseTheta = 38;
+  if (typeof options.baseAzimuthDeg === 'number' && Number.isFinite(options.baseAzimuthDeg)) {
+    baseTheta = Math.round(clamp(options.baseAzimuthDeg, 24, 66));
+  } else if (typeof options.targetAspect === 'number' && Number.isFinite(options.targetAspect)) {
+    const lastStep = steps[T - 1];
+    const finalBoxes: Array<WorldBox | OccluderBox> = [];
+    const lastOccCount = Math.min(
+      lastStep.occludersBefore.length,
+      lastStep.occluderCountBefore ?? lastStep.occludersBefore.length,
+    );
+    for (let i = 0; i < lastOccCount; i++) finalBoxes.push(lastStep.occludersBefore[i]);
+    for (let i = 0; i < lastStep.stepBoxes.length; i++) finalBoxes.push(lastStep.stepBoxes[i]);
+    if (finalBoxes.length === 0) {
+      for (let t = 0; t < T; t++) {
+        for (let i = 0; i < steps[t].stepBoxes.length; i++) finalBoxes.push(steps[t].stepBoxes[i]);
+      }
+    }
+    baseTheta = computeLayoutAlignedCanonicalAzimuth(finalBoxes, options.targetAspect, 30);
+  }
+  const canonicalViews =
+    baseTheta === 38 ? CANONICAL_STUDIO_VIEWS : buildCanonicalViewsForBaseAzimuth(baseTheta);
+  const V = canonicalViews.length;
   const initialCam = options.initialCamera ?? null;
 
   const dp: number[][] = Array.from({ length: T }, () => new Array<number>(V).fill(Infinity));
@@ -627,7 +861,7 @@ export function optimizeStudioStepCameraSequence(
     }
     let p = perView[viewIdx];
     if (!p) {
-      const view = CANONICAL_STUDIO_VIEWS[viewIdx];
+      const view = canonicalViews[viewIdx];
       p = buildViewOccluderProjections(occs, view.az, view.el);
       perView[viewIdx] = p;
     }
@@ -659,7 +893,7 @@ export function optimizeStudioStepCameraSequence(
       if (isTinyEarlyBase || step.stepBoxes.length === 0) {
         visTable[t][v] = 1;
       } else {
-        const view = CANONICAL_STUDIO_VIEWS[v];
+        const view = canonicalViews[v];
         visTable[t][v] = evaluateStepVisibilityWithProj(
           step.stepBoxes,
           getProj(step.occludersBefore, v),
@@ -687,7 +921,7 @@ export function optimizeStudioStepCameraSequence(
       } else if (step.stepBoxes.length === 0 || occCount === 0) {
         visTable[t][v] = 1;
       } else {
-        const view = CANONICAL_STUDIO_VIEWS[v];
+        const view = canonicalViews[v];
         visTable[t][v] = evaluateStepVisibilityWithProj(
           step.stepBoxes,
           getProj(step.occludersBefore, v),
@@ -701,7 +935,7 @@ export function optimizeStudioStepCameraSequence(
     const deadband = step.isSectionAttach ? 0.6 : STEP_VISIBILITY_DEADBAND;
 
     for (let v = 0; v < V; v++) {
-      const view = CANONICAL_STUDIO_VIEWS[v];
+      const view = canonicalViews[v];
       if (view.isBottom && !allowBottom) continue;
       if (!view.isBottom && forceBottom) continue;
 
@@ -732,7 +966,7 @@ export function optimizeStudioStepCameraSequence(
         let bestCost = Infinity;
         for (let u = 0; u < V; u++) {
           if (!Number.isFinite(dp[t - 1][u])) continue;
-          const prevView = CANONICAL_STUDIO_VIEWS[u];
+          const prevView = canonicalViews[u];
           const baseTrans = stepCameraTransitionCost(prevView, view);
           // Tiny one-time tie-break ONLY on actual turns (u !== v) so it never accumulates while staying put
           const tieBreak =
@@ -769,7 +1003,7 @@ export function optimizeStudioStepCameraSequence(
 
   const out: StudioStepCameraChoice[] = [];
   for (let t = 0; t < T; t++) {
-    const view = CANONICAL_STUDIO_VIEWS[chosenIdx[t]];
+    const view = canonicalViews[chosenIdx[t]];
     const prevPose: StudioCameraPose | null =
       t === 0 ? initialCam : out[t - 1];
     out.push({
@@ -790,16 +1024,21 @@ export function optimizeStudioStepCameraSequence(
  *
  * - `'full'`: Always frames the entire model built so far.
  * - `'focus'`: Explicit user Close-Up zoomed tightly onto newly added bricks.
- * - `'auto'` (default): Keeps framing rock-steady on the full built model for all
- *   normal, medium, and subdivided builds (`fullRadius <= 340` LDU), preventing
- *   jarring zoom-in/zoom-out and corner-to-corner panning between steps. Only on
- *   truly massive un-subdivided builds (`fullRadius > 340` LDU) with tiny new details
- *   (`newRadius / fullRadius < 0.24`) does it apply a smooth, bounded, context-preserving
- *   zoom assist.
+ * - `'auto'` (default):
+ *   - When `readableTarget` (from an active physical print page) is provided:
+ *     - Keeps framing rock-steady on the full model whenever the full view already
+ *       renders at `>= minStudSizeCm` (0.5 cm/stud).
+ *     - When the full model exceeds the page's readable budget, smoothly zooms in
+ *       just enough to keep `1 stud >= 0.5 cm` (showing maximum surrounding model
+ *       context and a steady scale across consecutive steps) without ever cropping
+ *       the newly added bricks.
+ *   - Without `readableTarget` (e.g. Screen Fit): stays rock-steady on the full
+ *     model up to `fullRadius <= 340` LDU and applies a smooth context-preserving
+ *     zoom assist only on truly massive builds with tiny new details.
  */
 export function computeStepCameraFraming(input: StepFramingInput): StepFramingResult {
   const mode = input.focusMode || 'auto';
-  const { fullCenter, fullRadius, newCenter, newRadius, hasPrevParts } = input;
+  const { fullCenter, fullRadius, newCenter, newRadius, hasPrevParts, readableTarget } = input;
 
   if (!hasPrevParts || !newCenter || mode === 'full') {
     return {
@@ -838,7 +1077,69 @@ export function computeStepCameraFraming(input: StepFramingInput): StepFramingRe
     };
   }
 
-  // Default 'auto': steady full-model framing unless the un-subdivided model is truly massive
+  // Physical-page readability-aware auto framing:
+  // Stay 100% steady on full model when it already fits >= 0.5 cm/stud; otherwise
+  // zoom in just enough to keep the working region readable at >= 0.5 cm/stud while
+  // never cropping newly added parts and preserving maximum surrounding context.
+  if (
+    readableTarget &&
+    Number.isFinite(readableTarget.maxHalfW) &&
+    Number.isFinite(readableTarget.maxHalfH) &&
+    readableTarget.maxHalfW > 12 &&
+    readableTarget.maxHalfH > 12
+  ) {
+    const fullW = Math.max(12, readableTarget.fullHalfW);
+    const fullH = Math.max(12, readableTarget.fullHalfH);
+    const newW = Math.max(12, readableTarget.newHalfW);
+    const newH = Math.max(12, readableTarget.newHalfH);
+    const maxW = readableTarget.maxHalfW;
+    const maxH = readableTarget.maxHalfH;
+
+    // Full model already renders >= minStudSizeCm -> rock-steady full-model framing!
+    if (fullW <= maxW + 1e-3 && fullH <= maxH + 1e-3) {
+      return {
+        center: [fullCenter[0], fullCenter[1], fullCenter[2]],
+        radius: fullRadius,
+        isZoomedIn: false,
+      };
+    }
+
+    // Zoom in just enough to meet the readable budget, while NEVER cropping new parts
+    // (keep at least ~12% breathing context around the new parts whenever possible).
+    const minNewW = Math.max(newW * 1.12, newW + 10);
+    const minNewH = Math.max(newH * 1.12, newH + 10);
+    const desiredW = Math.min(fullW, Math.max(minNewW, maxW));
+    const desiredH = Math.min(fullH, Math.max(minNewH, maxH));
+
+    // Only engage regional zoom when it meaningfully enlarges the limiting axis (> 3%)
+    const currentRatio = Math.max(fullW / maxW, fullH / maxH);
+    const zoomedRatio = Math.max(desiredW / maxW, desiredH / maxH);
+    if (zoomedRatio < currentRatio * 0.97) {
+      const effRadius = Math.max(desiredW, desiredH);
+      const center: Vec3 = [newCenter[0], newCenter[1], newCenter[2]];
+      const invSpan = 1 / Math.max(1, fullRadius * 2);
+      return {
+        center,
+        radius: Math.min(fullRadius, effRadius),
+        isZoomedIn: true,
+        targetHalfW: desiredW,
+        targetHalfH: desiredH,
+        locator: {
+          cxNorm: clamp(0.5 + (center[0] - fullCenter[0]) * invSpan, 0.08, 0.92),
+          czNorm: clamp(0.5 + (center[2] - fullCenter[2]) * invSpan, 0.08, 0.92),
+          radiusNorm: clamp(effRadius / Math.max(1, fullRadius), 0.18, 0.95),
+        },
+      };
+    }
+
+    return {
+      center: [fullCenter[0], fullCenter[1], fullCenter[2]],
+      radius: fullRadius,
+      isZoomedIn: false,
+    };
+  }
+
+  // Default 'auto' (Screen Fit / no physical target): steady full-model framing unless truly massive
   const ratio = newRadius / Math.max(1, fullRadius);
   if (fullRadius <= AUTO_FOCUS_MIN_FULL_RADIUS_LDU || ratio >= AUTO_FOCUS_MAX_NEW_RATIO) {
     return {
@@ -899,23 +1200,52 @@ export interface ProjectedOrthoHalfExtents {
   halfH: number;
 }
 
+export interface StepPliObstacleRect {
+  /** Normalized width [0..1] of the top-left header/PLI area inside the visual viewport. */
+  widthFrac: number;
+  /** Normalized height [0..1] of the top-left header/PLI area inside the visual viewport. */
+  heightFrac: number;
+}
+
+export interface StepOrthoFrustumOptions {
+  /** Exact per-part world boxes for tight 2D silhouette projection & visual centering. */
+  partBoxes?: ReadonlyArray<WorldBox | OccluderBox> | null;
+  /** Optional second list of per-part boxes (avoids array copying in pagination passes). */
+  secondPartBoxes?: ReadonlyArray<WorldBox | OccluderBox> | null;
+  /** Newly added part boxes (guaranteed to stay strictly inside the viewport when zoomed/shifted). */
+  newPartBoxes?: ReadonlyArray<WorldBox | OccluderBox> | null;
+  /** Camera look-at origin in world LDU (defaults to union bounds midpoint). */
+  origin?: Vec3 | null;
+  /** True when the step is regionally zoomed in onto a subset of the full model. */
+  isZoomedIn?: boolean;
+  /** Explicit per-axis zoomed half-width (LDU) from readability-aware auto framing. */
+  targetHalfW?: number;
+  /** Explicit per-axis zoomed half-height (LDU) from readability-aware auto framing. */
+  targetHalfH?: number;
+  /** Optional top-left header/PLI obstacle rectangle to clear via bounded 2D centering shift. */
+  pliObstacle?: StepPliObstacleRect | null;
+}
+
 export interface StepOrthoFrustum extends ProjectedOrthoHalfExtents {
   /** Orthographic viewport half-width in LDU after aspect fitting, margin, and zoom. */
   orthoHalfW: number;
   /** Orthographic viewport half-height in LDU after aspect fitting, margin, and zoom. */
   orthoHalfH: number;
+  /** Camera-right frustum center shift (LDU) relative to `origin` for visual centering & bounds clamping. */
+  centerOffsetR: number;
+  /** Camera-up frustum center shift (LDU) relative to `origin` for visual centering & bounds clamping. */
+  centerOffsetU: number;
+  /** True when `pliObstacle` was provided and all visible projected part boxes clear it cleanly. */
+  pliCleared: boolean;
 }
 
 /**
- * Projects a 3D world-space AABB onto the orthographic camera's `(right, up)` plane
- * at `(azDeg, elDeg)` and bounds each axis by `viewRadius`.
+ * Projects a step's 3D geometry onto the orthographic camera's `(right, up)` plane
+ * at `(azDeg, elDeg)` and bounds each axis by `viewRadius` (or per-axis targets).
  *
- * This eliminates bounding-sphere dead space on elongated, flat, or tall models
- * (ships, trains, bridges, towers, baseplates) while remaining O(1), strictly
- * conservative (zero clipping of any AABB corner), and continuous under free orbit.
- * When `viewRadius < fullRadius` (e.g. Close-Up or massive-model auto-focus), capping
- * each axis at `viewRadius` keeps framing smooth between adjacent steps and never
- * clips the zoomed-in target region.
+ * When `partBoxes` are provided, computes the exact tight 2D projected silhouette
+ * across individual parts (zero phantom 8-corner AABB bloat); otherwise falls back
+ * to projecting the single union AABB `bounds`.
  */
 export function computeProjectedOrthoHalfExtents(
   bounds: WorldBounds3D | null | undefined,
@@ -923,9 +1253,30 @@ export function computeProjectedOrthoHalfExtents(
   viewRadius: number,
   azDeg: number,
   elDeg: number,
+  partBoxes?: ReadonlyArray<WorldBox | OccluderBox> | null,
+  secondPartBoxes?: ReadonlyArray<WorldBox | OccluderBox> | null,
 ): ProjectedOrthoHalfExtents {
   const safeViewR = Math.max(12, Number.isFinite(viewRadius) ? viewRadius : 20);
   const safeFullR = Math.max(safeViewR, Number.isFinite(fullRadius) ? fullRadius : safeViewR);
+
+  if ((partBoxes && partBoxes.length > 0) || (secondPartBoxes && secondPartBoxes.length > 0)) {
+    const ext = computeProjectedBoxesExtents(
+      partBoxes || [],
+      secondPartBoxes || [],
+      [0, 0, 0],
+      azDeg,
+      elDeg,
+    );
+    if (ext) {
+      const fullHalfW = Math.min(safeFullR, ext.halfW);
+      const fullHalfH = Math.min(safeFullR, ext.halfH);
+      return {
+        halfW: Math.min(fullHalfW, safeViewR),
+        halfH: Math.min(fullHalfH, safeViewR),
+      };
+    }
+  }
+
   if (
     !bounds ||
     !Number.isFinite(bounds.minX) ||
@@ -967,8 +1318,8 @@ export function computeProjectedOrthoHalfExtents(
 
 /**
  * Computes the exact aspect-fitted orthographic frustum `(orthoHalfW, orthoHalfH)`
- * shared 1:1 by `WebGLBrickEngine.computeMVP`, `computeStudioOrthoCamera`, and
- * `pageLayout.ts` readability checks.
+ * and 2D visual centering/clamping offsets `(centerOffsetR, centerOffsetU)` shared
+ * 1:1 by `WebGLBrickEngine.computeMVP`, `computeStudioOrthoCamera`, and `pageLayout.ts`.
  */
 export function computeStepOrthoFrustum(
   bounds: WorldBounds3D | null | undefined,
@@ -978,18 +1329,64 @@ export function computeStepOrthoFrustum(
   elDeg: number,
   aspect: number,
   zoom = 1.0,
-  margin = 1.12,
+  margin = STEP_CAMERA_FRAMING_MARGIN,
+  options?: StepOrthoFrustumOptions | null,
 ): StepOrthoFrustum {
   const safeAspect = Math.max(0.1, Number.isFinite(aspect) ? aspect : 1);
   const safeZoom = Math.max(0.4, Number.isFinite(zoom) ? zoom : 1);
-  const safeMargin = Math.max(1.0, Number.isFinite(margin) ? margin : 1.12);
-  const { halfW, halfH } = computeProjectedOrthoHalfExtents(
-    bounds,
-    fullRadius,
-    viewRadius,
-    azDeg,
-    elDeg,
+  const safeMargin = Math.max(1.0, Number.isFinite(margin) ? margin : STEP_CAMERA_FRAMING_MARGIN);
+  const safeViewR = Math.max(12, Number.isFinite(viewRadius) ? viewRadius : 20);
+  const safeFullR = Math.max(safeViewR, Number.isFinite(fullRadius) ? fullRadius : safeViewR);
+
+  const origin: Vec3 = options?.origin
+    ? options.origin
+    : bounds && Number.isFinite(bounds.minX)
+      ? [
+          (bounds.minX + bounds.maxX) * 0.5,
+          (bounds.minY + bounds.maxY) * 0.5,
+          (bounds.minZ + bounds.maxZ) * 0.5,
+        ]
+      : [0, 0, 0];
+
+  const hasPartBoxes = Boolean(
+    (options?.partBoxes && options.partBoxes.length > 0) ||
+      (options?.secondPartBoxes && options.secondPartBoxes.length > 0),
   );
+  const fullExt = hasPartBoxes
+    ? computeProjectedBoxesExtents(
+        options?.partBoxes || [],
+        options?.secondPartBoxes || [],
+        origin,
+        azDeg,
+        elDeg,
+      )
+    : null;
+
+  let fullHalfW: number;
+  let fullHalfH: number;
+  if (fullExt) {
+    fullHalfW = Math.min(safeFullR, fullExt.halfW);
+    fullHalfH = Math.min(safeFullR, fullExt.halfH);
+  } else {
+    const fallback = computeProjectedOrthoHalfExtents(bounds, safeFullR, safeFullR, azDeg, elDeg);
+    fullHalfW = fallback.halfW;
+    fullHalfH = fallback.halfH;
+  }
+
+  const hasExplicitTargets =
+    typeof options?.targetHalfW === 'number' &&
+    Number.isFinite(options.targetHalfW) &&
+    typeof options?.targetHalfH === 'number' &&
+    Number.isFinite(options.targetHalfH);
+  const isZoomedIn = Boolean(options?.isZoomedIn || hasExplicitTargets || safeViewR < safeFullR - 1e-3);
+
+  const halfW = hasExplicitTargets
+    ? Math.min(fullHalfW, Math.max(12, options!.targetHalfW!))
+    : Math.min(fullHalfW, safeViewR);
+  const halfH = hasExplicitTargets
+    ? Math.min(fullHalfH, Math.max(12, options!.targetHalfH!))
+    : Math.min(fullHalfH, safeViewR);
+
   let orthoHalfH = (halfH * safeMargin) / safeZoom;
   let orthoHalfW = orthoHalfH * safeAspect;
   const reqHalfW = (halfW * safeMargin) / safeZoom;
@@ -997,7 +1394,214 @@ export function computeStepOrthoFrustum(
     orthoHalfW = reqHalfW;
     orthoHalfH = orthoHalfW / safeAspect;
   }
-  return { halfW, halfH, orthoHalfW, orthoHalfH };
+
+  if (!fullExt) {
+    return {
+      halfW,
+      halfH,
+      orthoHalfW,
+      orthoHalfH,
+      centerOffsetR: 0,
+      centerOffsetU: 0,
+      pliCleared: false,
+    };
+  }
+
+  const { right, up } = cameraBasis(azDeg, elDeg);
+  const rx = right[0], ry = right[1], rz = right[2];
+  const ux = up[0], uy = up[1], uz = up[2];
+  const originR = origin[0] * rx + origin[1] * ry + origin[2] * rz;
+  const originU = origin[0] * ux + origin[1] * uy + origin[2] * uz;
+
+  const fullMidR = (fullExt.minR + fullExt.maxR) * 0.5;
+  const fullMidU = (fullExt.minU + fullExt.maxU) * 0.5;
+  const padR = fullExt.halfW * (safeMargin - 1);
+  const padU = fullExt.halfH * (safeMargin - 1);
+  const boundMinR = fullExt.minR - padR;
+  const boundMaxR = fullExt.maxR + padR;
+  const boundMinU = fullExt.minU - padU;
+  const boundMaxU = fullExt.maxU + padU;
+
+  const newExt =
+    options?.newPartBoxes && options.newPartBoxes.length > 0
+      ? computeProjectedBoxesExtents(options.newPartBoxes, [], origin, azDeg, elDeg)
+      : null;
+
+  let camR: number;
+  let camU: number;
+
+  if (!isZoomedIn) {
+    // Full-model framing: center visually on the exact 2D silhouette midpoint
+    camR = fullMidR;
+    camU = fullMidU;
+  } else {
+    // Zoomed-in framing: start at focus origin, then clamp against the full model's
+    // 2D silhouette so zero empty air is wasted beyond the model's ends while
+    // keeping all newly added parts strictly inside the viewport.
+    camR = originR;
+    camU = originU;
+
+    if (boundMaxR - boundMinR <= 2 * orthoHalfW) {
+      camR = fullMidR;
+    } else {
+      camR = clamp(camR, boundMinR + orthoHalfW, boundMaxR - orthoHalfW);
+    }
+
+    if (boundMaxU - boundMinU <= 2 * orthoHalfH) {
+      camU = fullMidU;
+    } else {
+      camU = clamp(camU, boundMinU + orthoHalfH, boundMaxU - orthoHalfH);
+    }
+
+    if (newExt) {
+      const safeSpanR = orthoHalfW * 0.9;
+      const safeSpanU = orthoHalfH * 0.9;
+      if (newExt.maxR - newExt.minR <= 2 * safeSpanR) {
+        if (newExt.minR < camR - safeSpanR) camR = newExt.minR + safeSpanR;
+        if (newExt.maxR > camR + safeSpanR) camR = newExt.maxR - safeSpanR;
+      } else {
+        camR = (newExt.minR + newExt.maxR) * 0.5;
+      }
+      if (newExt.maxU - newExt.minU <= 2 * safeSpanU) {
+        if (newExt.minU < camU - safeSpanU) camU = newExt.minU + safeSpanU;
+        if (newExt.maxU > camU + safeSpanU) camU = newExt.maxU - safeSpanU;
+      } else {
+        camU = (newExt.minU + newExt.maxU) * 0.5;
+      }
+    }
+  }
+
+  // Optional top-left PLI obstacle clearance & bounded visual shift
+  let pliCleared = false;
+  const obs = options?.pliObstacle;
+  if (
+    obs &&
+    obs.widthFrac > 0 &&
+    obs.widthFrac < 0.9 &&
+    obs.heightFrac > 0 &&
+    obs.heightFrac < 0.9
+  ) {
+    const padClearR = orthoHalfW * 0.025;
+    const padClearU = orthoHalfH * 0.025;
+    const boxLists: Array<ReadonlyArray<WorldBox | OccluderBox>> = [];
+    if (options?.partBoxes && options.partBoxes.length > 0) boxLists.push(options.partBoxes);
+    if (options?.secondPartBoxes && options.secondPartBoxes.length > 0) {
+      boxLists.push(options.secondPartBoxes);
+    }
+
+    const measureObstacleOverlap = (testCamR: number, testCamU: number) => {
+      const viewMinR = testCamR - orthoHalfW;
+      const viewMaxR = testCamR + orthoHalfW;
+      const viewMinU = testCamU - orthoHalfH;
+      const viewMaxU = testCamU + orthoHalfH;
+      const obsMaxR = viewMinR + 2 * orthoHalfW * obs.widthFrac + padClearR;
+      const obsMinU = viewMaxU - 2 * orthoHalfH * obs.heightFrac - padClearU;
+
+      let hit = false;
+      let maxNeedR = 0;
+      let maxNeedU = 0;
+      for (let li = 0; li < boxLists.length; li++) {
+        const list = boxLists[li];
+        for (let i = 0; i < list.length; i++) {
+          const item = list[i];
+          if (!item) continue;
+          const b = extractBox(item);
+          const loR =
+            (rx >= 0 ? b.min[0] : b.max[0]) * rx +
+            (ry >= 0 ? b.min[1] : b.max[1]) * ry +
+            (rz >= 0 ? b.min[2] : b.max[2]) * rz;
+          const hiR =
+            (rx >= 0 ? b.max[0] : b.min[0]) * rx +
+            (ry >= 0 ? b.max[1] : b.min[1]) * ry +
+            (rz >= 0 ? b.max[2] : b.min[2]) * rz;
+          if (hiR < viewMinR || loR > viewMaxR) continue;
+          const loU =
+            (ux >= 0 ? b.min[0] : b.max[0]) * ux +
+            (uy >= 0 ? b.min[1] : b.max[1]) * uy +
+            (uz >= 0 ? b.min[2] : b.max[2]) * uz;
+          const hiU =
+            (ux >= 0 ? b.max[0] : b.min[0]) * ux +
+            (uy >= 0 ? b.max[1] : b.min[1]) * uy +
+            (uz >= 0 ? b.max[2] : b.min[2]) * uz;
+          if (hiU < viewMinU || loU > viewMaxU) continue;
+          if (loR < obsMaxR && hiU > obsMinU) {
+            hit = true;
+            const needR = obsMaxR - loR;
+            const needU = hiU - obsMinU;
+            if (needR > maxNeedR) maxNeedR = needR;
+            if (needU > maxNeedU) maxNeedU = needU;
+          }
+        }
+      }
+      return { hit, maxNeedR, maxNeedU };
+    };
+
+    const baseOverlap = measureObstacleOverlap(camR, camU);
+    if (!baseOverlap.hit) {
+      pliCleared = true;
+    } else {
+      // Compute how far we can safely shift the model right (camR -= shiftR) or down (camU += shiftU)
+      // without clipping the model or pushing newly added parts near the frame edge.
+      let freeRight = !isZoomedIn
+        ? Math.max(0, camR + orthoHalfW - boundMaxR)
+        : Math.max(0, camR - orthoHalfW - boundMinR);
+      let freeBottom = !isZoomedIn
+        ? Math.max(0, boundMinU - (camU - orthoHalfH))
+        : Math.max(0, boundMaxU - (camU + orthoHalfH));
+
+      if (isZoomedIn && newExt) {
+        freeRight = Math.min(freeRight, Math.max(0, camR + orthoHalfW * 0.9 - newExt.maxR));
+        freeBottom = Math.min(freeBottom, Math.max(0, newExt.minU - (camU - orthoHalfH * 0.9)));
+      }
+
+      const candidates: Array<{ sr: number; su: number }> = [];
+      if (baseOverlap.maxNeedR > 0 && baseOverlap.maxNeedR <= freeRight + 1e-3) {
+        candidates.push({ sr: Math.min(freeRight, baseOverlap.maxNeedR), su: 0 });
+      }
+      if (baseOverlap.maxNeedU > 0 && baseOverlap.maxNeedU <= freeBottom + 1e-3) {
+        candidates.push({ sr: 0, su: Math.min(freeBottom, baseOverlap.maxNeedU) });
+      }
+      if (freeRight > 1 && freeBottom > 1) {
+        const afterRight = measureObstacleOverlap(camR - freeRight, camU);
+        if (!afterRight.hit) {
+          candidates.push({ sr: freeRight, su: 0 });
+        } else if (afterRight.maxNeedU <= freeBottom + 1e-3) {
+          candidates.push({ sr: freeRight, su: Math.min(freeBottom, afterRight.maxNeedU) });
+        }
+        const afterDown = measureObstacleOverlap(camR, camU + freeBottom);
+        if (!afterDown.hit) {
+          candidates.push({ sr: 0, su: freeBottom });
+        } else if (afterDown.maxNeedR <= freeRight + 1e-3) {
+          candidates.push({ sr: Math.min(freeRight, afterDown.maxNeedR), su: freeBottom });
+        }
+      }
+
+      let bestShift: { sr: number; su: number; dist: number } | null = null;
+      for (const c of candidates) {
+        const check = measureObstacleOverlap(camR - c.sr, camU + c.su);
+        if (check.hit) continue;
+        const dist = Math.hypot(c.sr / orthoHalfW, c.su / orthoHalfH);
+        if (!bestShift || dist < bestShift.dist) {
+          bestShift = { sr: c.sr, su: c.su, dist };
+        }
+      }
+      if (bestShift) {
+        camR -= bestShift.sr;
+        camU += bestShift.su;
+        pliCleared = true;
+      }
+    }
+  }
+
+  return {
+    halfW,
+    halfH,
+    orthoHalfW,
+    orthoHalfH,
+    centerOffsetR: camR - originR,
+    centerOffsetU: camU - originU,
+    pliCleared,
+  };
 }
 
 export interface StudioStepCameraSource {
