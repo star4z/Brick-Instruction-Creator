@@ -1046,6 +1046,27 @@ describe('studioRuntime safety checks', () => {
       expect(runtime).not.toContain(`'${removedId}'`);
     }
   });
+
+  it('places minifigures directly without standalone pose steps and uses standing front-facing PLI thumbnails', () => {
+    const runtime = fs.readFileSync(path.resolve(process.cwd(), 'src/studioRuntime.ts'), 'utf8');
+
+    // Neither step-generation pipeline emits standalone isMinifigPoseStep / _mfpose_ steps
+    expect(runtime).not.toContain('_mfpose_');
+    expect(runtime).not.toContain('isMinifigPoseStep: true');
+
+    // Both HTML page rendering and PDF export use standing front-facing canonicalParts for attachedMinifig thumbs
+    const htmlAttStart = runtime.indexOf('const attMfImg = step.attachedMinifig');
+    expect(htmlAttStart).toBeGreaterThan(-1);
+    const htmlAttChunk = runtime.slice(htmlAttStart, htmlAttStart + 320);
+    expect(htmlAttChunk).toContain('step.attachedMinifig.canonicalParts || step.attachedMinifig.previewParts');
+    expect(htmlAttChunk).toContain('MINIFIG_BUILD_CAMERA.az');
+
+    const pdfAttStart = runtime.indexOf('const attUrl = getMinifigThumb(');
+    expect(pdfAttStart).toBeGreaterThan(-1);
+    const pdfAttChunk = runtime.slice(pdfAttStart, pdfAttStart + 260);
+    expect(pdfAttChunk).toContain('att.canonicalParts || att.previewParts');
+    expect(pdfAttChunk).toContain('MINIFIG_BUILD_CAMERA.az');
+  });
 });
 
 

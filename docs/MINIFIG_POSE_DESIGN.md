@@ -48,22 +48,16 @@ An individual arm **keeps its posed angle** in the initial build step **only whe
    - `poseSummary.armsMoved` only counts arms that were actually reset during normalization, avoiding redundant `"Pose arms"` pre-placement prompts when an arm already holds its final purse pose from the build step.
    - `posedPreviewParts` always preserves the exact final scene pose so any reset limbs are clearly posed right before attaching the minifigure to the model.
 
-### 4. Front-Facing Prepare Step & 3D Rotation Indicators
-When a minifigure requires posing or orientation changes before placement (`needsTransform === true`), the pre-placement **Prepare** step (`isMinifigPoseStep`) keeps the minifigure **facing the camera** (`+Z`) so the builder clearly sees the face, torso front, and every moving part:
+### 4. Direct Official-Style Minifigure Placement (No Standalone Pose Steps)
+Matching official LEGO instruction manuals, Brick Instruction Creator does **not** insert a separate standalone "Pose / Rotate minifigure" preparation step (`isMinifigPoseStep`) before placing a minifigure onto the model:
 
-1. **Front-Facing Posed Orientation (`posedFrontParts` & `poseCamera`)**:
-   - `posedFrontParts` removes world yaw (`R_unyaw = rotY(-yawRad)`) around the vertical axis so the minifigure always faces `+Z` toward the camera and key light while preserving every limb articulation and any intentional torso tilt.
-   - Default camera preset is `MINIFIG_POSE_CAMERA` (`az = +32°, el = 20°`, front-right 3/4 view). When only right-side limbs (`arm_r` / `leg_r`) rotate, `poseCamera` automatically chooses `front_left` (`az = -32°, el = 20°`) so the moving limb stays unobstructed while the figure still faces the camera.
-2. **3D Curved Rotation Indicators (`poseIndicators`)**:
-   - **Legs (`legs` / `leg_r` / `leg_l`)**: Orange (`#f97316`) 3D curved arc sweeping around the hip pin from `-Y` (standing) to the posed leg direction. Both legs merge into one clean outer-flank arc when bending together (e.g., `Legs 90° forward`), or emit separate outer-flank arcs for asymmetric walking poses.
-   - **Arms (`arm_r` / `arm_l`)**: Orange (`#f97316`) 3D curved arc around the shoulder hinge pin from neutral hanging pose to target pose. Only emitted for arms actually reset during canonical build (purse/accessory-locked arms are skipped).
-   - **Head (`head`)**: Orange (`#f97316`) horizontal 3D curved arc floating cleanly above the head/headgear crown from `+Z` (front) to the turned facing direction (excluding intentional 180° double-sided alternate faces).
-   - **Body Tilt (`body_tilt`)**: Sky-blue (`#0ea5e9`) vertical-plane 3D curved arc beside the `+X` flank from upright `+Y` to the tilted torso up-axis.
-   - **Body Yaw (`body_yaw`)**: Royal-blue (`#2563eb`) horizontal 3D curved arc positioned cleanly below the figure, ghost limbs, and all limb arcs (`lowestY - 12`), sweeping from `+Z` (front) to the target world facing direction. For symmetric 180° turns when a limb arc occupies `+X`, the yaw arc sweeps around `-X` to avoid 2D projection overlap.
-3. **Starting-Pose Ghost Limbs, Selective Highlights & Action Legend Pills**:
-   - Rotated limbs (`legs`, `arms`) emit aligned translucent starting-pose ghost limbs (`poseGhostParts`, rendered in the transparent pass with crisp slate outlines) attached directly to the posed torso's hip/shoulder joints.
-   - Only rotated parts (`rotatedPartIds`) receive highlight edge outlines on the Prepare step; stationary body parts keep clean standard brick outlines.
-   - Both the interactive page viewer (`renderPage`), live **Rotate** mode, and **PDF export** (`exportPDF`) render the 3D indicators and compact print-scaled color-coded legend pills (e.g., `● Legs 90° forward`, `● Turn figure 180°`) below the 3D render.
+1. **Build Standing, Place Directly in Final Pose**:
+   - In its build step, each minifigure is constructed standing upright, front-facing (`+Z`), with neutral hanging arms (preserving only accessory-required arm poses such as bags or handheld tools).
+   - When it is time to add the minifigure to the model, a single placement step (`attachedMinifig`) places the minifigure directly into the scene in its exact final world pose (`worldParts` — seated, rotated, arms/head positioned in context).
+2. **Front-Facing Standing Callout Thumbnail & Unobstructed Placement Camera**:
+   - The placement step's `×1` minifigure callout box renders the recognizable front-3/4 standing minifigure (`canonicalParts` at `MINIFIG_BUILD_CAMERA`) in both the interactive viewer and PDF export, while the main 3D step render shows the minifigure seated/positioned in the model from an unobstructed camera chosen by `chooseMinifigPlacementCamera`.
+   - Eliminating standalone pose steps removes confusing 3D curved arc arrows, ghost limbs, unreadable degree legend pills, and redundant "rotate an already-built figure" PLI callouts.
+   - `normalizeMinifigureForBuild` continues to compute pose analysis metadata (`poseSummary`, `posedPreviewParts`, `posedFrontParts`, `poseIndicators`, `poseGhostParts`) cleanly for diagnostics and legacy `.biw` project compatibility.
 
 ### 5. Minifigure Group Extraction, Structural Bar Exclusion & Naming
 - **Strict Structural & Fixture Exclusion (`isNonMinifigPart` & `extractMinifigureGroups`)**:

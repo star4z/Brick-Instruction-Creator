@@ -6169,31 +6169,8 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
     }
 
     const appendMinifigPlacementSteps = (targetSteps, nm, idPrefix) => {
-      if (nm.needsTransform) {
-        globalStep++;
-        const poseCam = nm.poseCamera || MINIFIG_POSE_CAMERA;
-        targetSteps.push({
-          id: `${idPrefix}_mfpose_${nm.id}_s${globalStep}`,
-          num: globalStep,
-          side: poseCam.side,
-          corner: poseCam.corner,
-          az: poseCam.az,
-          el: poseCam.el,
-          cue: 'none',
-          isMinifigPoseStep: true,
-          minifigPrep: {
-            id: nm.id,
-            name: nm.name,
-            label: nm.transformLabel,
-            canonicalParts: nm.canonicalParts,
-            poseSummary: nm.poseSummary,
-            indicators: nm.poseIndicators || [],
-            ghostParts: nm.poseGhostParts || [],
-            rotatedPartIds: nm.rotatedPartIds || [],
-          },
-          parts: nm.posedFrontParts || nm.posedPreviewParts,
-        });
-      }
+      // Official LEGO manuals never insert a separate pose/rotate step before placing a minifigure;
+      // the minifigure is built standing upright and then placed directly in its final scene pose.
       globalStep++;
       targetSteps.push({
         id: `${idPrefix}_mfplace_${nm.id}_s${globalStep}`,
@@ -7030,32 +7007,8 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
     });
 
     const emitMinifigPlacement = (nm) => {
-      // Position / rotate / pose minifigure right before placing it on the model!
-      if (nm.needsTransform) {
-        globalStep++;
-        const poseCam = nm.poseCamera || MINIFIG_POSE_CAMERA;
-        curSteps.push({
-          id: `ac${secIdx + 1}_mfpose_${nm.id}_s${globalStep}`,
-          num: globalStep,
-          side: poseCam.side,
-          corner: poseCam.corner,
-          az: poseCam.az,
-          el: poseCam.el,
-          cue: 'none',
-          isMinifigPoseStep: true,
-          minifigPrep: {
-            id: nm.id,
-            name: nm.name,
-            label: nm.transformLabel,
-            canonicalParts: nm.canonicalParts,
-            poseSummary: nm.poseSummary,
-            indicators: nm.poseIndicators || [],
-            ghostParts: nm.poseGhostParts || [],
-            rotatedPartIds: nm.rotatedPartIds || [],
-          },
-          parts: nm.posedFrontParts || nm.posedPreviewParts,
-        });
-      }
+      // Official LEGO manuals place minifigures directly in their final scene pose without a
+      // standalone pre-placement pose/rotation step.
       globalStep++;
       curSteps.push({
         id: `ac${secIdx + 1}_mfplace_${nm.id}_s${globalStep}`,
@@ -9519,10 +9472,10 @@ function renderAll() {
         : null;
       const attMfImg = step.attachedMinifig
         ? getMinifigThumb(
-            step.attachedMinifig.previewParts || step.attachedMinifig.canonicalParts,
+            step.attachedMinifig.canonicalParts || step.attachedMinifig.previewParts,
             `att_${step.attachedMinifig.id}`,
-            Math.round(cam.az),
-            Math.round(Math.min(30, Math.max(16, cam.el))),
+            MINIFIG_BUILD_CAMERA.az,
+            MINIFIG_BUILD_CAMERA.el,
             320,
             320,
           )
@@ -18803,10 +18756,10 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
           drawRRect(pliX, pliY, attBoxW, pliH, pliRadius);
           ctx.clip();
           const attUrl = getMinifigThumb(
-            att.previewParts || att.canonicalParts,
+            att.canonicalParts || att.previewParts,
             `att_${att.id}`,
-            Math.round(cam.az),
-            Math.round(Math.min(30, Math.max(16, cam.el))),
+            MINIFIG_BUILD_CAMERA.az,
+            MINIFIG_BUILD_CAMERA.el,
             320,
             320,
           );
