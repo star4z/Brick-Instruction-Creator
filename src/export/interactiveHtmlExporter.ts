@@ -870,6 +870,11 @@ ${staticFallbackHtml}
       <button id="btnZoomOut" class="tool-btn" type="button" title="Zoom out (-)" aria-label="Zoom out">−</button>
       <button id="btnTogglePli" class="tool-btn" type="button" title="Toggle parts box" aria-label="Toggle parts box" style="display:none">▤</button>
       <button id="btnToggleHl" class="tool-btn" type="button" title="Toggle highlight new pieces" aria-label="Highlight new pieces" style="display:none">✦</button>
+      <button id="btnXrayToggle" class="tool-btn" type="button" title="X-Ray previous assembly" aria-label="X-Ray previous assembly" style="display:none">◎</button>
+      <div id="explodeWrap" title="Explode current step" style="display:none;align-items:center;gap:4px;padding:4px 8px;border-radius:10px;background:rgba(255,255,255,0.88);border:1px solid rgba(15,23,42,0.14);font-size:10px;font-weight:700;color:#0f172a">
+        <span>↕</span>
+        <input id="explodeSlider" type="range" min="0" max="200" value="0" style="width:54px;accent-color:var(--accent);cursor:pointer" aria-label="Explode current step" />
+      </div>
     </div>
     <div id="hintChip" class="hint-chip">${wordless ? '360° ↻ · ±' : 'Drag to rotate · Pinch or scroll to zoom · Shift-drag or 2-finger to pan'}</div>
     <div id="flatView" class="flat-view"></div>
@@ -1282,7 +1287,12 @@ ${staticFallbackHtml}
   // Activate interactive 3D UI now that WebGL + shaders + buffers initialized cleanly
   document.documentElement.classList.add('js-3d-active');
 
+  const STORAGE_KEY = 'biw_viewer_idx_' + String(DATA.title || 'manual').slice(0, 40);
   let curIdx = 0;
+  try {
+    const saved = Number(localStorage.getItem(STORAGE_KEY));
+    if (Number.isFinite(saved) && saved >= 0 && saved < viewerItems.length) curIdx = saved;
+  } catch {}
   let cam = { az: 38, el: 28, zoom: 1.0, panX: 0, panY: 0 };
   let targetCam = null;
   let activeScene = null;
@@ -1290,6 +1300,8 @@ ${staticFallbackHtml}
   let showPli = true;
   let highlightNew = DATA.highlightNew !== false;
   let fadePrev = DATA.fadePrev !== false;
+  let xrayPrev = false;
+  let explodeLift = 0;
   const hlRgb = hexToRgb01(DATA.highlightColor || '#ff2d55');
   const arrowRgb01 = hexToRgb01(DATA.arrowColor || '#dc2626');
   const arrowColBytes = [Math.round(arrowRgb01[0] * 255), Math.round(arrowRgb01[1] * 255), Math.round(arrowRgb01[2] * 255), 255];
@@ -1539,8 +1551,8 @@ ${staticFallbackHtml}
     const newIdx = activeScene.newPartIdx || [];
 
     const drawGroups = [
-      { list: prevIdx, fade: fadePrev ? fadeMixVal : 0.0, hl: false },
-      { list: newIdx, fade: 0.0, hl: highlightNew && prevIdx.length > 0 },
+      { list: prevIdx, fade: xrayPrev ? 0.78 : (fadePrev ? fadeMixVal : 0.0), hl: false, isNewGrp: false },
+      { list: newIdx, fade: 0.0, hl: highlightNew && prevIdx.length > 0, isNewGrp: true },
     ];
 
     // 1. Opaque triangles
@@ -1552,8 +1564,10 @@ ${staticFallbackHtml}
     gl.uniform3f(progs.tri.vdir, vdir[0], vdir[1], vdir[2]);
     resetAttribs([progs.tri.pos, progs.tri.norm, progs.tri.col]);
 
+    const liftM4 = new Float32Array(16);
     for (const grp of drawGroups) {
       gl.uniform1f(progs.tri.fade, grp.fade);
+      const yLift = grp.isNewGrp && explodeLift > 0 ? explodeLift * 0.45 : 0;
       for (let i = 0; i < grp.list.length; i++) {
         const pm = partMats[grp.list[i]];
         if (!pm) continue;
@@ -1561,7 +1575,13 @@ ${staticFallbackHtml}
         if (!pr || pr.oc <= 0) continue;
         const gpu = ensureProtoGpu(pr);
         if (!gpu || !gpu.tp) continue;
-        gl.uniformMatrix4fv(progs.tri.model, false, pm.m4);
+        if (yLift > 0) {
+          liftM4.set(pm.m4);
+          liftM4[13] += yLift;
+          gl.uniformMatrix4fv(progs.tri.model, false, liftM4);
+        } else {
+          gl.uniformMatrix4fv(progs.tri.model, false, pm.m4);
+        }
         gl.uniformMatrix3fv(progs.tri.nmat, false, pm.n3);
         gl.bindBuffer(gl.ARRAY_BUFFER, gpu.tp); gl.vertexAttribPointer(progs.tri.pos, 3, gl.FLOAT, false, 0, 0);
         gl.bindBuffer(gl.ARRAY_BUFFER, gpu.tn); gl.vertexAttribPointer(progs.tri.norm, 3, gl.FLOAT, false, 0, 0);
@@ -1823,6 +1843,14 @@ ${staticFallbackHtml}
       btnPli.classList.toggle('active', showPli);
       btnHl.style.display = step ? 'flex' : 'none';
       btnHl.classList.toggle('active', highlightNew);
+      const btnXray = document.getElementById('btnXrayToggle');
+      if (btnXray) {
+        btnXray.style.display = step ? 'flex' : 'none';
+        btnXray.classList.toggle('active', xrayPrev);
+      }
+      const expWrap = document.getElementById('explodeWrap');
+      if (expWrap) expWrap.style.display = step ? 'flex' : 'none';
+      try { localStorage.setItem(STORAGE_KEY, String(curIdx)); } catch {}
       requestDraw();
     } else {
       canvas.style.display = 'none';
@@ -2093,6 +2121,10 @@ ${staticFallbackHtml}
   document.getElementById('btnZoomOut').onclick = () => { targetCam = null; cam.zoom = Math.max(0.4, cam.zoom / 1.2); requestDraw(); };
   document.getElementById('btnTogglePli').onclick = () => { showPli = !showPli; renderView(); };
   document.getElementById('btnToggleHl').onclick = () => { highlightNew = !highlightNew; document.getElementById('btnToggleHl').classList.toggle('active', highlightNew); requestDraw(); };
+  const btnXrayEl = document.getElementById('btnXrayToggle');
+  if (btnXrayEl) btnXrayEl.onclick = () => { xrayPrev = !xrayPrev; btnXrayEl.classList.toggle('active', xrayPrev); requestDraw(); };
+  const explodeSliderEl = document.getElementById('explodeSlider');
+  if (explodeSliderEl) explodeSliderEl.oninput = (e) => { explodeLift = Number(e.target.value) || 0; requestDraw(); };
 
   window.addEventListener('keydown', (e) => {
     if (e.key === 'ArrowRight' || e.key === ' ') { if (curIdx < viewerItems.length - 1) { curIdx++; renderView(); } }

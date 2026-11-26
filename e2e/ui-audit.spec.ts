@@ -397,6 +397,13 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     await page.locator('#toggleArrowOutlines').click();
     await page.locator('#toggleArrowLighting').click();
 
+    // Verify Step Number Weight (Light | Medium | Bold) controls
+    await expect(page.locator('.step-num-weight-btn[data-step-num-weight="300"]')).toBeVisible();
+    await page.locator('.step-num-weight-btn[data-step-num-weight="300"]').click();
+    await expect(page.locator('.step-num-weight-btn[data-step-num-weight="300"]')).toHaveAttribute('aria-pressed', 'true');
+    await page.locator('.step-num-weight-btn[data-step-num-weight="800"]').click();
+    await expect(page.locator('.step-num-weight-btn[data-step-num-weight="800"]')).toHaveAttribute('aria-pressed', 'true');
+
     // Verify Step Dividers default to LEGO-style Lines and Build Progress Bar + Span controls inside Style Popover (auto-forking built-in theme)
     await expect(page.locator('#toggleProgressBar')).toBeVisible();
     await expect(page.locator('#stylePopover .progress-bar-span-btn[data-progress-bar-span="page"]')).toHaveAttribute('aria-pressed', 'true');
@@ -510,6 +517,8 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     await page.locator('#btnHeaderExport').click();
     await expect(page.locator('#exportModal')).toBeVisible();
     await expect(page.locator('#expFormatSummary')).toContainText('Booklet outside page numbers');
+    await expect(page.locator('#btnExpBrickLinkXml')).toBeVisible();
+    await expect(page.locator('#btnExpRebrickableCsv')).toBeVisible();
     await auditSurface(page, `${testInfo.project.name}: Export & Print Modal`, {
       activeContainerSelector: '#exportModal',
     });

@@ -752,3 +752,206 @@ export function detectConfusablePliColors(
   return flagged;
 }
 
+/**
+ * Renders a Technic-style DO / DON'T (`✓` green checkmark vs. `✗` red X) orientation
+ * verification badge/card (matching 42083 p. 170 Step 266).
+ */
+export function buildOrientationCheckSvg(
+  widthPx = 144,
+  heightPx = 56,
+  opts?: { bg?: string; border?: string },
+): string {
+  const w = Math.max(96, Math.round(widthPx));
+  const h = Math.max(40, Math.round(heightPx));
+  const bg = opts?.bg || '#ffffff';
+  const border = opts?.border || '#475569';
+  const mid = w / 2;
+  const cy = h / 2;
+  const r = Math.min(13, h * 0.28);
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-label="Orientation check: correct versus incorrect">` +
+    `<rect x="1" y="1" width="${w - 2}" height="${h - 2}" rx="6" fill="${bg}" stroke="${border}" stroke-width="1.3"/>` +
+    `<line x1="${mid}" y1="6" x2="${mid}" y2="${h - 6}" stroke="${border}" stroke-width="1" stroke-dasharray="3 2" opacity="0.55"/>` +
+    `<circle cx="${mid * 0.5}" cy="${cy}" r="${r}" fill="#16a34a"/>` +
+    `<polyline points="${(mid * 0.5 - r * 0.45).toFixed(1)},${cy.toFixed(1)} ${(mid * 0.5 - r * 0.1).toFixed(1)},${(cy + r * 0.42).toFixed(1)} ${(mid * 0.5 + r * 0.52).toFixed(1)},${(cy - r * 0.42).toFixed(1)}" fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>` +
+    `<circle cx="${mid * 1.5}" cy="${cy}" r="${r}" fill="#dc2626"/>` +
+    `<line x1="${(mid * 1.5 - r * 0.42).toFixed(1)}" y1="${(cy - r * 0.42).toFixed(1)}" x2="${(mid * 1.5 + r * 0.42).toFixed(1)}" y2="${(cy + r * 0.42).toFixed(1)}" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round"/>` +
+    `<line x1="${(mid * 1.5 + r * 0.42).toFixed(1)}" y1="${(cy - r * 0.42).toFixed(1)}" x2="${(mid * 1.5 - r * 0.42).toFixed(1)}" y2="${(cy + r * 0.42).toFixed(1)}" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round"/>` +
+    `</svg>`;
+}
+
+export function drawOrientationCheckCanvas(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w = 144,
+  h = 56,
+  opts?: { bg?: string; border?: string },
+): void {
+  const bg = opts?.bg || '#ffffff';
+  const border = opts?.border || '#475569';
+  const mid = x + w / 2;
+  const cy = y + h / 2;
+  const r = Math.min(13, h * 0.28);
+  ctx.save();
+  ctx.fillStyle = bg;
+  ctx.strokeStyle = border;
+  ctx.lineWidth = 1.3;
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, 6);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.setLineDash([3, 2]);
+  ctx.moveTo(mid, y + 6);
+  ctx.lineTo(mid, y + h - 6);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Green checkmark
+  const lx = x + w * 0.25;
+  ctx.fillStyle = '#16a34a';
+  ctx.beginPath();
+  ctx.arc(lx, cy, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 2.4;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  ctx.moveTo(lx - r * 0.45, cy);
+  ctx.lineTo(lx - r * 0.1, cy + r * 0.42);
+  ctx.lineTo(lx + r * 0.52, cy - r * 0.42);
+  ctx.stroke();
+
+  // Red X
+  const rx = x + w * 0.75;
+  ctx.fillStyle = '#dc2626';
+  ctx.beginPath();
+  ctx.arc(rx, cy, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.moveTo(rx - r * 0.42, cy - r * 0.42);
+  ctx.lineTo(rx + r * 0.42, cy + r * 0.42);
+  ctx.moveTo(rx + r * 0.42, cy - r * 0.42);
+  ctx.lineTo(rx - r * 0.42, cy + r * 0.42);
+  ctx.stroke();
+  ctx.restore();
+}
+
+/**
+ * Renders a crisp red circular target highlight ring (`○`) for pinpointing exact
+ * attachment holes/studs on dense Technic or modular assemblies (matching 42083 p. 247, 278).
+ */
+export function buildTargetRingSvg(
+  diameterPx = 34,
+  opts?: { stroke?: string; strokeWidth?: number },
+): string {
+  const d = Math.max(16, Math.round(diameterPx));
+  const sw = opts?.strokeWidth ?? 2.2;
+  const stroke = opts?.stroke || '#dc2626';
+  const r = d / 2 - sw;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${d}" height="${d}" viewBox="0 0 ${d} ${d}" aria-hidden="true">` +
+    `<circle cx="${d / 2}" cy="${d / 2}" r="${r.toFixed(1)}" fill="none" stroke="#ffffff" stroke-width="${(sw + 1.4).toFixed(1)}" opacity="0.8"/>` +
+    `<circle cx="${d / 2}" cy="${d / 2}" r="${r.toFixed(1)}" fill="none" stroke="${stroke}" stroke-width="${sw.toFixed(1)}"/>` +
+    `</svg>`;
+}
+
+export function drawTargetRingCanvas(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  radius = 16,
+  opts?: { stroke?: string; strokeWidth?: number },
+): void {
+  const sw = opts?.strokeWidth ?? 2.2;
+  const stroke = opts?.stroke || '#dc2626';
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+  ctx.lineWidth = sw + 1.4;
+  ctx.stroke();
+  ctx.strokeStyle = stroke;
+  ctx.lineWidth = sw;
+  ctx.stroke();
+  ctx.restore();
+}
+
+export type RotationIconAxis = 'yaw180' | 'flipVertical' | 'roll90';
+
+/**
+ * Renders distinct official-style 3-axis rotation cue icons:
+ * - `'yaw180'`: horizontal turntable 180° spin (matching 42083 p. 74, 92176 p. 61)
+ * - `'flipVertical'`: vertical upside-down flip (matching 10278 p. 214–215, 75895 p. 45)
+ * - `'roll90'`: 90° quarter-turn tilt
+ */
+export function build3AxisRotationIconSvg(
+  axis: RotationIconAxis,
+  sizePx = 32,
+  opts?: { bg?: string; stroke?: string; border?: string },
+): string {
+  const s = Math.max(20, Math.round(sizePx));
+  const bg = opts?.bg || '#ffffff';
+  const stroke = opts?.stroke || '#0f172a';
+  const border = opts?.border || '#64748b';
+  let glyph = '';
+  if (axis === 'flipVertical') {
+    glyph = `<path d="M10 13 C10 7, 22 7, 22 13" fill="none" stroke="${stroke}" stroke-width="2" stroke-linecap="round"/>` +
+      `<polygon points="22,15 19,11 25,11" fill="${stroke}"/>` +
+      `<path d="M22 19 C22 25, 10 25, 10 19" fill="none" stroke="${stroke}" stroke-width="2" stroke-linecap="round"/>` +
+      `<polygon points="10,17 7,21 13,21" fill="${stroke}"/>`;
+  } else if (axis === 'roll90') {
+    glyph = `<path d="M9 19 A8 8 0 0 1 22 11" fill="none" stroke="${stroke}" stroke-width="2" stroke-linecap="round"/>` +
+      `<polygon points="24,13 22,8 18,12" fill="${stroke}"/>`;
+  } else {
+    glyph = `<path d="M8 14 A8 6 0 0 1 24 14" fill="none" stroke="${stroke}" stroke-width="2" stroke-linecap="round"/>` +
+      `<polygon points="25,15 21,12 24,10" fill="${stroke}"/>` +
+      `<path d="M24 18 A8 6 0 0 1 8 18" fill="none" stroke="${stroke}" stroke-width="2" stroke-linecap="round"/>` +
+      `<polygon points="7,17 11,20 8,22" fill="${stroke}"/>`;
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${s}" height="${s}" viewBox="0 0 32 32" aria-label="Rotate model (${axis})">` +
+    `<rect x="1.2" y="1.2" width="29.6" height="29.6" rx="6" fill="${bg}" stroke="${border}" stroke-width="1.4"/>` +
+    glyph +
+    `</svg>`;
+}
+
+/**
+ * Renders an official-style peeled-corner numbered sticker badge (matching Speed Champions #75895 p. 45).
+ */
+export function buildStickerBadgeSvg(
+  stickerNumber: number | string,
+  sizePx = 30,
+  opts?: { transparent?: boolean },
+): string {
+  const s = Math.max(20, Math.round(sizePx));
+  const label = String(stickerNumber);
+  const dash = opts?.transparent ? ' stroke-dasharray="2.5 2"' : '';
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${s}" height="${s}" viewBox="0 0 32 32" aria-label="Apply sticker ${label}">` +
+    `<path d="M10 3 H27 A2 2 0 0 1 29 5 V27 A2 2 0 0 1 27 29 H5 A2 2 0 0 1 3 27 V10 Z" fill="#ffffff" stroke="#0f172a" stroke-width="1.6"${dash}/>` +
+    `<path d="M3 10 Q10 10 10 3 Z" fill="#0f172a"/>` +
+    `<text x="17" y="19" text-anchor="middle" dominant-baseline="central" fill="#0f172a" font-size="13" font-weight="800" font-family="system-ui,sans-serif">${label}</text>` +
+    `</svg>`;
+}
+
+/**
+ * Renders the chunky blue alternate-build swap arrow (matching Bonsai Tree #10281 p. 76).
+ */
+export function buildSwapArrowSvg(
+  widthPx = 46,
+  heightPx = 24,
+  opts?: { color?: string },
+): string {
+  const w = Math.max(28, Math.round(widthPx));
+  const h = Math.max(16, Math.round(heightPx));
+  const col = opts?.color || '#1d4ed8';
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 46 24" aria-label="Swap alternate configuration">` +
+    `<rect x="2" y="8" width="4" height="8" rx="1" fill="${col}" stroke="#0f172a" stroke-width="1.2"/>` +
+    `<rect x="9" y="8" width="5" height="8" rx="1" fill="${col}" stroke="#0f172a" stroke-width="1.2"/>` +
+    `<path d="M17 8 H31 V3 L44 12 L31 21 V16 H17 Z" fill="${col}" stroke="#0f172a" stroke-width="1.2" stroke-linejoin="round"/>` +
+    `</svg>`;
+}
+
+
+

@@ -137,11 +137,13 @@ import {
   build1to1SilhouetteSvg,
   buildCoaxialPositionCalloutSvg,
   buildLengthBadgeSvg,
+  buildMultiPart1to1CardSvg,
   classifyPartLengthBadge,
   detectCoaxialPositionCallout,
   draw1to1SilhouetteCanvas,
   drawCoaxialPositionCalloutCanvas,
   drawLengthBadgeCanvas,
+  drawMultiPart1to1CardCanvas,
 } from './engine/lengthBadges';
 import {
   buildProgressBarHtml,
@@ -446,6 +448,7 @@ import {
 import { buildQrSvg, drawQrCanvas } from './cover/qrCode';
 import { StudioPhotoRenderer } from './cover/studioPhotoRenderer';
 import { buildPdfBinary, canvasRectToPdfLink } from './export/pdfBinary';
+import { buildBrickLinkWantedXml, buildRebrickableCsv } from './export/bomExporters';
 import {
   computeCanonicalPageMetrics,
   computePageTypography,
@@ -2204,12 +2207,17 @@ function buildMeshBuffers(prevParts, newParts, opts) {
         ? [26, 115, 232]
         : hexToRgb255(baseHex, fadeMix);
     const baseLuma = 0.299 * baseCol[0] + 0.587 * baseCol[1] + 0.114 * baseCol[2];
-    const starkEdgeCol = baseLuma < 56 ? [204, 212, 222] : [0, 0, 0];
-    const standardEdgeCol = baseLuma < 52
+    const isWarmDark = baseLuma < 64 && baseCol[0] > baseCol[2] * 1.45;
+    const darkBgBoost = Boolean(opts.darkBackground);
+    const lightEdgeTarget = darkBgBoost
+      ? [226, 232, 240]
+      : (isWarmDark ? [196, 181, 165] : [204, 212, 222]);
+    const starkEdgeCol = baseLuma < 64 ? lightEdgeTarget : [0, 0, 0];
+    const standardEdgeCol = baseLuma < 60
       ? [
-          Math.round(204 * (1 - fadeMix * 0.35) + 148 * (fadeMix * 0.35)),
-          Math.round(212 * (1 - fadeMix * 0.35) + 163 * (fadeMix * 0.35)),
-          Math.round(222 * (1 - fadeMix * 0.35) + 184 * (fadeMix * 0.35)),
+          Math.round(lightEdgeTarget[0] * (1 - fadeMix * 0.35) + 148 * (fadeMix * 0.35)),
+          Math.round(lightEdgeTarget[1] * (1 - fadeMix * 0.35) + 163 * (fadeMix * 0.35)),
+          Math.round(lightEdgeTarget[2] * (1 - fadeMix * 0.35) + 184 * (fadeMix * 0.35)),
         ]
       : hexToRgb255(cInfo.edge, fadeMix * 0.85);
     const edgeCol = isGhost
@@ -2238,7 +2246,7 @@ function buildMeshBuffers(prevParts, newParts, opts) {
       const resolveSubColor = (cid) => {
         if (!subColCache || cid === 16) return null;
         if (cid === STUD_SIDE_COLOR_FLAG) {
-          return (starkBlack && baseLuma >= 56) ? { rgb: [0, 0, 0], alpha: aByte } : null;
+          return (starkBlack && baseLuma >= 64) ? { rgb: [0, 0, 0], alpha: aByte } : null;
         }
         if (cid === STUD_INNER_COLOR_FLAG) {
           return starkBlack ? { rgb: [0, 0, 0], alpha: aByte } : null;
@@ -8006,6 +8014,7 @@ const state = {
   showPageTitle: true,
   showProgressBar: true,
   progressBarSpan: 'page', // 'page' | 'spread' (continuous across facing even/odd pages for printing)
+  stepNumWeight: 800,
   wordlessMode: DEFAULT_WORDLESS_MODE, // LEGO-style icon/number-only instructions (no translation needed)
   bomShowTextFields: initialWordlessDefaults.bomShowTextFields,
   pageNumberFormat: initialWordlessDefaults.pageNumberFormat, // 'number' | 'page_n' | 'n_of_total' | 'none'
@@ -11250,13 +11259,30 @@ function renderAll(renderOpts = {}) {
                   <div data-step-badges="${step.id}" class="${hasHeaderBadges ? 'flex' : 'hidden'} items-center gap-1.5 shrink-0">${headerBadgesInnerHtml}</div>
                 </div>`;
                   }
+                  const stepNumW = theme.stepNumWeight || state.stepNumWeight || 800;
+                  const multi1to1StripHtml = (() => {
+                    if (!state.showSizeGuides || isOfficialMfStyle || !Array.isArray(pli) || pli.length < 2) return '';
+                    const seen = new Map();
+                    for (const item of pli) {
+                      const guide = getActualSizeGuide(item.p);
+                      if (!guide) continue;
+                      const key = `${guide.kind}:${guide.lengthL}:${item.c}`;
+                      if (!seen.has(key)) {
+                        seen.set(key, { badge: guide, colorHex: (resolveColorInfo(item.c) || COLORS[71]).hex });
+                      }
+                    }
+                    if (seen.size < 2) return '';
+                    const pxPerMm = Math.max(2.0, dims.pxPerInch / 25.4);
+                    return `<div class="shrink-0 self-start pointer-events-none">${buildMultiPart1to1CardSvg(Array.from(seen.values()), pxPerMm, { bg: theme.pliBg, border: theme.pliBorder, text: theme.text })}</div>`;
+                  })();
                   if (useOverlayPli) {
                     return `
                 <div class="absolute z-10 flex items-start justify-between min-w-0 pointer-events-none" style="top:${slotPadPx}px;left:${slotPadPx}px;right:${slotPadPx}px;gap:${Math.round(typo.pt(5))}px">
                   <div class="flex items-start flex-wrap min-w-0 pointer-events-auto" style="gap:${Math.round(typo.pt(6))}px">
-                    <span class="font-extrabold leading-none shrink-0" style="font-size:${stepNumPx}px">${step.num}</span>
+                    <span class="leading-none shrink-0" style="font-size:${stepNumPx}px;font-weight:${stepNumW}">${step.num}</span>
                     ${pinBadgeHtml}
                     ${pliBoxHtml}
+                    ${multi1to1StripHtml}
                   </div>
                   <div data-step-badges="${step.id}" class="${hasHeaderBadges ? 'flex' : 'hidden'} items-center shrink-0 flex-wrap justify-end max-w-[55%] pointer-events-auto" style="gap:${Math.round(typo.pt(4))}px">${headerBadgesInnerHtml}</div>
                 </div>`;
@@ -11265,18 +11291,19 @@ function renderAll(renderOpts = {}) {
                 <div class="relative z-10 shrink-0 flex flex-col min-w-0" style="gap:${Math.round(typo.pt(4))}px">
                   <div class="flex items-center justify-between min-w-0" style="gap:${Math.round(typo.pt(4))}px">
                     <div class="flex items-center min-w-0 shrink-0" style="gap:${Math.round(typo.pt(4))}px">
-                      <span class="font-extrabold leading-none shrink-0" style="font-size:${stepNumPx}px">${step.num}</span>
+                      <span class="leading-none shrink-0" style="font-size:${stepNumPx}px;font-weight:${stepNumW}">${step.num}</span>
                       ${pinBadgeHtml}
                     </div>
                     <div data-step-badges="${step.id}" class="${hasHeaderBadges ? 'flex' : 'hidden'} items-center min-w-0 max-w-[82%] justify-end" style="gap:${Math.round(typo.pt(4))}px">${headerBadgesInnerHtml}</div>
                   </div>
-                  ${pliBoxHtml ? `<div class="min-w-0 max-w-full">${pliBoxHtml}</div>` : ''}
+                  ${pliBoxHtml ? `<div class="min-w-0 max-w-full flex items-start flex-wrap" style="gap:${Math.round(typo.pt(6))}px">${pliBoxHtml}${multi1to1StripHtml}</div>` : ''}
                 </div>` : `
                 <div class="relative z-10 shrink-0 flex items-start justify-between min-w-0" style="gap:${Math.round(typo.pt(5))}px">
                   <div class="flex items-start flex-wrap min-w-0 flex-1" style="gap:${Math.round(typo.pt(6))}px">
-                    <span class="font-extrabold leading-none shrink-0" style="font-size:${stepNumPx}px">${step.num}</span>
+                    <span class="leading-none shrink-0" style="font-size:${stepNumPx}px;font-weight:${stepNumW}">${step.num}</span>
                     ${pinBadgeHtml}
                     ${pliBoxHtml}
+                    ${multi1to1StripHtml}
                   </div>
                   <div data-step-badges="${step.id}" class="${hasHeaderBadges ? 'flex' : 'hidden'} items-center shrink-0 flex-wrap justify-end max-w-[55%]" style="gap:${Math.round(typo.pt(4))}px">${headerBadgesInnerHtml}</div>
                 </div>`;
@@ -14611,6 +14638,14 @@ function syncStepBorderStyleUI(mode = state.stepBorderStyle) {
   document.querySelectorAll('.step-border-style-setup-btn').forEach(b => {
     const act = b.getAttribute('data-step-border-style') === activeMode;
     b.className = `step-border-style-setup-btn py-2.5 px-2 rounded-lg border font-semibold flex flex-col items-center gap-1.5 transition cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)]'}`;
+    b.setAttribute('aria-pressed', act ? 'true' : 'false');
+  });
+  const activeWeight = Number(state.stepNumWeight) === 300 || Number(state.stepNumWeight) === 500 ? Number(state.stepNumWeight) : 800;
+  document.querySelectorAll('.step-num-weight-btn').forEach(b => {
+    const w = Number(b.getAttribute('data-step-num-weight'));
+    const act = w === activeWeight;
+    const wCls = w === 300 ? 'font-light' : (w === 500 ? 'font-medium' : 'font-extrabold');
+    b.className = `step-num-weight-btn py-1.5 px-2 rounded-md border ${wCls} text-xs transition-colors cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)]'}`;
     b.setAttribute('aria-pressed', act ? 'true' : 'false');
   });
 }
@@ -20495,7 +20530,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       } else {
         // Step number
         ctx.fillStyle = theme.text;
-        ctx.font = themeCanvasFont(theme, 800, stepNumPx);
+        ctx.font = themeCanvasFont(theme, theme.stepNumWeight || state.stepNumWeight || 800, stepNumPx);
         ctx.fillText(String(step.num), sx + st.slotPad, sy + st.slotPad);
         const numWidth = Math.max(Math.round(stepNumPx * 1.15), Math.round(ctx.measureText(String(step.num)).width));
 
@@ -20671,6 +20706,28 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
                 const gy = pliY + pliH - silH - 4;
                 draw1to1SilhouetteCanvas(ctx, guide, ix + 2, gy, silW, silH, gCol);
                 drawLengthBadgeCanvas(ctx, guide, ix + silW + 10, gy + silH / 2, Math.max(11, Math.round(typo.pt(9.5))));
+              }
+            }
+            if (state.showSizeGuides && pli.length >= 2) {
+              const seen1to1 = new Map();
+              for (const entry of pli) {
+                const g = getActualSizeGuide(entry.part.p);
+                if (!g) continue;
+                const k = `${g.kind}:${g.lengthL}:${entry.part.c}`;
+                if (!seen1to1.has(k)) {
+                  seen1to1.set(k, { badge: g, colorHex: (resolveColorInfo(entry.part.c) || COLORS[71]).hex });
+                }
+              }
+              const pliBoxW = pli.length * itemW + 10;
+              if (seen1to1.size >= 2 && pliX + pliBoxW + 110 < sx + slotW - st.slotPad) {
+                drawMultiPart1to1CardCanvas(
+                  ctx,
+                  Array.from(seen1to1.values()),
+                  pliX + pliBoxW + Math.round(typo.pt(6)),
+                  pliY,
+                  Math.max(2.0, typo.pt(72 / 25.4)),
+                  { bg: theme.pliBg, border: theme.pliBorder, text: theme.text },
+                );
               }
             }
           }
@@ -21089,7 +21146,17 @@ async function runPdfExport(pagesToExport) {
     await new Promise(r => setTimeout(r, 8));
     const pg = pagesToExport[i];
     const pgDims = computePdfPagePixelDimensions(pageWpt, pageHpt, pg.kind);
-    jpegPages.push(await renderPageToJpegBytes(pg, pgDims.width, pgDims.height, pageWpt, pageHpt));
+    const renderedPg = await renderPageToJpegBytes(pg, pgDims.width, pgDims.height, pageWpt, pageHpt);
+    const bmTitle = pg.kind === 'cover'
+      ? 'Cover'
+      : pg.kind === 'complete'
+        ? 'Build Complete'
+        : pg.kind === 'bom'
+          ? `Parts List${pg.bomPageCount > 1 ? ` (${pg.bomPageIdx + 1}/${pg.bomPageCount})` : ''}`
+          : pg.kind === 'back'
+            ? 'Back Cover'
+            : (pg.label || `Page ${pg.num || i + 1}`);
+    jpegPages.push({ ...renderedPg, bookmarkTitle: bmTitle });
   }
   const pdfBytes = buildPdfBinary(jpegPages, pageWpt, pageHpt);
   if (lastGeneratedPdfUrl) URL.revokeObjectURL(lastGeneratedPdfUrl);
@@ -23452,6 +23519,12 @@ const applyStepBorderStyle = (mode) => {
 document.querySelectorAll('.step-border-style-btn, .step-border-style-setup-btn').forEach(b => {
   b.onclick = () => applyStepBorderStyle(b.getAttribute('data-step-border-style'));
 });
+document.querySelectorAll('.step-num-weight-btn').forEach(b => {
+  b.onclick = () => {
+    const w = Number(b.getAttribute('data-step-num-weight'));
+    patchActiveTheme({ stepNumWeight: w === 300 || w === 500 ? w : 800 });
+  };
+});
 const setPageTitle = (e) => patchActiveTheme({ showPageTitle: e.target.checked });
 document.getElementById('togglePageTitle').onchange = setPageTitle;
 document.getElementById('togglePageTitleSetup').onchange = setPageTitle;
@@ -24086,6 +24159,40 @@ document.getElementById('bomSetupModal').onclick = (e) => { if (e.target.id === 
 document.getElementById('errorsModal').onclick = (e) => { if (e.target.id === 'errorsModal') document.getElementById('errorsModal').classList.add('hidden'); };
 document.getElementById('btnCloseExport').onclick = () => document.getElementById('exportModal').classList.add('hidden');
 document.getElementById('btnExpAllPdf').onclick = () => runPdfExport(state.pages);
+const triggerTextDownload = (content, filename, mime) => {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
+const buildBomExportList = () => {
+  if (!state.model) return [];
+  return getSortedBomEntries(getAllParts(state.model)).map((e) => ({
+    partId: e.part.p,
+    colorId: e.part.c,
+    qty: e.qty,
+    name: e.meta?.name || '',
+  }));
+};
+const btnExpBlXml = document.getElementById('btnExpBrickLinkXml');
+if (btnExpBlXml) {
+  btnExpBlXml.onclick = () => {
+    const slug = (state.model?.title || 'parts').replace(/[^a-z0-9]+/gi, '_').toLowerCase();
+    triggerTextDownload(buildBrickLinkWantedXml(buildBomExportList()), `${slug}_bricklink.xml`, 'application/xml;charset=utf-8');
+  };
+}
+const btnExpRebCsv = document.getElementById('btnExpRebrickableCsv');
+if (btnExpRebCsv) {
+  btnExpRebCsv.onclick = () => {
+    const slug = (state.model?.title || 'parts').replace(/[^a-z0-9]+/gi, '_').toLowerCase();
+    triggerTextDownload(buildRebrickableCsv(buildBomExportList()), `${slug}_rebrickable.csv`, 'text/csv;charset=utf-8');
+  };
+}
 document.getElementById('btnSharePdf').onclick = async () => {
   if (!lastGeneratedPdfBlob) return;
   try {

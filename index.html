@@ -709,6 +709,14 @@
               <button type="button" data-step-border-style="none" class="step-border-style-btn py-1.5 px-2 rounded-md border font-semibold text-xs transition-colors cursor-pointer">None</button>
             </div>
           </div>
+          <div class="space-y-1.5 pt-1">
+            <div class="font-medium">Step Number Weight</div>
+            <div class="grid grid-cols-3 gap-1.5" role="group" aria-label="Step number weight">
+              <button type="button" data-step-num-weight="300" class="step-num-weight-btn py-1.5 px-2 rounded-md border font-light text-xs transition-colors cursor-pointer">Light</button>
+              <button type="button" data-step-num-weight="500" class="step-num-weight-btn py-1.5 px-2 rounded-md border font-medium text-xs transition-colors cursor-pointer">Medium</button>
+              <button type="button" data-step-num-weight="800" class="step-num-weight-btn py-1.5 px-2 rounded-md border font-extrabold text-xs transition-colors cursor-pointer">Bold</button>
+            </div>
+          </div>
           <label id="togglePageTitleLabel" class="flex items-center justify-between gap-2 cursor-pointer">
             <span class="font-medium inline-flex items-center gap-1.5 min-w-0">
               <span class="truncate">Model Title on Pages</span>
@@ -1046,6 +1054,14 @@
             <button id="btnSysPrint" type="button" class="w-full py-3 px-4 rounded-lg border border-[var(--border-strong)] bg-[var(--card)] hover:bg-[var(--surface-hover)] text-[var(--foreground)] text-sm font-semibold flex items-center justify-center text-center transition-colors cursor-pointer">
               Print
             </button>
+            <div class="grid grid-cols-2 gap-2 pt-1">
+              <button id="btnExpBrickLinkXml" type="button" class="py-2.5 px-3 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] text-[var(--foreground)] text-xs font-semibold flex items-center justify-center text-center transition-colors cursor-pointer">
+                BrickLink XML
+              </button>
+              <button id="btnExpRebrickableCsv" type="button" class="py-2.5 px-3 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] text-[var(--foreground)] text-xs font-semibold flex items-center justify-center text-center transition-colors cursor-pointer">
+                Rebrickable CSV
+              </button>
+            </div>
           </div>
 
           <div id="expProgressWrap" class="hidden space-y-2">
@@ -1107,6 +1123,7 @@
                   <option value="a5">A5 Booklet (148 × 210 mm)</option>
                   <option value="b5">B5 Booklet (176 × 250 mm)</option>
                   <option value="half_letter">Half Letter (5.5 × 8.5 in)</option>
+                  <option value="pocket">Pocket Booklet (4.0 × 5.3 in)</option>
                   <option value="legal">US Legal (8.5 × 14 in)</option>
                   <option value="tabloid">Tabloid / Ledger (11 × 17 in)</option>
                   <option value="a3">A3 Poster (297 × 420 mm)</option>

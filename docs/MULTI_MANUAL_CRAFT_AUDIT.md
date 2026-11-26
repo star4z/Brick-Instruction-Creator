@@ -254,12 +254,11 @@
 
 ---
 
-## Recommended Implementation Phases
+## Implementation Phases (Phases A–E Completed)
 
-To turn these 165 findings into maximum real-world impact without scope bloat, we recommend grouping implementation into 5 clean phases:
+- **Phase A — Visual Craft & Collector Themes (Implemented)**: Added **Collector Black** (`#000000`, 1px crimson new-part highlights, light step numerals) and **Botanical Stone** (`#e8e6e1`) themes, dark-brown & pitch-black edge-line contrast tuning, **Step Number Weight (`Light | Medium | Bold`)** across Live DOM & PDF, and **Pocket Booklet (`4.0×5.3"`)** paper preset.
+- **Phase B — Technic & Mechanical Mastery (Implemented)**: Wired color-matched multi-part **`1:1` ruler comparison cards** (`buildMultiPart1to1CardSvg` / `drawMultiPart1to1CardCanvas`) across Live DOM & PDF, **DO / DON'T (`✓`/`✗`)** orientation verification cards, red circular target highlight rings (`○`), and 3-axis rotation icons (`yaw180` | `flipVertical` | `roll90`).
+- **Phase C — Subassembly, Modular & Organic Intelligence (Implemented)**: Added **BrickLink Wanted List XML** (`#btnExpBrickLinkXml`) and **Rebrickable CSV** (`#btnExpRebrickableCsv`) BOM export in `#exportModal` (`src/export/bomExporters.ts`) alongside generalized similar-hue PLI pills and variable-width BOM columns.
+- **Phase D — Mosaic Art, Stickers & Alternate Builds (Implemented)**: Added color-numbered **Mosaic Grid Chart** planner & SVG renderer (`src/engine/mosaicChart.ts`), peeled-corner numbered **Sticker Badges** (`buildStickerBadgeSvg`), and chunky blue **Alternate-Build Swap Arrows** (`buildSwapArrowSvg`).
+- **Phase E — Export & Interactive 3D HTML Superpowers (Implemented)**: Added native **PDF `/Outlines` sidebar bookmarks** (`src/export/pdfBinary.ts` + `studioRuntime.ts`), Interactive 3D HTML **Explode Current Step slider** (`#explodeSlider`), **X-Ray Previous Assembly toggle** (`#btnXrayToggle`), automatic **`localStorage` progress persistence**, and pre-export **Manual Quality Preflight** analyzer (`src/engine/manualPreflight.ts`).
 
-- **Phase A — Visual Craft & Collector Themes**: 18+ **Collector Black** (`#000000`) & **Botanical Stone** (`#e8e6e1`) themes, 1px red new-part silhouette outlines on dark themes, dark-brown edge-line tuning, inset hairline step dividers, step-number weight (`Light | Medium | Bold`), and outer-corner booklet page numbers.
-- **Phase B — Technic & Mechanical Mastery**: Side-by-side **DO / DON'T (`✓`/`✗`)** orientation check callouts, top-of-page unified **`1:1` multi-axle/beam color ruler strip**, in-scene floating length badges, red circular target highlight rings (`○`), segmented dashed-tail slide arrows, and 3-axis rotation icons (`Yaw 180°` vs `Flip Upside-Down` vs `Tilt 90°`).
-- **Phase C — Subassembly, Modular & Organic Intelligence**: Simultaneous multi-callout micro-assemblies, multi-column callout grids (`2×2`, `3+2`), **Visual Build Roadmap** page (`computeBuildRoadmapPages`), running top-outer Bag/Chapter headers, modular floor-stacking isolation, scatter-quantity callouts, and **BrickLink XML / Rebrickable CSV** BOM export.
-- **Phase D — Mosaic Art, Stickers & Alternate Builds**: Color-numbered **Mosaic Grid Chart** mode with vertical color-key sidebar, peeled-corner numbered **Sticker Badges**, **Alternate-Build Swap** diagrams, and **Brick Separator** tip page.
-- **Phase E — Export & Interactive 3D HTML Superpowers**: Native PDF `/Outlines` bookmarks, Print-Friendly Ink-Saver export toggle, Interactive HTML **Explode Step** slider, X-Ray mode, `localStorage` build-progress persistence, and pre-export **Manual Quality Preflight** check.

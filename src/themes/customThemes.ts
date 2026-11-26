@@ -165,6 +165,14 @@ export function sanitizeStepBorderStyle(
   return fallback;
 }
 
+export type StepNumWeight = 300 | 500 | 800;
+
+export function sanitizeStepNumWeight(raw: unknown, fallback: StepNumWeight = 800): StepNumWeight {
+  const n = Number(raw);
+  if (n === 300 || n === 500 || n === 800) return n;
+  return fallback;
+}
+
 /**
  * Step rendering and display options that belong to a theme (formerly loose
  * Style popover toggles). Field names intentionally match the studio runtime
@@ -194,6 +202,7 @@ export interface ThemeStyleOptions {
   showPageTitle: boolean;
   showProgressBar: boolean;
   progressBarSpan: ProgressBarSpan;
+  stepNumWeight: StepNumWeight;
   bomConfig: BomConfig;
 }
 
@@ -221,6 +230,7 @@ export const THEME_STYLE_OPTION_KEYS: Array<keyof ThemeStyleOptions> = [
   'showPageTitle',
   'showProgressBar',
   'progressBarSpan',
+  'stepNumWeight',
   'bomConfig',
 ];
 
@@ -248,6 +258,7 @@ export const DEFAULT_THEME_STYLE_OPTIONS: ThemeStyleOptions = {
   showPageTitle: true,
   showProgressBar: true,
   progressBarSpan: 'page',
+  stepNumWeight: 800,
   bomConfig: createDefaultBomConfig(),
 };
 
@@ -330,6 +341,7 @@ export function normalizeThemeStyleOptions(
     showPageTitle: bool('showPageTitle'),
     showProgressBar: bool('showProgressBar'),
     progressBarSpan: sanitizeProgressBarSpan(r.progressBarSpan, sanitizeProgressBarSpan(fb.progressBarSpan, 'page')),
+    stepNumWeight: sanitizeStepNumWeight(r.stepNumWeight, sanitizeStepNumWeight(fb.stepNumWeight, 800)),
     bomConfig: normalizeBomConfig(r.bomConfig, fb.bomConfig),
   };
 }
@@ -393,6 +405,7 @@ export interface ManualTheme {
   showPageTitle?: boolean;
   showProgressBar?: boolean;
   progressBarSpan?: ProgressBarSpan;
+  stepNumWeight?: StepNumWeight;
   bomConfig?: BomConfig;
   createdAt?: string;
   updatedAt?: string;
@@ -632,6 +645,53 @@ export const BUILT_IN_THEMES: Record<string, ManualTheme> = {
     headingFont: 'public-sans',
     bodyFont: 'public-sans',
     ...DEFAULT_THEME_STYLE_OPTIONS,
+  },
+  'collector-black': {
+    id: 'collector-black',
+    name: 'Collector Black',
+    builtIn: true,
+    bgType: 'solid',
+    bgColor: '#000000',
+    bgColorEnd: '#0a0d12',
+    bgAngle: 180,
+    bg: '#000000',
+    text: '#f8fafc',
+    muted: '#94a3b8',
+    pliBg: '#0b0f17',
+    pliBorder: '#ffffff',
+    accent: '#ef4444',
+    calloutBg: '#111622',
+    calloutBorder: '#94a3b8',
+    bp: false,
+    headingFont: 'public-sans',
+    bodyFont: 'public-sans',
+    ...DEFAULT_THEME_STYLE_OPTIONS,
+    highlightNew: true,
+    highlightColor: '#ef4444',
+    highlightLineWeight: 'light',
+    stepNumWeight: 300,
+  },
+  'botanical-stone': {
+    id: 'botanical-stone',
+    name: 'Botanical Stone',
+    builtIn: true,
+    bgType: 'solid',
+    bgColor: '#e8e6e1',
+    bgColorEnd: '#dfdcd5',
+    bgAngle: 180,
+    bg: '#e8e6e1',
+    text: '#1c1917',
+    muted: '#57534e',
+    pliBg: '#ffffff',
+    pliBorder: '#57534e',
+    accent: '#15803d',
+    calloutBg: '#f7f5f0',
+    calloutBorder: '#78716c',
+    bp: false,
+    headingFont: 'public-sans',
+    bodyFont: 'public-sans',
+    ...DEFAULT_THEME_STYLE_OPTIONS,
+    stepNumWeight: 300,
   },
 };
 

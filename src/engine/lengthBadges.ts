@@ -535,3 +535,124 @@ export function drawCoaxialPositionCalloutCanvas(
   ctx.restore();
   return { w, h };
 }
+
+export interface MultiPart1to1Item {
+  badge: PartLengthBadge;
+  colorHex: string;
+}
+
+/**
+ * Renders a unified Technic-style `1:1` comparison strip stacking 1..4 color-matched
+ * axles/bars/beams shortest-to-longest with left baselines flush (matching 42083 p. 37, 74, 130, 148).
+ */
+export function buildMultiPart1to1CardSvg(
+  items: ReadonlyArray<MultiPart1to1Item>,
+  pxPerMm = 3.78,
+  opts?: { bg?: string; border?: string; text?: string },
+): string {
+  if (!items.length) return '';
+  const sorted = [...items].sort((a, b) => a.badge.lengthL - b.badge.lengthL).slice(0, 4);
+  const bg = opts?.bg || '#ffffff';
+  const border = opts?.border || '#475569';
+  const text = opts?.text || '#0f172a';
+  const rowH = 18;
+  const padX = 10;
+  const padY = 7;
+  const badgeSz = 14;
+  const labelW = 28;
+  const maxBarPx = Math.max(
+    36,
+    ...sorted.map((it) => Math.max(24, Math.min(220, Math.round(it.badge.lengthL * 8 * pxPerMm)))),
+  );
+  const w = padX * 2 + maxBarPx + badgeSz + 8 + labelW;
+  const h = padY * 2 + sorted.length * rowH;
+
+  const rowsSvg = sorted.map((it, idx) => {
+    const barW = Math.max(24, Math.min(220, Math.round(it.badge.lengthL * 8 * pxPerMm)));
+    const ry = padY + idx * rowH;
+    const cy = ry + rowH / 2;
+    const stroke = hexLuminance255(it.colorHex) < 62 ? '#cbd5e1' : '#1e293b';
+    const shapeSvg = it.badge.kind === 'liftarm'
+      ? `<rect x="${padX}" y="${cy - 4.5}" width="${barW}" height="9" rx="4.5" fill="${it.colorHex}" stroke="${stroke}" stroke-width="1"/>`
+      : `<rect x="${padX}" y="${cy - 3.5}" width="${barW}" height="7" rx="1.8" fill="${it.colorHex}" stroke="${stroke}" stroke-width="1"/><line x1="${padX + 2}" y1="${cy}" x2="${padX + barW - 2}" y2="${cy}" stroke="${stroke}" stroke-width="0.7" opacity="0.65"/>`;
+    const bx = padX + barW + 4;
+    const badgeSvg = it.badge.shape === 'circle'
+      ? `<circle cx="${bx + badgeSz / 2}" cy="${cy}" r="${badgeSz / 2}" fill="#0f172a"/><text x="${bx + badgeSz / 2}" y="${cy + 0.5}" text-anchor="middle" dominant-baseline="central" fill="#ffffff" font-size="8.5" font-weight="800" font-family="system-ui,sans-serif">${it.badge.label}</text>`
+      : `<rect x="${bx}" y="${cy - badgeSz / 2}" width="${badgeSz}" height="${badgeSz}" rx="2" fill="#0f172a"/><text x="${bx + badgeSz / 2}" y="${cy + 0.5}" text-anchor="middle" dominant-baseline="central" fill="#ffffff" font-size="8.5" font-weight="800" font-family="system-ui,sans-serif">${it.badge.label}</text>`;
+    return shapeSvg + badgeSvg;
+  }).join('');
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-label="1:1 length comparison">` +
+    `<rect x="0.75" y="0.75" width="${w - 1.5}" height="${h - 1.5}" rx="5" fill="${bg}" stroke="${border}" stroke-width="1.2"/>` +
+    rowsSvg +
+    `<text x="${w - padX - 2}" y="${h / 2 + 0.5}" text-anchor="end" dominant-baseline="central" fill="${text}" font-size="11" font-weight="800" font-family="system-ui,sans-serif">1:1</text>` +
+    `</svg>`;
+}
+
+/**
+ * Canvas 2D renderer for the unified multi-part `1:1` ruler card (PDF export parity).
+ */
+export function drawMultiPart1to1CardCanvas(
+  ctx: CanvasRenderingContext2D,
+  items: ReadonlyArray<MultiPart1to1Item>,
+  x: number,
+  y: number,
+  pxPerMm = 3.78,
+  opts?: { bg?: string; border?: string; text?: string },
+): { w: number; h: number } {
+  if (!items.length) return { w: 0, h: 0 };
+  const sorted = [...items].sort((a, b) => a.badge.lengthL - b.badge.lengthL).slice(0, 4);
+  const bg = opts?.bg || '#ffffff';
+  const border = opts?.border || '#475569';
+  const text = opts?.text || '#0f172a';
+  const rowH = 18;
+  const padX = 10;
+  const padY = 7;
+  const badgeSz = 14;
+  const labelW = 28;
+  const maxBarPx = Math.max(
+    36,
+    ...sorted.map((it) => Math.max(24, Math.min(220, Math.round(it.badge.lengthL * 8 * pxPerMm)))),
+  );
+  const w = padX * 2 + maxBarPx + badgeSz + 8 + labelW;
+  const h = padY * 2 + sorted.length * rowH;
+
+  ctx.save();
+  ctx.fillStyle = bg;
+  ctx.strokeStyle = border;
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, 5);
+  ctx.fill();
+  ctx.stroke();
+
+  for (let idx = 0; idx < sorted.length; idx++) {
+    const it = sorted[idx];
+    const barW = Math.max(24, Math.min(220, Math.round(it.badge.lengthL * 8 * pxPerMm)));
+    const cy = y + padY + idx * rowH + rowH / 2;
+    const stroke = hexLuminance255(it.colorHex) < 62 ? '#cbd5e1' : '#1e293b';
+    ctx.fillStyle = it.colorHex;
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    if (it.badge.kind === 'liftarm') {
+      ctx.roundRect(x + padX, cy - 4.5, barW, 9, 4.5);
+    } else {
+      ctx.roundRect(x + padX, cy - 3.5, barW, 7, 1.8);
+    }
+    ctx.fill();
+    ctx.stroke();
+
+    const bx = x + padX + barW + 4;
+    drawLengthBadgeCanvas(ctx, it.badge, bx + badgeSz / 2, cy, badgeSz);
+  }
+
+  ctx.fillStyle = text;
+  ctx.font = '800 11px system-ui, -apple-system, sans-serif';
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('1:1', x + w - padX - 2, y + h / 2 + 0.5);
+  ctx.restore();
+  return { w, h };
+}
+

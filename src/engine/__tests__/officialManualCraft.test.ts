@@ -490,6 +490,128 @@ describe('Official Manual Craft Pass 2 — Substep Strips, Vertical Stacks, Cele
     expect(studCell.xFrac + studCell.wFrac).toBeCloseTo(beamCell.xFrac, 5);
     expect(beamCell.xFrac + beamCell.wFrac).toBeCloseTo(1, 5);
   });
+
+  it('provides Collector Black, Botanical Stone, stepNumWeight, and Pocket Booklet presets (Phase A)', async () => {
+    const { BUILT_IN_THEMES, normalizeThemeStyleOptions } = await import('../../themes/customThemes');
+    const { PAPER_FORMAT_SPECS } = await import('../stepToolbar');
+
+    expect(BUILT_IN_THEMES['collector-black']).toBeDefined();
+    expect(BUILT_IN_THEMES['collector-black'].bgColor).toBe('#000000');
+    expect(BUILT_IN_THEMES['collector-black'].highlightNew).toBe(true);
+    expect(BUILT_IN_THEMES['collector-black'].stepNumWeight).toBe(300);
+
+    expect(BUILT_IN_THEMES['botanical-stone']).toBeDefined();
+    expect(BUILT_IN_THEMES['botanical-stone'].bgColor).toBe('#e8e6e1');
+    expect(BUILT_IN_THEMES['botanical-stone'].stepNumWeight).toBe(300);
+
+    expect(normalizeThemeStyleOptions({ stepNumWeight: 500 }).stepNumWeight).toBe(500);
+    expect(normalizeThemeStyleOptions({ stepNumWeight: 999 }).stepNumWeight).toBe(800);
+
+    expect(PAPER_FORMAT_SPECS.pocket).toBeDefined();
+    expect(PAPER_FORMAT_SPECS.pocket.wIn).toBeCloseTo(4.02, 2);
+    expect(PAPER_FORMAT_SPECS.pocket.hIn).toBeCloseTo(5.31, 2);
+  });
+
+  it('renders Technic multi-part 1:1 cards, DO/DONT checks, target rings, and 3-axis rotation icons (Phase B)', async () => {
+    const { buildMultiPart1to1CardSvg, classifyPartLengthBadge } = await import('../lengthBadges');
+    const { buildOrientationCheckSvg, buildTargetRingSvg, build3AxisRotationIconSvg } = await import('../calloutCraft');
+
+    const b4 = classifyPartLengthBadge('Technic Axle 4', '3705')!;
+    const b8 = classifyPartLengthBadge('Technic Axle 8', '3707')!;
+    const cardSvg = buildMultiPart1to1CardSvg([
+      { badge: b8, colorHex: '#1b2a34' },
+      { badge: b4, colorHex: '#dc2626' },
+    ]);
+    expect(cardSvg).toContain('1:1');
+    expect(cardSvg).toContain('#dc2626');
+    expect(cardSvg).toContain('>4<');
+    expect(cardSvg).toContain('>8<');
+
+    expect(buildOrientationCheckSvg()).toContain('#16a34a');
+    expect(buildOrientationCheckSvg()).toContain('#dc2626');
+    expect(buildTargetRingSvg()).toContain('<circle');
+    expect(build3AxisRotationIconSvg('flipVertical')).toContain('flipVertical');
+    expect(build3AxisRotationIconSvg('yaw180')).toContain('yaw180');
+  });
+
+  it('exports valid BrickLink Wanted List XML and Rebrickable CSV (Phase C)', async () => {
+    const { buildBrickLinkWantedXml, buildRebrickableCsv } = await import('../../export/bomExporters');
+    const items = [
+      { partId: '3001.dat', colorId: 4, qty: 6 },
+      { partId: '3705', colorId: 0, qty: 2 },
+    ];
+    const xml = buildBrickLinkWantedXml(items);
+    expect(xml).toContain('<INVENTORY>');
+    expect(xml).toContain('<ITEMID>3001</ITEMID>');
+    expect(xml).toContain('<MINQTY>6</MINQTY>');
+
+    const csv = buildRebrickableCsv(items);
+    expect(csv.split('\n')[0]).toBe('Part,Color,Quantity');
+    expect(csv).toContain('3001,4,6');
+    expect(csv).toContain('3705,0,2');
+  });
+
+  it('detects and renders LEGO Art mosaic charts, sticker badges, and swap arrows (Phase D)', async () => {
+    const { detectMosaicGridStep, buildMosaicChartSvg } = await import('../mosaicChart');
+    const { buildStickerBadgeSvg, buildSwapArrowSvg } = await import('../calloutCraft');
+
+    const tiles = Array.from({ length: 16 }, (_, i) => ({
+      id: `t_${i}`,
+      partId: '98138',
+      colorId: i % 2 === 0 ? 1 : 4,
+      colorHex: i % 2 === 0 ? '#1e5aa8' : '#b40000',
+      center: [(i % 4) * 20, 0, Math.floor(i / 4) * 20] as [number, number, number],
+      spanLdu: [20, 8, 20] as [number, number, number],
+    }));
+    const plan = detectMosaicGridStep(tiles);
+    expect(plan).not.toBeNull();
+    expect(plan!.cols).toBe(4);
+    expect(plan!.rows).toBe(4);
+    expect(plan!.legend).toHaveLength(2);
+    const chartSvg = buildMosaicChartSvg(plan!);
+    expect(chartSvg).toContain('Color-numbered mosaic chart');
+
+    expect(buildStickerBadgeSvg(7)).toContain('>7<');
+    expect(buildStickerBadgeSvg(3, 30, { transparent: true })).toContain('stroke-dasharray');
+    expect(buildSwapArrowSvg()).toContain('#1d4ed8');
+  });
+
+  it('emits PDF /Outlines bookmarks and runs Manual Quality Preflight checks (Phase E)', async () => {
+    const { buildPdfBinary } = await import('../../export/pdfBinary');
+    const { runManualPreflight } = await import('../manualPreflight');
+
+    const pdf = buildPdfBinary(
+      [
+        { bytes: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]), pxW: 10, pxH: 10, bookmarkTitle: 'Cover' },
+        { bytes: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]), pxW: 10, pxH: 10, bookmarkTitle: 'Parts List' },
+      ],
+      612,
+      792,
+    );
+    const text = new TextDecoder('latin1').decode(pdf);
+    expect(text).toContain('/Outlines');
+    expect(text).toContain('/Title (Cover)');
+    expect(text).toContain('/Title (Parts List)');
+
+    const findings = runManualPreflight({
+      pageCount: 220,
+      stepCount: 300,
+      isDarkTheme: true,
+      showSizeGuides: false,
+      hasLongAxlesOrBeams: true,
+      floatingStepCount: 2,
+      hasPageSizeWarning: true,
+    });
+    expect(findings.map((f) => f.id)).toEqual([
+      'floating-steps',
+      'page-size-fit',
+      'missing-size-guides',
+      'dark-theme-ink',
+      'multi-booklet-hint',
+    ]);
+  });
 });
+
+
 
 

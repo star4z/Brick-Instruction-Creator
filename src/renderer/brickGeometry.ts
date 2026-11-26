@@ -224,7 +224,8 @@ export function buildPartMeshGroup(
 
   const baseC = new THREE.Color(colorInfo.hex);
   const baseLuma = 0.299 * baseC.r + 0.587 * baseC.g + 0.114 * baseC.b;
-  const adaptiveEdgeHex = baseLuma < 0.2 ? '#cbd5e1' : colorInfo.edgeHex;
+  const isWarmDark = baseC.r > baseC.b * 1.45 && baseLuma < 0.24;
+  const adaptiveEdgeHex = baseLuma < 0.24 ? (isWarmDark ? '#c4b5a5' : '#cbd5e1') : colorInfo.edgeHex;
   const edgeColor =
     isNew && theme.highlightNewParts
       ? new THREE.Color(theme.highlightColor)

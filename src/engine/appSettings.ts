@@ -60,6 +60,7 @@ const VALID_PAPER_FORMATS = new Set<string>([
   'a5',
   'b5',
   'half_letter',
+  'pocket',
   'legal',
   'tabloid',
   'a3',

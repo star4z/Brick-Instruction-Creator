@@ -21,6 +21,8 @@ export interface PdfJpegPage {
   links?: PdfLinkRect[];
   /** Optional searchable tokens (e.g. LDraw part IDs and step numbers) embedded as invisible PDF text for Ctrl+F lookup. */
   searchableText?: string[];
+  /** Optional PDF sidebar bookmark title (e.g. "Cover", "Bag 1", "Parts List") for native /Outlines navigation. */
+  bookmarkTitle?: string;
 }
 
 /**
@@ -103,9 +105,23 @@ export function buildPdfBinary(
     pageLayouts.push({ pgObj, imgObj, cntObj, annotObjs });
   }
 
+  // Optional PDF /Outlines bookmark tree for sidebar navigation
+  const bookmarks: Array<{ title: string; pgObj: number; objNum: number }> = [];
+  let outlinesRootObj = 0;
+  const rawBookmarks = jpegPages
+    .map((p, idx) => ({ title: String(p.bookmarkTitle || '').trim(), pgObj: pageLayouts[idx].pgObj }))
+    .filter((b) => b.title.length > 0);
+  if (rawBookmarks.length > 0) {
+    outlinesRootObj = nextObj++;
+    for (const b of rawBookmarks) {
+      bookmarks.push({ title: b.title, pgObj: b.pgObj, objNum: nextObj++ });
+    }
+  }
+
   // Obj 1: Catalog
   offsets.push(offset);
-  pushStr('1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n');
+  const outlinesCatalogEntry = outlinesRootObj > 0 ? ` /Outlines ${outlinesRootObj} 0 R` : '';
+  pushStr(`1 0 obj\n<< /Type /Catalog /Pages 2 0 R${outlinesCatalogEntry} >>\nendobj\n`);
 
   // Obj 2: Pages
   offsets.push(offset);
@@ -168,6 +184,23 @@ export function buildPdfBinary(
       offsets.push(offset);
       pushStr(
         `${objNum} 0 obj\n<< /Type /Annot /Subtype /Link /Rect [${link.llx} ${link.lly} ${link.urx} ${link.ury}] /Border [0 0 0] /H /I /A << /Type /Action /S /URI /URI (${escapedUri}) >> >>\nendobj\n`,
+      );
+    }
+  }
+
+  // Emit optional /Outlines root & items
+  if (outlinesRootObj > 0 && bookmarks.length > 0) {
+    offsets.push(offset);
+    pushStr(
+      `${outlinesRootObj} 0 obj\n<< /Type /Outlines /First ${bookmarks[0].objNum} 0 R /Last ${bookmarks[bookmarks.length - 1].objNum} 0 R /Count ${bookmarks.length} >>\nendobj\n`,
+    );
+    for (let bi = 0; bi < bookmarks.length; bi++) {
+      const b = bookmarks[bi];
+      const prevEntry = bi > 0 ? ` /Prev ${bookmarks[bi - 1].objNum} 0 R` : '';
+      const nextEntry = bi < bookmarks.length - 1 ? ` /Next ${bookmarks[bi + 1].objNum} 0 R` : '';
+      offsets.push(offset);
+      pushStr(
+        `${b.objNum} 0 obj\n<< /Title (${escapePdfLiteralString(b.title)}) /Parent ${outlinesRootObj} 0 R${prevEntry}${nextEntry} /Dest [${b.pgObj} 0 R /Fit] >>\nendobj\n`,
       );
     }
   }
