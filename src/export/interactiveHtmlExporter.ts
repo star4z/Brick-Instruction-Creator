@@ -1399,13 +1399,15 @@ ${staticFallbackHtml}
         const syB = Math.max(0.5, box.max[1]-box.min[1]);
         const szB = Math.max(0.5, box.max[2]-box.min[2]);
         const halfAlong = 0.5 * (Math.abs(ux)*sxB + Math.abs(uy)*syB + Math.abs(uz)*szB);
-        let fromDist = mag - halfAlong * 1.45 >= 10 ? (mag - halfAlong - 2.0) : mag;
-        let toDist = mag - halfAlong * 1.45 >= 10 ? Math.min(halfAlong * 0.45, 4.0) : 0;
+        const studTopDist = -halfAlong + 4.0;
+        let fromDist = mag - halfAlong - 2.0;
+        let toDist = studTopDist;
+        if (fromDist - toDist < 6) fromDist = Math.max(mag - halfAlong, studTopDist + 6.0);
         if (sp.arrowTo) {
           const proj = (sp.arrowTo[0]-box.center[0])*ux + (sp.arrowTo[1]-box.center[1])*uy + (sp.arrowTo[2]-box.center[2])*uz;
           if (proj > toDist && fromDist - proj >= 8) toDist = proj;
         }
-        if (fromDist - toDist < 6) { fromDist = mag; toDist = 0; }
+        if (fromDist - toDist < 6) { fromDist = mag; toDist = studTopDist; }
         let primaryAxis = 1;
         if (Math.abs(ux) >= Math.abs(uy) && Math.abs(ux) >= Math.abs(uz)) primaryAxis = 0;
         else if (Math.abs(uz) >= Math.abs(ux) && Math.abs(uz) >= Math.abs(uy)) primaryAxis = 2;
@@ -1416,14 +1418,12 @@ ${staticFallbackHtml}
         } else {
           const hp = primaryAxis === 0 ? 2 : 0;
           const hVal = studHalfOff(hp === 0 ? sxB : szB);
+          const hy = studHalfOff(syB);
           const sH = hp === 0 ? sx : sz;
-          if (hVal > 0) {
-            const a1 = [0, 0, 0], a2 = [0, 0, 0];
+          if (hVal > 0 || hy > 0) {
+            const a1 = [0, hy, 0], a2 = [0, -hy, 0];
             a1[hp] = sH * hVal; a2[hp] = -sH * hVal;
             anchors = [a1, a2];
-          } else if (syB >= 60 && syB >= (hp === 0 ? sxB : szB) * 2.2) {
-            const hy = Math.max(0, syB * 0.5 - 10);
-            anchors = [[0, -hy, 0], [0, hy, 0]];
           } else {
             anchors = [[0, 0, 0]];
           }

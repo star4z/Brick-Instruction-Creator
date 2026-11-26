@@ -311,7 +311,7 @@ describe('placementArrows — LEGO-style automatic placement arrows & offsets', 
     expect(singleSegs[0].from[0]).toBeCloseTo(0, 4);
     expect(singleSegs[0].from[2]).toBeCloseTo(0, 4);
     expect(singleSegs[0].from[1]).toBeLessThan(singleStudBox.center[1] + 28 - 4);
-    expect(singleSegs[0].to[1]).toBeGreaterThan(singleStudBox.center[1]);
+    expect(singleSegs[0].to[1]).toBeCloseTo(singleStudBox.min[1] + 4, 4);
 
     // 1x2 plate (40x8x20) lifted +28 LDU at az=38° (front-right: +X, +Z) -> nearest stud (+10, 0) & furthest stud (-10, 0)
     const plate1x2 = makeBox(0, 8, 0, 40, 8, 20);
@@ -1131,6 +1131,144 @@ describe('placementArrows — LEGO-style automatic placement arrows & offsets', 
     expect(off!.z).toBe(0);
     // In bottom view, pulls cleanly in -Y (off the free end of the vertical axle)
     expect(off!.y).toBeLessThanOrEqual(-16);
+  });
+
+  it('terminates placement arrows right at the top center of the target stud for plates, bricks, tiles, tall parts, SNOT, and underside attachments', () => {
+    // Standard plate (body 8 + stud 4 = 12 LDU) sitting on deck Y=0 (stud top at Y=4)
+    const plate12 = makeBox(0, 0, 0, 20, 12, 20);
+    const plateSegs = computePlacementArrowSegments(plate12, [0, 32, 0], null, null, 38);
+    expect(plateSegs).toHaveLength(1);
+    expect(plateSegs[0].to[0]).toBeCloseTo(0, 4);
+    expect(plateSegs[0].to[1]).toBeCloseTo(4, 4);
+    expect(plateSegs[0].to[2]).toBeCloseTo(0, 4);
+
+    // Standard brick (body 24 + stud 4 = 28 LDU) sitting on deck Y=8 (stud top at Y=12)
+    const brick28 = makeBox(20, 8, -10, 40, 28, 20);
+    const brickSegs = computePlacementArrowSegments(brick28, [0, 48, 0], null, null, 38);
+    expect(brickSegs).toHaveLength(2);
+    expect(brickSegs[0].to[0]).toBeCloseTo(30, 4);
+    expect(brickSegs[0].to[1]).toBeCloseTo(12, 4);
+    expect(brickSegs[0].to[2]).toBeCloseTo(-10, 4);
+    expect(brickSegs[1].to[0]).toBeCloseTo(10, 4);
+    expect(brickSegs[1].to[1]).toBeCloseTo(12, 4);
+    expect(brickSegs[1].to[2]).toBeCloseTo(-10, 4);
+
+    // Tall 3-brick part (76 LDU) sitting on deck Y=0 (stud top at Y=4)
+    const tall76 = makeBox(0, 0, 0, 20, 76, 20);
+    const tallSegs = computePlacementArrowSegments(tall76, [0, 96, 0], null, null, 38);
+    expect(tallSegs).toHaveLength(1);
+    expect(tallSegs[0].to[1]).toBeCloseTo(4, 4);
+
+    // SNOT plate (12 LDU thick along +Z) attaching onto side studs at Z=0..4 (stud top at Z=4)
+    const snotPlate = makeBox(10, 20, 6, 20, 40, 12); // z in [0, 12]
+    const snotSegs = computePlacementArrowSegments(snotPlate, [0, 0, 32], null, null, 38);
+    expect(snotSegs).toHaveLength(2);
+    expect(snotSegs[0].to[2]).toBeCloseTo(4, 4);
+    expect(snotSegs[1].to[2]).toBeCloseTo(4, 4);
+
+    // Upside-down plate (body Y in [-8, 0], own studs Y in [0, 4]) attaching under deck at Y=0
+    const underPlate = makeBox(0, -8, 0, 20, 12, 20); // minY=-8, maxY=4
+    const underSegs = computePlacementArrowSegments(underPlate, [0, -32, 0], null, null, 38);
+    expect(underSegs).toHaveLength(1);
+    expect(underSegs[0].to[1]).toBeCloseTo(0, 4);
+  });
+
+  it('centers arrows on exact engaged stud tops for overhanging seam-tolerant plates and hanging brackets', () => {
+    // 2x2 plate with LDraw seam tolerance (39.5 x 12 x 39.5) overhanging a 1x10 plate onto 2 studs at X=10, Z=±10, Y=0..4
+    const stepsOverhang: PlacementStepInput[] = [
+      {
+        id: 's1',
+        camera: { az: 38, el: 28, side: 'top' },
+        parts: [
+          {
+            ...makePart('rail_1x10', 10, -8, 0, 19.5, 12, 199.5, RED),
+            localUp: [0, 1, 0],
+            studs: [
+              [10, 0, -30, 0, 1, 0],
+              [10, 0, -10, 0, 1, 0],
+              [10, 0, 10, 0, 1, 0],
+              [10, 0, 30, 0, 1, 0],
+            ],
+          },
+          makePart('deck_a', -30, -8, -40, 60, 12, 80, DARK_GRAY),
+          makePart('deck_b', -30, -8, 40, 60, 12, 80, DARK_GRAY),
+          makePart('deck_c', 50, -8, 0, 60, 12, 160, RED),
+        ],
+      },
+      {
+        id: 's2',
+        camera: { az: 38, el: 28, side: 'top' },
+        parts: [
+          {
+            ...makePart('overhang_2x2', 0, 0, 0, 39.5, 12, 39.5, RED),
+            localUp: [0, 1, 0],
+          },
+        ],
+      },
+    ];
+
+    const resOver = computeAutoPlacementOffsetsForSequence(stepsOverhang);
+    const overOff = resOver.get('s2')?.['overhang_2x2'];
+    expect(overOff).toBeDefined();
+    expect(overOff!.arrowBox).toBeDefined();
+    // Must be dead-center on X=10 (not skewed to 9.875 by 39.5 seam clamping)
+    expect(overOff!.arrowBox!.center[0]).toBeCloseTo(10, 4);
+    const overSegs = computePlacementArrowSegments(
+      overOff!.arrowBox!,
+      [overOff!.x, overOff!.y, overOff!.z],
+      overOff!.arrowTo,
+      null,
+      38,
+    );
+    expect(overSegs).toHaveLength(2);
+    expect(overSegs[0].to[0]).toBeCloseTo(10, 4);
+    expect(overSegs[0].to[1]).toBeCloseTo(4, 4);
+    expect(overSegs[0].to[2]).toBeCloseTo(10, 4);
+    expect(overSegs[1].to[0]).toBeCloseTo(10, 4);
+    expect(overSegs[1].to[1]).toBeCloseTo(4, 4);
+    expect(overSegs[1].to[2]).toBeCloseTo(-10, 4);
+
+    // Lipped bracket/skirt whose AABB drops 4 LDU below the engaged studs (minY=-4, studs at Y=0..4)
+    const stepsBracket: PlacementStepInput[] = [
+      {
+        id: 's1',
+        camera: { az: 38, el: 28, side: 'top' },
+        parts: [
+          {
+            ...makePart('base_brick', 0, -24, 0, 40, 28, 40, RED),
+            localUp: [0, 1, 0],
+            studs: [
+              [-10, 0, 10, 0, 1, 0],
+              [10, 0, 10, 0, 1, 0],
+            ],
+          },
+          {
+            // Top horizontal flange sits on Y=0..8, front skirt lip drops down to Y=-4
+            ...makePart('lipped_bracket', 0, -4, 12, 40, 12, 24, RED),
+            localUp: [0, 1, 0],
+          },
+        ],
+      },
+    ];
+    const resBracket = computeAutoPlacementOffsetsForSequence(stepsBracket);
+    const brOff = resBracket.get('s1')?.['lipped_bracket'];
+    expect(brOff).toBeDefined();
+    expect(brOff!.arrowTo).toBeDefined();
+    expect(brOff!.arrowTo![1]).toBeCloseTo(4, 4);
+    const brSegs = computePlacementArrowSegments(
+      brOff!.arrowBox || stepsBracket[0].parts[1].box,
+      [brOff!.x, brOff!.y, brOff!.z],
+      brOff!.arrowTo,
+      null,
+      38,
+    );
+    expect(brSegs).toHaveLength(2);
+    expect(brSegs[0].to[0]).toBeCloseTo(10, 4);
+    expect(brSegs[0].to[1]).toBeCloseTo(4, 4);
+    expect(brSegs[0].to[2]).toBeCloseTo(10, 4);
+    expect(brSegs[1].to[0]).toBeCloseTo(-10, 4);
+    expect(brSegs[1].to[1]).toBeCloseTo(4, 4);
+    expect(brSegs[1].to[2]).toBeCloseTo(10, 4);
   });
 });
 

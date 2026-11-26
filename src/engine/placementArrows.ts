@@ -81,6 +81,7 @@ export const CONTRAST_ARROW_GREEN = '#16a34a';
 export const CONTRAST_ARROW_BLUE = '#2563eb';
 
 const CONTACT_EPS = 6;
+const STUD_HEIGHT_LDU = 4.0;
 const SUPPORT_GAP_MAX = 1.5;
 const COLOR_NEIGHBOR_EPS = CONTACT_EPS;
 const TOUCH_COLOR_EPS = 4;
@@ -284,6 +285,8 @@ interface ContactSummary {
   studPullDir: Vec3 | null;
   /** World-space base coordinates of engaged studs along `studPullDir` (empty when inferred without compiled studs). */
   engagedStudPoints: Vec3[];
+  /** World-space target tip coordinates of engaged studs (stud top center for ref studs; receiving face for part's own studs). */
+  engagedStudTips: Vec3[];
   touchingRefs: PlacementPartInput[];
   /** Directly touching refs (within 4 LDU with real contact area) used for color-camouflage checks. */
   colorTouchingRefs: PlacementPartInput[];
@@ -353,6 +356,7 @@ interface EngagedStudSummary {
   pullDir: Vec3;
   count: number;
   studPoints: Vec3[];
+  studTips: Vec3[];
 }
 
 function findEngagedStuds(
@@ -366,22 +370,24 @@ function findEngagedStuds(
     weight: number;
     count: number;
     points: Vec3[];
+    tips: Vec3[];
     alignBonus: number;
   };
   const buckets = new Map<string, Bucket>();
 
-  const addVote = (rawDir: Vec3, weight: number, point: Vec3, alignBonus: number) => {
+  const addVote = (rawDir: Vec3, weight: number, point: Vec3, tip: Vec3, alignBonus: number) => {
     const dir = snapCardinalOrUnit(rawDir[0], rawDir[1], rawDir[2]);
     const key = `${Math.round(dir[0] * 20)},${Math.round(dir[1] * 20)},${Math.round(dir[2] * 20)}`;
     let b = buckets.get(key);
     if (!b) {
-      b = { dir, weight: 0, count: 0, points: [], alignBonus: 0 };
+      b = { dir, weight: 0, count: 0, points: [], tips: [], alignBonus: 0 };
       buckets.set(key, b);
     }
     b.weight += weight;
     b.count += 1;
     b.alignBonus = Math.max(b.alignBonus, alignBonus);
     b.points.push(point);
+    b.tips.push(tip);
   };
 
   // 1. Existing ref studs engaging `part` (pulling `part` off moves in +studNormal)
@@ -403,7 +409,13 @@ function findEngagedStuds(
           weight = 0.75;
         }
       }
-      addVote([st[3], st[4], st[5]], weight, [st[0], st[1], st[2]], alignBonus);
+      const basePt: Vec3 = [st[0], st[1], st[2]];
+      const tipPt: Vec3 = [
+        st[0] + st[3] * STUD_HEIGHT_LDU,
+        st[1] + st[4] * STUD_HEIGHT_LDU,
+        st[2] + st[5] * STUD_HEIGHT_LDU,
+      ];
+      addVote([st[3], st[4], st[5]], weight, basePt, tipPt, alignBonus);
     }
   }
 
@@ -426,7 +438,8 @@ function findEngagedStuds(
             weight = 0.75;
           }
         }
-        addVote([-st[3], -st[4], -st[5]], weight, [st[0], st[1], st[2]], alignBonus);
+        const basePt: Vec3 = [st[0], st[1], st[2]];
+        addVote([-st[3], -st[4], -st[5]], weight, basePt, basePt, alignBonus);
         break;
       }
     }
@@ -448,6 +461,7 @@ function findEngagedStuds(
     pullDir: best.dir,
     count: best.count,
     studPoints: best.points,
+    studTips: best.tips,
   };
 }
 
@@ -632,6 +646,7 @@ function analyzeContacts(
   const engaged = findEngagedStuds(part, touchingRefs);
   let studPullDir: Vec3 | null = engaged ? engaged.pullDir : null;
   const engagedStudPoints: Vec3[] = engaged ? engaged.studPoints : [];
+  const engagedStudTips: Vec3[] = engaged ? engaged.studTips : [];
   if (!studPullDir && !verticalCoaxial && !horizontalCoaxial) {
     studPullDir = findLocalUpStudDir(part, touchingRefs);
   }
@@ -647,6 +662,7 @@ function analyzeContacts(
     lateralNormal,
     studPullDir,
     engagedStudPoints,
+    engagedStudTips,
     touchingRefs,
     colorTouchingRefs,
   };
@@ -871,16 +887,22 @@ function computeEngagedStudArrowBox(
     if (p[perpB] > maxB) maxB = p[perpB];
   }
 
-  // Expand by half a stud (10 LDU) around outermost engaged stud centers and clamp to partBox
-  const loA = Math.max(partBox.min[perpA], minA - 10);
-  const hiA = Math.min(partBox.max[perpA], maxA + 10);
-  const loB = Math.max(partBox.min[perpB], minB - 10);
-  const hiB = Math.min(partBox.max[perpB], maxB + 10);
+  // Expand symmetrically by half a stud (10 LDU) around outermost engaged stud centers
+  // without clamping against partBox edges so LDraw seam tolerances never skew stud centering.
+  const loA = minA - 10;
+  const hiA = maxA + 10;
+  const loB = minB - 10;
+  const hiB = maxB + 10;
   if (hiA - loA < 4 || hiB - loB < 4) return null;
 
   const spanA = partBox.max[perpA] - partBox.min[perpA];
   const spanB = partBox.max[perpB] - partBox.min[perpB];
-  if (spanA - (hiA - loA) < 6 && spanB - (hiB - loB) < 6) return null;
+  const centerA = (loA + hiA) * 0.5;
+  const centerB = (loB + hiB) * 0.5;
+  const centerShifted =
+    Math.abs(centerA - partBox.center[perpA]) > 0.25 ||
+    Math.abs(centerB - partBox.center[perpB]) > 0.25;
+  if (!centerShifted && spanA - (hiA - loA) < 2 && spanB - (hiB - loB) < 2) return null;
 
   const mn: Vec3 = [partBox.min[0], partBox.min[1], partBox.min[2]];
   const mx: Vec3 = [partBox.max[0], partBox.max[1], partBox.max[2]];
@@ -918,6 +940,7 @@ function resolveOffsetAlongAxis(
     preferShortestDir?: boolean;
     studPullDir?: Vec3 | null;
     engagedStudPoints?: ReadonlyArray<Vec3>;
+    engagedStudTips?: ReadonlyArray<Vec3>;
     coaxialAxis?: 0 | 1 | 2 | null;
     coaxialHostIds?: ReadonlySet<string>;
   } = {},
@@ -926,6 +949,7 @@ function resolveOffsetAlongAxis(
   const dirs: Vec3[] = [preferredDir, ...fallbackDirs];
   const studPullDir = options.studPullDir ?? null;
   const engagedStudPoints = options.engagedStudPoints ?? [];
+  const engagedStudTips = options.engagedStudTips ?? [];
   const coaxialAxis = options.coaxialAxis ?? null;
   const coaxialHostIds = options.coaxialHostIds;
 
@@ -1102,16 +1126,35 @@ function resolveOffsetAlongAxis(
       if (!collides) {
         const res: AutoPartOffset = { x: dx, y: dy, z: dz, tilt: 0, arrow: true };
         if (arrowBox) res.arrowBox = arrowBox;
-        // If a coaxial obstacle extends beyond the seated center, stop the arrowhead cleanly at its entry tip
+        // Stop the arrowhead cleanly at a coaxial obstacle tip (e.g. axle) OR at the exact
+        // engaged stud top when the part's AABB hangs past the studs (e.g. brackets/mudguards).
+        let targetTipAxis: number | null = null;
         if (corridorObsTip !== null) {
           const pastCenter = sign > 0
             ? corridorObsTip - part.box.center[axis]
             : part.box.center[axis] - corridorObsTip;
           if (pastCenter > 2) {
-            const arrowTo: Vec3 = [arrowAnchor[0], arrowAnchor[1], arrowAnchor[2]];
-            arrowTo[axis] = corridorObsTip + sign * 2;
-            res.arrowTo = arrowTo;
+            targetTipAxis = corridorObsTip + sign * 2;
           }
+        }
+        if (isCardinal && alignsWithEngagedStuds && engagedStudTips.length > 0) {
+          let studTipAxis = sign > 0 ? -Infinity : Infinity;
+          for (let i = 0; i < engagedStudTips.length; i++) {
+            const v = engagedStudTips[i][axis];
+            if (sign > 0 ? v > studTipAxis : v < studTipAxis) studTipAxis = v;
+          }
+          const defaultEntryFace = sign > 0 ? part.box.min[axis] : part.box.max[axis];
+          const defaultTipAxis = defaultEntryFace + sign * STUD_HEIGHT_LDU;
+          if ((studTipAxis - defaultTipAxis) * sign > 1.0) {
+            if (targetTipAxis === null || (studTipAxis - targetTipAxis) * sign > 0) {
+              targetTipAxis = studTipAxis;
+            }
+          }
+        }
+        if (targetTipAxis !== null) {
+          const arrowTo: Vec3 = [arrowAnchor[0], arrowAnchor[1], arrowAnchor[2]];
+          arrowTo[axis] = targetTipAxis;
+          res.arrowTo = arrowTo;
         }
         // Auto-detect pass-through alignment guide when a lateral pin/axle penetrates a perforated beam/frame
         if (isCardinal && axis !== 1) {
@@ -1347,6 +1390,7 @@ function computeFirstStepOffsets(
         preferShortestDir,
         studPullDir: contacts.studPullDir,
         engagedStudPoints: contacts.engagedStudPoints,
+        engagedStudTips: contacts.engagedStudTips,
         coaxialAxis,
         coaxialHostIds: contacts.coaxialHostIds,
       },
@@ -1605,6 +1649,7 @@ function computeSubsequentStepOffsets(
         preferShortestDir,
         studPullDir: c.contacts.studPullDir,
         engagedStudPoints: c.contacts.engagedStudPoints,
+        engagedStudTips: c.contacts.engagedStudTips,
         coaxialAxis,
         coaxialHostIds: c.contacts.coaxialHostIds,
       },
@@ -1735,22 +1780,20 @@ export function computePlacementArrowSegments(
   const s = boxSize(box);
   const halfAlong = 0.5 * (Math.abs(ux) * s[0] + Math.abs(uy) * s[1] + Math.abs(uz) * s[2]);
 
-  // Clear gap between near face of lifted brick and seated destination (or coaxial obstacle tip)
-  const clearGap = mag - halfAlong * 1.45;
-  let fromDist: number;
-  let toDist: number;
-  if (clearGap >= 10) {
-    // Start just outside the lifted part's near face, end just above the seated center
-    fromDist = mag - halfAlong - 2.0;
-    toDist = Math.min(halfAlong * 0.45, 4.0);
-  } else {
-    // Small manual nudge fallback
-    fromDist = mag;
-    toDist = 0;
+  // Terminate the arrowhead right at the top center of the target stud (4 LDU above
+  // the seated entry face `-halfAlong`, matching the official LDraw stud height).
+  // For upside-down attachments onto anti-studs (where the part's own 4 LDU studs
+  // protrude at `-halfAlong`), `-halfAlong + 4` lands flush on the receiving underside face.
+  const studTopDist = -halfAlong + STUD_HEIGHT_LDU;
+  let fromDist = mag - halfAlong - 2.0;
+  let toDist = studTopDist;
+  if (fromDist - toDist < 6) {
+    // Small manual nudge fallback: still anchor the tip at the stud top whenever possible
+    fromDist = Math.max(mag - halfAlong, studTopDist + 6.0);
   }
 
-  // If a coaxial obstacle tip (e.g. top of a vertical axle inside a bush) was provided,
-  // terminate the arrowhead cleanly at that entry tip so it never clips inside the obstacle.
+  // If a coaxial obstacle tip (e.g. top of a vertical axle inside a bush) or an elevated
+  // engaged stud tip (e.g. hanging bracket) was provided, terminate cleanly at that tip.
   if (arrowTo) {
     const proj =
       (arrowTo[0] - box.center[0]) * ux +
@@ -1763,7 +1806,7 @@ export function computePlacementArrowSegments(
 
   if (fromDist - toDist < 6) {
     fromDist = mag;
-    toDist = 0;
+    toDist = studTopDist;
   }
 
   // Primary movement axis
