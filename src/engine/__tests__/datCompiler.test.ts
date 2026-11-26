@@ -786,21 +786,20 @@ describe('compileDatEntry — smooth circular studs & crease-angle vertex normal
     expect(baseplate!.tris.length / 9).toBe(256 * 48);
   });
 
-  it('synthesizes underside stud3 pins and hollow stud4 anti-stud tubes with official LDraw y=-4..0 bounds and STUD_INNER_COLOR_FLAG', () => {
+  it('synthesizes underside stud3/stud3a pins and hollow stud4/stud4a anti-stud tubes matching official LDraw y=-4..0 geometry', () => {
     // Official LDraw 1x2 plate (3023b): stud3 at y=4 scaled by -1 -> LDraw y=4..8 -> GL y=-8..-4
     const antiPin = compileDatEntry(
       { key: 'anti_pin', lines: ['1 16 0 4 0 1 0 0 0 -1 0 0 0 1 stud3.dat'] },
       () => null,
     );
     expect(antiPin).not.toBeNull();
-    // 16 segments: 16 * (2 outer wall + 1 tip cap) = 48 tris, 32 rim edges, 16 silhouette condEdges
-    expect(antiPin!.tris.length / 9).toBe(48);
-    expect(antiPin!.edges.length / 6).toBe(32);
-    expect(antiPin!.condEdges?.length ?? 0).toBe(16 * 12);
+    // 24 segments: 24 * (2 outer wall + 1 tip cap) = 72 tris, 48 rim edges (tip + base), 24 silhouette condEdges
+    expect(antiPin!.tris.length / 9).toBe(72);
+    expect(antiPin!.edges.length / 6).toBe(48);
+    expect(antiPin!.condEdges?.length ?? 0).toBe(24 * 12);
     expect(antiPin!.max[0]).toBeCloseTo(4.0, 2);
     expect(antiPin!.min[1]).toBeCloseTo(-8.0, 2);
     expect(antiPin!.max[1]).toBeCloseTo(-4.0, 2);
-    expect(Array.from(antiPin!.triCols ?? []).filter((c) => c === STUD_INNER_COLOR_FLAG).length).toBe(0);
 
     // Official LDraw 1x2 brick (3004): stud3 at y=4 scaled by -5 -> LDraw y=4..24 -> GL y=-24..-4 (NEVER pokes above top y=0!)
     const brickPin = compileDatEntry(
@@ -812,13 +811,13 @@ describe('compileDatEntry — smooth circular studs & crease-angle vertex normal
     expect(brickPin!.max[1]).toBeCloseTo(-4.0, 2);
     expect(brickPin!.max[1]).toBeLessThan(0);
 
-    // stud3a omits base rim edges at local y=0 (16 tip rim edges only)
+    // stud3a omits base rim edges at local y=0 (24 tip rim edges only)
     const antiPinNoBase = compileDatEntry(
       { key: 'anti_pin_a', lines: ['1 16 0 18 0 1 0 0 0 -1.5 0 0 0 1 stud3a.dat'] },
       () => null,
     );
     expect(antiPinNoBase).not.toBeNull();
-    expect(antiPinNoBase!.edges.length / 6).toBe(16);
+    expect(antiPinNoBase!.edges.length / 6).toBe(24);
     expect(antiPinNoBase!.min[1]).toBeCloseTo(-24.0, 2);
     expect(antiPinNoBase!.max[1]).toBeCloseTo(-18.0, 2);
 
@@ -828,15 +827,26 @@ describe('compileDatEntry — smooth circular studs & crease-angle vertex normal
       () => null,
     );
     expect(antiTube).not.toBeNull();
-    // 16 segments: 16 * (2 outer + 2 tip ring + 2 inner wall + 1 inner cap) = 112 tris, 64 rim edges (inner+outer at both ends), 16 silhouette condEdges
-    expect(antiTube!.tris.length / 9).toBe(112);
-    expect(antiTube!.edges.length / 6).toBe(64);
-    expect(antiTube!.condEdges?.length ?? 0).toBe(16 * 12);
+    // 24 segments: 24 * (2 outer + 2 tip ring + 2 inner wall) = 144 tris (open bore, no solid inner cap)
+    // 96 rim edges (outer tip + outer base + inner tip + inner base), 48 silhouette condEdges (outer + inner)
+    expect(antiTube!.tris.length / 9).toBe(144);
+    expect(antiTube!.edges.length / 6).toBe(96);
+    expect(antiTube!.condEdges?.length ?? 0).toBe(48 * 12);
     expect(antiTube!.max[0]).toBeCloseTo(8.0, 2);
     expect(antiTube!.min[1]).toBeCloseTo(-24.0, 2);
     expect(antiTube!.max[1]).toBeCloseTo(-4.0, 2);
-    // Inner wall (32 tris) + inner ceiling cap (16 tris) = 48 tris tagged STUD_INNER_COLOR_FLAG
-    expect(Array.from(antiTube!.triCols!).filter((c) => c === STUD_INNER_COLOR_FLAG).length).toBe(48);
+    // Uses plastic color rather than STUD_INNER_COLOR_FLAG so tubes read as 3D hollow plastic
+    expect(antiTube!.triCols).toBeNull();
+
+    // stud4a omits base edges at y=0 (48 tip edges only: outer tip + inner tip)
+    const antiTubeNoBase = compileDatEntry(
+      { key: 'anti_tube_a', lines: ['1 16 0 4 0 1 0 0 0 -1 0 0 0 1 stud4a.dat'] },
+      () => null,
+    );
+    expect(antiTubeNoBase).not.toBeNull();
+    expect(antiTubeNoBase!.edges.length / 6).toBe(48);
+    expect(antiTubeNoBase!.min[1]).toBeCloseTo(-8.0, 2);
+    expect(antiTubeNoBase!.max[1]).toBeCloseTo(-4.0, 2);
   });
 
   it('computes smooth radial per-vertex normals on curved cylinders while keeping 90-degree top caps crisp', () => {
