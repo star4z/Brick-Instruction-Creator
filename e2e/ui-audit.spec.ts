@@ -799,4 +799,78 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
 
     runtime.assertClean(`${testInfo.project.name}: Accessibility & Interactive HTML Export`);
   });
+
+  test('Startup model loading screen appears when restoring last open model and clears cleanly', async ({ page }, testInfo) => {
+    const runtime = await attachRuntimeIssueCollector(page);
+    await page.goto('/');
+    await expect(page.locator('#emptyState')).toBeVisible();
+    await expect(page.locator('#startupLoadingScreen')).toBeHidden();
+
+    // Load a model so it is persisted as the last open model
+    await loadCleanManual(page);
+    const savedHint = await page.evaluate(() => localStorage.getItem('biw.lastModelHint.v1'));
+    expect(savedHint).toBeTruthy();
+    expect(savedHint).toContain('test-tower');
+
+    // Reload with a brief IndexedDB delay so we can reliably verify and audit the startup loading screen
+    await page.addInitScript(() => {
+      const origOpen = indexedDB.open.bind(indexedDB);
+      indexedDB.open = ((name: string, version?: number) => {
+        const realReq = version !== undefined ? origOpen(name, version) : origOpen(name);
+        const proxy: Record<string, unknown> = {};
+        let delayedSuccess: ((ev: Event) => void) | null = null;
+        Object.defineProperty(proxy, 'onsuccess', {
+          get: () => delayedSuccess,
+          set: (fn: ((ev: Event) => void) | null) => {
+            delayedSuccess = fn;
+            realReq.onsuccess = (ev: Event) => {
+              setTimeout(() => {
+                if (delayedSuccess) delayedSuccess.call(realReq, ev);
+              }, 350);
+            };
+          },
+        });
+        Object.defineProperty(proxy, 'onerror', {
+          get: () => realReq.onerror,
+          set: (fn) => { realReq.onerror = fn; },
+        });
+        Object.defineProperty(proxy, 'onupgradeneeded', {
+          get: () => realReq.onupgradeneeded,
+          set: (fn) => { realReq.onupgradeneeded = fn; },
+        });
+        Object.defineProperty(proxy, 'result', { get: () => realReq.result });
+        Object.defineProperty(proxy, 'error', { get: () => realReq.error });
+        return proxy as unknown as IDBOpenDBRequest;
+      }) as typeof indexedDB.open;
+    });
+
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect(page.locator('#startupLoadingScreen')).toBeVisible();
+    await expect(page.locator('#emptyState')).toBeHidden();
+    await expect(page.locator('#startupLoadingScreen')).toHaveAttribute('role', 'status');
+    await expect(page.locator('#startupLoadingTitle')).toContainText(/Loading/i);
+    await auditSurface(page, `${testInfo.project.name}: Startup Loading Screen`, {
+      activeContainerSelector: '#startupLoadingScreen',
+    });
+
+    // Once restore finishes, the loading screen hides and the manual stage appears
+    await expect(page.locator('#stageViewport')).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('#startupLoadingScreen')).toBeHidden();
+    await expect(page.locator('#emptyState')).toBeHidden();
+
+    // Closing the model clears the startup hint so a fresh reload lands directly on Empty State
+    await ensureMenuOpen(page);
+    await page.locator('#menuCloseModelBtn').click();
+    await expect(page.locator('#confirmActionModal')).toBeVisible();
+    await page.locator('#confirmActionConfirm').click();
+    await expect(page.locator('#emptyState')).toBeVisible();
+    const clearedHint = await page.evaluate(() => localStorage.getItem('biw.lastModelHint.v1'));
+    expect(clearedHint).toBeNull();
+
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect(page.locator('#emptyState')).toBeVisible();
+    await expect(page.locator('#startupLoadingScreen')).toBeHidden();
+
+    runtime.assertClean(`${testInfo.project.name}: Startup Model Loading Screen`);
+  });
 });

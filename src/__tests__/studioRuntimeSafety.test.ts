@@ -468,11 +468,11 @@ describe('studioRuntime safety checks', () => {
     expect(svgPaths).toHaveLength(3);
     expect(svgPaths.map(([, fill]) => fill)).toEqual(['#38bdf8', '#7c152e', '#ed7d1f']);
 
-    // Every path in public/logo.svg appears in all 3 inline SVG logos in index.html
-    // (unified menu header, welcome sheet, open-model modal) and in BRAND_LOGO_PATHS
+    // Every path in public/logo.svg appears in all 4 inline SVG logos in index.html
+    // (unified menu header, welcome sheet, startup loading screen, open-model modal) and in BRAND_LOGO_PATHS
     for (const [d, fill] of svgPaths) {
       const htmlTag = `<path d="${d}" fill="${fill}"/>`;
-      expect(html.split(htmlTag).length - 1).toBe(3);
+      expect(html.split(htmlTag).length - 1).toBe(4);
       expect(runtime).toContain(`['${d}', '${fill}']`);
     }
   });
@@ -1103,6 +1103,28 @@ describe('studioRuntime safety checks', () => {
     expect(orbitBody).toContain("outlineLineWeight: 'light'");
     expect(orbitBody).toContain('activePointerId');
     expect(orbitBody).toContain('snapshotEngine.draw(');
+  });
+
+  it('mounts #startupLoadingScreen inside #workspaceArea and wires synchronous session hint restoration', () => {
+    const html = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf8');
+    const runtime = fs.readFileSync(path.resolve(process.cwd(), 'src/studioRuntime.ts'), 'utf8');
+
+    const wsStart = html.indexOf('id="workspaceArea"');
+    const loadingIdx = html.indexOf('id="startupLoadingScreen"', wsStart);
+    const stageIdx = html.indexOf('id="stageViewport"', wsStart);
+    expect(wsStart).toBeGreaterThan(-1);
+    expect(loadingIdx).toBeGreaterThan(wsStart);
+    expect(stageIdx).toBeGreaterThan(loadingIdx);
+    expect(html).toContain('id="startupLoadingTitle"');
+    expect(html).toContain('id="startupLoadingStatus"');
+    expect(html).toContain('id="startupLoadingBar"');
+    expect(html).toContain('biw.lastModelHint.v1');
+
+    expect(runtime).toContain('readStartupModelHint(');
+    expect(runtime).toContain('writeStartupModelHint(');
+    expect(runtime).toContain('showStartupLoadingScreen(');
+    expect(runtime).toContain('hideStartupLoadingScreen(');
+    expect(runtime).toContain('isRestorableModelRecord(');
   });
 });
 

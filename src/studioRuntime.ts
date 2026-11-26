@@ -25,6 +25,12 @@ import {
   shouldOpenImportWizard,
 } from './engine/appSettings';
 import {
+  getStartupLoadingViewModel,
+  isRestorableModelRecord,
+  readStartupModelHint,
+  writeStartupModelHint,
+} from './engine/startupLoading';
+import {
   STUD_INNER_COLOR_FLAG,
   STUD_SIDE_COLOR_FLAG,
   compileDatEntry as compileLDrawDatEntry,
@@ -10216,7 +10222,8 @@ function renderAll(renderOpts = {}) {
   const skipRebuild = pageNavOnly || Boolean(renderOpts?.skipRebuildPages);
 
   const hasModel = Boolean(state.model);
-  document.getElementById('emptyState').classList.toggle('hidden', hasModel);
+  if (hasModel && startupLoadingActive) hideStartupLoadingScreen();
+  document.getElementById('emptyState').classList.toggle('hidden', hasModel || startupLoadingActive);
   document.getElementById('stageViewport').classList.toggle('hidden', !hasModel);
   document.getElementById('topRightPills').classList.toggle('hidden', !hasModel);
   document.getElementById('bottomDock').classList.toggle('hidden', !hasModel);
@@ -19336,7 +19343,63 @@ function persistCustomUploadedFonts() {
   } catch { /* ignore */ }
 }
 
+let startupLoadingActive = false;
+
+function showStartupLoadingScreen(phase, hint = null) {
+  startupLoadingActive = true;
+  const vm = getStartupLoadingViewModel(phase, hint);
+  const screenEl = document.getElementById('startupLoadingScreen');
+  const titleEl = document.getElementById('startupLoadingTitle');
+  const statusEl = document.getElementById('startupLoadingStatus');
+  const barEl = document.getElementById('startupLoadingBar');
+  const emptyEl = document.getElementById('emptyState');
+  if (titleEl) titleEl.textContent = vm.title;
+  if (statusEl) statusEl.textContent = vm.status;
+  if (barEl) {
+    barEl.style.width = `${vm.progressPct}%`;
+    barEl.setAttribute('aria-valuenow', String(vm.progressPct));
+  }
+  if (emptyEl) emptyEl.classList.add('hidden');
+  if (screenEl) screenEl.classList.remove('hidden');
+}
+
+function hideStartupLoadingScreen() {
+  startupLoadingActive = false;
+  const screenEl = document.getElementById('startupLoadingScreen');
+  if (screenEl) screenEl.classList.add('hidden');
+}
+
+function yieldToBrowserPaint() {
+  return new Promise((resolve) => {
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => setTimeout(resolve, 0));
+    } else {
+      setTimeout(resolve, 0);
+    }
+  });
+}
+
 async function restoreLastSessionOnStart() {
+  const initialHint = readStartupModelHint();
+  const rec = await dbGet('lastModel');
+  const hasRestorableModel = isRestorableModelRecord(rec);
+  const loadingHint = hasRestorableModel
+    ? {
+        fileName: rec.fileName || '',
+        kind: rec.kind,
+        title: initialHint && initialHint.fileName === (rec.fileName || '') ? initialHint.title : undefined,
+      }
+    : null;
+
+  if (hasRestorableModel && loadingHint) {
+    writeStartupModelHint(loadingHint);
+    showStartupLoadingScreen('library', loadingHint);
+    await yieldToBrowserPaint();
+  } else {
+    writeStartupModelHint(null);
+    hideStartupLoadingScreen();
+  }
+
   await loadSavedBricksLibrary();
   const dbCustomFonts = await dbGet('customUploadedFonts');
   if (Array.isArray(dbCustomFonts) && dbCustomFonts.length > 0) {
@@ -19352,8 +19415,7 @@ async function restoreLastSessionOnStart() {
   } else if (customThemes.length > 0 && (!Array.isArray(dbThemes) || dbThemes.length === 0)) {
     dbPut('customThemes', customThemes);
   }
-  const rec = await dbGet('lastModel');
-  if (!rec) { renderAll(); return; }
+  if (!hasRestorableModel) { renderAll(); return; }
   const prefs = (await dbGet('prefs')) || {};
   try {
     if (prefs.themeId) state.themeId = resolveThemeById(prefs.themeId, customThemes).id;
@@ -19383,9 +19445,15 @@ async function restoreLastSessionOnStart() {
 
     let effectiveRec = rec;
     if (rec.kind === 'io' && rec.data) {
+      showStartupLoadingScreen('extracting', loadingHint);
+      await yieldToBrowserPaint();
       const { m1Text, m2Text } = await extractIoArchive(rec.data);
+      showStartupLoadingScreen('parsing', loadingHint);
+      await yieldToBrowserPaint();
       const parsed = parseImportedModel(m1Text, m2Text, rec.fileName);
+      showStartupLoadingScreen('fetching_parts', loadingHint);
       const fetchRes = await autoFetchMissingPartsForParsed(parsed, rec.fileName);
+      showStartupLoadingScreen('textures', loadingHint);
       await textureStore.predecodeAllPending();
       const subPlan = (fetchRes.fetched > 0 && rec.subdivisionPlan && rec.subdivisionPlan.strategy !== 'none')
         ? refreshSubdivisionPlanForParsed(parsed, rec.subdivisionPlan)
@@ -19394,11 +19462,17 @@ async function restoreLastSessionOnStart() {
         effectiveRec = { ...rec, subdivisionPlan: subPlan };
         dbPut('lastModel', effectiveRec);
       }
+      showStartupLoadingScreen('building', loadingHint);
+      await yieldToBrowserPaint();
       state.model = buildManualFromParsed(parsed, rec.importMode || 'auto', subPlan);
     } else if (rec.kind === 'ldr' && typeof rec.data === 'string') {
       textureStore.clearEmbedded();
+      showStartupLoadingScreen('parsing', loadingHint);
+      await yieldToBrowserPaint();
       const parsed = parseImportedModel(rec.data, '', rec.fileName);
+      showStartupLoadingScreen('fetching_parts', loadingHint);
       const fetchRes = await autoFetchMissingPartsForParsed(parsed, rec.fileName);
+      showStartupLoadingScreen('textures', loadingHint);
       await textureStore.predecodeAllPending();
       const subPlan = (fetchRes.fetched > 0 && rec.subdivisionPlan && rec.subdivisionPlan.strategy !== 'none')
         ? refreshSubdivisionPlanForParsed(parsed, rec.subdivisionPlan)
@@ -19407,12 +19481,23 @@ async function restoreLastSessionOnStart() {
         effectiveRec = { ...rec, subdivisionPlan: subPlan };
         dbPut('lastModel', effectiveRec);
       }
+      showStartupLoadingScreen('building', loadingHint);
+      await yieldToBrowserPaint();
       state.model = buildManualFromParsed(parsed, rec.importMode || 'auto', subPlan);
     } else {
-      renderAll(); return;
+      hideStartupLoadingScreen();
+      renderAll();
+      return;
     }
 
     lastSourceRecord = effectiveRec;
+    if (state.model?.title) {
+      writeStartupModelHint({
+        fileName: effectiveRec.fileName || '',
+        kind: effectiveRec.kind,
+        title: state.model.title,
+      });
+    }
     state.overrides = prefs.overrides || {};
     state.stepInserts = prefs.stepInserts || {};
     state.pageInserts = prefs.pageInserts || {};
@@ -19450,13 +19535,20 @@ async function restoreLastSessionOnStart() {
     const wlEl = document.getElementById('toggleWordlessMode');
     if (wlEl) wlEl.checked = state.wordlessMode;
 
+    showStartupLoadingScreen('rendering', {
+      fileName: effectiveRec.fileName || '',
+      title: state.model?.title || loadingHint?.title,
+    });
+    await yieldToBrowserPaint();
     computeModelDiagnostics();
     resetZoom();
+    hideStartupLoadingScreen();
     renderAll();
     if (rec.kind === 'ldr') void fetchMissingPartsOnline({ silent: true });
     showToast(`Reloaded ${state.model.title}`);
     if (getMenuIconErrorBadgeCount(state.diagnostics, state.seenDiagnosticKeys) > 0) showImportErrorBanner();
   } catch (_) {
+    hideStartupLoadingScreen();
     renderAll();
   }
 }
@@ -26137,10 +26229,22 @@ function finishImport(parsed, mode, subdivisionPlan = null, isPostImport = false
   if (!isPostImport && pendingRawFile) {
     lastSourceRecord = { ...pendingRawFile, importMode: mode, subdivisionPlan: subdivisionPlan || null };
     dbPut('lastModel', lastSourceRecord);
+    if (lastSourceRecord.kind === 'io' || lastSourceRecord.kind === 'ldr') {
+      writeStartupModelHint({
+        fileName: lastSourceRecord.fileName || '',
+        kind: lastSourceRecord.kind,
+        title: parsed?.title || state.model?.title,
+      });
+    }
     pendingRawFile = null;
   } else if (isPostImport && lastSourceRecord && (lastSourceRecord.kind === 'io' || lastSourceRecord.kind === 'ldr')) {
     lastSourceRecord = { ...lastSourceRecord, importMode: mode, subdivisionPlan: subdivisionPlan || null };
     dbPut('lastModel', lastSourceRecord);
+    writeStartupModelHint({
+      fileName: lastSourceRecord.fileName || '',
+      kind: lastSourceRecord.kind,
+      title: parsed?.title || state.model?.title,
+    });
   }
   state.pageSizeWarning = null;
   computeModelDiagnostics();
@@ -26944,6 +27048,7 @@ async function closeCurrentModel() {
 
   resetZoom();
   renderAll();
+  writeStartupModelHint(null);
   try {
     await dbDelete('lastModel');
   } catch (_) {}
@@ -27009,6 +27114,12 @@ window.addEventListener('resize', () => {
 // Initialize responsive side menu immediately (expanded by default on desktop)
 syncSideMenuLayout({ animate: false });
 syncMenuControls();
+
+// Show startup loading screen synchronously if a previously open model is queued to restore
+const initialStartupHint = readStartupModelHint();
+if (initialStartupHint) {
+  showStartupLoadingScreen('restoring', initialStartupHint);
+}
 
 // Automatically reload last opened model & session on start!
 restoreLastSessionOnStart();
