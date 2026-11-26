@@ -1270,5 +1270,86 @@ describe('placementArrows — LEGO-style automatic placement arrows & offsets', 
     expect(brSegs[1].to[1]).toBeCloseTo(4, 4);
     expect(brSegs[1].to[2]).toBeCloseTo(10, 4);
   });
+
+  it('suppresses downward offset on an upright top view when the attachment point and arrow are obscured beneath an overhead deck (but allows it when flipped upside down)', () => {
+    const buildDeckSteps = (camera: { az: number; el: number; side: 'top' | 'bottom' }): PlacementStepInput[] => [
+      {
+        id: 's1',
+        camera,
+        parts: [
+          makePart('upper_deck_6x6', 0, 8, -70, 120, 12, 120, RED),
+          makePart('mid_black_4x4', 0, 0, 30, 80, 12, 80, BLACK),
+          makePart('right_long_1x10', 50, 0, 10, 20, 12, 200, RED),
+          makePart('right_cap_2x2', 40, 8, 90, 40, 12, 40, RED),
+        ],
+      },
+      {
+        id: 's2',
+        camera,
+        parts: [
+          makePart('front_yellow_4x4', 0, 0, 110, 80, 12, 80, YELLOW),
+          {
+            ...makePart('left_long_1x10', -50, 0, 10, 20, 12, 200, RED),
+            localUp: [0, 1, 0],
+            studs: [
+              [-50, 8, -80, 0, 1, 0],
+              [-50, 8, -60, 0, 1, 0],
+              [-50, 8, -40, 0, 1, 0],
+              [-50, 8, -20, 0, 1, 0],
+              [-50, 8, 0, 0, 1, 0],
+              [-50, 8, 20, 0, 1, 0],
+              [-50, 8, 40, 0, 1, 0],
+              [-50, 8, 60, 0, 1, 0],
+              [-50, 8, 80, 0, 1, 0],
+              [-50, 8, 100, 0, 1, 0],
+            ],
+          },
+        ],
+      },
+    ];
+
+    // Viewed from ABOVE (top): pushing the long plate downward (-Y) hides its rear attachment
+    // point and arrows behind the overhead deck & black plate — must stay cleanly seated.
+    const topRes = computeAutoPlacementOffsetsForSequence(buildDeckSteps({ az: 38, el: 30, side: 'top' }));
+    expect(topRes.get('s2')?.['left_long_1x10']).toBeUndefined();
+
+    // Viewed from BELOW (flipped model): -Y moves toward the camera (up on screen), so the
+    // exposed underside attachment studs & arrows are 100% visible — offset cleanly in -Y.
+    const botRes = computeAutoPlacementOffsetsForSequence(buildDeckSteps({ az: 38, el: -30, side: 'bottom' }));
+    const botOff = botRes.get('s2')?.['left_long_1x10'];
+    expect(botOff).toBeDefined();
+    expect(botOff!.y).toBeLessThanOrEqual(-20);
+  });
+
+  it('suppresses lateral offset for a rear-facing SNOT tile completely hidden behind a tall wall', () => {
+    const steps: PlacementStepInput[] = [
+      {
+        id: 's1',
+        camera: { az: 38, el: 28, side: 'top' },
+        parts: [
+          makePart('base', 0, 0, 0, 160, 8, 160, DARK_GRAY),
+          {
+            ...makePart('tall_wall', 0, 8, 0, 120, 72, 20, DARK_GRAY),
+            studs: [[0, 32, -10, 0, 0, -1]],
+          },
+        ],
+      },
+      {
+        id: 's2',
+        camera: { az: 38, el: 28, side: 'top' },
+        parts: [
+          {
+            ...makePart('rear_snot_tile', 0, 20, -14, 40, 24, 8, RED),
+            localUp: [0, 0, -1],
+          },
+        ],
+      },
+    ];
+
+    const res = computeAutoPlacementOffsetsForSequence(steps);
+    expect(res.get('s2')?.['rear_snot_tile']).toBeUndefined();
+  });
 });
+
+
 

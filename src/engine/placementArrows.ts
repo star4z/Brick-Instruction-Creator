@@ -928,6 +928,103 @@ function computeEngagedStudArrowBox(
  * - Returns `null` when every candidate direction is blocked/colliding so trapped
  *   bricks remain cleanly seated instead of colliding or clipping through neighbors.
  */
+interface OffsetArrowVisibility {
+  camDot: number;
+  bestObsTipClear: boolean;
+  bestObsArrowVis: number;
+  bestTipClear: boolean;
+  bestArrowVis: number;
+}
+
+/**
+ * Evaluates orthographic camera visibility of a candidate offset's rendered
+ * placement arrow(s) and attachment tip (`t = 0.92`) against scene obstacles
+ * and the offset piece itself (`shiftedBox`).
+ *
+ * Prevents emitting offsets that push a piece away from the camera or behind
+ * existing geometry where its attachment point and arrow are obscured.
+ */
+function evaluateOffsetArrowVisibility(
+  arrowBaseBox: PlacementAABB,
+  shiftedBox: PlacementAABB,
+  offset: Vec3,
+  arrowTo: Vec3 | null,
+  visObstacles: ReadonlyArray<PlacementPartInput>,
+  camera: { az: number; el: number },
+): OffsetArrowVisibility {
+  const mag = Math.hypot(offset[0], offset[1], offset[2]);
+  const { viewDir } = cameraBasis(camera.az, camera.el);
+  const camDot =
+    mag > 1e-6
+      ? (offset[0] * viewDir[0] + offset[1] * viewDir[1] + offset[2] * viewDir[2]) / mag
+      : 0;
+
+  const segs = computePlacementArrowSegments(arrowBaseBox, offset, arrowTo, null, camera.az);
+  if (segs.length === 0) {
+    return {
+      camDot,
+      bestObsTipClear: false,
+      bestObsArrowVis: 0,
+      bestTipClear: false,
+      bestArrowVis: 0,
+    };
+  }
+
+  const sampleTs = [0.08, 0.28, 0.5, 0.72, 0.92] as const;
+  let bestObsTipClear = false;
+  let bestObsArrowVis = 0;
+  let bestTipClear = false;
+  let bestArrowVis = 0;
+
+  for (const seg of segs) {
+    let obsClearCount = 0;
+    let allClearCount = 0;
+    let obsTipClear = true;
+    let allTipClear = true;
+
+    for (let si = 0; si < sampleTs.length; si++) {
+      const t = sampleTs[si];
+      const pt: Vec3 = [
+        seg.from[0] + (seg.to[0] - seg.from[0]) * t,
+        seg.from[1] + (seg.to[1] - seg.from[1]) * t,
+        seg.from[2] + (seg.to[2] - seg.from[2]) * t,
+      ];
+
+      let obsBlocked = false;
+      for (let i = 0; i < visObstacles.length; i++) {
+        if (rayIntersectsBox(pt, viewDir, visObstacles[i].box) !== null) {
+          obsBlocked = true;
+          break;
+        }
+      }
+      const selfBlocked =
+        t >= 0.5 && rayIntersectsBox(pt, viewDir, shiftedBox) !== null;
+
+      if (!obsBlocked) obsClearCount++;
+      if (!obsBlocked && !selfBlocked) allClearCount++;
+      if (si === sampleTs.length - 1) {
+        obsTipClear = !obsBlocked;
+        allTipClear = !obsBlocked && !selfBlocked;
+      }
+    }
+
+    const obsVis = obsClearCount / sampleTs.length;
+    const allVis = allClearCount / sampleTs.length;
+    if (obsTipClear) bestObsTipClear = true;
+    if (allTipClear) bestTipClear = true;
+    if (obsVis > bestObsArrowVis) bestObsArrowVis = obsVis;
+    if (allVis > bestArrowVis) bestArrowVis = allVis;
+  }
+
+  return {
+    camDot,
+    bestObsTipClear,
+    bestObsArrowVis,
+    bestTipClear,
+    bestArrowVis,
+  };
+}
+
 function resolveOffsetAlongAxis(
   part: PlacementPartInput,
   preferredDir: Vec3,
@@ -952,6 +1049,25 @@ function resolveOffsetAlongAxis(
   const engagedStudTips = options.engagedStudTips ?? [];
   const coaxialAxis = options.coaxialAxis ?? null;
   const coaxialHostIds = options.coaxialHostIds;
+
+  const visObstacles: PlacementPartInput[] = [];
+  if (camera) {
+    for (let i = 0; i < obstacles.length; i++) {
+      if (obstacles[i].id !== part.id) visObstacles.push(obstacles[i]);
+    }
+    for (let i = 0; i < siblingObstacles.length; i++) {
+      if (siblingObstacles[i].id !== part.id) visObstacles.push(siblingObstacles[i]);
+    }
+  }
+  let cachedSeatedVis: number | null = null;
+  const getSeatedVis = (): number => {
+    if (cachedSeatedVis === null) {
+      cachedSeatedVis = camera
+        ? 1 - estimateCameraOcclusion(part.box, visObstacles, camera.az, camera.el)
+        : 1;
+    }
+    return cachedSeatedVis;
+  };
 
   const isCoaxialHostAlongAxis = (obs: PlacementPartInput, axis: number): boolean => {
     if (coaxialAxis !== axis || !coaxialHostIds || !coaxialHostIds.has(obs.id)) return false;
@@ -1155,6 +1271,69 @@ function resolveOffsetAlongAxis(
           const arrowTo: Vec3 = [arrowAnchor[0], arrowAnchor[1], arrowAnchor[2]];
           arrowTo[axis] = targetTipAxis;
           res.arrowTo = arrowTo;
+        }
+
+        // Orthographic visibility & clarity gate: never emit an offset whose attachment point
+        // and placement arrow are obscured behind existing geometry (making the step less clear).
+        if (camera && visObstacles.length > 0) {
+          const vis = evaluateOffsetArrowVisibility(
+            res.arrowBox ?? part.box,
+            shifted,
+            [dx, dy, dz],
+            res.arrowTo ?? null,
+            visObstacles,
+            camera,
+          );
+          if (vis.camDot < -0.15) {
+            // Pulling AWAY from the camera:
+            const shiftedVis = 1 - estimateCameraOcclusion(shifted, visObstacles, camera.az, camera.el);
+            const seatedVis = getSeatedVis();
+            if (axis === 1) {
+              // Vertical away-from-camera (-Y on top view or +Y on bottom view):
+              // pushing a piece underneath an overhang is only helpful when the attachment
+              // tip and arrow stay clearly visible and the piece isn't buried deeper.
+              if (!vis.bestObsTipClear || vis.bestObsArrowVis < 0.6) {
+                break;
+              }
+              if (shiftedVis < seatedVis - 0.08) {
+                break;
+              }
+              if (!vis.bestTipClear || vis.bestArrowVis < 0.6) {
+                continue;
+              }
+            } else {
+              // Horizontal/lateral away-from-camera (e.g. a rear pin sliding out from a beam):
+              // allow when the attachment tip is visible OR the piece pulls out into clear open
+              // view with a mostly visible arrow shaft; reject when hidden behind a wall/deck.
+              const tipAndShaftClear = vis.bestObsTipClear && vis.bestObsArrowVis >= 0.6;
+              const pullsIntoOpenView =
+                vis.bestObsArrowVis >= 0.55 &&
+                shiftedVis >= 0.7 &&
+                shiftedVis >= seatedVis - 0.05;
+              if (!tipAndShaftClear && !pullsIntoOpenView) {
+                continue;
+              }
+              if (!vis.bestTipClear && vis.bestArrowVis < 0.55) {
+                continue;
+              }
+            }
+          } else {
+            // Moving perpendicular to or toward the camera:
+            // If the offset piece itself hides an otherwise-visible attachment tip, lift slightly further.
+            if (vis.bestObsTipClear && !vis.bestTipClear) {
+              continue;
+            }
+            // If scene obstacles hide BOTH the attachment tip and most of the arrow shaft, only allow
+            // the offset when it genuinely rescues a heavily hidden seated piece into open view
+            // (continuing `extra` steps so lifting higher can clear a foreground wall).
+            if (!vis.bestObsTipClear && vis.bestObsArrowVis < 0.45) {
+              const seatedVis = getSeatedVis();
+              const shiftedVis = 1 - estimateCameraOcclusion(shifted, visObstacles, camera.az, camera.el);
+              if (seatedVis >= 0.45 || shiftedVis < seatedVis + 0.25) {
+                continue;
+              }
+            }
+          }
         }
         // Auto-detect pass-through alignment guide when a lateral pin/axle penetrates a perforated beam/frame
         if (isCardinal && axis !== 1) {
