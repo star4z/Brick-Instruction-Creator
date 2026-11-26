@@ -169,6 +169,7 @@ import {
 import {
   buildPhysicalVerticalPrereqMap,
   classifySidewaysCapability,
+  createHorizontalFastenerGuards,
   minSubBoxGap,
   partsPhysicallyTouch,
   transformLocalBox6ToWorld,
@@ -4739,6 +4740,10 @@ function classifyPartRole(part) {
       (/\baxle\b/.test(name) && !/hole|brick|plate|wheel|connector|hub|frame|beam|liftarm|bush|gear|cam|holder|steering/.test(name))) {
     return 'axle';
   }
+  if (/^(?:bl_)?(?:2780|3673|4274|89678|3749|6558|32054|43093|15100|11214|61332|32556|6628|18651|22961|6562|4459|32138|65098|80477)[a-z]?$/.test(k) ||
+      (/\bpin\b/.test(name) && !/hole|slot|brick|plate|tile|beam|liftarm|bogie|wheel|holder|connector|hub|frame|turntable|hinge|panel|slope|bracket|arch|wedge|motor|gear|pulley|steering|bar\s+holder|minifig/.test(name))) {
+    return 'pin';
+  }
   if (classifyMinifigGroupKind(part, (pid) => resolvePart(pid).name) !== null) return 'figure';
   if (/plate|brick|tile|frame|base|beam|liftarm|chassis|slope|panel|bracket|hinge|turntable/.test(name)) return 'structural';
   return 'detail';
@@ -5066,6 +5071,7 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount, outPrebui
   const layerY = canonicalParts.map((p, i) => computeBuildLayerY(p, boxes[i]));
   const adj = buildSpatialAdjacency(canonicalParts, boxes, roles, sideCaps, subBoxes);
   const { belowMap } = buildVerticalPrereqMap(boxes, adj, roles, claddingFlags, undefined, subBoxes);
+  const fastenerGuards = createHorizontalFastenerGuards(boxes, adj, roles, belowMap);
   const subDescriptors = canonicalParts.map((p, i) => ({
     index: i,
     partId: normId(p.p),
@@ -5305,7 +5311,7 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount, outPrebui
       : null;
     let frontier;
     if (placed.size === 0) {
-      const nonWheels = Array.from(remaining).filter(i => roles[i] !== 'wheel' && !claddingFlags[i] && !belowMap[i].some(u => remaining.has(u)));
+      const nonWheels = Array.from(remaining).filter(i => roles[i] !== 'wheel' && roles[i] !== 'pin' && !claddingFlags[i] && !belowMap[i].some(u => remaining.has(u)));
       const pool = nonWheels.length > 0 ? nonWheels : Array.from(remaining);
       pool.sort((a, b) => layerY[a] - layerY[b]);
       const minY = layerY[pool[0]];
@@ -5318,12 +5324,18 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount, outPrebui
       frontier = lowBand;
     } else {
       const rawFrontier = Array.from(remaining).filter(i => adj[i].some(nb => placedBeforeStep.has(nb)));
-      const unblocked = rawFrontier.filter(i =>
+      const emptyStepSet = new Set();
+      const baseUnblocked = rawFrontier.filter(i =>
         !isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, placedBeforeStep)
         && !belowMap[i].some(u => remaining.has(u) && isPrereqGrounded(u))
       );
-      if (unblocked.length > 0) {
-        frontier = unblocked;
+      const fastenerUnblocked = baseUnblocked.filter(i =>
+        !fastenerGuards.isBlocked(i, placedBeforeStep, emptyStepSet, remaining)
+      );
+      if (fastenerUnblocked.length > 0) {
+        frontier = fastenerUnblocked;
+      } else if (baseUnblocked.length > 0) {
+        frontier = baseUnblocked;
       } else {
         const claddingReady = rawFrontier.filter(i => !isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, placedBeforeStep));
         frontier = claddingReady.length > 0 ? claddingReady : rawFrontier;
@@ -5349,6 +5361,7 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount, outPrebui
           if (placedInStep.has(i)) return false;
           if (Math.abs(layerY[i] - anchorY) > 12) return false;
           if (isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, supportSet)) return false;
+          if (fastenerGuards.isBlocked(i, placedBeforeStep, placedInStep, remaining)) return false;
           if (placedBeforeStep.size > 0) {
             if (belowMap[i].some(u => !placedBeforeStep.has(u) && isPrereqGrounded(u))) return false;
           } else {
@@ -6032,6 +6045,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
     const outSteps = [];
     const scopeIndices = Array.from(new Set([...Array.from(prePlacedSet), ...idxList]));
     const { belowMap } = buildVerticalPrereqMap(boxes, adj, roles, claddingFlags, scopeIndices, subBoxes);
+    const fastenerGuards = createHorizontalFastenerGuards(boxes, adj, roles, belowMap, scopeIndices);
     const scopeBounds = computeBoundsFromBoxes(scopeIndices.map(i => boxes[i]));
     let builtBounds = prePlacedSet.size > 0
       ? computeBoundsFromBoxes(Array.from(prePlacedSet).map(i => boxes[i]))
@@ -6047,7 +6061,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
         : null;
       let frontier;
       if (placed.size === 0) {
-        const nonWheels = Array.from(remaining).filter(i => roles[i] !== 'wheel' && !claddingFlags[i] && !belowMap[i].some(u => remaining.has(u)));
+        const nonWheels = Array.from(remaining).filter(i => roles[i] !== 'wheel' && roles[i] !== 'pin' && !claddingFlags[i] && !belowMap[i].some(u => remaining.has(u)));
         const pool = nonWheels.length > 0 ? nonWheels : Array.from(remaining);
         pool.sort((a, b) => layerY[a] - layerY[b]);
         const minY = layerY[pool[0]];
@@ -6060,12 +6074,18 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
         frontier = lowBand;
       } else {
         const rawFrontier = Array.from(remaining).filter(i => adj[i].some(nb => placedBeforeStep.has(nb)));
-        const unblocked = rawFrontier.filter(i =>
+        const emptyStepSet = new Set();
+        const baseUnblocked = rawFrontier.filter(i =>
           !isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, placedBeforeStep)
           && !belowMap[i].some(u => remaining.has(u) && isPrereqGrounded(u))
         );
-        if (unblocked.length > 0) {
-          frontier = unblocked;
+        const fastenerUnblocked = baseUnblocked.filter(i =>
+          !fastenerGuards.isBlocked(i, placedBeforeStep, emptyStepSet, remaining)
+        );
+        if (fastenerUnblocked.length > 0) {
+          frontier = fastenerUnblocked;
+        } else if (baseUnblocked.length > 0) {
+          frontier = baseUnblocked;
         } else {
           const readyFrontier = rawFrontier.filter(i => !isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, placedBeforeStep));
           frontier = readyFrontier.length > 0 ? readyFrontier : rawFrontier;
@@ -6094,6 +6114,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
             if (placedInStep.has(i)) return false;
             if (isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, supportSet)) return false;
             if (Math.abs(layerY[i] - anchorY) > 12) return false;
+            if (fastenerGuards.isBlocked(i, placedBeforeStep, placedInStep, remaining)) return false;
             if (placedBeforeStep.size > 0) {
               if (belowMap[i].some(u => !placedBeforeStep.has(u) && isPrereqGrounded(u))) return false;
             } else {
@@ -7077,6 +7098,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
     };
 
     const sectionBounds = computeBoundsFromBoxes(indices.map(i => boxes[i]));
+    const fastenerGuards = createHorizontalFastenerGuards(boxes, adj, roles, belowMap, indices);
     let builtBounds = null;
     const builtBoxes = [];
     let activeCam = { ...DEFAULT_STUDIO_CAMERA };
@@ -7088,7 +7110,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
         : null;
       let frontier;
       if (placed.size === 0) {
-        const nonWheels = Array.from(remaining).filter(i => roles[i] !== 'wheel' && !claddingFlags[i] && !isPartBlockedFromBelow(i, null));
+        const nonWheels = Array.from(remaining).filter(i => roles[i] !== 'wheel' && roles[i] !== 'pin' && !claddingFlags[i] && !isPartBlockedFromBelow(i, null));
         const pool = nonWheels.length > 0 ? nonWheels : Array.from(remaining);
         pool.sort((a, b) => layerY[a] - layerY[b]);
         const minY = layerY[pool[0]];
@@ -7101,12 +7123,18 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
         frontier = lowBand;
       } else {
         const rawFrontier = Array.from(remaining).filter(i => adj[i].some(nb => placed.has(nb)));
-        const unblocked = rawFrontier.filter(i =>
+        const emptyStepSet = new Set();
+        const baseUnblocked = rawFrontier.filter(i =>
           !isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, placed)
           && !isPartBlockedFromBelow(i, isPrereqGrounded)
         );
-        if (unblocked.length > 0) {
-          frontier = unblocked;
+        const fastenerUnblocked = baseUnblocked.filter(i =>
+          !fastenerGuards.isBlocked(i, placed, emptyStepSet, remaining)
+        );
+        if (fastenerUnblocked.length > 0) {
+          frontier = fastenerUnblocked;
+        } else if (baseUnblocked.length > 0) {
+          frontier = baseUnblocked;
         } else {
           const claddingReady = rawFrontier.filter(i => !isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, placed));
           frontier = claddingReady.length > 0 ? claddingReady : rawFrontier;
@@ -7203,6 +7231,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
             if (partToDup.has(i)) return false;
             if (isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, supportSet)) return false;
             if (Math.abs(layerY[i] - anchorY) > 12) return false;
+            if (fastenerGuards.isBlocked(i, placedBeforeStep, placedInStep, remaining)) return false;
             if (placedBeforeStep.size > 0) {
               if (belowMap[i].some(u => !placedBeforeStep.has(u) && isPrereqGrounded(u))) return false;
             } else {

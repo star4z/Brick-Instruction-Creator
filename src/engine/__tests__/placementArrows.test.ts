@@ -655,4 +655,133 @@ describe('placementArrows — LEGO-style automatic placement arrows & offsets', 
     const res = computeAutoPlacementOffsetsForSequence(steps);
     expect(res.get('s2')).toBeUndefined();
   });
+
+  it('offsets a horizontal Technic pin coaxially out the OPEN hole end without lifting vertically or clipping through a blocking cap brick', () => {
+    // Deck plate (maxY=4), two seated 6541 Technic bricks along Z, a blocking 1x2 brick on the -Z end,
+    // and an open hole on the +Z end. Pin sits at y=[6..22] (2 LDU above deck studs).
+    const steps: PlacementStepInput[] = [
+      {
+        id: 's1',
+        camera: { az: 38, el: 28, side: 'top' },
+        parts: [
+          makePart('deck', 0, -8, 0, 120, 12, 120, DARK_GRAY),         // maxY = 4
+          makePart('technic_back', 0, 0, -10, 20, 28, 20, LIGHT_BLUE), // z in [-20..0]
+          makePart('technic_front', 0, 0, 10, 20, 28, 20, BLACK),      // z in [0..20]
+          makePart('back_cap_1x2', 0, 0, -30, 40, 28, 20, TAN),        // z in [-40..-20] blocks -Z!
+        ],
+      },
+      {
+        id: 's2',
+        camera: { az: 38, el: 28, side: 'top' },
+        parts: [
+          makePart('pin_2780', 0, 6, 0, 16, 16, 40, BLACK),            // y in [6..22], z in [-20..20]
+        ],
+      },
+    ];
+
+    const res = computeAutoPlacementOffsetsForSequence(steps);
+    const pinOff = res.get('s2')?.['pin_2780'];
+    expect(pinOff).toBeDefined();
+    // Must exit strictly horizontally along +Z (open end), never lifted vertically (+Y)
+    expect(pinOff!.x).toBe(0);
+    expect(pinOff!.y).toBe(0);
+    expect(pinOff!.z).toBeGreaterThanOrEqual(36);
+    // Shifted pin back edge (z = -20 + pinOff.z) must clear technic_front (+20) by >= 16 LDU (no clipping!)
+    expect(-20 + pinOff!.z).toBeGreaterThanOrEqual(20 + 16);
+    // Arrowhead terminates cleanly at the open hole face (z ≈ +22)
+    expect(pinOff!.arrowTo).toBeDefined();
+    expect(pinOff!.arrowTo![2]).toBeCloseTo(22, 1);
+  });
+
+  it('prevents same-step pin + host brick clipping (e.g. imported steps) by keeping host grounded and sliding pin horizontally', () => {
+    const steps: PlacementStepInput[] = [
+      {
+        id: 's1',
+        camera: { az: 38, el: 28, side: 'top' },
+        parts: [
+          makePart('deck', 0, -8, 0, 200, 12, 200, DARK_GRAY),
+          makePart('side_a', -80, 0, 0, 40, 24, 160, DARK_GRAY),
+          makePart('side_b', 80, 0, 0, 40, 24, 160, DARK_GRAY),
+          makePart('back_a', 0, 0, -80, 120, 24, 40, DARK_GRAY),
+        ],
+      },
+      {
+        id: 's2',
+        camera: { az: 38, el: 28, side: 'top' },
+        parts: [
+          makePart('host_6541', 0, 0, 0, 20, 28, 20, LIGHT_BLUE),
+          makePart('pin_half', 0, 6, 10, 16, 16, 28, BLACK),
+        ],
+      },
+    ];
+
+    const res = computeAutoPlacementOffsetsForSequence(steps);
+    const offs = res.get('s2');
+    expect(offs).toBeDefined();
+    // Host stays grounded so the pin can slide horizontally into it with zero clipping
+    expect(offs!['host_6541']).toBeUndefined();
+    const pinOff = offs!['pin_half'];
+    expect(pinOff).toBeDefined();
+    expect(pinOff!.y).toBe(0);
+    expect(pinOff!.z).toBeGreaterThanOrEqual(24);
+  });
+
+  it('does NOT trigger unnecessary offset placements for contrasting, unobstructed standard 1x2 bricks on large models', () => {
+    const steps: PlacementStepInput[] = [
+      {
+        id: 's1',
+        camera: { az: 38, el: 28, side: 'top' },
+        parts: [
+          makePart('chassis_1', -150, 0, 0, 200, 16, 120, DARK_GRAY),
+          makePart('chassis_2', 50, 0, 0, 200, 16, 120, DARK_GRAY),
+          makePart('chassis_3', 250, 0, 0, 200, 16, 120, DARK_GRAY),
+          makePart('deck_lbg', 0, 16, 0, 120, 8, 80, [160, 165, 169]),
+        ],
+      },
+      {
+        id: 's2',
+        camera: { az: 38, el: 28, side: 'top' },
+        parts: [
+          makePart('brick_1x2_a', -20, 24, 0, 40, 28, 20, BLACK),
+          makePart('brick_1x2_b', 20, 24, 20, 40, 28, 20, RED),
+          makePart('brick_1x2_c', 20, 24, -20, 40, 28, 20, YELLOW),
+        ],
+      },
+    ];
+
+    const res = computeAutoPlacementOffsetsForSequence(steps);
+    expect(res.get('s2')).toBeUndefined();
+  });
+
+  it('caps subsequent-step non-lateral offsets and skips nearby candidates that would crowd/occlude an accepted offset in screen space', () => {
+    const steps: PlacementStepInput[] = [
+      {
+        id: 's1',
+        camera: { az: 38, el: 28, side: 'top' },
+        parts: [
+          makePart('b1', 0, 0, 0, 200, 24, 200, DARK_GRAY),
+          makePart('b2', 200, 0, 0, 200, 24, 200, DARK_GRAY),
+          makePart('b3', 0, 0, 200, 200, 24, 200, DARK_GRAY),
+          makePart('b4', 200, 0, 200, 200, 24, 200, DARK_GRAY),
+        ],
+      },
+      {
+        id: 's2',
+        camera: { az: 38, el: 28, side: 'top' },
+        // Four immediately adjacent same-color camouflaged 1x2 bricks packed right next to each other
+        parts: [
+          makePart('adj_0', 0, 24, 0, 40, 28, 20, DARK_GRAY),
+          makePart('adj_1', 0, 24, 20, 40, 28, 20, DARK_GRAY),
+          makePart('adj_2', 0, 24, 40, 40, 28, 20, DARK_GRAY),
+          makePart('adj_3', 0, 24, 60, 40, 28, 20, DARK_GRAY),
+        ],
+      },
+    ];
+
+    const res = computeAutoPlacementOffsetsForSequence(steps);
+    const offs = res.get('s2');
+    expect(offs).toBeDefined();
+    // Should never explode all 4 adjacent bricks on top of each other — cap <= 2 and skip crowding neighbors
+    expect(Object.keys(offs!).length).toBeLessThanOrEqual(2);
+  });
 });

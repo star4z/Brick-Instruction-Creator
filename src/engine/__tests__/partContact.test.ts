@@ -19,6 +19,7 @@ import {
   buildPhysicalVerticalPrereqMap,
   canFlushSidewaysConnect,
   classifySidewaysCapability,
+  createHorizontalFastenerGuards,
   minSubBoxGap,
   partsPhysicallyTouch,
   transformLocalBox6ToWorld,
@@ -295,7 +296,7 @@ describe('Concave Sub-Box Collider & Zero-Floating Support Rules', () => {
     const hollowNoStud4 = compileLines('hollow_4x4', topWallLines)!;
     const hollowWithStud4 = compileLines('hollow_4x4_s4', [
       ...topWallLines,
-      '1 16 0 4 0 1 0 0 0 20 0 0 0 1 stud4.dat',
+      '1 16 0 4 0 1 0 0 0 -5 0 0 0 1 stud4.dat',
     ])!;
 
     const upperBox = makeWorldBox(-40, 24, -40, 40, 48, 40);
@@ -535,9 +536,9 @@ describe('Concave Sub-Box Collider & Zero-Floating Support Rules', () => {
       '1 16 -10 0 10 1 0 0 0 1 0 0 0 1 stud.dat',
       '1 16 10 0 10 1 0 0 0 1 0 0 0 1 stud.dat',
       '1 16 30 0 10 1 0 0 0 1 0 0 0 1 stud.dat',
-      '1 16 -20 4 0 1 0 0 0 20 0 0 0 1 stud4.dat',
-      '1 16 0 4 0 1 0 0 0 20 0 0 0 1 stud4.dat',
-      '1 16 20 4 0 1 0 0 0 20 0 0 0 1 stud4.dat',
+      '1 16 -20 4 0 1 0 0 0 -5 0 0 0 1 stud4.dat',
+      '1 16 0 4 0 1 0 0 0 -5 0 0 0 1 stud4.dat',
+      '1 16 20 4 0 1 0 0 0 -5 0 0 0 1 stud4.dat',
     ])!;
     expect(studdedBrick.subBoxes).toBeUndefined();
 
@@ -811,5 +812,134 @@ describe('Concave Sub-Box Collider & Zero-Floating Support Rules', () => {
     expect(stepOf(6)).toBeLessThan(stepOf(4));
     expect(stepOf(3)).toBeLessThan(stepOf(5));
     expect(stepOf(4)).toBeLessThan(stepOf(5));
+  });
+
+  it('rejects false floor-plate grazing for horizontal Technic pins while keeping genuine 3-axis hole interlocking', () => {
+    // Deck plate with studs rising to y = 4
+    const deckPlate = makeWorldBox(-40, -8, -40, 40, 4, 40);
+    // Two 1x1 Technic bricks (6541) sitting on the deck at y = [0..28] along Z
+    const technicA = makeWorldBox(-10, 0, -20, 10, 28, 0);
+    const technicB = makeWorldBox(-10, 0, 0, 10, 28, 20);
+    // Horizontal Technic pin (2780) centered at hole height y = 14, collar radius 8 -> y in [6..22]
+    // Notice the 2.0 LDU air gap above deckPlate studs (6 - 4 = 2.0 <= 2.8)!
+    const pin2780 = makeWorldBox(-8, 6, -20, 8, 22, 20);
+
+    expect(partsPhysicallyTouch(pin2780, deckPlate, null, null, 'pin', 'structural', 'articulated', 'none')).toBe(false);
+    expect(partsPhysicallyTouch(pin2780, technicA, null, null, 'pin', 'structural', 'articulated', 'none')).toBe(true);
+    expect(partsPhysicallyTouch(pin2780, technicB, null, null, 'pin', 'structural', 'articulated', 'none')).toBe(true);
+  });
+
+  it('orders both vertically-seated Technic bricks BEFORE their joining horizontal pin and keeps one axial entrance open until the pin slides in', () => {
+    // Exact sandwich: [backCap 1x2] | [technicA 6541] ==(pin2780)== [technicB 6541] | [frontCap 1x2]
+    // all sitting atop a deck plate.
+    const boxes: WorldBox[] = [
+      makeWorldBox(-40, -8, -50, 40, 4, 50),  // 0: deckPlate (y <= 4)
+      makeWorldBox(-10, 0, -20, 10, 28, 0),   // 1: technicA (LBG 6541)
+      makeWorldBox(-10, 0, 0, 10, 28, 20),    // 2: technicB (Black 6541)
+      makeWorldBox(-8, 6, -20, 8, 22, 20),    // 3: pin2780 (horizontal along Z)
+      makeWorldBox(-20, 0, -40, 20, 28, -20), // 4: backCap (LBG 1x2 blocking -Z end)
+      makeWorldBox(-20, 0, 20, 20, 28, 40),   // 5: frontCap (Black 1x2 blocking +Z end)
+    ];
+    const roles = ['structural', 'structural', 'structural', 'pin', 'structural', 'structural'];
+    const sideCaps: Array<'none' | 'articulated'> = ['none', 'none', 'none', 'articulated', 'none', 'none'];
+    const cladding = boxes.map(() => false);
+    const partIds = ['3034', '6541', '6541', '2780', '3004', '3004'];
+    const colors = [72, 71, 0, 0, 71, 0];
+
+    const adj: number[][] = boxes.map(() => []);
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        if (partsPhysicallyTouch(boxes[i], boxes[j], null, null, roles[i], roles[j], sideCaps[i], sideCaps[j])) {
+          adj[i].push(j);
+          adj[j].push(i);
+        }
+      }
+    }
+
+    // Pin (3) connects ONLY to technicA (1) and technicB (2) — never to deckPlate (0) or end caps (4, 5)
+    expect([...adj[3]].sort((a, b) => a - b)).toEqual([1, 2]);
+
+    const { belowMap } = buildPhysicalVerticalPrereqMap(boxes, adj, roles, cladding);
+    const fastenerGuards = createHorizontalFastenerGuards(boxes, adj, roles, belowMap);
+    const descriptors: DynamicPartDescriptor[] = boxes.map((box, i) => ({
+      index: i,
+      partId: partIds[i],
+      colorId: colors[i],
+      sku: `${partIds[i]}|${colors[i]}`,
+      role: roles[i],
+      box,
+      layerY: box.min[1],
+      isCladding: false,
+    }));
+
+    const modelBounds = computeBoundsFromBoxes(boxes);
+    let builtBounds: WorldBox | null = null;
+    const activeCam: StudioCameraPose = { ...DEFAULT_STUDIO_CAMERA };
+    const placed = new Set<number>();
+    const remaining = new Set<number>(boxes.map((_, i) => i));
+    const stepHistory: number[][] = [];
+
+    while (remaining.size > 0) {
+      const placedBeforeStep = new Set(placed);
+      const isPrereqGrounded = placedBeforeStep.size > 0
+        ? createGroundedPrereqChecker(adj, belowMap, placedBeforeStep, remaining)
+        : null;
+      let frontier: number[];
+      if (placed.size === 0) {
+        frontier = Array.from(remaining)
+          .filter((i) => roles[i] !== 'pin' && belowMap[i].length === 0)
+          .sort((a, b) => boxes[a].min[1] - boxes[b].min[1]);
+      } else {
+        const rawFrontier = Array.from(remaining).filter((i) => adj[i].some((nb) => placedBeforeStep.has(nb)));
+        const emptyStepSet = new Set<number>();
+        const baseUnblocked = rawFrontier.filter((i) => !belowMap[i].some((u) => remaining.has(u) && isPrereqGrounded!(u)));
+        const fastenerUnblocked = baseUnblocked.filter((i) => !fastenerGuards.isBlocked(i, placedBeforeStep, emptyStepSet, remaining));
+        frontier = fastenerUnblocked.length > 0 ? fastenerUnblocked : (baseUnblocked.length > 0 ? baseUnblocked : rawFrontier);
+        const refBounds = builtBounds ?? modelBounds;
+        frontier.sort((a, b) => compareFrontierCandidates(descriptors[a], descriptors[b], activeCam.corner, refBounds));
+      }
+
+      const anchor = frontier[0];
+      const anchorY = boxes[anchor].min[1];
+      const anchorConnectedToPrev = placedBeforeStep.size > 0 && adj[anchor].some((nb) => placedBeforeStep.has(nb));
+      const stepIdx = selectDynamicStepIndices({
+        anchor,
+        parts: descriptors,
+        getEligibleCandidates: (placedInStep) =>
+          Array.from(remaining).filter((i) => {
+            if (placedInStep.has(i)) return false;
+            if (Math.abs(boxes[i].min[1] - anchorY) > 12) return false;
+            if (fastenerGuards.isBlocked(i, placedBeforeStep, placedInStep, remaining)) return false;
+            if (placedBeforeStep.size > 0) {
+              if (belowMap[i].some((u) => !placedBeforeStep.has(u) && isPrereqGrounded!(u))) return false;
+            } else {
+              if (belowMap[i].length > 0) return false;
+            }
+            return isCandidateConnectedForStep(i, anchorConnectedToPrev, adj, placedBeforeStep, placedInStep);
+          }),
+        modelBounds,
+        builtBounds,
+        activeCam,
+        isFirstStep: stepHistory.length === 0,
+        totalPartsInScope: boxes.length,
+        isSubmodel: false,
+      });
+
+      stepHistory.push(stepIdx);
+      for (const pi of stepIdx) {
+        remaining.delete(pi);
+        placed.add(pi);
+        builtBounds = expandBoundsWithBox(builtBounds, boxes[pi]);
+      }
+    }
+
+    const stepOf = (idx: number) => stepHistory.findIndex((s) => s.includes(idx));
+    // Pin (3) MUST be placed strictly AFTER BOTH technicA (1) AND technicB (2) —
+    // never in the same step as its host brick, and never forcing technicB to drop through a protruding pin!
+    expect(stepOf(1)).toBeLessThan(stepOf(3));
+    expect(stepOf(2)).toBeLessThan(stepOf(3));
+    // At least one axial end cap (backCap=4 or frontCap=5) MUST be placed strictly AFTER pin (3)
+    // so the pin always has an open hole entrance to slide into!
+    expect(Math.max(stepOf(4), stepOf(5))).toBeGreaterThan(stepOf(3));
   });
 });

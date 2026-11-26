@@ -1038,65 +1038,69 @@ export function compileDatEntry(
     }
   };
 
-  // Underside anti-stud cylinder/tube:
-  // - stud3/stud3a: solid underside pin (r = 3.2 LDU, y = 0..1)
-  // - stud4/stud4a: hollow underside tube (rOut = 8.14, rIn = 6.0 LDU, y = 0..1)
+  // Underside anti-stud cylinder/tube matching official LDraw primitive specs:
+  // - stud3/stud3a: solid underside pin (r = 4.0 LDU, local y = -4..0; bricks scale Y by -5 -> y = 4..24)
+  // - stud4/stud4a: hollow underside tube (rOut = 8.0, rIn = 6.0 LDU, local y = -4..0)
   //   with inner cylindrical wall and recessed inner ceiling cap tagged STUD_INNER_COLOR_FLAG
   //   so anti-stud interiors render solid black when Part Outlines is enabled.
+  // - stud3a/stud4a omit base rim edges at local y = 0 per official LDraw primitives.
   const emitFastAntiStud = (
-    px: number, py: number, pz: number, pm: Mat3, isTube: boolean, colId: number, edgeLimit: number, segs = 16,
+    px: number, py: number, pz: number, pm: Mat3, isTube: boolean, hasBaseEdges: boolean, colId: number, edgeLimit: number, segs = 16,
   ) => {
-    const rOut = isTube ? 8.14 : 3.2;
+    const rOut = isTube ? 8.0 : 4.0;
     const rIn = 6.0;
     const tp = (x: number, y: number, z: number): Vec3 => {
       const v = mat3Vec(pm, x, y, z);
       return [px + v[0], py + v[1], pz + v[2]];
     };
     const innerColId = colId === 16 ? STUD_INNER_COLOR_FLAG : colId;
-    const topPts: Vec3[] = [];
-    const botPts: Vec3[] = [];
-    const inTopPts: Vec3[] = [];
-    const inBotPts: Vec3[] = [];
+    const basePts: Vec3[] = [];
+    const tipPts: Vec3[] = [];
+    const inBasePts: Vec3[] = [];
+    const inTipPts: Vec3[] = [];
     for (let i = 0; i < segs; i++) {
       const a = (i / segs) * Math.PI * 2;
       const ca = Math.cos(a), sa = Math.sin(a);
-      topPts.push(tp(ca * rOut, 0, sa * rOut));
-      botPts.push(tp(ca * rOut, 1, sa * rOut));
+      basePts.push(tp(ca * rOut, 0, sa * rOut));
+      tipPts.push(tp(ca * rOut, -4, sa * rOut));
       if (isTube) {
-        inTopPts.push(tp(ca * rIn, 0.02, sa * rIn));
-        inBotPts.push(tp(ca * rIn, 1, sa * rIn));
+        inBasePts.push(tp(ca * rIn, -0.05, sa * rIn));
+        inTipPts.push(tp(ca * rIn, -4, sa * rIn));
       }
     }
-    const botC = tp(0, 1, 0);
-    const innerTopC = tp(0, 0.02, 0);
+    const tipC = tp(0, -4, 0);
+    const innerBaseC = tp(0, -0.05, 0);
     for (let i = 0; i < segs; i++) {
       const next = (i + 1) % segs;
       const prev = (i + segs - 1) % segs;
-      const t0 = topPts[i], t1 = topPts[next];
-      const b0 = botPts[i], b1 = botPts[next];
-      // Outer cylindrical wall (outward normal)
+      const b0 = basePts[i], b1 = basePts[next];
+      const t0 = tipPts[i], t1 = tipPts[next];
+      // Outer cylindrical wall
       emitTri(b0, b1, t1, colId);
       emitTri(b0, t1, t0, colId);
       if (isTube) {
-        const it0 = inTopPts[i], it1 = inTopPts[next];
-        const ib0 = inBotPts[i], ib1 = inBotPts[next];
-        // Bottom flat ring at y = 1 (downward normal +Y LDraw / -Y GL)
-        emitTri(ib0, b1, b0, colId);
-        emitTri(ib0, ib1, b1, colId);
-        // Inner cylindrical wall (inward normal) + recessed inner ceiling cap (downward normal)
+        const ib0 = inBasePts[i], ib1 = inBasePts[next];
+        const it0 = inTipPts[i], it1 = inTipPts[next];
+        // Open tube tip flat ring at local y = -4
+        emitTri(it0, t0, t1, colId);
+        emitTri(it0, t1, it1, colId);
+        // Inner cylindrical wall + recessed inner ceiling cap near local y = 0
         emitTri(ib0, it1, ib1, innerColId);
         emitTri(ib0, it0, it1, innerColId);
-        emitTri(innerTopC, it1, it0, innerColId);
-        if (edges.length < edgeLimit) emitEdge(ib0, ib1, colId);
+        emitTri(innerBaseC, ib0, ib1, innerColId);
+        if (edges.length < edgeLimit) {
+          emitEdge(it0, it1, colId);
+          if (hasBaseEdges) emitEdge(ib0, ib1, colId);
+        }
       } else {
-        // Solid pin bottom cap at y = 1 (downward normal +Y LDraw / -Y GL)
-        emitTri(botC, b1, b0, colId);
+        // Solid pin tip cap at local y = -4
+        emitTri(tipC, t0, t1, colId);
       }
       if (edges.length < edgeLimit) {
-        emitEdge(b0, b1, colId);
         emitEdge(t0, t1, colId);
+        if (hasBaseEdges) emitEdge(b0, b1, colId);
       }
-      emitCondEdge(t0, b0, topPts[prev], topPts[next], colId);
+      emitCondEdge(t0, b0, tipPts[prev], tipPts[next], colId);
     }
   };
 
@@ -1693,12 +1697,13 @@ export function compileDatEntry(
         }
         if (FAST_ANTI_STUD_RE.test(base)) {
           const isTube = base.startsWith('stud4');
-          // Preserve anti-stud tube occupancy for physical clutch detection
-          const r = isTube ? 8.14 : 3.2;
+          const hasBaseEdges = !base.endsWith('a');
+          // Preserve anti-stud tube occupancy for physical clutch detection (official LDraw y = -4..0)
+          const r = isTube ? 8.0 : 4.0;
           let uMinX = Infinity, uMinY = Infinity, uMinZ = Infinity;
           let uMaxX = -Infinity, uMaxY = -Infinity, uMaxZ = -Infinity;
           for (const lx of [-r, r]) {
-            for (const ly of [0, 1]) {
+            for (const ly of [-4, 0]) {
               for (const lz of [-r, r]) {
                 const v = mat3Vec(nm, lx, ly, lz);
                 const g = ld2gl([nx + v[0], ny + v[1], nz + v[2]]);
@@ -1710,7 +1715,7 @@ export function compileDatEntry(
           }
           undersideBoxes.push([uMinX, uMinY, uMinZ, uMaxX, uMaxY, uMaxZ]);
           if (totalTriFloats < triLimit) {
-            emitFastAntiStud(nx, ny, nz, nm, isTube, childCol, edgeLimit, antiStudSegs);
+            emitFastAntiStud(nx, ny, nz, nm, isTube, hasBaseEdges, childCol, edgeLimit, antiStudSegs);
           }
           continue;
         }

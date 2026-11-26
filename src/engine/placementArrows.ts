@@ -72,11 +72,14 @@ export const CONTRAST_ARROW_GREEN = '#16a34a';
 export const CONTRAST_ARROW_BLUE = '#2563eb';
 
 const CONTACT_EPS = 6;
+const SUPPORT_GAP_MAX = 1.5;
 const COLOR_NEIGHBOR_EPS = CONTACT_EPS;
+const TOUCH_COLOR_EPS = 4;
 const SAME_COLOR_DIST_THRESHOLD = 42;
 const ARROW_CONTRAST_DIST_THRESHOLD = 75;
 const MAX_FIRST_STEP_OFFSETS = 6;
-const MAX_SUBSEQUENT_STEP_OFFSETS = 4;
+const MAX_SUBSEQUENT_STEP_OFFSETS = 2;
+const MAX_SUBSEQUENT_STEP_LATERAL_OFFSETS = 3;
 
 type Vec3 = [number, number, number];
 
@@ -259,10 +262,16 @@ interface ContactSummary {
   supportedFromAbove: boolean;
   /** True when the piece passes vertically through a hole or sleeves coaxially around a vertical rod/axle. */
   verticalCoaxial: boolean;
+  /** True when the piece passes horizontally through a side hole (e.g. Technic pin/axle inside a Technic brick). */
+  horizontalCoaxial: boolean;
+  /** Primary world horizontal insertion axis (0 = X, 2 = Z) when `horizontalCoaxial` is true. */
+  horizontalCoaxialAxis: 0 | 2 | null;
   lateralCount: number;
   /** Outward lateral normal from contacting reference parts toward this part. */
   lateralNormal: Vec3 | null;
   touchingRefs: PlacementPartInput[];
+  /** Directly touching refs (within 4 LDU with real contact area) used for color-camouflage checks. */
+  colorTouchingRefs: PlacementPartInput[];
 }
 
 function analyzeContacts(
@@ -274,10 +283,13 @@ function analyzeContacts(
   let supportedFromBelow = false;
   let supportedFromAbove = false;
   let verticalCoaxial = false;
+  let horizontalCoaxial = false;
+  let horizontalCoaxialAxis: 0 | 2 | null = null;
   let lateralCount = 0;
   let latX = 0;
   let latZ = 0;
   const touchingRefs: PlacementPartInput[] = [];
+  const colorTouchingRefs: PlacementPartInput[] = [];
 
   for (let i = 0; i < refs.length; i++) {
     const ref = refs[i];
@@ -291,12 +303,20 @@ function analyzeContacts(
     const ovY = overlap1D(b.min[1], b.max[1], rb.min[1], rb.max[1]);
     const ovZ = overlap1D(b.min[2], b.max[2], rb.min[2], rb.max[2]);
 
-    // Resting on top of ref
-    if (ovX > 2 && ovZ > 2 && b.min[1] >= rb.max[1] - CONTACT_EPS && b.min[1] <= rb.max[1] + CONTACT_EPS) {
+    if (boxesWithinMargin(b, rb, TOUCH_COLOR_EPS)) {
+      const solidAxes = (ovX >= 4 ? 1 : 0) + (ovY >= 4 ? 1 : 0) + (ovZ >= 4 ? 1 : 0);
+      if (solidAxes >= 2) {
+        colorTouchingRefs.push(ref);
+      }
+    }
+
+    // Resting on top of ref (allow -CONTACT_EPS for 4 LDU stud penetration, but at most +1.5 LDU air gap
+    // so horizontal Technic pins sitting 2 LDU above deck studs are never misclassified as vertically seated)
+    if (ovX > 2 && ovZ > 2 && b.min[1] >= rb.max[1] - CONTACT_EPS && b.min[1] <= rb.max[1] + SUPPORT_GAP_MAX) {
       supportedFromBelow = true;
     }
     // Attached underneath ref
-    if (ovX > 2 && ovZ > 2 && rb.min[1] >= b.max[1] - CONTACT_EPS && rb.min[1] <= b.max[1] + CONTACT_EPS) {
+    if (ovX > 2 && ovZ > 2 && rb.min[1] >= b.max[1] - CONTACT_EPS && rb.min[1] <= b.max[1] + SUPPORT_GAP_MAX) {
       supportedFromAbove = true;
     }
 
@@ -305,12 +325,25 @@ function analyzeContacts(
     const nestedXZ = ovX > 1.5 && ovZ > 1.5;
     if (ovY > 3 && nestedXZ) {
       const partVertElongated = s[1] >= Math.max(s[0], s[2]) * 1.1;
+      const partHorizElongated = Math.max(s[0], s[2]) >= s[1] * 1.15;
       const partProtrudesVert = b.max[1] > rb.max[1] + 2 || b.min[1] < rb.min[1] - 2;
       const refHorizWider = Math.max(rs[0], rs[2]) >= Math.max(s[0], s[2]) * 1.3;
-      const refVertRod = rs[1] >= Math.max(rs[0], rs[2]) * 1.25 && (rb.max[1] > b.max[1] + 2 || rb.min[1] < b.min[1] - 2);
+      const partWrapsRefXZ = s[0] >= rs[0] + 1 && s[2] >= rs[2] + 1;
+      const refVertRod =
+        !partHorizElongated &&
+        partWrapsRefXZ &&
+        rs[1] >= Math.max(rs[0], rs[2]) * 1.8 &&
+        (rb.max[1] > b.max[1] + 2 || rb.min[1] < b.min[1] - 2);
       if ((partVertElongated && (partProtrudesVert || refHorizWider)) || (partProtrudesVert && refHorizWider) || refVertRod) {
         verticalCoaxial = true;
         continue;
+      }
+
+      // Horizontal pin/axle embedded coaxially inside a Technic brick/beam side hole
+      const nestedInsideRefY = b.min[1] >= rb.min[1] + 1.5 && b.max[1] <= rb.max[1] - 1.5;
+      if (partHorizElongated || nestedInsideRefY) {
+        horizontalCoaxial = true;
+        horizontalCoaxialAxis = s[0] >= s[2] ? 0 : 2;
       }
     }
 
@@ -355,13 +388,86 @@ function analyzeContacts(
     supportedFromBelow,
     supportedFromAbove,
     verticalCoaxial,
+    horizontalCoaxial,
+    horizontalCoaxialAxis,
     lateralCount,
     lateralNormal,
     touchingRefs,
+    colorTouchingRefs,
   };
 }
 
 const MIN_CORRIDOR_ARROW_GAP = 16;
+
+function unionBox(a: PlacementAABB, b: PlacementAABB): PlacementAABB {
+  const min: Vec3 = [
+    Math.min(a.min[0], b.min[0]),
+    Math.min(a.min[1], b.min[1]),
+    Math.min(a.min[2], b.min[2]),
+  ];
+  const max: Vec3 = [
+    Math.max(a.max[0], b.max[0]),
+    Math.max(a.max[1], b.max[1]),
+    Math.max(a.max[2], b.max[2]),
+  ];
+  return {
+    min,
+    max,
+    center: [(min[0] + max[0]) * 0.5, (min[1] + max[1]) * 0.5, (min[2] + max[2]) * 0.5],
+  };
+}
+
+interface ScreenRect2D {
+  uMin: number;
+  uMax: number;
+  vMin: number;
+  vMax: number;
+}
+
+/** Projects a 3D AABB into orthographic 2D camera screen coordinates `(u, v)`. */
+function projectBoxToScreen2D(
+  box: PlacementAABB,
+  azDeg: number,
+  elDeg: number,
+): ScreenRect2D {
+  const az = (azDeg * Math.PI) / 180;
+  const el = (elDeg * Math.PI) / 180;
+  const rx = Math.cos(az);
+  const rz = -Math.sin(az);
+  const ux = -Math.sin(az) * Math.sin(el);
+  const uy = Math.cos(el);
+  const uz = -Math.cos(az) * Math.sin(el);
+
+  let uMin = Infinity;
+  let uMax = -Infinity;
+  let vMin = Infinity;
+  let vMax = -Infinity;
+  for (let ix = 0; ix < 2; ix++) {
+    const x = ix === 0 ? box.min[0] : box.max[0];
+    for (let iy = 0; iy < 2; iy++) {
+      const y = iy === 0 ? box.min[1] : box.max[1];
+      for (let iz = 0; iz < 2; iz++) {
+        const z = iz === 0 ? box.min[2] : box.max[2];
+        const u = x * rx + z * rz;
+        const v = x * ux + y * uy + z * uz;
+        if (u < uMin) uMin = u;
+        if (u > uMax) uMax = u;
+        if (v < vMin) vMin = v;
+        if (v > vMax) vMax = v;
+      }
+    }
+  }
+  return { uMin, uMax, vMin, vMax };
+}
+
+function screenRectsOverlap(a: ScreenRect2D, b: ScreenRect2D, pad = 6): boolean {
+  return (
+    a.uMin - pad < b.uMax &&
+    a.uMax + pad > b.uMin &&
+    a.vMin - pad < b.vMax &&
+    a.vMax + pad > b.vMin
+  );
+}
 
 /**
  * Computes the perpendicular overlap box between `partBox` and its contacting
@@ -509,6 +615,7 @@ function resolveOffsetAlongAxis(
   camera?: { az: number; el: number },
   touchingRefs: ReadonlyArray<PlacementPartInput> = [],
   siblingObstacles: ReadonlyArray<PlacementPartInput> = [],
+  options: { preferShortestDir?: boolean } = {},
 ): AutoPartOffset | null {
   const s = boxSize(part.box);
   const dirs: Vec3[] = [preferredDir, ...fallbackDirs];
@@ -528,7 +635,20 @@ function resolveOffsetAlongAxis(
     return Math.round(mag);
   };
 
-  for (const dir of dirs) {
+  // Precompute which obstacles already intersect `part.box` at its seated position (coaxial hosts),
+  // so the swept-corridor guard only rejects solid external blockers sitting OUTSIDE `part.box`.
+  const seatedIntersectingObs = new Set<string>();
+  for (let i = 0; i < obstacles.length; i++) {
+    const obs = obstacles[i];
+    if (obs.id !== part.id && boxesIntersectStrict(part.box, obs.box, 1.5)) {
+      seatedIntersectingObs.add(obs.id);
+    }
+  }
+
+  let bestCandidate: { res: AutoPartOffset; mag: number; dirIdx: number } | null = null;
+
+  for (let dirIdx = 0; dirIdx < dirs.length; dirIdx++) {
+    const dir = dirs[dirIdx];
     const axis = Math.abs(dir[0]) >= 0.5 ? 0 : (Math.abs(dir[1]) >= 0.5 ? 1 : 2);
     const sign = dir[axis] >= 0 ? 1 : -1;
     const perpA = (axis + 1) % 3;
@@ -537,8 +657,8 @@ function resolveOffsetAlongAxis(
     const arrowBox = computeContactArrowBox(part.box, touchingRefs, axis, sign);
     const arrowAnchor = arrowBox ? arrowBox.center : part.box.center;
 
-    // Find any coaxial / corridor obstacle directly along the insertion path (e.g., vertical axle inside a bush)
-    // Only existing `obstacles` (never same-step siblings) can act as coaxial pins/axles to lift past.
+    // Find any coaxial / corridor obstacle directly along the insertion path (e.g., vertical axle inside a bush
+    // or Technic brick hole face around a horizontal pin). Only `obstacles` (never non-host siblings) qualify.
     let corridorObsTip: number | null = null;
     for (let i = 0; i < obstacles.length; i++) {
       const obs = obstacles[i];
@@ -547,8 +667,7 @@ function resolveOffsetAlongAxis(
       const ovA = overlap1D(part.box.min[perpA], part.box.max[perpA], ob.min[perpA], ob.max[perpA]);
       const ovB = overlap1D(part.box.min[perpB], part.box.max[perpB], ob.min[perpB], ob.max[perpB]);
       if (ovA <= 1.5 || ovB <= 1.5) continue;
-      // Check if obstacle coaxially overlaps part along the insertion axis or protrudes past part's center in `dir`
-      if (!boxesIntersectStrict(part.box, ob, 1.5)) continue;
+      if (!seatedIntersectingObs.has(obs.id)) continue;
       if (sign > 0) {
         if (ob.max[axis] > part.box.min[axis] + 1 && ob.min[axis] < part.box.max[axis] + 24) {
           if (corridorObsTip === null || ob.max[axis] > corridorObsTip) corridorObsTip = ob.max[axis];
@@ -585,7 +704,7 @@ function resolveOffsetAlongAxis(
       for (let i = 0; i < obstacles.length; i++) {
         const obs = obstacles[i];
         if (obs.id === part.id) continue;
-        if (boxesIntersectStrict(part.box, obs.box, 1.5)) continue; // coaxial pin/axle handled via corridorObsTip
+        if (seatedIntersectingObs.has(obs.id)) continue; // coaxial pin/axle handled via corridorObsTip
         if (boxesIntersectStrict(corridor, obs.box, 1.5)) {
           corridorBlockedDir = true;
           break;
@@ -600,10 +719,17 @@ function resolveOffsetAlongAxis(
         if (gapToTip < MIN_CORRIDOR_ARROW_GAP) continue;
       }
 
+      const swept = unionBox(part.box, shifted);
       let collides = false;
       for (let i = 0; i < obstacles.length; i++) {
-        if (obstacles[i].id === part.id) continue;
-        if (boxesIntersectStrict(shifted, obstacles[i].box, 1.5)) {
+        const obs = obstacles[i];
+        if (obs.id === part.id) continue;
+        if (boxesIntersectStrict(shifted, obs.box, 1.5)) {
+          collides = true;
+          break;
+        }
+        // Reject paths that pass straight through an external non-host brick along the insertion corridor
+        if (!seatedIntersectingObs.has(obs.id) && boxesIntersectStrict(swept, obs.box, 2.0)) {
           collides = true;
           break;
         }
@@ -631,19 +757,26 @@ function resolveOffsetAlongAxis(
             res.arrowTo = arrowTo;
           }
         }
-        return res;
+        if (!options.preferShortestDir) {
+          return res;
+        }
+        if (!bestCandidate || mag + 8 < bestCandidate.mag) {
+          bestCandidate = { res, mag, dirIdx };
+        }
+        break;
       }
     }
   }
 
-  return null;
+  return bestCandidate ? bestCandidate.res : null;
 }
 
 function chooseInsertionDirs(
   contacts: ContactSummary,
   cameraSide: 'top' | 'bottom',
   isLateralPrimary: boolean,
-): { preferred: Vec3; fallbacks: Vec3[] } {
+  cameraAzDeg = 38,
+): { preferred: Vec3; fallbacks: Vec3[]; preferShortestDir?: boolean } {
   const verticalDefault: Vec3 = cameraSide === 'bottom' ? [0, -1, 0] : [0, 1, 0];
   const verticalOpposite: Vec3 = cameraSide === 'bottom' ? [0, 1, 0] : [0, -1, 0];
 
@@ -651,6 +784,18 @@ function chooseInsertionDirs(
     return {
       preferred: verticalDefault,
       fallbacks: [verticalOpposite],
+    };
+  }
+  if (contacts.horizontalCoaxial && contacts.horizontalCoaxialAxis !== null) {
+    const axis = contacts.horizontalCoaxialAxis;
+    const az = (cameraAzDeg * Math.PI) / 180;
+    const camSign = (axis === 0 ? Math.sin(az) : Math.cos(az)) >= 0 ? 1 : -1;
+    const pref: Vec3 = axis === 0 ? [camSign, 0, 0] : [0, 0, camSign];
+    const opp: Vec3 = axis === 0 ? [-camSign, 0, 0] : [0, 0, -camSign];
+    return {
+      preferred: pref,
+      fallbacks: [opp],
+      preferShortestDir: true,
     };
   }
   if (isLateralPrimary && contacts.lateralNormal) {
@@ -710,8 +855,8 @@ function computeFirstStepOffsets(
       const ovX = overlap1D(a.box.min[0], a.box.max[0], b.box.min[0], b.box.max[0]);
       const ovZ = overlap1D(a.box.min[2], a.box.max[2], b.box.min[2], b.box.max[2]);
       const aSupportsB = isBottomView
-        ? (ovX > 2 && ovZ > 2 && a.box.min[1] >= b.box.max[1] - CONTACT_EPS && a.box.min[1] <= b.box.max[1] + CONTACT_EPS)
-        : (ovX > 2 && ovZ > 2 && b.box.min[1] >= a.box.max[1] - CONTACT_EPS && b.box.min[1] <= a.box.max[1] + CONTACT_EPS);
+        ? (ovX > 2 && ovZ > 2 && a.box.min[1] >= b.box.max[1] - CONTACT_EPS && a.box.min[1] <= b.box.max[1] + SUPPORT_GAP_MAX)
+        : (ovX > 2 && ovZ > 2 && b.box.min[1] >= a.box.max[1] - CONTACT_EPS && b.box.min[1] <= a.box.max[1] + SUPPORT_GAP_MAX);
       if (aSupportsB) {
         supportCount.set(a.id, (supportCount.get(a.id) || 0) + 1);
         supportedByAnother.add(b.id);
@@ -795,7 +940,12 @@ function computeFirstStepOffsets(
     if (contacts.touchingRefs.length === 0) continue;
 
     const isLateral = contacts.lateralCount > 0 && !contacts.supportedFromBelow && !contacts.supportedFromAbove;
-    const { preferred, fallbacks } = chooseInsertionDirs(contacts, cameraSide, isLateral);
+    const { preferred, fallbacks, preferShortestDir } = chooseInsertionDirs(
+      contacts,
+      cameraSide,
+      isLateral,
+      step.camera.az,
+    );
     const otherSiblings = parts.filter((q) => q.id !== p.id && !baseSet.has(q.id));
     const resolved = resolveOffsetAlongAxis(
       p,
@@ -805,6 +955,7 @@ function computeFirstStepOffsets(
       step.camera,
       contacts.touchingRefs,
       [...otherSiblings, ...acceptedShiftedObstacles],
+      { preferShortestDir },
     );
     if (!resolved) continue;
 
@@ -828,19 +979,23 @@ interface NoticeabilityCandidate {
   score: number;
   contacts: ContactSummary;
   isLateral: boolean;
+  isCoaxialOrLateral: boolean;
+  extraHosts?: PlacementPartInput[];
 }
 
 /**
- * Evaluates a subsequent step (`prevParts.length > 0`) and returns offsets for
- * individual pieces that would be hard to notice without highlighting.
+ * Evaluates a subsequent step (`prevParts.length > 0`) and returns clean,
+ * non-clipping, non-occluding offsets for individual pieces that need arrows.
  *
- * Strict anti-cluster invariants:
- * - Only loose pieces that directly contact `prevParts` (and do not stack onto
- *   another new piece placed in the same step) are eligible.
+ * Strict anti-cluster & non-occlusion invariants:
+ * - Only loose pieces that directly contact `prevParts` (or a grounded same-step
+ *   host brick for a horizontally embedded pin on imported steps) are eligible.
  * - Never pulls a piece out from underneath a sibling in the same step that
  *   depends on it for support.
  * - Never offsets two or more physically touching pieces together as a floating
  *   cluster (checked in both seated and shifted positions).
+ * - Projects shifted pieces + arrow corridors into 2D orthographic screen space
+ *   to prevent nearby offset placements from crowding or occluding each other.
  * - Rejects any offset whose swept withdrawal corridor passes through a sibling
  *   piece or non-coaxial obstacle.
  */
@@ -854,57 +1009,90 @@ function computeSubsequentStepOffsets(
   const cameraSide = step.camera.side === 'bottom' ? 'bottom' : 'top';
   const isBottomView = cameraSide === 'bottom';
   const builtDiag = Math.max(20, boxDiag(builtBounds));
+
+  // Defense-in-depth for steps (e.g. imported manual steps) where a horizontal pin/axle
+  // is present in the same step as the brick it embeds into: keep the host brick grounded
+  // so the pin slides cleanly horizontally into its hole instead of clipping through it.
+  const sameStepPinnedHosts = new Set<string>();
+  const sameStepHostByPin = new Map<string, PlacementPartInput[]>();
+  if (step.parts.length >= 2) {
+    for (const part of step.parts) {
+      const sibContacts = analyzeContacts(part, step.parts);
+      if (!sibContacts.horizontalCoaxial) continue;
+      const pVol = boxVolume(part.box);
+      const hosts = sibContacts.touchingRefs.filter((sib) => {
+        if (sib.id === part.id) return false;
+        const ovX = overlap1D(part.box.min[0], part.box.max[0], sib.box.min[0], sib.box.max[0]);
+        const ovY = overlap1D(part.box.min[1], part.box.max[1], sib.box.min[1], sib.box.max[1]);
+        const ovZ = overlap1D(part.box.min[2], part.box.max[2], sib.box.min[2], sib.box.max[2]);
+        return ovX > 1.5 && ovY > 3 && ovZ > 1.5 && pVol < boxVolume(sib.box) * 0.7;
+      });
+      if (hosts.length > 0) {
+        sameStepHostByPin.set(part.id, hosts);
+        for (const h of hosts) sameStepPinnedHosts.add(h.id);
+      }
+    }
+  }
+
   const contactsById = new Map<string, ContactSummary>();
   for (const part of step.parts) {
-    contactsById.set(part.id, analyzeContacts(part, prevParts));
+    const extraHosts = sameStepHostByPin.get(part.id);
+    const refPool = extraHosts ? [...prevParts, ...extraHosts] : prevParts;
+    contactsById.set(part.id, analyzeContacts(part, refPool));
   }
 
   const candidates: NoticeabilityCandidate[] = [];
 
   for (const part of step.parts) {
+    if (sameStepPinnedHosts.has(part.id)) continue;
+
+    const extraHosts = sameStepHostByPin.get(part.id);
     const contacts = contactsById.get(part.id)!;
-    // Must directly attach to the already-built model; pieces resting solely on
-    // another new piece in this same step belong to an in-step stack, not a solo offset.
+    // Must directly attach to the already-built model (or a grounded same-step pin host);
+    // pieces resting solely on another new piece in this step belong to an in-step stack.
     if (contacts.touchingRefs.length === 0) continue;
 
     // Never pull `part` away if another sibling in this step touches `part` and has
-    // no direct contact with `prevParts` (pulling `part` would leave that sibling floating).
-    let hasDependentSibling = false;
-    let stackedOnSibling = false;
-    for (const sib of step.parts) {
-      if (sib.id === part.id) continue;
-      if (!boxesWithinMargin(part.box, sib.box, CONTACT_EPS)) continue;
-      const sibContacts = contactsById.get(sib.id)!;
-      if (sibContacts.touchingRefs.length === 0) {
-        hasDependentSibling = true;
-        break;
-      }
-      // Check if `sib` vertically supports `part` along the build axis while `part` lacks
-      // vertical support from `prevParts` on that same side (i.e. stacked onto a same-step brick).
-      const ovX = overlap1D(part.box.min[0], part.box.max[0], sib.box.min[0], sib.box.max[0]);
-      const ovZ = overlap1D(part.box.min[2], part.box.max[2], sib.box.min[2], sib.box.max[2]);
-      if (ovX > 2 && ovZ > 2) {
-        if (
-          isBottomView &&
-          !contacts.supportedFromAbove &&
-          sib.box.min[1] >= part.box.max[1] - CONTACT_EPS &&
-          sib.box.min[1] <= part.box.max[1] + CONTACT_EPS
-        ) {
-          stackedOnSibling = true;
+    // no direct contact with `prevParts` (pulling `part` would leave that sibling floating),
+    // unless `part` itself is a horizontal pin embedding into its grounded same-step host.
+    if (!extraHosts) {
+      let hasDependentSibling = false;
+      let stackedOnSibling = false;
+      for (const sib of step.parts) {
+        if (sib.id === part.id) continue;
+        if (!boxesWithinMargin(part.box, sib.box, CONTACT_EPS)) continue;
+        const sibContacts = contactsById.get(sib.id)!;
+        if (sibContacts.touchingRefs.length === 0) {
+          hasDependentSibling = true;
           break;
         }
-        if (
-          !isBottomView &&
-          !contacts.supportedFromBelow &&
-          part.box.min[1] >= sib.box.max[1] - CONTACT_EPS &&
-          part.box.min[1] <= sib.box.max[1] + CONTACT_EPS
-        ) {
-          stackedOnSibling = true;
-          break;
+        // Check if `sib` vertically supports `part` along the build axis while `part` lacks
+        // vertical support from `prevParts` on that same side (i.e. stacked onto a same-step brick).
+        const ovX = overlap1D(part.box.min[0], part.box.max[0], sib.box.min[0], sib.box.max[0]);
+        const ovZ = overlap1D(part.box.min[2], part.box.max[2], sib.box.min[2], sib.box.max[2]);
+        if (ovX > 2 && ovZ > 2) {
+          if (
+            isBottomView &&
+            !contacts.supportedFromAbove &&
+            sib.box.min[1] >= part.box.max[1] - CONTACT_EPS &&
+            sib.box.min[1] <= part.box.max[1] + SUPPORT_GAP_MAX
+          ) {
+            stackedOnSibling = true;
+            break;
+          }
+          if (
+            !isBottomView &&
+            !contacts.supportedFromBelow &&
+            part.box.min[1] >= sib.box.max[1] - CONTACT_EPS &&
+            part.box.min[1] <= sib.box.max[1] + SUPPORT_GAP_MAX
+          ) {
+            stackedOnSibling = true;
+            break;
+          }
         }
       }
+      if (hasDependentSibling || stackedOnSibling) continue;
     }
-    if (hasDependentSibling || stackedOnSibling) continue;
 
     const s = boxSize(part.box);
     const diag = boxDiag(part.box);
@@ -918,12 +1106,13 @@ function computeSubsequentStepOffsets(
       contacts.lateralCount > 0 &&
       !contacts.supportedFromBelow &&
       !contacts.supportedFromAbove;
+    const isCoaxialOrLateral = isLateral || contacts.verticalCoaxial || contacts.horizontalCoaxial;
 
     // 1. Lateral / horizontal insertion or coaxial through-hole/sleeve insertion (pins, axles, bushes, beams)
     let score = 0;
-    if (isLateral || contacts.verticalCoaxial) {
+    if (isCoaxialOrLateral) {
       // Sideways and coaxial insertions are hard to read from an isometric view without an arrow
-      score += 3.0;
+      score += 3.5;
     }
 
     // 2. Partial occlusion from the step's actual camera view
@@ -932,9 +1121,10 @@ function computeSubsequentStepOffsets(
       score += 2.2 + occlusion * 2.0;
     }
 
-    // 3. Color camouflage against touching existing neighbors
+    // 3. Color camouflage against directly touching existing neighbors
+    const colorRefs = contacts.colorTouchingRefs;
     let minColorDist = Infinity;
-    for (const ref of contacts.touchingRefs) {
+    for (const ref of colorRefs) {
       const d = perceptualRgbDistance(part.rgb, ref.rgb);
       if (d < minColorDist) minColorDist = d;
     }
@@ -943,7 +1133,7 @@ function computeSubsequentStepOffsets(
       (height <= 10 && minHoriz <= 44 && maxHoriz <= 84 && relDiag < 0.42) ||
       relDiag < 0.30;
     if (
-      contacts.touchingRefs.length > 0 &&
+      colorRefs.length > 0 &&
       minColorDist < SAME_COLOR_DIST_THRESHOLD &&
       isSlenderOrModest &&
       prevParts.length >= 4
@@ -952,62 +1142,110 @@ function computeSubsequentStepOffsets(
       score += 1.8 + (1 - minColorDist / SAME_COLOR_DIST_THRESHOLD) * 0.8;
     }
 
-    // 4. Small detail relative to the existing model
-    const isSmallFootprint = maxHoriz <= 44 && vol <= 26000;
-    const isTinyPiece = maxHoriz <= 24 && height <= 26 && vol <= 12000;
-    if (prevParts.length >= 4 && ((isSmallFootprint && relDiag < 0.17) || (isTinyPiece && relDiag < 0.24))) {
-      score += 1.6 + Math.max(0, 0.24 - relDiag) * 4.0;
+    // 4. Truly tiny detail (e.g. 1x1 plate/tile/stud/clip, NOT full-height 1x2 bricks) on a much larger model
+    const isTinyPiece = maxHoriz <= 24 && height <= 18 && vol <= 8500;
+    if (prevParts.length >= 4 && isTinyPiece && relDiag < 0.22) {
+      score += 1.6 + Math.max(0, 0.22 - relDiag) * 4.0;
     }
 
     if (score >= 1.5) {
-      candidates.push({ part, score, contacts, isLateral });
+      candidates.push({ part, score, contacts, isLateral, isCoaxialOrLateral, extraHosts });
     }
   }
 
   if (candidates.length === 0) return {};
 
-  // Sort highest noticeability need first; greedily pick isolated single-brick offsets
-  candidates.sort((a, b) => b.score - a.score);
+  // Sort highest noticeability need first (mandatory lateral/coaxial insertions lead)
+  candidates.sort(
+    (a, b) =>
+      (b.isCoaxialOrLateral ? 1 : 0) - (a.isCoaxialOrLateral ? 1 : 0) ||
+      b.score - a.score,
+  );
 
   const out: Record<string, AutoPartOffset> = {};
-  const acceptedParts: PlacementPartInput[] = [];
-  const acceptedShiftedBoxes: PlacementAABB[] = [];
+  const accepted: Array<{
+    part: PlacementPartInput;
+    shiftedBox: PlacementAABB;
+    screenRect: ScreenRect2D;
+    isCoaxialOrLateral: boolean;
+  }> = [];
   const acceptedShiftedObstacles: PlacementPartInput[] = [];
 
   for (const c of candidates) {
-    if (acceptedParts.length >= MAX_SUBSEQUENT_STEP_OFFSETS) break;
-    // Never offset two or more physically touching bricks together as a cluster
-    if (acceptedParts.some((acc) => boxesWithinMargin(c.part.box, acc.box, CONTACT_EPS))) {
+    const cap = c.isCoaxialOrLateral
+      ? MAX_SUBSEQUENT_STEP_LATERAL_OFFSETS
+      : MAX_SUBSEQUENT_STEP_OFFSETS;
+    if (accepted.length >= cap) continue;
+
+    // Never offset two or more physically touching bricks together as a floating cluster
+    if (accepted.some((acc) => boxesWithinMargin(c.part.box, acc.part.box, CONTACT_EPS))) {
       continue;
     }
 
-    const { preferred, fallbacks } = chooseInsertionDirs(c.contacts, cameraSide, c.isLateral);
-    const otherSiblings = step.parts.filter((p) => p.id !== c.part.id);
+    const extraHostIds = new Set((c.extraHosts ?? []).map((h) => h.id));
+    const baseObstacles = c.extraHosts ? [...prevParts, ...c.extraHosts] : prevParts;
+    const otherSiblings = step.parts.filter((p) => p.id !== c.part.id && !extraHostIds.has(p.id));
+
+    const { preferred, fallbacks, preferShortestDir } = chooseInsertionDirs(
+      c.contacts,
+      cameraSide,
+      c.isLateral,
+      step.camera.az,
+    );
     const resolved = resolveOffsetAlongAxis(
       c.part,
       preferred,
       fallbacks,
-      prevParts,
+      baseObstacles,
       step.camera,
       c.contacts.touchingRefs,
       [...otherSiblings, ...acceptedShiftedObstacles],
+      { preferShortestDir },
     );
     if (!resolved) continue;
 
-    const shifted = shiftBox(c.part.box, resolved.x, resolved.y, resolved.z);
-    if (acceptedShiftedBoxes.some((sb) => boxesWithinMargin(shifted, sb, CONTACT_EPS))) {
+    const shiftedBox = shiftBox(c.part.box, resolved.x, resolved.y, resolved.z);
+    if (accepted.some((acc) => boxesWithinMargin(shiftedBox, acc.shiftedBox, CONTACT_EPS))) {
       continue;
     }
 
+    // Project shifted piece + its arrow corridor onto 2D orthographic screen plane
+    // to prevent nearby offset placements from crowding or occluding each other.
+    const liftedScreen = projectBoxToScreen2D(shiftedBox, step.camera.az, step.camera.el);
+    const corridorScreen = projectBoxToScreen2D(
+      unionBox(c.part.box, shiftedBox),
+      step.camera.az,
+      step.camera.el,
+    );
+    let crowdsExisting = false;
+    for (const acc of accepted) {
+      if (!c.isCoaxialOrLateral) {
+        if (screenRectsOverlap(corridorScreen, acc.screenRect, 6)) {
+          crowdsExisting = true;
+          break;
+        }
+      } else if (screenRectsOverlap(liftedScreen, acc.screenRect, 2)) {
+        // Even for two lateral/coaxial pieces, avoid stacking their lifted silhouettes directly on top of each other
+        crowdsExisting = true;
+        break;
+      }
+    }
+    if (crowdsExisting) continue;
+
     out[c.part.id] = resolved;
-    acceptedParts.push(c.part);
-    acceptedShiftedBoxes.push(shifted);
+    accepted.push({
+      part: c.part,
+      shiftedBox,
+      screenRect: c.isCoaxialOrLateral ? liftedScreen : corridorScreen,
+      isCoaxialOrLateral: c.isCoaxialOrLateral,
+    });
     acceptedShiftedObstacles.push({
       id: `__shifted_${c.part.id}`,
-      box: expandBoxMargin(shifted, CONTACT_EPS * 0.5),
+      box: expandBoxMargin(shiftedBox, CONTACT_EPS * 0.5),
       rgb: c.part.rgb,
     });
   }
+
   return out;
 }
 

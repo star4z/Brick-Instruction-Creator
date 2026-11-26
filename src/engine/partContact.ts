@@ -491,7 +491,7 @@ export interface SidewaysCapInput {
 export function classifySidewaysCapability(input: SidewaysCapInput): Exclude<SidewaysCap, boolean> {
   const { role, isSideways, hasCompiledMesh } = input;
   if (role === 'wheel_holder') return 'none';
-  if (role === 'wheel' || role === 'axle' || role === 'figure') return 'articulated';
+  if (role === 'wheel' || role === 'axle' || role === 'pin' || role === 'figure') return 'articulated';
 
   const k = (input.partId || '').toLowerCase();
   const shape = input.shape || '';
@@ -502,7 +502,7 @@ export function classifySidewaysCapability(input: SidewaysCapInput): Exclude<Sid
   }
   if (
     /\b(?:clip|hinge|bar|axle|handle|hook|grab|magnet|coupler|buffer|ball|socket|hose|antenna|lever)\b/.test(name) ||
-    (/\bpin\b/.test(name) && !/slot|hole|brick|plate|beam|liftarm|bogie|wheel\s*holder/.test(name))
+    (/\bpin\b/.test(name) && !/slot|hole|brick|plate|tile|beam|liftarm|bogie|wheel\s*holder/.test(name))
   ) {
     return 'articulated';
   }
@@ -541,9 +541,20 @@ export function canFlushSidewaysConnect(
   return false;
 }
 
+function isHorizontalFastenerBox(role: string, box: WorldBox): boolean {
+  if (role !== 'pin' && role !== 'axle') return false;
+  const dx = box.max[0] - box.min[0];
+  const dy = box.max[1] - box.min[1];
+  const dz = box.max[2] - box.min[2];
+  return Math.max(dx, dz) > dy * 1.15;
+}
+
 /**
  * Strict LEGO clutch contact check between two axis-aligned boxes:
- * - Train wheels attach ONLY to wheel holders or Technic axles.
+ * - Train wheels attach ONLY to wheel holders, Technic axles, or Technic pins.
+ * - Horizontal Technic pins/axles sit inside side holes (~2 LDU above deck studs) and
+ *   NEVER attach vertically to floor plates below them — they require 3-axis interlocking
+ *   (`ovX, ovY, ovZ >= 1.5`) or tight coaxial articulated contact.
  * - Upright bricks/plates/slopes/tiles connect via vertical stud footprint overlap
  *   (ovX >= 3 && ovZ >= 3), NOT by grazing smooth vertical side walls.
  * - Sideways contacts require either 3-axis interlocking (SNOT studs/pins/clips
@@ -559,7 +570,9 @@ export function boxesPhysicallyTouchBasic(
 ): boolean {
   const isWheelPair = roleA === 'wheel' || roleB === 'wheel';
   const otherIsHolder =
-    roleA === 'wheel_holder' || roleB === 'wheel_holder' || roleA === 'axle' || roleB === 'axle';
+    roleA === 'wheel_holder' || roleB === 'wheel_holder' ||
+    roleA === 'axle' || roleB === 'axle' ||
+    roleA === 'pin' || roleB === 'pin';
   if (isWheelPair && otherIsHolder) {
     const gx = Math.max(0, a.min[0] - b.max[0], b.min[0] - a.max[0]);
     const gy = Math.max(0, a.min[1] - b.max[1], b.min[1] - a.max[1]);
@@ -577,6 +590,22 @@ export function boxesPhysicallyTouchBasic(
   const ovX = Math.min(a.max[0], b.max[0]) - Math.max(a.min[0], b.min[0]);
   const ovY = Math.min(a.max[1], b.max[1]) - Math.max(a.min[1], b.min[1]);
   const ovZ = Math.min(a.max[2], b.max[2]) - Math.max(a.min[2], b.min[2]);
+
+  // Horizontal Technic pins/axles (and vertical pins) NEVER connect across an air gap
+  // to floor plates/studs below them; they engage via genuine 3-axis hole/stud interlocking.
+  const horizFastA = isHorizontalFastenerBox(roleA, a);
+  const horizFastB = isHorizontalFastenerBox(roleB, b);
+  if (horizFastA || horizFastB || roleA === 'pin' || roleB === 'pin') {
+    if (ovX >= 1.5 && ovY >= 1.5 && ovZ >= 1.5) return true;
+    if (!horizFastA && !horizFastB) {
+      // Vertical pin: allow tight flush vertical seat (e.g. stud/hole on procedural box)
+      if (ovX >= 3.0 && ovZ >= 3.0 && gy <= 0.6) return true;
+    }
+    if (ovY >= 1.5 && (ovX >= 1.5 || ovZ >= 1.5) && Math.max(gx, gz) <= 0.8) {
+      return canFlushSidewaysConnect(sideCapA, sideCapB);
+    }
+    return false;
+  }
 
   // 1. Vertical stud/tube stacking contact (overlapping horizontal footprint)
   if (ovX >= 3.0 && ovZ >= 3.0) return true;
@@ -729,7 +758,7 @@ export function buildPhysicalVerticalPrereqMap(
 
   let baseMinY = Infinity;
   for (const i of idxList) {
-    if (roles[i] === 'wheel' || roles[i] === 'figure' || claddingFlags[i]) continue;
+    if (roles[i] === 'wheel' || roles[i] === 'pin' || roles[i] === 'figure' || claddingFlags[i]) continue;
     if (boxes[i].min[1] < baseMinY) baseMinY = boxes[i].min[1];
   }
   if (!Number.isFinite(baseMinY)) baseMinY = 0;
@@ -741,7 +770,7 @@ export function buildPhysicalVerticalPrereqMap(
   const hasLowerOrSideSupport = (u: number): boolean => {
     const bu = boxes[u];
     for (const w of adj[u] ?? []) {
-      if (!activeSet.has(w) || roles[w] === 'wheel' || roles[w] === 'figure' || claddingFlags[w]) continue;
+      if (!activeSet.has(w) || roles[w] === 'wheel' || roles[w] === 'pin' || roles[w] === 'figure' || claddingFlags[w]) continue;
       const bw = boxes[w];
       // Exclude neighbors sitting strictly on top of `u`
       if (bw.min[1] >= bu.max[1] - 4.5 && bw.center[1] > bu.center[1] + 2.0) continue;
@@ -752,11 +781,11 @@ export function buildPhysicalVerticalPrereqMap(
 
   const belowMap: number[][] = Array.from({ length: boxes.length }, () => []);
   for (const i of idxList) {
-    if (roles[i] === 'wheel' || roles[i] === 'figure' || claddingFlags[i]) continue;
+    if (roles[i] === 'wheel' || roles[i] === 'pin' || roles[i] === 'figure' || claddingFlags[i]) continue;
     const bi = boxes[i];
     const subI = subBoxes ? subBoxes[i] : null;
     for (const u of idxList) {
-      if (u === i || roles[u] === 'wheel' || roles[u] === 'figure' || claddingFlags[u]) continue;
+      if (u === i || roles[u] === 'wheel' || roles[u] === 'pin' || roles[u] === 'figure' || claddingFlags[u]) continue;
       const bu = boxes[u];
       if (bu.min[1] >= bi.min[1] - 2.0) continue;
       if (bu.center[1] >= bi.center[1] - 2.0) continue;
@@ -770,4 +799,205 @@ export function buildPhysicalVerticalPrereqMap(
   }
 
   return { belowMap, baseMinY };
+}
+
+export interface HorizontalFastenerGuards {
+  /**
+   * True when `idx` is a horizontal Technic pin/axle that must wait for its
+   * vertically-seated interlocking host brick(s) to be placed in a prior step:
+   * - Prevents adding a pin in the exact same step as the brick it inserts into.
+   * - Prevents inserting a pin into brick A while vertically-seated brick B is
+   *   still unplaced (which would force a later step to shove brick B straight
+   *   down through the protruding horizontal pin).
+   */
+  isFastenerWaitingForHosts: (
+    idx: number,
+    placedBeforeStep: ReadonlySet<number>,
+    remaining: ReadonlySet<number>,
+  ) => boolean;
+  /**
+   * True when placing `idx` would seal the LAST open axial entrance of an
+   * unplaced horizontal pin/axle's insertion corridor (trapping the pin inside
+   * a closed sandwich of bricks before it can be slid in).
+   */
+  wouldBlockFastenerCorridor: (
+    idx: number,
+    placedBeforeStep: ReadonlySet<number>,
+    placedInStep: ReadonlySet<number>,
+    remaining: ReadonlySet<number>,
+  ) => boolean;
+  /** Combined fastener-ordering blocker check. */
+  isBlocked: (
+    idx: number,
+    placedBeforeStep: ReadonlySet<number>,
+    placedInStep: ReadonlySet<number>,
+    remaining: ReadonlySet<number>,
+  ) => boolean;
+}
+
+interface HorizontalFastenerRecord {
+  pinIdx: number;
+  allHosts: number[];
+  vertHosts: number[];
+  negBlockers: Set<number>;
+  posBlockers: Set<number>;
+}
+
+/**
+ * Builds pure 3D rigid-body insertion-order guards for horizontal Technic pins
+ * and horizontal axles inside a build scope.
+ */
+export function createHorizontalFastenerGuards(
+  boxes: readonly WorldBox[],
+  adj: readonly (readonly number[])[],
+  roles: readonly string[],
+  belowMap: readonly (readonly number[])[],
+  activeIndices?: readonly number[],
+): HorizontalFastenerGuards {
+  const idxList = activeIndices ?? boxes.map((_, i) => i);
+  const activeSet = new Set(idxList);
+  const fastenerByPin = new Map<number, HorizontalFastenerRecord>();
+  const blockerToFasteners = new Map<number, HorizontalFastenerRecord[]>();
+
+  const isStructuralHostRole = (r: string): boolean =>
+    r !== 'pin' && r !== 'axle' && r !== 'wheel' && r !== 'figure';
+
+  const isVerticallySeated = (h: number): boolean => {
+    if ((belowMap[h]?.length ?? 0) > 0) return true;
+    const bh = boxes[h];
+    for (const w of adj[h] ?? []) {
+      if (!activeSet.has(w) || !isStructuralHostRole(roles[w])) continue;
+      const bw = boxes[w];
+      if (bw.max[1] > bh.min[1] + 4.5) continue;
+      if (bh.min[1] - bw.max[1] > 4.5) continue;
+      const ovX = Math.min(bh.max[0], bw.max[0]) - Math.max(bh.min[0], bw.min[0]);
+      const ovZ = Math.min(bh.max[2], bw.max[2]) - Math.max(bh.min[2], bw.min[2]);
+      if (ovX >= 3.0 && ovZ >= 3.0) return true;
+    }
+    return false;
+  };
+
+  for (const p of idxList) {
+    if (!isHorizontalFastenerBox(roles[p], boxes[p])) continue;
+    const bp = boxes[p];
+    const dx = bp.max[0] - bp.min[0];
+    const dz = bp.max[2] - bp.min[2];
+    const axis: 0 | 2 = dx >= dz ? 0 : 2;
+    const perpAxis: 0 | 2 = axis === 0 ? 2 : 0;
+
+    const allHosts: number[] = [];
+    for (const h of adj[p] ?? []) {
+      if (!activeSet.has(h) || !isStructuralHostRole(roles[h])) continue;
+      const bh = boxes[h];
+      const ovX = Math.min(bp.max[0], bh.max[0]) - Math.max(bp.min[0], bh.min[0]);
+      const ovY = Math.min(bp.max[1], bh.max[1]) - Math.max(bp.min[1], bh.min[1]);
+      const ovZ = Math.min(bp.max[2], bh.max[2]) - Math.max(bp.min[2], bh.min[2]);
+      if (ovX >= 1.5 && ovY >= 1.5 && ovZ >= 1.5) {
+        allHosts.push(h);
+      }
+    }
+    if (allHosts.length === 0) continue;
+
+    const vertHosts = allHosts.filter((h) => isVerticallySeated(h));
+    const hostSet = new Set(allHosts);
+    const hostBelowSet = new Set<number>();
+    for (const h of vertHosts) {
+      for (const u of belowMap[h] ?? []) hostBelowSet.add(u);
+    }
+
+    const spanParts = vertHosts.length > 0 ? vertHosts : allHosts;
+    let corridorMin = bp.min[axis];
+    let corridorMax = bp.max[axis];
+    for (const h of spanParts) {
+      if (boxes[h].min[axis] < corridorMin) corridorMin = boxes[h].min[axis];
+      if (boxes[h].max[axis] > corridorMax) corridorMax = boxes[h].max[axis];
+    }
+
+    const negBlockers = new Set<number>();
+    const posBlockers = new Set<number>();
+    for (const b of idxList) {
+      if (b === p || hostSet.has(b) || hostBelowSet.has(b)) continue;
+      if (!isStructuralHostRole(roles[b])) continue;
+      const bb = boxes[b];
+      const ovY = Math.min(bp.max[1], bb.max[1]) - Math.max(bp.min[1], bb.min[1]);
+      const ovPerp = Math.min(bp.max[perpAxis], bb.max[perpAxis]) - Math.max(bp.min[perpAxis], bb.min[perpAxis]);
+      if (ovY < 2.0 || ovPerp < 2.0) continue;
+      if (bb.max[axis] <= corridorMin + 4.0 && bb.max[axis] >= corridorMin - 44.0) {
+        negBlockers.add(b);
+      }
+      if (bb.min[axis] >= corridorMax - 4.0 && bb.min[axis] <= corridorMax + 44.0) {
+        posBlockers.add(b);
+      }
+    }
+
+    const rec: HorizontalFastenerRecord = { pinIdx: p, allHosts, vertHosts, negBlockers, posBlockers };
+    fastenerByPin.set(p, rec);
+    for (const b of negBlockers) {
+      let list = blockerToFasteners.get(b);
+      if (!list) { list = []; blockerToFasteners.set(b, list); }
+      list.push(rec);
+    }
+    for (const b of posBlockers) {
+      if (negBlockers.has(b)) continue;
+      let list = blockerToFasteners.get(b);
+      if (!list) { list = []; blockerToFasteners.set(b, list); }
+      list.push(rec);
+    }
+  }
+
+  const isFastenerWaitingForHosts = (
+    idx: number,
+    placedBeforeStep: ReadonlySet<number>,
+    remaining: ReadonlySet<number>,
+  ): boolean => {
+    const rec = fastenerByPin.get(idx);
+    if (!rec) return false;
+    if (rec.vertHosts.length > 0) {
+      return rec.vertHosts.some((h) => remaining.has(h) && !placedBeforeStep.has(h));
+    }
+    if (placedBeforeStep.size > 0) {
+      return !rec.allHosts.some((h) => placedBeforeStep.has(h));
+    }
+    return false;
+  };
+
+  const wouldBlockFastenerCorridor = (
+    idx: number,
+    placedBeforeStep: ReadonlySet<number>,
+    placedInStep: ReadonlySet<number>,
+    remaining: ReadonlySet<number>,
+  ): boolean => {
+    const list = blockerToFasteners.get(idx);
+    if (!list) return false;
+    for (const rec of list) {
+      if (!remaining.has(rec.pinIdx)) continue;
+      const inNeg = rec.negBlockers.has(idx);
+      const inPos = rec.posBlockers.has(idx);
+      if (placedInStep.has(rec.pinIdx) && (inNeg || inPos)) {
+        return true;
+      }
+      if (inNeg) {
+        for (const opp of rec.posBlockers) {
+          if (placedBeforeStep.has(opp) || placedInStep.has(opp)) return true;
+        }
+      }
+      if (inPos) {
+        for (const opp of rec.negBlockers) {
+          if (placedBeforeStep.has(opp) || placedInStep.has(opp)) return true;
+        }
+      }
+    }
+    return false;
+  };
+
+  const isBlocked = (
+    idx: number,
+    placedBeforeStep: ReadonlySet<number>,
+    placedInStep: ReadonlySet<number>,
+    remaining: ReadonlySet<number>,
+  ): boolean =>
+    isFastenerWaitingForHosts(idx, placedBeforeStep, remaining) ||
+    wouldBlockFastenerCorridor(idx, placedBeforeStep, placedInStep, remaining);
+
+  return { isFastenerWaitingForHosts, wouldBlockFastenerCorridor, isBlocked };
 }

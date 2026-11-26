@@ -19,7 +19,7 @@ Previously, two interacting flaws allowed top-hung pieces like `Bogie Side Plate
 
 When [`compileDatEntry`](../src/engine/datCompiler.ts) compiles an LDraw `.dat` part once per unique `partId`:
 
-- **Anti-stud tube preservation**: Skipped hidden underside primitives (`stud3`, `stud3a`, `stud4`, `stud4a`) are still omitted from WebGL render buffers for speed, but their local bounding boxes are captured for collider generation.
+- **Anti-stud tube preservation**: Underside primitives (`stud3`, `stud3a`, `stud4`, `stud4a`) are synthesized locally over official LDraw `y = -4..0` (`r = 4` / `rOut = 8, rIn = 6`), and their local bounding boxes are captured for collider generation.
 - **Tight cell-clamped voxelization (`buildLocalSubBoxes`)**:
   - Part triangles (including textured decal batches) and underside anti-stud boxes are rasterized onto a compact local grid (`10 × 8 × 10` LDU target cells, capped at `18 × 14 × 18`).
   - Multi-cell triangles use an exact Akenine-Möller Triangle-vs-AABB SAT test against internally shrunk cell dividers (`eps = 0.35` LDU), storing the exact triangle-clamped min/max inside each occupied cell so flush faces never bleed into adjacent empty cutouts.
@@ -48,3 +48,14 @@ When [`compileDatEntry`](../src/engine/datCompiler.ts) compiles an LDraw `.dat` 
   - Removed the `collectBasePrereqs` frontier injection and `sameBaseLayer` candidate bypasses.
   - Every part added in Step 1 after the anchor must physically connect to `placedInStep`; every part added in Step `K > 1` must physically connect to `placedBeforeStep`.
   - Submodel Step 1 uses the same degree-weighted low-band foundation selector as main sections so builds start on the core chassis/wheel holder rather than a 1-connection leaf.
+
+### 4. Horizontal Technic Pin / Axle Contact & Rigid-Body Insertion Ordering
+
+- **Dedicated `'pin'` role & no air-gap floor grazing (`boxesPhysicallyTouchBasic`)**:
+  - Standalone Technic pins (`2780`, `3673`, `4274`, `89678`, `3749`, `6558`, etc.) classify as `'pin'`.
+  - Horizontal pins and horizontal axles sitting inside Technic brick holes (~2 LDU above deck studs) never connect vertically across an air gap (`gy > 0.6`) to the plate beneath them — they require genuine 3-axis hole/stud interlocking (`ovX, ovY, ovZ >= 1.5`) or tight coaxial articulated contact.
+- **Host-first & open-corridor guards (`createHorizontalFastenerGuards`)**:
+  - Any horizontal pin/axle interlocking with vertically-seated host bricks (e.g., two `6541` Technic bricks sitting on studs) waits until **all** of its vertically-seated hosts have been placed in prior steps — so a pin is never added in the same step as its host brick and never forces a subsequent brick to drop straight down through a protruding horizontal pin.
+  - Adjacent bricks sitting directly outside the pin's coaxial corridor cannot close **both** axial entrances before the pin is inserted, guaranteeing an open hole entrance for clean horizontal insertion before the final capping brick is placed.
+- **Official LDraw `stud3`/`stud4` anti-stud coordinates (`src/engine/datCompiler.ts`)**:
+  - `emitFastAntiStud` and `undersideBoxes` synthesize `stud3`/`stud3a` (`r = 4.0`) and `stud4`/`stud4a` (`rOut = 8.0`, `rIn = 6.0`) over official LDraw local `y = -4..0` (and omit base rim edges on `stud3a`/`stud4a`), so negatively Y-scaled brick/plate anti-studs (`sy = -5` / `-1`) extend strictly downward inside the underside cavity (`y = 4..24` / `4..8`) and never protrude through the top surface between studs.

@@ -394,11 +394,11 @@ describe('compileDatEntry — minifigure torso & sibling-fair budgeting', () => 
     expect(hasVertexNearX(mesh!.tris, 10, 1.5)).toBe(true);
     expect(hasVertexNearX(mesh!.tris, 20, 1.5)).toBe(true);
     expect(hasVertexNearX(mesh!.tris, 30, 1.5)).toBe(true);
-    // stud3/stud4 are synthesized at origin (r=3.2 / r=8.14) rather than walking external db stubs at x=40/50
+    // stud3/stud4 are synthesized at origin (r=4.0 / r=8.0) rather than walking external db stubs at x=40/50
     expect(hasVertexNearX(mesh!.tris, 40, 1.5)).toBe(false);
     expect(hasVertexNearX(mesh!.tris, 50, 1.5)).toBe(false);
-    expect(hasVertexNearX(mesh!.tris, 8.14, 0.25)).toBe(true);
-    expect(hasVertexNearX(mesh!.tris, 3.2, 0.25)).toBe(true);
+    expect(hasVertexNearX(mesh!.tris, 8.0, 0.25)).toBe(true);
+    expect(hasVertexNearX(mesh!.tris, 4.0, 0.25)).toBe(true);
   });
 
   it('compiles BrickLink Studio dual-sided minifigure heads with PE_TEX_PATH 1/2 and PE_TEX_INFO base64 PNG decals', () => {
@@ -786,29 +786,55 @@ describe('compileDatEntry — smooth circular studs & crease-angle vertex normal
     expect(baseplate!.tris.length / 9).toBe(256 * 48);
   });
 
-  it('synthesizes underside stud3 pins and hollow stud4 anti-stud tubes with STUD_INNER_COLOR_FLAG on tube interiors', () => {
+  it('synthesizes underside stud3 pins and hollow stud4 anti-stud tubes with official LDraw y=-4..0 bounds and STUD_INNER_COLOR_FLAG', () => {
+    // Official LDraw 1x2 plate (3023b): stud3 at y=4 scaled by -1 -> LDraw y=4..8 -> GL y=-8..-4
     const antiPin = compileDatEntry(
-      { key: 'anti_pin', lines: ['1 16 0 4 0 1 0 0 0 4 0 0 0 1 stud3.dat'] },
+      { key: 'anti_pin', lines: ['1 16 0 4 0 1 0 0 0 -1 0 0 0 1 stud3.dat'] },
       () => null,
     );
     expect(antiPin).not.toBeNull();
-    // 16 segments: 16 * (2 outer wall + 1 bottom cap) = 48 tris, 32 rim edges, 16 silhouette condEdges
+    // 16 segments: 16 * (2 outer wall + 1 tip cap) = 48 tris, 32 rim edges, 16 silhouette condEdges
     expect(antiPin!.tris.length / 9).toBe(48);
     expect(antiPin!.edges.length / 6).toBe(32);
     expect(antiPin!.condEdges?.length ?? 0).toBe(16 * 12);
-    expect(antiPin!.max[0]).toBeCloseTo(3.2, 2);
+    expect(antiPin!.max[0]).toBeCloseTo(4.0, 2);
+    expect(antiPin!.min[1]).toBeCloseTo(-8.0, 2);
+    expect(antiPin!.max[1]).toBeCloseTo(-4.0, 2);
     expect(Array.from(antiPin!.triCols ?? []).filter((c) => c === STUD_INNER_COLOR_FLAG).length).toBe(0);
 
+    // Official LDraw 1x2 brick (3004): stud3 at y=4 scaled by -5 -> LDraw y=4..24 -> GL y=-24..-4 (NEVER pokes above top y=0!)
+    const brickPin = compileDatEntry(
+      { key: 'brick_1x2_pin', lines: ['1 16 0 4 0 1 0 0 0 -5 0 0 0 1 stud3.dat'] },
+      () => null,
+    );
+    expect(brickPin).not.toBeNull();
+    expect(brickPin!.min[1]).toBeCloseTo(-24.0, 2);
+    expect(brickPin!.max[1]).toBeCloseTo(-4.0, 2);
+    expect(brickPin!.max[1]).toBeLessThan(0);
+
+    // stud3a omits base rim edges at local y=0 (16 tip rim edges only)
+    const antiPinNoBase = compileDatEntry(
+      { key: 'anti_pin_a', lines: ['1 16 0 18 0 1 0 0 0 -1.5 0 0 0 1 stud3a.dat'] },
+      () => null,
+    );
+    expect(antiPinNoBase).not.toBeNull();
+    expect(antiPinNoBase!.edges.length / 6).toBe(16);
+    expect(antiPinNoBase!.min[1]).toBeCloseTo(-24.0, 2);
+    expect(antiPinNoBase!.max[1]).toBeCloseTo(-18.0, 2);
+
+    // Official LDraw 2x4 brick (3001): stud4 at y=4 scaled by -5 -> LDraw y=4..24 -> GL y=-24..-4
     const antiTube = compileDatEntry(
-      { key: 'anti_tube', lines: ['1 16 0 4 0 1 0 0 0 20 0 0 0 1 stud4.dat'] },
+      { key: 'anti_tube', lines: ['1 16 0 4 0 1 0 0 0 -5 0 0 0 1 stud4.dat'] },
       () => null,
     );
     expect(antiTube).not.toBeNull();
-    // 16 segments: 16 * (2 outer + 2 bottom ring + 2 inner wall + 1 inner cap) = 112 tris, 48 rim edges, 16 silhouette condEdges
+    // 16 segments: 16 * (2 outer + 2 tip ring + 2 inner wall + 1 inner cap) = 112 tris, 64 rim edges (inner+outer at both ends), 16 silhouette condEdges
     expect(antiTube!.tris.length / 9).toBe(112);
-    expect(antiTube!.edges.length / 6).toBe(48);
+    expect(antiTube!.edges.length / 6).toBe(64);
     expect(antiTube!.condEdges?.length ?? 0).toBe(16 * 12);
-    expect(antiTube!.max[0]).toBeCloseTo(8.14, 2);
+    expect(antiTube!.max[0]).toBeCloseTo(8.0, 2);
+    expect(antiTube!.min[1]).toBeCloseTo(-24.0, 2);
+    expect(antiTube!.max[1]).toBeCloseTo(-4.0, 2);
     // Inner wall (32 tris) + inner ceiling cap (16 tris) = 48 tris tagged STUD_INNER_COLOR_FLAG
     expect(Array.from(antiTube!.triCols!).filter((c) => c === STUD_INNER_COLOR_FLAG).length).toBe(48);
   });
