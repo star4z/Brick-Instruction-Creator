@@ -6,7 +6,7 @@ import {
   ensureMenuOpen,
   uploadLdrFile,
 } from './auditHelpers';
-import { CLEAN_MULTI_STEP_LDR, MISSING_PART_LDR } from './fixtures/sampleModels';
+import { CLEAN_MULTI_STEP_LDR, MISSING_PART_LDR, MULTI_CHAPTER_MPD } from './fixtures/sampleModels';
 
 async function loadCleanManual(page: Page): Promise<void> {
   await uploadLdrFile(page, 'test-tower.ldr', CLEAN_MULTI_STEP_LDR);
@@ -503,5 +503,46 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     await expect(page.locator('#emptyState')).toBeVisible();
 
     runtime.assertClean(`${testInfo.project.name}: Modals & Confirm Flow`);
+  });
+
+  test('Build Progress Bar advances monotonically across absolute steps without restarting per chapter', async ({
+    page,
+  }, testInfo) => {
+    const runtime = await attachRuntimeIssueCollector(page);
+
+    await page.goto('/');
+    await uploadLdrFile(page, 'multi-chapter-progress.mpd', MULTI_CHAPTER_MPD);
+    const wizard = page.locator('#importWizardModal');
+    await expect(wizard).toBeVisible();
+    await page.locator('#impWizBtnGenerate').click();
+    await expect(wizard).toBeHidden();
+    await expect(page.locator('#stageViewport')).toBeVisible();
+    await closeMenuOnMobile(page);
+
+    const progressFractions: number[] = [];
+    const nextBtn = page.locator('#nextPage');
+    for (let guard = 0; guard < 30; guard++) {
+      const isStepPage = (await page.locator('#pageFrame [data-step-visual]').count()) > 0;
+      if (isStepPage) {
+        const bar = page.locator('#pageFrame .biw-progress-bar');
+        await expect(bar.first()).toBeVisible();
+        const raw = await bar.first().getAttribute('data-progress-fraction');
+        expect(raw).not.toBeNull();
+        progressFractions.push(Number(raw));
+      }
+      if (await nextBtn.isDisabled()) break;
+      await nextBtn.click();
+    }
+
+    // Must span multiple step pages across submodel + main build chapters
+    expect(progressFractions.length).toBeGreaterThanOrEqual(2);
+    // Final step page reaches 100% (1.0), and no earlier step page finishes early or restarts
+    expect(progressFractions[progressFractions.length - 1]).toBe(1);
+    for (let i = 0; i < progressFractions.length - 1; i++) {
+      expect(progressFractions[i]).toBeLessThan(1);
+      expect(progressFractions[i + 1]).toBeGreaterThan(progressFractions[i]);
+    }
+
+    runtime.assertClean(`${testInfo.project.name}: Absolute Step Progress Bar`);
   });
 });

@@ -33,3 +33,30 @@ export const MISSING_PART_LDR = [
   '1 1 0 -24 0 1 0 0 0 1 0 0 0 1 999999nonexistent.dat',
   '0 STEP',
 ].join('\n');
+
+export const MULTI_CHAPTER_MPD = [
+  '0 FILE main.ldr',
+  '0 Title: Multi-Chapter Progress Check',
+  '0 Name: main.ldr',
+  '0 Author: UI Audit Suite',
+  // Base plate (Step 1)
+  '1 72 -40 0 0 1 0 0 0 1 0 0 0 1 3020.dat',
+  '1 72 40 0 0 1 0 0 0 1 0 0 0 1 3020.dat',
+  '0 STEP',
+  // Attach two identical pillar submodels (creates a dedicated submodel chapter with Steps 1-2)
+  '1 16 -40 -24 0 1 0 0 0 1 0 0 0 1 pillar.ldr',
+  '1 16 40 -24 0 1 0 0 0 1 0 0 0 1 pillar.ldr',
+  '0 STEP',
+  // Bridge across both pillars
+  '1 4 0 -72 0 1 0 0 0 1 0 0 0 1 3001.dat',
+  '0 STEP',
+  // Cap on top
+  '1 14 0 -96 0 1 0 0 0 1 0 0 0 1 3003.dat',
+  '0 STEP',
+  '0 FILE pillar.ldr',
+  '0 Name: pillar.ldr',
+  '1 1 0 0 0 1 0 0 0 1 0 0 0 1 3003.dat',
+  '0 STEP',
+  '1 2 0 -24 0 1 0 0 0 1 0 0 0 1 3003.dat',
+  '0 STEP',
+].join('\n');

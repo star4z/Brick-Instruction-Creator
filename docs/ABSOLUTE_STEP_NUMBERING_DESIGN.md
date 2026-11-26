@@ -36,6 +36,7 @@ Pure helpers live in [`src/engine/stepNumbering.ts`](../src/engine/stepNumbering
 - Step Range Group editor (`From Step #` / `To Step #`), "Use Current Page", and Overview "Select Range → Group".
 - "Move selected pieces to step" prompt asks for an absolute `#`.
 - Diagnostics aggregate and look up first-seen steps by `absNum`.
+- Bottom-edge build progress bar (`computeAbsoluteStepProgressFraction`) tracks `absNum` across `1..N` so progress advances monotonically across minifigures, submodels, and bags without restarting when printed step numbers reset.
 
 ## UI: showing both numbers
 

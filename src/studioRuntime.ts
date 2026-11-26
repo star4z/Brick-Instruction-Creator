@@ -143,7 +143,7 @@ import {
 import {
   buildProgressBarHtml,
   classifyLooseUnbaggedParts,
-  computeBagProgressFraction,
+  computeAbsoluteStepProgressFraction,
   computeBuildRoadmapPages,
   drawProgressBarCanvas,
 } from './engine/buildRoadmap';
@@ -7502,6 +7502,20 @@ function showToast(msg) {
 }
 
 function getAllSteps(model) { return model ? model.chapters.flatMap(ch => ch.steps.map(step => ({ ch, step }))) : []; }
+function computePageStepProgressFraction(page, totalStepsOverride = null) {
+  const lastSlot = Array.isArray(page?.slots) && page.slots.length > 0
+    ? page.slots[page.slots.length - 1]
+    : null;
+  const lastStep = lastSlot?.step || null;
+  const totalAbsSteps = typeof totalStepsOverride === 'number'
+    ? totalStepsOverride
+    : getAllSteps(state.model).length;
+  const absStepNum = lastStep ? getAbsStepNum(lastStep) : 0;
+  if (absStepNum > 0 && totalAbsSteps > 0) {
+    return computeAbsoluteStepProgressFraction(absStepNum, totalAbsSteps);
+  }
+  return state.pages.length > 1 ? Math.max(0, Math.min(1, page.num / state.pages.length)) : 1;
+}
 function getMainSteps(model) { return model ? model.chapters.filter(ch => ch.kind !== 'submodel').flatMap(ch => ch.steps.map(step => ({ ch, step }))) : []; }
 function getAllParts(model) {
   return getMainSteps(model)
@@ -9861,16 +9875,7 @@ function renderAll() {
         </div>
 
         <!-- Page Footer (+ Official-Style Bottom Build Progress Bar) -->
-        ${(() => {
-          const lastSlotOnPage = Array.isArray(page.slots) && page.slots.length > 0 ? page.slots[page.slots.length - 1] : null;
-          const lastStepOnPage = lastSlotOnPage?.step || null;
-          const chSteps = lastSlotOnPage?.ch?.steps || page.chapter?.steps || [];
-          const idxInCh = lastStepOnPage ? chSteps.findIndex((s) => s.id === lastStepOnPage.id) : -1;
-          const progFrac = idxInCh >= 0 && chSteps.length > 1
-            ? computeBagProgressFraction(idxInCh, chSteps.length)
-            : (state.pages.length > 1 ? Math.max(0, Math.min(1, page.num / state.pages.length)) : 1);
-          return renderPageFooterHtml({ titleText: page.chapterName, progressFrac: progFrac });
-        })()}
+        ${renderPageFooterHtml({ titleText: page.chapterName, progressFrac: computePageStepProgressFraction(page) })}
       </div>`;
 
     bindStepPageInteractions(page);
@@ -19147,13 +19152,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       }
     }
 
-    const lastSlotPdf = Array.isArray(page.slots) && page.slots.length > 0 ? page.slots[page.slots.length - 1] : null;
-    const lastStepPdf = lastSlotPdf?.step || null;
-    const chStepsPdf = lastSlotPdf?.ch?.steps || page.chapter?.steps || [];
-    const idxInChPdf = lastStepPdf ? chStepsPdf.findIndex((s) => s.id === lastStepPdf.id) : -1;
-    const progFracPdf = idxInChPdf >= 0 && chStepsPdf.length > 1
-      ? computeBagProgressFraction(idxInChPdf, chStepsPdf.length)
-      : (state.pages.length > 1 ? Math.max(0, Math.min(1, page.num / state.pages.length)) : 1);
+    const progFracPdf = computePageStepProgressFraction(page, allSteps.length);
     drawFooter(page.chapterName || '', progFracPdf);
   }
 

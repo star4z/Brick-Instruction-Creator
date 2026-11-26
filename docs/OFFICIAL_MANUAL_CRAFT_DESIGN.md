@@ -36,7 +36,7 @@ Every mechanism below is implemented using **pure physical, geometric, and perce
 ### 2.5 Build Roadmap, Inline Bag Openers & Bottom-Edge Progress Bar ([`src/engine/buildRoadmap.ts`](../src/engine/buildRoadmap.ts))
 - **`computeBuildRoadmapPages`**: Paginates multi-stage builds into 2-column × 3-row cumulative stage progression pages (up to 6 stages per page).
 - **`classifyLooseUnbaggedParts`**: Identifies oversized unbagged parts (`maxDimLdu >= 240`) for inline bag opener callouts.
-- **Bottom-Edge Build Progress Bar** (`computeBagProgressFraction`, `buildProgressBarHtml`, `drawProgressBarCanvas`): Tracks step progress `0..1` within the current bag/stage and renders in Live DOM, PDF Canvas, and Interactive HTML, controlled via `ThemeStyleOptions.showProgressBar` (`#toggleProgressBar`).
+- **Bottom-Edge Build Progress Bar** (`computeAbsoluteStepProgressFraction`, `buildProgressBarHtml`, `drawProgressBarCanvas`): Tracks step progress `0..1` continuously across the model's absolute steps (`1..N` across all chapters, submodels, minifigures, and bags) without finishing early or restarting when printed step labels reset; renders in Live DOM and PDF Canvas, controlled via `ThemeStyleOptions.showProgressBar` (`#toggleProgressBar`).
 
 ### 2.6 Technical Gray Theme Preset ([`src/themes/customThemes.ts`](../src/themes/customThemes.ts))
 - Adds built-in theme `gray` (**Technical Gray**): neutral print-friendly `#e3e4e5` canvas, sky-blue PLI boxes (`#cbe2f6`, `#1e293b` border), warm cream callout boxes (`#fff5cc`), and dark charcoal typography.

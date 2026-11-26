@@ -9,9 +9,9 @@
  *   - Inline Bag Opener Card (`classifyLooseUnbaggedParts`): identifies oversized/long
  *     parts (>= 12L beams/plates or large baseplates) alongside the numbered bag icon
  *     (matching 75192 p. 20).
- *   - Bottom-Edge Build Progress Bar (`computeBagProgressFraction`, `buildProgressBarHtml`,
+ *   - Bottom-Edge Build Progress Bar (`computeAbsoluteStepProgressFraction`, `buildProgressBarHtml`,
  *     `drawProgressBarCanvas`): sleek horizontal track with circular bead marker tracking
- *     progress across the current bag/section (matching 31172 p. 4–103).
+ *     progress continuously across the model's absolute steps (`1..N`).
  */
 
 export interface RoadmapStageInput {
@@ -106,8 +106,24 @@ export function classifyLooseUnbaggedParts(
 
 /**
  * Computes the normalized `0..1` progress fraction along the bottom-edge progress bar
- * within the current bag/stage (resets cleanly to `0` at the start of each new bag,
- * reaches `1` at the final step of that bag — matching 31172 p. 4–103).
+ * across the entire model's absolute step sequence (`1..totalAbsoluteSteps`).
+ *
+ * Advances monotonically from `0` at absolute step `#1` to `1` at the final absolute step
+ * `#N` across all chapters (minifigures, submodels, bags, and main build), without
+ * finishing early or restarting when printed step labels reset.
+ */
+export function computeAbsoluteStepProgressFraction(
+  absoluteStepNum: number,
+  totalAbsoluteSteps: number,
+): number {
+  if (!Number.isFinite(totalAbsoluteSteps) || totalAbsoluteSteps <= 1) return 1;
+  if (!Number.isFinite(absoluteStepNum)) return 0;
+  const clamped = Math.max(1, Math.min(totalAbsoluteSteps, absoluteStepNum));
+  return (clamped - 1) / (totalAbsoluteSteps - 1);
+}
+
+/**
+ * Computes a normalized `0..1` progress fraction for a 0-based index within a fixed count.
  */
 export function computeBagProgressFraction(
   stepIndexInStage: number,
@@ -120,7 +136,7 @@ export function computeBagProgressFraction(
 
 /**
  * Builds the sleek bottom-edge horizontal progress bar HTML with circular marker bead
- * (matching 31172 p. 4–103) for Live DOM Preview & Interactive HTML Export.
+ * for Live DOM Preview & Interactive HTML Export.
  */
 export function buildProgressBarHtml(
   fraction: number,
@@ -133,7 +149,7 @@ export function buildProgressBarHtml(
   const h = Math.max(3, Math.round(opts?.heightPx ?? 4));
   const bead = Math.max(9, h * 2 + 2);
 
-  return `<div class="biw-progress-bar relative flex-1 flex items-center" style="height:${bead}px;min-width:60px;" aria-hidden="true">` +
+  return `<div class="biw-progress-bar relative flex-1 flex items-center" data-progress-fraction="${f.toFixed(4)}" style="height:${bead}px;min-width:60px;" aria-hidden="true">` +
     `<div style="position:relative;width:100%;height:${h}px;border-radius:999px;background:${trackBg};overflow:visible;">` +
       `<div style="position:absolute;left:0;top:0;height:100%;width:${pct}%;border-radius:999px;background:${accent};"></div>` +
       `<div style="position:absolute;top:50%;left:${pct}%;width:${bead}px;height:${bead}px;transform:translate(-50%,-50%);border-radius:999px;background:${accent};border:1.5px solid #0f172a;box-shadow:inset 0 0 0 1.5px rgba(255,255,255,0.45);"></div>` +

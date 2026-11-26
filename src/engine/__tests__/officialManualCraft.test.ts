@@ -18,9 +18,11 @@ import {
 import {
   buildProgressBarHtml,
   classifyLooseUnbaggedParts,
+  computeAbsoluteStepProgressFraction,
   computeBagProgressFraction,
   computeBuildRoadmapPages,
 } from '../buildRoadmap';
+import { assignAbsoluteStepNumbers, getAbsStepNum } from '../stepNumbering';
 import {
   CONTRAST_ARROW_BLUE,
   CONTRAST_ARROW_GREEN,
@@ -187,7 +189,38 @@ describe('Official Manual Craft — Contrast Arrows, Roadmap, Progress Bar, Regi
 
     expect(computeBagProgressFraction(0, 10)).toBe(0);
     expect(computeBagProgressFraction(9, 10)).toBe(1);
-    expect(buildProgressBarHtml(0.5)).toContain('50.00%');
+    expect(computeAbsoluteStepProgressFraction(1, 10)).toBe(0);
+    expect(computeAbsoluteStepProgressFraction(10, 10)).toBe(1);
+    expect(computeAbsoluteStepProgressFraction(1, 1)).toBe(1);
+    expect(computeAbsoluteStepProgressFraction(0, 10)).toBe(0);
+    expect(computeAbsoluteStepProgressFraction(15, 10)).toBe(1);
+    expect(computeAbsoluteStepProgressFraction(Number.NaN, 10)).toBe(0);
+
+    // Multi-chapter manual where printed step labels restart at 1 in each submodel/minifig chapter
+    const chapters = [
+      { kind: 'minifigure', steps: [{ num: 1 }, { num: 2 }] },
+      { kind: 'submodel', steps: [{ num: 1 }, { num: 2 }, { num: 3 }] },
+      { kind: 'bag', steps: [{ num: 1 }, { num: 2 }, { num: 3 }] },
+      { kind: 'bag', steps: [{ num: 4 }, { num: 5 }] },
+    ];
+    const totalAbs = assignAbsoluteStepNumbers(chapters);
+    expect(totalAbs).toBe(10);
+    const fracs = chapters
+      .flatMap((ch) => ch.steps)
+      .map((s) => computeAbsoluteStepProgressFraction(getAbsStepNum(s), totalAbs));
+    expect(fracs[0]).toBe(0);
+    expect(fracs[fracs.length - 1]).toBe(1);
+    for (let i = 1; i < fracs.length; i++) {
+      expect(fracs[i]).toBeGreaterThan(fracs[i - 1]);
+    }
+    // Never hits 1.0 early at intermediate chapter boundaries (e.g. end of minifig or submodel)
+    for (let i = 0; i < fracs.length - 1; i++) {
+      expect(fracs[i]).toBeLessThan(1);
+    }
+
+    const barHtml = buildProgressBarHtml(0.5);
+    expect(barHtml).toContain('50.00%');
+    expect(barHtml).toContain('data-progress-fraction="0.5000"');
   });
 
   it('computes regional cropped close-up framing with normalized locator bounds', () => {
