@@ -414,6 +414,13 @@ export function normalizeBomConfig(
       ? (r.sortSecondary as BomSortTrait)
       : fb.sortSecondary;
 
+  const relativeScale =
+    typeof r.relativeScale === 'boolean' ? r.relativeScale : fb.relativeScale;
+  const variableWidthColumns =
+    typeof r.variableWidthColumns === 'boolean' ? r.variableWidthColumns : fb.variableWidthColumns;
+  const showLengthBadges =
+    typeof r.showLengthBadges === 'boolean' ? r.showLengthBadges : fb.showLengthBadges;
+
   return {
     format,
     gridMode,
@@ -425,6 +432,9 @@ export function normalizeBomConfig(
     verticalDir,
     align,
     variableSizing,
+    ...(relativeScale !== undefined ? { relativeScale } : {}),
+    ...(variableWidthColumns !== undefined ? { variableWidthColumns } : {}),
+    ...(showLengthBadges !== undefined ? { showLengthBadges } : {}),
     tableRowsMode,
     tableRowsPerPage,
     fields,
@@ -446,6 +456,9 @@ export function bomConfigsEqual(a: BomConfig, b: BomConfig): boolean {
     a.verticalDir !== b.verticalDir ||
     a.align !== b.align ||
     a.variableSizing !== b.variableSizing ||
+    Boolean(a.relativeScale) !== Boolean(b.relativeScale) ||
+    Boolean(a.variableWidthColumns) !== Boolean(b.variableWidthColumns) ||
+    (a.showLengthBadges !== false) !== (b.showLengthBadges !== false) ||
     a.tableRowsMode !== b.tableRowsMode ||
     a.tableRowsPerPage !== b.tableRowsPerPage ||
     a.sortPrimary !== b.sortPrimary ||

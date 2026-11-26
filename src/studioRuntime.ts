@@ -10373,12 +10373,20 @@ function renderAll(renderOpts = {}) {
         const bomBadgeOverlay = bomLengthBadge
           ? `<span class="absolute top-0.5 right-0.5 pointer-events-none">${buildLengthBadgeSvg(bomLengthBadge, Math.max(13, Math.round(ct.qtyFont * 1.35)))}</span>`
           : '';
+        const bomRelScaleStyle = state.bomConfig?.relativeScale
+          ? (() => {
+              const def = resolvePart(item.part.p);
+              const span = Math.max(20, (def.sx || 1) * 20, (def.sz || 1) * 20, def.h || 24);
+              const sf = Math.max(0.48, Math.min(1.0, Math.pow(span / 120, 0.65)));
+              return `transform:scale(${sf.toFixed(3)});`;
+            })()
+          : '';
         const posStyle = `left:${(xFrac * 100).toFixed(4)}%;top:${(yFrac * 100).toFixed(4)}%;width:${(wFrac * 100).toFixed(4)}%;height:${(hFrac * 100).toFixed(4)}%;padding:${ct.padY}px ${ct.padX}px;background:transparent`;
 
         if (ct.layoutMode === 'horizontal-img-first' || ct.layoutMode === 'horizontal-img-last') {
           const textFields = enabledFields.filter((f) => f !== 'image');
           const imgHtml = `<div class="relative h-full shrink-0" style="width:44%">
-            <img src="${thumb}" alt="${escHtml(item.meta.name)}" class="absolute inset-0 w-full h-full object-contain pointer-events-none" style="padding:${ct.imgPad}px" />
+            <img src="${thumb}" alt="${escHtml(item.meta.name)}" class="absolute inset-0 w-full h-full object-contain pointer-events-none" style="padding:${ct.imgPad}px;${bomRelScaleStyle}" />
             ${bomBadgeOverlay}
           </div>`;
           const textsHtml = `<div class="flex-1 min-w-0 h-full flex flex-col justify-center overflow-hidden" style="gap:${ct.textGap}px;padding-left:${ct.layoutMode === 'horizontal-img-first' ? Math.max(3, ct.padX) : 0}px;padding-right:${ct.layoutMode === 'horizontal-img-last' ? Math.max(3, ct.padX) : 0}px">
@@ -10393,7 +10401,7 @@ function renderAll(renderOpts = {}) {
         const innerHtml = enabledFields.map((f) => {
           if (f === 'image') {
             return `<div class="relative flex-1 min-h-0 w-full">
-              <img src="${thumb}" alt="${escHtml(item.meta.name)}" class="absolute inset-0 w-full h-full object-contain pointer-events-none" style="padding:${ct.imgPad}px" />
+              <img src="${thumb}" alt="${escHtml(item.meta.name)}" class="absolute inset-0 w-full h-full object-contain pointer-events-none" style="padding:${ct.imgPad}px;${bomRelScaleStyle}" />
               ${bomBadgeOverlay}
             </div>`;
           }
@@ -14905,6 +14913,10 @@ function syncBomSetupUI() {
     const act = wantVar === Boolean(bc.variableSizing);
     b.className = `bom-varsize-btn p-2.5 rounded-lg border font-semibold flex items-center gap-2.5 text-left transition cursor-pointer ${act ? activeCls : idleCls}`;
   });
+  const bomRelScaleChk = document.getElementById('bomRelativeScale');
+  if (bomRelScaleChk) bomRelScaleChk.checked = Boolean(bc.relativeScale);
+  const bomLenBadgesChk = document.getElementById('bomShowLengthBadges');
+  if (bomLenBadgesChk) bomLenBadgesChk.checked = bc.showLengthBadges !== false;
 
   // Fill order, Horizontal, Vertical buttons
   document.querySelectorAll('.bom-flowaxis-btn').forEach(b => {
@@ -19727,6 +19739,14 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
 
         const hasImage = enabledFields.includes('image');
         const img = hasImage ? await loadImgPromise(getBomPartThumb(entry.part, c.colSpan || 1, c.rowSpan || 1)) : null;
+        const pdfBomBadge = state.bomConfig?.showLengthBadges !== false ? getActualSizeGuide(entry.part.p) : null;
+        const pdfBomScale = state.bomConfig?.relativeScale
+          ? (() => {
+              const def = resolvePart(entry.part.p);
+              const span = Math.max(20, (def.sx || 1) * 20, (def.sz || 1) * 20, def.h || 24);
+              return Math.max(0.48, Math.min(1.0, Math.pow(span / 120, 0.65)));
+            })()
+          : 1.0;
 
         if (ct.layoutMode === 'horizontal-img-first' || ct.layoutMode === 'horizontal-img-last') {
           const innerW = Math.max(10, cw - ct.padX * 2);
@@ -19740,7 +19760,15 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
             ? cx + ct.padX + imgColW + Math.max(3, ct.padX)
             : cx + ct.padX;
           if (img) {
-            drawContain(ctx, img, imgX, cy + ct.padY + ct.imgPad, Math.max(8, imgColW - ct.imgPad * 2), Math.max(8, innerH - ct.imgPad * 2));
+            const boxW = Math.max(8, imgColW - ct.imgPad * 2);
+            const boxH = Math.max(8, innerH - ct.imgPad * 2);
+            const dw = boxW * pdfBomScale;
+            const dh = boxH * pdfBomScale;
+            drawContain(ctx, img, imgX + (boxW - dw) / 2, cy + ct.padY + ct.imgPad + (boxH - dh) / 2, dw, dh);
+            if (pdfBomBadge) {
+              const bSz = Math.max(12, Math.round(ct.qtyFont * 1.25));
+              drawLengthBadgeCanvas(ctx, pdfBomBadge, imgX + boxW - bSz * 0.55, cy + ct.padY + bSz * 0.55, bSz);
+            }
           }
           const textFields = enabledFields.filter((f) => f !== 'image');
           let curY = cy + ct.padY + Math.max(0, (innerH - ct.totalTextH) / 2);
@@ -19761,7 +19789,15 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
           for (const f of enabledFields) {
             if (f === 'image') {
               if (img) {
-                drawContain(ctx, img, innerX + ct.imgPad, curY + ct.imgPad, Math.max(8, innerW - ct.imgPad * 2), Math.max(8, imgSlotH - ct.imgPad * 2));
+                const boxW = Math.max(8, innerW - ct.imgPad * 2);
+                const boxH = Math.max(8, imgSlotH - ct.imgPad * 2);
+                const dw = boxW * pdfBomScale;
+                const dh = boxH * pdfBomScale;
+                drawContain(ctx, img, innerX + ct.imgPad + (boxW - dw) / 2, curY + ct.imgPad + (boxH - dh) / 2, dw, dh);
+                if (pdfBomBadge) {
+                  const bSz = Math.max(12, Math.round(ct.qtyFont * 1.25));
+                  drawLengthBadgeCanvas(ctx, pdfBomBadge, innerX + innerW - bSz * 0.55, curY + bSz * 0.55, bSz);
+                }
               }
               curY += imgSlotH + ct.textGap;
             } else {
@@ -20110,6 +20146,12 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
             ctx.fill();
             ctx.strokeStyle = theme.pliBorder; ctx.lineWidth = 1.25;
             ctx.stroke();
+            const pdfConfusable = detectConfusablePliColors(
+              pli.map((it) => {
+                const ci = resolveColorInfo(it.part.c) || COLORS[71];
+                return { colorId: it.part.c, hex: ci.hex, name: ci.name };
+              }),
+            );
             for (let pi = 0; pi < pli.length; pi++) {
               const im = await loadImgPromise(getPliThumb(pli[pi].part));
               const ix = pliX + 5 + pi * itemW;
@@ -20118,6 +20160,20 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
               drawContain(ctx, im, ix, pliY + 3, itemW * 0.54, imgH);
               ctx.fillStyle = theme.text; ctx.font = themeCanvasFont(theme, 700, pliQtyPx);
               ctx.fillText(`${pli[pi].qty}×`, ix + itemW * 0.58, pliY + Math.round((imgH - pliQtyPx) * 0.45));
+              if (pdfConfusable.has(pli[pi].part.c)) {
+                const cInfoPdf = resolveColorInfo(pli[pi].part.c) || COLORS[71];
+                const dotX = ix + itemW * 0.64;
+                const dotY = pliY + Math.round((imgH - pliQtyPx) * 0.45) + pliQtyPx + 5;
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(dotX, dotY, 4, 0, Math.PI * 2);
+                ctx.fillStyle = cInfoPdf.hex;
+                ctx.fill();
+                ctx.strokeStyle = '#1e293b';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+                ctx.restore();
+              }
               if (guide) {
                 const gCol = (resolveColorInfo(pli[pi].part.c) || COLORS[71]).hex;
                 const silW = Math.min(itemW * 0.54, Math.max(16, guide.lengthL * typo.pt(3.8)));
@@ -20288,7 +20344,35 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
         });
         renderedStepSnap = snap;
         const stepImg = await resolveRenderDrawable(snap);
+        if ((step.attachedSubmodel || step.subassembly) && !isOfficialMfStyle) {
+          drawAttachmentStarburstCanvas(ctx, sx + st.slotPad + mainAvailW / 2, renderTopY + renderAvailH / 2, Math.min(mainAvailW, renderAvailH) * 0.36);
+        }
         drawContain(ctx, stepImg, sx + st.slotPad, renderTopY, mainAvailW, renderAvailH);
+        if (step.subassembly && !ov.calloutAsPages && !isOfficialMfStyle) {
+          const reps = Math.min(4, Math.max(1, step.subassembly.repeatCount || 1));
+          const callBox = { x: sx + st.slotPad + 6, y: renderTopY + 8, w: Math.min(110, mainAvailW * 0.28), h: Math.min(72, renderAvailH * 0.32) };
+          const targets = reps === 1
+            ? [{ x: sx + st.slotPad + mainAvailW * 0.56, y: renderTopY + renderAvailH * 0.5 }]
+            : Array.from({ length: reps }, (_, rIdx) => ({
+                x: sx + st.slotPad + mainAvailW * (0.44 + (rIdx / Math.max(1, reps - 1)) * 0.24),
+                y: renderTopY + renderAvailH * (0.46 + (rIdx % 2) * 0.08),
+              }));
+          drawOrthogonalLeadersCanvas(ctx, routeOrthogonalLeaders(callBox, targets), { stroke: theme.text, strokeWidth: 1.5, arrowSize: 8 });
+        }
+        if (state.showSizeGuides && !isOfficialMfStyle) {
+          const pdfCoax = detectCoaxialPositionCallout(
+            (step.parts || []).map((p) => ({ id: p.id, title: resolvePart(p.p).name, colorHex: (resolveColorInfo(p.c) || COLORS[71]).hex, box: computeWorldBox(p) })),
+            (prev || []).map((p) => ({ id: p.id, title: resolvePart(p.p).name, colorHex: (resolveColorInfo(p.c) || COLORS[71]).hex, box: computeWorldBox(p) })),
+          );
+          if (pdfCoax) {
+            const pxMm = Math.max(2.6, typo.pt(3.1));
+            drawCoaxialPositionCalloutCanvas(ctx, pdfCoax, sx + slotW - st.slotPad - Math.round(typo.pt(68)), renderTopY + 6, pxMm, { bg: theme.calloutBg, border: theme.calloutBorder, text: theme.text });
+          }
+        }
+        const pdfHasHinge = !isOfficialMfStyle && (Math.abs(ov.hingeAngleDeg || 0) >= 10 || (step.parts || []).some((p) => p.m && detectNonOrthogonalArticulationAngle(p.m) !== null));
+        if (pdfHasHinge) {
+          drawCurvedMotionArrowCanvas(ctx, sx + slotW - st.slotPad - 20, renderTopY + 22, Math.max(14, Math.round(typo.pt(14))), 'cw');
+        }
       }
 
       if (state.showRotCues && effectiveCue && effectiveCue !== 'none') {
@@ -22725,6 +22809,10 @@ document.querySelectorAll('.bom-preset-btn').forEach(b => {
 document.querySelectorAll('.bom-varsize-btn').forEach(b => {
   b.onclick = () => patchBomConfig({ variableSizing: b.getAttribute('data-bom-varsize') === 'variable' }, { immediate: true });
 });
+const bomRelScaleEl = document.getElementById('bomRelativeScale');
+if (bomRelScaleEl) bomRelScaleEl.onchange = (e) => patchBomConfig({ relativeScale: e.target.checked }, { immediate: true });
+const bomLenBadgesEl = document.getElementById('bomShowLengthBadges');
+if (bomLenBadgesEl) bomLenBadgesEl.onchange = (e) => patchBomConfig({ showLengthBadges: e.target.checked }, { immediate: true });
 document.querySelectorAll('.bom-flowaxis-btn').forEach(b => {
   b.onclick = () => patchBomConfig({ flowAxis: b.getAttribute('data-bom-flow-axis') === 'columns' ? 'columns' : 'rows' }, { immediate: true });
 });

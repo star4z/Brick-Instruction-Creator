@@ -507,6 +507,9 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
 
     await page.locator('[data-bom-grid-mode="custom"]').click();
     await expect(page.locator('#bomCustomSizeWrap')).toBeVisible();
+    await expect(page.locator('#bomRelativeScale')).toBeVisible();
+    await page.locator('#bomRelativeScale').click();
+    await expect(page.locator('#bomShowLengthBadges')).toBeChecked();
     await auditSurface(page, `${testInfo.project.name}: Parts List Setup (Grid Custom)`, {
       activeContainerSelector: '#bomSetupModal',
     });

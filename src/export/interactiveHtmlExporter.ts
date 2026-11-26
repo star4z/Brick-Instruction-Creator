@@ -102,6 +102,8 @@ export interface InteractivePliEntry {
   thumb: string;
   colorName?: string;
   colorHex?: string;
+  /** Optional official length badge (`(4)` circle for axles/bars, `[5]` square for liftarms/beams). */
+  lengthBadge?: { label: string; shape: 'circle' | 'square' } | null;
 }
 
 export interface InteractiveArrowSpec {
@@ -887,6 +889,10 @@ ${staticFallbackHtml}
     </div>
     <input id="pageScrubber" class="scrubber" type="range" min="0" max="0" value="0" aria-label="Jump to step" />
   </footer>
+  <div id="viewerProgressBar" aria-hidden="true" style="position:fixed;left:16px;right:16px;bottom:3px;height:4px;border-radius:999px;background:rgba(100,116,139,0.24);z-index:40;pointer-events:none">
+    <div id="viewerProgressFill" style="height:100%;width:0%;border-radius:999px;background:var(--accent);transition:width .18s ease"></div>
+    <div id="viewerProgressBead" style="position:absolute;top:50%;left:0%;width:9px;height:9px;transform:translate(-50%,-50%);border-radius:999px;background:var(--accent);border:1.5px solid #0f172a;transition:left .18s ease"></div>
+  </div>
 
   <div id="drawerBackdrop" class="drawer-backdrop">
     <div class="drawer glass">
@@ -1781,6 +1787,14 @@ ${staticFallbackHtml}
     const pg = item.page;
     const step = item.step;
 
+    const pFill = document.getElementById('viewerProgressFill');
+    const pBead = document.getElementById('viewerProgressBead');
+    if (pFill && pBead) {
+      const pct = viewerItems.length > 1 ? Math.max(0, Math.min(100, (curIdx / (viewerItems.length - 1)) * 100)) : 100;
+      pFill.style.width = pct.toFixed(2) + '%';
+      pBead.style.left = pct.toFixed(2) + '%';
+    }
+
     const heroEl = document.getElementById('heroOverlay');
     const stepHud = document.getElementById('stepHud');
     const camTools = document.getElementById('camTools');
@@ -1836,7 +1850,9 @@ ${staticFallbackHtml}
         ? '<div class="pli-panel"><div class="pli-grid">' + step.pli.map(p =>
             '<div class="pli-item">' +
               (p.thumb ? '<img src="' + p.thumb + '" alt="' + esc(p.name) + '" />' : '') +
-              '<div><div class="pli-qty">' + p.qty + '×</div>' + (isWordless ? '' : '<div class="pli-id">' + esc(p.partId.toUpperCase()) + '</div>') + '</div>' +
+              '<div><div class="pli-qty">' + p.qty + '×' +
+              (p.lengthBadge ? ' <span style="display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;padding:0 3px;font-size:10px;font-weight:800;border:1.2px solid currentColor;border-radius:' + (p.lengthBadge.shape === 'circle' ? '999px' : '3px') + ';margin-left:2px">' + esc(p.lengthBadge.label) + '</span>' : '') +
+              '</div>' + (isWordless ? '' : '<div class="pli-id">' + esc(p.partId.toUpperCase()) + '</div>') + '</div>' +
             '</div>'
           ).join('') + '</div></div>'
         : '';

@@ -60,3 +60,8 @@ Every mechanism below is implemented using **pure physical, geometric, and perce
 - **General Vertical Exploded-Stack Columns & Precision Dual Alignment Lines**: `detectVerticalStackColumn` for 2–4 layer vertical sub-stacks and `computePrecisionAlignmentLines` for razor-thin dual projection lines on compact lateral multi-contact brackets (wired in WebGL).
 - **Calm 2025 Celebration Finale**: Soft radial starburst + 5 hollow outline stars behind the full completed 3D model hero (which already includes all placed minifigures in 3D) on Build Complete across Live DOM, PDF, and Interactive HTML exports.
 
+
+### 2.11 Pass 3 Full Pipeline Parity (Live DOM ↔ PDF ↔ Interactive 3D HTML)
+- **PDF Export Parity**: PDF export (`renderPageToJpegBytes`) draws attachment starbursts (`drawAttachmentStarburstCanvas`), orthogonal/forked inline callout leaders (`drawOrthogonalLeadersCanvas`), `1:1` coaxial assembly-position callouts (`drawCoaxialPositionCalloutCanvas`), hinge articulation curved yellow arrows (`drawCurvedMotionArrowCanvas`), confusable dark-color PLI swatch dots (`detectConfusablePliColors`), and BOM circled/squared length badges + physical relative part scaling.
+- **Interactive 3D HTML Parity**: Added a live bottom-edge build progress bar (`#viewerProgressBar`) tracking viewer progress and circled/squared length badges on step PLI chips.
+- **Parts List Setup Controls**: Exposed **Relative Part Scale** (`#bomRelativeScale`) and **Length Badges (N) / [N]** (`#bomShowLengthBadges`) in `#bomSetupModal`, persisted on `BomConfig` and verified in desktop + mobile Playwright UI audits.
