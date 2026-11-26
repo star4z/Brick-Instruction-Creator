@@ -636,7 +636,18 @@ describe('Official Manual Craft Pass 2 — Substep Strips, Vertical Stacks, Cele
     expect(fallbackPanels).toHaveLength(2);
     expect(fallbackPanels.every((p) => p.kind === 'view')).toBe(true);
   });
+
+  it('renders all 4 Brick Separator Guide panel SVGs', async () => {
+    const { BRICK_SEPARATOR_PANELS, buildBrickSeparatorPanelSvg } = await import('../brickSeparatorGuide');
+    expect(BRICK_SEPARATOR_PANELS).toHaveLength(4);
+    for (const pn of BRICK_SEPARATOR_PANELS) {
+      const svg = buildBrickSeparatorPanelSvg(pn.id);
+      expect(svg).toContain('<svg');
+      expect(svg).toContain('#f97316');
+    }
+  });
 });
+
 
 
 

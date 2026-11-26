@@ -185,6 +185,16 @@ import {
   drawPlayFeatureArrowCanvas,
 } from './engine/playFeatures';
 import {
+  BRICK_SEPARATOR_PANELS,
+  buildBrickSeparatorPanelSvg,
+  drawBrickSeparatorPanelCanvas,
+} from './engine/brickSeparatorGuide';
+import {
+  buildMosaicChartSvg,
+  detectMosaicGridStep,
+  drawMosaicChartCanvas,
+} from './engine/mosaicChart';
+import {
   buildPhysicalVerticalPrereqMap,
   classifySidewaysCapability,
   createHorizontalFastenerGuards,
@@ -8889,6 +8899,59 @@ function rebuildPages() {
   const allStepChecks = [];
 
   if (state.showCover) pages.push({ id:'cover', kind:'cover', num:++pNum, label:'Cover' });
+  if (state.showSpecSheet) pages.push({ id:'spec_sheet', kind:'spec_sheet', num:++pNum, label:'Model Overview' });
+  if (state.showBrickSeparator) pages.push({ id:'brick_separator', kind:'brick_separator', num:++pNum, label:'Brick Separator Guide' });
+  if (state.showBuildRoadmap) {
+    const chStages = [];
+    const mainChapters = (state.model.chapters || []).filter((c) => c.steps?.length > 0);
+    if (mainChapters.length >= 2) {
+      let cumParts = [];
+      let stepCursor = 1;
+      for (let ci = 0; ci < mainChapters.length; ci++) {
+        const chItem = mainChapters[ci];
+        const chParts = chItem.steps.flatMap((s) => s.parts || []);
+        cumParts = cumParts.concat(chParts);
+        chStages.push({
+          stageNumber: ci + 1,
+          title: chItem.name || `Stage ${ci + 1}`,
+          partCount: chParts.length,
+          stepStart: stepCursor,
+          stepEnd: stepCursor + chItem.steps.length - 1,
+          cumulativeParts: cumParts.slice(),
+        });
+        stepCursor += chItem.steps.length;
+      }
+    } else if (mainChapters.length === 1) {
+      const allSt = mainChapters[0].steps || [];
+      const chunks = Math.min(4, Math.max(2, Math.ceil(allSt.length / Math.max(1, Math.ceil(allSt.length / 4)))));
+      const perChunk = Math.max(1, Math.ceil(allSt.length / chunks));
+      let cumParts = [];
+      for (let ci = 0; ci < chunks; ci++) {
+        const slice = allSt.slice(ci * perChunk, (ci + 1) * perChunk);
+        if (!slice.length) continue;
+        const cParts = slice.flatMap((s) => s.parts || []);
+        cumParts = cumParts.concat(cParts);
+        chStages.push({
+          stageNumber: ci + 1,
+          title: `Stage ${ci + 1}`,
+          partCount: cParts.length,
+          stepStart: ci * perChunk + 1,
+          stepEnd: ci * perChunk + slice.length,
+          cumulativeParts: cumParts.slice(),
+        });
+      }
+    }
+    const rmPages = computeBuildRoadmapPages(chStages, 6);
+    for (const rp of rmPages) {
+      pages.push({
+        id: `roadmap_${rp.pageIndex}`,
+        kind: 'roadmap',
+        num: ++pNum,
+        label: rmPages.length > 1 ? `Build Roadmap (${rp.pageIndex + 1}/${rmPages.length})` : 'Build Roadmap',
+        roadmapPage: rp,
+      });
+    }
+  }
 
   for (const ch of state.model.chapters) {
     let i = 0;
@@ -10410,7 +10473,7 @@ function renderAll(renderOpts = {}) {
     studioPhotoEngine.releaseTransientBuffers();
   }
   const theme = getThemeForPage(page);
-  const allParts = (page.kind === 'cover' || page.kind === 'complete' || page.kind === 'play_features' || !pageNavOnly)
+  const allParts = (page.kind === 'cover' || page.kind === 'complete' || page.kind === 'play_features' || page.kind === 'spec_sheet' || page.kind === 'roadmap' || !pageNavOnly)
     ? getAllParts(state.model)
     : null;
 
@@ -10689,6 +10752,126 @@ function renderAll(renderOpts = {}) {
         mountedCanvases,
       );
     }
+  } else if (page.kind === 'spec_sheet') {
+    const spParts = allParts || getAllParts(state.model);
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
+    const uniqParts = new Set();
+    const uniqCols = new Set();
+    for (const p of spParts) {
+      uniqParts.add(p.p);
+      uniqCols.add(p.c);
+      const b = computeWorldBox(p);
+      if (b.min[0] < minX) minX = b.min[0]; if (b.max[0] > maxX) maxX = b.max[0];
+      if (b.min[1] < minY) minY = b.min[1]; if (b.max[1] > maxY) maxY = b.max[1];
+      if (b.min[2] < minZ) minZ = b.min[2]; if (b.max[2] > maxZ) maxZ = b.max[2];
+    }
+    const wLdu = Number.isFinite(maxX - minX) ? Math.max(20, maxX - minX) : 20;
+    const hLdu = Number.isFinite(maxY - minY) ? Math.max(24, maxY - minY) : 24;
+    const dLdu = Number.isFinite(maxZ - minZ) ? Math.max(20, maxZ - minZ) : 20;
+    const wCm = (wLdu * 0.04).toFixed(1), hCm = (hLdu * 0.04).toFixed(1), dCm = (dLdu * 0.04).toFixed(1);
+    const wIn = (wLdu * 0.04 / 2.54).toFixed(1), hIn = (hLdu * 0.04 / 2.54).toFixed(1), dIn = (dLdu * 0.04 / 2.54).toFixed(1);
+    const totalSt = getAllSteps(state.model).length;
+    const specSnap = renderSnapshot([], spParts, 35, 22, 920, 760, 1.0, {
+      highlightNew: false, fadePrev: false, showArrows: false,
+      stepLighting: state.stepLighting, highQualityStepRender: state.highQualityStepRender,
+      starkBlackOutlines: state.starkBlackOutlines, outlineLineWeight: state.starkBlackOutlines ? state.outlineLineWeight : 'light',
+      darkBackground: isDarkHexColor(toHexColor(theme.bgColor || '#ffffff', '#ffffff')), accent: theme.accent,
+    });
+    const stats = [
+      { label: 'Pieces', value: String(spParts.length) },
+      { label: 'Unique Parts', value: String(uniqParts.size) },
+      { label: 'Colors', value: String(uniqCols.size) },
+      { label: 'Steps', value: String(totalSt) },
+      { label: 'Footprint (Studs)', value: `${Math.max(1, Math.round(wLdu / 20))} × ${Math.max(1, Math.round(dLdu / 20))}` },
+      { label: 'Size (cm / in)', value: `${wCm}×${dCm}×${hCm} cm (${wIn}×${dIn}×${hIn}")` },
+    ];
+    frame.innerHTML = `
+      <div class="relative w-full h-full flex flex-col overflow-hidden" style="padding:${padPx}px;padding-bottom:${padPx + footerH}px;gap:${Math.round(typo.pt(12))}px">
+        ${wordless ? '' : `
+          <div class="shrink-0">
+            <div class="text-xs font-bold uppercase tracking-wider opacity-65" style="color:${theme.muted}">Model Overview</div>
+            <div class="font-extrabold tracking-tight truncate" style="font-size:${Math.round(typo.pt(18))}px;color:${theme.text}">${escHtml(state.model?.title || 'Custom Model')}</div>
+          </div>`}
+        <div class="flex-1 min-h-0 flex ${dims.width >= dims.height ? 'flex-row' : 'flex-col'} items-center" style="gap:${Math.round(typo.pt(14))}px">
+          <div class="flex-1 min-w-0 min-h-0 w-full h-full flex items-center justify-center rounded-xl p-2" style="background:${theme.calloutBg};border:1.5px solid ${theme.calloutBorder}">
+            <span data-canvas-mount="spec_hero" class="w-full h-full flex items-center justify-center"></span>
+          </div>
+          <div class="${dims.width >= dims.height ? 'w-[42%]' : 'w-full'} shrink-0 grid grid-cols-2" style="gap:${Math.round(typo.pt(8))}px">
+            ${stats.map((stItem) => `
+              <div class="rounded-lg p-2.5" style="background:${theme.pliBg};border:1px solid ${theme.pliBorder}">
+                <div class="text-[10px] font-bold uppercase tracking-wider opacity-70" style="color:${theme.muted}">${escHtml(stItem.label)}</div>
+                <div class="font-extrabold tabular-nums mt-0.5" style="font-size:${Math.round(typo.pt(11))}px;color:${theme.text}">${escHtml(stItem.value)}</div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      </div>`;
+    mountRenderedCanvas(
+      frame.querySelector('[data-canvas-mount="spec_hero"]'),
+      specSnap,
+      { className: 'w-full h-full object-contain pointer-events-none select-none', alt: state.model?.title || 'Model' },
+      mountedCanvases,
+    );
+  } else if (page.kind === 'brick_separator') {
+    const isDarkSep = isDarkHexColor(toHexColor(theme.bgColor || '#ffffff', '#ffffff'));
+    const sepInk = isDarkSep ? '#e2e8f0' : '#0f172a';
+    frame.innerHTML = `
+      <div class="relative w-full h-full flex flex-col overflow-hidden" style="padding:${padPx}px;padding-bottom:${padPx + footerH}px;gap:${Math.round(typo.pt(10))}px">
+        ${wordless ? '' : `
+          <div class="shrink-0">
+            <div class="font-extrabold tracking-tight" style="font-size:${Math.round(typo.pt(15))}px;color:${theme.text}">Brick Separator Guide</div>
+          </div>`}
+        <div class="flex-1 min-h-0 grid grid-cols-2 grid-rows-2" style="gap:${Math.round(typo.pt(10))}px">
+          ${BRICK_SEPARATOR_PANELS.map((pn, idx) => `
+            <div class="rounded-xl flex flex-col items-center justify-center p-3 text-center" style="background:${theme.calloutBg};border:1.5px solid ${theme.calloutBorder};gap:${Math.round(typo.pt(6))}px">
+              <div class="flex items-center justify-center">${buildBrickSeparatorPanelSvg(pn.id, Math.max(84, Math.round(typo.pt(86))), { ink: sepInk })}</div>
+              ${wordless ? `<span class="font-extrabold tabular-nums" style="font-size:${Math.round(typo.pt(11))}px;color:${theme.text}">${idx + 1}</span>` : `
+                <div>
+                  <div class="font-extrabold" style="font-size:${Math.round(typo.pt(10.5))}px;color:${theme.text}">${idx + 1}. ${escHtml(pn.title)}</div>
+                  <div class="opacity-75" style="font-size:${Math.round(typo.pt(8.5))}px;color:${theme.muted}">${escHtml(pn.caption)}</div>
+                </div>`}
+            </div>
+          `).join('')}
+        </div>
+      </div>`;
+  } else if (page.kind === 'roadmap') {
+    const rp = page.roadmapPage || { cols: 2, rows: 2, stages: [] };
+    const rmSnaps = (rp.stages || []).map((stg) => renderSnapshot([], stg.cumulativeParts || allParts || [], 38, 28, 640, 480, 1.0, {
+      highlightNew: false, fadePrev: false, showArrows: false,
+      stepLighting: state.stepLighting, highQualityStepRender: state.highQualityStepRender,
+      starkBlackOutlines: state.starkBlackOutlines, outlineLineWeight: state.starkBlackOutlines ? state.outlineLineWeight : 'light',
+      darkBackground: isDarkHexColor(toHexColor(theme.bgColor || '#ffffff', '#ffffff')), accent: theme.accent,
+    }));
+    frame.innerHTML = `
+      <div class="relative w-full h-full flex flex-col overflow-hidden" style="padding:${padPx}px;padding-bottom:${padPx + footerH}px;gap:${Math.round(typo.pt(8))}px">
+        ${wordless ? '' : `
+          <div class="shrink-0 flex items-center justify-between">
+            <div class="font-extrabold tracking-tight" style="font-size:${Math.round(typo.pt(15))}px;color:${theme.text}">Build Roadmap</div>
+            <span class="text-xs font-bold opacity-65" style="color:${theme.muted}">${rp.stages.length} Stages</span>
+          </div>`}
+        <div class="flex-1 min-h-0 grid" style="grid-template-columns:repeat(${rp.cols},minmax(0,1fr));grid-template-rows:repeat(${rp.rows},minmax(0,1fr));gap:${Math.round(typo.pt(9))}px">
+          ${(rp.stages || []).map((stg, idx) => `
+            <div class="relative rounded-xl overflow-hidden flex flex-col p-2" style="background:${theme.calloutBg};border:1.5px solid ${theme.calloutBorder}">
+              <div class="shrink-0 flex items-center justify-between gap-1.5">
+                <span class="inline-flex items-center justify-center rounded-full font-black text-white tabular-nums" style="background:${theme.accent};min-width:${Math.round(typo.pt(20))}px;height:${Math.round(typo.pt(20))}px;padding:0 ${Math.round(typo.pt(6))}px;font-size:${Math.round(typo.pt(10))}px">${stg.stageNumber}</span>
+                ${wordless ? '' : `<span class="font-bold truncate flex-1 text-left" style="font-size:${Math.round(typo.pt(9))}px;color:${theme.text}">${escHtml(stg.title)}</span>`}
+                <span class="font-semibold tabular-nums opacity-70" style="font-size:${Math.round(typo.pt(8.5))}px;color:${theme.muted}">${stg.partCount} ${wordless ? '' : 'pcs'}</span>
+              </div>
+              <div class="flex-1 min-h-0 flex items-center justify-center overflow-hidden">
+                <span data-canvas-mount="rm_${idx}" class="w-full h-full flex items-center justify-center"></span>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>`;
+    (rp.stages || []).forEach((stg, idx) => {
+      mountRenderedCanvas(
+        frame.querySelector(`[data-canvas-mount="rm_${idx}"]`),
+        rmSnaps[idx],
+        { className: 'w-full h-full object-contain pointer-events-none select-none', alt: stg.title },
+        mountedCanvases,
+      );
+    });
   } else if (page.kind === 'play_features') {
     const pfParts = allParts || getAllParts(state.model);
     const panels = detectPlayFeaturePanels(
@@ -11652,19 +11835,43 @@ function renderAll(renderOpts = {}) {
 
                   <div data-step-visual="${step.id}" class="flex-1 min-w-0 min-h-0 w-full h-full flex items-center justify-center relative overflow-hidden">
                     ${showAttachStarburst ? `<div class="absolute inset-0 flex items-center justify-center pointer-events-none opacity-80">${buildAttachmentStarburstSvg(Math.round(Math.min(estSlotW, estSlotH) * 0.65))}</div>` : ''}
-                    ${showLive3D
-                      ? `<canvas id="liveRotateCanvas" class="absolute inset-0 w-full h-full object-contain cursor-grab active:cursor-grabbing" style="touch-action:none;"></canvas>`
-                      : isMfExploded && mfExploded
-                        ? `<span data-canvas-mount="mf_exp_${slotIdx}"></span>`
-                        : isMfSeq && mfSeqStages
-                          ? `<div class="w-full h-full grid items-center justify-items-center gap-1 sm:gap-2 px-1" style="grid-template-columns:repeat(${mfSeqStages.length},minmax(0,1fr))">
-                              ${mfSeqStages.map((_entry, si) => `
-                                <div class="w-full h-full min-w-0 min-h-0 flex items-center justify-center overflow-hidden">
-                                  <span data-canvas-mount="mf_seq_${slotIdx}_${si}"></span>
-                                </div>`).join('')}
-                            </div>`
-                          : `<span data-canvas-mount="step_${slotIdx}"></span>`
-                    }
+                    ${(() => {
+                      const mosaicPlan = (!showLive3D && !isOfficialMfStyle && (step.parts || []).length >= 12)
+                        ? detectMosaicGridStep(
+                            (step.parts || []).map((p) => {
+                              const b = computeWorldBox(p);
+                              const ci = resolveColorInfo(p.c) || COLORS[71];
+                              const title = resolvePart(p.p).name || '';
+                              return {
+                                id: p.id,
+                                partId: p.p,
+                                colorId: p.c,
+                                colorHex: ci.hex,
+                                colorName: ci.name,
+                                isRound: /round/i.test(title),
+                                center: b.center,
+                                spanLdu: [b.max[0] - b.min[0], b.max[1] - b.min[1], b.max[2] - b.min[2]],
+                              };
+                            }),
+                          )
+                        : null;
+                      if (mosaicPlan) {
+                        const mCell = Math.max(9, Math.min(20, Math.floor(Math.min(estSlotW - 90, estSlotH - 36) / Math.max(mosaicPlan.cols, mosaicPlan.rows))));
+                        return `<div class="w-full h-full flex items-center justify-center overflow-hidden p-1">${buildMosaicChartSvg(mosaicPlan, mCell)}</div>`;
+                      }
+                      return showLive3D
+                        ? `<canvas id="liveRotateCanvas" class="absolute inset-0 w-full h-full object-contain cursor-grab active:cursor-grabbing" style="touch-action:none;"></canvas>`
+                        : isMfExploded && mfExploded
+                          ? `<span data-canvas-mount="mf_exp_${slotIdx}"></span>`
+                          : isMfSeq && mfSeqStages
+                            ? `<div class="w-full h-full grid items-center justify-items-center gap-1 sm:gap-2 px-1" style="grid-template-columns:repeat(${mfSeqStages.length},minmax(0,1fr))">
+                                ${mfSeqStages.map((_entry, si) => `
+                                  <div class="w-full h-full min-w-0 min-h-0 flex items-center justify-center overflow-hidden">
+                                    <span data-canvas-mount="mf_seq_${slotIdx}_${si}"></span>
+                                  </div>`).join('')}
+                              </div>`
+                            : `<span data-canvas-mount="step_${slotIdx}"></span>`;
+                    })()}
                     ${hasHingeArticulation ? `<span class="absolute top-1.5 right-1.5 z-10 pointer-events-none" title="Articulated angle">${buildCurvedMotionArrowSvg(Math.max(26, Math.round(typo.pt(26))), 'cw')}</span>` : ''}
                     ${stepLocator ? `<div class="absolute bottom-1.5 left-1.5 z-10 pointer-events-none rounded-md border bg-white/85 shadow-xs" style="width:${Math.round(typo.pt(38))}px;height:${Math.round(typo.pt(28))}px;border-color:${theme.pliBorder}" title="Regional close-up locator"><div class="relative w-full h-full"><span class="absolute rounded-sm border-2" style="border-color:${theme.accent};background:${theme.accent}22;left:${Math.max(4, Math.min(72, Math.round((stepLocator.cxNorm - stepLocator.radiusNorm * 0.4) * 100)))}%;top:${Math.max(4, Math.min(68, Math.round((stepLocator.czNorm - stepLocator.radiusNorm * 0.4) * 100)))}%;width:${Math.max(20, Math.min(70, Math.round(stepLocator.radiusNorm * 75)))}%;height:${Math.max(20, Math.min(70, Math.round(stepLocator.radiusNorm * 75)))}%"></span></div></div>` : ''}
                     <span data-rot-cue-host="${step.id}" class="${rotBadgeHtml ? 'inline-flex' : 'hidden'} items-center absolute z-10 pointer-events-none" style="left:${rotInitPos.leftPct.toFixed(3)}%;top:${rotInitPos.topPct.toFixed(3)}%">${rotBadgeHtml}</span>
@@ -14940,6 +15147,9 @@ function syncMenuControls() {
       : null,
   );
   setChk('toggleShowCover', state.showCover);
+  setChk('toggleShowSpecSheet', state.showSpecSheet);
+  setChk('toggleShowBrickSeparator', state.showBrickSeparator);
+  setChk('toggleShowBuildRoadmap', state.showBuildRoadmap);
   setChk('toggleShowPlayFeatures', state.showPlayFeatures);
   setChk('toggleShowComplete', state.showBuildComplete);
   setChk('toggleShowPartsList', state.showPartsList);
@@ -20265,6 +20475,135 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       // Register clickable PDF hyperlink over the program attribution + QR code
       links.push(canvasRectToPdfLink(actualGroupRect, pxW, pxH, pageWpt, pageHpt, PROGRAM_URL));
     }
+  } else if (page.kind === 'spec_sheet') {
+    const spParts = getAllParts(state.model);
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
+    const uniqParts = new Set();
+    const uniqCols = new Set();
+    for (const p of spParts) {
+      uniqParts.add(p.p); uniqCols.add(p.c);
+      const b = computeWorldBox(p);
+      if (b.min[0] < minX) minX = b.min[0]; if (b.max[0] > maxX) maxX = b.max[0];
+      if (b.min[1] < minY) minY = b.min[1]; if (b.max[1] > maxY) maxY = b.max[1];
+      if (b.min[2] < minZ) minZ = b.min[2]; if (b.max[2] > maxZ) maxZ = b.max[2];
+    }
+    const wLdu = Number.isFinite(maxX - minX) ? Math.max(20, maxX - minX) : 20;
+    const hLdu = Number.isFinite(maxY - minY) ? Math.max(24, maxY - minY) : 24;
+    const dLdu = Number.isFinite(maxZ - minZ) ? Math.max(20, maxZ - minZ) : 20;
+    const wCm = (wLdu * 0.04).toFixed(1), hCm = (hLdu * 0.04).toFixed(1), dCm = (dLdu * 0.04).toFixed(1);
+    const totalSt = getAllSteps(state.model).length;
+    const headerH = wordless ? 0 : Math.round(typo.pt(32));
+    if (!wordless) {
+      ctx.fillStyle = theme.text;
+      ctx.font = themeCanvasFont(theme, 800, Math.round(typo.pt(18)));
+      ctx.fillText(state.model?.title || 'Model Overview', pad, pad);
+    }
+    const bodyY = pad + headerH;
+    const bodyH = pxH - bodyY - pad - footerH;
+    const bodyW = pxW - pad * 2;
+    const heroW = Math.round(bodyW * 0.56);
+    const snap = renderSnapshot([], spParts, 35, 22, 1100, 900, 1.0, {
+      highlightNew: false, fadePrev: false, showArrows: false,
+      stepLighting: state.stepLighting, highQualityStepRender: state.highQualityStepRender,
+      starkBlackOutlines: state.starkBlackOutlines, outlineLineWeight: state.starkBlackOutlines ? state.outlineLineWeight : 'light',
+      darkBackground: isDarkHexColor(toHexColor(theme.bgColor || '#ffffff', '#ffffff')), accent: theme.accent,
+    });
+    const img = await resolveRenderDrawable(snap);
+    ctx.beginPath(); ctx.roundRect(pad, bodyY, heroW, bodyH, Math.round(typo.pt(10)));
+    ctx.fillStyle = theme.calloutBg; ctx.fill(); ctx.strokeStyle = theme.calloutBorder; ctx.lineWidth = 1.5; ctx.stroke();
+    drawContain(ctx, img, pad + 10, bodyY + 10, heroW - 20, bodyH - 20);
+    const stats = [
+      ['PIECES', String(spParts.length)],
+      ['UNIQUE PARTS', String(uniqParts.size)],
+      ['COLORS', String(uniqCols.size)],
+      ['STEPS', String(totalSt)],
+      ['FOOTPRINT', `${Math.max(1, Math.round(wLdu / 20))} × ${Math.max(1, Math.round(dLdu / 20))} studs`],
+      ['SIZE', `${wCm} × ${dCm} × ${hCm} cm`],
+    ];
+    const sx0 = pad + heroW + Math.round(typo.pt(12));
+    const sw = (bodyW - heroW - Math.round(typo.pt(12)) - Math.round(typo.pt(8))) / 2;
+    const sh = (bodyH - Math.round(typo.pt(16))) / 3;
+    for (let si = 0; si < stats.length; si++) {
+      const sc = si % 2, sr = Math.floor(si / 2);
+      const bx = sx0 + sc * (sw + Math.round(typo.pt(8)));
+      const by = bodyY + sr * (sh + Math.round(typo.pt(8)));
+      ctx.beginPath(); ctx.roundRect(bx, by, sw, sh, Math.round(typo.pt(8)));
+      ctx.fillStyle = theme.pliBg; ctx.fill(); ctx.strokeStyle = theme.pliBorder; ctx.lineWidth = 1; ctx.stroke();
+      ctx.fillStyle = theme.muted; ctx.font = themeCanvasFont(theme, 700, Math.round(typo.pt(8)));
+      ctx.fillText(stats[si][0], bx + 10, by + 10);
+      ctx.fillStyle = theme.text; ctx.font = themeCanvasFont(theme, 800, Math.round(typo.pt(11)));
+      ctx.fillText(stats[si][1], bx + 10, by + 10 + Math.round(typo.pt(14)));
+    }
+  } else if (page.kind === 'brick_separator') {
+    const isDarkSep = isDarkHexColor(toHexColor(theme.bgColor || '#ffffff', '#ffffff'));
+    const sepInk = isDarkSep ? '#e2e8f0' : '#0f172a';
+    const headerH = wordless ? 0 : Math.round(typo.pt(26));
+    if (!wordless) {
+      ctx.fillStyle = theme.text;
+      ctx.font = themeCanvasFont(theme, 800, Math.round(typo.pt(15)));
+      ctx.fillText('Brick Separator Guide', pad, pad);
+    }
+    const gapPx = Math.round(typo.pt(10));
+    const gridTop = pad + headerH;
+    const cardW = (pxW - pad * 2 - gapPx) / 2;
+    const cardH = (pxH - gridTop - pad - footerH - gapPx) / 2;
+    for (let idx = 0; idx < BRICK_SEPARATOR_PANELS.length; idx++) {
+      const pn = BRICK_SEPARATOR_PANELS[idx];
+      const cx = pad + (idx % 2) * (cardW + gapPx);
+      const cy = gridTop + Math.floor(idx / 2) * (cardH + gapPx);
+      ctx.beginPath(); ctx.roundRect(cx, cy, cardW, cardH, Math.round(typo.pt(10)));
+      ctx.fillStyle = theme.calloutBg; ctx.fill(); ctx.strokeStyle = theme.calloutBorder; ctx.lineWidth = 1.5; ctx.stroke();
+      const iconSz = Math.min(cardW * 0.55, cardH * 0.58);
+      drawBrickSeparatorPanelCanvas(ctx, pn.id, cx + cardW / 2, cy + cardH * 0.42, iconSz, { ink: sepInk });
+      ctx.textAlign = 'center';
+      ctx.fillStyle = theme.text;
+      ctx.font = themeCanvasFont(theme, 800, Math.round(typo.pt(10.5)));
+      ctx.fillText(wordless ? String(idx + 1) : `${idx + 1}. ${pn.title}`, cx + cardW / 2, cy + cardH - Math.round(typo.pt(24)));
+      if (!wordless) {
+        ctx.fillStyle = theme.muted;
+        ctx.font = themeCanvasFont(theme, 500, Math.round(typo.pt(8.5)));
+        ctx.fillText(pn.caption, cx + cardW / 2, cy + cardH - Math.round(typo.pt(11)));
+      }
+      ctx.textAlign = 'left';
+    }
+  } else if (page.kind === 'roadmap') {
+    const rp = page.roadmapPage || { cols: 2, rows: 2, stages: [] };
+    const headerH = wordless ? 0 : Math.round(typo.pt(26));
+    if (!wordless) {
+      ctx.fillStyle = theme.text;
+      ctx.font = themeCanvasFont(theme, 800, Math.round(typo.pt(15)));
+      ctx.fillText('Build Roadmap', pad, pad);
+    }
+    const gapPx = Math.round(typo.pt(9));
+    const gridTop = pad + headerH;
+    const cardW = (pxW - pad * 2 - (rp.cols - 1) * gapPx) / Math.max(1, rp.cols);
+    const cardH = (pxH - gridTop - pad - footerH - (rp.rows - 1) * gapPx) / Math.max(1, rp.rows);
+    for (let idx = 0; idx < (rp.stages || []).length; idx++) {
+      const stg = rp.stages[idx];
+      const cx = pad + (idx % rp.cols) * (cardW + gapPx);
+      const cy = gridTop + Math.floor(idx / rp.cols) * (cardH + gapPx);
+      ctx.beginPath(); ctx.roundRect(cx, cy, cardW, cardH, Math.round(typo.pt(10)));
+      ctx.fillStyle = theme.calloutBg; ctx.fill(); ctx.strokeStyle = theme.calloutBorder; ctx.lineWidth = 1.5; ctx.stroke();
+      const pillR = Math.round(typo.pt(10));
+      ctx.beginPath(); ctx.arc(cx + 12 + pillR, cy + 12 + pillR, pillR, 0, Math.PI * 2);
+      ctx.fillStyle = theme.accent; ctx.fill();
+      ctx.fillStyle = '#ffffff'; ctx.font = themeCanvasFont(theme, 900, Math.round(typo.pt(10)));
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(String(stg.stageNumber), cx + 12 + pillR, cy + 12 + pillR + 0.5);
+      ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      if (!wordless) {
+        ctx.fillStyle = theme.text; ctx.font = themeCanvasFont(theme, 700, Math.round(typo.pt(9)));
+        ctx.fillText(stg.title || `Stage ${stg.stageNumber}`, cx + 18 + pillR * 2, cy + 14);
+      }
+      const snap = renderSnapshot([], stg.cumulativeParts || getAllParts(state.model), 38, 28, 720, 540, 1.0, {
+        highlightNew: false, fadePrev: false, showArrows: false,
+        stepLighting: state.stepLighting, highQualityStepRender: state.highQualityStepRender,
+        starkBlackOutlines: state.starkBlackOutlines, outlineLineWeight: state.starkBlackOutlines ? state.outlineLineWeight : 'light',
+        darkBackground: isDarkHexColor(toHexColor(theme.bgColor || '#ffffff', '#ffffff')), accent: theme.accent,
+      });
+      const img = await resolveRenderDrawable(snap);
+      drawContain(ctx, img, cx + 8, cy + 20 + pillR * 2, cardW - 16, cardH - 28 - pillR * 2);
+    }
   } else if (page.kind === 'play_features') {
     const pfParts = getAllParts(state.model);
     const panels = detectPlayFeaturePanels(
@@ -21448,7 +21787,30 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
         if ((step.attachedSubmodel || step.subassembly || pdfRadialRing) && !isOfficialMfStyle) {
           drawAttachmentStarburstCanvas(ctx, sx + st.slotPad + mainAvailW / 2, renderTopY + renderAvailH / 2, Math.min(mainAvailW, renderAvailH) * 0.36);
         }
-        drawContain(ctx, stepImg, sx + st.slotPad, renderTopY, mainAvailW, renderAvailH);
+        const pdfMosaicPlan = (!isOfficialMfStyle && (step.parts || []).length >= 12)
+          ? detectMosaicGridStep(
+              (step.parts || []).map((p) => {
+                const b = computeWorldBox(p);
+                const ci = resolveColorInfo(p.c) || COLORS[71];
+                const title = resolvePart(p.p).name || '';
+                return {
+                  id: p.id,
+                  partId: p.p,
+                  colorId: p.c,
+                  colorHex: ci.hex,
+                  colorName: ci.name,
+                  isRound: /round/i.test(title),
+                  center: b.center,
+                  spanLdu: [b.max[0] - b.min[0], b.max[1] - b.min[1], b.max[2] - b.min[2]],
+                };
+              }),
+            )
+          : null;
+        if (pdfMosaicPlan) {
+          drawMosaicChartCanvas(ctx, pdfMosaicPlan, sx + st.slotPad, renderTopY, mainAvailW, renderAvailH);
+        } else {
+          drawContain(ctx, stepImg, sx + st.slotPad, renderTopY, mainAvailW, renderAvailH);
+        }
         if (step.subassembly && !ov.calloutAsPages && !isOfficialMfStyle) {
           const reps = Math.min(4, Math.max(1, step.subassembly.repeatCount || 1));
           const callBox = { x: sx + st.slotPad + 6, y: renderTopY + 8, w: Math.min(110, mainAvailW * 0.28), h: Math.min(72, renderAvailH * 0.32) };
@@ -24023,6 +24385,9 @@ const openExtraPageSettings = (kind) => {
 };
 for (const [chkId, key] of [
   ['toggleShowCover', 'showCover'],
+  ['toggleShowSpecSheet', 'showSpecSheet'],
+  ['toggleShowBrickSeparator', 'showBrickSeparator'],
+  ['toggleShowBuildRoadmap', 'showBuildRoadmap'],
   ['toggleShowPlayFeatures', 'showPlayFeatures'],
   ['toggleShowComplete', 'showBuildComplete'],
   ['toggleShowPartsList', 'showPartsList'],
@@ -24319,6 +24684,31 @@ async function runInteractiveHtmlExport() {
           scene: {
             prevPartIdx: [],
             newPartIdx: allPartIndices,
+            az,
+            el,
+            zoom,
+            hero: true,
+          },
+        });
+      } else if (pg.kind === 'play_features' || pg.kind === 'spec_sheet' || pg.kind === 'roadmap' || pg.kind === 'brick_separator') {
+        const az = pg.kind === 'play_features' ? -38 : 35;
+        const el = 24;
+        const zoom = 1.0;
+        const pgParts = pg.kind === 'roadmap' && pg.roadmapPage?.stages?.length
+          ? (pg.roadmapPage.stages[pg.roadmapPage.stages.length - 1].cumulativeParts || allParts)
+          : allParts;
+        const pgPartIdx = pgParts.map((p) => registerPart(p));
+        exportPages.push({
+          id: pg.id,
+          kind: 'divider',
+          num: pg.num,
+          label: pg.label || 'Overview',
+          title: wordless ? '' : (pg.label || 'Overview'),
+          subtitle: wordless ? '' : (pg.kind === 'play_features' ? 'Interactive 3D Play & Display Showcase' : pg.kind === 'roadmap' ? 'Cumulative Build Stages' : pg.kind === 'brick_separator' ? 'Lift plates · Pry tiles · Push axles · Separate below' : `${allParts.length} pieces · ${allSteps.length} steps`),
+          previewUrl: renderFallbackPreview([], pgParts, az, el, zoom, { highlightNew: false, fadePrev: false }),
+          scene: {
+            prevPartIdx: [],
+            newPartIdx: pgPartIdx,
             az,
             el,
             zoom,

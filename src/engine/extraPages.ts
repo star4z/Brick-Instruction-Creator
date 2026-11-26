@@ -6,10 +6,21 @@
  * backward compatibility with older IndexedDB sessions and `.biw` projects.
  */
 
-export type ExtraPageKind = 'cover' | 'play_features' | 'complete' | 'bom' | 'back';
+export type ExtraPageKind =
+  | 'cover'
+  | 'spec_sheet'
+  | 'brick_separator'
+  | 'roadmap'
+  | 'play_features'
+  | 'complete'
+  | 'bom'
+  | 'back';
 
 export interface ExtraPagesConfig {
   showCover: boolean;
+  showSpecSheet?: boolean;
+  showBrickSeparator?: boolean;
+  showBuildRoadmap?: boolean;
   showPlayFeatures?: boolean;
   showBuildComplete: boolean;
   showPartsList: boolean;
@@ -29,6 +40,9 @@ export interface ExtraPageSettingsAction {
 export function createDefaultExtraPagesConfig(): ExtraPagesConfig {
   return {
     showCover: true,
+    showSpecSheet: false,
+    showBrickSeparator: false,
+    showBuildRoadmap: false,
     showPlayFeatures: false,
     showBuildComplete: true,
     showPartsList: true,
@@ -46,6 +60,9 @@ export function normalizeExtraPagesConfig(
   const fallback = typeof raw?.showExtras === 'boolean' ? raw.showExtras : true;
   return {
     showCover: typeof raw?.showCover === 'boolean' ? raw.showCover : fallback,
+    showSpecSheet: typeof raw?.showSpecSheet === 'boolean' ? raw.showSpecSheet : false,
+    showBrickSeparator: typeof raw?.showBrickSeparator === 'boolean' ? raw.showBrickSeparator : false,
+    showBuildRoadmap: typeof raw?.showBuildRoadmap === 'boolean' ? raw.showBuildRoadmap : false,
     showPlayFeatures: typeof raw?.showPlayFeatures === 'boolean' ? raw.showPlayFeatures : false,
     showBuildComplete:
       typeof raw?.showBuildComplete === 'boolean' ? raw.showBuildComplete : fallback,
@@ -61,6 +78,12 @@ export function isExtraPageEnabled(
   switch (kind) {
     case 'cover':
       return Boolean(config.showCover);
+    case 'spec_sheet':
+      return Boolean(config.showSpecSheet);
+    case 'brick_separator':
+      return Boolean(config.showBrickSeparator);
+    case 'roadmap':
+      return Boolean(config.showBuildRoadmap);
     case 'play_features':
       return Boolean(config.showPlayFeatures);
     case 'complete':

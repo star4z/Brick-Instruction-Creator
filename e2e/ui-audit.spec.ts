@@ -452,7 +452,9 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     await expect(page.locator('#menuStepGenBtn')).toHaveText(/^\s*Step Generation\s*$/);
     await page.locator('#menuPageSetupBtn').click();
     await expect(page.locator('#pageSetupModal')).toBeVisible();
-    await expect(page.locator('#toggleShowPlayFeatures')).toBeVisible();
+    for (const sel of ['#toggleShowSpecSheet', '#toggleShowBrickSeparator', '#toggleShowBuildRoadmap', '#toggleShowPlayFeatures']) {
+      await expect(page.locator(sel)).toBeVisible();
+    }
     await page.locator('#toggleShowPlayFeatures').click();
     await expect(page.locator('#toggleShowPlayFeatures')).toBeChecked();
     await page.locator('#toggleShowPlayFeatures').click();

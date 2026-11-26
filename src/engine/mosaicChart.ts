@@ -180,3 +180,107 @@ export function buildMosaicChartSvg(
     quadLines +
     `</svg>`;
 }
+
+/**
+ * Canvas 2D renderer for color-numbered LEGO Art mosaic charts (PDF export parity).
+ */
+export function drawMosaicChartCanvas(
+  ctx: CanvasRenderingContext2D,
+  plan: MosaicChartPlan,
+  x: number,
+  y: number,
+  maxW: number,
+  maxH: number,
+  opts?: { bg?: string; gridColor?: string; textColor?: string },
+): void {
+  const bg = opts?.bg || '#0b0f17';
+  const gridColor = opts?.gridColor || 'rgba(255,255,255,0.28)';
+  const textColor = opts?.textColor || '#f8fafc';
+  const pad = 12;
+  const legendW = 56;
+  const cellPx = Math.max(
+    8,
+    Math.min(
+      24,
+      Math.floor((maxW - pad * 2 - legendW - 10) / Math.max(1, plan.cols)),
+      Math.floor((maxH - pad * 2) / Math.max(1, plan.rows)),
+    ),
+  );
+  const gridW = plan.cols * cellPx;
+  const gridH = plan.rows * cellPx;
+  const totalW = pad * 2 + legendW + 10 + gridW;
+  const totalH = Math.max(pad * 2 + gridH, pad * 2 + plan.legend.length * 18);
+  const ox = x + Math.max(0, (maxW - totalW) / 2);
+  const oy = y + Math.max(0, (maxH - totalH) / 2);
+  const gx = ox + pad + legendW + 10;
+  const gy = oy + pad;
+
+  ctx.save();
+  ctx.fillStyle = bg;
+  ctx.beginPath();
+  ctx.roundRect(ox, oy, totalW, totalH, 8);
+  ctx.fill();
+
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (let idx = 0; idx < plan.legend.length; idx++) {
+    const entry = plan.legend[idx];
+    const ly = oy + pad + idx * 18 + 9;
+    const fg = luma255(entry.colorHex) < 128 ? '#ffffff' : '#0f172a';
+    ctx.fillStyle = entry.colorHex;
+    ctx.strokeStyle = gridColor;
+    ctx.lineWidth = 0.9;
+    ctx.beginPath();
+    ctx.arc(ox + pad + 10, ly, 7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = fg;
+    ctx.font = '800 8.5px system-ui, sans-serif';
+    ctx.fillText(String(entry.colorNum), ox + pad + 10, ly + 0.5);
+    ctx.fillStyle = textColor;
+    ctx.textAlign = 'left';
+    ctx.font = '700 8.5px system-ui, sans-serif';
+    ctx.fillText(`${entry.count}×`, ox + pad + 22, ly + 0.5);
+    ctx.textAlign = 'center';
+  }
+
+  ctx.strokeStyle = gridColor;
+  ctx.lineWidth = 1.2;
+  ctx.strokeRect(gx, gy, gridW, gridH);
+
+  const fontSz = Math.max(7, Math.round(cellPx * 0.44));
+  ctx.font = `800 ${fontSz}px system-ui, sans-serif`;
+  for (const c of plan.cells) {
+    const cx = gx + c.col * cellPx + cellPx / 2;
+    const cy = gy + c.row * cellPx + cellPx / 2;
+    const r = cellPx * 0.43;
+    const fg = luma255(c.colorHex) < 128 ? '#ffffff' : '#0f172a';
+    ctx.fillStyle = c.colorHex;
+    ctx.strokeStyle = 'rgba(255,255,255,0.22)';
+    ctx.lineWidth = 0.7;
+    ctx.beginPath();
+    if (c.isRound) ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    else ctx.roundRect(cx - r, cy - r, r * 2, r * 2, 2.5);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = fg;
+    ctx.fillText(String(c.colorNum), cx, cy + 0.5);
+  }
+
+  ctx.strokeStyle = gridColor;
+  ctx.lineWidth = 1;
+  for (let c = 4; c < plan.cols; c += 4) {
+    ctx.beginPath();
+    ctx.moveTo(gx + c * cellPx, gy);
+    ctx.lineTo(gx + c * cellPx, gy + gridH);
+    ctx.stroke();
+  }
+  for (let r = 4; r < plan.rows; r += 4) {
+    ctx.beginPath();
+    ctx.moveTo(gx, gy + r * cellPx);
+    ctx.lineTo(gx + gridW, gy + r * cellPx);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+

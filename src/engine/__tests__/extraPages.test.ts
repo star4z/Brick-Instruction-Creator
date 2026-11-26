@@ -11,6 +11,9 @@ describe('extraPages', () => {
   it('defaults all four extra pages to enabled', () => {
     expect(createDefaultExtraPagesConfig()).toEqual({
       showCover: true,
+      showSpecSheet: false,
+      showBrickSeparator: false,
+      showBuildRoadmap: false,
       showPlayFeatures: false,
       showBuildComplete: true,
       showPartsList: true,
@@ -21,6 +24,9 @@ describe('extraPages', () => {
   it('migrates legacy showExtras=false when individual flags are absent', () => {
     expect(normalizeExtraPagesConfig({ showExtras: false })).toEqual({
       showCover: false,
+      showSpecSheet: false,
+      showBrickSeparator: false,
+      showBuildRoadmap: false,
       showPlayFeatures: false,
       showBuildComplete: false,
       showPartsList: false,
@@ -37,6 +43,9 @@ describe('extraPages', () => {
       }),
     ).toEqual({
       showCover: true,
+      showSpecSheet: false,
+      showBrickSeparator: false,
+      showBuildRoadmap: false,
       showPlayFeatures: false,
       showBuildComplete: false,
       showPartsList: true,
