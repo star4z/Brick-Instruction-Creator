@@ -936,6 +936,53 @@ describe('compileDatEntry — smooth circular studs & crease-angle vertex normal
     expect(cyli!.edges.length).toBe(0);
   });
 
+  it('caps only the y=0 end of LDraw cylc primitives (leaving y=1 open for hollow containers like 92926)', () => {
+    const countHorizontalCapTrisAtGlY = (tris: Float32Array, targetGlY: number): number => {
+      let count = 0;
+      for (let i = 0; i < tris.length; i += 9) {
+        const y0 = tris[i + 1];
+        const y1 = tris[i + 4];
+        const y2 = tris[i + 7];
+        if (
+          Math.abs(y0 - targetGlY) < 1e-3 &&
+          Math.abs(y1 - targetGlY) < 1e-3 &&
+          Math.abs(y2 - targetGlY) < 1e-3
+        ) {
+          count++;
+        }
+      }
+      return count;
+    };
+
+    // Standard orientation: y=0 (glY=0) is closed by 4-4disc, y=1 (glY=-10) is open
+    const upright = compileDatEntry(
+      { key: 'upright_cylc', lines: ['1 16 0 0 0 6 0 0 0 10 0 0 0 6 4-4cylc.dat'] },
+      () => null,
+    );
+    expect(upright).not.toBeNull();
+    // 48 side quads (96 tris) + 48 single-end cap tris = 144 tris
+    expect(upright!.tris.length / 9).toBe(144);
+    expect(countHorizontalCapTrisAtGlY(upright!.tris, 0)).toBe(48);
+    expect(countHorizontalCapTrisAtGlY(upright!.tris, -10)).toBe(0);
+
+    // Inverted hollow container cavity (matches official LDraw 92926 Rubbish Bin interior):
+    // local y=0 maps to LDraw Y=40 (glY=-40, closed bottom floor) and local y=1 maps to
+    // LDraw Y=0 (glY=0, open top rim).
+    const invertedCavity = compileDatEntry(
+      {
+        key: 'hollow_bin_cavity',
+        lines: [
+          '0 BFC INVERTNEXT',
+          '1 16 0 40 0 16.25 0 0 0 -40 0 0 0 -16.25 4-4cylc.dat',
+        ],
+      },
+      () => null,
+    );
+    expect(invertedCavity).not.toBeNull();
+    expect(countHorizontalCapTrisAtGlY(invertedCavity!.tris, -40)).toBe(48);
+    expect(countHorizontalCapTrisAtGlY(invertedCavity!.tris, 0)).toBe(0);
+  });
+
   it('preserves crisp creases across shallow LDraw type-2 hard edges (e.g. 18-degree slopes)', () => {
     // Flat horizontal quad (y = 0, x in [-10, 0]) meeting an 18° slope (x in [0, 10])
     // along the shared type-2 hard edge at x = 0, y = 0, z in [-10, 10].

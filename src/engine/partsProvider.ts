@@ -42,7 +42,7 @@ function synthesizeStandardPrimitive(
   mat: Mat3,
   pos: Vec3,
 ): boolean {
-  const m = normKey.match(/^(\d+)-(\d+)(cyli|cylo|edge|disc)$/);
+  const m = normKey.match(/^(\d+)-(\d+)(cyli|cylo|cylc|edge|disc)$/);
   if (!m) return false;
   const num = parseInt(m[1], 10);
   const den = parseInt(m[2], 10);
@@ -54,6 +54,7 @@ function synthesizeStandardPrimitive(
   const xf = (x: number, y: number, z: number): Vec3 =>
     ldrawPosToYUp(vec3Add(pos, mat3MulVec(mat, [x, y, z])));
 
+  const topCenter = kind === 'cylc' ? xf(0, 0, 0) : null;
   for (let i = 0; i < segs; i++) {
     const a0 = (i / segs) * totalAngle;
     const a1 = ((i + 1) / segs) * totalAngle;
@@ -65,12 +66,19 @@ function synthesizeStandardPrimitive(
     } else if (kind === 'disc') {
       triangles.push(...xf(0, 0, 0), ...xf(x0, 0, z0), ...xf(x1, 0, z1));
     } else {
-      // cyli / cylo: cylinder from y=0 to y=1 in LDraw space
+      // cyli / cylo / cylc: cylinder from y=0 to y=1 in LDraw space.
+      // Per official LDraw spec, cylc is closed on one end only (disc at y=0) and open at y=1.
       const b0 = xf(x0, 0, z0);
       const b1 = xf(x1, 0, z1);
       const t0 = xf(x0, 1, z0);
       const t1 = xf(x1, 1, z1);
       triangles.push(...b0, ...b1, ...t1, ...b0, ...t1, ...t0);
+      if (topCenter) {
+        triangles.push(...topCenter, ...b0, ...b1);
+      }
+      if (kind === 'cylo' || kind === 'cylc') {
+        lines.push(...b0, ...b1, ...t0, ...t1);
+      }
     }
   }
   return true;

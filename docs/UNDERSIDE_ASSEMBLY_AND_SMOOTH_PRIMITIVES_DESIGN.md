@@ -21,7 +21,7 @@ Standard LDraw circular primitives (`4-4cyli`, `1-8cyli`, `4-4ring*`, `1-4edge`,
 - In `compileDatEntry` (`src/engine/datCompiler.ts`), `emitSynthPrim` upgrades standard 16-segment circular primitives (`circleRes === 16`) to **48 segments** (matching official LDraw `48/` hi-res primitives).
 - Explicit low-resolution `8/` primitives remain at 8 segments.
 - Because `48 = 3 × 16`, every 16-gon vertex (`k × 22.5°`) is an exact vertex of the 48-gon (`3k × 7.5°`). Partial arcs (`1-16`, `1-8`, `1-4`, `3-8`, `1-2`, `3-4`) therefore align vertex-for-vertex with any adjacent hand-authored 16-gon geometry (such as printed minifigure faces or underside notches) with zero seam cracks.
-- Synthesized cylinders (`cyli`, `cylo`, `cylc`) also emit vertical silhouette conditional lines (`condEdges`), giving curved outer walls crisp silhouettes under Part Outlines.
+- Synthesized cylinders (`cyli`, `cylo`, `cylc`) also emit vertical silhouette conditional lines (`condEdges`), giving curved outer walls crisp silhouettes under Part Outlines. Following the official LDraw specification, `cylo` and `cylc` emit rim edges at both `y = 0` and `y = 1`, while `cylc` caps **only** the `y = 0` end (`*-disc.dat`) and leaves `y = 1` open so hollow containers that invert `cylc` (such as bins, mugs, and sockets) remain properly hollow.
 
 ---
 

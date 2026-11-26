@@ -1154,8 +1154,11 @@ export function compileDatEntry(
       return true;
     }
     if (kind === 'cyli' || kind === 'cylo' || kind === 'cylc') {
+      // Per the official LDraw primitive spec, *-cylc.dat is closed on ONE end only
+      // (a single *-disc.dat at y = 0) and open at y = 1, with rim edges at both ends.
+      // Hollow containers (such as 92926 Rubbish Bin) invert 4-4cylc so y = 0 forms the
+      // interior bottom floor and y = 1 stays open at the top rim.
       const topC = kind === 'cylc' ? tp(0, 0, 0) : null;
-      const botC = kind === 'cylc' ? tp(0, 1, 0) : null;
       const emitRimEdges = kind === 'cylo' || kind === 'cylc';
       const isFullCircle = frac >= 0.999;
       const topPts: Vec3[] = new Array(segs + 1);
@@ -1170,9 +1173,8 @@ export function compileDatEntry(
         const b0 = botPts[i], b1 = botPts[i + 1];
         emitT(t0, t1, b1);
         emitT(t0, b1, b0);
-        if (topC && botC) {
+        if (topC) {
           emitT(topC, t0, t1);
-          emitT(botC, b1, b0);
         }
         if (emitRimEdges && edges.length < edgeLimit) {
           emitEdge(t0, t1, colId);
