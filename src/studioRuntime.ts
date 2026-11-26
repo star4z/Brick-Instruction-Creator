@@ -9056,20 +9056,6 @@ function renderAll() {
           ? buildFireworksSvg()
           : `<div class="absolute inset-0 pointer-events-none">${buildCalmCelebrationSvg(dims.width, dims.height, { starStroke: theme.accent })}</div>`)
       : '';
-    // Multi-chapter ensemble strip (minifigures / standalone accessory chapters shown cleanly along foreground)
-    const ensembleChapters = (state.model?.chapters || []).filter((c) => c.kind === 'minifigure' && Array.isArray(c.steps) && c.steps.length > 0).slice(0, 6);
-    const ensembleHtml = ensembleChapters.length > 0
-      ? `<div class="relative z-10 shrink-0 flex items-end justify-center pointer-events-none" style="gap:${Math.round(typo.pt(10))}px;margin-bottom:${Math.round(typo.pt(4))}px">
-          ${ensembleChapters.map((ec, eIdx) => {
-            const ecParts = ec.steps.flatMap((s) => s.parts || []);
-            const thumb = getMinifigThumb(ecParts, `ens_${ec.id}_${eIdx}`, 28, 18, 180, 180);
-            return thumb ? `<img src="${thumb}" alt="${escHtml(ec.name || 'Figure')}" style="height:${Math.round(typo.pt(46))}px;width:auto" class="object-contain drop-shadow-xs" />` : '';
-          }).join('')}
-        </div>`
-      : '';
-    const completeBarHtml = state.showProgressBar !== false
-      ? buildProgressBarHtml(1, { accent: theme.accent, heightPx: Math.max(3, Math.round(typo.pt(3))) })
-      : '';
     frame.innerHTML = `
       <div class="relative w-full h-full text-center flex flex-col items-center justify-between overflow-hidden" style="padding:${padPx}px;padding-bottom:${padPx + footerH}px;${cm.bgSrc ? `background-image:url(${cm.bgSrc});background-size:cover;background-position:center;` : ''}">
         ${celebBgHtml}
@@ -9082,7 +9068,6 @@ function renderAll() {
             ? `<canvas id="liveHeroCanvas" class="absolute inset-0 w-full h-full object-contain cursor-grab active:cursor-grabbing touch-none select-none"></canvas>`
             : `<img data-cover-hero-img="true" src="${snap.url}" alt="Completed build" class="absolute inset-0 w-full h-full object-contain pointer-events-none select-none" />`}
         </div>
-        ${ensembleHtml}
         ${renderPageFooterHtml({ titleText: state.model.title, zIndexClass: 'z-10' })}
       </div>`;
   } else if (page.kind === 'back') {

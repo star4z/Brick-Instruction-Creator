@@ -58,5 +58,5 @@ Every mechanism below is implemented using **pure physical, geometric, and perce
 - **Column-Only Vertical Hairlines (`stepDividerStyle: 'boxes' | 'hairlines' | 'none'`)**: Exposed via `#stepDividerStyle` in the Style popover (default `'hairlines'` on Technical Gray) across both Live DOM and PDF export.
 - **Inline Horizontal Numbered Sub-Step Strips & Radial Symmetry Compression** ([`src/engine/substepStrips.ts`](../src/engine/substepStrips.ts)): Pure planners for consolidated-PLI horizontal `1 2 3 4` strips and radial symmetric ring completion.
 - **General Vertical Exploded-Stack Columns & Precision Dual Alignment Lines**: `detectVerticalStackColumn` for 2–4 layer vertical sub-stacks and `computePrecisionAlignmentLines` for razor-thin dual projection lines on compact lateral multi-contact brackets (wired in WebGL).
-- **Calm 2025 Celebration & Multi-Chapter Ensemble Finale**: Soft radial starburst + 5 hollow outline stars + 100% progress bar on Build Complete (Live DOM & PDF), plus foreground minifigure/chapter ensemble strip.
+- **Calm 2025 Celebration Finale**: Soft radial starburst + 5 hollow outline stars behind the full completed 3D model hero (which already includes all placed minifigures in 3D) on Build Complete across Live DOM, PDF, and Interactive HTML exports.
 

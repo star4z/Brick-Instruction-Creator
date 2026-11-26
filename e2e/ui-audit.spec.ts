@@ -282,9 +282,23 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
       await expect(page.locator('#zoomControlsBar')).toBeHidden();
     }
 
-    // Navigate to Last Page (Parts List / Back Cover) and back to First Page
+    // Navigate to Last Page (Back Cover), then step back to Build Complete page and verify clean hero-only render
     await page.locator('#lastPage').click();
     await auditSurface(page, `${testInfo.project.name}: Last Page`, {
+      checkWorkspaceChrome: true,
+      hasModel: true,
+    });
+
+    // Jump to Build Complete page via Overview Modal and verify clean hero-only render
+    await page.locator('#btnPageOverview').click();
+    await expect(page.locator('#overviewModal')).toBeVisible();
+    const completeRow = page.locator('#overviewList > div').filter({ hasText: /Build Complete/i }).first();
+    await expect(completeRow).toBeVisible();
+    await completeRow.click();
+    await expect(page.locator('#overviewModal')).toBeHidden();
+    await expect(page.locator('#pageFrame img[data-cover-hero-img="true"]')).toHaveCount(1);
+    await expect(page.locator('#pageFrame img')).toHaveCount(1);
+    await auditSurface(page, `${testInfo.project.name}: Build Complete Page`, {
       checkWorkspaceChrome: true,
       hasModel: true,
     });

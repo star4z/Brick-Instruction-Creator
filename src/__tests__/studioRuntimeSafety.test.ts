@@ -1067,6 +1067,22 @@ describe('studioRuntime safety checks', () => {
     expect(pdfAttChunk).toContain('att.canonicalParts || att.previewParts');
     expect(pdfAttChunk).toContain('MINIFIG_BUILD_CAMERA.az');
   });
+
+  it('renders only the completed 3D hero on Build Complete without a duplicate overlapping minifigure ensemble strip', () => {
+    const runtime = fs.readFileSync(path.resolve(process.cwd(), 'src/studioRuntime.ts'), 'utf8');
+    const completeStart = runtime.indexOf("} else if (page.kind === 'complete') {");
+    const backStart = runtime.indexOf("} else if (page.kind === 'back') {", completeStart);
+    expect(completeStart).toBeGreaterThan(-1);
+    expect(backStart).toBeGreaterThan(completeStart);
+    const completeChunk = runtime.slice(completeStart, backStart);
+
+    // Minifigures are already placed in allParts; flattening a minifigure chapter's steps
+    // would superimpose every origin-normalized minifigure on top of each other.
+    expect(completeChunk).not.toContain('ensembleChapters');
+    expect(completeChunk).not.toContain('ensembleHtml');
+    expect(completeChunk).not.toContain('getMinifigThumb(');
+    expect(completeChunk).toContain('renderCoverHeroSnapshot(allParts');
+  });
 });
 
 
