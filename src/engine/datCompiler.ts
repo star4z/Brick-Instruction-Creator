@@ -1796,37 +1796,95 @@ export function compileDatEntry(
   // Synthesize missing sharp crease edges (>= 40°) and smooth curved-surface conditional
   // silhouette edges (1.8°..40°) directly from shared triangle adjacency across the full
   // mesh (including across subpart/primitive seams such as 3-4cyli + 1-4cyli and Studio .io
-  // parts that omit type-5 conditional lines). Coplanar diagonals and already-authored edges
-  // are skipped so flat faces stay clean and explicit LDraw edges are never duplicated.
+  // parts like 973tex/3818tex/3819tex that omit type-5 conditional lines or join curved
+  // shells with slight floating-point offsets or mismatched segment counts). Coplanar
+  // diagonals and already-authored edges are skipped so flat faces stay clean and explicit
+  // LDraw edges are never duplicated.
   {
-    const qKey = (x: number, y: number, z: number): string =>
-      `${Math.round(x * 100) + 0},${Math.round(y * 100) + 0},${Math.round(z * 100) + 0}`;
-    const pairKey = (ka: string, kb: string): string => (ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`);
+    const WELD_EPS = 0.02; // 0.02 LDU (~0.008 mm): welds 3-dec/4-dec subpart & .io export seams
+    const WELD_EPS2 = WELD_EPS * WELD_EPS;
+    const INV_WELD_EPS = 1 / WELD_EPS;
+    const vx: number[] = [];
+    const vy: number[] = [];
+    const vz: number[] = [];
+    const exactCache = new Map<string, number>();
+    const grid = new Map<string, number[]>();
 
-    const existingEdges = new Set<string>();
+    const weldVertex = (x: number, y: number, z: number): number => {
+      const ek = `${Math.round(x * 1000) + 0},${Math.round(y * 1000) + 0},${Math.round(z * 1000) + 0}`;
+      const cached = exactCache.get(ek);
+      if (cached !== undefined) return cached;
+      const cx = Math.floor(x * INV_WELD_EPS);
+      const cy = Math.floor(y * INV_WELD_EPS);
+      const cz = Math.floor(z * INV_WELD_EPS);
+      let bestId = -1;
+      let bestD2 = WELD_EPS2;
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dz = -1; dz <= 1; dz++) {
+            const bucket = grid.get(`${cx + dx},${cy + dy},${cz + dz}`);
+            if (!bucket) continue;
+            for (let b = 0; b < bucket.length; b++) {
+              const id = bucket[b];
+              const ddx = vx[id] - x;
+              const ddy = vy[id] - y;
+              const ddz = vz[id] - z;
+              const d2 = ddx * ddx + ddy * ddy + ddz * ddz;
+              if (d2 <= bestD2) {
+                bestD2 = d2;
+                bestId = id;
+              }
+            }
+          }
+        }
+      }
+      if (bestId >= 0) {
+        exactCache.set(ek, bestId);
+        return bestId;
+      }
+      const id = vx.length;
+      vx.push(x);
+      vy.push(y);
+      vz.push(z);
+      const gk = `${cx},${cy},${cz}`;
+      let cell = grid.get(gk);
+      if (!cell) {
+        cell = [];
+        grid.set(gk, cell);
+      }
+      cell.push(id);
+      exactCache.set(ek, id);
+      return id;
+    };
+
+    const EDGE_STRIDE = 67108864; // 2^26: safe exact numeric pair key up to 67M vertices
+    const edgeKey = (va: number, vb: number): number =>
+      va < vb ? va * EDGE_STRIDE + vb : vb * EDGE_STRIDE + va;
+
+    const existingEdges = new Set<number>();
     for (let i = 0; i + 5 < edges.length; i += 6) {
-      existingEdges.add(
-        pairKey(qKey(edges[i], edges[i + 1], edges[i + 2]), qKey(edges[i + 3], edges[i + 4], edges[i + 5])),
-      );
+      const va = weldVertex(edges[i], edges[i + 1], edges[i + 2]);
+      const vb = weldVertex(edges[i + 3], edges[i + 4], edges[i + 5]);
+      if (va !== vb) existingEdges.add(edgeKey(va, vb));
     }
     for (let i = 0; i + 11 < condEdges.length; i += 12) {
-      existingEdges.add(
-        pairKey(
-          qKey(condEdges[i], condEdges[i + 1], condEdges[i + 2]),
-          qKey(condEdges[i + 3], condEdges[i + 4], condEdges[i + 5]),
-        ),
-      );
+      const va = weldVertex(condEdges[i], condEdges[i + 1], condEdges[i + 2]);
+      const vb = weldVertex(condEdges[i + 3], condEdges[i + 4], condEdges[i + 5]);
+      if (va !== vb) existingEdges.add(edgeKey(va, vb));
     }
 
-    interface HalfEdgeEntry {
-      ax: number; ay: number; az: number;
-      bx: number; by: number; bz: number;
+    interface IncidentFace {
       nx: number; ny: number; nz: number;
       ox: number; oy: number; oz: number;
       colId: number;
-      done: boolean;
     }
-    const adj = new Map<string, HalfEdgeEntry>();
+    interface EdgeEntry {
+      va: number; vb: number;
+      ax: number; ay: number; az: number;
+      bx: number; by: number; bz: number;
+      faces: IncidentFace[];
+    }
+    const adj = new Map<number, EdgeEntry>();
     const COPLANAR_COS = 0.9995; // ~1.8°: skip flat face diagonals
     const CREASE_COS = 0.766;    // ~40°: sharp corner -> hard edge; smoother -> conditional silhouette
 
@@ -1847,45 +1905,28 @@ export function compileDatEntry(
         const rawCol = cols ? cols[ti] : 16;
         if (rawCol === STUD_SIDE_COLOR_FLAG || rawCol === STUD_INNER_COLOR_FLAG) continue;
         const colId = rawCol < 0 ? 16 : rawCol;
-        const k0 = qKey(x0, y0, z0);
-        const k1 = qKey(x1, y1, z1);
-        const k2 = qKey(x2, y2, z2);
+        const v0 = weldVertex(x0, y0, z0);
+        const v1 = weldVertex(x1, y1, z1);
+        const v2 = weldVertex(x2, y2, z2);
 
-        const triEdges: [string, string, number, number, number, number, number, number, number, number, number][] = [
-          [k0, k1, x0, y0, z0, x1, y1, z1, x2, y2, z2],
-          [k1, k2, x1, y1, z1, x2, y2, z2, x0, y0, z0],
-          [k2, k0, x2, y2, z2, x0, y0, z0, x1, y1, z1],
+        const triEdges: [number, number, number, number, number, number, number, number, number, number, number][] = [
+          [v0, v1, x0, y0, z0, x1, y1, z1, x2, y2, z2],
+          [v1, v2, x1, y1, z1, x2, y2, z2, x0, y0, z0],
+          [v2, v0, x2, y2, z2, x0, y0, z0, x1, y1, z1],
         ];
 
         for (let e = 0; e < 3; e++) {
-          const [ka, kb, ax, ay, az, bx, by, bz, ox, oy, oz] = triEdges[e];
-          if (ka === kb) continue;
-          const ek = pairKey(ka, kb);
+          const [va, vb, ax, ay, az, bx, by, bz, ox, oy, oz] = triEdges[e];
+          if (va === vb) continue;
+          const ek = edgeKey(va, vb);
           if (existingEdges.has(ek)) continue;
-          const prev = adj.get(ek);
-          if (!prev) {
-            adj.set(ek, { ax, ay, az, bx, by, bz, nx, ny, nz, ox, oy, oz, colId, done: false });
-          } else if (!prev.done) {
-            prev.done = true;
-            const absDot = Math.abs(prev.nx * nx + prev.ny * ny + prev.nz * nz);
-            if (absDot >= COPLANAR_COS) continue;
-            const outCol = prev.colId !== 16 ? prev.colId : colId;
-            if (absDot <= CREASE_COS) {
-              if (edges.length < maxEdgeFloats) {
-                edges.push(prev.ax, prev.ay, prev.az, prev.bx, prev.by, prev.bz);
-                edgeCols.push(outCol);
-                if (outCol !== 16) hasSubEdgeColor = true;
-              }
-            } else if (condEdges.length < maxCondFloats) {
-              condEdges.push(
-                prev.ax, prev.ay, prev.az,
-                prev.bx, prev.by, prev.bz,
-                prev.ox, prev.oy, prev.oz,
-                ox, oy, oz,
-              );
-              condEdgeCols.push(outCol);
-              if (outCol !== 16) hasSubCondEdgeColor = true;
-            }
+          let entry = adj.get(ek);
+          if (!entry) {
+            entry = { va, vb, ax, ay, az, bx, by, bz, faces: [] };
+            adj.set(ek, entry);
+          }
+          if (entry.faces.length < 6) {
+            entry.faces.push({ nx, ny, nz, ox, oy, oz, colId });
           }
         }
       }
@@ -1894,6 +1935,205 @@ export function compileDatEntry(
     processTriBuffer(trisArr, hasSubColor ? triCols : null);
     for (const tb of texBatches) {
       processTriBuffer(tb.tris, tb.triCols);
+    }
+
+    const emitSynthPair = (
+      ax: number, ay: number, az: number,
+      bx: number, by: number, bz: number,
+      fA: IncidentFace,
+      fB: IncidentFace,
+      absDot: number,
+    ) => {
+      if (absDot >= COPLANAR_COS) return;
+      const outCol = fA.colId !== 16 ? fA.colId : fB.colId;
+      if (absDot <= CREASE_COS) {
+        if (edges.length < maxEdgeFloats) {
+          edges.push(ax, ay, az, bx, by, bz);
+          edgeCols.push(outCol);
+          if (outCol !== 16) hasSubEdgeColor = true;
+        }
+      } else if (condEdges.length < maxCondFloats) {
+        condEdges.push(ax, ay, az, bx, by, bz, fA.ox, fA.oy, fA.oz, fB.ox, fB.oy, fB.oz);
+        condEdgeCols.push(outCol);
+        if (outCol !== 16) hasSubCondEdgeColor = true;
+      }
+    };
+
+    const boundaryEdges: EdgeEntry[] = [];
+    for (const entry of adj.values()) {
+      const faces = entry.faces;
+      if (faces.length === 1) {
+        boundaryEdges.push(entry);
+        continue;
+      }
+      let bestAbsDot = Infinity;
+      let bestA: IncidentFace | null = null;
+      let bestB: IncidentFace | null = null;
+      for (let i = 0; i < faces.length; i++) {
+        const fi = faces[i];
+        for (let j = i + 1; j < faces.length; j++) {
+          const fj = faces[j];
+          // Skip duplicate overlapping triangles sharing the exact same opposite vertex
+          const dox = fi.ox - fj.ox, doy = fi.oy - fj.oy, doz = fi.oz - fj.oz;
+          if (dox * dox + doy * doy + doz * doz <= WELD_EPS2) continue;
+          const absDot = Math.abs(fi.nx * fj.nx + fi.ny * fj.ny + fi.nz * fj.nz);
+          if (absDot < bestAbsDot) {
+            bestAbsDot = absDot;
+            bestA = fi;
+            bestB = fj;
+          }
+        }
+      }
+      if (bestA && bestB) {
+        emitSynthPair(entry.ax, entry.ay, entry.az, entry.bx, entry.by, entry.bz, bestA, bestB, bestAbsDot);
+      } else if (faces.length > 0) {
+        boundaryEdges.push(entry);
+      }
+    }
+
+    // Bridge mismatched-tessellation curved seams & T-junctions among remaining unpaired
+    // boundary edges (e.g., a 48-seg cylinder ring meeting a 16-seg shoulder or elbow dome
+    // along the same circular seam without shared vertices). Only pairs near-tangent edges
+    // within 0.20 LDU whose incident faces lie on opposite sides of the seam, so open rims
+    // of thin shells and flat coplanar T-junctions stay completely clean.
+    if (boundaryEdges.length >= 2 && boundaryEdges.length <= 6000) {
+      const SEAM_TOL = 0.20;
+      const SEAM_TOL2 = SEAM_TOL * SEAM_TOL;
+      const END_TOL2 = 0.26 * 0.26;
+      const CELL_SIZE = 0.5;
+      const INV_CELL = 1 / CELL_SIZE;
+      const seamGrid = new Map<string, number[]>();
+
+      const addToGrid = (idx: number, e: EdgeEntry) => {
+        const minEx = Math.min(e.ax, e.bx) - SEAM_TOL;
+        const maxEx = Math.max(e.ax, e.bx) + SEAM_TOL;
+        const minEy = Math.min(e.ay, e.by) - SEAM_TOL;
+        const maxEy = Math.max(e.ay, e.by) + SEAM_TOL;
+        const minEz = Math.min(e.az, e.bz) - SEAM_TOL;
+        const maxEz = Math.max(e.az, e.bz) + SEAM_TOL;
+        const x0 = Math.floor(minEx * INV_CELL), x1 = Math.floor(maxEx * INV_CELL);
+        const y0 = Math.floor(minEy * INV_CELL), y1 = Math.floor(maxEy * INV_CELL);
+        const z0 = Math.floor(minEz * INV_CELL), z1 = Math.floor(maxEz * INV_CELL);
+        // Skip huge spanning edges from flooding the grid
+        if ((x1 - x0 + 1) * (y1 - y0 + 1) * (z1 - z0 + 1) > 64) return;
+        for (let cx = x0; cx <= x1; cx++) {
+          for (let cy = y0; cy <= y1; cy++) {
+            for (let cz = z0; cz <= z1; cz++) {
+              const gk = `${cx},${cy},${cz}`;
+              let arr = seamGrid.get(gk);
+              if (!arr) {
+                arr = [];
+                seamGrid.set(gk, arr);
+              }
+              arr.push(idx);
+            }
+          }
+        }
+      };
+
+      for (let i = 0; i < boundaryEdges.length; i++) {
+        addToGrid(i, boundaryEdges[i]);
+      }
+
+      const distPtSeg2 = (
+        px: number, py: number, pz: number,
+        ax: number, ay: number, az: number,
+        bx: number, by: number, bz: number,
+      ): [number, number] => {
+        const abx = bx - ax, aby = by - ay, abz = bz - az;
+        const ab2 = abx * abx + aby * aby + abz * abz;
+        if (ab2 < 1e-10) {
+          const dx = px - ax, dy = py - ay, dz = pz - az;
+          return [dx * dx + dy * dy + dz * dz, 0];
+        }
+        const tRaw = ((px - ax) * abx + (py - ay) * aby + (pz - az) * abz) / ab2;
+        const t = tRaw < 0 ? 0 : tRaw > 1 ? 1 : tRaw;
+        const dx = px - (ax + t * abx);
+        const dy = py - (ay + t * aby);
+        const dz = pz - (az + t * abz);
+        return [dx * dx + dy * dy + dz * dz, tRaw];
+      };
+
+      const seenStamp = new Int32Array(boundaryEdges.length);
+      for (let i = 0; i < boundaryEdges.length; i++) {
+        const u = boundaryEdges[i];
+        const fU = u.faces[0];
+        const udx = u.bx - u.ax, udy = u.by - u.ay, udz = u.bz - u.az;
+        const uLen = Math.hypot(udx, udy, udz);
+        if (uLen < 1e-4) continue;
+        const ux = udx / uLen, uy = udy / uLen, uz = udz / uLen;
+        const mx = (u.ax + u.bx) * 0.5;
+        const my = (u.ay + u.by) * 0.5;
+        const mz = (u.az + u.bz) * 0.5;
+
+        // Unit direction perpendicular to u pointing into face fU (toward fU.o)
+        const uox = fU.ox - mx, uoy = fU.oy - my, uoz = fU.oz - mz;
+        const uoProj = uox * ux + uoy * uy + uoz * uz;
+        let tUx = uox - uoProj * ux;
+        let tUy = uoy - uoProj * uy;
+        let tUz = uoz - uoProj * uz;
+        const tULen = Math.hypot(tUx, tUy, tUz);
+        if (tULen < 1e-5) continue;
+        tUx /= tULen; tUy /= tULen; tUz /= tULen;
+
+        const cx = Math.floor(mx * INV_CELL);
+        const cy = Math.floor(my * INV_CELL);
+        const cz = Math.floor(mz * INV_CELL);
+        const stamp = i + 1;
+        let bestPartner: EdgeEntry | null = null;
+        let bestD2 = SEAM_TOL2;
+
+        for (let dx = -1; dx <= 1; dx++) {
+          for (let dy = -1; dy <= 1; dy++) {
+            for (let dz = -1; dz <= 1; dz++) {
+              const bucket = seamGrid.get(`${cx + dx},${cy + dy},${cz + dz}`);
+              if (!bucket) continue;
+              for (let b = 0; b < bucket.length; b++) {
+                const j = bucket[b];
+                if (j === i || seenStamp[j] === stamp) continue;
+                seenStamp[j] = stamp;
+                const v = boundaryEdges[j];
+                const vdx = v.bx - v.ax, vdy = v.by - v.ay, vdz = v.bz - v.az;
+                const vLen = Math.hypot(vdx, vdy, vdz);
+                if (vLen < 1e-4) continue;
+                // Require edges to be nearly parallel / tangent along the seam
+                const align = Math.abs((ux * vdx + uy * vdy + uz * vdz) / vLen);
+                if (align < 0.85) continue;
+
+                const [dMid2, tMid] = distPtSeg2(mx, my, mz, v.ax, v.ay, v.az, v.bx, v.by, v.bz);
+                if (dMid2 > bestD2 || tMid < -0.05 || tMid > 1.05) continue;
+
+                // Both endpoints of u must stay close to segment v (so u sits along v, not crossing)
+                const [dA2] = distPtSeg2(u.ax, u.ay, u.az, v.ax, v.ay, v.az, v.bx, v.by, v.bz);
+                if (dA2 > END_TOL2) continue;
+                const [dB2] = distPtSeg2(u.bx, u.by, u.bz, v.ax, v.ay, v.az, v.bx, v.by, v.bz);
+                if (dB2 > END_TOL2) continue;
+
+                // Verify the two faces extend toward opposite sides of the seam (continuing surface)
+                const fV = v.faces[0];
+                const vox = fV.ox - mx, voy = fV.oy - my, voz = fV.oz - mz;
+                const voProj = vox * ux + voy * uy + voz * uz;
+                const tVx = vox - voProj * ux;
+                const tVy = voy - voProj * uy;
+                const tVz = voz - voProj * uz;
+                const tVLen = Math.hypot(tVx, tVy, tVz);
+                if (tVLen < 1e-5) continue;
+                const sideDot = (tUx * tVx + tUy * tVy + tUz * tVz) / tVLen;
+                if (sideDot > 0.35) continue;
+
+                bestD2 = dMid2;
+                bestPartner = v;
+              }
+            }
+          }
+        }
+
+        if (bestPartner) {
+          const fV = bestPartner.faces[0];
+          const absDot = Math.abs(fU.nx * fV.nx + fU.ny * fV.ny + fU.nz * fV.nz);
+          emitSynthPair(u.ax, u.ay, u.az, u.bx, u.by, u.bz, fU, fV, absDot);
+        }
+      }
     }
   }
 

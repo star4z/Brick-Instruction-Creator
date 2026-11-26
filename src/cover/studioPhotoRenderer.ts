@@ -857,7 +857,7 @@ void main() {
   vec2 d = s2 - s1;
   float cr1 = d.x * (sc1.y - s1.y) - d.y * (sc1.x - s1.x);
   float cr2 = d.x * (sc2.y - s1.y) - d.y * (sc2.x - s1.x);
-  if (cr1 * cr2 > 0.0) {
+  if ((cr1 > 0.0 && cr2 > 0.0) || (cr1 < 0.0 && cr2 < 0.0)) {
     p1.xy += uLineOffset * p1.w;
     p1.z -= 0.0009 * p1.w;
     gl_Position = p1;

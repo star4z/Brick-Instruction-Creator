@@ -1013,6 +1013,64 @@ describe('compileDatEntry — smooth circular studs & crease-angle vertex normal
     // Exactly 1 conditional silhouette edge (the 20° curved fold), NOT the coplanar diagonal
     expect((compiled!.condEdges?.length ?? 0) / 12).toBe(1);
   });
+
+  it('welds sub-0.02 LDU floating-point subpart mismatches symmetrically across mirrored +X/-X coordinates', () => {
+    // Models Studio .io / LDraw 3-dec vs 4-dec seam offsets such as 14.436 vs 14.433 and 3.065 vs 3.064
+    // that straddle Math.round(x * 100) boundaries asymmetrically between +X and -X arms.
+    const makePair = (sign: 1 | -1): DatEntrySource => ({
+      key: `weld_seam_${sign > 0 ? 'pos' : 'neg'}`,
+      lines: [
+        // Triangle 1 (outer curved shell)
+        `3 16 ${(sign * 0.164).toFixed(3)} 22.436 3.065  ${(sign * 3.497).toFixed(3)} 14.436 3.065  ${(sign * 5.411).toFixed(3)} 14.436 2.570`,
+        // Triangle 2 (adjacent inner face meeting at ~25° with a 0.0036 LDU offset at the bottom vertex)
+        `3 16 ${(sign * 0.164).toFixed(3)} 22.436 3.065  ${(sign * 3.499).toFixed(3)} 14.433 3.065  ${(sign * 0.164).toFixed(3)} 14.436 1.500`,
+      ],
+    });
+    const pos = compileDatEntry(makePair(1), () => null);
+    const neg = compileDatEntry(makePair(-1), () => null);
+    expect(pos).not.toBeNull();
+    expect(neg).not.toBeNull();
+    // Both mirrored versions must synthesize the exact same welded edge (never asymmetric!)
+    const posCount = pos!.edges.length / 6 + (pos!.condEdges?.length ?? 0) / 12;
+    const negCount = neg!.edges.length / 6 + (neg!.condEdges?.length ?? 0) / 12;
+    expect(posCount).toBe(1);
+    expect(negCount).toBe(1);
+  });
+
+  it('does not let duplicate overlapping triangles suppress creases or silhouette edges on shared edges', () => {
+    const dupMesh: DatEntrySource = {
+      key: 'dup_overlap_crease',
+      lines: [
+        // Exact duplicate triangle emitted twice on the same edge
+        '3 16 0 0 0  10 0 0  5 0 10',
+        '3 16 0 0 0  10 0 0  5 0 10',
+        // 90° vertical wall meeting at edge (0,0,0)-(10,0,0)
+        '3 16 0 0 0  10 0 0  5 10 0',
+      ],
+    };
+    const compiled = compileDatEntry(dupMesh, () => null);
+    expect(compiled).not.toBeNull();
+    expect(compiled!.edges.length / 6).toBe(1);
+  });
+
+  it('bridges mismatched-tessellation curved seams (e.g., fine cylinder rim meeting coarse dome) with conditional edges', () => {
+    // Coarse 16-seg chord along y = 0 from (0,0,0) to (2,0,0) extending upward (+Y) at 20° tilt
+    // Fine 48-seg sub-chord along y = 0 from (0.6,0,0.08) to (1.4,0,0.08) extending downward (-Y)
+    const fineMeetsCoarse: DatEntrySource = {
+      key: 'mismatched_ring_seam',
+      lines: [
+        // Coarse dome triangle above the seam (tilted ~20° inward toward -Z)
+        '3 16 0 0 0  2 0 0  1 3 -1.1',
+        // Fine cylinder triangle below the seam (vertical along -Y, slightly bowed outward by 0.08 LDU)
+        '3 16 0.6 0 0.08  1.4 0 0.08  1 -3 0.08',
+      ],
+    };
+    const compiled = compileDatEntry(fineMeetsCoarse, () => null);
+    expect(compiled).not.toBeNull();
+    // Must bridge the fine sub-chord as a conditional silhouette edge (NOT a hard edge across the smooth curve)
+    expect(compiled!.edges.length / 6).toBe(0);
+    expect((compiled!.condEdges?.length ?? 0) / 12).toBeGreaterThanOrEqual(1);
+  });
 });
 
 
