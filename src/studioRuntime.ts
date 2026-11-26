@@ -5348,6 +5348,36 @@ function normalizeCanonicalSubParts(rawList, prefix) {
   }));
 }
 
+function getPartWorldHeadedShaftDir(part) {
+  if (!part || (part.children && part.children.length > 0)) return null;
+  const compiled = compileEmbeddedDat(part.p);
+  if (!compiled || !compiled.headedShaftDir) return null;
+  const wd = xformNorm(compiled.headedShaftDir, part.m || R_ID, 0);
+  const len = Math.hypot(wd[0], wd[1], wd[2]);
+  if (len < 1e-5) return null;
+  return [wd[0] / len, wd[1] / len, wd[2] / len];
+}
+
+function rotatePart180X(p) {
+  const m = p.m || R_ID;
+  const rotM = [
+    m[0], m[1], m[2],
+    -m[3], -m[4], -m[5],
+    -m[6], -m[7], -m[8],
+  ];
+  return {
+    ...p,
+    y: -p.y,
+    z: -p.z,
+    m: rotM,
+    children: p.children ? p.children.map(rotatePart180X) : undefined,
+  };
+}
+
+function rotateCanonicalParts180X(rawList, prefix) {
+  return normalizeCanonicalSubParts(rawList.map(rotatePart180X), prefix);
+}
+
 function autoNameDuplicateSubmodel(indices, parts, fallbackNum) {
   const names = indices.map(i => (resolvePart(parts[i].p).name || '').toLowerCase());
   if (names.some(n => /wheel|bogie/.test(n))) return 'Wheel Assembly';
@@ -5614,10 +5644,25 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount, outPrebui
     if (Array.isArray(outPrebuiltSubChapters)) {
       for (const mech of undersidePlan.mechanisms) {
         const mechSubId = `${groupId}_${mech.id}`;
-        const mechCanonical = normalizeCanonicalSubParts(
+        let mechCanonical = normalizeCanonicalSubParts(
           mech.partIndices.map(i => canonicalParts[i]),
           mechSubId,
         );
+        // Gravity stability: if net vertical headed shafts (e.g. towball-axles, stop-axles)
+        // have their wide head hanging downward, flip the standalone mechanism 180 deg around X
+        // so the wide head drops in from above and rests stably on the beam by gravity (matching
+        // the flipped underside orientation used when attaching it in Phase 2).
+        let downHeaded = 0;
+        let upHeaded = 0;
+        for (const mp of mechCanonical) {
+          const hd = getPartWorldHeadedShaftDir(mp);
+          if (!hd) continue;
+          if (hd[1] < -0.85) downHeaded++;
+          else if (hd[1] > 0.85) upHeaded++;
+        }
+        if (downHeaded > upHeaded) {
+          mechCanonical = rotateCanonicalParts180X(mechCanonical, mechSubId);
+        }
         const mechSteps = buildLocalSubmodelSteps(mechCanonical, mechSubId, 1);
         outPrebuiltSubChapters.push({
           id: mechSubId,
@@ -5663,13 +5708,21 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount, outPrebui
     }
 
     // Phase 1: Build the visible Primary Structural Deck right-side up before flipping.
-    // Respect bottom-up vertical prerequisites within the deck AND defer any underside-only
-    // deck plates (clutched strictly underneath already-placed spanning deck plates) into
-    // Phase 2 so they are never placed hidden underneath while right-side up.
+    // Respect bottom-up vertical prerequisites within the deck AND defer ONLY genuine
+    // underside-only deck plates (clutched strictly underneath already-placed spanning
+    // deck plates) into Phase 2 — never routing top-of-deck plates into upside-down steps!
     const deckRem = new Set(undersidePlan.deckPartIndices);
     const deferredDeckUnderside = [];
     while (deckRem.size > 0) {
       const placedBeforeStep = new Set(placed);
+      const strictUnderInDeck = new Set();
+      if (placedBeforeStep.size > 0) {
+        for (const di of deckRem) {
+          if (isStrictDeckUndersidePart(di, boxes, adj, placedBeforeStep)) {
+            strictUnderInDeck.add(di);
+          }
+        }
+      }
       const isDeckPrereqGrounded = placedBeforeStep.size > 0
         ? createGroundedPrereqChecker(adj, belowMap, placedBeforeStep, deckRem)
         : null;
@@ -5688,20 +5741,28 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount, outPrebui
         frontier = lowBand;
       } else {
         const rawFrontier = Array.from(deckRem).filter(i => adj[i].some(nb => placedBeforeStep.has(nb)));
+        // Deferred underside-only plates sitting below the already-placed deck never block
+        // placing top-of-deck plates on the exposed upper face of the deck!
         const baseUnblocked = rawFrontier.filter(i =>
-          !belowMap[i].some(u => deckRem.has(u) && isDeckPrereqGrounded(u)),
+          !belowMap[i].some(u => deckRem.has(u) && !strictUnderInDeck.has(u) && isDeckPrereqGrounded(u)),
         );
         const candFrontier = baseUnblocked.length > 0 ? baseUnblocked : rawFrontier;
-        const uprightFrontier = candFrontier.filter(i => !isStrictDeckUndersidePart(i, boxes, adj, placedBeforeStep));
+        const uprightFrontier = candFrontier.filter(i => !strictUnderInDeck.has(i));
         if (uprightFrontier.length > 0) {
           frontier = uprightFrontier;
         } else if (rawFrontier.length > 0) {
-          // Only hidden underside-only deck attachments remain — defer them to Phase 2 (after flipping over)!
-          for (const remIdx of deckRem) deferredDeckUnderside.push(remIdx);
+          // Only defer genuinely underside-only deck parts to Phase 2 (after flipping over).
+          // Any remaining upper/non-underside deck parts stay in `remaining` for upright Phase 3!
+          for (const remIdx of deckRem) {
+            if (strictUnderInDeck.has(remIdx)) {
+              deferredDeckUnderside.push(remIdx);
+            }
+          }
           deckRem.clear();
           break;
         } else {
-          frontier = Array.from(deckRem).sort((a, b) => layerY[a] - layerY[b]);
+          const nonUnderRem = Array.from(deckRem).filter(i => !strictUnderInDeck.has(i));
+          frontier = (nonUnderRem.length > 0 ? nonUnderRem : Array.from(deckRem)).sort((a, b) => layerY[a] - layerY[b]);
         }
         const skuCountsInBand = new Map();
         for (const idx of frontier) {
@@ -5722,8 +5783,8 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount, outPrebui
             if (placedInStep.has(i)) return false;
             if (Math.abs(layerY[i] - anchorY) > 12) return false;
             if (placedBeforeStep.size > 0) {
-              if (isStrictDeckUndersidePart(i, boxes, adj, placedBeforeStep)) return false;
-              if (belowMap[i].some(u => deckRem.has(u) && !placedBeforeStep.has(u) && isDeckPrereqGrounded(u))) return false;
+              if (strictUnderInDeck.has(i)) return false;
+              if (belowMap[i].some(u => deckRem.has(u) && !strictUnderInDeck.has(u) && !placedBeforeStep.has(u) && isDeckPrereqGrounded(u))) return false;
             } else {
               if (belowMap[i].some(u => deckRem.has(u))) return false;
             }
@@ -5934,6 +5995,91 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount, outPrebui
     // Phase 3 resumes upright ('top') in the main bottom-up loop below;
     // optimizeManualStepCameras will emit the matching flip_vertical cue automatically.
     activeCam = { side: 'top', corner: activeCam.corner, az: activeCam.az, el: 30 };
+  }
+
+  // Gravity-stable two-sided headed-shaft mechanism builder:
+  // When a compact standalone Technic sub-assembly (`3..16` parts) contains an upward-headed
+  // vertical shaft (e.g. towball-axle or stop-axle whose wide head rests on top of a host
+  // beam by gravity) AND underside retaining collars/bushes below that host beam, assemble
+  // the host beam + top-inserted shafts upright first, then flip over (`forceSide: 'bottom'`)
+  // so the headed shaft rests on the table while the retaining bushes drop cleanly onto the shafts.
+  if (!undersidePlan.hasSuspendedUnderside && placed.size === 0 && n >= 3 && n <= 16) {
+    const upHeadedShafts = [];
+    for (let i = 0; i < n; i++) {
+      const hd = getPartWorldHeadedShaftDir(canonicalParts[i]);
+      if (hd && hd[1] > 0.85) upHeadedShafts.push(i);
+    }
+    if (upHeadedShafts.length > 0) {
+      let hostIdx = -1;
+      let bestHostScore = -Infinity;
+      for (const sh of upHeadedShafts) {
+        const bs = boxes[sh];
+        for (const nb of adj[sh] || []) {
+          if (roles[nb] === 'axle' || roles[nb] === 'pin') continue;
+          const bh = boxes[nb];
+          const hx = bh.max[0] - bh.min[0];
+          const hy = bh.max[1] - bh.min[1];
+          const hz = bh.max[2] - bh.min[2];
+          // Must be a horizontal beam/plate that the headed shaft passes through
+          if (Math.max(hx, hz) < 28 || hy > 28) continue;
+          if (bs.max[1] <= bh.max[1] + 2.0) continue;
+          const sc = (adj[nb]?.length || 0) * 10 + Math.max(hx, hz);
+          if (sc > bestHostScore) { bestHostScore = sc; hostIdx = nb; }
+        }
+      }
+      if (hostIdx >= 0) {
+        const hostMinY = boxes[hostIdx].min[1];
+        const topParts = [];
+        const underParts = [];
+        for (let i = 0; i < n; i++) {
+          if (i !== hostIdx && boxes[i].max[1] <= hostMinY + 4.5 && boxes[i].center[1] < boxes[hostIdx].center[1] - 2.0) {
+            underParts.push(i);
+          } else {
+            topParts.push(i);
+          }
+        }
+        const topSet = new Set(topParts);
+        const allUnderConnected =
+          underParts.length > 0 &&
+          underParts.every(u => (adj[u] || []).some(nb => topSet.has(nb)));
+        if (allUnderConnected && topParts.length >= 2) {
+          const emitMechStep = (idxs, isBottom) => {
+            if (idxs.length === 0) return;
+            for (const i of idxs) { remaining.delete(i); placed.add(i); }
+            const stepBoxes = idxs.map(i => boxes[i]);
+            for (const b of stepBoxes) {
+              builtBounds = expandBoundsWithBox(builtBounds, b);
+              builtBoxes.push(b);
+            }
+            sNum++;
+            steps.push({
+              id: `${groupId}_s${sNum}`,
+              num: sNum,
+              side: isBottom ? 'bottom' : 'top',
+              corner: activeCam.corner,
+              az: activeCam.az,
+              el: isBottom ? -30 : 30,
+              cue: isBottom ? 'flip_vertical' : 'none',
+              ...(isBottom ? { isUpsideDownUndersideStep: true } : {}),
+              parts: idxs.map(i => canonicalParts[i]),
+              isSubmodelStep: true,
+            });
+          };
+          if (topParts.length <= 5) {
+            emitMechStep(topParts, false);
+          } else {
+            // Step 1: primary host beam + shafts/axles directly piercing it; Step 2: remaining top beams/axles
+            const hostAdj = new Set(adj[hostIdx] || []);
+            const step1Top = [hostIdx, ...topParts.filter(i => i !== hostIdx && hostAdj.has(i) && (roles[i] === 'axle' || roles[i] === 'pin' || upHeadedShafts.includes(i)))];
+            const step1Set = new Set(step1Top);
+            const step2Top = topParts.filter(i => !step1Set.has(i));
+            emitMechStep(step1Top, false);
+            emitMechStep(step2Top, false);
+          }
+          emitMechStep(underParts, true);
+        }
+      }
+    }
   }
 
   while (remaining.size > 0) {
@@ -6499,6 +6645,7 @@ function assignAutoPlacementOffsets(chapters) {
     const localUp = (!part.children || part.children.length === 0)
       ? xformNorm([0, 1, 0], part.m || R_ID, 0)
       : undefined;
+    const headedShaftDir = getPartWorldHeadedShaftDir(part);
     return {
       id: part.id,
       box: computeWorldBox(part),
@@ -6506,6 +6653,7 @@ function assignAutoPlacementOffsets(chapters) {
       sku: `${part.p}:${part.c}`,
       ...(localUp ? { localUp } : {}),
       ...(studs.length > 0 ? { studs } : {}),
+      ...(headedShaftDir ? { headedShaftDir } : {}),
     };
   };
 

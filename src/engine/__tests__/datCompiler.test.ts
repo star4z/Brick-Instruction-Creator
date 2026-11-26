@@ -3,6 +3,7 @@ import {
   STUD_INNER_COLOR_FLAG,
   STUD_SIDE_COLOR_FLAG,
   compileDatEntry,
+  computeMeshHeadedShaftDir,
   isDirectRgbColor,
   normalizeDatRef,
   type DatEntrySource,
@@ -1188,7 +1189,35 @@ describe('compileDatEntry — smooth circular studs & crease-angle vertex normal
     expect(compiled!.studs![1][4]).toBeCloseTo(0, 4);
     expect(compiled!.studs![1][5]).toBeCloseTo(1, 4);
   });
+
+  it('detects asymmetric headed shafts (towball/stop-axle) via 3D cross-section while ignoring symmetric axles and bricks', () => {
+    // Towball-like shaft along X: narrow 12x12 shaft on +X (x=0..20), wide 16x16 ball on -X (x=-17..0)
+    const headedTris = new Float32Array([
+      // Wide head end (x=-17..-6, y/z in [-8, 8] -> span 16)
+      -17, -8, -8, -17, 8, -8, -17, 8, 8,
+      -10, -8, 8, -10, 8, 8, -10, -8, -8,
+      // Narrow shaft end (x=8..20, y/z in [-6, 6] -> span 12)
+      10, -6, -6, 10, 6, -6, 10, 6, 6,
+      20, -6, 6, 20, 6, 6, 20, -6, -6,
+    ]);
+    expect(computeMeshHeadedShaftDir(headedTris, [-17, -8, -8], [20, 8, 8])).toEqual([-1, 0, 0]);
+
+    // Symmetric plain axle (12x12 at both ends) -> null
+    const symAxleTris = new Float32Array([
+      -30, -6, -6, -30, 6, -6, -30, 6, 6,
+      30, -6, -6, 30, 6, -6, 30, 6, 6,
+    ]);
+    expect(computeMeshHeadedShaftDir(symAxleTris, [-30, -6, -6], [30, 6, 6])).toBeNull();
+
+    // Standard brick (40x24x80) -> null
+    const brickTris = new Float32Array([
+      -40, 0, -20, -40, 24, -20, -40, 24, 20,
+      40, 0, -20, 40, 24, -20, 40, 24, 20,
+    ]);
+    expect(computeMeshHeadedShaftDir(brickTris, [-40, 0, -20], [40, 24, 20])).toBeNull();
+  });
 });
+
 
 
 

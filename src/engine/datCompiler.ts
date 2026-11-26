@@ -66,6 +66,8 @@ export interface CompiledDatMesh {
   subBoxes?: LocalBox6[];
   /** Local-space outward external stud positions & unit normals (top & SNOT side studs). */
   studs?: LocalStud[];
+  /** Optional local-space unit vector pointing from narrow shaft toward wide head/ball/stop on asymmetric headed fasteners. */
+  headedShaftDir?: readonly [number, number, number];
   /** Optional per-vertex concave-cavity ambient occlusion (0..255; undefined when no cavities exist). */
   cavityAo?: Uint8Array;
   min: [number, number, number];
@@ -2203,6 +2205,12 @@ export function compileDatEntry(
     [maxX, maxY, maxZ],
   );
 
+  const headedShaftDir = computeMeshHeadedShaftDir(
+    trisArr,
+    [minX, minY, minZ],
+    [maxX, maxY, maxZ],
+  );
+
   return {
     tris: trisArr,
     norms: normsArr,
@@ -2218,8 +2226,86 @@ export function compileDatEntry(
     ...(texBatches.length > 0 ? { texBatches } : {}),
     ...(subBoxes ? { subBoxes } : {}),
     ...(localStuds.length > 0 ? { studs: localStuds } : {}),
+    ...(headedShaftDir ? { headedShaftDir } : {}),
     ...(cavityAo ? { cavityAo } : {}),
     min: [minX, minY, minZ],
     max: [maxX, maxY, maxZ],
   };
+}
+
+/**
+ * Pure 3D cross-section geometry detector for asymmetric headed shafts/fasteners
+ * (e.g. Technic towball-axles, axles with stop/stud, pins with stud/flange, stopped bars).
+ *
+ * When a shaft-like part (`L >= 20` LDU, `perpMax <= 22` LDU, `L >= perpMax * 1.25`) has
+ * one narrow end that fits through a standard Technic/pin hole (`<= 13.5` LDU) and an
+ * opposite end significantly wider (`>= 1.20 * narrow` and `>= narrow + 2.5` LDU), returns
+ * the local unit vector pointing FROM the narrow shaft TOWARD the wide head/ball/stop.
+ *
+ * Physically, such a part can only be inserted head-last (withdrawn along `headedShaftDir`),
+ * never forced head-first backwards through a narrow hole.
+ */
+export function computeMeshHeadedShaftDir(
+  tris: Float32Array,
+  min: readonly [number, number, number],
+  max: readonly [number, number, number],
+): readonly [number, number, number] | null {
+  if (tris.length < 9) return null;
+  const dims = [max[0] - min[0], max[1] - min[1], max[2] - min[2]];
+  let axis = 0;
+  if (dims[1] > dims[axis]) axis = 1;
+  if (dims[2] > dims[axis]) axis = 2;
+  const perpA = (axis + 1) % 3;
+  const perpB = (axis + 2) % 3;
+  const L = dims[axis];
+  const perpMax = Math.max(dims[perpA], dims[perpB]);
+  if (L < 20 || perpMax > 22 || L < perpMax * 1.25) return null;
+
+  const negCut = min[axis] + L * 0.35;
+  const posCut = max[axis] - L * 0.35;
+
+  let negMinA = Infinity;
+  let negMaxA = -Infinity;
+  let negMinB = Infinity;
+  let negMaxB = -Infinity;
+  let posMinA = Infinity;
+  let posMaxA = -Infinity;
+  let posMinB = Infinity;
+  let posMaxB = -Infinity;
+  let negCount = 0;
+  let posCount = 0;
+
+  for (let i = 0; i < tris.length; i += 3) {
+    const c = tris[i + axis];
+    const a = tris[i + perpA];
+    const b = tris[i + perpB];
+    if (c <= negCut) {
+      if (a < negMinA) negMinA = a;
+      if (a > negMaxA) negMaxA = a;
+      if (b < negMinB) negMinB = b;
+      if (b > negMaxB) negMaxB = b;
+      negCount++;
+    }
+    if (c >= posCut) {
+      if (a < posMinA) posMinA = a;
+      if (a > posMaxA) posMaxA = a;
+      if (b < posMinB) posMinB = b;
+      if (b > posMaxB) posMaxB = b;
+      posCount++;
+    }
+  }
+  if (negCount < 3 || posCount < 3) return null;
+
+  const negSpan = Math.max(negMaxA - negMinA, negMaxB - negMinB);
+  const posSpan = Math.max(posMaxA - posMinA, posMaxB - posMinB);
+  const narrow = Math.min(negSpan, posSpan);
+  const wide = Math.max(negSpan, posSpan);
+
+  if (narrow <= 1.0 || narrow > 13.5) return null;
+  if (wide < narrow * 1.2 || wide - narrow < 2.5) return null;
+
+  const sign = posSpan > negSpan ? 1 : -1;
+  if (axis === 0) return [sign, 0, 0];
+  if (axis === 1) return [0, sign, 0];
+  return [0, 0, sign];
 }

@@ -1349,7 +1349,69 @@ describe('placementArrows — LEGO-style automatic placement arrows & offsets', 
     const res = computeAutoPlacementOffsetsForSequence(steps);
     expect(res.get('s2')?.['rear_snot_tile']).toBeUndefined();
   });
+
+  it('never inserts an asymmetric headed fastener (e.g. towball-axle) head-first backwards through a narrow liftarm hole', () => {
+    // 1. Towball-axle with wide ball on TOP (+Y): lifts cleanly +Y (drops shaft-first down into liftarm)
+    const uprightRes = computeAutoPlacementOffsetsForSequence([
+      {
+        id: 's1',
+        camera: { az: 38, el: 28, side: 'top' },
+        parts: [
+          makePart('liftarm', 0, 20, 0, 18, 8, 80, BLACK),
+          {
+            ...makePart('towball_top', 0, 8, 20, 16, 37, 16, DARK_GRAY),
+            headedShaftDir: [0, 1, 0],
+          },
+        ],
+      },
+    ]);
+    const topOff = uprightRes.get('s1')?.['towball_top'];
+    expect(topOff).toBeDefined();
+    expect(topOff!.y).toBeGreaterThanOrEqual(24);
+    expect(topOff!.x).toBe(0);
+    expect(topOff!.z).toBe(0);
+
+    // 2. Towball-axle with wide ball on BOTTOM (-Y) viewed from top:
+    // MUST NEVER pull +Y (which would try to push the 16 LDU ball downwards through a 12 LDU hole!)
+    const invRes = computeAutoPlacementOffsetsForSequence([
+      {
+        id: 's1',
+        camera: { az: 38, el: 28, side: 'top' },
+        parts: [
+          makePart('liftarm', 0, 20, 0, 18, 8, 80, BLACK),
+          {
+            ...makePart('towball_bot', 0, 8, 20, 16, 37, 16, DARK_GRAY),
+            headedShaftDir: [0, -1, 0],
+          },
+        ],
+      },
+    ]);
+    const invOff = invRes.get('s1')?.['towball_bot'];
+    if (invOff) {
+      expect(invOff.y).toBeLessThan(0);
+    }
+
+    // 3. Towball-axle with wide ball on BOTTOM (-Y) viewed from flipped bottom camera:
+    // pulls cleanly -Y (UP on screen on the flipped model, dropping shaft-first into liftarm!)
+    const botViewRes = computeAutoPlacementOffsetsForSequence([
+      {
+        id: 's1',
+        camera: { az: 38, el: -28, side: 'bottom' },
+        parts: [
+          makePart('liftarm', 0, 20, 0, 18, 8, 80, BLACK),
+          {
+            ...makePart('towball_bot', 0, 8, 20, 16, 37, 16, DARK_GRAY),
+            headedShaftDir: [0, -1, 0],
+          },
+        ],
+      },
+    ]);
+    const botOff = botViewRes.get('s1')?.['towball_bot'];
+    expect(botOff).toBeDefined();
+    expect(botOff!.y).toBeLessThanOrEqual(-24);
+  });
 });
+
 
 
 

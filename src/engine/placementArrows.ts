@@ -51,6 +51,8 @@ export interface PlacementPartInput {
   localUp?: readonly [number, number, number];
   /** Optional world-space outward studs belonging to this part (from compiled .dat geometry). */
   studs?: ReadonlyArray<PlacementStud>;
+  /** Optional world-space unit vector pointing from narrow shaft toward wide head/ball/stop on asymmetric headed fasteners. */
+  headedShaftDir?: readonly [number, number, number];
 }
 
 export interface PlacementStepInput {
@@ -1368,6 +1370,7 @@ function chooseInsertionDirs(
   cameraSide: 'top' | 'bottom',
   isLateralPrimary: boolean,
   cameraAzDeg = 38,
+  headedShaftDir?: readonly [number, number, number],
 ): { preferred: Vec3; fallbacks: Vec3[]; preferShortestDir?: boolean } {
   const verticalDefault: Vec3 = cameraSide === 'bottom' ? [0, -1, 0] : [0, 1, 0];
   const verticalOpposite: Vec3 = cameraSide === 'bottom' ? [0, 1, 0] : [0, -1, 0];
@@ -1383,6 +1386,14 @@ function chooseInsertionDirs(
   }
 
   if (contacts.verticalCoaxial) {
+    // An asymmetric headed shaft/towball/stop-axle can ONLY be inserted from its wide-head side
+    // (withdrawn along `headedShaftDir`), never forced head-first backwards through a narrow hole.
+    if (headedShaftDir && Math.abs(headedShaftDir[1]) >= 0.85) {
+      return {
+        preferred: [0, headedShaftDir[1] >= 0 ? 1 : -1, 0],
+        fallbacks: [],
+      };
+    }
     return {
       preferred: verticalDefault,
       fallbacks: [verticalOpposite],
@@ -1390,6 +1401,14 @@ function chooseInsertionDirs(
   }
   if (contacts.horizontalCoaxial && contacts.horizontalCoaxialAxis !== null) {
     const axis = contacts.horizontalCoaxialAxis;
+    if (headedShaftDir && Math.abs(headedShaftDir[axis]) >= 0.85) {
+      const headSign = headedShaftDir[axis] >= 0 ? 1 : -1;
+      const headDir: Vec3 = axis === 0 ? [headSign, 0, 0] : [0, 0, headSign];
+      return {
+        preferred: headDir,
+        fallbacks: [],
+      };
+    }
     const az = (cameraAzDeg * Math.PI) / 180;
     const camSign = (axis === 0 ? Math.sin(az) : Math.cos(az)) >= 0 ? 1 : -1;
     const pref: Vec3 = axis === 0 ? [camSign, 0, 0] : [0, 0, camSign];
@@ -1476,17 +1495,22 @@ function computeFirstStepOffsets(
   }
 
   // Score each part for being the primary grounded base piece:
-  // supporting other parts > central hub touching multiple Step-1 parts > largest volume > on base plane
+  // supporting other parts > central hub touching multiple Step-1 parts > structural host over slender vertical shafts > on base plane > largest volume
   const baseScores = parts.map((p) => {
+    const s = boxSize(p.box);
     const vol = boxVolume(p.box);
     const sup = supportCount.get(p.id) || 0;
     let touchCount = 0;
     for (const other of parts) {
       if (other.id !== p.id && boxesWithinMargin(p.box, other.box, CONTACT_EPS)) touchCount++;
     }
-    const onGround = isBottomView
-      ? (Math.abs(p.box.max[1] - basePlaneY) <= CONTACT_EPS ? 1 : 0)
-      : (Math.abs(p.box.min[1] - basePlaneY) <= CONTACT_EPS ? 1 : 0);
+    const isSlenderVertShaft =
+      s[1] > Math.max(s[0], s[2]) * 1.35 && Math.max(s[0], s[2]) <= 22;
+    const onGround = isSlenderVertShaft
+      ? 0
+      : isBottomView
+        ? (Math.abs(p.box.max[1] - basePlaneY) <= CONTACT_EPS ? 1 : 0)
+        : (Math.abs(p.box.min[1] - basePlaneY) <= CONTACT_EPS ? 1 : 0);
     const isSupported = supportedByAnother.has(p.id) ? 1 : 0;
     return {
       part: p,
@@ -1494,6 +1518,7 @@ function computeFirstStepOffsets(
         sup * 1_000_000 +
         (1 - isSupported) * 200_000 +
         touchCount * 120_000 +
+        (isSlenderVertShaft ? -40_000 : 0) +
         onGround * 20_000 +
         vol,
     };
@@ -1550,6 +1575,7 @@ function computeFirstStepOffsets(
       cameraSide,
       isLateral,
       step.camera.az,
+      p.headedShaftDir,
     );
     const otherSiblings = parts.filter((q) => q.id !== p.id && !baseSet.has(q.id));
     const coaxialAxis: 0 | 1 | 2 | null = contacts.verticalCoaxial
@@ -1810,6 +1836,7 @@ function computeSubsequentStepOffsets(
       cameraSide,
       c.isLateral,
       step.camera.az,
+      c.part.headedShaftDir,
     );
     const coaxialAxis: 0 | 1 | 2 | null = c.contacts.verticalCoaxial
       ? 1
