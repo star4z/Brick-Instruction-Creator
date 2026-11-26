@@ -15,6 +15,7 @@ import {
   type DynamicPartDescriptor,
 } from '../dynamicStepSizer';
 import {
+  boxesPhysicallyTouchBasic,
   buildLocalSubBoxes,
   buildPhysicalVerticalPrereqMap,
   canFlushSidewaysConnect,
@@ -942,4 +943,57 @@ describe('Concave Sub-Box Collider & Zero-Floating Support Rules', () => {
     // so the pin always has an open hole entrance to slide into!
     expect(Math.max(stepOf(4), stepOf(5))).toBeGreaterThan(stepOf(3));
   });
+
+  it('rejects structural stud-clutch contact on smooth studless tile tops while allowing minifigures, studded undersides, and through-axles', () => {
+    const floorPlate = makeWorldBox(-40, 0, -40, 40, 12, 40);
+    const smoothTile = makeWorldBox(-20, 8, -20, 20, 16, 20);
+    const brickAboveTile = makeWorldBox(-20, 16, -20, 20, 40, 20);
+    const minifigOnTile = makeWorldBox(-15, 16, -10, 15, 44, 10);
+    const vertAxleThroughTile = makeWorldBox(-4, 0, -4, 4, 48, 4);
+
+    // Floor plate (studded) -> smoothTile: valid clutch on the tile's underside
+    expect(
+      boxesPhysicallyTouchBasic(floorPlate, smoothTile, 'structural', 'structural', 'none', 'none', false, true),
+    ).toBe(true);
+
+    // smoothTile (smooth top, zero studs) -> brickAboveTile: NOT a structural clutch connection
+    expect(
+      boxesPhysicallyTouchBasic(smoothTile, brickAboveTile, 'structural', 'structural', 'none', 'none', true, false),
+    ).toBe(false);
+
+    // smoothTile -> minifigure standing loosely on top: allowed
+    expect(
+      boxesPhysicallyTouchBasic(smoothTile, minifigOnTile, 'structural', 'figure', 'none', 'none', true, false),
+    ).toBe(true);
+
+    // smoothTile (round tile with hole) <-> vertical axle passing through it (3-axis interlocking): allowed
+    expect(
+      boxesPhysicallyTouchBasic(smoothTile, vertAxleThroughTile, 'structural', 'axle', 'none', 'articulated', true, false),
+    ).toBe(true);
+
+    // In buildPhysicalVerticalPrereqMap: a floor-supported tile still sits in roof's belowMap (never trapped),
+    // while a brick whose ONLY lower neighbor is a smooth tile does NOT treat the tile as lower stud support.
+    const boxes: WorldBox[] = [
+      floorPlate,                                // 0: studded floor
+      smoothTile,                                // 1: smooth tile on floor
+      makeWorldBox(-20, 16, -20, 20, 32, 20),    // 2: loose brick resting only on smooth tile
+      makeWorldBox(-40, 32, -40, 40, 44, 40),    // 3: spanning roof above tile & brick
+    ];
+    const adj: number[][] = [
+      [1],    // 0: floor -> tile
+      [0, 2], // 1: tile -> floor, (fallback edge to brick)
+      [1, 3], // 2: brick -> tile, roof
+      [2],    // 3: roof -> brick
+    ];
+    const roles = ['structural', 'structural', 'structural', 'structural'];
+    const cladding = [false, false, false, false];
+    const smoothTopFlags = [false, true, false, false];
+    const { belowMap } = buildPhysicalVerticalPrereqMap(boxes, adj, roles, cladding, undefined, null, smoothTopFlags);
+
+    // Tile (1) is supported by studded floor (0) so it blocks Roof (3)
+    expect(belowMap[3]).toContain(1);
+    // Brick (2) only has smooth tile (1) below it, so smooth tile does NOT count as structural lower support
+    expect(belowMap[3]).not.toContain(2);
+  });
 });
+

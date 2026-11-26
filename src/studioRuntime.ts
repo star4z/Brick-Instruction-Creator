@@ -183,6 +183,8 @@ import {
   analyzeUndersideAssembly,
   buildInvertedVerticalPrereqMap,
   collectCapInnerAttachments,
+  isLooseHoleBearing,
+  isStrictDeckUndersidePart,
 } from './engine/undersideAssembly';
 import {
   buildMinifigExplodedPlan,
@@ -3184,7 +3186,7 @@ class WebGLBrickEngine {
     const eye = [center[0]+dist*Math.sin(az)*Math.cos(el), center[1]+dist*Math.sin(el), center[2]+dist*Math.cos(az)*Math.cos(el)];
     const near = Math.max(1, dist - clipRadius * 2.4);
     const far = dist + clipRadius * 2.4;
-    const view = lookAtMat4(eye, center, [0, 1, 0]);
+    const view = lookAtMat4(eye, center, elDeg < 0 ? [0, -1, 0] : [0, 1, 0]);
     if (tightFit && fixedHalfH <= 0) {
       const tightArrays = [];
       if (mesh.triPos && mesh.triPos.length >= 9) tightArrays.push(mesh.triPos);
@@ -5173,14 +5175,48 @@ function canConnectSideways(part, role) {
   });
 }
 
+// Returns true for flat upright studless tiles (e.g. Tile 1x2, Tile 2x2, Round Tile 2x2 w/ Hole)
+// whose smooth top face has zero studs and therefore cannot structurally clutch bricks placed on top.
+function isSmoothStudlessTopPart(part, box, role, sideCap = 'none') {
+  if (!part || !box) return false;
+  if (part.children && part.children.length > 0) return false;
+  if (role === 'figure' || role === 'wheel' || role === 'axle' || role === 'pin' || role === 'wheel_holder') {
+    return false;
+  }
+  if (sideCap && sideCap !== 'none') return false;
+  const m = part.m || R_ID;
+  if (m[4] < 0.7) return false;
+  const h = box.max[1] - box.min[1];
+  if (h > 10.5) return false;
+  const def = resolvePart(part.p);
+  const name = (def?.name || '').toLowerCase();
+  if (/\b(?:jumper|turntable|clip|hinge|bar|bracket|handle|hook|lever|stud)\b/.test(name)) {
+    return false;
+  }
+  const compiled = compileEmbeddedDat(part.p);
+  if (compiled) {
+    if (compiled.studs && compiled.studs.length > 0) {
+      for (let i = 0; i < compiled.studs.length; i++) {
+        const st = compiled.studs[i];
+        const wn = xformNorm([st[3], st[4], st[5]], m, 0);
+        if (wn[1] >= 0.5) return false;
+      }
+      return true;
+    }
+    return def?.studs === false || /\btile\b/.test(name);
+  }
+  return def?.studs === false;
+}
+
 // Strict LEGO clutch contact check:
 // - Train wheels attach ONLY to wheel holders or Technic axles.
+// - Smooth studless tiles cannot structurally clutch bricks resting on their top face.
 // - Upright bricks/plates/slopes/tiles connect via vertical stud footprint overlap (ovX >= 3 && ovZ >= 3),
-//   NOT by grazing smooth vertical side walls (which caused floating inverted slopes & train-body bleed into bogies!).
+//   NOT by grazing smooth vertical side walls.
 // - Sideways contacts require either 3-axis interlocking (SNOT studs/pins/clips engaged >= 1.5 LDU)
 //   or BOTH parts having sideways/SNOT/clip/hinge/window connection capability.
-function boxesPhysicallyTouch(a, b, roleA, roleB, sideCapA = true, sideCapB = true, subA = null, subB = null) {
-  return partsPhysicallyTouch(a, b, subA, subB, roleA, roleB, sideCapA, sideCapB);
+function boxesPhysicallyTouch(a, b, roleA, roleB, sideCapA = true, sideCapB = true, subA = null, subB = null, smoothTopA = false, smoothTopB = false) {
+  return partsPhysicallyTouch(a, b, subA, subB, roleA, roleB, sideCapA, sideCapB, smoothTopA, smoothTopB);
 }
 
 function mat3Transpose(m) {
@@ -5418,17 +5454,17 @@ function detectDuplicateSubassemblies(parts, boxes, adj, roles) {
 // belowMap[i] = parts sitting directly underneath `i` that have lower/side support and MUST be
 // placed before `i` (pure top-hung/underside-attached pieces are excluded so they snap cleanly
 // onto the spanning upper plate after it is placed, instead of floating in mid-air before it!).
-function buildVerticalPrereqMap(boxes, adj, roles, claddingFlags, activeIndices, subBoxes = null) {
-  return buildPhysicalVerticalPrereqMap(boxes, adj, roles, claddingFlags, activeIndices, subBoxes);
+function buildVerticalPrereqMap(boxes, adj, roles, claddingFlags, activeIndices, subBoxes = null, smoothTopFlags = null) {
+  return buildPhysicalVerticalPrereqMap(boxes, adj, roles, claddingFlags, activeIndices, subBoxes, smoothTopFlags);
 }
 
 // Build bottom-up zero-floating steps for 1 canonical copy of a duplicate submodel or modular section.
 // When a large section has a broad Primary Structural Deck sitting above isolated suspended underside
-// pockets (e.g. hanging nose/belly structures or captured Technic axle mechanisms), it automatically:
-//   0. Pre-builds any multi-part Technic axle/bar mechanisms as standalone sub-chapters
-//   1. Builds the rigid Primary Structural Deck right-side up
-//   2. Flips upside down (side: 'bottom', cue: 'flip_vertical') to insert pre-built Technic mechanisms
-//      into deck holes and stack underside bricks & retaining caps in inverted-gravity order
+// pockets (e.g. hanging underside housings, wheel assemblies, or captured Technic axle mechanisms), it automatically:
+//   0. Pre-builds any multi-part Technic axle/bar mechanisms and cohesive multi-part underside modules as standalone sub-chapters
+//   1. Builds the visible Primary Structural Deck right-side up (deferring hidden underside-only deck plates)
+//   2. Flips the model upside down (side: 'bottom', cue: 'flip_vertical') to place deferred deck-underside plates,
+//      insert pre-built Technic mechanisms into deck holes, and snap completed underside sub-modules into place
 //   3. Flips right-side up (side: 'top', cue: 'flip_vertical') and builds the upper structure bottom-up
 function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount, outPrebuiltSubChapters = null) {
   const n = canonicalParts.length;
@@ -5436,10 +5472,11 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount, outPrebui
   const subBoxes = canonicalParts.map(p => computeWorldSubBoxes(p));
   const roles = canonicalParts.map(p => classifyPartRole(p));
   const sideCaps = canonicalParts.map((p, i) => canConnectSideways(p, roles[i]));
+  const smoothTopFlags = canonicalParts.map((p, i) => isSmoothStudlessTopPart(p, boxes[i], roles[i], sideCaps[i]));
   const claddingFlags = canonicalParts.map((p, i) => isSidewaysCladdingPart(p, boxes[i]));
   const layerY = canonicalParts.map((p, i) => computeBuildLayerY(p, boxes[i]));
-  const adj = buildSpatialAdjacency(canonicalParts, boxes, roles, sideCaps, subBoxes);
-  const { belowMap } = buildVerticalPrereqMap(boxes, adj, roles, claddingFlags, undefined, subBoxes);
+  const adj = buildSpatialAdjacency(canonicalParts, boxes, roles, sideCaps, subBoxes, smoothTopFlags);
+  const { belowMap } = buildVerticalPrereqMap(boxes, adj, roles, claddingFlags, undefined, subBoxes, smoothTopFlags);
   const fastenerGuards = createHorizontalFastenerGuards(boxes, adj, roles, belowMap);
   const subDescriptors = canonicalParts.map((p, i) => ({
     index: i,
@@ -5476,8 +5513,10 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount, outPrebui
   const undersidePlan = analyzeUndersideAssembly(undersideInputs, adj);
 
   if (undersidePlan.hasSuspendedUnderside) {
-    // Phase 0: Pre-build any multi-part Technic axle/bar mechanisms as standalone sub-chapters
+    // Phase 0: Pre-build any multi-part Technic axle/bar mechanisms AND cohesive multi-part
+    // underside structural modules as standalone right-side-up sub-chapters
     const mechSubMap = new Map();
+    const undersideSubMap = new Map();
     if (Array.isArray(outPrebuiltSubChapters)) {
       for (const mech of undersidePlan.mechanisms) {
         const mechSubId = `${groupId}_${mech.id}`;
@@ -5495,21 +5534,55 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount, outPrebui
         });
         mechSubMap.set(mech.id, {
           id: `${mechSubId}_c0`,
+          subChapterId: mechSubId,
           name: mech.name,
           repeatCount: 1,
           totalRepeatCount: 1,
           canonicalParts: mechCanonical,
         });
       }
+
+      for (const subSpec of undersidePlan.subassemblies || []) {
+        const modSubId = `${groupId}_${subSpec.id}`;
+        const modCanonical = normalizeCanonicalSubParts(
+          subSpec.partIndices.map(i => canonicalParts[i]),
+          modSubId,
+        );
+        const modSteps = buildLocalSubmodelSteps(modCanonical, modSubId, 1);
+        outPrebuiltSubChapters.push({
+          id: modSubId,
+          name: subSpec.name,
+          pieceCount: subSpec.partIndices.length,
+          canonicalParts: modCanonical,
+          steps: modSteps,
+        });
+        undersideSubMap.set(subSpec.id, {
+          id: `${modSubId}_c0`,
+          subChapterId: modSubId,
+          name: subSpec.name,
+          repeatCount: 1,
+          totalRepeatCount: 1,
+          attachVerb: 'Attach',
+          canonicalParts: modCanonical,
+        });
+      }
     }
 
-    // Phase 1: Build the Primary Structural Deck right-side up before flipping
+    // Phase 1: Build the visible Primary Structural Deck right-side up before flipping.
+    // Respect bottom-up vertical prerequisites within the deck AND defer any underside-only
+    // deck plates (clutched strictly underneath already-placed spanning deck plates) into
+    // Phase 2 so they are never placed hidden underneath while right-side up.
     const deckRem = new Set(undersidePlan.deckPartIndices);
+    const deferredDeckUnderside = [];
     while (deckRem.size > 0) {
       const placedBeforeStep = new Set(placed);
+      const isDeckPrereqGrounded = placedBeforeStep.size > 0
+        ? createGroundedPrereqChecker(adj, belowMap, placedBeforeStep, deckRem)
+        : null;
       let frontier;
       if (placed.size === 0) {
-        const pool = Array.from(deckRem);
+        const unblockedFirst = Array.from(deckRem).filter(i => !belowMap[i].some(u => deckRem.has(u)));
+        const pool = unblockedFirst.length > 0 ? unblockedFirst : Array.from(deckRem);
         pool.sort((a, b) => layerY[a] - layerY[b]);
         const minY = layerY[pool[0]];
         const lowBand = pool.filter(i => layerY[i] <= minY + 16);
@@ -5521,7 +5594,21 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount, outPrebui
         frontier = lowBand;
       } else {
         const rawFrontier = Array.from(deckRem).filter(i => adj[i].some(nb => placedBeforeStep.has(nb)));
-        frontier = rawFrontier.length > 0 ? rawFrontier : Array.from(deckRem).sort((a, b) => layerY[a] - layerY[b]);
+        const baseUnblocked = rawFrontier.filter(i =>
+          !belowMap[i].some(u => deckRem.has(u) && isDeckPrereqGrounded(u)),
+        );
+        const candFrontier = baseUnblocked.length > 0 ? baseUnblocked : rawFrontier;
+        const uprightFrontier = candFrontier.filter(i => !isStrictDeckUndersidePart(i, boxes, adj, placedBeforeStep));
+        if (uprightFrontier.length > 0) {
+          frontier = uprightFrontier;
+        } else if (rawFrontier.length > 0) {
+          // Only hidden underside-only deck attachments remain — defer them to Phase 2 (after flipping over)!
+          for (const remIdx of deckRem) deferredDeckUnderside.push(remIdx);
+          deckRem.clear();
+          break;
+        } else {
+          frontier = Array.from(deckRem).sort((a, b) => layerY[a] - layerY[b]);
+        }
         const skuCountsInBand = new Map();
         for (const idx of frontier) {
           const sku = subDescriptors[idx].sku;
@@ -5540,6 +5627,12 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount, outPrebui
           Array.from(deckRem).filter(i => {
             if (placedInStep.has(i)) return false;
             if (Math.abs(layerY[i] - anchorY) > 12) return false;
+            if (placedBeforeStep.size > 0) {
+              if (isStrictDeckUndersidePart(i, boxes, adj, placedBeforeStep)) return false;
+              if (belowMap[i].some(u => deckRem.has(u) && !placedBeforeStep.has(u) && isDeckPrereqGrounded(u))) return false;
+            } else {
+              if (belowMap[i].some(u => deckRem.has(u))) return false;
+            }
             return isCandidateConnectedForStep(i, anchorConnectedToPrev, adj, placedBeforeStep, placedInStep);
           }),
         modelBounds: subModelBounds,
@@ -5571,10 +5664,89 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount, outPrebui
       });
     }
 
-    // Phase 2: Flip upside down (side: 'bottom') and build suspended underside pockets
-    // in inverted-gravity order (Technic axle mechanisms first, then descending world-Y bricks & caps)
+    // Phase 2: Flip model upside down (side: 'bottom') and build all underside work in one clean batch:
+    //   2.0 Deferred deck-underside plates (clutched directly to the now-exposed underside of the deck)
+    //   2a  Pre-built Technic axle/bar mechanisms inserted into deck holes
+    //   2b  Pre-built cohesive multi-part underside modules snapped straight onto the inverted deck/axle
+    //   2c  Any remaining small/flat non-module pocket parts in inverted-gravity order
     activeCam = { side: 'bottom', corner: activeCam.corner, az: activeCam.az, el: -30 };
     let isFirstUpsideDownStep = true;
+
+    const emitInvertedStepBatch = (indexList) => {
+      const batchRem = new Set(indexList.filter(i => remaining.has(i)));
+      if (batchRem.size === 0) return;
+      const aboveMap = buildInvertedVerticalPrereqMap(boxes, adj, roles, claddingFlags, Array.from(batchRem), placed);
+      while (batchRem.size > 0) {
+        const placedBeforeStep = new Set(placed);
+        const rawFrontier = Array.from(batchRem).filter(i => adj[i].some(nb => placedBeforeStep.has(nb)));
+        const unblocked = rawFrontier.filter(i => !aboveMap[i].some(u => batchRem.has(u)));
+        let frontier = unblocked.length > 0 ? unblocked : (rawFrontier.length > 0 ? rawFrontier : Array.from(batchRem));
+        // Defer loose round-hole bearings until their retaining cap/host is placed so they never float alone
+        const nonLoose = frontier.filter(i => !isLooseHoleBearing(undersideInputs[i]));
+        if (nonLoose.length > 0) frontier = nonLoose;
+        // Inverted gravity: highest world Y (closest to the inverted deck) comes FIRST, wheels last
+        frontier.sort((a, b) => {
+          const wa = roles[a] === 'wheel' ? 1 : 0;
+          const wb = roles[b] === 'wheel' ? 1 : 0;
+          if (wa !== wb) return wa - wb;
+          const dy = boxes[b].max[1] - boxes[a].max[1];
+          if (Math.abs(dy) > 4) return dy;
+          return boxes[b].center[1] - boxes[a].center[1];
+        });
+        const anchor = frontier[0];
+        const anchorTopY = boxes[anchor].max[1];
+        const anchorConnectedToPrev = adj[anchor].some(nb => placedBeforeStep.has(nb));
+        let stepIdx = selectDynamicStepIndices({
+          anchor,
+          parts: subDescriptors,
+          getEligibleCandidates: (placedInStep) =>
+            Array.from(batchRem).filter(i => {
+              if (placedInStep.has(i)) return false;
+              if (isLooseHoleBearing(undersideInputs[i]) && !isLooseHoleBearing(undersideInputs[anchor])) return false;
+              if (Math.abs(boxes[i].max[1] - anchorTopY) > 12) return false;
+              if (aboveMap[i].some(u => batchRem.has(u))) return false;
+              return isCandidateConnectedForStep(i, anchorConnectedToPrev, adj, placedBeforeStep, placedInStep);
+            }),
+          modelBounds: subModelBounds,
+          builtBounds,
+          activeCam,
+          isFirstStep: false,
+          totalPartsInScope: n,
+          isSubmodel: true,
+        });
+        // Pull in any inner-face cap attachments (e.g. tiles/round-hole retainers clutched to the cap plate)
+        const capExtras = collectCapInnerAttachments(stepIdx, batchRem, boxes, adj, roles);
+        if (capExtras.length > 0) {
+          stepIdx = [...stepIdx, ...capExtras];
+        }
+        for (const i of stepIdx) { batchRem.delete(i); remaining.delete(i); placed.add(i); }
+        const stepBoxes = stepIdx.map(i => boxes[i]);
+        for (const b of stepBoxes) {
+          builtBounds = expandBoundsWithBox(builtBounds, b);
+          builtBoxes.push(b);
+        }
+        sNum++;
+        steps.push({
+          id: `${groupId}_s${sNum}`,
+          num: sNum,
+          side: 'bottom',
+          corner: activeCam.corner,
+          az: activeCam.az,
+          el: -30,
+          cue: isFirstUpsideDownStep ? 'flip_vertical' : 'none',
+          isUpsideDownUndersideStep: true,
+          parts: stepIdx.map(i => canonicalParts[i]),
+          isSubmodelStep: true,
+        });
+        isFirstUpsideDownStep = false;
+      }
+    };
+
+    // 2.0 Place deferred deck-underside plates onto the now-exposed inverted deck first
+    if (deferredDeckUnderside.length > 0) {
+      emitInvertedStepBatch(deferredDeckUnderside);
+    }
+
     for (const pocket of undersidePlan.pockets) {
       // 2a. Insert pre-built Technic axle/bar mechanisms into the upside-down deck FIRST
       for (const mech of pocket.mechanisms) {
@@ -5604,55 +5776,44 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount, outPrebui
         isFirstUpsideDownStep = false;
       }
 
-      // 2b. Stack remaining pocket parts in inverted-gravity order (highest world Y first -> lowest cap last)
-      const pocketRem = new Set(pocket.structuralIndices.filter(i => remaining.has(i)));
-      const aboveMap = buildInvertedVerticalPrereqMap(boxes, adj, roles, claddingFlags, Array.from(pocketRem), placed);
-      while (pocketRem.size > 0) {
-        const placedBeforeStep = new Set(placed);
-        const rawFrontier = Array.from(pocketRem).filter(i => adj[i].some(nb => placedBeforeStep.has(nb)));
-        const unblocked = rawFrontier.filter(i => !aboveMap[i].some(u => pocketRem.has(u)));
-        let frontier = unblocked.length > 0 ? unblocked : (rawFrontier.length > 0 ? rawFrontier : Array.from(pocketRem));
-        // Inverted gravity: highest world Y (closest to the inverted deck) comes FIRST, wheels last
-        frontier.sort((a, b) => {
-          const wa = roles[a] === 'wheel' ? 1 : 0;
-          const wb = roles[b] === 'wheel' ? 1 : 0;
-          if (wa !== wb) return wa - wb;
-          const dy = boxes[b].max[1] - boxes[a].max[1];
-          if (Math.abs(dy) > 4) return dy;
-          return boxes[b].center[1] - boxes[a].center[1];
-        });
-        const anchor = frontier[0];
-        const anchorTopY = boxes[anchor].max[1];
-        const anchorConnectedToPrev = adj[anchor].some(nb => placedBeforeStep.has(nb));
-        let stepIdx = selectDynamicStepIndices({
-          anchor,
-          parts: subDescriptors,
-          getEligibleCandidates: (placedInStep) =>
-            Array.from(pocketRem).filter(i => {
-              if (placedInStep.has(i)) return false;
-              if (Math.abs(boxes[i].max[1] - anchorTopY) > 12) return false;
-              if (aboveMap[i].some(u => pocketRem.has(u))) return false;
-              return isCandidateConnectedForStep(i, anchorConnectedToPrev, adj, placedBeforeStep, placedInStep);
-            }),
-          modelBounds: subModelBounds,
-          builtBounds,
-          activeCam,
-          isFirstStep: false,
-          totalPartsInScope: n,
-          isSubmodel: true,
-        });
-        // Pull in any inner-face cap attachments (e.g. tiles/round-hole retainers clutched to the cap plate)
-        const capExtras = collectCapInnerAttachments(stepIdx, pocketRem, boxes, adj, roles);
-        if (capExtras.length > 0) {
-          stepIdx = [...stepIdx, ...capExtras];
+      // 2b. Snap each pre-built cohesive underside sub-module onto the inverted deck/axle in one step
+      for (const subSpec of pocket.subassemblies || []) {
+        const subIndices = subSpec.partIndices.filter(i => remaining.has(i));
+        if (subIndices.length === 0) continue;
+        let subCx = 0, subCz = 0;
+        for (const i of subIndices) {
+          subCx += boxes[i].center[0];
+          subCz += boxes[i].center[2];
         }
-        for (const i of stepIdx) { pocketRem.delete(i); remaining.delete(i); placed.add(i); }
-        const stepBoxes = stepIdx.map(i => boxes[i]);
+        subCx /= subIndices.length;
+        subCz /= subIndices.length;
+        let leadArrowId = canonicalParts[subIndices[0]]?.id || null;
+        let bestLeadScore = Infinity;
+        for (const i of subIndices) {
+          const dXZ = Math.hypot(boxes[i].center[0] - subCx, boxes[i].center[2] - subCz);
+          const score = dXZ - boxes[i].max[1] * 0.25;
+          if (score < bestLeadScore) { bestLeadScore = score; leadArrowId = canonicalParts[i].id; }
+        }
+        const subOffsets = {};
+        for (const i of subIndices) {
+          remaining.delete(i);
+          placed.add(i);
+          // Offset in -Y world space (UP on screen on the flipped model) with arrow pointing DOWN onto the deck
+          subOffsets[canonicalParts[i].id] = {
+            x: 0,
+            y: -44,
+            z: 0,
+            tilt: 0,
+            arrow: canonicalParts[i].id === leadArrowId,
+          };
+        }
+        const stepBoxes = subIndices.map(i => boxes[i]);
         for (const b of stepBoxes) {
           builtBounds = expandBoundsWithBox(builtBounds, b);
           builtBoxes.push(b);
         }
         sNum++;
+        const attachedMod = undersideSubMap.get(subSpec.id) || null;
         steps.push({
           id: `${groupId}_s${sNum}`,
           num: sNum,
@@ -5662,10 +5823,18 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount, outPrebui
           el: -30,
           cue: isFirstUpsideDownStep ? 'flip_vertical' : 'none',
           isUpsideDownUndersideStep: true,
-          parts: stepIdx.map(i => canonicalParts[i]),
+          defaultPartOffsets: subOffsets,
+          attachedSubmodel: attachedMod || undefined,
+          parts: subIndices.map(i => canonicalParts[i]),
           isSubmodelStep: true,
         });
         isFirstUpsideDownStep = false;
+      }
+
+      // 2c. Stack any remaining small/flat non-module pocket parts in inverted-gravity order
+      const looseIndices = pocket.looseStructuralIndices ?? pocket.structuralIndices;
+      if (looseIndices.length > 0) {
+        emitInvertedStepBatch(looseIndices);
       }
     }
     // Phase 3 resumes upright ('top') in the main bottom-up loop below;
@@ -5710,6 +5879,21 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount, outPrebui
         frontier = claddingReady.length > 0 ? claddingReady : rawFrontier;
       }
       if (frontier.length === 0) frontier = Array.from(remaining).sort((a, b) => layerY[a] - layerY[b]);
+      // Avoid interleaving hidden strict-underside overhang parts with visible upright parts:
+      // finish upright parts in the active layer band first so underside parts batch together cleanly.
+      const uprightInFrontier = frontier.filter(i => !isStrictDeckUndersidePart(i, boxes, adj, placedBeforeStep));
+      if (uprightInFrontier.length > 0 && uprightInFrontier.length < frontier.length) {
+        let minUnderY = Infinity;
+        for (const i of frontier) {
+          if (isStrictDeckUndersidePart(i, boxes, adj, placedBeforeStep) && layerY[i] < minUnderY) {
+            minUnderY = layerY[i];
+          }
+        }
+        const uprightNearBand = uprightInFrontier.filter(i => layerY[i] <= minUnderY + 32);
+        if (uprightNearBand.length > 0) {
+          frontier = uprightNearBand;
+        }
+      }
       const skuCountsInBand = new Map();
       for (const idx of frontier) {
         const sku = subDescriptors[idx].sku;
@@ -5721,6 +5905,7 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount, outPrebui
     const anchor = frontier[0];
     const anchorY = layerY[anchor];
     const anchorConnectedToPrev = placedBeforeStep.size > 0 && adj[anchor].some(nb => placedBeforeStep.has(nb));
+    const anchorIsStrictUnderside = placedBeforeStep.size > 0 && isStrictDeckUndersidePart(anchor, boxes, adj, placedBeforeStep);
     const stepIdx = selectDynamicStepIndices({
       anchor,
       parts: subDescriptors,
@@ -5732,6 +5917,7 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount, outPrebui
           if (isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, supportSet)) return false;
           if (fastenerGuards.isBlocked(i, placedBeforeStep, placedInStep, remaining)) return false;
           if (placedBeforeStep.size > 0) {
+            if (isStrictDeckUndersidePart(i, boxes, adj, placedBeforeStep) !== anchorIsStrictUnderside) return false;
             if (belowMap[i].some(u => !placedBeforeStep.has(u) && isPrereqGrounded(u))) return false;
           } else {
             if (belowMap[i].length > 0) return false;
@@ -5776,10 +5962,11 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount, outPrebui
 }
 
 // Fast 3D spatial hash broad-phase adjacency builder (wheel-aware & rejects smooth side-wall grazing + concave AABB cutouts!)
-function buildSpatialAdjacency(parts, boxes, roles, sideCaps = null, subBoxes = null) {
+function buildSpatialAdjacency(parts, boxes, roles, sideCaps = null, subBoxes = null, smoothTopFlags = null) {
   const n = parts.length;
   const caps = sideCaps || parts.map((p, i) => canConnectSideways(p, roles[i]));
   const subs = subBoxes || parts.map(p => computeWorldSubBoxes(p));
+  const smoothTops = smoothTopFlags || parts.map((p, i) => isSmoothStudlessTopPart(p, boxes[i], roles[i], caps[i]));
   const adj = Array.from({ length: n }, () => []);
   const cellSize = 80;
   const pad = 12;
@@ -5818,7 +6005,7 @@ function buildSpatialAdjacency(parts, boxes, roles, sideCaps = null, subBoxes = 
     const pk = lo * n + hi;
     if (tested.has(pk)) return;
     tested.add(pk);
-    if (boxesPhysicallyTouch(boxes[lo], boxes[hi], roles[lo], roles[hi], caps[lo], caps[hi], subs[lo], subs[hi])) {
+    if (boxesPhysicallyTouch(boxes[lo], boxes[hi], roles[lo], roles[hi], caps[lo], caps[hi], subs[lo], subs[hi], smoothTops[lo], smoothTops[hi])) {
       adj[lo].push(hi);
       adj[hi].push(lo);
     }
@@ -6329,7 +6516,8 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
   // 1. Build strict physical adjacency graph via 3D spatial hash broad-phase (wheel-aware & rejects smooth side-wall grazing + concave AABB cutouts!)
   const subBoxes = parts.map(p => computeWorldSubBoxes(p));
   const sideCaps = parts.map((p, i) => canConnectSideways(p, roles[i]));
-  const adj = buildSpatialAdjacency(parts, boxes, roles, sideCaps, subBoxes);
+  const smoothTopFlags = parts.map((p, i) => isSmoothStudlessTopPart(p, boxes[i], roles[i], sideCaps[i]));
+  const adj = buildSpatialAdjacency(parts, boxes, roles, sideCaps, subBoxes, smoothTopFlags);
 
   // 1a. Whole-Minifigure Assembly Grouping (NEVER build just a head — and NEVER sweep chairs/seats or furniture into figures!)
   const {
@@ -6488,7 +6676,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
     const remaining = new Set(idxList);
     const outSteps = [];
     const scopeIndices = Array.from(new Set([...Array.from(prePlacedSet), ...idxList]));
-    const { belowMap } = buildVerticalPrereqMap(boxes, adj, roles, claddingFlags, scopeIndices, subBoxes);
+    const { belowMap } = buildVerticalPrereqMap(boxes, adj, roles, claddingFlags, scopeIndices, subBoxes, smoothTopFlags);
     const fastenerGuards = createHorizontalFastenerGuards(boxes, adj, roles, belowMap, scopeIndices);
     const scopeBounds = computeBoundsFromBoxes(scopeIndices.map(i => boxes[i]));
     let builtBounds = prePlacedSet.size > 0
@@ -6537,6 +6725,19 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
         if (frontier.length === 0) {
           frontier = Array.from(remaining).sort((a, b) => layerY[a] - layerY[b]);
         }
+        const uprightInFrontier = frontier.filter(i => !isStrictDeckUndersidePart(i, boxes, adj, placedBeforeStep));
+        if (uprightInFrontier.length > 0 && uprightInFrontier.length < frontier.length) {
+          let minUnderY = Infinity;
+          for (const i of frontier) {
+            if (isStrictDeckUndersidePart(i, boxes, adj, placedBeforeStep) && layerY[i] < minUnderY) {
+              minUnderY = layerY[i];
+            }
+          }
+          const uprightNearBand = uprightInFrontier.filter(i => layerY[i] <= minUnderY + 32);
+          if (uprightNearBand.length > 0) {
+            frontier = uprightNearBand;
+          }
+        }
         const skuCountsInBand = new Map();
         for (const idx of frontier) {
           const sku = allPartDescriptors[idx].sku;
@@ -6549,6 +6750,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
       const anchor = frontier[0];
       const anchorY = layerY[anchor];
       const anchorConnectedToPrev = placedBeforeStep.size > 0 && adj[anchor].some(nb => placedBeforeStep.has(nb));
+      const anchorIsStrictUnderside = placedBeforeStep.size > 0 && isStrictDeckUndersidePart(anchor, boxes, adj, placedBeforeStep);
       const stepIndices = selectDynamicStepIndices({
         anchor,
         parts: allPartDescriptors,
@@ -6560,6 +6762,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
             if (Math.abs(layerY[i] - anchorY) > 12) return false;
             if (fastenerGuards.isBlocked(i, placedBeforeStep, placedInStep, remaining)) return false;
             if (placedBeforeStep.size > 0) {
+              if (isStrictDeckUndersidePart(i, boxes, adj, placedBeforeStep) !== anchorIsStrictUnderside) return false;
               if (belowMap[i].some(u => !placedBeforeStep.has(u) && isPrereqGrounded(u))) return false;
             } else {
               if (belowMap[i].length > 0) return false;
@@ -6846,9 +7049,13 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
               steps: subSteps,
             });
           } else {
-            // Emit each pre-built mechanism sub-assembly RIGHT BEFORE the step that attaches it,
-            // rather than up front before the section even starts!
-            const mechById = new Map(prebuiltMechChapters.map(m => [m.id, m]));
+            // Emit each pre-built mechanism or underside module sub-assembly RIGHT BEFORE the step
+            // that attaches it, rather than up front before the section starts or dumped at the end!
+            const mechById = new Map();
+            for (const m of prebuiltMechChapters) {
+              mechById.set(m.id, m);
+              mechById.set(`${m.id}_c0`, m);
+            }
             const emittedMechs = new Set();
             let curChunk = [];
             let chunkSeq = 0;
@@ -6870,10 +7077,10 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
               chunkSeq++;
             };
             for (const st of subSteps) {
-              const attId = st.attachedSubmodel?.id;
-              if (attId && mechById.has(attId) && !emittedMechs.has(attId)) {
+              const attKey = st.attachedSubmodel?.subChapterId || st.attachedSubmodel?.id;
+              const mechCh = attKey ? mechById.get(attKey) : null;
+              if (mechCh && !emittedMechs.has(mechCh.id)) {
                 flushSectionChunk();
-                const mechCh = mechById.get(attId);
                 chapters.push({
                   id: `subch_${++chSeq}_${mechCh.id}`,
                   name: mechCh.name,
@@ -6884,7 +7091,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
                   canonicalParts: mechCh.canonicalParts,
                   steps: mechCh.steps,
                 });
-                emittedMechs.add(attId);
+                emittedMechs.add(mechCh.id);
               }
               curChunk.push(st);
             }
@@ -7439,7 +7646,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
     const indices = group.indices;
     const placed = new Set();
     const remaining = new Set(indices);
-    const { belowMap } = buildVerticalPrereqMap(boxes, adj, roles, claddingFlags, indices, subBoxes);
+    const { belowMap } = buildVerticalPrereqMap(boxes, adj, roles, claddingFlags, indices, subBoxes, smoothTopFlags);
     let curSteps = [];
 
     // Analyze support & overhead enclosure for minifigures belonging to this model section
@@ -7590,6 +7797,19 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
         if (frontier.length === 0) {
           frontier = Array.from(remaining).sort((a, b) => layerY[a] - layerY[b]);
         }
+        const uprightInFrontier = frontier.filter(i => !isStrictDeckUndersidePart(i, boxes, adj, placed));
+        if (uprightInFrontier.length > 0 && uprightInFrontier.length < frontier.length) {
+          let minUnderY = Infinity;
+          for (const i of frontier) {
+            if (isStrictDeckUndersidePart(i, boxes, adj, placed) && layerY[i] < minUnderY) {
+              minUnderY = layerY[i];
+            }
+          }
+          const uprightNearBand = uprightInFrontier.filter(i => layerY[i] <= minUnderY + 32);
+          if (uprightNearBand.length > 0) {
+            frontier = uprightNearBand;
+          }
+        }
         const skuCountsInBand = new Map();
         for (const idx of frontier) {
           const sku = allPartDescriptors[idx].sku;
@@ -7669,6 +7889,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
       const placedBeforeStep = new Set(placed);
       const anchorY = layerY[anchor];
       const anchorConnectedToPrev = placedBeforeStep.size > 0 && adj[anchor].some(nb => placedBeforeStep.has(nb));
+      const anchorIsStrictUnderside = placedBeforeStep.size > 0 && isStrictDeckUndersidePart(anchor, boxes, adj, placedBeforeStep);
       const stepIndices = selectDynamicStepIndices({
         anchor,
         parts: allPartDescriptors,
@@ -7681,6 +7902,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
             if (Math.abs(layerY[i] - anchorY) > 12) return false;
             if (fastenerGuards.isBlocked(i, placedBeforeStep, placedInStep, remaining)) return false;
             if (placedBeforeStep.size > 0) {
+              if (isStrictDeckUndersidePart(i, boxes, adj, placedBeforeStep) !== anchorIsStrictUnderside) return false;
               if (belowMap[i].some(u => !placedBeforeStep.has(u) && isPrereqGrounded(u))) return false;
             } else {
               if (belowMap[i].length > 0) return false;
@@ -11467,7 +11689,7 @@ function bindHeroCameraInteractions(page) {
       document.getElementById('contextOverlay')?.classList.add('is-orbit-dragging');
     }
     moved = true;
-    az = (((az - dx * 0.7) % 360) + 360) % 360;
+    az = (((az + (el < 0 ? dx : -dx) * 0.7) % 360) + 360) % 360;
     el = clampCoverElevation(el + dy * 0.5);
     const roundedAz = ((Math.round(az) % 360) + 360) % 360;
     const roundedEl = Math.round(el);
@@ -11701,7 +11923,7 @@ function bindStepPageInteractions(page) {
           document.getElementById('contextOverlay')?.classList.add('is-orbit-dragging');
         }
         moved = true;
-        az = (((az - dx * 0.7) % 360) + 360) % 360;
+        az = (((az + (el < 0 ? dx : -dx) * 0.7) % 360) + 360) % 360;
         el = Math.max(-75, Math.min(75, el + dy * 0.5));
         const nextSide = el < 0 ? 'bottom' : 'top';
         const matchedPreset = findMatchingCameraPreset(az);
@@ -12036,7 +12258,7 @@ function renderContextOverlay(page) {
           <span class="hidden sm:inline text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">View</span>
           <div class="inline-flex rounded-md bg-[var(--surface-sunken)] p-0.5 text-[11px] sm:text-xs font-semibold gap-0.5 shrink-0">
             <button type="button" id="heroCamTop" title="Look down from above" class="px-1.5 sm:px-2 py-1 rounded inline-flex items-center gap-1 transition-colors cursor-pointer ${!isBottom ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'hover:bg-[var(--surface-hover)]'}">${buildCameraViewSvg('top')}<span>Top</span></button>
-            <button type="button" id="heroCamBot" title="Look up from underneath" class="px-1.5 sm:px-2 py-1 rounded inline-flex items-center gap-1 transition-colors cursor-pointer ${isBottom ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'hover:bg-[var(--surface-hover)]'}">${buildCameraViewSvg('bottom')}<span class="sm:hidden">Bot</span><span class="hidden sm:inline">Bottom</span></button>
+            <button type="button" id="heroCamBot" title="Flip model upside down" class="px-1.5 sm:px-2 py-1 rounded inline-flex items-center gap-1 transition-colors cursor-pointer ${isBottom ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'hover:bg-[var(--surface-hover)]'}">${buildCameraViewSvg('bottom')}<span class="sm:hidden">Bot</span><span class="hidden sm:inline">Bottom</span></button>
           </div>
           <div class="w-px h-4 bg-[var(--border)] shrink-0 sm:hidden" aria-hidden="true"></div>
           <span class="hidden sm:inline text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)] ml-1 mr-0.5">Rotate</span>
@@ -12544,7 +12766,7 @@ function renderContextOverlay(page) {
             <span class="hidden sm:inline text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">View</span>
             <div class="inline-flex rounded-md bg-[var(--surface-sunken)] p-0.5 text-[11px] sm:text-xs font-semibold gap-0.5 shrink-0">
               <button type="button" id="camTop" title="Look down from above" class="px-1.5 sm:px-2 py-1 rounded inline-flex items-center gap-1 transition-colors cursor-pointer ${cam.side === 'top' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'hover:bg-[var(--surface-hover)]'}">${buildCameraViewSvg('top')}<span>Top</span></button>
-              <button type="button" id="camBot" title="Look up from underneath" class="px-1.5 sm:px-2 py-1 rounded inline-flex items-center gap-1 transition-colors cursor-pointer ${cam.side === 'bottom' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'hover:bg-[var(--surface-hover)]'}">${buildCameraViewSvg('bottom')}<span class="sm:hidden">Bot</span><span class="hidden sm:inline">Bottom</span></button>
+              <button type="button" id="camBot" title="Flip model upside down" class="px-1.5 sm:px-2 py-1 rounded inline-flex items-center gap-1 transition-colors cursor-pointer ${cam.side === 'bottom' ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'hover:bg-[var(--surface-hover)]'}">${buildCameraViewSvg('bottom')}<span class="sm:hidden">Bot</span><span class="hidden sm:inline">Bottom</span></button>
             </div>
             <div class="w-px h-4 bg-[var(--border)] shrink-0 sm:hidden" aria-hidden="true"></div>
             <span class="hidden sm:inline text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)] ml-1 mr-0.5">Rotate</span>

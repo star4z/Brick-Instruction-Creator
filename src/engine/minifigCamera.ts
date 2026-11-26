@@ -110,6 +110,13 @@ export function cameraBasis(azDeg: number, elDeg: number): {
 
   // Unit vector pointing FROM target TOWARD orthographic camera eye (matches WebGLBrickEngine.computeMVP)
   const viewDir: Vec3 = [sinAz * cosEl, sinEl, cosAz * cosEl];
+  // When elDeg < 0 (upside-down underside steps), flip the MODEL upside down on the table
+  // (worldUp = [0, -1, 0]) so the camera looks down onto the exposed underside instead of peering up from below.
+  if (elDeg < 0) {
+    const right: Vec3 = [-cosAz, 0, sinAz];
+    const up: Vec3 = [sinAz * sinEl, -cosEl, cosAz * sinEl];
+    return { viewDir, right, up };
+  }
   const right: Vec3 = [cosAz, 0, -sinAz];
   const up: Vec3 = [-sinAz * sinEl, cosEl, -cosAz * sinEl];
   return { viewDir, right, up };

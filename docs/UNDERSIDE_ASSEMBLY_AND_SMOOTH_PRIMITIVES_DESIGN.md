@@ -39,23 +39,35 @@ Implemented in `analyzeUndersideAssembly`, `buildInvertedVerticalPrereqMap`, and
    - Verifies that all parts strictly below that deck break into **isolated localized underside pockets** (no single connected component below the deck spans `>= 50%` of the model's long axis — ensuring buildings/castles resting on a ground baseplate always stay normal bottom-up).
    - Verifies at least one substantial pocket (`>= 4` parts) attaches directly to the deck from below.
 
-2. **Pre-Built Technic Axle/Bar Mechanism Extraction**:
-   - Inside each suspended underside pocket, identifies connected clusters of non-stud-host Technic mechanism parts (Technic axles, liftarms/beams, bushes, axle connectors, towball axles) with `>= 2` parts containing at least one axle and one non-axle mechanism part, where the cluster has a vertical axle or touches the deck or a loose round-hole bearing (`isLooseHoleBearing`).
-   - Emits each mechanism as a standalone pre-built submodel chapter right before its parent section chapter so the builder assembles the Technic pole/bar unit first.
+2. **Pre-Built Technic Mechanisms & Underside Sub-Modules (`UndersideSubassemblySpec`)**:
+   - Inside each suspended underside pocket, identifies:
+     - **Technic axle/bar mechanisms**: connected clusters of non-stud-host Technic mechanism parts (`>= 2` parts with at least one axle and one non-axle mechanism part, touching the deck or a loose round-hole bearing or having a vertical axle).
+     - **Cohesive underside structural sub-modules**: remaining connected structural components inside the pocket with `>= 4` parts that either have multi-layer vertical height (`>= 14` LDU) or contain wheels (`Wheel Assembly` when wheeled, `Underside Module` otherwise). Rather than constructing complex housings or wheeled assemblies brick-by-brick hanging upside down (which leaves cantilevered pieces and impossible between-brick insertions), each sub-module is built right-side up bottom-up first as its own standalone sub-chapter and snapped onto the flipped deck in one clean attachment step.
+   - Pre-built sub-chapters are emitted inline immediately before the chunk/step that attaches them (matching normalized submodel IDs across continuation chunks).
 
-3. **Three-Phase Section Build Order** (wired in `buildLocalSubmodelSteps` in `src/studioRuntime.ts`):
-   - **Phase 1 (Upright, `side: 'top'`)**: Build the Primary Structural Deck to establish a rigid, flat chassis.
-   - **Phase 2 (Upside Down, `side: 'bottom'`, `cue: 'flip_vertical'`)**:
+3. **Three-Phase Section Build Order & Batching Underside Parts** (wired in `buildLocalSubmodelSteps` in `src/studioRuntime.ts`):
+   - **Phase 0 (Pre-Built Sub-Chapters, Upright)**: Build any extracted `mechanisms` and `subassemblies` right-side up in their own local frame first.
+   - **Phase 1 (Upright, `side: 'top'`)**: Build the Primary Structural Deck while enforcing `belowMap` vertical prerequisites and deferring any strictly covered deck-underside parts (`isStrictDeckUndersidePart` — parts sitting directly below an already-placed overhead plate with no lower vertical support) into `deferredDeckUnderside` so they are never placed unseen beneath the deck.
+   - **Phase 2 (Upside Down — Model Flipped, `side: 'bottom'`, `cue: 'flip_vertical'`)**:
      - Lock camera side via `forceSide: 'bottom'` in `optimizeStudioStepCameraSequence` (`src/engine/stepCamera.ts`).
+     - Place `deferredDeckUnderside` plates onto the now-exposed inverted deck first.
      - For each suspended underside pocket:
        1. Insert any pre-built **Technic mechanism** into the underside deck holes first (single attachment step with submodel callout).
-       2. Stack remaining pocket bricks in **inverted-gravity order** (descending world Y, from highest bricks touching the deck down to the bottom cap plate), obeying `buildInvertedVerticalPrereqMap` so inner parts are never trapped under lower caps.
-       3. Co-attach thin inner-face cap tiles/retainers (such as round-hole bearing tiles clutched to a bottom cap plate) via `collectCapInnerAttachments`.
-   - **Phase 3 (Upright, `side: 'top'`, `cue: 'flip_vertical'`)**: Flip right-side up and build the remaining upper structure bottom-up.
+       2. Attach any pre-built **Underside Module** / **Wheel Assembly** onto the flipped deck in a single attachment step with a clear vertical downward drop onto the inverted deck (`-44` world-Y offset = above on screen on the flipped model).
+       3. Stack any remaining flat/small `looseStructuralIndices` in **inverted-gravity order** (descending world Y, obeying `buildInvertedVerticalPrereqMap`), deferring loose round-hole bearings (`isLooseHoleBearing`) until their retaining cap plate is placed so they co-attach cleanly via `collectCapInnerAttachments` instead of floating alone on an axle.
+   - **Phase 3 (Upright, `side: 'top'`, `cue: 'flip_vertical'`)**: Flip right-side up and build the remaining upper structure bottom-up, avoiding mixing upright and strict-underside parts in the same step and finishing upright parts in the active layer band first so any remaining underside overhang parts batch together cleanly instead of triggering repeated camera flips.
 
 ---
 
-## 3. Generalized Naming (`src/engine/subdivisionAnalyzer.ts`)
+## 3. Smooth Studless Tile Top-Face Clutch Physics (`src/engine/partContact.ts`)
+
+- **Physical rule**: A smooth studless top surface (tiles, flat ingots, grilles, studless panels/windscreens — detected via `isSmoothStudlessTopPart` in `src/studioRuntime.ts`, excluding modified tiles with studs/clips/bars/jumper studs) provides **zero** vertical stud-clutch grip on its top face.
+- `boxesPhysicallyTouchBasic` and `partsPhysicallyTouch` reject false vertical adjacency when the lower part has `smoothTop = true` (while still permitting minifigures `role === 'figure'` resting on tiles, studded undersides below a tile, and 3-axis through-axles/pins `role === 'axle' | 'pin'` passing through hole-bearing tiles).
+- `buildPhysicalVerticalPrereqMap` similarly excludes smooth-top tiles below `u` from counting as structural lower support in `hasLowerOrSideSupport(u)` (while preserving floor-supported tile prereq ordering so tiles aren't trapped under overhead roofs). As a result, structural bricks never attach onto smooth tiles as if they had studs, and inverted/underside sub-assemblies naturally build from real studded clutch connections.
+
+---
+
+## 4. Generalized Naming (`src/engine/subdivisionAnalyzer.ts`)
 
 - Replaced theme-specific `'Middle Bogie'` / `'Center Joint & Bogie'` labels in `autoNameEndAssembly` and join section naming with general mechanical labels **`Center Wheel Assembly`** and **`Center Joint & Wheels`** so wheeled articulated models of any theme (vehicles, rovers, trailers, trains) receive accurate domain-neutral names.
 - Submodel names authored directly inside imported `.io`/`.mpd` files (such as user-named minifigure submodels) continue to be preserved verbatim from the source file.

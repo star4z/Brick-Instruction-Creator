@@ -1525,7 +1525,7 @@ ${staticFallbackHtml}
     const r = activeBounds.radius;
     const dist = r * 3.0;
     const eye = [c[0] + dist*Math.sin(az)*Math.cos(el), c[1] + dist*Math.sin(el), c[2] + dist*Math.cos(az)*Math.cos(el)];
-    const view = lookAtMat4(eye, c, [0, 1, 0]);
+    const view = lookAtMat4(eye, c, cam.el < 0 ? [0, -1, 0] : [0, 1, 0]);
     const halfH = (r * 1.38) / Math.max(0.35, cam.zoom);
     const halfW = halfH * (w / Math.max(1, h));
     const pxX = cam.panX * halfW;

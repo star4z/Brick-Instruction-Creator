@@ -15,6 +15,8 @@
  * heuristics.
  */
 
+import { cameraBasis } from './minifigCamera';
+
 export interface PlacementAABB {
   min: [number, number, number];
   max: [number, number, number];
@@ -273,6 +275,8 @@ interface ContactSummary {
   horizontalCoaxial: boolean;
   /** Primary world horizontal insertion axis (0 = X, 2 = Z) when `horizontalCoaxial` is true. */
   horizontalCoaxialAxis: 0 | 2 | null;
+  /** Exact reference part IDs that genuinely form a coaxial through-hole/shaft pair with this part. */
+  coaxialHostIds: Set<string>;
   lateralCount: number;
   /** Outward lateral normal from contacting reference parts toward this part. */
   lateralNormal: Vec3 | null;
@@ -510,6 +514,7 @@ function analyzeContacts(
   let verticalCoaxial = false;
   let horizontalCoaxial = false;
   let horizontalCoaxialAxis: 0 | 2 | null = null;
+  const coaxialHostIds = new Set<string>();
   let lateralCount = 0;
   let latX = 0;
   let latZ = 0;
@@ -557,13 +562,21 @@ function analyzeContacts(
       const partProtrudesVert = b.max[1] > rb.max[1] + 2 || b.min[1] < rb.min[1] - 2;
       const refHorizWider = Math.max(rs[0], rs[2]) >= Math.max(s[0], s[2]) * 1.3;
       const partWrapsRefXZ = s[0] >= rs[0] + 1 && s[2] >= rs[2] + 1;
+      const refInsidePartXZ =
+        rb.min[0] >= b.min[0] - 1.5 &&
+        rb.max[0] <= b.max[0] + 1.5 &&
+        rb.min[2] >= b.min[2] - 1.5 &&
+        rb.max[2] <= b.max[2] + 1.5;
+      // Any ring, bush, half-bush, round-hole tile, or plate threaded around a slender protruding
+      // vertical rod MUST slide vertically along ±Y (never sideways through the rod).
       const refVertRod =
-        !partHorizElongated &&
         partWrapsRefXZ &&
+        refInsidePartXZ &&
         rs[1] >= Math.max(rs[0], rs[2]) * 1.8 &&
         (rb.max[1] > b.max[1] + 2 || rb.min[1] < b.min[1] - 2);
       if (coaxialXZ && ((partVertElongated && (partProtrudesVert || refHorizWider)) || (partProtrudesVert && refHorizWider) || refVertRod)) {
         verticalCoaxial = true;
+        coaxialHostIds.add(ref.id);
         continue;
       }
 
@@ -575,6 +588,7 @@ function analyzeContacts(
       if (nestedInsideRefY && (partHorizElongated || ovY >= s[1] * 0.72)) {
         horizontalCoaxial = true;
         horizontalCoaxialAxis = s[0] >= s[2] ? 0 : 2;
+        coaxialHostIds.add(ref.id);
       }
     }
 
@@ -628,6 +642,7 @@ function analyzeContacts(
     verticalCoaxial,
     horizontalCoaxial,
     horizontalCoaxialAxis,
+    coaxialHostIds,
     lateralCount,
     lateralNormal,
     studPullDir,
@@ -670,13 +685,12 @@ function projectBoxToScreen2D(
   azDeg: number,
   elDeg: number,
 ): ScreenRect2D {
-  const az = (azDeg * Math.PI) / 180;
-  const el = (elDeg * Math.PI) / 180;
-  const rx = Math.cos(az);
-  const rz = -Math.sin(az);
-  const ux = -Math.sin(az) * Math.sin(el);
-  const uy = Math.cos(el);
-  const uz = -Math.cos(az) * Math.sin(el);
+  const { right, up } = cameraBasis(azDeg, elDeg);
+  const rx = right[0];
+  const rz = right[2];
+  const ux = up[0];
+  const uy = up[1];
+  const uz = up[2];
 
   let uMin = Infinity;
   let uMax = -Infinity;
@@ -904,12 +918,23 @@ function resolveOffsetAlongAxis(
     preferShortestDir?: boolean;
     studPullDir?: Vec3 | null;
     engagedStudPoints?: ReadonlyArray<Vec3>;
+    coaxialAxis?: 0 | 1 | 2 | null;
+    coaxialHostIds?: ReadonlySet<string>;
   } = {},
 ): AutoPartOffset | null {
   const s = boxSize(part.box);
   const dirs: Vec3[] = [preferredDir, ...fallbackDirs];
   const studPullDir = options.studPullDir ?? null;
   const engagedStudPoints = options.engagedStudPoints ?? [];
+  const coaxialAxis = options.coaxialAxis ?? null;
+  const coaxialHostIds = options.coaxialHostIds;
+
+  const isCoaxialHostAlongAxis = (obs: PlacementPartInput, axis: number): boolean => {
+    if (coaxialAxis !== axis || !coaxialHostIds || !coaxialHostIds.has(obs.id)) return false;
+    // Require deep coaxial shaft/hole overlap (> 6 LDU), never a shallow 4 LDU stud penetration
+    const ovAlong = overlap1D(part.box.min[axis], part.box.max[axis], obs.box.min[axis], obs.box.max[axis]);
+    return ovAlong > CONTACT_EPS + 1.5;
+  };
 
   const computeBaseMag = (d: Vec3, arrowAnchor: Vec3): number => {
     const dimAlong = Math.abs(d[0]) * s[0] + Math.abs(d[1]) * s[1] + Math.abs(d[2]) * s[2];
@@ -925,16 +950,6 @@ function resolveOffsetAlongAxis(
     }
     return Math.round(mag);
   };
-
-  // Precompute which obstacles already intersect `part.box` at its seated position (coaxial hosts),
-  // so the swept-corridor guard only rejects solid external blockers sitting OUTSIDE `part.box`.
-  const seatedIntersectingObs = new Set<string>();
-  for (let i = 0; i < obstacles.length; i++) {
-    const obs = obstacles[i];
-    if (obs.id !== part.id && boxesIntersectStrict(part.box, obs.box, 1.5)) {
-      seatedIntersectingObs.add(obs.id);
-    }
-  }
 
   let bestCandidate: { res: AutoPartOffset; mag: number; dirIdx: number } | null = null;
 
@@ -959,18 +974,18 @@ function resolveOffsetAlongAxis(
         : computeContactArrowBox(part.box, touchingRefs, axis, sign);
     const arrowAnchor = arrowBox ? arrowBox.center : part.box.center;
 
-    // Find any coaxial / corridor obstacle directly along the insertion path (e.g., vertical axle inside a bush
-    // or Technic brick hole face around a horizontal pin). Only `obstacles` (never non-host siblings) qualify.
+    // Find any genuine coaxial through-hole/shaft host along the insertion path (e.g., vertical axle inside a bush
+    // or Technic brick hole face around a horizontal pin). Solid stacked plates/bricks NEVER qualify!
     let corridorObsTip: number | null = null;
     if (isCardinal) {
       for (let i = 0; i < obstacles.length; i++) {
         const obs = obstacles[i];
         if (obs.id === part.id) continue;
+        if (!isCoaxialHostAlongAxis(obs, axis)) continue;
         const ob = obs.box;
         const ovA = overlap1D(part.box.min[perpA], part.box.max[perpA], ob.min[perpA], ob.max[perpA]);
         const ovB = overlap1D(part.box.min[perpB], part.box.max[perpB], ob.min[perpB], ob.max[perpB]);
         if (ovA <= 1.5 || ovB <= 1.5) continue;
-        if (!seatedIntersectingObs.has(obs.id)) continue;
         if (sign > 0) {
           if (ob.max[axis] > part.box.min[axis] + 1 && ob.min[axis] < part.box.max[axis] + 24) {
             if (corridorObsTip === null || ob.max[axis] > corridorObsTip) corridorObsTip = ob.max[axis];
@@ -991,16 +1006,21 @@ function resolveOffsetAlongAxis(
       const dy = Math.round(dir[1] * mag);
       const dz = Math.round(dir[2] * mag);
       const shifted = shiftBox(part.box, dx, dy, dz);
+      const swept = unionBox(part.box, shifted);
 
       if (isCardinal) {
         const corridor = buildSweptCorridorBox(part.box, axis, sign, mag);
 
-        // Reject this direction if any sibling part or non-coaxial solid obstacle sits inside
-        // the swept withdrawal corridor ahead of `part` (prevents jumping through stacked bricks/ceilings).
+        // Reject this direction if ANY sibling part or non-coaxial solid obstacle sits inside
+        // the swept withdrawal corridor ahead of `part` (prevents jumping through stacked plates/ceilings/walls).
         for (let i = 0; i < siblingObstacles.length; i++) {
           const obs = siblingObstacles[i];
           if (obs.id === part.id) continue;
-          if (boxesIntersectStrict(corridor, obs.box, 1.5)) {
+          const isLeading = (obs.box.center[axis] - part.box.center[axis]) * sign > 1.0;
+          if (
+            boxesIntersectStrict(corridor, obs.box, 1.5) ||
+            (isLeading && boxesIntersectStrict(swept, obs.box, 2.0))
+          ) {
             corridorBlockedDir = true;
             break;
           }
@@ -1010,8 +1030,12 @@ function resolveOffsetAlongAxis(
         for (let i = 0; i < obstacles.length; i++) {
           const obs = obstacles[i];
           if (obs.id === part.id) continue;
-          if (seatedIntersectingObs.has(obs.id)) continue; // coaxial pin/axle handled via corridorObsTip
-          if (boxesIntersectStrict(corridor, obs.box, 1.5)) {
+          if (isCoaxialHostAlongAxis(obs, axis)) continue; // genuine coaxial pin/axle handled via corridorObsTip
+          const isLeading = (obs.box.center[axis] - part.box.center[axis]) * sign > 1.0;
+          if (
+            boxesIntersectStrict(corridor, obs.box, 1.5) ||
+            (isLeading && boxesIntersectStrict(swept, obs.box, 2.0))
+          ) {
             corridorBlockedDir = true;
             break;
           }
@@ -1026,7 +1050,6 @@ function resolveOffsetAlongAxis(
         if (gapToTip < MIN_CORRIDOR_ARROW_GAP) continue;
       }
 
-      const swept = unionBox(part.box, shifted);
       let collides = false;
       for (let i = 0; i < obstacles.length; i++) {
         const obs = obstacles[i];
@@ -1035,18 +1058,44 @@ function resolveOffsetAlongAxis(
           collides = true;
           break;
         }
-        // Reject paths that pass straight through an external non-host brick along the insertion corridor
-        if (!seatedIntersectingObs.has(obs.id) && boxesIntersectStrict(swept, obs.box, 2.0)) {
-          collides = true;
-          break;
+        if (!isCardinal && !isCoaxialHostAlongAxis(obs, axis)) {
+          const isLeading =
+            (obs.box.center[0] - part.box.center[0]) * dir[0] +
+            (obs.box.center[1] - part.box.center[1]) * dir[1] +
+            (obs.box.center[2] - part.box.center[2]) * dir[2] > 1.0;
+          for (const frac of [0.25, 0.5, 0.75]) {
+            if (!isLeading && frac <= 0.25) continue;
+            const mid = shiftBox(part.box, dx * frac, dy * frac, dz * frac);
+            if (boxesIntersectStrict(mid, obs.box, 1.5)) {
+              collides = true;
+              break;
+            }
+          }
+          if (collides) break;
         }
       }
       if (!collides) {
         for (let i = 0; i < siblingObstacles.length; i++) {
-          if (siblingObstacles[i].id === part.id) continue;
-          if (boxesIntersectStrict(shifted, siblingObstacles[i].box, 1.5)) {
+          const obs = siblingObstacles[i];
+          if (obs.id === part.id) continue;
+          if (boxesIntersectStrict(shifted, obs.box, 1.5)) {
             collides = true;
             break;
+          }
+          if (!isCardinal) {
+            const isLeading =
+              (obs.box.center[0] - part.box.center[0]) * dir[0] +
+              (obs.box.center[1] - part.box.center[1]) * dir[1] +
+              (obs.box.center[2] - part.box.center[2]) * dir[2] > 1.0;
+            for (const frac of [0.25, 0.5, 0.75]) {
+              if (!isLeading && frac <= 0.25) continue;
+              const mid = shiftBox(part.box, dx * frac, dy * frac, dz * frac);
+              if (boxesIntersectStrict(mid, obs.box, 1.5)) {
+                collides = true;
+                break;
+              }
+            }
+            if (collides) break;
           }
         }
       }
@@ -1065,13 +1114,18 @@ function resolveOffsetAlongAxis(
           }
         }
         // Auto-detect pass-through alignment guide when a lateral pin/axle penetrates a perforated beam/frame
-        if (isCardinal && axis !== 1 && seatedIntersectingObs.size > 0) {
-          const guideTarget = detectThroughHoleGuideTarget(
-            part.box,
-            [dx, dy, dz],
-            obstacles.filter((o) => seatedIntersectingObs.has(o.id)).map((o) => o.box),
-          );
-          if (guideTarget) res.throughGuideTo = guideTarget;
+        if (isCardinal && axis !== 1) {
+          const penetratingHostBoxes = obstacles
+            .filter((o) => o.id !== part.id && boxesIntersectStrict(part.box, o.box, 1.5))
+            .map((o) => o.box);
+          if (penetratingHostBoxes.length > 0) {
+            const guideTarget = detectThroughHoleGuideTarget(
+              part.box,
+              [dx, dy, dz],
+              penetratingHostBoxes,
+            );
+            if (guideTarget) res.throughGuideTo = guideTarget;
+          }
         }
         if (!options.preferShortestDir) {
           return res;
@@ -1276,6 +1330,11 @@ function computeFirstStepOffsets(
       step.camera.az,
     );
     const otherSiblings = parts.filter((q) => q.id !== p.id && !baseSet.has(q.id));
+    const coaxialAxis: 0 | 1 | 2 | null = contacts.verticalCoaxial
+      ? 1
+      : contacts.horizontalCoaxial
+        ? contacts.horizontalCoaxialAxis
+        : null;
     const resolved = resolveOffsetAlongAxis(
       p,
       preferred,
@@ -1288,6 +1347,8 @@ function computeFirstStepOffsets(
         preferShortestDir,
         studPullDir: contacts.studPullDir,
         engagedStudPoints: contacts.engagedStudPoints,
+        coaxialAxis,
+        coaxialHostIds: contacts.coaxialHostIds,
       },
     );
     if (!resolved) continue;
@@ -1527,6 +1588,11 @@ function computeSubsequentStepOffsets(
       c.isLateral,
       step.camera.az,
     );
+    const coaxialAxis: 0 | 1 | 2 | null = c.contacts.verticalCoaxial
+      ? 1
+      : c.contacts.horizontalCoaxial
+        ? c.contacts.horizontalCoaxialAxis
+        : null;
     const resolved = resolveOffsetAlongAxis(
       c.part,
       preferred,
@@ -1539,6 +1605,8 @@ function computeSubsequentStepOffsets(
         preferShortestDir,
         studPullDir: c.contacts.studPullDir,
         engagedStudPoints: c.contacts.engagedStudPoints,
+        coaxialAxis,
+        coaxialHostIds: c.contacts.coaxialHostIds,
       },
     );
     if (!resolved) continue;

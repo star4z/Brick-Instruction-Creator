@@ -347,10 +347,12 @@ export function computeCameraBasis(azDeg: number, elDeg: number): CameraBasis {
   const fx = Math.sin(az) * Math.cos(el);
   const fy = Math.sin(el);
   const fz = Math.cos(az) * Math.cos(el);
-  // right = normalize(worldUp × forward) where worldUp = (0, 1, 0)
-  let rx = fz;
+  // right = normalize(worldUp × forward) where worldUp flips to (0, -1, 0) for underside views
+  // so the model turns upside down on the table instead of placing the camera underneath.
+  const upSign = elDeg < 0 ? -1 : 1;
+  let rx = upSign * fz;
   let ry = 0;
-  let rz = -fx;
+  let rz = -upSign * fx;
   const rLen = Math.hypot(rx, ry, rz) || 1;
   rx /= rLen;
   rz /= rLen;

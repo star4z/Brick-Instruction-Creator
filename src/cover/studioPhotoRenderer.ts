@@ -278,7 +278,7 @@ export function computeStudioTelephotoCamera(
   const near = Math.max(2, dist - depthPad);
   const far = dist + depthPad * 1.5;
 
-  const view = lookAtMat4(eye, target, [0, 1, 0]);
+  const view = lookAtMat4(eye, target, elDeg < 0 ? [0, -1, 0] : [0, 1, 0]);
   const proj = perspectiveMat4(fovRad, aspect, near, far);
   const mvp = mulMat4(proj, view);
 
@@ -318,7 +318,7 @@ export function computeStudioOrthoCamera(
   ];
   const near = Math.max(1, dist - clipRadius * 2.4);
   const far = dist + clipRadius * 2.4;
-  const view = lookAtMat4(eye, target, [0, 1, 0]);
+  const view = lookAtMat4(eye, target, elDeg < 0 ? [0, -1, 0] : [0, 1, 0]);
 
   const aspect = width / Math.max(1, height);
   const safeZoom = Math.max(0.4, zoom);
@@ -397,23 +397,29 @@ export function computeLightOrthoMVP(
 
 /**
  * Computes camera-relative 3-point studio softbox light directions (Key, Fill, Rim, Overhead).
+ * When `elDeg < 0` (model flipped upside down on the table), the studio softbox dome flips
+ * onto the `-Y` side so the exposed upward-facing underside receives natural overhead lighting.
  */
-export function computeStudioLightDirs(azDeg: number): {
+export function computeStudioLightDirs(
+  azDeg: number,
+  elDeg = 30,
+): {
   key: [number, number, number];
   fill: [number, number, number];
   rim: [number, number, number];
   overhead: [number, number, number];
 } {
+  const upSign = elDeg < 0 ? -1 : 1;
   const dirFrom = (az: number, el: number): [number, number, number] => {
     const a = (az * Math.PI) / 180;
     const e = (el * Math.PI) / 180;
     return [Math.sin(a) * Math.cos(e), Math.sin(e), Math.cos(a) * Math.cos(e)];
   };
   return {
-    key: dirFrom(azDeg + 36, 60),       // High overhead-front-right main studio softbox
-    fill: dirFrom(azDeg - 58, 42),      // Soft cool studio bounce from front-left
-    rim: dirFrom(azDeg + 152, 46),      // High back-rim strip for crisp dark-brick bevel catchlights
-    overhead: dirFrom(azDeg + 8, 84),   // Large overhead studio light-tent dome for grounded floor & underside AO
+    key: dirFrom(azDeg + upSign * 36, upSign * 60),       // High overhead-front-right main studio softbox
+    fill: dirFrom(azDeg - upSign * 58, upSign * 42),      // Soft cool studio bounce from front-left
+    rim: dirFrom(azDeg + upSign * 152, upSign * 46),      // High back-rim strip for crisp dark-brick bevel catchlights
+    overhead: dirFrom(azDeg + upSign * 8, upSign * 84),   // Large overhead studio light-tent dome for grounded floor & underside AO
   };
 }
 
@@ -563,6 +569,7 @@ uniform vec2 uFillTexel;
 uniform vec2 uOverTexel;
 uniform float uMinY;
 uniform float uModelHeight;
+uniform float uUpSign;
 
 varying vec3 vWorldPos;
 varying vec3 vWorldNorm;
@@ -613,14 +620,15 @@ float geomSmith(float NdotV, float NdotL, float roughness) {
 
 // Procedural Photographic Studio Softbox Light-Tent Environment
 vec3 sampleStudioEnv(vec3 R, float roughness, vec3 keyDir, vec3 fillDir, vec3 rimDir) {
-  float upMask = smoothstep(-0.15, 0.72, R.y);
+  float ry = R.y * uUpSign;
+  float upMask = smoothstep(-0.15, 0.72, ry);
   // Subtle dark studio gap at horizon -> clean white overhead light-tent softbox
   vec3 floorBounce = vec3(0.22, 0.24, 0.28);
   vec3 wallSweep = vec3(0.56, 0.59, 0.64);
   vec3 env = mix(floorBounce, wallSweep, upMask);
 
   // Overhead studio softbox panel (tight enough to gleam on bevels without washing flat tops)
-  float topBox = smoothstep(0.62 - roughness * 0.25, 0.94, R.y);
+  float topBox = smoothstep(0.62 - roughness * 0.25, 0.94, ry);
   env += vec3(0.62, 0.61, 0.59) * topBox;
 
   // Crisp Key softbox reflection card
@@ -730,10 +738,12 @@ void main() {
 
   // 4) Indirect Studio Light-Tent Ambient + Subtle White Floor Bounce + Restrained ABS Fresnel Reflection
   float skyOcclusion = mix(0.32, 1.0, overVis);
-  float heightNorm = clamp((vWorldPos.y - uMinY) / max(10.0, uModelHeight), 0.0, 1.0);
-  float floorBounceFactor = (1.0 - smoothstep(0.0, 0.35, heightNorm)) * max(-N.y * 0.7 + 0.3, 0.0);
+  float rawHeightNorm = clamp((vWorldPos.y - uMinY) / max(10.0, uModelHeight), 0.0, 1.0);
+  float heightNorm = uUpSign < 0.0 ? (1.0 - rawHeightNorm) : rawHeightNorm;
+  float nyUp = N.y * uUpSign;
+  float floorBounceFactor = (1.0 - smoothstep(0.0, 0.35, heightNorm)) * max(-nyUp * 0.7 + 0.3, 0.0);
 
-  vec3 hemiAmb = mix(vec3(0.14, 0.16, 0.19), vec3(0.30, 0.31, 0.34), N.y * 0.5 + 0.5);
+  vec3 hemiAmb = mix(vec3(0.14, 0.16, 0.19), vec3(0.30, 0.31, 0.34), nyUp * 0.5 + 0.5);
   vec3 ambientDiff = albedo * (hemiAmb * skyOcclusion + vec3(0.08, 0.085, 0.095) * floorBounceFactor);
 
   // Calibrated dielectric Schlick Fresnel reflection so dark bricks stay rich obsidian-black while bevels gleam
@@ -1437,7 +1447,7 @@ export class StudioPhotoRenderer {
         );
     this.lastMvp = cam.mvp;
 
-    const lights = computeStudioLightDirs(options.azDeg);
+    const lights = computeStudioLightDirs(options.azDeg, options.elDeg);
     const modelRadius = Math.max(mesh.fullRadius || mesh.radius, 20);
     const shadowCenter: [number, number, number] = [
       (mesh.bounds.minX + mesh.bounds.maxX) * 0.5,
@@ -1595,6 +1605,7 @@ export class StudioPhotoRenderer {
       gl.uniform2f(gl.getUniformLocation(prog, 'uOverTexel'), 1 / this.overFbo!.w, 1 / this.overFbo!.h);
       gl.uniform1f(gl.getUniformLocation(prog, 'uMinY'), mesh.bounds.minY);
       gl.uniform1f(gl.getUniformLocation(prog, 'uModelHeight'), Math.max(10, mesh.bounds.maxY - mesh.bounds.minY));
+      gl.uniform1f(gl.getUniformLocation(prog, 'uUpSign'), options.elDeg < 0 ? -1.0 : 1.0);
 
       gl.activeTexture(gl.TEXTURE3);
       gl.bindTexture(gl.TEXTURE_2D, this.emptyTex);

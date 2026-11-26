@@ -841,4 +841,56 @@ describe('Step Camera Stability & Steady Framing', () => {
     expect(Math.cos((res[0].az * Math.PI) / 180)).toBeLessThan(0);
     expect(res[0].corner === 'back_left' || res[0].corner === 'back_right').toBe(true);
   });
+
+  it('always starts Step 1 upright even if forceSide=bottom is mistakenly requested with zero prior occluders', () => {
+    const res = optimizeStudioStepCameraSequence([
+      {
+        stepBoxes: [makeBox(-40, 0, -20, 40, 8, 20), makeBox(-40, 8, -20, 40, 16, 20)],
+        occludersBefore: [],
+        occluderCountBefore: 0,
+        builtBoundsBefore: null,
+        forceSide: 'bottom',
+      },
+    ]);
+    expect(res[0].side).toBe('top');
+    expect(res[0].el).toBeGreaterThan(0);
+    expect(res[0].cue).toBe('none');
+  });
+
+  it('prevents rapid consecutive vertical flip ping-pongs across alternating underside and upright steps', () => {
+    const floorAndUpper: WorldBox[] = [
+      makeBox(-80, 24, -80, 0, 48, 0),
+      makeBox(0, 24, -80, 80, 48, 0),
+      makeBox(-80, 24, 0, 0, 48, 80),
+      makeBox(0, 24, 0, 80, 48, 80),
+      makeBox(-60, 48, -60, 60, 96, 60),
+    ];
+    const underA = [makeBox(0, 0, 0, 40, 24, 40)];
+    const topMid = [makeBox(-20, 96, -20, 20, 120, 20)];
+    const underB = [makeBox(-40, 0, -40, 0, 24, 0)];
+    const topEnd = [makeBox(-20, 120, -20, 20, 144, 20)];
+
+    const res = optimizeStudioStepCameraSequence(
+      buildSequenceInputs([floorAndUpper, underA, topMid, underB, topEnd]),
+    );
+    const flipCount = res.filter((r) => r.cue === 'flip_vertical').length;
+    // Must NEVER emit 4 consecutive flips (top -> bottom -> top -> bottom -> top)!
+    expect(flipCount).toBeLessThanOrEqual(2);
+    expect(res[0].side).toBe('top');
+  });
+
+  it('links isSectionModule continuation chunks across pre-built sub-chapters when resolving flip_vertical cues', () => {
+    const sDeck = { id: 'sec_s1', side: 'top' as 'top' | 'bottom', corner: 'front_right' as const, az: 38, el: 30 };
+    const sMech = { id: 'mech_s1', side: 'top' as 'top' | 'bottom', corner: 'front_right' as const, az: 38, el: 30 };
+    const sAttach = { id: 'sec_s2', side: 'bottom' as 'top' | 'bottom', corner: 'front_right' as const, az: 38, el: -30 };
+
+    const chDeck = { id: 'subch_1', kind: 'submodel', isSectionModule: true, sectionId: 'subsec_front', steps: [sDeck] };
+    const chMech = { id: 'subch_2', kind: 'submodel', isSectionModule: false, sectionId: 'subsec_mech', steps: [sMech] };
+    const chCont = { id: 'subch_3', kind: 'submodel', isSectionModule: true, sectionId: 'subsec_front', steps: [sAttach] };
+    const chapters = [chDeck, chMech, chCont];
+
+    expect(resolveEffectiveStudioStepCue(chapters, chCont, sAttach)).toBe('flip_vertical');
+    expect(resolveEffectiveStudioStepCue(chapters, chMech, sMech)).toBe('none');
+  });
 });
+

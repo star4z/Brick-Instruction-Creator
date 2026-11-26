@@ -142,6 +142,8 @@ export const UNDERSIDE_MAX_OVERHEAD_GAP_LDU = 32;
 export const STEP_CAMERA_YAW_90_COST = 0.68;
 export const STEP_CAMERA_YAW_180_COST = 0.95;
 export const STEP_CAMERA_FLIP_COST = 1.35;
+/** Extra penalty for re-entering bottom view within 2 steps of flipping back upright (stops consecutive flip ping-pongs). */
+export const STEP_CAMERA_RAPID_REFLIP_COST = 2.4;
 
 /** Auto framing stays steady on the full model up to this bounding radius (~34 studs across). */
 export const AUTO_FOCUS_MIN_FULL_RADIUS_LDU = 340;
@@ -840,10 +842,13 @@ export function optimizeStudioStepCameraSequence(
   const canonicalViews =
     baseTheta === 38 ? CANONICAL_STUDIO_VIEWS : buildCanonicalViewsForBaseAzimuth(baseTheta);
   const V = canonicalViews.length;
+  // 3-level cooldown state per canonical view (cd in 0..2 = steps remaining before re-entering bottom without rapid-reflip penalty)
+  const CD_LEVELS = 3;
+  const S = V * CD_LEVELS;
   const initialCam = options.initialCamera ?? null;
 
-  const dp: number[][] = Array.from({ length: T }, () => new Array<number>(V).fill(Infinity));
-  const backptr: number[][] = Array.from({ length: T }, () => new Array<number>(V).fill(0));
+  const dp: number[][] = Array.from({ length: T }, () => new Array<number>(S).fill(Infinity));
+  const backptr: number[][] = Array.from({ length: T }, () => new Array<number>(S).fill(0));
   const visTable: number[][] = Array.from({ length: T }, () => new Array<number>(V).fill(1));
   const stepUnionBoxes: WorldBox[] = steps.map((s) => unionBoxes(s.stepBoxes));
   const projCache = new Map<
@@ -880,7 +885,8 @@ export function optimizeStudioStepCameraSequence(
     const spanZ = builtBounds ? builtBounds.max[2] - builtBounds.min[2] : 0;
     const isTinyEarlyBase = occCount < 4 || (Math.max(spanX, spanZ) < 80 && spanY < 40);
 
-    const forceBottom = step.forceSide === 'bottom';
+    // Step 1 with zero prior occluders has nothing overhead and must always start upright ('top').
+    const forceBottom = step.forceSide === 'bottom' && occCount > 0;
     const forceTop = step.forceSide === 'top';
 
     // Evaluate all 4 top canonical views first
@@ -954,18 +960,16 @@ export function optimizeStudioStepCameraSequence(
 
       if (t === 0) {
         const initTransCost = initialCam ? stepCameraTransitionCost(initialCam, view) : 0;
-        // One-time non-accumulating tie-break toward facing corner only when transitioning
         const initTieBreak =
           initTransCost > 0 && builtBounds
             ? -0.01 * clamp(cornerDot(stepUnionBoxes[t], view.corner, builtBounds), -1, 1)
             : 0;
-        dp[t][v] = initTransCost + initTieBreak + emissionCost;
-        backptr[t][v] = v;
+        const initCd = initialCam && initialCam.side === 'bottom' && !view.isBottom ? 2 : 0;
+        const dstState = v * CD_LEVELS + initCd;
+        dp[t][dstState] = initTransCost + initTieBreak + emissionCost;
+        backptr[t][dstState] = dstState;
       } else {
-        let bestPrev = 0;
-        let bestCost = Infinity;
         for (let u = 0; u < V; u++) {
-          if (!Number.isFinite(dp[t - 1][u])) continue;
           const prevView = canonicalViews[u];
           const baseTrans = stepCameraTransitionCost(prevView, view);
           // Tiny one-time tie-break ONLY on actual turns (u !== v) so it never accumulates while staying put
@@ -973,32 +977,49 @@ export function optimizeStudioStepCameraSequence(
             u !== v && builtBounds
               ? -0.01 * clamp(cornerDot(stepUnionBoxes[t], view.corner, builtBounds), -1, 1)
               : 0;
-          const c = dp[t - 1][u] + baseTrans + tieBreak;
-          if (c < bestCost) {
-            bestCost = c;
-            bestPrev = u;
+          const isExitingBottom = prevView.isBottom && !view.isBottom;
+          const isEnteringBottom = !prevView.isBottom && view.isBottom;
+
+          for (let prevCd = 0; prevCd < CD_LEVELS; prevCd++) {
+            const srcState = u * CD_LEVELS + prevCd;
+            const prevCost = dp[t - 1][srcState];
+            if (!Number.isFinite(prevCost)) continue;
+
+            const nextCd = view.isBottom
+              ? 0
+              : isExitingBottom
+                ? 2
+                : Math.max(0, prevCd - 1);
+            const rapidReflipPenalty =
+              isEnteringBottom && prevCd > 0 && !forceBottom
+                ? STEP_CAMERA_RAPID_REFLIP_COST
+                : 0;
+            const c = prevCost + baseTrans + rapidReflipPenalty + tieBreak + emissionCost;
+            const dstState = v * CD_LEVELS + nextCd;
+            if (c < dp[t][dstState]) {
+              dp[t][dstState] = c;
+              backptr[t][dstState] = srcState;
+            }
           }
         }
-        dp[t][v] = bestCost + emissionCost;
-        backptr[t][v] = bestPrev;
       }
     }
   }
 
-  let bestEnd = 0;
+  let bestEndState = 0;
   let bestEndCost = Infinity;
-  for (let v = 0; v < V; v++) {
-    if (dp[T - 1][v] < bestEndCost) {
-      bestEndCost = dp[T - 1][v];
-      bestEnd = v;
+  for (let s = 0; s < S; s++) {
+    if (dp[T - 1][s] < bestEndCost) {
+      bestEndCost = dp[T - 1][s];
+      bestEndState = s;
     }
   }
 
   const chosenIdx: number[] = new Array<number>(T);
-  let curr = bestEnd;
+  let currState = bestEndState;
   for (let t = T - 1; t >= 0; t--) {
-    chosenIdx[t] = curr;
-    curr = backptr[t][curr];
+    chosenIdx[t] = Math.floor(currState / CD_LEVELS);
+    currState = backptr[t][currState];
   }
 
   const out: StudioStepCameraChoice[] = [];
@@ -1627,6 +1648,7 @@ export interface StudioStepChapterLike<
 > {
   id?: string;
   kind?: string;
+  isSectionModule?: boolean;
   sectionId?: string;
   steps?: ReadonlyArray<TStep>;
 }
@@ -1693,8 +1715,9 @@ export function resolveStudioStepCamera(
  * Finds the immediately preceding model build step in the same continuous build
  * sequence as `step` (matching `optimizeManualStepCameras` and `getPreviousPartsForStep`):
  * - Standalone minifigure and minifigure-pose steps are skipped.
- * - Submodel chapters stay isolated in their own local frame.
- * - Main / numbered-bag / join chapters sharing a `sectionId` form one continuous sequence.
+ * - Standalone submodel chapters stay isolated in their own local frame.
+ * - Section-module continuation chunks and main / numbered-bag / join chapters sharing
+ *   a `sectionId` form one continuous sequence.
  */
 export function findPreviousStudioModelStep<TStep extends StudioStepCameraSource>(
   chapters: ReadonlyArray<StudioStepChapterLike<TStep>> | null | undefined,
@@ -1710,7 +1733,7 @@ export function findPreviousStudioModelStep<TStep extends StudioStepCameraSource
     s === step || (step.id != null && s.id === step.id);
 
   if (
-    chapter.kind === 'submodel' ||
+    (chapter.kind === 'submodel' && !chapter.isSectionModule) ||
     !Array.isArray(chapters) ||
     chapters.length === 0
   ) {
@@ -1726,8 +1749,13 @@ export function findPreviousStudioModelStep<TStep extends StudioStepCameraSource
   const secKey = chapter.sectionId || chapter.id;
   let prev: TStep | null = null;
   for (const ch of chapters) {
-    if (ch.kind === 'submodel' || ch.kind === 'minifigure') continue;
-    if ((ch.sectionId || ch.id) !== secKey) continue;
+    if (ch.kind === 'minifigure') continue;
+    if (chapter.isSectionModule) {
+      if (!ch.isSectionModule || (ch.sectionId || ch.id) !== secKey) continue;
+    } else {
+      if (ch.kind === 'submodel') continue;
+      if ((ch.sectionId || ch.id) !== secKey) continue;
+    }
     const steps = ch.steps || [];
     for (const s of steps) {
       if (isSameStep(s)) return prev;

@@ -600,5 +600,23 @@ describe('Photorealistic Studio Camera & Softbox Light Rig', () => {
     const effectiveTopTexels = (large[2] * topSin) / overTexelWorld;
     expect(effectiveTopTexels).toBeLessThan(0.4);
   });
+
+  it('flips the model upside down (world -Y up on screen) and inverts the studio light dome when elDeg < 0', () => {
+    const camBottom = computeStudioOrthoCamera([0, 20, 0], 80, 120, 38, -30, 1200, 900, 1.0);
+    // Project a point below center (y = 0) vs above center (y = 40) through camBottom.mvp:
+    // Because the model is flipped upside down on the table, lower world-Y projects HIGHER on screen (larger NDC y)!
+    const m = camBottom.mvp;
+    const ndcYBelow = m[1] * 0 + m[5] * 0 + m[9] * 0 + m[13];
+    const ndcYAbove = m[1] * 0 + m[5] * 40 + m[9] * 0 + m[13];
+    expect(ndcYBelow).toBeGreaterThan(ndcYAbove);
+
+    // Studio softbox lights flip onto the -Y side so the exposed upward-facing underside is brightly lit from above
+    const bottomLights = computeStudioLightDirs(38, -30);
+    for (const dir of [bottomLights.key, bottomLights.fill, bottomLights.rim, bottomLights.overhead]) {
+      expect(Math.hypot(dir[0], dir[1], dir[2])).toBeCloseTo(1.0, 5);
+      expect(dir[1]).toBeLessThan(-0.5);
+    }
+  });
 });
+
 

@@ -567,6 +567,8 @@ export function boxesPhysicallyTouchBasic(
   roleB: string,
   sideCapA: SidewaysCap = true,
   sideCapB: SidewaysCap = true,
+  smoothTopA = false,
+  smoothTopB = false,
 ): boolean {
   const isWheelPair = roleA === 'wheel' || roleB === 'wheel';
   const otherIsHolder =
@@ -608,7 +610,30 @@ export function boxesPhysicallyTouchBasic(
   }
 
   // 1. Vertical stud/tube stacking contact (overlapping horizontal footprint)
-  if (ovX >= 3.0 && ovZ >= 3.0) return true;
+  if (ovX >= 3.0 && ovZ >= 3.0) {
+    // A smooth studless tile top face has zero studs and cannot structurally clutch
+    // a brick sitting on top of it (only minifigures/loose props or 3-axis through-axles).
+    const bRestsOnSmoothA =
+      smoothTopA &&
+      b.min[1] >= a.max[1] - tol &&
+      b.center[1] > a.center[1] + 1.0 &&
+      roleB !== 'figure' &&
+      roleB !== 'axle' &&
+      roleB !== 'pin';
+    const aRestsOnSmoothB =
+      smoothTopB &&
+      a.min[1] >= b.max[1] - tol &&
+      a.center[1] > b.center[1] + 1.0 &&
+      roleA !== 'figure' &&
+      roleA !== 'axle' &&
+      roleA !== 'pin';
+    if (!bRestsOnSmoothA && !aRestsOnSmoothB) {
+      return true;
+    }
+    // Allow genuine deep 3-axis interlocking (e.g. vertical axle passing through round-hole tile)
+    if (ovX >= 1.5 && ovY >= 1.5 && ovZ >= 1.5) return true;
+    return false;
+  }
 
   // 2. Sideways / SNOT / clip / hinge / Technic pin contact
   const goodAxes = (ovX >= 1.5 ? 1 : 0) + (ovY >= 1.5 ? 1 : 0) + (ovZ >= 1.5 ? 1 : 0);
@@ -635,8 +660,10 @@ export function partsPhysicallyTouch(
   roleB: string,
   sideCapA: SidewaysCap = true,
   sideCapB: SidewaysCap = true,
+  smoothTopA = false,
+  smoothTopB = false,
 ): boolean {
-  if (!boxesPhysicallyTouchBasic(boxA, boxB, roleA, roleB, sideCapA, sideCapB)) {
+  if (!boxesPhysicallyTouchBasic(boxA, boxB, roleA, roleB, sideCapA, sideCapB, smoothTopA, smoothTopB)) {
     return false;
   }
 
@@ -654,7 +681,7 @@ export function partsPhysicallyTouch(
   for (let i = 0; i < listA.length; i++) {
     const sa = listA[i];
     for (let j = 0; j < listB.length; j++) {
-      if (boxesPhysicallyTouchBasic(sa, listB[j], roleA, roleB, sideCapA, sideCapB)) {
+      if (boxesPhysicallyTouchBasic(sa, listB[j], roleA, roleB, sideCapA, sideCapB, smoothTopA, smoothTopB)) {
         return true;
       }
     }
@@ -752,6 +779,7 @@ export function buildPhysicalVerticalPrereqMap(
   claddingFlags: readonly boolean[],
   activeIndices?: readonly number[],
   subBoxes?: readonly (readonly WorldBox[] | null)[] | null,
+  smoothTopFlags?: readonly boolean[] | null,
 ): { belowMap: number[][]; baseMinY: number } {
   const idxList = activeIndices ?? boxes.map((_, i) => i);
   const activeSet = new Set(idxList);
@@ -764,7 +792,8 @@ export function buildPhysicalVerticalPrereqMap(
   if (!Number.isFinite(baseMinY)) baseMinY = 0;
 
   // True ONLY when `u` has at least one genuine non-upper structural neighbor in `adj[u]`
-  // (something below or horizontally supporting `u`, NOT merely resting on top of `u`).
+  // (something below with real studs or horizontally supporting `u`, NOT merely resting on top of `u`
+  // or resting loosely on a smooth studless tile).
   // Pure top-hung / underside-attached pieces return false so they attach AFTER the upper
   // plate that holds them up, instead of floating in mid-air before it.
   const hasLowerOrSideSupport = (u: number): boolean => {
@@ -774,6 +803,8 @@ export function buildPhysicalVerticalPrereqMap(
       const bw = boxes[w];
       // Exclude neighbors sitting strictly on top of `u`
       if (bw.min[1] >= bu.max[1] - 4.5 && bw.center[1] > bu.center[1] + 2.0) continue;
+      // Exclude smooth studless tiles sitting strictly underneath `u` (no top studs -> no structural clutch)
+      if (smoothTopFlags?.[w] && bw.max[1] <= bu.min[1] + 4.5 && bw.center[1] < bu.center[1] - 1.0) continue;
       if (bw.min[1] < bu.max[1] - 4.0 && bw.center[1] <= bu.center[1] + 4.0) return true;
     }
     return false;

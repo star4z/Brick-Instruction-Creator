@@ -1053,4 +1053,84 @@ describe('placementArrows — LEGO-style automatic placement arrows & offsets', 
     expect(segs2x4[1].to[0]).toBeCloseTo(-10, 2);
     expect(segs2x4[1].to[1]).toBeCloseTo(10, 2);
   });
+
+  it('never inserts a plate upward through an already-placed overhead plate even when 4 LDU top studs overlap', () => {
+    // Lower rail at y=[-8..4] (with studs at y=0..4), overhead 6x14 deck plate at y=[8..20],
+    // and red 2x3 plate sandwiched underneath at y=[0..12] (its 4 LDU top studs overlap overhead plate by 4 LDU!).
+    // Must NEVER lift the red 2x3 plate +Y straight through the solid overhead 6x14 plate!
+    const steps: PlacementStepInput[] = [
+      {
+        id: 's1',
+        camera: { az: 38, el: 30, side: 'top' },
+        parts: [
+          {
+            ...makePart('lower_rail', 0, -8, 0, 40, 12, 160, RED),
+            studs: [
+              [-10, 0, -10, 0, 1, 0],
+              [10, 0, -10, 0, 1, 0],
+              [-10, 0, 10, 0, 1, 0],
+              [10, 0, 10, 0, 1, 0],
+            ],
+          },
+          makePart('overhead_6x14', 0, 8, 0, 120, 12, 280, BLACK),
+          makePart('frame_left', -50, 0, 0, 20, 12, 240, RED),
+          makePart('frame_right', 50, 0, 0, 20, 12, 240, RED),
+        ],
+      },
+      {
+        id: 's2',
+        camera: { az: 38, el: 30, side: 'top' },
+        parts: [
+          {
+            ...makePart('trapped_red_2x3', 0, 0, 0, 40, 12, 60, RED),
+            localUp: [0, 1, 0],
+            studs: [
+              [-10, 8, -20, 0, 1, 0],
+              [10, 8, -20, 0, 1, 0],
+              [-10, 8, 0, 0, 1, 0],
+              [10, 8, 0, 0, 1, 0],
+              [-10, 8, 20, 0, 1, 0],
+              [10, 8, 20, 0, 1, 0],
+            ],
+          },
+        ],
+      },
+    ];
+
+    const res = computeAutoPlacementOffsetsForSequence(steps);
+    const off = res.get('s2')?.['trapped_red_2x3'];
+    // Must either reject upward teleportation (undefined) or move away without crossing y=8..20
+    if (off) {
+      expect(off.y).toBeLessThanOrEqual(0);
+    }
+  });
+
+  it('slides a flat 2x2 round tile with center hole vertically along a protruding vertical Technic axle instead of sideways through it', () => {
+    const steps: PlacementStepInput[] = [
+      {
+        id: 's1',
+        camera: { az: 38, el: -30, side: 'bottom' },
+        parts: [
+          makePart('deck', 0, 72, 0, 120, 12, 240, RED),
+          makePart('vert_axle', 0, 20, 0, 8, 64, 8, BLACK),
+        ],
+      },
+      {
+        id: 's2',
+        camera: { az: 38, el: -30, side: 'bottom' },
+        parts: [
+          makePart('round_hole_tile_15535', 0, 24, 0, 40, 8, 40, BLACK),
+        ],
+      },
+    ];
+
+    const res = computeAutoPlacementOffsetsForSequence(steps);
+    const off = res.get('s2')?.['round_hole_tile_15535'];
+    expect(off).toBeDefined();
+    expect(off!.x).toBe(0);
+    expect(off!.z).toBe(0);
+    // In bottom view, pulls cleanly in -Y (off the free end of the vertical axle)
+    expect(off!.y).toBeLessThanOrEqual(-16);
+  });
 });
+

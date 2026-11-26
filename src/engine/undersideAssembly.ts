@@ -18,10 +18,22 @@ export interface TechnicMechanismSpec {
   pocketIndex: number;
 }
 
+export interface UndersideSubassemblySpec {
+  id: string;
+  name: string;
+  partIndices: number[];
+  pocketIndex: number;
+}
+
 export interface UndersidePocketSpec {
   partIndices: number[];
   mechanisms: TechnicMechanismSpec[];
+  /** Cohesive multi-part underside structural modules to pre-build right-side up before snapping onto the flipped deck. */
+  subassemblies: UndersideSubassemblySpec[];
+  /** All non-mechanism structural indices in this pocket. */
   structuralIndices: number[];
+  /** Remaining small/flat structural indices not claimed by a pre-built sub-module. */
+  looseStructuralIndices: number[];
 }
 
 export interface UndersideAssemblyPlan {
@@ -32,6 +44,8 @@ export interface UndersideAssemblyPlan {
   pockets: UndersidePocketSpec[];
   allUndersideIndices: Set<number>;
   mechanisms: TechnicMechanismSpec[];
+  /** All cohesive multi-part underside structural sub-modules across pockets, pre-built right-side up. */
+  subassemblies: UndersideSubassemblySpec[];
 }
 
 const TECHNIC_MECH_FALLBACK_ID_RE =
@@ -144,6 +158,7 @@ function emptyPlan(): UndersideAssemblyPlan {
     pockets: [],
     allUndersideIndices: new Set<number>(),
     mechanisms: [],
+    subassemblies: [],
   };
 }
 
@@ -297,7 +312,10 @@ export function analyzeUndersideAssembly(
   const allUndersideIndices = new Set<number>();
   const pockets: UndersidePocketSpec[] = [];
   const allMechanisms: TechnicMechanismSpec[] = [];
+  const allSubassemblies: UndersideSubassemblySpec[] = [];
   let mechSeq = 0;
+  let wheelSubSeq = 0;
+  let modSubSeq = 0;
 
   for (let pIdx = 0; pIdx < chosenBelowComps.length; pIdx++) {
     const comp = chosenBelowComps[pIdx];
@@ -337,10 +355,61 @@ export function analyzeUndersideAssembly(
     }
 
     const pocketStructural = comp.filter((i) => !claimedByMech.has(i));
+
+    // Promote cohesive multi-part underside structural clusters (>= 4 parts and multi-layer
+    // or wheeled) into standalone sub-modules built right-side up bottom-up FIRST, then
+    // snapped cleanly onto the flipped deck as a single completed assembly — eliminating
+    // floating pieces and impossible wedged-in-between insertions.
+    const structComps = findConnectedComponents(pocketStructural, adj);
+    structComps.sort((a, b) => b.length - a.length);
+    const pocketSubassemblies: UndersideSubassemblySpec[] = [];
+    const claimedBySub = new Set<number>();
+
+    for (const sc of structComps) {
+      if (sc.length < 4) continue;
+      let scMinY = Infinity;
+      let scMaxY = -Infinity;
+      let hasWheel = false;
+      for (const idx of sc) {
+        const b = parts[idx].box;
+        if (b.min[1] < scMinY) scMinY = b.min[1];
+        if (b.max[1] > scMaxY) scMaxY = b.max[1];
+        if (parts[idx].role === 'wheel' || parts[idx].role === 'wheel_holder') {
+          hasWheel = true;
+        }
+      }
+      const scHeight = Number.isFinite(scMinY) ? scMaxY - scMinY : 0;
+      if (scHeight < 14 && !hasWheel) continue;
+
+      let subId: string;
+      let subName: string;
+      if (hasWheel) {
+        wheelSubSeq++;
+        subId = `underside_wheel_${wheelSubSeq}`;
+        subName = wheelSubSeq === 1 ? 'Wheel Assembly' : `Wheel Assembly ${wheelSubSeq}`;
+      } else {
+        modSubSeq++;
+        subId = `underside_mod_${modSubSeq}`;
+        subName = modSubSeq === 1 ? 'Underside Module' : `Underside Module ${modSubSeq}`;
+      }
+      const subSpec: UndersideSubassemblySpec = {
+        id: subId,
+        name: subName,
+        partIndices: sc,
+        pocketIndex: pIdx,
+      };
+      pocketSubassemblies.push(subSpec);
+      allSubassemblies.push(subSpec);
+      for (const idx of sc) claimedBySub.add(idx);
+    }
+
+    const looseStructuralIndices = pocketStructural.filter((i) => !claimedBySub.has(i));
     pockets.push({
       partIndices: comp,
       mechanisms: pocketMechanisms,
+      subassemblies: pocketSubassemblies,
       structuralIndices: pocketStructural,
+      looseStructuralIndices,
     });
   }
 
@@ -348,6 +417,7 @@ export function analyzeUndersideAssembly(
   pockets.sort((a, b) => b.mechanisms.length - a.mechanisms.length || b.partIndices.length - a.partIndices.length);
   pockets.forEach((p, idx) => {
     for (const m of p.mechanisms) m.pocketIndex = idx;
+    for (const s of p.subassemblies) s.pocketIndex = idx;
   });
 
   return {
@@ -358,6 +428,7 @@ export function analyzeUndersideAssembly(
     pockets,
     allUndersideIndices,
     mechanisms: allMechanisms,
+    subassemblies: allSubassemblies,
   };
 }
 
@@ -453,3 +524,50 @@ export function collectCapInnerAttachments(
   }
   return extras;
 }
+
+/**
+ * Returns true when part `idx` connects to `placedSet` ONLY from above (hanging
+ * strictly underneath already-placed overhead bricks that cover >= 50% of its XZ
+ * footprint within 24 LDU vertically, with zero lower or same-layer support in `placedSet`).
+ *
+ * Used during upright building so hidden underside attachments (e.g. turntable plates or
+ * underside reinforcement plates clutched strictly beneath a spanning deck plate) are
+ * deferred out of upright steps and placed cleanly in one batch after flipping the model over.
+ */
+export function isStrictDeckUndersidePart(
+  idx: number,
+  boxes: readonly WorldBox[],
+  adj: readonly (readonly number[])[],
+  placedSet: ReadonlySet<number>,
+): boolean {
+  const b = boxes[idx];
+  if (!b || placedSet.size === 0) return false;
+  const area = Math.max(1, (b.max[0] - b.min[0]) * (b.max[2] - b.min[2]));
+  let placedNeighborCount = 0;
+  let maxCoverRatio = 0;
+  let totalCoverArea = 0;
+
+  for (const nb of adj[idx] ?? []) {
+    if (!placedSet.has(nb)) continue;
+    placedNeighborCount++;
+    const bn = boxes[nb];
+    // If ANY placed neighbor sits below or at the same vertical band (not strictly above),
+    // this piece is not a pure underside-only attachment.
+    if (bn.min[1] < b.max[1] - 4.5 || bn.center[1] <= b.center[1] + 2.0) {
+      return false;
+    }
+    if (bn.min[1] <= b.max[1] + 24) {
+      const ovX = Math.max(0, Math.min(b.max[0], bn.max[0]) - Math.max(b.min[0], bn.min[0]));
+      const ovZ = Math.max(0, Math.min(b.max[2], bn.max[2]) - Math.max(b.min[2], bn.min[2]));
+      if (ovX > 2 && ovZ > 2) {
+        const ovArea = ovX * ovZ;
+        totalCoverArea += ovArea;
+        const r = ovArea / area;
+        if (r > maxCoverRatio) maxCoverRatio = r;
+      }
+    }
+  }
+
+  return placedNeighborCount > 0 && (maxCoverRatio >= 0.5 || totalCoverArea / area >= 0.65);
+}
+
