@@ -160,6 +160,18 @@ describe('stepRenderResolution', () => {
     });
     expect(seq.width).toBeGreaterThanOrEqual(820);
     expect(seq.height).toBeGreaterThanOrEqual(1100);
+
+    // Dense 8-slot minifigure grid on 3x Retina iPhone stays crisp while fitting compact cache budget
+    const dense8 = computeMinifigDiagramRenderSize({
+      kind: 'exploded',
+      slotCount: 8,
+      dpr: 3,
+      zoom: 1,
+      gpuMaxDim: 2048,
+    });
+    expect(dense8.width).toBeGreaterThanOrEqual(1500);
+    expect(dense8.height).toBeGreaterThanOrEqual(1050);
+    expect(dense8.width * dense8.height * 8).toBeLessThanOrEqual(20_000_000);
   });
 
   it('clamps render dimensions while preserving aspect ratio', () => {

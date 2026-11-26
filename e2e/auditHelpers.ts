@@ -287,6 +287,22 @@ export async function auditSurface(
         }
       }
 
+      if (hasModel) {
+        const pageFrame = document.getElementById('pageFrame');
+        if (pageFrame && isVisible(pageFrame)) {
+          const unmounted = pageFrame.querySelectorAll('[data-canvas-mount]');
+          if (unmounted.length > 0) {
+            issues.push(`pageFrame has ${unmounted.length} unmounted [data-canvas-mount] placeholder(s)`);
+          }
+          const canvases = Array.from(pageFrame.querySelectorAll('canvas'));
+          for (const cv of canvases) {
+            if (cv.width <= 0 || cv.height <= 0) {
+              issues.push(`pageFrame has zero-sized canvas (${cv.width}x${cv.height}, aria-label="${cv.getAttribute('aria-label') || ''}")`);
+            }
+          }
+        }
+      }
+
       return { issues, vw, vh };
     },
     { activeContainerSelector, checkWorkspaceChrome, hasModel }

@@ -23,7 +23,7 @@ All cache policy, key generation, adaptive supersampling, and pre-warm ordering 
 
 - **`createPixelBudgetCache<T>(options)`**:
   - O(1) `Map`-based LRU cache bounded simultaneously by **`maxEntries`** and **`maxTotalPixels`** so HiDPI canvas memory stays strictly bounded on both desktop and mobile devices.
-  - Supports `canEvict(value)` so offscreen `<canvas>` elements currently mounted in the live DOM (`canvas.isConnected`) are never zeroed out during eviction.
+  - Supports `canEvict(value)` so offscreen `<canvas>` elements currently mounted in the live DOM (`canvas.isConnected`) or pinned as in-flight entries during an active `withPinnedRenderPass()` page render pass are never evicted or zeroed out before DOM mounting.
   - Supports `onEvict(value)` to release backing-store memory (`canvas.width = 0; canvas.height = 0`) when entries are evicted or epochs are bumped.
   - Exposes `bumpEpoch()` / `getEpoch()` for instant O(1) cache invalidation on model reload, texture decode, lighting mode change, or library updates.
 - **Deterministic Render Cache Keys**:

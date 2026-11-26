@@ -193,9 +193,11 @@ export function computeMinifigDiagramRenderSize(input: MinifigDiagramRenderSizeI
   const resScale = Math.min(3.2, computePreviewResolutionScale(input.dpr ?? 1, input.zoom ?? 1));
   const maxEdge = Math.min(DEFAULT_SCREEN_MAX_EDGE, gpuLimit);
   if (input.kind === 'exploded') {
-    const baseW = isLarge ? 1200 : 900;
-    const baseH = isLarge ? 840 : 640;
-    return clampRenderDimensions(baseW * resScale, baseH * resScale, maxEdge, DEFAULT_SCREEN_MAX_PIXELS, 360);
+    const isDenseGrid = input.slotCount >= 5 && !isLarge;
+    const baseW = isLarge ? 1200 : isDenseGrid ? 560 : 900;
+    const baseH = isLarge ? 840 : isDenseGrid ? 400 : 640;
+    const maxPixels = isDenseGrid ? 2_200_000 : DEFAULT_SCREEN_MAX_PIXELS;
+    return clampRenderDimensions(baseW * resScale, baseH * resScale, maxEdge, maxPixels, 360);
   }
 
   const stages = Math.max(1, input.stageCount || 3);

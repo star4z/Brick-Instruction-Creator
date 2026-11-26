@@ -3546,19 +3546,73 @@ function createCanvasRenderResult(canvas, extra = {}) {
   };
 }
 
+let activeRenderPinSet = null;
+
+function pinRenderEntry(entry) {
+  if (activeRenderPinSet && entry) activeRenderPinSet.add(entry);
+  return entry;
+}
+
+function withPinnedRenderPass(fn) {
+  const prev = activeRenderPinSet;
+  const next = prev || new Set();
+  activeRenderPinSet = next;
+  try {
+    return fn();
+  } finally {
+    activeRenderPinSet = prev;
+  }
+}
+
 function isRenderEntryUsable(entry) {
   return Boolean(entry && entry.canvas && entry.canvas.width > 0 && entry.canvas.height > 0);
 }
 
 function canEvictRenderEntry(entry) {
-  return !entry?.canvas?.isConnected;
+  return !entry?.canvas?.isConnected && !(activeRenderPinSet && activeRenderPinSet.has(entry));
 }
 
 function releaseRenderEntryCanvas(entry) {
-  if (entry?.canvas && !entry.canvas.isConnected) {
+  if (entry?.canvas && !entry.canvas.isConnected && !(activeRenderPinSet && activeRenderPinSet.has(entry))) {
     entry.canvas.width = 0;
     entry.canvas.height = 0;
   }
+}
+
+function createManagedRenderCache(options) {
+  const raw = createPixelBudgetCache(options);
+  return {
+    get(key) {
+      const hit = raw.get(key);
+      if (hit) pinRenderEntry(hit);
+      return hit;
+    },
+    has(key) {
+      return raw.has(key);
+    },
+    set(key, value) {
+      pinRenderEntry(value);
+      raw.set(key, value);
+    },
+    delete(key) {
+      return raw.delete(key);
+    },
+    clear() {
+      raw.clear();
+    },
+    bumpEpoch() {
+      return raw.bumpEpoch();
+    },
+    getEpoch() {
+      return raw.getEpoch();
+    },
+    size() {
+      return raw.size();
+    },
+    totalPixels() {
+      return raw.totalPixels();
+    },
+  };
 }
 
 function getRenderEntryPixels(entry) {
@@ -3593,7 +3647,7 @@ function mountRenderedCanvas(placeholder, entry, opts = {}, mountedSet = null) {
 }
 
 const coverHeroMeshCache = new Map();
-const coverHeroRenderCache = createPixelBudgetCache({
+const coverHeroRenderCache = createManagedRenderCache({
   maxEntries: isCompactMemoryViewport ? 4 : 8,
   maxTotalPixels: isCompactMemoryViewport ? 18_000_000 : 38_000_000,
   getPixels: getRenderEntryPixels,
@@ -3610,7 +3664,7 @@ const coverHeroCache = {
   },
 };
 
-const pageRenderCache = createPixelBudgetCache({
+const pageRenderCache = createManagedRenderCache({
   maxEntries: isCompactMemoryViewport ? 18 : 36,
   maxTotalPixels: isCompactMemoryViewport ? 22_000_000 : 54_000_000,
   getPixels: getRenderEntryPixels,
@@ -3618,7 +3672,7 @@ const pageRenderCache = createPixelBudgetCache({
   onEvict: releaseRenderEntryCanvas,
 });
 
-const minifigDiagramCache = createPixelBudgetCache({
+const minifigDiagramCache = createManagedRenderCache({
   maxEntries: isCompactMemoryViewport ? 16 : 36,
   maxTotalPixels: isCompactMemoryViewport ? 20_000_000 : 48_000_000,
   getPixels: getRenderEntryPixels,
@@ -3626,7 +3680,7 @@ const minifigDiagramCache = createPixelBudgetCache({
   onEvict: releaseRenderEntryCanvas,
 });
 
-const minifigOneToOneCache = createPixelBudgetCache({
+const minifigOneToOneCache = createManagedRenderCache({
   maxEntries: 16,
   maxTotalPixels: 8_000_000,
   getPixels: getRenderEntryPixels,
@@ -9939,7 +9993,8 @@ function renderAll(renderOpts = {}) {
     return `<div data-page-footer="true" data-page-number-side="${pgNumSide}" class="absolute ${zIndexClass ? `${zIndexClass} ` : ''}flex items-center justify-between font-medium pointer-events-none" style="gap:${Math.round(typo.pt(10))}px;bottom:${footerPadBottom}px;left:${padPx}px;right:${padPx}px;font-size:${typo.footerFont}px;color:${theme.muted}">${inner}</div>`;
   };
 
-  // Render Page Contents
+  // Render Page Contents (pin all in-flight canvases until mounted so multi-slot pages never self-evict)
+  withPinnedRenderPass(() => {
   if (page.kind === 'cover') {
     const dens = DENSITY_PAD[state.density] || DENSITY_PAD.balanced;
     state.coverMeta = normalizeCoverMeta(state.coverMeta, !wordless);
@@ -11095,6 +11150,7 @@ function renderAll(renderOpts = {}) {
     bindStepPageInteractions(page);
     positionVisibleStepRotationBadges();
   }
+  });
 
   if ((page.kind === 'cover' || page.kind === 'complete') && state.mode === 'camera') {
     bindHeroCameraInteractions(page);

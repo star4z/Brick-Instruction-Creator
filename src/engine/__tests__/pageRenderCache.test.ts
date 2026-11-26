@@ -55,6 +55,38 @@ describe('pageRenderCache', () => {
     expect(cache.has('newest')).toBe(true);
   });
 
+  it('never evicts pinned in-flight entries from an active multi-slot render pass even when exceeding pixel budget', () => {
+    const evicted: string[] = [];
+    const pinned = new Set<{ id: string; connected: boolean; px: number }>();
+    const cache = createPixelBudgetCache<{ id: string; connected: boolean; px: number }>({
+      maxEntries: 16,
+      maxTotalPixels: 20_000_000,
+      getPixels: (v) => v.px,
+      canEvict: (v) => !v.connected && !pinned.has(v),
+      onEvict: (v) => evicted.push(v.id),
+    });
+
+    // Stale entry from a previous page (disconnected & unpinned)
+    cache.set('prev_page', { id: 'prev_page', connected: false, px: 3_000_000 });
+
+    // Render 8 slots of ~3M px each (24M > 20M budget) before mounting them to DOM
+    const slots = Array.from({ length: 8 }, (_, i) => ({
+      id: `mf_${i + 1}`,
+      connected: false,
+      px: 3_000_000,
+    }));
+    for (const s of slots) {
+      pinned.add(s);
+      cache.set(s.id, s);
+    }
+
+    // Previous page entry should be evicted, while all 8 current-page slots remain intact
+    expect(evicted).toEqual(['prev_page']);
+    for (const s of slots) {
+      expect(cache.has(s.id)).toBe(true);
+    }
+  });
+
   it('bumps epoch and clears releasable entries cleanly', () => {
     const evicted: string[] = [];
     const cache = createPixelBudgetCache<{ id: string; px: number }>({
