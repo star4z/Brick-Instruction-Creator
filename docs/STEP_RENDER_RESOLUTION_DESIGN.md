@@ -15,7 +15,7 @@ Models rendered on instruction step pages (both on-screen in the Studio editor a
   - Enforces high-resolution floors (`2400+` px wide on 1-up, `1550+` px on 2-up, `1450+` px on 4-up compact slots) and scales cleanly up to **`3600px`** max edge (`9.6M` px budget) on screen and **`3840px`** max edge (`11M` px budget) in PDF export, clamped against the device's WebGL `MAX_VIEWPORT_DIMS` / `MAX_RENDERBUFFER_SIZE`.
 - **`computeMinifigDiagramRenderSize(input)`**:
   - Scales Exploded Stack and Sequential Step-by-Step minifigure diagrams up to `3600px` on screen and `3840px` in PDF export.
-  - Inside `renderMinifigExplodedDiagram` and `renderMinifigSequentialStage`, each sub-render is supersampled `1.65×`–`2.0×` before high-quality downsampling (`imageSmoothingQuality = 'high'`).
+  - Inside `renderMinifigExplodedDiagram` and `renderMinifigSequentialStage`, each sub-render uses adaptive WebGL supersampling (`computeSubrenderSupersampleFactor` in `src/engine/pageRenderCache.ts`: up to `1.5×` for small accessory callouts `<= 340px`, tapering to `1.0×` native HiDPI with WebGL MSAA for large `>= 720px` sub-renders already scaled `2.25×`–`3.25×` above CSS pixels) before high-quality compositing (`imageSmoothingQuality = 'high'`).
 - **`computePdfPagePixelDimensions(pageWpt, pageHpt, pageKind)`**:
   - Renders all PDF pages (step, BOM, divider, Cover, and Build Complete) at **`4.167×` points (300 DPI)** (capped at `3600px` long edge, `11M` px budget — e.g., full `3300 × 2550` for US Letter and `3508 × 2480` for A4).
   - Renders each PDF step model at `1.75×` supersampling over its drawn slot rectangle, downsampled onto the PDF canvas with `imageSmoothingQuality = 'high'`.
@@ -23,7 +23,7 @@ Models rendered on instruction step pages (both on-screen in the Studio editor a
 ### 2. Zoom-Aware In-Place Sharpening
 - During pinch-zoom, wheel-zoom, or toolbar zoom, the page stage continues to transform smoothly at 60fps via CSS `translate3d(...) scale(...)`.
 - Once zoom settles (`180ms` debounce), `refreshStepModelsForZoom()` checks `shouldUpgradeStepRenderForZoom()` for each visible step slot.
-- Standard and Studio High-Quality steps reuse their cached `info.snap.mesh` directly via `renderMeshSnapshot()` (zero mesh rebuild, zero DOM flicker) and swap `img.src` in place at up to `3600px` resolution.
+- Standard and Studio High-Quality steps reuse their cached `info.snap.mesh` directly via `renderMeshSnapshot()` (zero mesh rebuild, zero DOM flicker) and swap the mounted `<canvas>` in place at up to `3600px` resolution (see `PAGE_RENDER_CACHING_DESIGN.md`).
 
 ### 3. Style Options: Studio High-Quality Step Render & Stark Black Outlines (`src/themes/customThemes.ts`)
 Both options live under **Styles → Step Display** and are saved per theme (`.biwtheme`), per project (`.biw`), and in session preferences:

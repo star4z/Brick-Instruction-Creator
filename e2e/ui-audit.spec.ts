@@ -6,7 +6,12 @@ import {
   ensureMenuOpen,
   uploadLdrFile,
 } from './auditHelpers';
-import { CLEAN_MULTI_STEP_LDR, MISSING_PART_LDR, MULTI_CHAPTER_MPD } from './fixtures/sampleModels';
+import {
+  CLEAN_MINIFIG_MODEL_LDR,
+  CLEAN_MULTI_STEP_LDR,
+  MISSING_PART_LDR,
+  MULTI_CHAPTER_MPD,
+} from './fixtures/sampleModels';
 
 async function loadCleanManual(page: Page): Promise<void> {
   await uploadLdrFile(page, 'test-tower.ldr', CLEAN_MULTI_STEP_LDR);
@@ -296,8 +301,8 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     await expect(completeRow).toBeVisible();
     await completeRow.click();
     await expect(page.locator('#overviewModal')).toBeHidden();
-    await expect(page.locator('#pageFrame img[data-cover-hero-img="true"]')).toHaveCount(1);
-    await expect(page.locator('#pageFrame img')).toHaveCount(1);
+    await expect(page.locator('#pageFrame [data-cover-hero-img="true"]')).toHaveCount(1);
+    await expect(page.locator('#pageFrame img, #pageFrame canvas')).toHaveCount(1);
     await auditSurface(page, `${testInfo.project.name}: Build Complete Page`, {
       checkWorkspaceChrome: true,
       hasModel: true,
@@ -597,5 +602,76 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     }
 
     runtime.assertClean(`${testInfo.project.name}: Absolute Step Progress Bar`);
+  });
+
+  test('Minifigure Page (Exploded & Sequential + 1:1) and Cached Page Navigation', async ({ page }, testInfo) => {
+    const runtime = await attachRuntimeIssueCollector(page);
+
+    await page.goto('/');
+    await expect(page.locator('#emptyState')).toBeVisible();
+    await uploadLdrFile(page, 'minifig-tower.ldr', CLEAN_MINIFIG_MODEL_LDR);
+    const mpSkip = page.locator('#mpBtnSkip');
+    const wizard = page.locator('#importWizardModal');
+    await Promise.race([
+      wizard.waitFor({ state: 'visible' }),
+      mpSkip.waitFor({ state: 'visible' }),
+    ]);
+    if (await mpSkip.isVisible()) {
+      await mpSkip.click();
+      await expect(wizard).toBeVisible();
+    }
+    await page.locator('#impWizBtnGenerate').click();
+    await expect(wizard).toBeHidden();
+    await expect(page.locator('#pageFrame')).toBeVisible();
+    await closeMenuOnMobile(page);
+
+    // Navigate to Minifigure 1 (Exploded style by default)
+    await page.locator('#nextPage').click();
+    await expect(page.locator('#pageLabelText')).toContainText(/Minifigure/i);
+    await expect(page.locator('#pageFrame canvas').first()).toBeVisible();
+    const expCanvasBox = await page.locator('#pageFrame canvas').first().boundingBox();
+    expect(expCanvasBox && expCanvasBox.width > 40 && expCanvasBox.height > 40).toBeTruthy();
+    await auditSurface(page, `${testInfo.project.name}: Minifigure Page (Exploded)`, {
+      checkWorkspaceChrome: true,
+      hasModel: true,
+    });
+
+    // Advance to step page and revisit Minifigure 1 to verify cached canvas remounting
+    await page.locator('#nextPage').click();
+    await expect(page.locator('#pageFrame canvas').first()).toBeVisible();
+    await page.locator('#prevPage').click();
+    await expect(page.locator('#pageLabelText')).toContainText(/Minifigure/i);
+    await expect(page.locator('#pageFrame canvas').first()).toBeVisible();
+
+    // Switch to Sequential style + 1:1 reference via Style popover
+    await page.locator('#btnStylePop').click();
+    await expect(page.locator('#stylePopover')).toBeVisible();
+    const mf1Chk = page.locator('#toggleMinifig1to1');
+    if (await mf1Chk.isVisible() && !(await mf1Chk.isChecked())) {
+      await mf1Chk.click();
+    }
+    const seqBtn = page.locator('.mf-style-btn[data-mf-style="sequential"]');
+    if (await seqBtn.isVisible()) {
+      await seqBtn.click();
+    }
+    await page.locator('#btnStylePop').click();
+    await expect(page.locator('#stylePopover')).toBeHidden();
+
+    // Verify Sequential Minifigure page mounts stage + 1:1 canvases cleanly
+    await expect(page.locator('#pageLabelText')).toContainText(/Minifigure/i);
+    await expect(page.locator('#pageFrame canvas').first()).toBeVisible();
+    await auditSurface(page, `${testInfo.project.name}: Minifigure Page (Sequential + 1:1)`, {
+      checkWorkspaceChrome: true,
+      hasModel: true,
+    });
+
+    // Flip forward & back across cached sequential minifig / step pages
+    await page.locator('#nextPage').click();
+    await expect(page.locator('#pageFrame canvas').first()).toBeVisible();
+    await page.locator('#prevPage').click();
+    await expect(page.locator('#pageLabelText')).toContainText(/Minifigure/i);
+    await expect(page.locator('#pageFrame canvas').first()).toBeVisible();
+
+    runtime.assertClean(`${testInfo.project.name}: Minifigure & Cached Navigation`);
   });
 });

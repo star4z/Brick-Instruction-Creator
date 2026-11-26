@@ -60,3 +60,21 @@ export const MULTI_CHAPTER_MPD = [
   '1 2 0 -24 0 1 0 0 0 1 0 0 0 1 3003.dat',
   '0 STEP',
 ].join('\n');
+
+export const CLEAN_MINIFIG_MODEL_LDR = [
+  '0 Title: Minifig & Tower',
+  '0 Name: minifig-tower.ldr',
+  '0 Author: UI Audit Suite',
+  // Minifigure: Hips & Legs, Torso Assembly, Head, Helmet
+  '1 1 0 -28 0 1 0 0 0 1 0 0 0 1 970c00.dat',
+  '1 4 0 -60 0 1 0 0 0 1 0 0 0 1 973c01.dat',
+  '1 14 0 -84 0 1 0 0 0 1 0 0 0 1 3626c.dat',
+  '1 0 0 -100 0 1 0 0 0 1 0 0 0 1 3842a.dat',
+  // Simple companion build
+  '1 72 100 0 0 1 0 0 0 1 0 0 0 1 3020.dat',
+  '1 72 180 0 0 1 0 0 0 1 0 0 0 1 3020.dat',
+  '0 STEP',
+  '1 4 100 -24 0 1 0 0 0 1 0 0 0 1 3001.dat',
+  '1 1 180 -24 0 1 0 0 0 1 0 0 0 1 3001.dat',
+  '0 STEP',
+].join('\n');

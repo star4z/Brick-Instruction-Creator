@@ -344,6 +344,14 @@ import {
   shouldUpgradeStepRenderForZoom,
 } from './engine/stepRenderResolution';
 import {
+  buildLiveStepRenderCacheKey,
+  buildMinifigOneToOneCacheKey,
+  buildStaticPageSnapCacheKey,
+  computePrewarmPageIndices,
+  computeSubrenderSupersampleFactor,
+  createPixelBudgetCache,
+} from './engine/pageRenderCache';
+import {
   DEFAULT_EDITOR_URL,
   buildInteractiveHtmlFilename,
   encodeTypedArrayBase64,
@@ -3458,8 +3466,178 @@ const snapshotEngine = new WebGLBrickEngine(snapshotCanvas);
 let studioPhotoEngine = null;
 let activeLiveEngine = null;
 const pliThumbCache = new Map();
-const coverHeroCache = new Map();
 const overviewThumbCache = createOverviewThumbCache();
+
+const isCompactMemoryViewport = typeof window !== 'undefined'
+  && (window.innerWidth < 768 || (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0 && window.innerWidth < 1024));
+
+function captureOffscreenCanvas(srcCanvas) {
+  const w = Math.max(1, srcCanvas?.width || 1);
+  const h = Math.max(1, srcCanvas?.height || 1);
+  const out = document.createElement('canvas');
+  out.width = w;
+  out.height = h;
+  const ctx = out.getContext('2d');
+  if (ctx && srcCanvas && srcCanvas.width > 0 && srcCanvas.height > 0) {
+    ctx.drawImage(srcCanvas, 0, 0);
+  }
+  return out;
+}
+
+function createCanvasRenderResult(canvas, extra = {}) {
+  let cachedUrl = null;
+  return {
+    ...extra,
+    canvas,
+    w: extra.w ?? (canvas?.width || 0),
+    h: extra.h ?? (canvas?.height || 0),
+    get url() {
+      if (cachedUrl === null) {
+        cachedUrl = canvas && canvas.width > 0 && canvas.height > 0
+          ? canvas.toDataURL('image/png')
+          : '';
+      }
+      return cachedUrl;
+    },
+  };
+}
+
+function isRenderEntryUsable(entry) {
+  return Boolean(entry && entry.canvas && entry.canvas.width > 0 && entry.canvas.height > 0);
+}
+
+function canEvictRenderEntry(entry) {
+  return !entry?.canvas?.isConnected;
+}
+
+function releaseRenderEntryCanvas(entry) {
+  if (entry?.canvas && !entry.canvas.isConnected) {
+    entry.canvas.width = 0;
+    entry.canvas.height = 0;
+  }
+}
+
+function getRenderEntryPixels(entry) {
+  if (!entry) return 0;
+  const w = entry.canvas?.width || entry.w || 0;
+  const h = entry.canvas?.height || entry.h || 0;
+  return w * h;
+}
+
+function mountRenderedCanvas(placeholder, entry, opts = {}, mountedSet = null) {
+  if (!placeholder || !isRenderEntryUsable(entry)) return null;
+  let el = entry.canvas;
+  if ((mountedSet && mountedSet.has(el)) || el.isConnected) {
+    el = captureOffscreenCanvas(el);
+  } else if (mountedSet) {
+    mountedSet.add(el);
+  }
+  el.className = opts.className || '';
+  el.style.cssText = opts.style || '';
+  el.setAttribute('role', 'img');
+  if (opts.alt) el.setAttribute('aria-label', opts.alt);
+  else el.removeAttribute('aria-label');
+  el.removeAttribute('data-pick-step');
+  el.removeAttribute('data-cover-hero-img');
+  if (opts.attrs) {
+    for (const [k, v] of Object.entries(opts.attrs)) {
+      if (v !== null && v !== undefined && v !== false) el.setAttribute(k, String(v));
+    }
+  }
+  placeholder.replaceWith(el);
+  return el;
+}
+
+const coverHeroMeshCache = new Map();
+const coverHeroRenderCache = createPixelBudgetCache({
+  maxEntries: isCompactMemoryViewport ? 4 : 8,
+  maxTotalPixels: isCompactMemoryViewport ? 18_000_000 : 38_000_000,
+  getPixels: getRenderEntryPixels,
+  canEvict: canEvictRenderEntry,
+  onEvict: releaseRenderEntryCanvas,
+});
+const coverHeroCache = {
+  has: (k) => coverHeroRenderCache.has(k),
+  get: (k) => coverHeroRenderCache.get(k),
+  set: (k, v) => coverHeroRenderCache.set(k, v),
+  clear: () => {
+    coverHeroRenderCache.clear();
+    coverHeroMeshCache.clear();
+  },
+};
+
+const pageRenderCache = createPixelBudgetCache({
+  maxEntries: isCompactMemoryViewport ? 18 : 36,
+  maxTotalPixels: isCompactMemoryViewport ? 22_000_000 : 54_000_000,
+  getPixels: getRenderEntryPixels,
+  canEvict: canEvictRenderEntry,
+  onEvict: releaseRenderEntryCanvas,
+});
+
+const minifigDiagramCache = createPixelBudgetCache({
+  maxEntries: isCompactMemoryViewport ? 16 : 36,
+  maxTotalPixels: isCompactMemoryViewport ? 20_000_000 : 48_000_000,
+  getPixels: getRenderEntryPixels,
+  canEvict: canEvictRenderEntry,
+  onEvict: releaseRenderEntryCanvas,
+});
+
+const minifigOneToOneCache = createPixelBudgetCache({
+  maxEntries: 16,
+  maxTotalPixels: 8_000_000,
+  getPixels: getRenderEntryPixels,
+  canEvict: canEvictRenderEntry,
+  onEvict: releaseRenderEntryCanvas,
+});
+
+const minifigSeqPlanCache = new Map();
+const minifigExplodedPlanCache = new Map();
+let stepPartSignaturesCache = null;
+
+function getStepPartSignaturesForModel() {
+  if (!state.model) return null;
+  if (!stepPartSignaturesCache) {
+    stepPartSignaturesCache = computeOverviewStepSignatures(state.model.chapters);
+  }
+  return stepPartSignaturesCache;
+}
+
+function invalidateStepPartSignaturesCache() {
+  stepPartSignaturesCache = null;
+}
+
+let prewarmGen = 0;
+let prewarmHandle = 0;
+let prewarmIsIdle = false;
+let prewarmRafId = 0;
+let lastPageNavDirection = 1;
+
+function cancelAdjacentPagePrewarm() {
+  prewarmGen += 1;
+  if (prewarmRafId && typeof cancelAnimationFrame === 'function') {
+    cancelAnimationFrame(prewarmRafId);
+    prewarmRafId = 0;
+  }
+  if (prewarmHandle) {
+    if (prewarmIsIdle && typeof cancelIdleCallback === 'function') {
+      cancelIdleCallback(prewarmHandle);
+    } else {
+      clearTimeout(prewarmHandle);
+    }
+    prewarmHandle = 0;
+    prewarmIsIdle = false;
+  }
+}
+
+function clearMinifigDiagramCaches() {
+  cancelAdjacentPagePrewarm();
+  minifigDiagramCache.bumpEpoch();
+  minifigOneToOneCache.bumpEpoch();
+  pageRenderCache.bumpEpoch();
+  minifigSeqPlanCache.clear();
+  minifigExplodedPlanCache.clear();
+  stepPartSignaturesCache = null;
+}
 
 function getStudioPhotoEngine() {
   if (!studioPhotoEngine) {
@@ -3523,7 +3701,7 @@ function renderStepWithStudioPhoto(mesh, az, el, w, h, zoom, opts) {
   if (!photo || !photo.isAvailable()) return null;
   const maxDim = Math.max(1024, Math.min(4096, photo.getMaxDimension() || 4096));
   const clamped = clampRenderDimensions(w, h, maxDim, maxDim * maxDim, 320);
-  const rendered = photo.render(mesh, {
+  const renderedCanvas = photo.renderToCanvas(mesh, {
     projection: 'ortho',
     azDeg: az,
     elDeg: el,
@@ -3545,14 +3723,14 @@ function renderStepWithStudioPhoto(mesh, az, el, w, h, zoom, opts) {
     darkBackground: Boolean(opts?.darkBackground),
     getTextureImage: (texKey) => textureStore.getDecodedImage(texKey),
   });
-  if (!rendered) return null;
-  return {
-    url: rendered.url,
+  if (!renderedCanvas) return null;
+  const captured = captureOffscreenCanvas(renderedCanvas);
+  return createCanvasRenderResult(captured, {
     mesh,
-    mvp: rendered.mvp,
-    w: rendered.width,
-    h: rendered.height,
-  };
+    mvp: photo.getLastMvp(),
+    w: captured.width,
+    h: captured.height,
+  });
 }
 
 function renderSnapshot(prev, next, az, el, w, h, zoom, opts) {
@@ -3568,13 +3746,13 @@ function renderSnapshot(prev, next, az, el, w, h, zoom, opts) {
   }
   const drawOpts = lightingMode === 'none' ? { ...(opts || {}), unlit: true } : opts;
   const mvp = snapshotEngine.draw(mesh, w, h, az, el, zoom, opts?.fixedHalfH || 0, drawOpts);
-  return {
-    url: snapshotCanvas.toDataURL('image/png'),
+  const captured = captureOffscreenCanvas(snapshotCanvas);
+  return createCanvasRenderResult(captured, {
     mesh,
     mvp,
-    w: snapshotCanvas.width || w,
-    h: snapshotCanvas.height || h,
-  };
+    w: captured.width || w,
+    h: captured.height || h,
+  });
 }
 
 function renderMeshSnapshot(mesh, az, el, w, h, zoom, opts) {
@@ -3585,19 +3763,20 @@ function renderMeshSnapshot(mesh, az, el, w, h, zoom, opts) {
   }
   const drawOpts = lightingMode === 'none' ? { ...(opts || {}), unlit: true } : opts;
   const mvp = snapshotEngine.draw(mesh, w, h, az, el, zoom, opts?.fixedHalfH || 0, drawOpts);
-  return {
-    url: snapshotCanvas.toDataURL('image/png'),
+  const captured = captureOffscreenCanvas(snapshotCanvas);
+  return createCanvasRenderResult(captured, {
     mesh,
     mvp,
-    w: snapshotCanvas.width || w,
-    h: snapshotCanvas.height || h,
-  };
+    w: captured.width || w,
+    h: captured.height || h,
+  });
 }
 
 function drawSupersampledMeshToCtx(ctx, mesh, dstX, dstY, dstW, dstH, az, el, zoom = 1.0, fixedHalfH = 0, drawOpts = null, factor = 1.65) {
+  const effFactor = computeSubrenderSupersampleFactor(dstW, dstH, factor);
   const ss = clampRenderDimensions(
-    Math.round(dstW * factor),
-    Math.round(dstH * factor),
+    Math.round(dstW * effFactor),
+    Math.round(dstH * effFactor),
     Math.min(snapshotEngine.maxDim || 3200, 3200),
     7_200_000,
     Math.max(48, Math.round(Math.min(dstW, dstH))),
@@ -3617,7 +3796,7 @@ function getCoverHeroGpuMaxDim() {
 
 function getCoverHeroMesh(parts, theme) {
   const meshCacheKey = `__hero_mesh_${parts.length}`;
-  let mesh = coverHeroCache.get(meshCacheKey);
+  let mesh = coverHeroMeshCache.get(meshCacheKey);
   if (!mesh) {
     mesh = buildMeshBuffers([], parts, {
       highlightNew: false,
@@ -3626,7 +3805,7 @@ function getCoverHeroMesh(parts, theme) {
       heroQuality: true,
       accent: theme?.accent || '#1a73e8',
     });
-    coverHeroCache.set(meshCacheKey, mesh);
+    coverHeroMeshCache.set(meshCacheKey, mesh);
   }
   return { mesh, meshCacheKey };
 }
@@ -3639,15 +3818,16 @@ function renderCoverHeroSnapshot(parts, az, el, zoom, targetW, targetH, theme) {
   const rh = Math.max(320, Math.min(maxDim, Math.round(targetH)));
   const darkTheme = isDarkHexColor(toHexColor(theme?.bgColor || '#ffffff', '#ffffff'));
   const cacheKey = `${parts.length}|${Math.round(az * 10)}|${Math.round(el * 10)}|${safeZoom}|${rw}x${rh}|${darkTheme ? 'd' : 'l'}`;
-  if (coverHeroCache.has(cacheKey)) return coverHeroCache.get(cacheKey);
+  const cached = coverHeroCache.get(cacheKey);
+  if (isRenderEntryUsable(cached)) return cached;
 
   // Reuse hero beveled mesh across angle/zoom/theme edits for instant responsiveness
-  const { mesh, meshCacheKey } = getCoverHeroMesh(parts, theme);
+  const { mesh } = getCoverHeroMesh(parts, theme);
 
   // Primary path: Photorealistic multi-pass WebGL Studio Renderer (triple softbox shadow maps,
   // linear-space GGX ABS plastic PBR, Fresnel softbox reflections, 3D shadow-catcher floor, SSAO)
   if (photo && photo.isAvailable()) {
-    const rendered = photo.render(mesh, {
+    const renderedCanvas = photo.renderToCanvas(mesh, {
       azDeg: az,
       elDeg: el,
       width: rw,
@@ -3656,13 +3836,9 @@ function renderCoverHeroSnapshot(parts, az, el, zoom, targetW, targetH, theme) {
       darkBackground: darkTheme,
       getTextureImage: (texKey) => textureStore.getDecodedImage(texKey),
     });
-    if (rendered) {
-      const out = { url: rendered.url, mesh, mvp: null, w: rendered.width, h: rendered.height };
-      if (coverHeroCache.size > 6) {
-        const keepMesh = coverHeroCache.get(meshCacheKey);
-        coverHeroCache.clear();
-        if (keepMesh) coverHeroCache.set(meshCacheKey, keepMesh);
-      }
+    if (renderedCanvas) {
+      const captured = captureOffscreenCanvas(renderedCanvas);
+      const out = createCanvasRenderResult(captured, { mesh, mvp: null, w: captured.width, h: captured.height });
       coverHeroCache.set(cacheKey, out);
       return out;
     }
@@ -3739,8 +3915,7 @@ function renderCoverHeroSnapshot(parts, az, el, zoom, targetW, targetH, theme) {
     cctx.drawImage(snapshotCanvas, 0, 0, rw, rh);
   }
 
-  const out = { url: comp.toDataURL('image/png'), mesh, mvp, w: rw, h: rh };
-  if (coverHeroCache.size > 18) coverHeroCache.clear();
+  const out = createCanvasRenderResult(comp, { mesh, mvp, w: rw, h: rh });
   coverHeroCache.set(cacheKey, out);
   return out;
 }
@@ -3748,6 +3923,23 @@ function renderCoverHeroSnapshot(parts, az, el, zoom, targetW, targetH, theme) {
 function renderMinifigOneToOne(parts, pagePxH, pageHIn, maxPxW, maxPxH, accent = '#1a73e8') {
   const sb = Boolean(state.starkBlackOutlines);
   const outW = sb ? sanitizeLineWeight(state.outlineLineWeight, 'medium') : 'light';
+  const unlit = state.stepLighting === 'none';
+  const partsSignature = computeStepPreviewPartSignature(parts);
+  const cacheKey = buildMinifigOneToOneCacheKey({
+    epoch: minifigOneToOneCache.getEpoch(),
+    partsSignature,
+    pagePxH,
+    pageHIn,
+    maxPxW,
+    maxPxH,
+    accent,
+    starkBlackOutlines: sb,
+    outlineLineWeight: outW,
+    unlit,
+  });
+  const cached = minifigOneToOneCache.get(cacheKey);
+  if (isRenderEntryUsable(cached)) return cached;
+
   const mesh = buildMeshBuffers([], parts, { highlightNew: false, fadePrev: false, showArrows: false, accent, starkBlackOutlines: sb });
   const widthLdu = Math.max(16, mesh.bounds.maxX - mesh.bounds.minX);
   const heightLdu = Math.max(24, mesh.bounds.maxY - mesh.bounds.minY);
@@ -3757,17 +3949,21 @@ function renderMinifigOneToOne(parts, pagePxH, pageHIn, maxPxW, maxPxH, accent =
   const rw = Math.max(140, Math.round(rh * aspect));
   snapshotEngine.draw(mesh, rw, rh, 0, 0, 1.0, layout.fixedHalfH, {
     ...(sb ? { starkBlackOutlines: true, outlineLineWeight: outW } : {}),
-    unlit: state.stepLighting === 'none',
+    unlit,
   });
-  return { url: snapshotCanvas.toDataURL('image/png'), ...layout };
+  const captured = captureOffscreenCanvas(snapshotCanvas);
+  const out = createCanvasRenderResult(captured, { ...layout, w: captured.width, h: captured.height });
+  minifigOneToOneCache.set(cacheKey, out);
+  return out;
 }
 
-const minifigDiagramCache = new Map();
-const minifigSeqPlanCache = new Map();
-
-function clearMinifigDiagramCaches() {
-  minifigDiagramCache.clear();
-  minifigSeqPlanCache.clear();
+function getMinifigExplodedPlanForStep(step) {
+  const key = `${step.id}|${(step.parts || []).map(p => `${p.id}:${p.p}:${p.c}`).join(',')}`;
+  if (minifigExplodedPlanCache.has(key)) return minifigExplodedPlanCache.get(key);
+  const plan = buildMinifigExplodedPlan(step.parts || [], (pid) => resolvePart(pid).name, computeWorldBox);
+  if (minifigExplodedPlanCache.size > 48) minifigExplodedPlanCache.clear();
+  minifigExplodedPlanCache.set(key, plan);
+  return plan;
 }
 
 function getMinifigSequentialPlanForStep(step) {
@@ -3969,15 +4165,16 @@ function renderMinifigExplodedDiagram(step, cam, w, h, theme, zoom = 1.0) {
   const outW = sb ? sanitizeLineWeight(state.outlineLineWeight, 'medium') : 'light';
   const unlit = state.stepLighting === 'none';
   const mfDrawOpts = sb ? { tightFit: true, starkBlackOutlines: true, outlineLineWeight: outW, unlit } : { tightFit: true, unlit };
-  const cacheKey = `exp|${step.id}|${(step.parts || []).length}|${Math.round(cam.az)}|${Math.round(cam.el)}|${Math.round(zoom * 100)}|${rw}x${rh}|${darkBg ? 'd' : 'l'}|${sb ? outW : 'n'}${unlit ? '|u' : ''}`;
-  if (minifigDiagramCache.has(cacheKey)) return minifigDiagramCache.get(cacheKey);
+  const cacheKey = `exp|${minifigDiagramCache.getEpoch()}|${step.id}|${(step.parts || []).length}|${Math.round(cam.az)}|${Math.round(cam.el)}|${Math.round(zoom * 100)}|${rw}x${rh}|${darkBg ? 'd' : 'l'}|${sb ? outW : 'n'}${unlit ? '|u' : ''}`;
+  const cachedExp = minifigDiagramCache.get(cacheKey);
+  if (isRenderEntryUsable(cachedExp)) return cachedExp;
 
-  const plan = buildMinifigExplodedPlan(step.parts || [], (pid) => resolvePart(pid).name, computeWorldBox);
+  const plan = getMinifigExplodedPlanForStep(step);
   const comp = document.createElement('canvas');
   comp.width = rw;
   comp.height = rh;
   const ctx = comp.getContext('2d');
-  if (!ctx) return { url: '', w: rw, h: rh, plan };
+  if (!ctx) return { canvas: null, url: '', w: rw, h: rh, plan };
 
   const hasAcc = plan.accessoryCallouts.length > 0;
   const padX = Math.round(rw * 0.05);
@@ -4193,8 +4390,7 @@ function renderMinifigExplodedDiagram(step, cam, w, h, theme, zoom = 1.0) {
     }
   }
 
-  const out = { url: comp.toDataURL('image/png'), w: rw, h: rh, plan };
-  if (minifigDiagramCache.size > 64) minifigDiagramCache.clear();
+  const out = createCanvasRenderResult(comp, { w: rw, h: rh, plan });
   minifigDiagramCache.set(cacheKey, out);
   return out;
 }
@@ -4214,14 +4410,15 @@ function renderMinifigSequentialStage(step, stage, plan, cam, w, h, theme, zoom 
   const sb = Boolean(state.starkBlackOutlines);
   const outW = sb ? sanitizeLineWeight(state.outlineLineWeight, 'medium') : 'light';
   const unlit = state.stepLighting === 'none';
-  const cacheKey = `seq|${step.id}|s${stage.stepNumber}|${(step.parts || []).length}|${Math.round(cam.az)}|${Math.round(cam.el)}|${Math.round(zoom * 100)}|${rw}x${rh}|${bgHex}|${textColor}|${sb ? outW : 'n'}${unlit ? '|u' : ''}`;
-  if (minifigDiagramCache.has(cacheKey)) return minifigDiagramCache.get(cacheKey);
+  const cacheKey = `seq|${minifigDiagramCache.getEpoch()}|${step.id}|s${stage.stepNumber}|${(step.parts || []).length}|${Math.round(cam.az)}|${Math.round(cam.el)}|${Math.round(zoom * 100)}|${rw}x${rh}|${bgHex}|${textColor}|${sb ? outW : 'n'}${unlit ? '|u' : ''}`;
+  const cachedSeq = minifigDiagramCache.get(cacheKey);
+  if (isRenderEntryUsable(cachedSeq)) return cachedSeq;
 
   const comp = document.createElement('canvas');
   comp.width = rw;
   comp.height = rh;
   const ctx = comp.getContext('2d');
-  if (!ctx) return { url: '', w: rw, h: rh };
+  if (!ctx) return { canvas: null, url: '', w: rw, h: rh };
 
   const numColW = Math.round(rw * 0.14);
   const rightPad = Math.round(rw * 0.04);
@@ -4241,9 +4438,10 @@ function renderMinifigSequentialStage(step, stage, plan, cam, w, h, theme, zoom 
     partOffsets: stage.partOffsets || {},
     starkBlackOutlines: sb,
   });
+  const stageFactor = computeSubrenderSupersampleFactor(figW, figH, 1.5);
   const stageSs = clampRenderDimensions(
-    Math.round(figW * 1.5),
-    Math.round(figH * 1.5),
+    Math.round(figW * stageFactor),
+    Math.round(figH * stageFactor),
     Math.min(snapshotEngine.maxDim || 2048, 2200),
     3_600_000,
     Math.max(96, Math.min(figW, figH)),
@@ -4406,8 +4604,7 @@ function renderMinifigSequentialStage(step, stage, plan, cam, w, h, theme, zoom 
   ctx.fillText(String(stage.stepNumber), numX, numY);
   ctx.restore();
 
-  const out = { url: comp.toDataURL('image/png'), w: rw, h: rh };
-  if (minifigDiagramCache.size > 96) minifigDiagramCache.clear();
+  const out = createCanvasRenderResult(comp, { w: rw, h: rh });
   minifigDiagramCache.set(cacheKey, out);
   return out;
 }
@@ -7987,6 +8184,7 @@ function drawFireworksCanvas(ctx, pxW, pxH) {
 }
 
 function rebuildPages() {
+  invalidateStepPartSignaturesCache();
   if (!state.model) {
     state.pages = [];
     state.pageSizeWarning = null;
@@ -8600,6 +8798,27 @@ function syncStageOverlayClearance(page) {
   currentPageFitScale = clearance.fitScale;
 }
 let currentCoverHeroInfo = null;
+function swapRenderedElement(existingEl, upgraded) {
+  if (!existingEl || !upgraded) return;
+  if (isRenderEntryUsable(upgraded)) {
+    if (existingEl.tagName === 'CANVAS') {
+      const attrs = {};
+      if (existingEl.hasAttribute('data-pick-step')) attrs['data-pick-step'] = existingEl.getAttribute('data-pick-step');
+      if (existingEl.hasAttribute('data-cover-hero-img')) attrs['data-cover-hero-img'] = existingEl.getAttribute('data-cover-hero-img');
+      mountRenderedCanvas(existingEl, upgraded, {
+        className: existingEl.className,
+        style: existingEl.style.cssText,
+        alt: existingEl.getAttribute('aria-label') || '',
+        attrs,
+      });
+      return;
+    }
+  }
+  if (existingEl.tagName === 'IMG' && upgraded.url) {
+    existingEl.src = upgraded.url;
+  }
+}
+
 function refreshStepModelsForZoom() {
   zoomHiResTimer = 0;
   if (!state.model) return;
@@ -8631,8 +8850,8 @@ function refreshStepModelsForZoom() {
       );
       currentCoverHeroInfo.w = upgraded.w;
       currentCoverHeroInfo.h = upgraded.h;
-      const img = frame.querySelector('img[data-cover-hero-img="true"]');
-      if (img && upgraded.url) img.src = upgraded.url;
+      const el = frame.querySelector('[data-cover-hero-img="true"]');
+      swapRenderedElement(el, upgraded);
     }
     return;
   }
@@ -8655,8 +8874,8 @@ function refreshStepModelsForZoom() {
       const upgraded = renderMinifigExplodedDiagram(info.step, info.cam, expSize.width, expSize.height, info.theme, info.modelScale);
       info.mfExplodedW = upgraded.w;
       info.mfExplodedH = upgraded.h;
-      const img = frame.querySelector(`img[data-pick-step="${stepId}"]`);
-      if (img && upgraded.url) img.src = upgraded.url;
+      const el = frame.querySelector(`[data-pick-step="${stepId}"]`);
+      swapRenderedElement(el, upgraded);
     } else if (!info.isMfSeq && info.snap?.mesh) {
       const target = computeStepSlotRenderSize({
         slotWidth: info.estSlotW || 640,
@@ -8681,8 +8900,8 @@ function refreshStepModelsForZoom() {
         info.opts,
       );
       info.snap = upgraded;
-      const img = frame.querySelector(`.step-render-img[data-pick-step="${stepId}"]`);
-      if (img && upgraded.url) img.src = upgraded.url;
+      const el = frame.querySelector(`.step-render-img[data-pick-step="${stepId}"]`);
+      swapRenderedElement(el, upgraded);
     }
   }
 }
@@ -9025,9 +9244,465 @@ function getThemeForPage(page) {
   return getActiveTheme();
 }
 
-function renderAll() {
+function getCachedStaticPageSnap(kind, id, parts, az, el, w, h, opts) {
+  const partsSignature = computeStepPreviewPartSignature(parts);
+  const lightingMode = opts?.stepLighting ?? (opts?.highQualityStepRender ? 'studio' : 'standard');
+  const cacheKey = buildStaticPageSnapCacheKey({
+    epoch: pageRenderCache.getEpoch(),
+    kind,
+    id: String(id || ''),
+    partsSignature,
+    az,
+    el,
+    width: w,
+    height: h,
+    accent: opts?.accent || '',
+    stepLighting: lightingMode,
+    starkBlackOutlines: Boolean(opts?.starkBlackOutlines),
+    outlineLineWeight: opts?.outlineLineWeight,
+    darkBackground: Boolean(opts?.darkBackground),
+  });
+  const cached = pageRenderCache.get(cacheKey);
+  if (isRenderEntryUsable(cached)) return cached;
+  const snap = renderSnapshot([], parts, az, el, w, h, 1.0, opts);
+  pageRenderCache.set(cacheKey, snap);
+  return snap;
+}
+
+function getCachedLiveStepSnapshot(ch, step, prev, cam, ov, rw, rh, modelScale, opts) {
+  const sigMap = getStepPartSignaturesForModel();
+  const sig = sigMap?.get(step.id);
+  const prevSignature = sig ? sig.prevSignature : computeStepPreviewPartSignature(prev);
+  const stepSignature = sig ? sig.stepSignature : computeStepPreviewPartSignature(step.parts);
+  const lightingMode = opts?.stepLighting ?? (opts?.highQualityStepRender ? 'studio' : 'standard');
+  const rt = opts?.readableTarget;
+  const po = opts?.pliObstacle;
+  const framingTag = (rt || po)
+    ? `${rt ? `rt:${Math.round((rt.autoZoom || 1) * 100)}` : ''}${po ? `:po:${Math.round((po.widthFrac || 0) * 100)}x${Math.round((po.heightFrac || 0) * 100)}` : ''}`
+    : '';
+  const cacheKey = buildLiveStepRenderCacheKey({
+    epoch: pageRenderCache.getEpoch(),
+    stepId: step.id,
+    prevSignature,
+    stepSignature,
+    camAz: cam.az,
+    camEl: cam.el,
+    modelScale,
+    width: rw,
+    height: rh,
+    highlightNew: Boolean(opts?.highlightNew),
+    highlightColor: opts?.highlightColor,
+    highlightLineWeight: opts?.highlightLineWeight,
+    fadePrev: Boolean(opts?.fadePrev),
+    fadeOpacity: opts?.fadeOpacity,
+    stepLighting: lightingMode,
+    starkBlackOutlines: Boolean(opts?.starkBlackOutlines),
+    outlineLineWeight: opts?.outlineLineWeight,
+    darkBackground: Boolean(opts?.darkBackground),
+    showArrows: Boolean(opts?.showArrows),
+    arrowColor: opts?.arrowColor,
+    arrowStyle: opts?.arrowStyle,
+    arrowOutlines: Boolean(opts?.arrowOutlines),
+    arrowLighting: Boolean(opts?.arrowLighting),
+    accent: opts?.accent,
+    focusMode: ov?.focusMode,
+    framingTag,
+    offX: ov?.offX,
+    offY: ov?.offY,
+    offZ: ov?.offZ,
+    panX: opts?.panX,
+    panY: opts?.panY,
+    partOffsets: opts?.partOffsets,
+    selectedPartIds: opts?.selectedPartIds,
+    minifigPrepId: step.minifigPrep?.id || null,
+    minifigIndicatorCount: step.minifigPrep?.indicators?.length || 0,
+  });
+  const cached = pageRenderCache.get(cacheKey);
+  if (isRenderEntryUsable(cached)) return cached;
+  const snap = renderSnapshot(prev, step.parts, cam.az, cam.el, rw, rh, modelScale, opts);
+  pageRenderCache.set(cacheKey, snap);
+  return snap;
+}
+
+function buildLiveStepMeshOnly(prev, parts, rw, rh, opts) {
+  const lightingMode = opts?.stepLighting ?? (opts?.highQualityStepRender ? 'studio' : 'standard');
+  const useStudio = lightingMode === 'studio' && Boolean(getStudioPhotoEngine()?.isAvailable());
+  const meshOpts = useStudio ? { ...opts, heroQuality: true, includeHeroEdges: true } : opts;
+  const mesh = buildMeshBuffers(prev, parts, meshOpts);
+  return { mesh, mvp: null, canvas: null, url: '', w: rw, h: rh };
+}
+
+function collectPrewarmTasksForPage(targetPage, dims, typo, dpr) {
+  const tasks = [];
+  if (!targetPage || !state.model) return tasks;
+  const theme = getThemeForPage(targetPage);
+  const padPx = typo.pad;
+  const gapPx = typo.gap;
+  const footerH = typo.footerH;
+  const wordless = Boolean(state.wordlessMode);
+  const darkThemeBg = isDarkHexColor(toHexColor(theme.bgColor || '#ffffff', '#ffffff'));
+
+  if (targetPage.kind === 'cover') {
+    const dens = DENSITY_PAD[state.density] || DENSITY_PAD.balanced;
+    const cm = normalizeCoverMeta(state.coverMeta, !wordless);
+    const showCoverText = cm.showText !== false;
+    const title = showCoverText ? (cm.title || state.model.title || 'Untitled Model').trim() : '';
+    const sub = showCoverText ? (cm.subtitle || '').trim() : '';
+    const layout = computeCoverLayout({
+      pageW: dims.width,
+      pageH: dims.height,
+      hasCreatorLogo: Boolean(cm.creatorLogoSrc),
+      hasTitle: showCoverText && title.length > 0,
+      hasSubtitle: showCoverText && sub.length > 0,
+      hasThemeImage: Boolean(cm.themeImageSrc),
+      densityPadFactor: dens.pad / 20,
+    });
+    const heroSize = computeCoverHeroRenderSize({
+      heroWidth: layout.heroRect.w,
+      heroHeight: layout.heroRect.h,
+      dpr,
+      zoom: 1,
+      stageFitScale: dims.fitScale,
+      mode: 'screen',
+      gpuMaxDim: getCoverHeroGpuMaxDim(),
+    });
+    tasks.push(() => {
+      const allParts = getAllParts(state.model);
+      renderCoverHeroSnapshot(allParts, cm.az, cm.el, cm.zoom, heroSize.width, heroSize.height, theme);
+    });
+    return tasks;
+  }
+
+  if (targetPage.kind === 'complete') {
+    const cm = normalizeCompleteMeta(state.completeMeta);
+    const compW = Math.max(240, dims.width - padPx * 2);
+    const compH = Math.max(200, Math.round(dims.height * 0.72));
+    const heroSize = computeCoverHeroRenderSize({
+      heroWidth: compW,
+      heroHeight: compH,
+      dpr,
+      zoom: 1,
+      stageFitScale: dims.fitScale,
+      mode: 'screen',
+      gpuMaxDim: getCoverHeroGpuMaxDim(),
+    });
+    tasks.push(() => {
+      const allParts = getAllParts(state.model);
+      renderCoverHeroSnapshot(allParts, cm.az, cm.el, cm.zoom, heroSize.width, heroSize.height, theme);
+    });
+    return tasks;
+  }
+
+  if (targetPage.kind === 'section_divider') {
+    const resScale = getPreviewResolutionScale();
+    const divSize = clampRenderDimensions(
+      Math.round(Math.max(1080, dims.width - padPx * 2) * resScale),
+      Math.round(Math.max(680, dims.height - padPx * 2 - footerH - 80) * resScale),
+      Math.min(snapshotEngine.maxDim || 3200, 3200),
+      7_200_000,
+      480,
+    );
+    tasks.push(() => {
+      getCachedStaticPageSnap('section_divider', targetPage.id, targetPage.previewParts || [], 38, 28, divSize.width, divSize.height, {
+        highlightNew: false,
+        fadePrev: false,
+        showArrows: false,
+        accent: theme.accent,
+        stepLighting: state.stepLighting,
+        highQualityStepRender: state.highQualityStepRender,
+        starkBlackOutlines: state.starkBlackOutlines,
+        outlineLineWeight: state.starkBlackOutlines ? state.outlineLineWeight : 'light',
+        darkBackground: darkThemeBg,
+      });
+    });
+    return tasks;
+  }
+
+  if (targetPage.kind === 'submodel_page' && targetPage.step?.subassembly) {
+    const sub = targetPage.step.subassembly;
+    const resScale = getPreviewResolutionScale();
+    const subPageSize = clampRenderDimensions(
+      Math.round(Math.max(920, dims.width - padPx * 2) * resScale),
+      Math.round(Math.max(580, dims.height - padPx * 2 - footerH - 80) * resScale),
+      Math.min(snapshotEngine.maxDim || 2048, 2200),
+      3_800_000,
+      480,
+    );
+    tasks.push(() => {
+      getCachedStaticPageSnap('submodel_page', targetPage.id, sub.buildParts, 38, 30, subPageSize.width, subPageSize.height, {
+        highlightNew: false,
+        fadePrev: false,
+        showArrows: false,
+        accent: theme.accent,
+        stepLighting: state.stepLighting,
+        highQualityStepRender: state.highQualityStepRender,
+        starkBlackOutlines: state.starkBlackOutlines,
+        outlineLineWeight: state.starkBlackOutlines ? state.outlineLineWeight : 'light',
+        darkBackground: darkThemeBg,
+      });
+    });
+    return tasks;
+  }
+
+  if (targetPage.kind === 'bom' && Array.isArray(targetPage.bomEntries)) {
+    const seenBom = new Set();
+    for (const entry of targetPage.bomEntries) {
+      if (!entry?.part) continue;
+      const k = `${entry.part.p}:${entry.part.c}`;
+      if (seenBom.has(k)) continue;
+      seenBom.add(k);
+      tasks.push(() => { getPliThumb(entry.part); });
+      if (seenBom.size >= 24) break;
+    }
+    return tasks;
+  }
+
+  if (targetPage.kind !== 'steps' || !Array.isArray(targetPage.slots)) return tasks;
+
+  const slots = targetPage.slots;
+  const pageSpec = targetPage.layoutSpec || state.layoutConfig;
+  const st = typo.steps;
+  const introEstH = targetPage.submodelIntro ? Math.round(st.introThumbH + typo.pt(20)) : 0;
+  const gridW = Math.max(120, dims.width - padPx * 2);
+  const gridH = Math.max(120, dims.height - padPx * 2 - footerH - introEstH);
+  const slotRects = computePageSlotRects(slots.length, pageSpec, dims.isLandscape, gridW, gridH, gapPx, targetPage.autoGrid);
+  const resScale = getPreviewResolutionScale();
+
+  // Pre-warm unique PLI thumbnails first so small 420x420 toDataURL readbacks never flush queued multi-megapixel step renders
+  const seenPli = new Set();
+  for (let slotIdx = 0; slotIdx < slots.length; slotIdx++) {
+    const { ch, step } = slots[slotIdx];
+    const isMfBuild = Boolean((step.isStandaloneFigure || ch.kind === 'minifigure') && !step.isMinifigPoseStep);
+    const mfStyle = isMfBuild ? getEffectiveMinifigStyle(step) : 'classic';
+    if (step.attachedSubmodel || step.attachedMinifig || step.minifigPrep || (isMfBuild && (mfStyle === 'exploded' || mfStyle === 'sequential'))) continue;
+    for (const p of (step.parts || [])) {
+      const k = `${p.p}:${p.c}`;
+      if (seenPli.has(k)) continue;
+      seenPli.add(k);
+      tasks.push(() => { getPliThumb(p); });
+      if (seenPli.size >= 16) break;
+    }
+    if (seenPli.size >= 16) break;
+  }
+
+  for (let slotIdx = 0; slotIdx < slots.length; slotIdx++) {
+    const { ch, step, minifigSeqSlice } = slots[slotIdx];
+    const slotRect = slotRects[slotIdx] || { x: 0, y: 0, w: gridW, h: gridH, isFeatured: slots.length === 1, isCompact: false };
+    const estSlotW = Math.max(90, slotRect.w);
+    const estSlotH = Math.max(90, slotRect.h);
+    const cam = getStepCamera(step);
+    const ov = state.overrides[step.id] || {};
+    const modelScale = ov.modelScale || 1.0;
+    const isMfBuild = Boolean((step.isStandaloneFigure || ch.kind === 'minifigure') && !step.isMinifigPoseStep);
+    const mfStyle = isMfBuild ? getEffectiveMinifigStyle(step) : 'classic';
+    const isMfExploded = isMfBuild && mfStyle === 'exploded';
+    const isMfSeq = isMfBuild && mfStyle === 'sequential';
+
+    if (isMfExploded) {
+      const expDims = computeMinifigDiagramRenderSize({
+        kind: 'exploded',
+        slotCount: slots.length,
+        isFeatured: Boolean(slotRect.isFeatured),
+        dpr,
+        zoom: 1,
+        mode: 'screen',
+        gpuMaxDim: snapshotEngine.maxDim,
+      });
+      tasks.push(() => {
+        renderMinifigExplodedDiagram(step, cam, expDims.width, expDims.height, theme, modelScale);
+      });
+    } else if (isMfSeq) {
+      const seqPlan = getMinifigSequentialPlanForStep(step);
+      const sl = minifigSeqSlice || { start: 0, end: seqPlan.stages.length, cols: Math.min(3, seqPlan.stages.length), pageIdx: 0, pageCount: 1 };
+      const visibleStages = seqPlan.stages.slice(sl.start, sl.end);
+      const seqDims = computeMinifigDiagramRenderSize({
+        kind: 'sequential',
+        slotCount: slots.length,
+        stageCount: visibleStages.length,
+        dpr,
+        zoom: 1,
+        mode: 'screen',
+        gpuMaxDim: snapshotEngine.maxDim,
+      });
+      for (const stage of visibleStages) {
+        tasks.push(() => {
+          renderMinifigSequentialStage(step, stage, seqPlan, cam, seqDims.width, seqDims.height, theme, modelScale);
+        });
+      }
+    } else {
+      const mfPrep = step.isMinifigPoseStep ? step.minifigPrep : null;
+      const stepMeta = state.stepFramingMeta.get(step.id) || null;
+      const hasStaticBadgesEarly = Boolean(step.stepHint || step.minifigPrep);
+      const useOverlayPli = Boolean(
+        slots.length === 1 &&
+        !hasStaticBadgesEarly &&
+        stepMeta?.canOverlayPli &&
+        stepMeta?.pliObstacle,
+      );
+      const slotPadPx = (slotRect.isCompact || estSlotH < typo.pt(250) || estSlotW < typo.pt(230))
+        ? Math.max(4, Math.round(st.slotPad * 0.72))
+        : st.slotPad;
+      const poseLegendPx = (mfPrep && mfPrep.indicators && mfPrep.indicators.length > 0) ? Math.round(typo.pt(22)) : 0;
+      const estHeaderPx = useOverlayPli
+        ? 0
+        : Math.round(((slotRect.isCompact || estSlotH < typo.pt(250) || estSlotW < typo.pt(230)) ? st.pliThumbTight : st.pliThumb) + typo.pt(18));
+      const estVisualW = Math.max(60, estSlotW - slotPadPx * 2);
+      const estVisualH = Math.max(60, estSlotH - slotPadPx * 2 - estHeaderPx - poseLegendPx);
+      const stepRenderDims = computeStepSlotRenderSize({
+        slotWidth: estSlotW,
+        slotHeight: estSlotH,
+        visualWidth: estVisualW,
+        visualHeight: estVisualH,
+        slotCount: slots.length,
+        isFeatured: Boolean(slotRect.isFeatured),
+        isCompact: Boolean(slotRect.isCompact),
+        dpr,
+        zoom: 1,
+        stageFitScale: dims.fitScale,
+        mode: 'screen',
+        gpuMaxDim: state.highQualityStepRender ? getCoverHeroGpuMaxDim() : snapshotEngine.maxDim,
+      });
+      tasks.push(() => {
+        const prev = getPreviousPartsForStep(state.model, ch, step);
+        const effectivePartOffsets = getEffectivePartOffsets(step, ov);
+        const opts = {
+          highlightNew: state.highlightNew, highlightColor: state.highlightColor,
+          highlightLineWeight: state.highlightLineWeight,
+          fadePrev: state.fadePrev, fadeOpacity: state.fadeOpacity,
+          stepLighting: state.stepLighting,
+          unlit: state.stepLighting === 'none',
+          highQualityStepRender: state.highQualityStepRender,
+          starkBlackOutlines: state.starkBlackOutlines,
+          outlineLineWeight: state.starkBlackOutlines ? state.outlineLineWeight : 'light',
+          darkBackground: darkThemeBg,
+          showArrows: true, arrowColor: state.arrowColor, arrowStyle: state.arrowStyle, arrowOutlines: state.arrowOutlines, arrowLighting: state.arrowLighting, accent: theme.accent, ov,
+          partOffsets: effectivePartOffsets,
+          readableTarget: stepMeta?.readableTarget || null,
+          pliObstacle: useOverlayPli ? stepMeta.pliObstacle : null,
+          selectedPartIds: null,
+          ...(mfPrep ? {
+            minifigIndicators: mfPrep.indicators || [],
+            ghostParts: mfPrep.ghostParts || [],
+            highlightOnlyPartIds: new Set(mfPrep.rotatedPartIds || []),
+          } : {}),
+        };
+        getCachedLiveStepSnapshot(ch, step, prev, cam, ov, stepRenderDims.width, stepRenderDims.height, modelScale, opts);
+      });
+    }
+
+    const allowMf1to1OnPage = !isMfSeq || !minifigSeqSlice || minifigSeqSlice.pageIdx === minifigSeqSlice.pageCount - 1;
+    if (state.showMinifig1to1 && isMfBuild && allowMf1to1OnPage) {
+      tasks.push(() => {
+        renderMinifigOneToOne(step.parts, dims.height, dims.heightIn, Math.round(estSlotW * (isMfSeq ? 0.24 : 0.32)), Math.round(estSlotH * 0.64), theme.accent);
+      });
+    }
+
+    if (step.subassembly && !ov.calloutAsPages && !isMfExploded && !isMfSeq) {
+      const subCalloutDims = clampRenderDimensions(
+        Math.round(520 * resScale),
+        Math.round(360 * resScale),
+        Math.min(snapshotEngine.maxDim || 2400, 2400),
+        3_800_000,
+        300,
+      );
+      tasks.push(() => {
+        getCachedStaticPageSnap('sub_callout', step.id, step.subassembly.buildParts, 38, 30, subCalloutDims.width, subCalloutDims.height, {
+          highlightNew: false,
+          fadePrev: false,
+          showArrows: false,
+          accent: theme.accent,
+          stepLighting: state.stepLighting,
+          highQualityStepRender: state.highQualityStepRender,
+          starkBlackOutlines: state.starkBlackOutlines,
+          outlineLineWeight: state.starkBlackOutlines ? state.outlineLineWeight : 'light',
+          darkBackground: darkThemeBg,
+        });
+      });
+    }
+  }
+
+  return tasks;
+}
+
+function scheduleAdjacentPagePrewarm() {
+  cancelAdjacentPagePrewarm();
+  if (!state.model || state.pages.length <= 1 || state.zoom > 1.05) return;
+  if (typeof document !== 'undefined' && document.hidden) return;
+  if (isOverviewModalOpen()) return;
+
+  const gen = prewarmGen;
+  const neighborIndices = computePrewarmPageIndices(state.pageIdx, state.pages.length, lastPageNavDirection);
+  if (neighborIndices.length === 0) return;
+
+  const scheduleNext = (fn, delayMs = 0) => {
+    if (delayMs > 0) {
+      prewarmIsIdle = false;
+      prewarmHandle = window.setTimeout(fn, delayMs);
+    } else if (typeof requestIdleCallback === 'function') {
+      prewarmIsIdle = true;
+      prewarmHandle = requestIdleCallback(fn, { timeout: 350 });
+    } else {
+      prewarmIsIdle = false;
+      prewarmHandle = window.setTimeout(fn, 24);
+    }
+  };
+
+  const startPrewarmQueue = () => {
+    if (gen !== prewarmGen || !state.model) return;
+    if (typeof document !== 'undefined' && document.hidden) return;
+    const dims = computePageFrameDimensions();
+    const typo = computePageTypography({
+      widthIn: dims.widthIn,
+      heightIn: dims.heightIn,
+      pxPerInch: dims.pxPerInch,
+      density: state.density,
+      bomDensity: state.bomConfig?.density,
+    });
+    const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) ? window.devicePixelRatio : 1;
+    const queue = [];
+    for (const idx of neighborIndices) {
+      const pg = state.pages[idx];
+      if (!pg) continue;
+      queue.push(...collectPrewarmTasksForPage(pg, dims, typo, dpr));
+    }
+    if (queue.length === 0) return;
+
+    let cursor = 0;
+    const runOne = () => {
+      if (gen !== prewarmGen || !state.model || cursor >= queue.length) return;
+      if (typeof document !== 'undefined' && document.hidden) return;
+      try {
+        queue[cursor++]();
+      } catch (_) {}
+      if (gen === prewarmGen && cursor < queue.length) {
+        scheduleNext(runOne, 0);
+      }
+    };
+    scheduleNext(runOne, 0);
+  };
+
+  // Wait for two animation frames so the current page finishes painting before we touch WebGL for neighbors
+  if (typeof requestAnimationFrame === 'function') {
+    prewarmRafId = requestAnimationFrame(() => {
+      if (gen !== prewarmGen) return;
+      prewarmRafId = requestAnimationFrame(() => {
+        prewarmRafId = 0;
+        if (gen !== prewarmGen) return;
+        scheduleNext(startPrewarmQueue, 24);
+      });
+    });
+  } else {
+    scheduleNext(startPrewarmQueue, 120);
+  }
+}
+
+function renderAll(renderOpts = {}) {
+  cancelAdjacentPagePrewarm();
   if (activeLiveEngine) { activeLiveEngine.dispose(); activeLiveEngine = null; }
   currentSlotRenderInfo.clear();
+
+  const pageNavOnly = Boolean(renderOpts?.pageNavigationOnly) && Boolean(state.model) && state.pages.length > 0;
+  const skipRebuild = pageNavOnly || Boolean(renderOpts?.skipRebuildPages);
 
   const hasModel = Boolean(state.model);
   document.getElementById('emptyState').classList.toggle('hidden', hasModel);
@@ -9058,29 +9733,36 @@ function renderAll() {
     return;
   }
 
-  rebuildPages();
+  if (!skipRebuild) {
+    rebuildPages();
+  }
   const page = state.pages[state.pageIdx];
   const theme = getThemeForPage(page);
-  const allSteps = getAllSteps(state.model);
-  const allParts = getAllParts(state.model);
-  const fileTypeLabel = getModelFileTypeLabel();
+  const allParts = (page.kind === 'cover' || page.kind === 'complete' || !pageNavOnly)
+    ? getAllParts(state.model)
+    : null;
 
-  if (desktopNameEl) desktopNameEl.textContent = state.model.title;
-  if (mobileModelSepEl) mobileModelSepEl.classList.remove('hidden');
-  if (mobileModelNameEl) { mobileModelNameEl.textContent = state.model.title; mobileModelNameEl.classList.remove('hidden'); }
-  document.getElementById('menuModelName').textContent = state.model.title;
-  if (fileTypeEl) {
-    fileTypeEl.textContent = fileTypeLabel;
-    fileTypeEl.classList.remove('hidden');
+  if (!pageNavOnly) {
+    const allSteps = getAllSteps(state.model);
+    const fileTypeLabel = getModelFileTypeLabel();
+
+    if (desktopNameEl) desktopNameEl.textContent = state.model.title;
+    if (mobileModelSepEl) mobileModelSepEl.classList.remove('hidden');
+    if (mobileModelNameEl) { mobileModelNameEl.textContent = state.model.title; mobileModelNameEl.classList.remove('hidden'); }
+    document.getElementById('menuModelName').textContent = state.model.title;
+    if (fileTypeEl) {
+      fileTypeEl.textContent = fileTypeLabel;
+      fileTypeEl.classList.remove('hidden');
+    }
+    if (statsEl) {
+      statsEl.innerHTML = `
+        <span class="px-2 py-0.5 rounded bg-[var(--card)] border border-[var(--border)]">${formatPartCount(allParts.length)}</span>
+        <span class="px-2 py-0.5 rounded bg-[var(--card)] border border-[var(--border)]">${allSteps.length} steps</span>
+        <span class="px-2 py-0.5 rounded bg-[var(--card)] border border-[var(--border)]">${state.pages.length} pages</span>`;
+      statsEl.classList.remove('hidden');
+    }
+    syncSideMenuLayout();
   }
-  if (statsEl) {
-    statsEl.innerHTML = `
-      <span class="px-2 py-0.5 rounded bg-[var(--card)] border border-[var(--border)]">${formatPartCount(allParts.length)}</span>
-      <span class="px-2 py-0.5 rounded bg-[var(--card)] border border-[var(--border)]">${allSteps.length} steps</span>
-      <span class="px-2 py-0.5 rounded bg-[var(--card)] border border-[var(--border)]">${state.pages.length} pages</span>`;
-    statsEl.classList.remove('hidden');
-  }
-  syncSideMenuLayout();
 
   document.getElementById('btnUndo').disabled = state.undoStack.length === 0;
   document.getElementById('btnRedo').disabled = state.redoStack.length === 0;
@@ -9145,6 +9827,7 @@ function renderAll() {
   // Apply stage scale immediately so there is never an unscaled flash before rAF
   flushStageTransform();
 
+  const mountedCanvases = new Set();
   const footerPadBottom = Math.max(4, Math.round(padPx * 0.42));
   const wordless = Boolean(state.wordlessMode);
   const showFooterTitle = !wordless && Boolean(state.showPageTitle);
@@ -9198,15 +9881,18 @@ function renderAll() {
       mode: 'screen',
       gpuMaxDim: getCoverHeroGpuMaxDim(),
     });
-    const snap = renderCoverHeroSnapshot(
-      allParts,
-      cm.az,
-      cm.el,
-      cm.zoom,
-      heroSize.width,
-      heroSize.height,
-      theme,
-    );
+    const isLiveHeroCamera = state.mode === 'camera';
+    const snap = isLiveHeroCamera
+      ? { mesh: getCoverHeroMesh(allParts, theme).mesh, w: heroSize.width, h: heroSize.height, canvas: null }
+      : renderCoverHeroSnapshot(
+          allParts,
+          cm.az,
+          cm.el,
+          cm.zoom,
+          heroSize.width,
+          heroSize.height,
+          theme,
+        );
     currentCoverHeroInfo = {
       kind: 'cover',
       parts: allParts,
@@ -9220,7 +9906,6 @@ function renderAll() {
       h: snap.h,
       theme,
     };
-    const isLiveHeroCamera = state.mode === 'camera';
     const darkBg = isDarkHexColor(toHexColor(theme.bgColor || '#ffffff', '#ffffff'));
     const badgeSurface = darkBg ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.92)';
     const badgeBorder = darkBg ? 'rgba(255,255,255,0.20)' : 'rgba(15,23,42,0.14)';
@@ -9245,7 +9930,7 @@ function renderAll() {
         <div class="absolute z-0 flex items-center justify-center ${isLiveHeroCamera ? 'pointer-events-auto' : 'pointer-events-none'}" style="left:${layout.heroRect.x}px;top:${layout.heroRect.y}px;width:${layout.heroRect.w}px;height:${layout.heroRect.h}px;">
           ${isLiveHeroCamera
             ? `<canvas id="liveHeroCanvas" class="w-full h-full object-contain cursor-grab active:cursor-grabbing touch-none select-none"></canvas>`
-            : `<img data-cover-hero-img="true" src="${snap.url}" alt="${escHtml(title || state.model.title || 'Model')}" class="w-full h-full object-contain pointer-events-none select-none" />`}
+            : `<span data-canvas-mount="cover_hero"></span>`}
         </div>
 
         <!-- Top-Left: Optional Creator Logo + Optional Model Name & Subtitle -->
@@ -9288,6 +9973,18 @@ function renderAll() {
           </div>
         </a>
       </div>`;
+    if (!isLiveHeroCamera) {
+      mountRenderedCanvas(
+        frame.querySelector('[data-canvas-mount="cover_hero"]'),
+        snap,
+        {
+          className: 'w-full h-full object-contain pointer-events-none select-none',
+          alt: title || state.model.title || 'Model',
+          attrs: { 'data-cover-hero-img': 'true' },
+        },
+        mountedCanvases,
+      );
+    }
   } else if (page.kind === 'complete') {
     state.completeMeta = normalizeCompleteMeta(state.completeMeta);
     const cm = state.completeMeta;
@@ -9303,7 +10000,10 @@ function renderAll() {
       mode: 'screen',
       gpuMaxDim: getCoverHeroGpuMaxDim(),
     });
-    const snap = renderCoverHeroSnapshot(allParts, cm.az, cm.el, cm.zoom, heroSize.width, heroSize.height, theme);
+    const isLiveHeroCamera = state.mode === 'camera';
+    const snap = isLiveHeroCamera
+      ? { mesh: getCoverHeroMesh(allParts, theme).mesh, w: heroSize.width, h: heroSize.height, canvas: null }
+      : renderCoverHeroSnapshot(allParts, cm.az, cm.el, cm.zoom, heroSize.width, heroSize.height, theme);
     currentCoverHeroInfo = {
       kind: 'complete',
       parts: allParts,
@@ -9317,7 +10017,6 @@ function renderAll() {
       h: snap.h,
       theme,
     };
-    const isLiveHeroCamera = state.mode === 'camera';
     const showText = cm.showText !== false;
     const showFw = cm.showFireworks !== false;
     const celebStyle = cm.celebrationStyle || 'starburst';
@@ -9336,10 +10035,22 @@ function renderAll() {
         <div class="relative z-10 flex-1 min-h-0 w-full overflow-hidden ${isLiveHeroCamera ? 'pointer-events-auto' : 'pointer-events-none'}" style="margin:${Math.round(typo.pt(8))}px 0;">
           ${isLiveHeroCamera
             ? `<canvas id="liveHeroCanvas" class="absolute inset-0 w-full h-full object-contain cursor-grab active:cursor-grabbing touch-none select-none"></canvas>`
-            : `<img data-cover-hero-img="true" src="${snap.url}" alt="Completed build" class="absolute inset-0 w-full h-full object-contain pointer-events-none select-none" />`}
+            : `<span data-canvas-mount="complete_hero"></span>`}
         </div>
         ${renderPageFooterHtml({ titleText: state.model.title, zIndexClass: 'z-10' })}
       </div>`;
+    if (!isLiveHeroCamera) {
+      mountRenderedCanvas(
+        frame.querySelector('[data-canvas-mount="complete_hero"]'),
+        snap,
+        {
+          className: 'absolute inset-0 w-full h-full object-contain pointer-events-none select-none',
+          alt: 'Completed build',
+          attrs: { 'data-cover-hero-img': 'true' },
+        },
+        mountedCanvases,
+      );
+    }
   } else if (page.kind === 'back') {
     const bm = normalizeBackMeta(state.backMeta);
     const credit = BACK_COVER_CREDIT;
@@ -9370,7 +10081,7 @@ function renderAll() {
       7_200_000,
       480,
     );
-    const snap = renderSnapshot([], page.previewParts || [], 38, 28, divSize.width, divSize.height, 1.0, {
+    const snap = getCachedStaticPageSnap('section_divider', page.id, page.previewParts || [], 38, 28, divSize.width, divSize.height, {
       highlightNew: false,
       fadePrev: false,
       showArrows: false,
@@ -9425,10 +10136,19 @@ function renderAll() {
       <div class="relative w-full h-full flex flex-col justify-between overflow-hidden" style="padding:${padPx}px;padding-bottom:${padPx + footerH}px">
         ${bagHeaderHtml}
         <div class="relative flex-1 min-h-0 overflow-hidden" style="margin:${Math.round(typo.pt(8))}px 0">
-          <img src="${snap.url}" alt="${escHtml(page.chapterName || 'Stage')}" class="absolute inset-0 w-full h-full object-contain pointer-events-none" />
+          <span data-canvas-mount="section_divider"></span>
         </div>
         ${renderPageFooterHtml({ titleText: state.model.title })}
       </div>`;
+    mountRenderedCanvas(
+      frame.querySelector('[data-canvas-mount="section_divider"]'),
+      snap,
+      {
+        className: 'absolute inset-0 w-full h-full object-contain pointer-events-none',
+        alt: page.chapterName || 'Stage',
+      },
+      mountedCanvases,
+    );
   } else if (page.kind === 'submodel_page') {
     const sub = page.step.subassembly;
     const resScale = getPreviewResolutionScale();
@@ -9439,7 +10159,7 @@ function renderAll() {
       3_800_000,
       480,
     );
-    const snap = renderSnapshot([], sub.buildParts, 38, 30, subPageSize.width, subPageSize.height, 1.0, {
+    const snap = getCachedStaticPageSnap('submodel_page', page.id, sub.buildParts, 38, 30, subPageSize.width, subPageSize.height, {
       highlightNew: false,
       fadePrev: false,
       showArrows: false,
@@ -9457,10 +10177,19 @@ function renderAll() {
           <span class="rounded-full font-black text-white" style="background:${theme.accent};font-size:${typo.submodelPage.badgeFont}px;padding:${Math.round(typo.pt(2.5))}px ${Math.round(typo.pt(9))}px">${wordless ? `×${sub.repeatCount}` : `Build ${sub.repeatCount}×`}</span>
         </div>
         <div class="relative flex-1 min-h-0 overflow-hidden" style="margin:${Math.round(typo.pt(8))}px 0">
-          <img src="${snap.url}" class="absolute inset-0 w-full h-full object-contain pointer-events-none" />
+          <span data-canvas-mount="submodel_page"></span>
         </div>
         ${renderPageFooterHtml({ titleText: page.chapterName })}
       </div>`;
+    mountRenderedCanvas(
+      frame.querySelector('[data-canvas-mount="submodel_page"]'),
+      snap,
+      {
+        className: 'absolute inset-0 w-full h-full object-contain pointer-events-none',
+        alt: sub.name || 'Submodel',
+      },
+      mountedCanvases,
+    );
   } else if (page.kind === 'bom') {
     const cfg = getEffectiveBomConfig();
     const enabledFields = getEnabledBomFields(cfg);
@@ -9629,12 +10358,24 @@ function renderAll() {
     const gridH = Math.max(120, dims.height - padPx * 2 - footerH - introEstH);
     const slotRects = computePageSlotRects(slots.length, pageSpec, dims.isLandscape, gridW, gridH, gapPx, page.autoGrid);
     const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) ? window.devicePixelRatio : 1;
+    const isLiveStepCamera = state.mode === 'step' && state.stepSubTab === 'camera';
+    const isStepNotesMode = state.mode === 'step' && state.stepSubTab === 'notes';
+    const isPartsMode = state.mode === 'parts';
+    const isArrangeMode = false;
+
+    // Warm small 420x420 PLI thumbnails before queuing multi-megapixel step renders so toDataURL
+    // never forces a synchronous GPU pipeline flush behind queued step frames on snapshotCanvas.
+    for (const { ch, step } of slots) {
+      const isMfBuildSlot = Boolean((step.isStandaloneFigure || ch.kind === 'minifigure') && !step.isMinifigPoseStep);
+      const mfStyleSlot = isMfBuildSlot ? getEffectiveMinifigStyle(step) : 'classic';
+      if (step.attachedSubmodel || step.attachedMinifig || step.minifigPrep || (isMfBuildSlot && (mfStyleSlot === 'exploded' || mfStyleSlot === 'sequential'))) continue;
+      for (const p of (step.parts || [])) getPliThumb(p);
+    }
 
     const slotData = slots.map(({ ch, step, minifigSeqSlice }, slotIdx) => {
       const slotRect = slotRects[slotIdx] || { x: 0, y: 0, w: gridW, h: gridH, isFeatured: slots.length === 1, isCompact: false };
       const estSlotW = Math.max(90, slotRect.w);
       const estSlotH = Math.max(90, slotRect.h);
-      const prev = getPreviousPartsForStep(state.model, ch, step);
       const cam = getStepCamera(step);
       const ov = state.overrides[step.id] || {};
       const modelScale = ov.modelScale || 1.0;
@@ -9642,6 +10383,9 @@ function renderAll() {
       const mfStyle = isMfBuild ? getEffectiveMinifigStyle(step) : 'classic';
       const isMfExploded = isMfBuild && mfStyle === 'exploded';
       const isMfSeq = isMfBuild && mfStyle === 'sequential';
+      const isOfficialMf = isMfExploded || isMfSeq;
+      const showLive3D = isLiveStepCamera && state.selectedStepId === step.id;
+      const prev = (!isOfficialMf || showLive3D) ? getPreviousPartsForStep(state.model, ch, step) : [];
       const effectivePartOffsets = getEffectivePartOffsets(step, ov);
       const mfPrep = step.isMinifigPoseStep ? step.minifigPrep : null;
       const darkThemeBg = isDarkHexColor(toHexColor(theme.bgColor || '#ffffff', '#ffffff'));
@@ -9688,27 +10432,32 @@ function renderAll() {
         : Math.round(((slotRect.isCompact || estSlotH < typo.pt(250) || estSlotW < typo.pt(230)) ? st.pliThumbTight : st.pliThumb) + typo.pt(18));
       const estVisualW = Math.max(60, estSlotW - slotPadPx * 2);
       const estVisualH = Math.max(60, estSlotH - slotPadPx * 2 - estHeaderPx - poseLegendPx);
-      const stepRenderDims = computeStepSlotRenderSize({
-        slotWidth: estSlotW,
-        slotHeight: estSlotH,
-        visualWidth: estVisualW,
-        visualHeight: estVisualH,
-        slotCount: slots.length,
-        isFeatured: Boolean(slotRect.isFeatured),
-        isCompact: Boolean(slotRect.isCompact),
-        dpr,
-        zoom: state.zoom,
-        stageFitScale: currentPageFitScale,
-        mode: 'screen',
-        gpuMaxDim: state.highQualityStepRender ? getCoverHeroGpuMaxDim() : snapshotEngine.maxDim,
-      });
-      const rw = stepRenderDims.width;
-      const rh = stepRenderDims.height;
-      const snap = renderSnapshot(prev, step.parts, cam.az, cam.el, rw, rh, modelScale, opts);
+      let snap = null;
+      if (!isOfficialMf || showLive3D) {
+        const stepRenderDims = computeStepSlotRenderSize({
+          slotWidth: estSlotW,
+          slotHeight: estSlotH,
+          visualWidth: estVisualW,
+          visualHeight: estVisualH,
+          slotCount: slots.length,
+          isFeatured: Boolean(slotRect.isFeatured),
+          isCompact: Boolean(slotRect.isCompact),
+          dpr,
+          zoom: state.zoom,
+          stageFitScale: currentPageFitScale,
+          mode: 'screen',
+          gpuMaxDim: state.highQualityStepRender ? getCoverHeroGpuMaxDim() : snapshotEngine.maxDim,
+        });
+        const rw = stepRenderDims.width;
+        const rh = stepRenderDims.height;
+        snap = showLive3D
+          ? buildLiveStepMeshOnly(prev, step.parts, rw, rh, opts)
+          : getCachedLiveStepSnapshot(ch, step, prev, cam, ov, rw, rh, modelScale, opts);
+      }
 
       let mfExploded = null;
       let mfSeqStages = null;
-      if (isMfExploded) {
+      if (isMfExploded && !showLive3D) {
         const expDims = computeMinifigDiagramRenderSize({
           kind: 'exploded',
           slotCount: slots.length,
@@ -9719,7 +10468,7 @@ function renderAll() {
           gpuMaxDim: snapshotEngine.maxDim,
         });
         mfExploded = renderMinifigExplodedDiagram(step, cam, expDims.width, expDims.height, theme, modelScale);
-      } else if (isMfSeq) {
+      } else if (isMfSeq && !showLive3D) {
         const seqPlan = getMinifigSequentialPlanForStep(step);
         const sl = minifigSeqSlice || { start: 0, end: seqPlan.stages.length, cols: Math.min(3, seqPlan.stages.length), pageIdx: 0, pageCount: 1 };
         const visibleStages = seqPlan.stages.slice(sl.start, sl.end);
@@ -9776,8 +10525,8 @@ function renderAll() {
         3_800_000,
         300,
       );
-      const subImg = (step.subassembly && !ov.calloutAsPages)
-        ? renderSnapshot([], step.subassembly.buildParts, 38, 30, subCalloutDims.width, subCalloutDims.height, 1.0, {
+      const subSnap = (step.subassembly && !ov.calloutAsPages && !isOfficialMf)
+        ? getCachedStaticPageSnap('sub_callout', step.id, step.subassembly.buildParts, 38, 30, subCalloutDims.width, subCalloutDims.height, {
             highlightNew: false,
             fadePrev: false,
             showArrows: false,
@@ -9787,7 +10536,7 @@ function renderAll() {
             starkBlackOutlines: state.starkBlackOutlines,
             outlineLineWeight: state.starkBlackOutlines ? state.outlineLineWeight : 'light',
             darkBackground: darkThemeBg,
-          }).url
+          })
         : null;
       const attSubImg = step.attachedSubmodel ? getSubmodelThumb(step.attachedSubmodel, 360, 270) : null;
       const mfPrepImg = step.minifigPrep
@@ -9818,13 +10567,9 @@ function renderAll() {
           item.qty++; item.ids.push(p.id);
         }
       }
-      return { ch, step, minifigSeqSlice, slotRect, estSlotW, estSlotH, prev, cam, ov, snap, isMfBuild, isMfExploded, isMfSeq, mfExploded, mfSeqStages, subImg, attSubImg, mfPrepImg, attMfImg, mf1to1, useOverlayPli, slotPadPx, estVisualW, estVisualH, pli: Array.from(pliMap.values()) };
+      return { ch, step, slotIdx, minifigSeqSlice, slotRect, estSlotW, estSlotH, prev, cam, ov, snap, isMfBuild, isMfExploded, isMfSeq, mfExploded, mfSeqStages, subSnap, attSubImg, mfPrepImg, attMfImg, mf1to1, useOverlayPli, slotPadPx, estVisualW, estVisualH, pli: Array.from(pliMap.values()) };
     });
 
-    const isLiveStepCamera = state.mode === 'step' && state.stepSubTab === 'camera';
-    const isStepNotesMode = state.mode === 'step' && state.stepSubTab === 'notes';
-    const isPartsMode = state.mode === 'parts';
-    const isArrangeMode = false;
     const effectiveBorderStyle = resolveEffectiveStepBorderStyle(
       page.layoutGroup,
       sanitizeStepBorderStyle(state.stepBorderStyle, 'lines'),
@@ -9856,7 +10601,7 @@ function renderAll() {
           </div>` : ''}
         <div class="relative flex-1 min-h-0">
           ${dividerLinesSvg}
-          ${slotData.map(({ ch, step, minifigSeqSlice, slotRect, estSlotW, estSlotH, prev, ov, snap, isMfExploded, isMfSeq, mfExploded, mfSeqStages, subImg, attSubImg, mfPrepImg, attMfImg, mf1to1, useOverlayPli, slotPadPx, estVisualW, estVisualH, pli }) => {
+          ${slotData.map(({ ch, step, slotIdx, minifigSeqSlice, slotRect, estSlotW, estSlotH, prev, ov, snap, isMfExploded, isMfSeq, mfExploded, mfSeqStages, subSnap, attSubImg, mfPrepImg, attMfImg, mf1to1, useOverlayPli, slotPadPx, estVisualW, estVisualH, pli }) => {
             const isTightSlot = slotRect.isCompact || estSlotH < typo.pt(250) || estSlotW < typo.pt(230);
             const stepNumPx = (slots.length === 1 || slotRect.isFeatured) ? st.stepNum1Up : (isTightSlot ? st.stepNumTight : st.stepNum2Up);
             const pliThumbPx = isTightSlot ? st.pliThumbTight : st.pliThumb;
@@ -10005,25 +10750,7 @@ function renderAll() {
             const hasHeaderBadges = Boolean(staticHeaderBadgesHtml);
             const headerBadgesInnerHtml = staticHeaderBadgesHtml;
             const stackHeaderBadges = hasHeaderBadges && (isTightSlot || estSlotW < typo.pt(250));
-            const rotInitPos = (() => {
-              if (!rotBadgeHtml) return { leftPct: 80, topPct: 4 };
-              const disp = getRotationCueDisplay(effectiveCue, wordless);
-              const bm = computeRotationBadgeMetrics((p) => typo.pt(p), isTightSlot, disp);
-              const estVisW = Math.max(80, estVisualW);
-              const estVisH = Math.max(80, estVisualH);
-              return computeRotationBadgePlacement({
-                containerW: estVisW,
-                containerH: estVisH,
-                badgeW: bm.estWidth,
-                badgeH: bm.outerH,
-                snapW: snap?.w || estVisW,
-                snapH: snap?.h || estVisH,
-                mvp: !isOfficialMfStyle ? snap?.mvp : null,
-                triPos: !isOfficialMfStyle ? snap?.mesh?.triPos : null,
-                texDraws: !isOfficialMfStyle ? snap?.mesh?.texDraws : null,
-                bounds: !isOfficialMfStyle ? snap?.mesh?.bounds : null,
-              });
-            })();
+            const rotInitPos = { leftPct: 80, topPct: 4 };
 
             return `
               <div data-step="${step.id}" class="step-slot absolute flex flex-col min-h-0 overflow-hidden transition ${isArrangeMode && slots.length > 1 ? 'cursor-pointer' : ''}" style="left:${slotLeftPct.toFixed(4)}%;top:${slotTopPct.toFixed(4)}%;width:${slotWidthPct.toFixed(4)}%;height:${slotHeightPct.toFixed(4)}%;border-radius:${typo.borderRadius}px;padding:${slotPadPx}px;border:${slotBorderStyle};background:${slotBgStyle}">
@@ -10109,13 +10836,13 @@ function renderAll() {
                   return `
                 <div class="relative flex-1 min-h-0 flex ${ov.calloutDir === 'vertical' ? 'flex-col' : 'flex-row'} items-center justify-center overflow-hidden" style="gap:${Math.round(typo.pt(6))}px;margin-top:${(isOfficialMfStyle || useOverlayPli) ? 0 : Math.round(typo.pt(4))}px">
                   ${inlineLeaderHtml}
-                  ${step.subassembly && !ov.calloutAsPages && !isOfficialMfStyle ? `
+                  ${step.subassembly && !ov.calloutAsPages && !isOfficialMfStyle && subSnap ? `
                     <div data-drag="callout" data-step="${step.id}" class="draggable-el relative z-10 shrink-0 ${ov.calloutDir === 'vertical' ? 'max-w-full' : 'max-w-[48%]'} max-h-full flex flex-col overflow-hidden ${isArrangeMode ? 'cursor-move' : ''}" style="width:${isTightSlot ? st.calloutWTight : st.calloutW}px;padding:${Math.round(typo.pt(5))}px;border-radius:${Math.round(typo.pt(8))}px;background:${theme.calloutBg};border:${calloutSel ? `2px solid ${theme.accent}` : `1.5px solid ${theme.calloutBorder}`};transform:translate(${calloutPos.x}px,${calloutPos.y}px)">
                       <div class="flex items-center ${wordless ? 'justify-end' : 'justify-between'} font-bold shrink-0 min-w-0" style="gap:${Math.round(typo.pt(4))}px;font-size:${st.calloutFont}px">
                         ${wordless ? '' : `<span class="min-w-0 truncate">${escHtml(step.subassembly.name)}</span>`}
                         <span class="rounded-full text-white shrink-0" style="background:${theme.accent};padding:${Math.round(typo.pt(1))}px ${Math.round(typo.pt(4.5))}px">${step.subassembly.repeatCount}×</span>
                       </div>
-                      <img src="${subImg}" class="w-full flex-1 min-h-0 object-contain pointer-events-none" />
+                      <span data-canvas-mount="sub_${slotIdx}"></span>
                     </div>` : ''}
 
                   <div data-step-visual="${step.id}" class="flex-1 min-w-0 min-h-0 w-full h-full flex items-center justify-center relative overflow-hidden">
@@ -10123,15 +10850,15 @@ function renderAll() {
                     ${showLive3D
                       ? `<canvas id="liveRotateCanvas" class="absolute inset-0 w-full h-full object-contain cursor-grab active:cursor-grabbing" style="touch-action:none;"></canvas>`
                       : isMfExploded && mfExploded
-                        ? `<img data-pick-step="${step.id}" src="${mfExploded.url}" alt="${escHtml(step.minifigName || 'Minifigure assembly')}" class="absolute inset-0 w-full h-full object-contain pointer-events-none" />`
+                        ? `<span data-canvas-mount="mf_exp_${slotIdx}"></span>`
                         : isMfSeq && mfSeqStages
                           ? `<div class="w-full h-full grid items-center justify-items-center gap-1 sm:gap-2 px-1" style="grid-template-columns:repeat(${mfSeqStages.length},minmax(0,1fr))">
-                              ${mfSeqStages.map(({ stage, img }) => `
+                              ${mfSeqStages.map((_entry, si) => `
                                 <div class="w-full h-full min-w-0 min-h-0 flex items-center justify-center overflow-hidden">
-                                  <img src="${img.url}" alt="${escHtml(`Step ${stage.stepNumber}: ${stage.label}`)}" class="max-w-full max-h-full w-full h-full object-contain pointer-events-none" />
+                                  <span data-canvas-mount="mf_seq_${slotIdx}_${si}"></span>
                                 </div>`).join('')}
                             </div>`
-                          : `<img data-pick-step="${step.id}" src="${snap.url}" class="step-render-img absolute inset-0 w-full h-full object-contain ${isPartsMode ? 'cursor-crosshair' : 'pointer-events-none'}" />`
+                          : `<span data-canvas-mount="step_${slotIdx}"></span>`
                     }
                     ${hasHingeArticulation ? `<span class="absolute top-1.5 right-1.5 z-10 pointer-events-none" title="Articulated angle">${buildCurvedMotionArrowSvg(Math.max(26, Math.round(typo.pt(26))), 'cw')}</span>` : ''}
                     ${stepLocator ? `<div class="absolute bottom-1.5 left-1.5 z-10 pointer-events-none rounded-md border bg-white/85 shadow-xs" style="width:${Math.round(typo.pt(38))}px;height:${Math.round(typo.pt(28))}px;border-color:${theme.pliBorder}" title="Regional close-up locator"><div class="relative w-full h-full"><span class="absolute rounded-sm border-2" style="border-color:${theme.accent};background:${theme.accent}22;left:${Math.max(4, Math.min(72, Math.round((stepLocator.cxNorm - stepLocator.radiusNorm * 0.4) * 100)))}%;top:${Math.max(4, Math.min(68, Math.round((stepLocator.czNorm - stepLocator.radiusNorm * 0.4) * 100)))}%;width:${Math.max(20, Math.min(70, Math.round(stepLocator.radiusNorm * 75)))}%;height:${Math.max(20, Math.min(70, Math.round(stepLocator.radiusNorm * 75)))}%"></span></div></div>` : ''}
@@ -10150,7 +10877,7 @@ function renderAll() {
                         ${mf1Hdr.detail ? `<span class="opacity-75 tabular-nums truncate">${escHtml(mf1Hdr.detail)}</span>` : ''}
                       </div>
                       <div class="flex items-center" style="gap:${Math.round(typo.pt(4))}px">
-                        <img src="${mf1to1.url}" alt="1:1 actual size minifigure" style="width:${mf1to1.displayPxW}px;height:${mf1to1.displayPxH}px" class="block shrink-0 pointer-events-none" />
+                        <span data-canvas-mount="mf1_${slotIdx}"></span>
                         <div class="flex flex-col items-center justify-between opacity-55" style="height:${Math.max(24, Math.round(mf1to1.displayPxH * 0.92))}px">
                           <span class="w-1.5 h-[1.5px] bg-current"></span>
                           <span class="w-[1.5px] flex-1 bg-current"></span>
@@ -10199,6 +10926,70 @@ function renderAll() {
         ${renderPageFooterHtml({ titleText: page.chapterName, progressFrac: computePageStepProgressFraction(page) })}
       </div>`;
 
+    // Mount cached high-resolution canvases directly into the step slots (zero PNG encode/decode!)
+    for (const slotItem of slotData) {
+      const { step, slotIdx, snap, isMfExploded, isMfSeq, mfExploded, mfSeqStages, subSnap, mf1to1 } = slotItem;
+      const showLive3D = isLiveStepCamera && state.selectedStepId === step.id;
+      if (subSnap) {
+        mountRenderedCanvas(
+          frame.querySelector(`[data-canvas-mount="sub_${slotIdx}"]`),
+          subSnap,
+          { className: 'w-full flex-1 min-h-0 object-contain pointer-events-none', alt: step.subassembly?.name || 'Subassembly' },
+          mountedCanvases,
+        );
+      }
+      if (!showLive3D) {
+        if (isMfExploded && mfExploded) {
+          mountRenderedCanvas(
+            frame.querySelector(`[data-canvas-mount="mf_exp_${slotIdx}"]`),
+            mfExploded,
+            {
+              className: 'absolute inset-0 w-full h-full object-contain pointer-events-none',
+              alt: step.minifigName || 'Minifigure assembly',
+              attrs: { 'data-pick-step': step.id },
+            },
+            mountedCanvases,
+          );
+        } else if (isMfSeq && mfSeqStages) {
+          for (let si = 0; si < mfSeqStages.length; si++) {
+            const { stage, img } = mfSeqStages[si];
+            mountRenderedCanvas(
+              frame.querySelector(`[data-canvas-mount="mf_seq_${slotIdx}_${si}"]`),
+              img,
+              {
+                className: 'max-w-full max-h-full w-full h-full object-contain pointer-events-none',
+                alt: `Step ${stage.stepNumber}: ${stage.label}`,
+              },
+              mountedCanvases,
+            );
+          }
+        } else if (snap) {
+          mountRenderedCanvas(
+            frame.querySelector(`[data-canvas-mount="step_${slotIdx}"]`),
+            snap,
+            {
+              className: `step-render-img absolute inset-0 w-full h-full object-contain ${isPartsMode ? 'cursor-crosshair' : 'pointer-events-none'}`,
+              alt: `Step ${step.num}`,
+              attrs: { 'data-pick-step': step.id },
+            },
+            mountedCanvases,
+          );
+        }
+      }
+      if (mf1to1) {
+        mountRenderedCanvas(
+          frame.querySelector(`[data-canvas-mount="mf1_${slotIdx}"]`),
+          mf1to1,
+          {
+            className: 'block shrink-0 pointer-events-none',
+            style: `width:${mf1to1.displayPxW}px;height:${mf1to1.displayPxH}px`,
+            alt: '1:1 actual size minifigure',
+          },
+          mountedCanvases,
+        );
+      }
+    }
+
     bindStepPageInteractions(page);
     positionVisibleStepRotationBadges();
   }
@@ -10209,9 +11000,12 @@ function renderAll() {
 
   renderContextOverlay(page);
   syncStageOverlayClearance(page);
-  syncMenuControls();
-  syncPageSizeWarningUI();
+  if (!pageNavOnly) {
+    syncMenuControls();
+    syncPageSizeWarningUI();
+  }
   applyStageTransform();
+  scheduleAdjacentPagePrewarm();
 }
 
 // =========================================================================
@@ -10443,14 +11237,53 @@ function bindStepPageInteractions(page) {
   const isLiveStepCamera = state.mode === 'step' && state.stepSubTab === 'camera';
   const isStepNotesMode = state.mode === 'step' && state.stepSubTab === 'notes';
 
-  // Tap a step slot to make it active
+  // Tap a step slot to make it active (and pick 3D parts when tapping .step-render-img in Parts Mode)
   frame.querySelectorAll('.step-slot').forEach(slotEl => {
-    slotEl.addEventListener('click', () => {
+    slotEl.addEventListener('click', (e) => {
+      const target = e.target;
+      const pickEl = target && typeof target.closest === 'function' ? target.closest('.step-render-img') : null;
+      if (isPartsMode && pickEl) {
+        e.stopPropagation();
+        const sid = pickEl.getAttribute('data-pick-step');
+        const info = currentSlotRenderInfo.get(sid);
+        if (!info || !info.snap?.mvp) return;
+        const rect = pickEl.getBoundingClientRect();
+        // Account for object-contain letterboxing inside the element
+        const imgAspect = info.snap.w / info.snap.h;
+        const boxAspect = rect.width / rect.height;
+        let drawW = rect.width, drawH = rect.height, ox = 0, oy = 0;
+        if (boxAspect > imgAspect) { drawW = rect.height * imgAspect; ox = (rect.width - drawW) / 2; }
+        else { drawH = rect.width / imgAspect; oy = (rect.height - drawH) / 2; }
+        const ndcX = ((e.clientX - rect.left - ox) / drawW) * 2 - 1;
+        const ndcY = 1 - ((e.clientY - rect.top - oy) / drawH) * 2;
+
+        // Pick closest new part in this step whose projected 3D box contains (or is nearest to) tap
+        let bestId = null, bestScore = 0.28;
+        const ov = info.ov || {};
+        for (const p of info.step.parts) {
+          const baseDefOffs = getBaseDefaultPartOffsets(info.step);
+          const pOv = ov.partOffsets?.[p.id] || baseDefOffs?.[p.id] || {};
+          const box = computeWorldBox(p);
+          const dx = (pOv.x || 0) + (ov.offX || 0), dy = (pOv.y || 0) + (ov.offY || 0), dz = (pOv.z || 0) + (ov.offZ || 0);
+          const c = projectWorldToNdc([box.center[0]+dx, box.center[1]+dy, box.center[2]+dz], info.snap.mvp);
+          const dist = Math.hypot(c[0] - ndcX, c[1] - ndcY);
+          if (dist < bestScore) { bestScore = dist; bestId = p.id; }
+        }
+        if (bestId) {
+          if (state.selectedStepId !== sid) { state.selectedStepId = sid; state.selectedPartIds.clear(); }
+          if (state.selectedPartIds.has(bestId)) state.selectedPartIds.delete(bestId);
+          else state.selectedPartIds.add(bestId);
+          renderAll({ pageNavigationOnly: true });
+        } else {
+          showToast('Tap a highlighted part or a part in the Parts Box.');
+        }
+        return;
+      }
       const sid = slotEl.getAttribute('data-step');
       if (state.selectedStepId !== sid) {
         state.selectedStepId = sid;
         state.selectedPartIds.clear();
-        renderAll();
+        renderAll({ pageNavigationOnly: true });
       }
     });
   });
@@ -10465,48 +11298,7 @@ function bindStepPageInteractions(page) {
       if (state.selectedStepId !== sid) { state.selectedStepId = sid; state.selectedPartIds.clear(); }
       const allSelected = ids.every(id => state.selectedPartIds.has(id));
       ids.forEach(id => allSelected ? state.selectedPartIds.delete(id) : state.selectedPartIds.add(id));
-      renderAll();
-    });
-  });
-
-  // PARTS MODE: Tap directly on a 3D part in the step render to pick it
-  frame.querySelectorAll('.step-render-img').forEach(img => {
-    img.addEventListener('click', (e) => {
-      if (!isPartsMode) return;
-      e.stopPropagation();
-      const sid = img.getAttribute('data-pick-step');
-      const info = currentSlotRenderInfo.get(sid);
-      if (!info || !info.snap.mvp) return;
-      const rect = img.getBoundingClientRect();
-      // Account for object-contain letterboxing inside the img element
-      const imgAspect = info.snap.w / info.snap.h;
-      const boxAspect = rect.width / rect.height;
-      let drawW = rect.width, drawH = rect.height, ox = 0, oy = 0;
-      if (boxAspect > imgAspect) { drawW = rect.height * imgAspect; ox = (rect.width - drawW) / 2; }
-      else { drawH = rect.width / imgAspect; oy = (rect.height - drawH) / 2; }
-      const ndcX = ((e.clientX - rect.left - ox) / drawW) * 2 - 1;
-      const ndcY = 1 - ((e.clientY - rect.top - oy) / drawH) * 2;
-
-      // Pick closest new part in this step whose projected 3D box contains (or is nearest to) tap
-      let bestId = null, bestScore = 0.28;
-      const ov = info.ov || {};
-      for (const p of info.step.parts) {
-        const baseDefOffs = getBaseDefaultPartOffsets(info.step);
-        const pOv = ov.partOffsets?.[p.id] || baseDefOffs?.[p.id] || {};
-        const box = computeWorldBox(p);
-        const dx = (pOv.x || 0) + (ov.offX || 0), dy = (pOv.y || 0) + (ov.offY || 0), dz = (pOv.z || 0) + (ov.offZ || 0);
-        const c = projectWorldToNdc([box.center[0]+dx, box.center[1]+dy, box.center[2]+dz], info.snap.mvp);
-        const dist = Math.hypot(c[0] - ndcX, c[1] - ndcY);
-        if (dist < bestScore) { bestScore = dist; bestId = p.id; }
-      }
-      if (bestId) {
-        if (state.selectedStepId !== sid) { state.selectedStepId = sid; state.selectedPartIds.clear(); }
-        if (state.selectedPartIds.has(bestId)) state.selectedPartIds.delete(bestId);
-        else state.selectedPartIds.add(bestId);
-        renderAll();
-      } else {
-        showToast('Tap a highlighted part or a part in the Parts Box.');
-      }
+      renderAll({ pageNavigationOnly: true });
     });
   });
 
@@ -11805,11 +12597,12 @@ function renderContextOverlay(page) {
         stepGotoDivBtn.onclick = () => {
           const divIdx = state.pages.findIndex(p => p.id === 'div_' + page.id);
           if (divIdx >= 0) {
+            lastPageNavDirection = divIdx < state.pageIdx ? -1 : 1;
             state.pageIdx = divIdx;
             state.mode = 'page';
             state.selectedPartIds.clear();
             resetZoom();
-            renderAll();
+            renderAll({ pageNavigationOnly: true });
           }
         };
       }
@@ -12419,7 +13212,7 @@ function toggleStepPageBreak(step, opts = {}) {
     if (anchorIdx >= 0) state.pageIdx = anchorIdx;
   }
 
-  renderAll();
+  renderAll({ skipRebuildPages: true });
   const ovModal = document.getElementById('overviewModal');
   if (refreshOverview || (ovModal && !ovModal.classList.contains('hidden'))) {
     renderOverviewModal();
@@ -12444,7 +13237,7 @@ function applyMinifigStyleChange(rawStyle, anchorStepId = null) {
     const idx = state.pages.findIndex(pg => pg.slots?.some(sl => sl.step.id === currentStepId));
     if (idx >= 0) state.pageIdx = idx;
   }
-  renderAll();
+  renderAll({ skipRebuildPages: true });
 }
 
 // =========================================================================
@@ -12593,6 +13386,7 @@ function jumpToStepById(stepId, opts = {}) {
   if (!stepId) return false;
   const pIdx = state.pages.findIndex(pg => pg.slots?.some(sl => sl.step.id === stepId));
   if (pIdx < 0) return false;
+  lastPageNavDirection = pIdx < state.pageIdx ? -1 : 1;
   state.pageIdx = pIdx;
   state.selectedStepId = stepId;
   state.selectedPartIds.clear();
@@ -12603,7 +13397,7 @@ function jumpToStepById(stepId, opts = {}) {
     document.getElementById('errorsModal')?.classList.add('hidden');
   }
   resetZoom();
-  renderAll();
+  renderAll({ pageNavigationOnly: true });
   return true;
 }
 
@@ -14097,7 +14891,7 @@ function renderOverviewModal(opts = {}) {
           const anchorIdx = findPageIndexForStep(state.pages, anchorStepId);
           if (anchorIdx >= 0) state.pageIdx = anchorIdx;
         }
-        renderAll();
+        renderAll({ skipRebuildPages: true });
         renderOverviewModal();
         showToast('Cleared all page breaks — pages can reflow freely.');
       };
@@ -14165,12 +14959,13 @@ function renderOverviewModal(opts = {}) {
   };
 
   const jumpToPageAndStep = (idx, stepId = null) => {
+    lastPageNavDirection = idx < state.pageIdx ? -1 : 1;
     state.pageIdx = idx;
     if (stepId) state.selectedStepId = stepId;
     state.selectedPartIds.clear();
     closeOverviewModal();
     resetZoom();
-    renderAll();
+    renderAll({ pageNavigationOnly: true });
   };
 
   const createPreviewBox = (pageTheme, highlighted) => {
@@ -17918,6 +18713,12 @@ function loadImgPromise(src) {
   return new Promise((res) => { const img = new Image(); img.onload = () => res(img); img.onerror = () => res(null); img.src = src; });
 }
 
+function resolveRenderDrawable(entry) {
+  if (!entry) return Promise.resolve(null);
+  if (isRenderEntryUsable(entry)) return Promise.resolve(entry.canvas);
+  return entry.url ? loadImgPromise(entry.url) : Promise.resolve(null);
+}
+
 function drawContain(ctx, img, x, y, w, h) {
   if (!img || !img.width || !img.height || w <= 2 || h <= 2) return null;
   const sc = Math.min(w / img.width, h / img.height);
@@ -18138,7 +18939,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       heroSize.height,
       theme,
     );
-    const heroImg = await loadImgPromise(snap.url);
+    const heroImg = await resolveRenderDrawable(snap);
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
     drawContain(ctx, heroImg, layout.heroRect.x, layout.heroRect.y, layout.heroRect.w, layout.heroRect.h);
@@ -18360,7 +19161,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       gpuMaxDim: getCoverHeroGpuMaxDim(),
     });
     const snap = renderCoverHeroSnapshot(allParts, cm.az, cm.el, cm.zoom, heroSize.width, heroSize.height, theme);
-    const img = await loadImgPromise(snap.url);
+    const img = await resolveRenderDrawable(snap);
     drawContain(ctx, img, pad, topOff, pxW - pad * 2, availH);
     drawFooter(state.model.title);
   } else if (page.kind === 'back') {
@@ -18462,7 +19263,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       outlineLineWeight: state.starkBlackOutlines ? state.outlineLineWeight : 'light',
       darkBackground: isDarkHexColor(toHexColor(theme.bgColor || '#ffffff', '#ffffff')),
     });
-    const img = await loadImgPromise(snap.url);
+    const img = await resolveRenderDrawable(snap);
     drawContain(ctx, img, pad, imgTop, subAvailW, subAvailH);
     drawFooter(page.chapterName || state.model.title);
   } else if (page.kind === 'section_divider') {
@@ -18554,7 +19355,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       outlineLineWeight: state.starkBlackOutlines ? state.outlineLineWeight : 'light',
       darkBackground: isDarkHexColor(toHexColor(theme.bgColor || '#ffffff', '#ffffff')),
     });
-    const img = await loadImgPromise(snap.url);
+    const img = await resolveRenderDrawable(snap);
     drawContain(ctx, img, pad, imgTop, divAvailW, divAvailH);
     drawFooter(state.model.title);
   } else if (page.kind === 'bom') {
@@ -19302,7 +20103,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
           gpuMaxDim: snapshotEngine.maxDim,
         });
         const expDiag = renderMinifigExplodedDiagram(step, cam, expDims.width, expDims.height, theme, modelScale);
-        const expImg = await loadImgPromise(expDiag.url);
+        const expImg = await resolveRenderDrawable(expDiag);
         drawContain(ctx, expImg, sx + st.slotPad, renderTopY, mainAvailW, renderAvailH);
       } else if (isMfSeq) {
         const seqPlan = getMinifigSequentialPlanForStep(step);
@@ -19321,7 +20122,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
         });
         for (let si = 0; si < visibleStages.length; si++) {
           const stDiag = renderMinifigSequentialStage(step, visibleStages[si], seqPlan, cam, seqDims.width, seqDims.height, theme, modelScale);
-          const stImg = await loadImgPromise(stDiag.url);
+          const stImg = await resolveRenderDrawable(stDiag);
           drawContain(ctx, stImg, sx + st.slotPad + si * (stCellW + stGap), renderTopY, stCellW, renderAvailH);
         }
       } else {
@@ -19354,7 +20155,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
           } : {}),
         });
         renderedStepSnap = snap;
-        const stepImg = await loadImgPromise(snap.url);
+        const stepImg = await resolveRenderDrawable(snap);
         drawContain(ctx, stepImg, sx + st.slotPad, renderTopY, mainAvailW, renderAvailH);
       }
 
@@ -19400,7 +20201,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
         ctx.fillStyle = theme.accent;
         ctx.font = themeCanvasFont(theme, 800, st.mf1to1Font);
         drawTruncatedText(mfHeaderLabel, cardX + cardPad, cardY + Math.round(cardPad * 0.7), Math.max(0, cardW - cardPad * 2));
-        const mf1Img = await loadImgPromise(mf1.url);
+        const mf1Img = await resolveRenderDrawable(mf1);
         const imgX = cardX + Math.round((cardW - 10 - mf1.displayPxW) / 2);
         const imgY = cardY + headerH + Math.round((cardH - headerH - cardPad - mf1.displayPxH) / 2);
         ctx.drawImage(mf1Img, imgX, imgY, mf1.displayPxW, mf1.displayPxH);
@@ -20393,7 +21194,7 @@ function switchStudioMode(nextMode) {
   state.mode = target;
   if (state.mode !== 'parts') state.selectedPartIds.clear();
   state.selectedArrangeEl = null;
-  renderAll();
+  renderAll({ pageNavigationOnly: true });
 }
 
 function rotateActiveCameraByStep(dir) {
@@ -21463,10 +22264,11 @@ function navigatePage(action) {
   dismissErrorBanner();
   const targetIdx = resolvePageNavigationTarget(state.pageIdx, state.pages.length, action);
   if (targetIdx !== state.pageIdx) {
+    lastPageNavDirection = targetIdx < state.pageIdx ? -1 : 1;
     state.pageIdx = targetIdx;
     state.selectedPartIds.clear();
     resetZoom();
-    renderAll();
+    renderAll({ pageNavigationOnly: true });
   }
 }
 const firstPageBtn = document.getElementById('firstPage');
@@ -21680,7 +22482,7 @@ document.querySelectorAll('.step-lighting-chip').forEach(b => {
     const mode = sanitizeStepLightingMode(b.getAttribute('data-step-lighting'), 'none');
     pliThumbCache.clear();
     submodelThumbCache.clear();
-    minifigDiagramCache.clear();
+    clearMinifigDiagramCaches();
     libThumbCache.clear();
     libPreviewMeshCache = { key: '', mesh: null };
     overviewThumbCache.bumpEpoch();
@@ -21845,7 +22647,7 @@ const toggleExtraPage = (key, checked) => {
     if (keptIdx >= 0) state.pageIdx = keptIdx;
   }
   overviewThumbCache.bumpEpoch();
-  renderAll();
+  renderAll({ skipRebuildPages: true });
 };
 const openExtraPageSettings = (kind) => {
   if (!canOpenExtraPageSettings(state, kind, Boolean(state.model))) return;
@@ -21853,12 +22655,13 @@ const openExtraPageSettings = (kind) => {
   const idx = state.pages.findIndex(p => p.kind === action.pageKind);
   if (idx < 0) return;
   closePageSetupModal();
+  lastPageNavDirection = idx < state.pageIdx ? -1 : 1;
   state.pageIdx = idx;
   state.mode = action.targetMode;
   state.selectedPartIds.clear();
   state.selectedArrangeEl = null;
   resetZoom();
-  renderAll();
+  renderAll({ pageNavigationOnly: true });
   if (action.openBomModal) {
     openBomSetupModal();
   }
@@ -24149,6 +24952,7 @@ function finishImport(parsed, mode, subdivisionPlan = null, isPostImport = false
   const preservePageNumberFormat = Boolean(importOpts && importOpts.preservePageNumberFormat);
   submodelThumbCache.clear();
   coverHeroCache.clear();
+  clearMinifigDiagramCaches();
   overviewThumbCache.bumpEpoch();
   state.model = buildManualFromParsed(parsed, mode, subdivisionPlan);
   if (!isPostImport) {
