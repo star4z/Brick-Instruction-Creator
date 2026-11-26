@@ -1064,6 +1064,15 @@ function resolveOffsetAlongAxis(
             res.arrowTo = arrowTo;
           }
         }
+        // Auto-detect pass-through alignment guide when a lateral pin/axle penetrates a perforated beam/frame
+        if (isCardinal && axis !== 1 && seatedIntersectingObs.size > 0) {
+          const guideTarget = detectThroughHoleGuideTarget(
+            part.box,
+            [dx, dy, dz],
+            obstacles.filter((o) => seatedIntersectingObs.has(o.id)).map((o) => o.box),
+          );
+          if (guideTarget) res.throughGuideTo = guideTarget;
+        }
         if (!options.preferShortestDir) {
           return res;
         }
@@ -2135,5 +2144,47 @@ export function computePrecisionAlignmentLines(
     };
   });
 }
+
+/**
+ * Pure geometric through-hole guide detector: when a slender pin, axle, or bar
+ * is inserted laterally and penetrates a thicker host beam/brick/frame, computes
+ * an alignment guide endpoint extending cleanly past the far exit face of the host.
+ */
+export function detectThroughHoleGuideTarget(
+  partBox: PlacementAABB,
+  offset: readonly [number, number, number],
+  existingBoxes: ReadonlyArray<PlacementAABB>,
+): [number, number, number] | null {
+  if (!existingBoxes.length) return null;
+  const [ox, oy, oz] = offset;
+  if (Math.abs(oy) >= 1 || Math.hypot(ox, oz) < 10) return null;
+
+  const axis: 0 | 2 = Math.abs(ox) >= Math.abs(oz) ? 0 : 2;
+  const sign = offset[axis] > 0 ? 1 : -1;
+  const s = boxSize(partBox);
+  const perpAxes = axis === 0 ? ([1, 2] as const) : ([0, 1] as const);
+
+  // Require slender pin/axle/bar geometry along insertion axis
+  if (s[axis] < 18 || Math.max(s[perpAxes[0]], s[perpAxes[1]]) > 24) return null;
+
+  let farFace: number | null = null;
+  for (const ob of existingBoxes) {
+    if (!boxesIntersectStrict(partBox, ob, 1.0)) continue;
+    const os = boxSize(ob);
+    if (os[axis] < 10) continue;
+    // Host must be larger than the pin/axle on at least one perpendicular axis (beam/frame/brick)
+    if (os[perpAxes[0]] <= s[perpAxes[0]] + 4 && os[perpAxes[1]] <= s[perpAxes[1]] + 4) continue;
+    const exitFace = sign > 0 ? ob.min[axis] : ob.max[axis];
+    if (farFace === null || (sign > 0 ? exitFace < farFace : exitFace > farFace)) {
+      farFace = exitFace;
+    }
+  }
+  if (farFace === null) return null;
+
+  const tip: [number, number, number] = [partBox.center[0], partBox.center[1], partBox.center[2]];
+  tip[axis] = sign > 0 ? Math.min(partBox.min[axis], farFace) - 14 : Math.max(partBox.max[axis], farFace) + 14;
+  return tip;
+}
+
 
 

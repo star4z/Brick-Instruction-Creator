@@ -339,5 +339,54 @@ describe('Official Manual Craft Pass 2 — Substep Strips, Vertical Stacks, Cele
     expect(prec!.every((s) => s.isPrecisionLine)).toBe(true);
     expect(FOCUS_MODE_OPTIONS.some((o) => o.id === 'regional')).toBe(true);
   });
+
+  it('auto-detects through-hole alignment guide targets for lateral pins penetrating host beams', async () => {
+    const { detectThroughHoleGuideTarget } = await import('../placementArrows');
+    const pinBox = {
+      min: [-20, -4, -4] as [number, number, number],
+      max: [20, 4, 4] as [number, number, number],
+      center: [0, 0, 0] as [number, number, number],
+    };
+    const hostBeam = {
+      min: [-10, -10, -80] as [number, number, number],
+      max: [10, 10, 80] as [number, number, number],
+      center: [0, 0, 0] as [number, number, number],
+    };
+
+    // Pin withdrawn along +X (inserting in -X through the beam)
+    const tip = detectThroughHoleGuideTarget(pinBox, [36, 0, 0], [hostBeam]);
+    expect(tip).not.toBeNull();
+    expect(tip![0]).toBeLessThan(pinBox.min[0]);
+    expect(tip![1]).toBe(0);
+    expect(tip![2]).toBe(0);
+
+    // Vertical drop should not emit lateral through-hole guide
+    expect(detectThroughHoleGuideTarget(pinBox, [0, 36, 0], [hostBeam])).toBeNull();
+  });
+
+  it('scales column widths proportionally in packBomGridPages when variableWidthColumns is enabled', async () => {
+    const { packBomGridPages } = await import('../partsList');
+    const items = [
+      { id: 'stud', sx: 1, sz: 1, h: 8 },
+      { id: 'beam16', sx: 16, sz: 1, h: 20 },
+    ];
+    const spans = [
+      { colSpan: 1, rowSpan: 1 },
+      { colSpan: 1, rowSpan: 1 },
+    ];
+    const pages = packBomGridPages(items, spans, 2, 1, {
+      flowAxis: 'rows',
+      horizontalDir: 'ltr',
+      verticalDir: 'ttb',
+      align: 'start',
+      variableWidthColumns: true,
+    });
+    expect(pages).toHaveLength(1);
+    const [studCell, beamCell] = pages[0];
+    expect(studCell.wFrac).toBeLessThan(beamCell.wFrac);
+    expect(studCell.xFrac + studCell.wFrac).toBeCloseTo(beamCell.xFrac, 5);
+    expect(beamCell.xFrac + beamCell.wFrac).toBeCloseTo(1, 5);
+  });
 });
+
 

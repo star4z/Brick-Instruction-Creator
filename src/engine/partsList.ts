@@ -650,6 +650,8 @@ export interface BomGridPackOptions {
   horizontalDir: BomHorizontalDir;
   verticalDir: BomVerticalDir;
   align: BomHangingAlign;
+  /** When true, dynamically scales column widths proportionally to each column's widest part. */
+  variableWidthColumns?: boolean;
 }
 
 interface LogicalPlacement<T> {
@@ -760,7 +762,7 @@ export function packBomGridPages<T>(
       }
     }
 
-    return pageCells.map((c) => {
+    const resolved = pageCells.map((c) => {
       const col0 = isRows ? c.p : c.s;
       const row0 = isRows ? c.s : c.p;
       const colSpan = isRows ? c.spanP : c.spanS;
@@ -775,10 +777,52 @@ export function packBomGridPages<T>(
         row,
         colSpan,
         rowSpan,
-        xFrac: col / safeCols,
-        yFrac: row / safeRows,
-        wFrac: colSpan / safeCols,
-        hFrac: rowSpan / safeRows,
+      };
+    });
+
+    // Optional variable-width column scaling (matching UCS 75192 / Creator 31172):
+    // Columns with narrow 1x1 studs/pins compress slightly while columns with wide beams/plates expand.
+    let colStarts: number[] | null = null;
+    if (opts.variableWidthColumns && safeCols >= 2) {
+      const colMaxDim = new Array<number>(safeCols).fill(1);
+      for (const cell of resolved) {
+        const anyItem = cell.item as unknown as { sx?: number; sz?: number; h?: number; maxDimLdu?: number };
+        const spanLdu = typeof anyItem?.maxDimLdu === 'number'
+          ? anyItem.maxDimLdu
+          : Math.max(20, (anyItem?.sx || 1) * 20, (anyItem?.sz || 1) * 20, anyItem?.h || 24);
+        const perColSpan = Math.max(20, spanLdu / Math.max(1, cell.colSpan));
+        for (let dc = 0; dc < cell.colSpan; dc++) {
+          const ci = cell.col + dc;
+          if (ci >= 0 && ci < safeCols) {
+            colMaxDim[ci] = Math.max(colMaxDim[ci], perColSpan);
+          }
+        }
+      }
+      const rawWeights = colMaxDim.map((d) => Math.pow(Math.max(20, d) / 40, 0.35));
+      const meanW = rawWeights.reduce((a, b) => a + b, 0) / safeCols;
+      const clampedWeights = rawWeights.map((w) => clamp(w / Math.max(0.01, meanW), 0.72, 1.65));
+      const sumW = clampedWeights.reduce((a, b) => a + b, 0);
+      colStarts = [0];
+      let acc = 0;
+      for (let ci = 0; ci < safeCols; ci++) {
+        acc += clampedWeights[ci] / sumW;
+        colStarts.push(ci === safeCols - 1 ? 1 : acc);
+      }
+    }
+
+    return resolved.map((c) => {
+      const xFrac = colStarts ? colStarts[c.col] : c.col / safeCols;
+      const wFrac = colStarts ? colStarts[c.col + c.colSpan] - colStarts[c.col] : c.colSpan / safeCols;
+      return {
+        item: c.item,
+        col: c.col,
+        row: c.row,
+        colSpan: c.colSpan,
+        rowSpan: c.rowSpan,
+        xFrac,
+        yFrac: c.row / safeRows,
+        wFrac,
+        hFrac: c.rowSpan / safeRows,
       };
     });
   });
@@ -795,6 +839,7 @@ export interface AutoBomGridInput<T extends BomSizedItemInput> {
   minCellSizeIn: number;
   enabledFields: readonly BomFieldId[];
   variableSizing: boolean;
+  variableWidthColumns?: boolean;
   flowAxis: BomFlowAxis;
   horizontalDir: BomHorizontalDir;
   verticalDir: BomVerticalDir;
@@ -876,6 +921,7 @@ export function computeAutoBomGrid<T extends BomSizedItemInput>(
     horizontalDir: input.horizontalDir,
     verticalDir: input.verticalDir,
     align: input.align,
+    variableWidthColumns: Boolean(input.variableWidthColumns),
   };
 
   const maxCols = clamp(Math.floor(contentWIn / minCell), 1, MAX_AUTO_BOM_GRID_TRACKS);
@@ -992,6 +1038,7 @@ export function resolveBomGridPlan<T extends BomSizedItemInput>(params: {
       minCellSizeIn: config.minCellSizeIn,
       enabledFields,
       variableSizing: config.variableSizing,
+      variableWidthColumns: Boolean(config.variableWidthColumns),
       flowAxis: config.flowAxis,
       horizontalDir: config.horizontalDir,
       verticalDir: config.verticalDir,
@@ -1007,6 +1054,7 @@ export function resolveBomGridPlan<T extends BomSizedItemInput>(params: {
     horizontalDir: config.horizontalDir,
     verticalDir: config.verticalDir,
     align: config.align,
+    variableWidthColumns: Boolean(config.variableWidthColumns),
   });
 
   return {

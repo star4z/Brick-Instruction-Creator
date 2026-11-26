@@ -164,6 +164,7 @@ import {
   drawCurvedMotionArrowCanvas,
   drawOrthogonalLeadersCanvas,
   routeOrthogonalLeaders,
+  shouldShowGhostSubmodelPreview,
 } from './engine/calloutCraft';
 import {
   detectRadialSymmetricCompletion,
@@ -7815,9 +7816,27 @@ const state = {
 function getBaseDefaultPartOffsets(step) {
   const auto = state.autoPlacementArrows !== false ? (step?.autoPartOffsets || null) : null;
   const def = step?.defaultPartOffsets || null;
-  if (!auto && !def) return null;
-  if (!auto) return def;
-  if (!def) return auto;
+  const hasAuto = Boolean(auto && Object.keys(auto).length > 0);
+  const hasDef = Boolean(def && Object.keys(def).length > 0);
+  if (!hasAuto && !hasDef && state.autoPlacementArrows !== false && step && !step.isStandaloneFigure && !step.isMinifigPoseStep && !step.attachedSubmodel && Array.isArray(step.parts) && step.parts.length >= 2 && step.parts.length <= 4) {
+    const stackPlan = detectVerticalStackColumn(step.parts.map((p) => ({ id: p.id, box: computeWorldBox(p) })));
+    if (stackPlan && stackPlan.orderedPartIds.length >= 2) {
+      const out = {};
+      for (let i = 1; i < stackPlan.orderedPartIds.length; i++) {
+        out[stackPlan.orderedPartIds[i]] = {
+          x: 0,
+          y: i * stackPlan.layerGapLdu,
+          z: 0,
+          tilt: 0,
+          arrow: i === stackPlan.orderedPartIds.length - 1,
+        };
+      }
+      return out;
+    }
+  }
+  if (!hasAuto && !hasDef) return null;
+  if (!hasAuto) return def;
+  if (!hasDef) return auto;
   return { ...auto, ...def };
 }
 
@@ -8072,6 +8091,34 @@ function getPreviousPartsForStep(model, ch, step) {
     if (c.id === ch.id) break;
   }
   return prev;
+}
+const mirrorSubassemblyCache = new WeakMap();
+function getMirroredSubassemblyMap(model) {
+  if (!model || !Array.isArray(model.chapters)) return new Map();
+  if (mirrorSubassemblyCache.has(model)) return mirrorSubassemblyCache.get(model);
+  const candidates = [];
+  const nameById = new Map();
+  for (const ch of model.chapters) {
+    if (ch.kind === 'submodel' && Array.isArray(ch.canonicalParts) && ch.canonicalParts.length >= 2) {
+      nameById.set(ch.id, ch.name || 'Submodel');
+      candidates.push({
+        id: ch.id,
+        parts: ch.canonicalParts.map((p) => {
+          const b = computeWorldBox(p);
+          return { partId: p.p, colorId: p.c, pos: b.center };
+        }),
+      });
+    }
+  }
+  const map = new Map();
+  if (candidates.length >= 2) {
+    for (const pair of detectMirroredSubassemblyPairs(candidates)) {
+      map.set(pair.firstId, { partnerId: pair.secondId, partnerName: nameById.get(pair.secondId) || 'Mirror', axis: pair.mirrorAxis, role: 'L' });
+      map.set(pair.secondId, { partnerId: pair.firstId, partnerName: nameById.get(pair.firstId) || 'Mirror', axis: pair.mirrorAxis, role: 'R' });
+    }
+  }
+  mirrorSubassemblyCache.set(model, map);
+  return map;
 }
 const submodelThumbCache = new Map();
 function getSubmodelThumb(subObj, w = 220, h = 150) {
@@ -10744,7 +10791,9 @@ function renderAll(renderOpts = {}) {
 
     frame.innerHTML = `
       <div class="relative w-full h-full flex flex-col overflow-hidden" style="padding:${padPx}px;padding-bottom:${padPx + footerH}px">
-        ${page.submodelIntro ? `
+        ${page.submodelIntro ? (() => {
+          const mirrorInfo = getMirroredSubassemblyMap(state.model).get(page.submodelIntro.id) || null;
+          return `
           <div class="shrink-0 flex items-center ${wordless ? 'w-fit self-start' : 'justify-between'} shadow-xs overflow-hidden" style="margin-bottom:${Math.round(typo.pt(7))}px;padding:${Math.round(typo.pt(5))}px ${Math.round(typo.pt(10))}px;border-radius:${Math.round(typo.pt(10))}px;gap:${Math.round(typo.pt(10))}px;background:${theme.calloutBg};border:1.5px solid ${theme.calloutBorder}">
             <div class="flex items-center min-w-0 ${wordless ? '' : 'flex-1'}" style="gap:${Math.round(typo.pt(8))}px">
               <img src="${subIntroImg}" alt="${escHtml(page.submodelIntro.name)}" style="width:${st.introThumbW}px;height:${st.introThumbH}px" class="object-contain shrink-0 pointer-events-none" />
@@ -10754,8 +10803,12 @@ function renderAll(renderOpts = {}) {
                   <div class="font-extrabold truncate" style="font-size:${st.introTitleFont}px">${escHtml(page.submodelIntro.name)}</div>
                 </div>`}
             </div>
-            <span class="shrink-0 inline-flex items-center rounded-full font-black text-white shadow-xs tabular-nums" style="gap:${Math.round(typo.pt(3.5))}px;background:${theme.accent};font-size:${st.introPillFont}px;padding:${Math.round(typo.pt(3))}px ${Math.round(typo.pt(10))}px">${page.submodelIntro.repeatCount > 1 ? `×${page.submodelIntro.repeatCount}` : (wordless ? `${buildBrickGlyphSvg(Math.max(11, Math.round(st.introPillFont * 1.05)))}<span>${page.submodelIntro.pieceCount || page.submodelIntro.canonicalParts.length}</span>` : `${page.submodelIntro.pieceCount || page.submodelIntro.canonicalParts.length} pcs`)}</span>
-          </div>` : ''}
+            <div class="shrink-0 flex items-center" style="gap:${Math.round(typo.pt(4))}px">
+              ${mirrorInfo ? `<span class="inline-flex items-center rounded-full font-bold tabular-nums" title="${escHtml(`Mirrored pair with ${mirrorInfo.partnerName}`)}" style="background:rgba(15,23,42,0.08);color:${theme.text};border:1px solid ${theme.calloutBorder};font-size:${Math.max(9, Math.round(st.introPillFont * 0.85))}px;padding:${Math.round(typo.pt(2))}px ${Math.round(typo.pt(7))}px">${wordless ? '⇄' : `⇄ Mirror ${mirrorInfo.role}`}</span>` : ''}
+              <span class="shrink-0 inline-flex items-center rounded-full font-black text-white shadow-xs tabular-nums" style="gap:${Math.round(typo.pt(3.5))}px;background:${theme.accent};font-size:${st.introPillFont}px;padding:${Math.round(typo.pt(3))}px ${Math.round(typo.pt(10))}px">${page.submodelIntro.repeatCount > 1 ? `×${page.submodelIntro.repeatCount}` : (wordless ? `${buildBrickGlyphSvg(Math.max(11, Math.round(st.introPillFont * 1.05)))}<span>${page.submodelIntro.pieceCount || page.submodelIntro.canonicalParts.length}</span>` : `${page.submodelIntro.pieceCount || page.submodelIntro.canonicalParts.length} pcs`)}</span>
+            </div>
+          </div>`;
+        })() : ''}
         <div class="relative flex-1 min-h-0">
           ${dividerLinesSvg}
           ${slotData.map(({ ch, step, slotIdx, minifigSeqSlice, slotRect, estSlotW, estSlotH, prev, ov, snap, isMfExploded, isMfSeq, mfExploded, mfSeqStages, subSnap, attSubImg, mfPrepImg, attMfImg, mf1to1, useOverlayPli, slotPadPx, estVisualW, estVisualH, pli }) => {
@@ -10969,7 +11022,15 @@ function renderAll(renderOpts = {}) {
                         (prev || []).map((p) => ({ id: p.id, title: resolvePart(p.p).name, colorHex: (resolveColorInfo(p.c) || COLORS[71]).hex, box: computeWorldBox(p) })),
                       )
                     : null;
-                  const showAttachStarburst = Boolean((step.attachedSubmodel || step.subassembly) && !isOfficialMfStyle);
+                  const radialRing = (!isOfficialMfStyle && (step.parts || []).length >= 3)
+                    ? detectRadialSymmetricCompletion(
+                        (step.parts || []).map((p) => ({ id: p.id, partId: p.p, colorId: p.c, center: computeWorldBox(p).center })),
+                      )
+                    : null;
+                  const showAttachStarburst = Boolean((step.attachedSubmodel || step.subassembly || radialRing) && !isOfficialMfStyle);
+                  const showGhostCalloutCue = Boolean(
+                    step.subassembly && shouldShowGhostSubmodelPreview((step.subassembly.parts || []).length, true),
+                  );
                   const hasHingeArticulation = Boolean(
                     !isOfficialMfStyle &&
                     (Math.abs(ov.hingeAngleDeg || 0) >= 10 ||
@@ -10997,7 +11058,10 @@ function renderAll(renderOpts = {}) {
                     <div data-drag="callout" data-step="${step.id}" class="draggable-el relative z-10 shrink-0 ${ov.calloutDir === 'vertical' ? 'max-w-full' : 'max-w-[48%]'} max-h-full flex flex-col overflow-hidden ${isArrangeMode ? 'cursor-move' : ''}" style="width:${isTightSlot ? st.calloutWTight : st.calloutW}px;padding:${Math.round(typo.pt(5))}px;border-radius:${Math.round(typo.pt(8))}px;background:${theme.calloutBg};border:${calloutSel ? `2px solid ${theme.accent}` : `1.5px solid ${theme.calloutBorder}`};transform:translate(${calloutPos.x}px,${calloutPos.y}px)">
                       <div class="flex items-center ${wordless ? 'justify-end' : 'justify-between'} font-bold shrink-0 min-w-0" style="gap:${Math.round(typo.pt(4))}px;font-size:${st.calloutFont}px">
                         ${wordless ? '' : `<span class="min-w-0 truncate">${escHtml(step.subassembly.name)}</span>`}
-                        <span class="rounded-full text-white shrink-0" style="background:${theme.accent};padding:${Math.round(typo.pt(1))}px ${Math.round(typo.pt(4.5))}px">${step.subassembly.repeatCount}×</span>
+                        <span class="shrink-0 flex items-center" style="gap:${Math.round(typo.pt(3))}px">
+                          ${showGhostCalloutCue ? `<span class="rounded-full opacity-75" style="border:1px dashed ${theme.calloutBorder};padding:0 ${Math.round(typo.pt(3.5))}px;font-size:${Math.max(8, Math.round(st.calloutFont * 0.82))}px" title="Completed subassembly preview">↳</span>` : ''}
+                          <span class="rounded-full text-white shrink-0" style="background:${theme.accent};padding:${Math.round(typo.pt(1))}px ${Math.round(typo.pt(4.5))}px">${step.subassembly.repeatCount}×</span>
+                        </span>
                       </div>
                       <span data-canvas-mount="sub_${slotIdx}"></span>
                     </div>` : ''}
@@ -14965,6 +15029,8 @@ function syncBomSetupUI() {
   if (bomRelScaleChk) bomRelScaleChk.checked = Boolean(bc.relativeScale);
   const bomLenBadgesChk = document.getElementById('bomShowLengthBadges');
   if (bomLenBadgesChk) bomLenBadgesChk.checked = bc.showLengthBadges !== false;
+  const bomVarColsChk = document.getElementById('bomVariableWidthColumns');
+  if (bomVarColsChk) bomVarColsChk.checked = Boolean(bc.variableWidthColumns);
 
   // Fill order, Horizontal, Vertical buttons
   document.querySelectorAll('.bom-flowaxis-btn').forEach(b => {
@@ -19942,6 +20008,29 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
         drawTruncatedText(sub.name || 'Submodel', textX, pad + Math.round(bannerH * 0.48), introTextMaxW);
       }
 
+      const pdfMirrorInfo = getMirroredSubassemblyMap(state.model).get(sub.id) || null;
+      if (pdfMirrorInfo) {
+        const mLabel = wordless ? '⇄' : `⇄ Mirror ${pdfMirrorInfo.role}`;
+        const mFont = Math.max(9, Math.round(st.introPillFont * 0.85));
+        ctx.font = themeCanvasFont(theme, 700, mFont);
+        const mW = Math.ceil(ctx.measureText(mLabel).width) + Math.round(typo.pt(14));
+        const mH = Math.round(pillH * 0.88);
+        const mX = pillX - mW - Math.round(typo.pt(6));
+        const mY = pad + Math.round((bannerH - mH) / 2);
+        if (mX > pad + st.introThumbW + Math.round(typo.pt(24))) {
+          drawRRect(mX, mY, mW, mH, mH / 2);
+          ctx.fillStyle = 'rgba(15,23,42,0.08)';
+          ctx.fill();
+          ctx.strokeStyle = theme.calloutBorder;
+          ctx.lineWidth = 1;
+          ctx.stroke();
+          ctx.fillStyle = theme.text;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(mLabel, mX + mW / 2, mY + mH / 2 + 0.5);
+        }
+      }
+
       drawRRect(pillX, pillY, pillW, pillH, pillH / 2);
       ctx.fillStyle = theme.accent;
       ctx.fill();
@@ -20392,7 +20481,12 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
         });
         renderedStepSnap = snap;
         const stepImg = await resolveRenderDrawable(snap);
-        if ((step.attachedSubmodel || step.subassembly) && !isOfficialMfStyle) {
+        const pdfRadialRing = (!isOfficialMfStyle && (step.parts || []).length >= 3)
+          ? detectRadialSymmetricCompletion(
+              (step.parts || []).map((p) => ({ id: p.id, partId: p.p, colorId: p.c, center: computeWorldBox(p).center })),
+            )
+          : null;
+        if ((step.attachedSubmodel || step.subassembly || pdfRadialRing) && !isOfficialMfStyle) {
           drawAttachmentStarburstCanvas(ctx, sx + st.slotPad + mainAvailW / 2, renderTopY + renderAvailH / 2, Math.min(mainAvailW, renderAvailH) * 0.36);
         }
         drawContain(ctx, stepImg, sx + st.slotPad, renderTopY, mainAvailW, renderAvailH);
@@ -22861,6 +22955,8 @@ const bomRelScaleEl = document.getElementById('bomRelativeScale');
 if (bomRelScaleEl) bomRelScaleEl.onchange = (e) => patchBomConfig({ relativeScale: e.target.checked }, { immediate: true });
 const bomLenBadgesEl = document.getElementById('bomShowLengthBadges');
 if (bomLenBadgesEl) bomLenBadgesEl.onchange = (e) => patchBomConfig({ showLengthBadges: e.target.checked }, { immediate: true });
+const bomVarColsEl = document.getElementById('bomVariableWidthColumns');
+if (bomVarColsEl) bomVarColsEl.onchange = (e) => patchBomConfig({ variableWidthColumns: e.target.checked }, { immediate: true });
 document.querySelectorAll('.bom-flowaxis-btn').forEach(b => {
   b.onclick = () => patchBomConfig({ flowAxis: b.getAttribute('data-bom-flow-axis') === 'columns' ? 'columns' : 'rows' }, { immediate: true });
 });
