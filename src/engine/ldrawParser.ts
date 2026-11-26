@@ -82,7 +82,11 @@ function splitMpdSubfiles(source: string, rootName: string): Map<string, ParsedS
 
     if (/^0\s+NOFILE\b/i.test(line)) {
       flush();
+      currentName = rootName;
+      currentKey = rootName.toLowerCase();
       currentLines = [];
+      currentSteps = 0;
+      currentHasGeom = false;
       continue;
     }
 
@@ -100,6 +104,15 @@ function splitMpdSubfiles(source: string, rootName: string): Map<string, ParsedS
   }
 
   return subfiles;
+}
+
+let modelIdSeq = 0;
+
+function parseLDrawColorTokenLocal(tok: string): number {
+  if (/^0x2[0-9a-f]{6}$/i.test(tok)) {
+    return parseInt(tok, 16);
+  }
+  return parseInt(tok, 10);
 }
 
 export function parseLDrawSource(
@@ -164,6 +177,7 @@ export function parseLDrawSource(
     parentRot: Mat3,
     parentColor: number,
     pathStack: string[],
+    ancestorKeys: Set<string>,
     depth: number,
   ) => {
     if (depth > 16) return;
@@ -178,20 +192,20 @@ export function parseLDrawSource(
       // Support both standard LDraw type-1 lines and Studio modelv2.ldr type-11 part lines
       if (!line.startsWith('1 ') && !line.startsWith('11 ')) continue;
 
-      const tokens = line.split(/\s+/);
-      if (tokens.length < 15) continue;
+      const mLine = line.match(/^(?:1|11)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(.+)$/);
+      if (!mLine) continue;
 
-      const rawColor = parseInt(tokens[1], 10);
+      const rawColor = parseLDrawColorTokenLocal(mLine[1]);
       const colorId = mapColor(rawColor, parentColor);
-      const x = parseFloat(tokens[2]);
-      const y = parseFloat(tokens[3]);
-      const z = parseFloat(tokens[4]);
+      const x = parseFloat(mLine[2]);
+      const y = parseFloat(mLine[3]);
+      const z = parseFloat(mLine[4]);
       const m: Mat3 = [
-        parseFloat(tokens[5]), parseFloat(tokens[6]), parseFloat(tokens[7]),
-        parseFloat(tokens[8]), parseFloat(tokens[9]), parseFloat(tokens[10]),
-        parseFloat(tokens[11]), parseFloat(tokens[12]), parseFloat(tokens[13]),
+        parseFloat(mLine[5]), parseFloat(mLine[6]), parseFloat(mLine[7]),
+        parseFloat(mLine[8]), parseFloat(mLine[9]), parseFloat(mLine[10]),
+        parseFloat(mLine[11]), parseFloat(mLine[12]), parseFloat(mLine[13]),
       ];
-      const refName = tokens.slice(14).join(' ').trim();
+      const refName = mLine[14].trim();
       const refKey = refName.toLowerCase();
 
       if ([x, y, z, ...m].some((n) => !Number.isFinite(n))) continue;
@@ -200,9 +214,11 @@ export function parseLDrawSource(
       const worldLdrRot = mat3Mul(parentRot, m);
 
       const nested = subfiles.get(refKey);
-      if (nested && !nested.hasGeometryPrimitives && nested.key !== sf.key) {
+      if (nested && !nested.hasGeometryPrimitives && !ancestorKeys.has(nested.key)) {
         const nextPath = [...pathStack, nested.name];
-        visitSubfile(nested, worldLdrPos, worldLdrRot, colorId, nextPath, depth + 1);
+        const nextAncestors = new Set(ancestorKeys);
+        nextAncestors.add(nested.key);
+        visitSubfile(nested, worldLdrPos, worldLdrRot, colorId, nextPath, nextAncestors, depth + 1);
       } else {
         const partId = normalizePartId(refName);
         const def = resolvePartDefinition(partId);
@@ -242,7 +258,7 @@ export function parseLDrawSource(
   };
 
   if (firstEntry) {
-    visitSubfile(firstEntry, [0, 0, 0], IDENTITY_MAT3, 71, [], 0);
+    visitSubfile(firstEntry, [0, 0, 0], IDENTITY_MAT3, 71, [], new Set([firstEntry.key]), 0);
   }
 
   const explicitSubmodels: ExplicitSubmodel[] = Array.from(submodelPartMap.entries()).map(
@@ -254,7 +270,7 @@ export function parseLDrawSource(
   );
 
   return {
-    id: `model_${Date.now().toString(36)}`,
+    id: `model_${Date.now().toString(36)}_${++modelIdSeq}`,
     name: modelTitle,
     author,
     sourceFormat,
@@ -334,7 +350,7 @@ export async function parseModelFile(file: File): Promise<CanonicalModel> {
         if (entry.filename.toLowerCase().endsWith('.dat') && !entry.encrypted) {
           try {
             const content = await entry.getData(new TextWriter());
-            embedded[normalizePartId(entry.filename)] = content;
+            embedded[normalizePartId(entry.filename)] = convertStudioDatLinesToLDraw(content.split(/\r?\n/)).join('\n');
           } catch {
             // Skip unreadable custom part entry
           }

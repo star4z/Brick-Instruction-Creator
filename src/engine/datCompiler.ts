@@ -1471,10 +1471,18 @@ export function compileDatEntry(
     edgeLimit: number,
     inheritedTexmap: TexmapProjection | null,
     inheritedPeTex: PeTexPathEntry[],
+    parentInvert = false,
   ) => {
     if (depth > maxDepth || totalTriFloats >= triLimit) return;
     const isStudioDat = isUnconvertedStudioDatLines(rawLines);
     const lines = preprocessTexmapLines(rawLines, px, py, pz, pm, lookupTexture);
+    const pmDet =
+      pm[0] * (pm[4] * pm[8] - pm[5] * pm[7]) -
+      pm[1] * (pm[3] * pm[8] - pm[5] * pm[6]) +
+      pm[2] * (pm[3] * pm[7] - pm[4] * pm[6]);
+    const matFlipped = pmDet < 0;
+    let localCW = false;
+    let invertNext = false;
 
     // Resolve incoming PE_TEX_PATH entries targeted at this file vs its subfile children
     let activeExplicitPeTex: PeTexInfo | null = null;
@@ -1538,8 +1546,17 @@ export function compileDatEntry(
       const raw = item.text;
       const lineTexmap = item.texmap ?? inheritedTexmap;
 
-      // BrickLink Studio PE_TEX_* meta commands (embedded base64 PNG decals!)
+      // Meta commands: LDraw BFC winding directives & BrickLink Studio PE_TEX_* decals
       if (raw[0] === '0') {
+        if (/^0\s+BFC\b/i.test(raw)) {
+          if (/\bINVERTNEXT\b/i.test(raw)) {
+            invertNext = true;
+          } else {
+            if (/\bCCW\b/i.test(raw)) localCW = false;
+            else if (/\bCW\b/i.test(raw)) localCW = true;
+          }
+          continue;
+        }
         if (raw.includes('PE_TEX_')) {
           const mPath = raw.match(/^0\s+PE_TEX_PATH\s+(.+)$/i);
           if (mPath) {
@@ -1575,7 +1592,10 @@ export function compileDatEntry(
         continue;
       }
 
+      const flipWinding = (localCW !== parentInvert) !== matFlipped;
+
       if (isLineKind(raw, '3')) {
+        invertNext = false;
         pendingPePath = null;
         pendingNextShear = false;
         if (totalTriFloats >= directTriLimit) continue;
@@ -1593,16 +1613,19 @@ export function compileDatEntry(
           if (activeExplicitPeTex && t.length >= 17) {
             const u0 = +t[11], v0 = +t[12], u1 = +t[13], v1 = +t[14], u2 = +t[15], v2 = +t[16];
             if ([u0, v0, u1, v1, u2, v2].every(Number.isFinite)) {
-              explicitUvs = [[u0, v0], [u1, v1], [u2, v2]];
+              explicitUvs = flipWinding
+                ? [[u0, v0], [u2, v2], [u1, v1]]
+                : [[u0, v0], [u1, v1], [u2, v2]];
             }
           }
           emitTriWithActiveTex(
-            pa, pb, pc, colId,
+            pa, flipWinding ? pc : pb, flipWinding ? pb : pc, colId,
             activeExplicitPeTex, explicitUvs,
             lineTexmap, activeProjPeTex,
           );
         }
       } else if (isLineKind(raw, '4')) {
+        invertNext = false;
         pendingPePath = null;
         pendingNextShear = false;
         if (totalTriFloats >= directTriLimit) continue;
@@ -1614,9 +1637,11 @@ export function compileDatEntry(
           const c = mat3Vec(pm, +t[8], +t[9], +t[10]);
           const d = mat3Vec(pm, +t[11], +t[12], +t[13]);
           const pa: Vec3 = [px + a[0], py + a[1], pz + a[2]];
-          const pb: Vec3 = [px + b[0], py + b[1], pz + b[2]];
+          const pb0: Vec3 = [px + b[0], py + b[1], pz + b[2]];
           const pc: Vec3 = [px + c[0], py + c[1], pz + c[2]];
-          const pd: Vec3 = [px + d[0], py + d[1], pz + d[2]];
+          const pd0: Vec3 = [px + d[0], py + d[1], pz + d[2]];
+          const pb = flipWinding ? pd0 : pb0;
+          const pd = flipWinding ? pb0 : pd0;
 
           if (activeExplicitPeTex && t.length >= 22) {
             const u0 = +t[14], v0 = +t[15], u1 = +t[16], v1 = +t[17];
@@ -1626,9 +1651,9 @@ export function compileDatEntry(
                 texKey: activeExplicitPeTex.texKey,
                 base64Png: activeExplicitPeTex.base64Png,
                 uva: [u0, v0],
-                uvb: [u1, v1],
+                uvb: flipWinding ? [u3, v3] : [u1, v1],
                 uvc: [u2, v2],
-                uvd: [u3, v3],
+                uvd: flipWinding ? [u1, v1] : [u3, v3],
               });
               continue;
             }
@@ -1660,6 +1685,7 @@ export function compileDatEntry(
           emitQuad(pa, pb, pc, pd, colId);
         }
       } else if (isLineKind(raw, '2')) {
+        invertNext = false;
         pendingPePath = null;
         pendingNextShear = false;
         if (edges.length >= directEdgeLimit) continue;
@@ -1672,6 +1698,7 @@ export function compileDatEntry(
           }
         }
       } else if (isLineKind(raw, '5')) {
+        invertNext = false;
         pendingPePath = null;
         pendingNextShear = false;
         if (condEdges.length >= maxCondFloats) continue;
@@ -1692,6 +1719,8 @@ export function compileDatEntry(
           }
         }
       } else if (isLineKind(raw, '1')) {
+        const childInvert = parentInvert !== invertNext;
+        invertNext = false;
         pendingPePath = null;
         pendingNextShear = false;
         const t = raw.split(/\s+/);
@@ -1808,6 +1837,7 @@ export function compileDatEntry(
             childEdgeLimit,
             lineTexmap,
             childPeTex,
+            childInvert,
           );
         } else if (totalTriFloats < childTriLimit) {
           // Procedural fallback for missing torus bevels (t04o6250, t08o6250, t16o6250), cones, boxes, axles

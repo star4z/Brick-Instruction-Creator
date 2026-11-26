@@ -14,6 +14,11 @@ import { buildAttachmentStarburstSvg, buildCurvedMotionArrowSvg } from '../engin
 import { buildLiveStepRenderCacheKey } from '../engine/pageRenderCache';
 import { buildProgressBarHtml } from '../engine/buildRoadmap';
 import { findShortcutConflict } from '../engine/keyboardShortcuts';
+import { parseLDrawSource } from '../engine/ldrawParser';
+import { compileDatEntry } from '../engine/datCompiler';
+import { isBoxGrounded } from '../engine/floatingCheck';
+import { getStudioOriginOffset } from '../engine/studioPartOrigins';
+import { extractDatDependencies } from '../engine/ldrLibrary';
 
 // Minimal valid 1x1 JPEG bytes (SOI + EOI)
 const MINIMAL_JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
@@ -231,6 +236,61 @@ describe('Remediation regression tests', () => {
     it('findShortcutConflict detects conflict against secondaryDefaultCombo (e.g. Ctrl+Y for redo)', () => {
       const conflict = findShortcutConflict('Mod+Y', 'undo', {});
       expect(conflict).toBe('redo');
+    });
+  });
+
+  describe('Batch B: parser, BFC/mirrored normals, grounding, origins & !TEXMAP', () => {
+    it('ldrawParser handles 0 NOFILE, 0x2RRGGBB colors, mutual recursion, and unique model IDs', () => {
+      const mpd = [
+        '0 FILE main.ldr',
+        '1 0x2FF0088 0 0 0 1 0 0 0 1 0 0 0 1 subA.ldr',
+        '0 NOFILE',
+        '0 FILE subA.ldr',
+        '1 16 0 0 0 1 0 0 0 1 0 0 0 1 subB.ldr',
+        '1 16 0 0 0 1 0 0 0 1 0 0 0 1 3001.dat',
+        '0 FILE subB.ldr',
+        '1 16 0 0 0 1 0 0 0 1 0 0 0 1 subA.ldr',
+      ].join('\n');
+      const m1 = parseLDrawSource(mpd, 'test.mpd', 'mpd');
+      const m2 = parseLDrawSource(mpd, 'test.mpd', 'mpd');
+      expect(m1.id).not.toBe(m2.id);
+      expect(m1.parts.length).toBeGreaterThanOrEqual(1);
+      expect(m1.parts[0].colorId).toBe(0x2ff0088);
+    });
+
+    it('datCompiler flips triangle winding for 0 BFC CW and negative-determinant subfiles', () => {
+      const ccwLines = ['0 BFC CERTIFY CCW', '3 16 0 0 0 10 0 0 0 0 10'];
+      const cwLines = ['0 BFC CERTIFY CW', '3 16 0 0 0 10 0 0 0 0 10'];
+      const mirroredParent = ['1 16 0 0 0 -1 0 0 0 1 0 0 0 1 child.dat'];
+      const ccw = compileDatEntry({ key: 't_ccw', lines: ccwLines }, () => null);
+      const cw = compileDatEntry({ key: 't_cw', lines: cwLines }, () => null);
+      const mirrored = compileDatEntry(
+        { key: 't_mir', lines: mirroredParent },
+        (ref) => (ref === 'child' || ref === 'child.dat' ? { key: 'child', lines: ccwLines } : null),
+      );
+      expect(ccw).not.toBeNull();
+      expect(cw).not.toBeNull();
+      expect(mirrored).not.toBeNull();
+      // CW normal should be opposite sign of CCW normal on Y axis
+      expect(ccw!.norms[1]).toBeCloseTo(-cw!.norms[1], 4);
+      // Mirrored X-reflection flips winding back so Y normal matches unmirrored CCW
+      expect(mirrored!.norms[1]).toBeCloseTo(ccw!.norms[1], 4);
+    });
+
+    it('isBoxGrounded rejects parts fallen far below the ground plane', () => {
+      expect(isBoxGrounded({ min: [0, 0, 0], max: [20, 24, 20] }, 0)).toBe(true);
+      expect(isBoxGrounded({ min: [0, -500, 0], max: [20, -476, 20] }, 0)).toBe(false);
+    });
+
+    it('getStudioOriginOffset normalizes backslashes and parts/ prefixes', () => {
+      expect(getStudioOriginOffset('parts\\93091.dat')).not.toBeNull();
+    });
+
+    it('extractDatDependencies preserves spaces inside quoted !TEXMAP filenames', () => {
+      const { textures } = extractDatDependencies(
+        '0 !TEXMAP START PLANAR 0 0 0 10 0 0 0 10 0 "my  spaced  decal.png"',
+      );
+      expect(textures).toContain('my  spaced  decal.png');
     });
   });
 });

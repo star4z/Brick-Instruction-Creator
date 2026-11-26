@@ -32,7 +32,13 @@ export function isStudioAuthoredSource(source: string): boolean {
 
 /** Returns the Studio→LDraw origin offset for a normalized part id, if any. */
 export function getStudioOriginOffset(partId: string): Vec3 | null {
-  const key = partId.toLowerCase().replace(/\.dat$/i, '').replace(/^bl_/, '');
+  const key = partId
+    .trim()
+    .toLowerCase()
+    .replace(/\\/g, '/')
+    .replace(/^(?:(?:ldraw|parts|p)\/)+/, '')
+    .replace(/\.dat$/i, '')
+    .replace(/^bl_/, '');
   return STUDIO_PART_ORIGIN_OFFSETS[key] ?? null;
 }
 

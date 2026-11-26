@@ -42,3 +42,14 @@ This document tracks the comprehensive static-analysis and live-runtime audit of
 - Added `configurePreviewServer`, stream error handling, `Cache-Control` headers, and live-bundle `manualChunks` in `vite.config.ts`.
 - Narrowed console error suppression in `e2e/auditHelpers.ts`, added manifest JSON validation to `scripts/check-neocities.mjs`, and added `npm test` to `.github/workflows/ui-audit.yml`.
 - Added targeted regression unit tests (`src/__tests__/remediationFixes.test.ts`) and E2E accessibility + async Interactive HTML export coverage (`e2e/ui-audit.spec.ts`).
+
+## Phase 6 — Supply-Chain CVEs, Dead Code Removal, LDraw BFC/Parser & Export Speed
+- **0 Production CVEs & Dead Code Removal**: Removed unreachable legacy React/Zustand/Three.js/jsPDF stack (`src/App.tsx`, `src/components/`, `src/store/`, `src/renderer/`, `src/export/pdfExporter.ts`, `src/export/htmlExporter.ts`) and uninstalled 79 unused packages including vulnerable `jspdf <=4.2.0` (`npm audit --omit=dev` → **0 vulnerabilities**). Cleaned up `vite.config.ts` and `tsconfig.json`.
+- **Security & Documentation Sync**: Added a Content-Security-Policy meta tag to `index.html` and updated `docs/ARCHITECTURE.md`, `README.md`, and `PRODUCT.md` to accurately reflect the live vanilla DOM + custom WebGL1 + streaming PDF 1.4 architecture.
+- **LDraw BFC, Parser, Connectivity & Grounding**:
+  - Added LDraw `0 BFC` (`CW`/`CCW`/`INVERTNEXT`) and negative-determinant matrix winding flip support in `src/engine/datCompiler.ts`.
+  - Fixed `0 NOFILE` state reset, `0x2RRGGBB` direct RGB color tokens, mutual recursion cycle guard, multi-space subfile names, standalone `.dat` conversion in `.io` ZIPs, and monotonic model IDs in `src/engine/ldrawParser.ts`.
+  - Preserved spaces in quoted `!TEXMAP` filenames and resolved `AbortError` cleanly in `src/engine/ldrLibrary.ts`; normalized `parts/` & backslashes in `src/engine/studioPartOrigins.ts`.
+  - Added lower bound to `isBoxGrounded` (`src/engine/floatingCheck.ts`); added coaxial normal alignment checks to Technic/hinge snaps and O(1) BFS queue indexing + `partById` lookup in `src/engine/connectivity.ts`.
+- **UX & Large-Model Export Speed**: Replaced native blocking `window.prompt()` calls in `src/studioRuntime.ts` with a styled, accessible input dialog (`openStudioInputPrompt`), and skipped redundant per-step `<noscript>` JPEG fallback renders on >24-step Interactive 3D HTML exports to slash export time and HTML file size on large manuals.
+- *(Note: Legacy `.biw` v1–v3 file version migration was intentionally skipped per project decision to treat all file formats as v1 proposals.)*

@@ -84,7 +84,8 @@ export function isBoxGrounded(
   groundY: number,
   toleranceLdu: number = GROUND_TOLERANCE_LDU,
 ): boolean {
-  return box.min[1] <= groundY + toleranceLdu;
+  const lowerBound = groundY - Math.max(toleranceLdu * 4, 40);
+  return box.min[1] <= groundY + toleranceLdu && box.min[1] >= lowerBound;
 }
 
 /**

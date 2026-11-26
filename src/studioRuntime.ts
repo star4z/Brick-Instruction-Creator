@@ -12974,8 +12974,87 @@ function renderContextOverlay(page) {
     };
     box.querySelector('#actNewBefore').onclick = () => splitSelectedToOffset(-1);
     box.querySelector('#actNewAfter').onclick = () => splitSelectedToOffset(1);
-    box.querySelector('#actMoveStep').onclick = () => {
-      const targetNum = parseInt(prompt(`Move selected parts to which absolute Step # (1–${getAllSteps(state.model).length})? This step is #${getAbsStepNum(step)}.`), 10);
+    const openStudioInputPrompt = ({
+      title,
+      message,
+      defaultValue = '',
+      placeholder = '',
+      inputType = 'text',
+      min = '',
+      max = '',
+      confirmLabel = 'Confirm',
+    }) => new Promise((resolve) => {
+      const overlay = document.createElement('div');
+      overlay.setAttribute('role', 'dialog');
+      overlay.setAttribute('aria-modal', 'true');
+      overlay.setAttribute('aria-label', title);
+      overlay.className = 'no-print fixed inset-0 z-[70] bg-black/55 backdrop-blur-xs flex items-center justify-center p-4';
+      overlay.innerHTML = `
+        <div class="studio-sheet bg-[var(--card)] border border-[var(--border)] rounded-2xl shadow-2xl w-full max-w-sm p-5 space-y-3">
+          <div class="text-base font-semibold text-[var(--foreground)]"></div>
+          <p class="text-xs text-[var(--muted-foreground)] leading-relaxed"></p>
+          <input class="w-full px-3 py-2 text-sm rounded-lg border border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]" />
+          <div class="flex items-center justify-end gap-2 pt-1">
+            <button type="button" data-role="cancel" class="px-3.5 py-1.5 rounded-lg text-xs font-medium border border-[var(--border)] text-[var(--foreground)] hover:bg-[var(--muted)]">Cancel</button>
+            <button type="button" data-role="ok" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-[var(--primary)] text-white hover:opacity-95"></button>
+          </div>
+        </div>
+      `;
+      const titleEl = overlay.querySelector('.text-base');
+      const msgEl = overlay.querySelector('p');
+      const inputEl = overlay.querySelector('input');
+      const cancelBtn = overlay.querySelector('[data-role="cancel"]');
+      const okBtn = overlay.querySelector('[data-role="ok"]');
+      if (titleEl) titleEl.textContent = title;
+      if (msgEl) msgEl.textContent = message;
+      if (okBtn) okBtn.textContent = confirmLabel;
+      if (inputEl) {
+        inputEl.type = inputType;
+        inputEl.value = String(defaultValue);
+        if (placeholder) inputEl.placeholder = placeholder;
+        if (min !== '') inputEl.min = String(min);
+        if (max !== '') inputEl.max = String(max);
+      }
+      const finish = (val) => {
+        document.removeEventListener('keydown', onKey, true);
+        overlay.remove();
+        resolve(val);
+      };
+      const onKey = (ev) => {
+        if (ev.key === 'Escape') {
+          ev.preventDefault();
+          ev.stopPropagation();
+          finish(null);
+        } else if (ev.key === 'Enter' && document.activeElement === inputEl) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          finish(inputEl.value);
+        }
+      };
+      overlay.onclick = (ev) => { if (ev.target === overlay) finish(null); };
+      if (cancelBtn) cancelBtn.onclick = () => finish(null);
+      if (okBtn) okBtn.onclick = () => finish(inputEl ? inputEl.value : '');
+      document.addEventListener('keydown', onKey, true);
+      document.body.appendChild(overlay);
+      if (inputEl) {
+        inputEl.focus();
+        inputEl.select();
+      }
+    });
+
+    box.querySelector('#actMoveStep').onclick = async () => {
+      const totalSteps = getAllSteps(state.model).length;
+      const rawTarget = await openStudioInputPrompt({
+        title: 'Move Parts to Step',
+        message: `Enter destination absolute Step # (1–${totalSteps}). Current step is #${getAbsStepNum(step)}.`,
+        defaultValue: String(getAbsStepNum(step)),
+        inputType: 'number',
+        min: 1,
+        max: totalSteps,
+        confirmLabel: 'Move',
+      });
+      if (rawTarget === null) return;
+      const targetNum = parseInt(rawTarget, 10);
       if (!targetNum) return;
       const all = getAllSteps(state.model);
       const dest = all.find(x => getAbsStepNum(x.step) === targetNum);
@@ -12992,10 +13071,17 @@ function renderContextOverlay(page) {
       showToast(`Moved ${formatPartCount(moved.length)} to ${dest.ch.name ? `${dest.ch.name} ` : ''}Step ${dest.step.num} (#${targetNum}).`);
       renderAll();
     };
-    box.querySelector('#actMakeSub').onclick = () => {
+    box.querySelector('#actMakeSub').onclick = async () => {
       const picked = step.parts.filter(p => state.selectedPartIds.has(p.id));
       if (picked.length === 0) return;
-      const name = prompt('Submodel name:', 'Subassembly');
+      const rawName = await openStudioInputPrompt({
+        title: 'Create Submodel Callout',
+        message: 'Name this subassembly callout:',
+        defaultValue: 'Subassembly',
+        placeholder: 'Subassembly',
+        confirmLabel: 'Create',
+      });
+      const name = rawName ? rawName.trim() : '';
       if (!name) return;
       pushUndo();
       step.subassembly = { name, repeatCount: 1, direction: 'horizontal', asPages: false, buildParts: picked };
@@ -24422,13 +24508,15 @@ async function runInteractiveHtmlExport() {
             rotationCueKind: hasCue ? effectiveCue : undefined,
             subLabel,
             pli: Array.from(pliMap.values()),
-            previewUrl: renderFallbackPreview(prev, step.parts || [], cam.az, cam.el, ov.modelScale || 1.0, {
-              partOffsets: effOffsets,
-              arrowColor: state.arrowColor,
-              arrowStyle: state.arrowStyle,
-              arrowOutlines: state.arrowOutlines,
-              arrowLighting: state.arrowLighting,
-            }),
+            previewUrl: allSteps.length <= 24
+              ? renderFallbackPreview(prev, step.parts || [], cam.az, cam.el, ov.modelScale || 1.0, {
+                  partOffsets: effOffsets,
+                  arrowColor: state.arrowColor,
+                  arrowStyle: state.arrowStyle,
+                  arrowOutlines: state.arrowOutlines,
+                  arrowLighting: state.arrowLighting,
+                })
+              : undefined,
             prevPartIdx,
             newPartIdx,
             arrows: stepArrows.length > 0 ? stepArrows : undefined,

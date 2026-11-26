@@ -239,12 +239,15 @@ export function extractDatDependencies(datText: string): ExtractedDatDependencie
         if (mTex) {
           const method = mTex[1].toUpperCase();
           const paramCount = method === 'PLANAR' ? 9 : method === 'CYLINDRICAL' ? 10 : 11;
-          const rest = mTex[2].trim().split(/\s+/);
-          if (rest.length > paramCount) {
-            let texName = rest[paramCount];
-            if (texName.startsWith('"')) {
-              const qm = rest.slice(paramCount).join(' ').match(/^"([^"]+)"/);
+          const paramsRe = new RegExp(`^(?:\\S+\\s+){${paramCount}}(.+)$`);
+          const afterParams = mTex[2].trim().match(paramsRe)?.[1]?.trim() || '';
+          if (afterParams) {
+            let texName = '';
+            if (afterParams.startsWith('"')) {
+              const qm = afterParams.match(/^"([^"]+)"/);
               if (qm) texName = qm[1];
+            } else {
+              texName = afterParams.split(/\s+/)[0] || '';
             }
             texName = texName.replace(/^["']|["']$/g, '').trim();
             if (/\.(?:png|jpg|jpeg|webp)$/i.test(texName)) {
@@ -618,7 +621,7 @@ export async function fetchLDrawDependencyGraph(
             }
           } catch (err) {
             if ((err as { name?: string })?.name === 'AbortError' || signal?.aborted) {
-              throw err;
+              return { k, text: null as string | null, resolvedKey: k, networkBlocked: false, notFound: false };
             }
           }
         }

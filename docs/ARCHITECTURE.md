@@ -24,17 +24,16 @@ flowchart LR
     Conn --> StepGen["Multi-Directional Step Generator\n(SNOT, Repeated Subassemblies,\nPacing Presets, Zero-Float)"]
     StepGen --> CamOpt["Viterbi Camera & Rotation\nOptimizer (8 Canonical Views)"]
     CamOpt --> Layout["Reactive Flow Layout Engine\n(Semantic Overrides + Pin Breaks)"]
-    Layout --> Renderer["Three.js Technical Renderer\n(Edge Lines, Highlights, Fades,\nPresentation Transforms)"]
-    Renderer --> UI["Studio Workspace\n(Desktop 3-Pane / Mobile Viewer)"]
-    Renderer --> Export["Exporters\n(Vector+Raster PDF, Interactive HTML,\n.biw Project + IDB Autosave)"]
+    Layout --> Renderer["Custom WebGL1 Brick Renderer\n(PBR/Flat Shading, Edge & Conditional Lines,\nDecals, Highlights, Fades, Arrows)"]
+    Renderer --> UI["Studio Workspace\n(Responsive Desktop & Mobile Stage)"]
+    Renderer --> Export["Exporters\n(Streaming PDF 1.4, Interactive 3D HTML,\nBrickLink/Rebrickable BOM, .biw + IDB)"]
 ```
 
 ### Tech Stack
-- **Frontend**: React 19 + TypeScript + Vite + Tailwind CSS + Zustand (with Immer-style immutable updates & undo/redo history)
-- **3D Rendering**: Three.js (orthographic technical camera, soft plastic toon/lambert shading, crisp LDraw edge/conditional lines, silhouette highlight outlines, previous-step desaturation/fade, offscreen canvas pool for PLI & step snapshots)
-- **Compute Offloading**: Dedicated Web Worker pipeline architecture (clean pure-TS engine modules runnable in Workers or synchronously in tests)
-- **Archive & Export**: `jszip` (`.io` archive + local `complete.zip` parsing), `jspdf` (hybrid vector layout + high-DPI 3D renders), self-contained single-file HTML viewer exporter
-- **Persistence**: IndexedDB (`idb`) for project autosave & LDraw part geometry/snap cache + portable `.biw` project and `.biwtheme` custom theme files
+- **Frontend**: TypeScript + Vite + Tailwind CSS v4 + imperative DOM Studio runtime (`src/studioRuntime.ts` + `index.html`) backed by pure, strictly typed TypeScript engine modules (`src/engine/`, `src/cover/`, `src/themes/`, `src/export/`, `src/storage/`)
+- **3D Rendering**: Custom WebGL1 engine (`WebGLBrickEngine` and `StudioPhotoRenderer`) with orthographic technical camera, PBR & flat shading, crisp LDraw edge/conditional lines, luminance-aware dark-brick outlines, embedded PNG decals, highlight outlines, previous-step fades, and offscreen canvas LRU caching
+- **Archive & Export**: `jszip` & `@zip.js/zip.js` (`.io` archive + local `complete.zip` parsing), zero-dependency streaming PDF 1.4 binary generator (`src/export/pdfBinary.ts` with `/Info` metadata, `/Outlines` bookmarks, clickable `/URI` links, and invisible searchable text), self-contained offline Interactive 3D HTML viewer (`src/export/interactiveHtmlExporter.ts`), and BrickLink XML / Rebrickable CSV BOM export (`src/export/bomExporters.ts`)
+- **Persistence**: IndexedDB for session autosave, custom uploaded fonts, and LDraw part geometry/texture caches + portable `.biw` project and `.biwtheme` custom theme files
 
 ---
 

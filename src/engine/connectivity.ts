@@ -159,7 +159,7 @@ function matchSnapPair(
     (sa.kind === 'pin_hole' && sb.kind === 'pin') ||
     (sa.kind === 'axle' && sb.kind === 'axle_hole') ||
     (sa.kind === 'axle_hole' && sb.kind === 'axle');
-  if (isPin && dist <= 5.5 + toleranceLdu) {
+  if (isPin && dist <= 5.5 + toleranceLdu && Math.abs(vec3Dot(sa.normal, sb.normal)) >= 0.7) {
     return {
       type: 'technic',
       strength: 2.8,
@@ -169,7 +169,7 @@ function matchSnapPair(
   }
 
   // Hinge <-> Hinge
-  if (sa.kind === 'hinge' && sb.kind === 'hinge' && dist <= 6.0 + toleranceLdu) {
+  if (sa.kind === 'hinge' && sb.kind === 'hinge' && dist <= 6.0 + toleranceLdu && Math.abs(vec3Dot(sa.normal, sb.normal)) >= 0.7) {
     return {
       type: 'hinge',
       strength: 2.2,
@@ -339,14 +339,18 @@ export function buildConnectivityGraph(
   const visited = new Set<string>();
   const components: string[][] = [];
 
+  const partById = new Map<string, PartInstance>();
+  for (const part of parts) partById.set(part.id, part);
+
   for (const part of parts) {
     if (visited.has(part.id)) continue;
     const comp: string[] = [];
     const queue: string[] = [part.id];
+    let head = 0;
     visited.add(part.id);
 
-    while (queue.length > 0) {
-      const curr = queue.shift()!;
+    while (head < queue.length) {
+      const curr = queue[head++];
       comp.push(curr);
       for (const edge of adjacency[curr] ?? []) {
         if (!visited.has(edge.b)) {
@@ -368,7 +372,7 @@ export function buildConnectivityGraph(
     );
     for (const comp of components) {
       if (comp.length === 1) {
-        const inst = parts.find((p) => p.id === comp[0])!;
+        const inst = partById.get(comp[0])!;
         const box = aabbs.get(inst.id)!;
         if (isBoxGrounded(box, groundY)) continue;
         let nearest = Infinity;

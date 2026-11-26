@@ -36,9 +36,9 @@ Unlike BrickLink Studio's instruction maker—where editing an early step cascad
   - 3-tier cascading manual styling (opinionated theme presets, global design tokens, custom theme editor, per-step overrides) plus Cover Page and Bill of Materials (BOM) configuration.
   - Bricks Library browser with searchable 3D part preview and local/remote LDraw library management.
   - Diagnostics & Model Issues inspector (floating parts, missing shapes, tolerance warnings).
-  - Exports: high-resolution hybrid vector+raster PDF (desktop & iOS WebView safe), self-contained offline Interactive HTML Viewer, printable CSS layout (`@media print`), and portable `.biw` project / `.biwtheme` custom theme save/load.
+  - Exports: high-resolution streaming PDF 1.4 (desktop & iOS WebView safe, with bookmarks & clickable links), self-contained offline Interactive 3D HTML Viewer, BrickLink XML / Rebrickable CSV BOM export, printable CSS layout (`@media print`), and portable `.biw` project / `.biwtheme` custom theme save/load.
 - **Technical & deployment constraints**:
-  - 100% client-side static TypeScript + Vite + Tailwind CSS + Three.js + jsPDF web app (`base: './'`).
+  - 100% client-side static TypeScript + Vite + Tailwind CSS + custom WebGL1 + zero-dependency PDF 1.4 web app (`base: './'`).
   - Deployed to GitHub Pages and verified for Neocities static hosting compliance (`< 5 MB` per output file, allowed static extensions only, checked via `npm run check:neocities`).
   - Existing DOM runtime hooks (`src/studioRuntime.ts` bindings in `index.html`) and Vitest engine/UI safety suite (`npm test`) must remain intact and passing.
 
@@ -49,8 +49,8 @@ Unlike BrickLink Studio's instruction maker—where editing an early step cascad
 
 ## Evidence on Hand
 
-- Live application codebase (`index.html`, `src/studioRuntime.ts`, `src/engine/`, `src/themes/`, `src/cover/`, `src/export/`, `src/renderer/`) and architectural design docs under `docs/` (`docs/ARCHITECTURE.md` and feature specs).
-- Existing 4 built-in manual output themes (Classic Manual Blue, Modern Studio White, Collector 18+ Dark, Drafting Blueprint) and bundled demo/test fixtures.
+- Live application codebase (`index.html`, `src/studioRuntime.ts`, `src/engine/`, `src/themes/`, `src/cover/`, `src/export/`, `src/storage/`) and architectural design docs under `docs/` (`docs/ARCHITECTURE.md` and feature specs).
+- Built-in manual output themes (Classic Manual Blue, Modern Studio White, Collector 18+ Dark, Drafting Blueprint, Technical Gray, and additional craft presets) and bundled demo/test fixtures.
 - **Absences not to fabricate**: No external customer testimonials, user-count metrics, pricing tiers, or press quotes exist.
 
 ## Product Principles
