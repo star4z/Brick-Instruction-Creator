@@ -1151,7 +1151,10 @@ export class StudioPhotoRenderer {
   private anisoExt: EXT_texture_filter_anisotropic | null = null;
   private maxAniso = 1;
 
-  constructor(canvas?: HTMLCanvasElement) {
+  constructor(
+    canvas?: HTMLCanvasElement,
+    gpuCaps?: { maxDimCap?: number; keyShadowDim?: number; auxShadowDim?: number },
+  ) {
     this.canvas = canvas ?? document.createElement('canvas');
     const gl = this.canvas.getContext('webgl', {
       antialias: true,
@@ -1163,12 +1166,13 @@ export class StudioPhotoRenderer {
     this.gl = gl;
     if (!gl) return;
 
+    const maxDimCap = Math.max(1024, Math.min(4096, Math.floor(gpuCaps?.maxDimCap || 4096)));
     try {
       const vp = gl.getParameter(gl.MAX_VIEWPORT_DIMS);
       const rb = gl.getParameter(gl.MAX_RENDERBUFFER_SIZE) || 2048;
       const texMax = gl.getParameter(gl.MAX_TEXTURE_SIZE) || 2048;
       const vpMin = vp && vp.length >= 2 ? Math.min(vp[0], vp[1]) : 2048;
-      this.maxDim = Math.max(1024, Math.min(vpMin, rb, texMax, 4096));
+      this.maxDim = Math.max(1024, Math.min(vpMin, rb, texMax, maxDimCap));
       this.anisoExt = gl.getExtension('EXT_texture_filter_anisotropic')
         || gl.getExtension('WEBKIT_EXT_TEXTURE_FILTER_ANISOTROPIC')
         || gl.getExtension('MOZ_EXT_TEXTURE_FILTER_ANISOTROPIC');
@@ -1238,8 +1242,8 @@ export class StudioPhotoRenderer {
     );
 
     // High-res shadow maps (nearest filtering because 24-bit depth is packed in RGBA!)
-    const keyShadowDim = Math.min(2048, this.maxDim);
-    const auxShadowDim = Math.min(1024, this.maxDim);
+    const keyShadowDim = Math.min(Math.max(512, Math.floor(gpuCaps?.keyShadowDim || 2048)), this.maxDim);
+    const auxShadowDim = Math.min(Math.max(256, Math.floor(gpuCaps?.auxShadowDim || 1024)), this.maxDim);
     this.keyFbo = createFboTarget(gl, keyShadowDim, keyShadowDim, false);
     this.fillFbo = createFboTarget(gl, auxShadowDim, auxShadowDim, false);
     this.overFbo = createFboTarget(gl, auxShadowDim, auxShadowDim, false);
@@ -1882,6 +1886,19 @@ export class StudioPhotoRenderer {
     };
   }
 
+  releaseTransientBuffers(): void {
+    const gl = this.gl;
+    if (!gl) return;
+    destroyFboTarget(gl, this.colorFbo);
+    destroyFboTarget(gl, this.viewDepthFbo);
+    this.colorFbo = null;
+    this.viewDepthFbo = null;
+    if (this.canvas.width > 1 || this.canvas.height > 1) {
+      this.canvas.width = 1;
+      this.canvas.height = 1;
+    }
+  }
+
   dispose(): void {
     const gl = this.gl;
     if (!gl) return;
@@ -1894,6 +1911,29 @@ export class StudioPhotoRenderer {
     destroyFboTarget(gl, this.overFbo);
     destroyFboTarget(gl, this.colorFbo);
     destroyFboTarget(gl, this.viewDepthFbo);
+    this.keyFbo = null;
+    this.fillFbo = null;
+    this.overFbo = null;
+    this.colorFbo = null;
+    this.viewDepthFbo = null;
+    const bufs = [
+      this.bTriPos, this.bTriNorm, this.bTriCol,
+      this.bDecalPos, this.bDecalNorm, this.bDecalUv, this.bDecalCol,
+      this.bLinePos, this.bLineCol, this.bHlLinePos, this.bHlLineCol,
+      this.bCondPos, this.bCondOther, this.bCondC1, this.bCondC2, this.bCondCol,
+      this.bHlCondPos, this.bHlCondOther, this.bHlCondC1, this.bHlCondC2, this.bHlCondCol,
+      this.bArrowPos, this.bArrowNorm, this.bArrowCol, this.bArrowLinePos, this.bArrowLineCol,
+      this.bFloorPos, this.bQuadPos,
+    ];
+    for (const b of bufs) if (b) gl.deleteBuffer(b);
+    const progs = [
+      this.depthProg, this.viewDepthProg, this.pbrProg, this.floorProg,
+      this.seamProg, this.condProg, this.ssaoProg, this.unlitArrowProg,
+    ];
+    for (const p of progs) if (p) gl.deleteProgram(p);
+    this.uploadedMesh = null;
+    this.canvas.width = 0;
+    this.canvas.height = 0;
     gl.getExtension('WEBGL_lose_context')?.loseContext();
     this.gl = null;
     this.ready = false;

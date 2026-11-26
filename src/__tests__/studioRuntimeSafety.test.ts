@@ -1083,6 +1083,27 @@ describe('studioRuntime safety checks', () => {
     expect(completeChunk).not.toContain('getMinifigThumb(');
     expect(completeChunk).toContain('renderCoverHeroSnapshot(allParts');
   });
+
+  it('reuses shared snapshotEngine with rAF throttling and iOS GPU memory guards during live step and hero orbit', () => {
+    const runtime = fs.readFileSync(path.resolve(process.cwd(), 'src/studioRuntime.ts'), 'utf8');
+
+    // Never allocate duplicate WebGL contexts / VBOs for live orbit canvases
+    expect(runtime).not.toContain('new WebGLBrickEngine(liveCanvas)');
+    expect(runtime).toContain('resolveDeviceGpuBudget()');
+    expect(runtime).toContain('computeLiveOrbitRenderSize(');
+    expect(runtime).toContain('studioPhotoEngine.releaseTransientBuffers()');
+
+    // Live step orbit must throttle all drags via requestAnimationFrame and use single-tap interactive LOD
+    const orbitStart = runtime.indexOf("const liveCanvas = document.getElementById('liveRotateCanvas');");
+    const orbitEnd = runtime.indexOf('liveCanvas.onpointercancel = endOrbit;', orbitStart);
+    expect(orbitStart).toBeGreaterThan(-1);
+    expect(orbitEnd).toBeGreaterThan(orbitStart);
+    const orbitBody = runtime.slice(orbitStart, orbitEnd);
+    expect(orbitBody).toContain('requestAnimationFrame(');
+    expect(orbitBody).toContain("outlineLineWeight: 'light'");
+    expect(orbitBody).toContain('activePointerId');
+    expect(orbitBody).toContain('snapshotEngine.draw(');
+  });
 });
 
 

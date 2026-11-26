@@ -6,10 +6,13 @@ import {
   DEFAULT_SCREEN_MAX_PIXELS,
   clampRenderDimensions,
   computeCoverHeroRenderSize,
+  computeLiveOrbitRenderSize,
   computeMinifigDiagramRenderSize,
   computePdfPagePixelDimensions,
   computePreviewResolutionScale,
   computeStepSlotRenderSize,
+  isConstrainedIosWebKit,
+  resolveDeviceGpuBudget,
   shouldUpgradeStepRenderForZoom,
 } from '../stepRenderResolution';
 
@@ -224,5 +227,40 @@ describe('stepRenderResolution', () => {
       gpuMaxDim: 2048,
     });
     expect(Math.max(capped.width, capped.height)).toBeLessThanOrEqual(2048);
+  });
+
+  it('detects iOS/iPadOS WebKit and bounds live orbit & WebGL budgets conservatively without reducing desktop caps', () => {
+    expect(isConstrainedIosWebKit('Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15', 5, 'iPhone')).toBe(true);
+    expect(isConstrainedIosWebKit('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15', 5, 'MacIntel')).toBe(true);
+    expect(isConstrainedIosWebKit('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36', 0, 'MacIntel')).toBe(false);
+    expect(isConstrainedIosWebKit('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', 0, 'Win32')).toBe(false);
+
+    const iosBudget = resolveDeviceGpuBudget({
+      userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15',
+      maxTouchPoints: 5,
+      platform: 'iPhone',
+    });
+    const desktopBudget = resolveDeviceGpuBudget({
+      userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
+      maxTouchPoints: 0,
+      platform: 'Linux x86_64',
+    });
+
+    expect(iosBudget.constrained).toBe(true);
+    expect(iosBudget.maxWebGlDim).toBeLessThanOrEqual(2048);
+    expect(iosBudget.interactiveMaxEdge).toBeLessThanOrEqual(768);
+    expect(iosBudget.studioKeyShadowDim).toBeLessThanOrEqual(1024);
+
+    expect(desktopBudget.constrained).toBe(false);
+    expect(desktopBudget.maxWebGlDim).toBe(4096);
+
+    const iosIdle = computeLiveOrbitRenderSize(3600, 2500, { interactive: false, budget: iosBudget });
+    const iosDrag = computeLiveOrbitRenderSize(3600, 2500, { interactive: true, budget: iosBudget });
+    expect(Math.max(iosIdle.width, iosIdle.height)).toBeLessThanOrEqual(iosBudget.liveMaxEdge);
+    expect(iosIdle.width * iosIdle.height).toBeLessThanOrEqual(iosBudget.liveMaxPixels + 4000);
+    expect(Math.max(iosDrag.width, iosDrag.height)).toBeLessThanOrEqual(iosBudget.interactiveMaxEdge);
+    expect(iosDrag.width * iosDrag.height).toBeLessThanOrEqual(iosBudget.interactiveMaxPixels + 4000);
+    // Aspect ratio preserved
+    expect(Math.abs(iosDrag.width / iosDrag.height - 3600 / 2500)).toBeLessThan(0.05);
   });
 });

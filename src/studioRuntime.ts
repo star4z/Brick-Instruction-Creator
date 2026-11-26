@@ -337,10 +337,12 @@ import {
 import {
   clampRenderDimensions,
   computeCoverHeroRenderSize,
+  computeLiveOrbitRenderSize,
   computeMinifigDiagramRenderSize,
   computePdfPagePixelDimensions,
   computePreviewResolutionScale,
   computeStepSlotRenderSize,
+  resolveDeviceGpuBudget,
   shouldUpgradeStepRenderForZoom,
 } from './engine/stepRenderResolution';
 import {
@@ -2869,21 +2871,22 @@ function computePreviewLightDirs(right, up, forward) {
 
 // GPU-Cached WebGL Engine: Uploads buffers ONLY once per mesh (0 bytes uploaded while orbiting!)
 class WebGLBrickEngine {
-  constructor(canvas) {
+  constructor(canvas, maxDimCap = 4096) {
     this.canvas = canvas;
     this.uploadedMesh = null;
     this.glTextures = new Map();
-    this.maxDim = 2048;
+    this.maxDim = Math.max(1024, Math.min(2048, maxDimCap || 2048));
     this.anisoExt = null;
     this.maxAniso = 1;
     const gl = canvas.getContext('webgl', { antialias: true, alpha: true, preserveDrawingBuffer: true, powerPreference: 'default' });
     this.gl = gl;
     if (!gl) return;
+    const safeCap = Math.max(1024, Math.min(4096, Math.floor(maxDimCap || 4096)));
     try {
       const vp = gl.getParameter(gl.MAX_VIEWPORT_DIMS);
       const rb = gl.getParameter(gl.MAX_RENDERBUFFER_SIZE) || 2048;
       const vpMin = vp && vp.length >= 2 ? Math.min(vp[0], vp[1]) : 2048;
-      this.maxDim = Math.max(1024, Math.min(vpMin, rb, 4096));
+      this.maxDim = Math.max(1024, Math.min(vpMin, rb, safeCap));
       this.anisoExt = gl.getExtension('EXT_texture_filter_anisotropic')
         || gl.getExtension('WEBKIT_EXT_TEXTURE_FILTER_ANISOTROPIC')
         || gl.getExtension('MOZ_EXT_TEXTURE_FILTER_ANISOTROPIC');
@@ -3475,17 +3478,35 @@ class WebGLBrickEngine {
   }
   dispose() {
     if (!this.gl) return;
-    for (const tex of this.glTextures.values()) this.gl.deleteTexture(tex);
+    const gl = this.gl;
+    for (const tex of this.glTextures.values()) gl.deleteTexture(tex);
     this.glTextures.clear();
-    if (this.emptyTex) this.gl.deleteTexture(this.emptyTex);
+    if (this.emptyTex) gl.deleteTexture(this.emptyTex);
     this.emptyTex = null;
-    this.gl.getExtension('WEBGL_lose_context')?.loseContext();
+    const bufs = [
+      this.bTriPos, this.bTriNorm, this.bTriCol,
+      this.bTexPos, this.bTexNorm, this.bTexUv, this.bTexCol,
+      this.bLinePos, this.bLineCol, this.bHlLinePos, this.bHlLineCol,
+      this.bCondPos, this.bCondOther, this.bCondC1, this.bCondC2, this.bCondCol,
+      this.bHlCondPos, this.bHlCondOther, this.bHlCondC1, this.bHlCondC2, this.bHlCondCol,
+      this.bArrowPos, this.bArrowNorm, this.bArrowCol, this.bArrowLinePos, this.bArrowLineCol,
+    ];
+    for (const b of bufs) if (b) gl.deleteBuffer(b);
+    const progs = [this.triProg, this.texProg, this.lineProg, this.condProg];
+    for (const p of progs) if (p) gl.deleteProgram(p);
+    this.uploadedMesh = null;
+    if (this.canvas) {
+      this.canvas.width = 0;
+      this.canvas.height = 0;
+    }
+    gl.getExtension('WEBGL_lose_context')?.loseContext();
     this.gl = null;
   }
 }
 
+const deviceGpuBudget = resolveDeviceGpuBudget();
 const snapshotCanvas = document.createElement('canvas');
-const snapshotEngine = new WebGLBrickEngine(snapshotCanvas);
+const snapshotEngine = new WebGLBrickEngine(snapshotCanvas, deviceGpuBudget.maxWebGlDim);
 let studioPhotoEngine = null;
 let activeLiveEngine = null;
 const pliThumbCache = new Map();
@@ -3665,7 +3686,11 @@ function clearMinifigDiagramCaches() {
 function getStudioPhotoEngine() {
   if (!studioPhotoEngine) {
     try {
-      studioPhotoEngine = new StudioPhotoRenderer();
+      studioPhotoEngine = new StudioPhotoRenderer(undefined, {
+        maxDimCap: deviceGpuBudget.maxWebGlDim,
+        keyShadowDim: deviceGpuBudget.studioKeyShadowDim,
+        auxShadowDim: deviceGpuBudget.studioAuxShadowDim,
+      });
     } catch (_) {
       studioPhotoEngine = null;
     }
@@ -3722,8 +3747,8 @@ function getBomPartThumb(part, colSpan = 1, rowSpan = 1) {
 function renderStepWithStudioPhoto(mesh, az, el, w, h, zoom, opts) {
   const photo = getStudioPhotoEngine();
   if (!photo || !photo.isAvailable()) return null;
-  const maxDim = Math.max(1024, Math.min(4096, photo.getMaxDimension() || 4096));
-  const clamped = clampRenderDimensions(w, h, maxDim, maxDim * maxDim, 320);
+  const maxDim = Math.max(1024, Math.min(deviceGpuBudget.maxWebGlDim, photo.getMaxDimension() || 4096));
+  const clamped = clampRenderDimensions(w, h, maxDim, Math.min(maxDim * maxDim, deviceGpuBudget.screenMaxPixels), 320);
   const renderedCanvas = photo.renderToCanvas(mesh, {
     projection: 'ortho',
     azDeg: az,
@@ -9745,6 +9770,10 @@ function scheduleAdjacentPagePrewarm() {
 function renderAll(renderOpts = {}) {
   cancelAdjacentPagePrewarm();
   if (activeLiveEngine) { activeLiveEngine.dispose(); activeLiveEngine = null; }
+  const prevLiveStep = document.getElementById('liveRotateCanvas');
+  if (prevLiveStep instanceof HTMLCanvasElement) { prevLiveStep.width = 0; prevLiveStep.height = 0; }
+  const prevLiveHero = document.getElementById('liveHeroCanvas');
+  if (prevLiveHero instanceof HTMLCanvasElement) { prevLiveHero.width = 0; prevLiveHero.height = 0; }
   currentSlotRenderInfo.clear();
 
   const pageNavOnly = Boolean(renderOpts?.pageNavigationOnly) && Boolean(state.model) && state.pages.length > 0;
@@ -9783,6 +9812,16 @@ function renderAll(renderOpts = {}) {
     rebuildPages();
   }
   const page = state.pages[state.pageIdx];
+  if (
+    deviceGpuBudget.constrained &&
+    studioPhotoEngine &&
+    page?.kind !== 'cover' &&
+    page?.kind !== 'complete' &&
+    state.stepLighting !== 'studio' &&
+    !state.highQualityStepRender
+  ) {
+    studioPhotoEngine.releaseTransientBuffers();
+  }
   const theme = getThemeForPage(page);
   const allParts = (page.kind === 'cover' || page.kind === 'complete' || !pageNavOnly)
     ? getAllParts(state.model)
@@ -10480,7 +10519,7 @@ function renderAll(renderOpts = {}) {
       const estVisualH = Math.max(60, estSlotH - slotPadPx * 2 - estHeaderPx - poseLegendPx);
       let snap = null;
       if (!isOfficialMf || showLive3D) {
-        const stepRenderDims = computeStepSlotRenderSize({
+        const rawStepRenderDims = computeStepSlotRenderSize({
           slotWidth: estSlotW,
           slotHeight: estSlotH,
           visualWidth: estVisualW,
@@ -10494,6 +10533,15 @@ function renderAll(renderOpts = {}) {
           mode: 'screen',
           gpuMaxDim: state.highQualityStepRender ? getCoverHeroGpuMaxDim() : snapshotEngine.maxDim,
         });
+        const stepRenderDims = deviceGpuBudget.constrained
+          ? clampRenderDimensions(
+              rawStepRenderDims.width,
+              rawStepRenderDims.height,
+              deviceGpuBudget.maxWebGlDim,
+              deviceGpuBudget.screenMaxPixels,
+              240,
+            )
+          : rawStepRenderDims;
         const rw = stepRenderDims.width;
         const rh = stepRenderDims.height;
         snap = showLive3D
@@ -11158,43 +11206,54 @@ function bindHeroCameraInteractions(page) {
 
   const photo = getStudioPhotoEngine();
   const useStudioLive = Boolean(photo && photo.isAvailable());
-  const ctx2d = useStudioLive ? liveCanvas.getContext('2d') : null;
-  if (useStudioLive && ctx2d) {
-    liveCanvas.width = w;
-    liveCanvas.height = h;
-  } else {
-    activeLiveEngine = new WebGLBrickEngine(liveCanvas);
-  }
+  const ctx2d = liveCanvas.getContext('2d');
+  if (!ctx2d) return;
+  const gpuMaxDim = useStudioLive ? (photo?.getMaxDimension() || deviceGpuBudget.maxWebGlDim) : (snapshotEngine.maxDim || deviceGpuBudget.maxWebGlDim);
+  const liveSize = computeLiveOrbitRenderSize(w, h, {
+    interactive: false,
+    budget: deviceGpuBudget,
+    gpuMaxDim,
+  });
+  liveCanvas.width = liveSize.width;
+  liveCanvas.height = liveSize.height;
 
   const drawLiveHero = (curAz, curEl, interactive) => {
     const curMeta = getHeroMeta();
     const safeZoom = clampCoverZoom(curMeta?.zoom ?? 1.0);
-    if (useStudioLive && photo && ctx2d) {
-      const maxEdge = interactive ? 960 : Math.min(Math.max(w, h), photo.getMaxDimension() || 4096);
-      const scale = Math.min(1, maxEdge / Math.max(w, h, 1));
-      const rw = Math.max(320, Math.round(w * scale));
-      const rh = Math.max(240, Math.round(h * scale));
+    const targetSize = computeLiveOrbitRenderSize(w, h, {
+      interactive,
+      budget: deviceGpuBudget,
+      gpuMaxDim,
+    });
+    if (useStudioLive && photo) {
       const rendered = photo.renderToCanvas(info.mesh, {
         azDeg: curAz,
         elDeg: curEl,
-        width: rw,
-        height: rh,
+        width: targetSize.width,
+        height: targetSize.height,
         zoom: safeZoom,
         darkBackground: darkBg,
         getTextureImage: (texKey) => textureStore.getDecodedImage(texKey),
       });
       if (rendered) {
-        ctx2d.clearRect(0, 0, w, h);
+        ctx2d.clearRect(0, 0, liveSize.width, liveSize.height);
         ctx2d.imageSmoothingEnabled = true;
-        ctx2d.imageSmoothingQuality = 'high';
-        ctx2d.drawImage(rendered, 0, 0, rendered.width, rendered.height, 0, 0, w, h);
+        ctx2d.imageSmoothingQuality = interactive ? 'low' : 'high';
+        ctx2d.drawImage(rendered, 0, 0, rendered.width, rendered.height, 0, 0, liveSize.width, liveSize.height);
       }
-    } else if (activeLiveEngine) {
-      activeLiveEngine.draw(info.mesh, w, h, curAz, curEl, safeZoom, 0, {
+    } else if (snapshotEngine.gl) {
+      snapshotEngine.draw(info.mesh, targetSize.width, targetSize.height, curAz, curEl, safeZoom, 0, {
         tightFit: true,
         heroShading: true,
         lineAlpha: 0.32,
+        ...(interactive ? { outlineLineWeight: 'light', highlightLineWeight: 'light', boldLines: false } : {}),
       });
+      if (snapshotCanvas.width > 0 && snapshotCanvas.height > 0) {
+        ctx2d.clearRect(0, 0, liveSize.width, liveSize.height);
+        ctx2d.imageSmoothingEnabled = true;
+        ctx2d.imageSmoothingQuality = interactive ? 'low' : 'high';
+        ctx2d.drawImage(snapshotCanvas, 0, 0, snapshotCanvas.width, snapshotCanvas.height, 0, 0, liveSize.width, liveSize.height);
+      }
     }
   };
 
@@ -11204,19 +11263,22 @@ function bindHeroCameraInteractions(page) {
   drawLiveHero(az, el, false);
 
   let dragging = false, moved = false, pushedUndo = false, startX = 0, startY = 0, lx = 0, ly = 0;
+  let activePointerId = null;
   let dragRaf = 0;
   liveCanvas.onpointerdown = (e) => {
+    if (activePointerId !== null && activePointerId !== e.pointerId) return;
     e.preventDefault();
     e.stopPropagation();
     dragging = true;
+    activePointerId = e.pointerId;
     moved = false;
     pushedUndo = false;
     startX = lx = e.clientX;
     startY = ly = e.clientY;
-    liveCanvas.setPointerCapture(e.pointerId);
+    try { liveCanvas.setPointerCapture(e.pointerId); } catch (_) {}
   };
   liveCanvas.onpointermove = (e) => {
-    if (!dragging || (!useStudioLive && !activeLiveEngine)) return;
+    if (!dragging || (activePointerId !== null && e.pointerId !== activePointerId)) return;
     e.stopPropagation();
     const dx = e.clientX - lx;
     const dy = e.clientY - ly;
@@ -11251,21 +11313,19 @@ function bindHeroCameraInteractions(page) {
       topBtn.className = `px-1.5 sm:px-2 py-1 rounded inline-flex items-center gap-1 transition-colors cursor-pointer ${!isBottom ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'hover:bg-[var(--surface-hover)]'}`;
       botBtn.className = `px-1.5 sm:px-2 py-1 rounded inline-flex items-center gap-1 transition-colors cursor-pointer ${isBottom ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'hover:bg-[var(--surface-hover)]'}`;
     }
-    if (useStudioLive) {
-      if (!dragRaf) {
-        dragRaf = requestAnimationFrame(() => {
-          dragRaf = 0;
-          drawLiveHero(az, el, true);
-        });
-      }
-    } else {
-      drawLiveHero(az, el, true);
+    if (!dragRaf) {
+      dragRaf = requestAnimationFrame(() => {
+        dragRaf = 0;
+        drawLiveHero(az, el, true);
+      });
     }
   };
   const endOrbit = (e) => {
-    if (!dragging) return;
+    if (!dragging || (activePointerId !== null && e.pointerId !== activePointerId)) return;
     e.stopPropagation();
     dragging = false;
+    activePointerId = null;
+    try { liveCanvas.releasePointerCapture(e.pointerId); } catch (_) {}
     document.getElementById('contextOverlay')?.classList.remove('is-orbit-dragging');
     if (dragRaf) { cancelAnimationFrame(dragRaf); dragRaf = 0; }
     if (moved) {
@@ -11348,7 +11408,7 @@ function bindStepPageInteractions(page) {
     });
   });
 
-  // STEP -> CAMERA MODE: Attach single GPU-cached live canvas matching static snapshot size identically
+  // STEP -> CAMERA MODE: Reuse shared GPU-cached engine with capped 2D live canvas (0 duplicate WebGL contexts/VBOs!)
   if (isLiveStepCamera) {
     const liveCanvas = document.getElementById('liveRotateCanvas');
     const info = currentSlotRenderInfo.get(state.selectedStepId);
@@ -11359,28 +11419,32 @@ function bindStepPageInteractions(page) {
       const liveDrawOpts = (info.isMfExploded || info.isMfSeq)
         ? { ...(info.opts || {}), tightFit: true }
         : (info.opts || null);
-      const photo = state.highQualityStepRender ? getStudioPhotoEngine() : null;
+      const photo = (state.highQualityStepRender || state.stepLighting === 'studio') ? getStudioPhotoEngine() : null;
       const useStudioLive = Boolean(photo && photo.isAvailable());
-      const ctx2d = useStudioLive ? liveCanvas.getContext('2d') : null;
-      if (useStudioLive && ctx2d) {
-        liveCanvas.width = w;
-        liveCanvas.height = h;
-      } else {
-        activeLiveEngine = new WebGLBrickEngine(liveCanvas);
-      }
+      const ctx2d = liveCanvas.getContext('2d');
+      if (!ctx2d) return;
+      const gpuMaxDim = useStudioLive ? (photo?.getMaxDimension() || deviceGpuBudget.maxWebGlDim) : (snapshotEngine.maxDim || deviceGpuBudget.maxWebGlDim);
+      const liveSize = computeLiveOrbitRenderSize(w, h, {
+        interactive: false,
+        budget: deviceGpuBudget,
+        gpuMaxDim,
+      });
+      liveCanvas.width = liveSize.width;
+      liveCanvas.height = liveSize.height;
 
       const drawLiveStep = (curAz, curEl, interactive) => {
-        if (useStudioLive && photo && ctx2d) {
-          const maxEdge = interactive ? 1024 : Math.min(Math.max(w, h), photo.getMaxDimension() || 4096);
-          const scale = Math.min(1, maxEdge / Math.max(w, h, 1));
-          const rw = Math.max(320, Math.round(w * scale));
-          const rh = Math.max(240, Math.round(h * scale));
+        const targetSize = computeLiveOrbitRenderSize(w, h, {
+          interactive,
+          budget: deviceGpuBudget,
+          gpuMaxDim,
+        });
+        if (useStudioLive && photo) {
           const rendered = photo.renderToCanvas(info.snap.mesh, {
             projection: 'ortho',
             azDeg: curAz,
             elDeg: curEl,
-            width: rw,
-            height: rh,
+            width: targetSize.width,
+            height: targetSize.height,
             zoom: info.modelScale || 1.0,
             fixedHalfH,
             fixedCenter: liveDrawOpts?.fixedCenter,
@@ -11388,9 +11452,9 @@ function bindStepPageInteractions(page) {
             panY: liveDrawOpts?.panY || 0,
             showFloor: false,
             lineAlpha: typeof liveDrawOpts?.lineAlpha === 'number' ? liveDrawOpts.lineAlpha : 1.0,
-            boldLines: Boolean(liveDrawOpts?.starkBlackOutlines || liveDrawOpts?.boldLines),
-            outlineLineWeight: liveDrawOpts?.outlineLineWeight ?? (liveDrawOpts?.starkBlackOutlines ? 'medium' : 'light'),
-            highlightLineWeight: liveDrawOpts?.highlightLineWeight ?? 'medium',
+            boldLines: interactive ? false : Boolean(liveDrawOpts?.starkBlackOutlines || liveDrawOpts?.boldLines),
+            outlineLineWeight: interactive ? 'light' : (liveDrawOpts?.outlineLineWeight ?? (liveDrawOpts?.starkBlackOutlines ? 'medium' : 'light')),
+            highlightLineWeight: interactive ? 'light' : (liveDrawOpts?.highlightLineWeight ?? 'medium'),
             arrowStyle: sanitizePlacementArrowStyle(liveDrawOpts?.arrowStyle, 'flat'),
             arrowOutlines: Boolean(liveDrawOpts?.arrowOutlines),
             arrowLighting: Boolean(liveDrawOpts?.arrowLighting),
@@ -11398,14 +11462,34 @@ function bindStepPageInteractions(page) {
             getTextureImage: (texKey) => textureStore.getDecodedImage(texKey),
           });
           if (rendered) {
-            ctx2d.clearRect(0, 0, w, h);
+            const studioMvp = photo.getLastMvp();
+            if (studioMvp) info.liveMvp = studioMvp;
+            ctx2d.clearRect(0, 0, liveSize.width, liveSize.height);
             ctx2d.imageSmoothingEnabled = true;
-            ctx2d.imageSmoothingQuality = 'high';
-            ctx2d.drawImage(rendered, 0, 0, rendered.width, rendered.height, 0, 0, w, h);
+            ctx2d.imageSmoothingQuality = interactive ? 'low' : 'high';
+            ctx2d.drawImage(rendered, 0, 0, rendered.width, rendered.height, 0, 0, liveSize.width, liveSize.height);
           }
-        } else if (activeLiveEngine) {
-          const liveMvp = activeLiveEngine.draw(info.snap.mesh, w, h, curAz, curEl, info.modelScale, fixedHalfH, liveDrawOpts);
+        } else if (snapshotEngine.gl) {
+          const stepDrawOpts = interactive
+            ? { ...(liveDrawOpts || {}), outlineLineWeight: 'light', highlightLineWeight: 'light', boldLines: false }
+            : liveDrawOpts;
+          const liveMvp = snapshotEngine.draw(
+            info.snap.mesh,
+            targetSize.width,
+            targetSize.height,
+            curAz,
+            curEl,
+            info.modelScale,
+            fixedHalfH,
+            stepDrawOpts,
+          );
           if (liveMvp) info.liveMvp = liveMvp;
+          if (snapshotCanvas.width > 0 && snapshotCanvas.height > 0) {
+            ctx2d.clearRect(0, 0, liveSize.width, liveSize.height);
+            ctx2d.imageSmoothingEnabled = true;
+            ctx2d.imageSmoothingQuality = interactive ? 'low' : 'high';
+            ctx2d.drawImage(snapshotCanvas, 0, 0, snapshotCanvas.width, snapshotCanvas.height, 0, 0, liveSize.width, liveSize.height);
+          }
         }
       };
 
@@ -11413,19 +11497,22 @@ function bindStepPageInteractions(page) {
       drawLiveStep(az, el, false);
 
       let dragging = false, moved = false, pushedUndo = false, startX = 0, startY = 0, lx = 0, ly = 0;
+      let activePointerId = null;
       let dragRaf = 0;
       liveCanvas.onpointerdown = (e) => {
+        if (activePointerId !== null && activePointerId !== e.pointerId) return;
         e.preventDefault();
         e.stopPropagation();
         dragging = true;
+        activePointerId = e.pointerId;
         moved = false;
         pushedUndo = false;
         startX = lx = e.clientX;
         startY = ly = e.clientY;
-        liveCanvas.setPointerCapture(e.pointerId);
+        try { liveCanvas.setPointerCapture(e.pointerId); } catch (_) {}
       };
       liveCanvas.onpointermove = (e) => {
-        if (!dragging || (!useStudioLive && !activeLiveEngine)) return;
+        if (!dragging || (activePointerId !== null && e.pointerId !== activePointerId)) return;
         e.stopPropagation();
         const dx = e.clientX - lx;
         const dy = e.clientY - ly;
@@ -11459,21 +11546,20 @@ function bindStepPageInteractions(page) {
         const readoutText = `${roundedAz}° / ${roundedEl}°`;
         document.querySelectorAll('.step-cam-readout').forEach((elNode) => { elNode.textContent = readoutText; });
         syncVisibleStepRotationBadges();
-        if (useStudioLive) {
-          if (!dragRaf) {
-            dragRaf = requestAnimationFrame(() => {
-              dragRaf = 0;
-              drawLiveStep(az, el, true);
-            });
-          }
-        } else {
-          drawLiveStep(az, el, true);
+        if (!dragRaf) {
+          dragRaf = requestAnimationFrame(() => {
+            dragRaf = 0;
+            drawLiveStep(az, el, true);
+            syncVisibleStepRotationBadges();
+          });
         }
       };
       const endOrbit = (e) => {
-        if (!dragging) return;
+        if (!dragging || (activePointerId !== null && e.pointerId !== activePointerId)) return;
         e.stopPropagation();
         dragging = false;
+        activePointerId = null;
+        try { liveCanvas.releasePointerCapture(e.pointerId); } catch (_) {}
         document.getElementById('contextOverlay')?.classList.remove('is-orbit-dragging');
         if (dragRaf) { cancelAnimationFrame(dragRaf); dragRaf = 0; }
         if (moved) {

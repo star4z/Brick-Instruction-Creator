@@ -295,3 +295,120 @@ export function shouldUpgradeStepRenderForZoom(
   const ratioH = targetH / renderedH;
   return Math.max(ratioW, ratioH) >= thresholdRatio;
 }
+
+export interface DeviceGpuBudget {
+  /** True on iOS/iPadOS WebKit where Metal WebGL & IOSurface canvas memory are strictly capped. */
+  constrained: boolean;
+  /** Safe max edge for offscreen WebGL canvases & FBOs on screen renders. */
+  maxWebGlDim: number;
+  /** Safe max pixel area for screen step renders. */
+  screenMaxPixels: number;
+  /** Safe max edge for idle live-orbit 2D canvas backing store. */
+  liveMaxEdge: number;
+  /** Safe max pixel area for idle live-orbit 2D canvas backing store. */
+  liveMaxPixels: number;
+  /** Safe max edge for interactive drag frames during live orbit. */
+  interactiveMaxEdge: number;
+  /** Safe max pixel area for interactive drag frames during live orbit. */
+  interactiveMaxPixels: number;
+  /** Safe key shadow map dimension for StudioPhotoRenderer. */
+  studioKeyShadowDim: number;
+  /** Safe aux shadow map dimension for StudioPhotoRenderer. */
+  studioAuxShadowDim: number;
+}
+
+/**
+ * Detect iOS / iPadOS WebKit environments (iPhone, iPad, iPod, and iPadOS desktop-class UA)
+ * where Safari enforces strict per-tab Jetsam & IOSurface canvas memory ceilings.
+ */
+export function isConstrainedIosWebKit(
+  userAgent?: string,
+  maxTouchPoints?: number,
+  platform?: string,
+): boolean {
+  const ua = typeof userAgent === 'string'
+    ? userAgent
+    : (typeof navigator !== 'undefined' ? navigator.userAgent || '' : '');
+  const plat = typeof platform === 'string'
+    ? platform
+    : (typeof navigator !== 'undefined' ? navigator.platform || '' : '');
+  const touchPts = typeof maxTouchPoints === 'number'
+    ? maxTouchPoints
+    : (typeof navigator !== 'undefined' ? navigator.maxTouchPoints || 0 : 0);
+
+  if (/iPhone|iPad|iPod/i.test(ua)) return true;
+  // iPadOS 13+ reports Macintosh in UA/platform with multi-touch support
+  if ((/Macintosh/i.test(ua) || /MacIntel/i.test(plat)) && touchPts > 1) return true;
+  return false;
+}
+
+/**
+ * Resolve safe WebGL & live-orbit canvas memory budgets for the current device.
+ * Desktop browsers keep full 4K / 9.6 MP limits; iOS/iPadOS WebKit uses conservative
+ * caps that stay sharp on Retina displays without triggering Jetsam or GPU watchdog crashes.
+ */
+export function resolveDeviceGpuBudget(options?: {
+  userAgent?: string;
+  maxTouchPoints?: number;
+  platform?: string;
+}): DeviceGpuBudget {
+  const constrained = isConstrainedIosWebKit(
+    options?.userAgent,
+    options?.maxTouchPoints,
+    options?.platform,
+  );
+  if (constrained) {
+    return {
+      constrained: true,
+      maxWebGlDim: 2048,
+      screenMaxPixels: 3_200_000,
+      liveMaxEdge: 1280,
+      liveMaxPixels: 1_200_000,
+      interactiveMaxEdge: 768,
+      interactiveMaxPixels: 480_000,
+      studioKeyShadowDim: 1024,
+      studioAuxShadowDim: 512,
+    };
+  }
+  return {
+    constrained: false,
+    maxWebGlDim: DEFAULT_GPU_MAX_DIM,
+    screenMaxPixels: DEFAULT_SCREEN_MAX_PIXELS,
+    liveMaxEdge: 1800,
+    liveMaxPixels: 2_400_000,
+    interactiveMaxEdge: 1024,
+    interactiveMaxPixels: 1_050_000,
+    studioKeyShadowDim: 2048,
+    studioAuxShadowDim: 1024,
+  };
+}
+
+/**
+ * Compute aspect-preserving render dimensions for the live orbit canvas, capped for
+ * either idle display or interactive pointer-drag frames.
+ */
+export function computeLiveOrbitRenderSize(
+  sourceW: number,
+  sourceH: number,
+  options?: {
+    interactive?: boolean;
+    budget?: DeviceGpuBudget;
+    gpuMaxDim?: number;
+  },
+): RenderDimensions {
+  const budget = options?.budget ?? resolveDeviceGpuBudget();
+  const gpuLimit = Math.max(256, Math.floor(options?.gpuMaxDim || budget.maxWebGlDim));
+  const maxEdge = Math.min(
+    gpuLimit,
+    options?.interactive ? budget.interactiveMaxEdge : budget.liveMaxEdge,
+  );
+  const maxPixels = options?.interactive ? budget.interactiveMaxPixels : budget.liveMaxPixels;
+  return clampRenderDimensions(
+    Math.max(240, sourceW || 760),
+    Math.max(180, sourceH || 500),
+    maxEdge,
+    maxPixels,
+    240,
+  );
+}
+
