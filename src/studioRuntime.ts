@@ -149,6 +149,7 @@ import {
   computeAbsoluteStepProgressFraction,
   computeBuildRoadmapPages,
   drawProgressBarCanvas,
+  resolvePageProgressBar,
 } from './engine/buildRoadmap';
 import {
   buildAttachmentStarburstSvg,
@@ -400,6 +401,7 @@ import {
   getStepDividerLineColor,
   sanitizeLineWeight,
   sanitizePlacementArrowStyle,
+  sanitizeProgressBarSpan,
   sanitizeStepBorderStyle,
   sanitizeStepLightingMode,
   themeCanvasFont,
@@ -7781,6 +7783,7 @@ const state = {
   showStepBorders: false,
   showPageTitle: true,
   showProgressBar: true,
+  progressBarSpan: 'page', // 'page' | 'spread' (continuous across facing even/odd pages for printing)
   wordlessMode: DEFAULT_WORDLESS_MODE, // LEGO-style icon/number-only instructions (no translation needed)
   bomShowTextFields: initialWordlessDefaults.bomShowTextFields,
   pageNumberFormat: initialWordlessDefaults.pageNumberFormat, // 'number' | 'page_n' | 'n_of_total' | 'none'
@@ -7997,7 +8000,23 @@ function showToast(msg) {
 }
 
 function getAllSteps(model) { return model ? model.chapters.flatMap(ch => ch.steps.map(step => ({ ch, step }))) : []; }
-function computePageStepProgressFraction(page, totalStepsOverride = null) {
+function resolveStepPageProgressBar(page, totalStepsOverride = null) {
+  const span = sanitizeProgressBarSpan(state.progressBarSpan, 'page');
+  const pages = Array.isArray(state.pages) ? state.pages : [];
+  if (pages.length > 0 && page && Number.isFinite(page.num)) {
+    const descriptors = pages.map((p) => {
+      const slots = Array.isArray(p?.slots) ? p.slots : [];
+      const lastSlot = slots.length > 0 ? slots[slots.length - 1] : null;
+      const lastStep = lastSlot?.step || null;
+      return {
+        pageNum: p.num,
+        isStepPage: p.kind === 'steps',
+        lastAbsStepNum: lastStep ? getAbsStepNum(lastStep) : 0,
+      };
+    });
+    const resolved = resolvePageProgressBar(descriptors, page.num, span);
+    if (resolved) return resolved;
+  }
   const lastSlot = Array.isArray(page?.slots) && page.slots.length > 0
     ? page.slots[page.slots.length - 1]
     : null;
@@ -8006,10 +8025,10 @@ function computePageStepProgressFraction(page, totalStepsOverride = null) {
     ? totalStepsOverride
     : getAllSteps(state.model).length;
   const absStepNum = lastStep ? getAbsStepNum(lastStep) : 0;
-  if (absStepNum > 0 && totalAbsSteps > 0) {
-    return computeAbsoluteStepProgressFraction(absStepNum, totalAbsSteps);
-  }
-  return state.pages.length > 1 ? Math.max(0, Math.min(1, page.num / state.pages.length)) : 1;
+  const fraction = absStepNum > 0 && totalAbsSteps > 0
+    ? computeAbsoluteStepProgressFraction(absStepNum, totalAbsSteps)
+    : (pages.length > 1 ? Math.max(0, Math.min(1, (page.num - 1) / (pages.length - 1))) : 0);
+  return { fraction, segment: 'full' };
 }
 function getMainSteps(model) { return model ? model.chapters.filter(ch => ch.kind !== 'submodel').flatMap(ch => ch.steps.map(step => ({ ch, step }))) : []; }
 function getAllParts(model) {
@@ -10017,23 +10036,56 @@ function renderAll(renderOpts = {}) {
   const footerPadBottom = Math.max(4, Math.round(padPx * 0.42));
   const wordless = Boolean(state.wordlessMode);
   const showFooterTitle = !wordless && Boolean(state.showPageTitle);
-  const renderPageFooterHtml = ({ titleText = '', progressFrac = null, zIndexClass = '' } = {}) => {
+  const renderPageFooterHtml = ({ titleText = '', progressBar = null, zIndexClass = '' } = {}) => {
     const pgNumText = formatPageNumber(page.num, state.pages.length);
     const hasNum = Boolean(pgNumText);
     const pgNumSide = hasNum ? resolvePageNumberSide(page.num, state.pageNumberPosition) : 'right';
     const hasTitle = Boolean(showFooterTitle && titleText);
+    const progressFrac = typeof progressBar === 'number'
+      ? progressBar
+      : (progressBar && typeof progressBar.fraction === 'number' ? progressBar.fraction : null);
     const hasBar = typeof progressFrac === 'number' && state.showProgressBar !== false;
+    const barSegment = hasBar && progressBar && typeof progressBar === 'object' && (progressBar.segment === 'left' || progressBar.segment === 'right')
+      ? progressBar.segment
+      : 'full';
     if (!hasNum && !hasTitle && !hasBar) return '';
-    const titleSpan = hasTitle
-      ? `<span class="truncate ${hasBar ? 'shrink-0 max-w-[32%]' : 'min-w-0'} ${pgNumSide === 'left' ? 'text-right' : 'text-left'}">${escHtml(titleText)}</span>`
+
+    const barHeightPx = Math.max(3, Math.round(typo.pt(3)));
+    const barBeadPx = Math.max(9, barHeightPx * 2 + 2);
+    const barHtml = hasBar
+      ? buildProgressBarHtml(progressFrac, { accent: theme.accent, heightPx: barHeightPx, segment: barSegment })
       : '';
     const numSpan = hasNum
       ? `<span data-page-number="true" data-page-number-side="${pgNumSide}" style="color:${theme.text}" class="font-bold shrink-0">${escHtml(pgNumText)}</span>`
       : '';
-    const barHtml = hasBar
-      ? buildProgressBarHtml(progressFrac, { accent: theme.accent, heightPx: Math.max(3, Math.round(typo.pt(3))) })
+    const titleAlignClass = barSegment === 'right'
+      ? 'text-right'
+      : barSegment === 'left'
+        ? 'text-left'
+        : (pgNumSide === 'left' ? 'text-right' : 'text-left');
+    const titleSpan = hasTitle
+      ? `<span class="truncate ${hasBar ? 'shrink-0 max-w-[32%]' : 'min-w-0'} ${titleAlignClass}">${escHtml(titleText)}</span>`
       : '';
     const spacer = !hasBar ? '<span class="min-w-0"></span>' : '';
+
+    if (barSegment === 'left') {
+      // Even (verso) spread page: progress bar exits flush at the right spine (right: 0).
+      if (pgNumSide === 'left' && hasNum) {
+        return `<div data-page-footer="true" data-page-number-side="${pgNumSide}" class="absolute ${zIndexClass ? `${zIndexClass} ` : ''}flex items-center justify-between font-medium pointer-events-none" style="gap:${Math.round(typo.pt(10))}px;bottom:${footerPadBottom}px;left:${padPx}px;right:0px;font-size:${typo.footerFont}px;color:${theme.muted}">${numSpan}${titleSpan}${barHtml}</div>`;
+      }
+      // If page numbers are set to 'right' while spread bar is active, float the page number
+      // cleanly above the bar at the right margin so the continuous spine bar is uninterrupted.
+      const floatingNum = hasNum
+        ? `<div class="absolute ${zIndexClass ? `${zIndexClass} ` : ''}font-bold pointer-events-none" style="bottom:${footerPadBottom + barBeadPx + 2}px;right:${padPx}px;font-size:${typo.footerFont}px;color:${theme.text}">${numSpan}</div>`
+        : '';
+      return `${floatingNum}<div data-page-footer="true" data-page-number-side="${pgNumSide}" class="absolute ${zIndexClass ? `${zIndexClass} ` : ''}flex items-center justify-between font-medium pointer-events-none" style="gap:${Math.round(typo.pt(10))}px;bottom:${footerPadBottom}px;left:${padPx}px;right:0px;font-size:${typo.footerFont}px;color:${theme.muted}">${titleSpan}${barHtml}</div>`;
+    }
+
+    if (barSegment === 'right') {
+      // Odd (recto) spread page: progress bar enters flush from the left spine (left: 0).
+      return `<div data-page-footer="true" data-page-number-side="${pgNumSide}" class="absolute ${zIndexClass ? `${zIndexClass} ` : ''}flex items-center justify-between font-medium pointer-events-none" style="gap:${Math.round(typo.pt(10))}px;bottom:${footerPadBottom}px;left:0px;right:${padPx}px;font-size:${typo.footerFont}px;color:${theme.muted}">${barHtml}${titleSpan}${numSpan}</div>`;
+    }
+
     const inner = pgNumSide === 'left' && hasNum
       ? `${numSpan}${barHtml}${hasTitle ? titleSpan : spacer}`
       : `${hasTitle ? titleSpan : spacer}${barHtml}${numSpan}`;
@@ -11144,7 +11196,7 @@ function renderAll(renderOpts = {}) {
         </div>
 
         <!-- Page Footer (+ Official-Style Bottom Build Progress Bar) -->
-        ${renderPageFooterHtml({ titleText: page.chapterName, progressFrac: computePageStepProgressFraction(page) })}
+        ${renderPageFooterHtml({ titleText: page.chapterName, progressBar: resolveStepPageProgressBar(page) })}
       </div>`;
 
     // Mount cached high-resolution canvases directly into the step slots (zero PNG encode/decode!)
@@ -14251,7 +14303,7 @@ function syncMenuControls() {
   syncStepBorderStyleUI(state.stepBorderStyle);
   setChk('togglePageTitle', state.showPageTitle);
   setChk('togglePageTitleSetup', state.showPageTitle);
-  setChk('toggleProgressBar', state.showProgressBar !== false);
+  syncProgressBarUI(state);
   const covShowText = normalizeCoverMeta(state.coverMeta, !state.wordlessMode).showText !== false;
   const compShowText = state.completeMeta.showText !== false;
   const menuEditsSummary = getCurrentManualEditsSummary();
@@ -14345,6 +14397,39 @@ function syncStepBorderStyleUI(mode = state.stepBorderStyle) {
     b.className = `step-border-style-setup-btn py-2.5 px-2 rounded-lg border font-semibold flex flex-col items-center gap-1.5 transition cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)]'}`;
     b.setAttribute('aria-pressed', act ? 'true' : 'false');
   });
+}
+
+function syncProgressBarUI(opts = state) {
+  const showBar = opts?.showProgressBar !== false;
+  const activeSpan = sanitizeProgressBarSpan(opts?.progressBarSpan, 'page');
+  for (const id of ['toggleProgressBar', 'toggleProgressBarSetup']) {
+    const el = document.getElementById(id);
+    if (el) el.checked = showBar;
+  }
+  const styleGroup = document.getElementById('progressBarSpanGroup');
+  if (styleGroup) styleGroup.classList.toggle('hidden', !showBar);
+  const setupGroup = document.getElementById('progressBarSpanSetupGroup');
+  if (setupGroup) setupGroup.classList.toggle('opacity-50', !showBar);
+  document.querySelectorAll('.progress-bar-span-btn').forEach(b => {
+    const act = b.getAttribute('data-progress-bar-span') === activeSpan;
+    b.className = `progress-bar-span-btn py-1.5 px-2 rounded-md border font-semibold text-xs transition-colors cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)]'}`;
+    b.setAttribute('aria-pressed', act ? 'true' : 'false');
+    b.disabled = !showBar;
+  });
+  document.querySelectorAll('.progress-bar-span-setup-btn').forEach(b => {
+    const act = b.getAttribute('data-progress-bar-span') === activeSpan;
+    b.className = `progress-bar-span-setup-btn py-2.5 px-2.5 rounded-lg border font-semibold flex flex-col items-center gap-1.5 transition cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)]'}`;
+    b.setAttribute('aria-pressed', act ? 'true' : 'false');
+    b.disabled = !showBar;
+  });
+  const hintEl = document.getElementById('progressBarSpanHint');
+  if (hintEl) {
+    hintEl.textContent = !showBar
+      ? 'Build progress bar is currently turned off.'
+      : activeSpan === 'spread'
+        ? 'Booklet print: progress bar spans continuously across facing even (left) and odd (right) pages.'
+        : 'Each step page displays its own complete progress bar.';
+  }
 }
 
 function syncStepLightingUI(mode = state.stepLighting) {
@@ -19089,17 +19174,69 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
   const pgNumSide = pgNumText ? resolvePageNumberSide(page.num, state.pageNumberPosition) : 'right';
   const wordless = Boolean(state.wordlessMode);
   const showFooterTitle = !wordless && Boolean(state.showPageTitle);
-  const drawFooter = (leftLabel, progressFrac = null) => {
+  const drawFooter = (leftLabel, progressBar = null) => {
     const gap = Math.round(typo.pt(12));
     const hasTitle = Boolean(showFooterTitle && leftLabel);
     const hasNum = Boolean(pgNumText);
+    const progressFrac = typeof progressBar === 'number'
+      ? progressBar
+      : (progressBar && typeof progressBar.fraction === 'number' ? progressBar.fraction : null);
     const hasBar = typeof progressFrac === 'number' && state.showProgressBar !== false;
+    const barSegment = hasBar && progressBar && typeof progressBar === 'object' && (progressBar.segment === 'left' || progressBar.segment === 'right')
+      ? progressBar.segment
+      : 'full';
     const maxTitleW = Math.round(pxW * 0.32);
 
     let barLeft = pad;
     let barRight = pxW - pad;
 
-    if (pgNumSide === 'left' && hasNum) {
+    if (barSegment === 'left') {
+      // Even (verso) spread page: progress bar exits flush at right spine (x = pxW).
+      barLeft = pad;
+      barRight = pxW;
+      if (pgNumSide === 'left' && hasNum) {
+        ctx.fillStyle = theme.text;
+        ctx.textAlign = 'left';
+        ctx.font = themeCanvasFont(theme, 700, typo.footerFont);
+        ctx.fillText(pgNumText, pad, footerTextY);
+        barLeft = pad + ctx.measureText(pgNumText).width + gap;
+      }
+      if (hasTitle) {
+        ctx.fillStyle = theme.muted;
+        ctx.textAlign = 'left';
+        ctx.font = themeCanvasFont(theme, 600, typo.footerFont);
+        const measured = ctx.measureText(leftLabel).width;
+        ctx.fillText(leftLabel, barLeft, footerTextY, maxTitleW);
+        barLeft += Math.min(maxTitleW, measured) + gap;
+      }
+      if (pgNumSide === 'right' && hasNum) {
+        ctx.fillStyle = theme.text;
+        ctx.textAlign = 'right';
+        ctx.font = themeCanvasFont(theme, 700, typo.footerFont);
+        ctx.fillText(pgNumText, pxW - pad, footerTextY - Math.round(typo.footerFont * 1.15));
+        ctx.textAlign = 'left';
+      }
+    } else if (barSegment === 'right') {
+      // Odd (recto) spread page: progress bar enters flush from left spine (x = 0).
+      barLeft = 0;
+      barRight = pxW - pad;
+      if (hasNum) {
+        ctx.fillStyle = theme.text;
+        ctx.textAlign = 'right';
+        ctx.font = themeCanvasFont(theme, 700, typo.footerFont);
+        ctx.fillText(pgNumText, pxW - pad, footerTextY);
+        barRight = pxW - pad - ctx.measureText(pgNumText).width - gap;
+      }
+      if (hasTitle) {
+        ctx.fillStyle = theme.muted;
+        ctx.textAlign = 'right';
+        ctx.font = themeCanvasFont(theme, 600, typo.footerFont);
+        const measured = ctx.measureText(leftLabel).width;
+        ctx.fillText(leftLabel, barRight, footerTextY, maxTitleW);
+        barRight -= Math.min(maxTitleW, measured) + gap;
+      }
+      ctx.textAlign = 'left';
+    } else if (pgNumSide === 'left' && hasNum) {
       ctx.fillStyle = theme.text;
       ctx.textAlign = 'left';
       ctx.font = themeCanvasFont(theme, 700, typo.footerFont);
@@ -19153,7 +19290,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
         footerTextY + typo.footerFont * 0.52,
         barRight - barLeft,
         progressFrac,
-        { accent: theme.accent, barHeight: Math.max(3, Math.round(typo.pt(3.2))) },
+        { accent: theme.accent, barHeight: Math.max(3, Math.round(typo.pt(3.2))), segment: barSegment },
       );
     }
   };
@@ -20690,8 +20827,8 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       }
     }
 
-    const progFracPdf = computePageStepProgressFraction(page, allSteps.length);
-    drawFooter(page.chapterName || '', progFracPdf);
+    const progBarPdf = resolveStepPageProgressBar(page, allSteps.length);
+    drawFooter(page.chapterName || '', progBarPdf);
   }
 
   // Build invisible Ctrl+F searchable metadata tokens (step numbers & LDraw part IDs) for this PDF page
@@ -21106,7 +21243,7 @@ function syncStylePanel() {
   syncStepBorderStyleUI(opts.stepBorderStyle);
   setChk('togglePageTitle', opts.showPageTitle);
   setChk('togglePageTitleSetup', opts.showPageTitle);
-  setChk('toggleProgressBar', opts.showProgressBar !== false);
+  syncProgressBarUI(opts);
   const wordlessOn = Boolean(state.wordlessMode);
   for (const [chkId, lblId, noteId] of [
     ['togglePageTitle', 'togglePageTitleLabel', 'pageTitleWordlessNote'],
@@ -23109,8 +23246,22 @@ document.querySelectorAll('.step-border-style-btn, .step-border-style-setup-btn'
 const setPageTitle = (e) => patchActiveTheme({ showPageTitle: e.target.checked });
 document.getElementById('togglePageTitle').onchange = setPageTitle;
 document.getElementById('togglePageTitleSetup').onchange = setPageTitle;
+const setProgressBar = (e) => {
+  overviewThumbCache.bumpEpoch();
+  patchActiveTheme({ showProgressBar: e.target.checked });
+};
 const toggleProgressBarEl = document.getElementById('toggleProgressBar');
-if (toggleProgressBarEl) toggleProgressBarEl.onchange = (e) => patchActiveTheme({ showProgressBar: e.target.checked });
+if (toggleProgressBarEl) toggleProgressBarEl.onchange = setProgressBar;
+const toggleProgressBarSetupEl = document.getElementById('toggleProgressBarSetup');
+if (toggleProgressBarSetupEl) toggleProgressBarSetupEl.onchange = setProgressBar;
+const applyProgressBarSpan = (span) => {
+  const next = sanitizeProgressBarSpan(span, 'page');
+  overviewThumbCache.bumpEpoch();
+  patchActiveTheme({ progressBarSpan: next });
+};
+document.querySelectorAll('.progress-bar-span-btn, .progress-bar-span-setup-btn').forEach(b => {
+  b.onclick = () => applyProgressBarSpan(b.getAttribute('data-progress-bar-span'));
+});
 const toggleWordlessEl = document.getElementById('toggleWordlessMode');
 if (toggleWordlessEl) {
   toggleWordlessEl.onchange = (e) => applyWordlessMode(e.target.checked);

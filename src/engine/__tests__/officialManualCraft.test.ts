@@ -21,6 +21,8 @@ import {
   computeAbsoluteStepProgressFraction,
   computeBagProgressFraction,
   computeBuildRoadmapPages,
+  computeProgressBarSegmentRender,
+  resolvePageProgressBar,
 } from '../buildRoadmap';
 import { assignAbsoluteStepNumbers, getAbsStepNum } from '../stepNumbering';
 import {
@@ -36,7 +38,12 @@ import {
   packVariableWidthBomColumns,
 } from '../partsList';
 import { buildPdfBinary } from '../../export/pdfBinary';
-import { BUILT_IN_THEMES, DEFAULT_THEME_STYLE_OPTIONS } from '../../themes/customThemes';
+import {
+  BUILT_IN_THEMES,
+  DEFAULT_THEME_STYLE_OPTIONS,
+  normalizeThemeStyleOptions,
+  sanitizeProgressBarSpan,
+} from '../../themes/customThemes';
 
 describe('Official Manual Craft — Length Badges & 1:1 Coaxial Callouts', () => {
   it('classifies axles & bars as circled (N) and liftarms/beams as squared [N]', () => {
@@ -221,6 +228,102 @@ describe('Official Manual Craft — Contrast Arrows, Roadmap, Progress Bar, Regi
     const barHtml = buildProgressBarHtml(0.5);
     expect(barHtml).toContain('50.00%');
     expect(barHtml).toContain('data-progress-fraction="0.5000"');
+    expect(barHtml).toContain('data-progress-segment="full"');
+  });
+
+  it('starts progress bar all the way to the left on the first step page and spans two facing pages in spread mode', () => {
+    // Single-page mode with multiple steps packed onto the first step page (steps 1-3 on p.2)
+    const multiStepPages = [
+      { pageNum: 1, isStepPage: false, lastAbsStepNum: 0 }, // Cover
+      { pageNum: 2, isStepPage: true, lastAbsStepNum: 3 },  // Steps 1-3 (first step page)
+      { pageNum: 3, isStepPage: true, lastAbsStepNum: 6 },  // Steps 4-6
+      { pageNum: 4, isStepPage: true, lastAbsStepNum: 8 },  // Steps 7-8
+      { pageNum: 5, isStepPage: true, lastAbsStepNum: 10 }, // Steps 9-10 (last step page)
+    ];
+    expect(resolvePageProgressBar(multiStepPages, 1, 'page')).toBeNull();
+    expect(resolvePageProgressBar(multiStepPages, 2, 'page')).toEqual({ fraction: 0, segment: 'full' });
+    expect(resolvePageProgressBar(multiStepPages, 3, 'page')!.fraction).toBeCloseTo(3 / 7, 5);
+    expect(resolvePageProgressBar(multiStepPages, 4, 'page')!.fraction).toBeCloseTo(5 / 7, 5);
+    expect(resolvePageProgressBar(multiStepPages, 5, 'page')).toEqual({ fraction: 1, segment: 'full' });
+
+    // Single-step-page manual still starts all the way to the left (0)
+    const singlePage = [
+      { pageNum: 1, isStepPage: false, lastAbsStepNum: 0 },
+      { pageNum: 2, isStepPage: true, lastAbsStepNum: 4 },
+    ];
+    expect(resolvePageProgressBar(singlePage, 2, 'page')).toEqual({ fraction: 0, segment: 'full' });
+
+    // Two-page spread mode: facing pairs (2,3), (4,5), (6,7)
+    const spreadPages = [
+      { pageNum: 1, isStepPage: false, lastAbsStepNum: 0 }, // Cover
+      { pageNum: 2, isStepPage: true, lastAbsStepNum: 2 },
+      { pageNum: 3, isStepPage: true, lastAbsStepNum: 4 },
+      { pageNum: 4, isStepPage: true, lastAbsStepNum: 6 },
+      { pageNum: 5, isStepPage: true, lastAbsStepNum: 8 },
+      { pageNum: 6, isStepPage: true, lastAbsStepNum: 10 },
+      { pageNum: 7, isStepPage: true, lastAbsStepNum: 12 },
+    ];
+    expect(resolvePageProgressBar(spreadPages, 2, 'spread')).toEqual({ fraction: 0, segment: 'left' });
+    expect(resolvePageProgressBar(spreadPages, 3, 'spread')).toEqual({ fraction: 0, segment: 'right' });
+    expect(resolvePageProgressBar(spreadPages, 4, 'spread')).toEqual({ fraction: 0.5, segment: 'left' });
+    expect(resolvePageProgressBar(spreadPages, 5, 'spread')).toEqual({ fraction: 0.5, segment: 'right' });
+    expect(resolvePageProgressBar(spreadPages, 6, 'spread')).toEqual({ fraction: 1, segment: 'left' });
+    expect(resolvePageProgressBar(spreadPages, 7, 'spread')).toEqual({ fraction: 1, segment: 'right' });
+
+    // Solo step pages facing non-step pages fall back to 'full' so the bead never disappears
+    const mixedSpreadPages = [
+      { pageNum: 1, isStepPage: false, lastAbsStepNum: 0 }, // Cover
+      { pageNum: 2, isStepPage: false, lastAbsStepNum: 0 }, // Roadmap
+      { pageNum: 3, isStepPage: true, lastAbsStepNum: 2 },  // Solo first step page
+      { pageNum: 4, isStepPage: true, lastAbsStepNum: 4 },  // Spread left
+      { pageNum: 5, isStepPage: true, lastAbsStepNum: 6 },  // Spread right
+      { pageNum: 6, isStepPage: true, lastAbsStepNum: 8 },  // Solo last step page
+      { pageNum: 7, isStepPage: false, lastAbsStepNum: 0 }, // Build Complete
+    ];
+    expect(resolvePageProgressBar(mixedSpreadPages, 3, 'spread')).toEqual({ fraction: 0, segment: 'full' });
+    expect(resolvePageProgressBar(mixedSpreadPages, 4, 'spread')!.segment).toBe('left');
+    expect(resolvePageProgressBar(mixedSpreadPages, 5, 'spread')!.segment).toBe('right');
+    expect(resolvePageProgressBar(mixedSpreadPages, 4, 'spread')!.fraction).toBeCloseTo(4 / 6, 5);
+    expect(resolvePageProgressBar(mixedSpreadPages, 5, 'spread')!.fraction).toBeCloseTo(4 / 6, 5);
+    expect(resolvePageProgressBar(mixedSpreadPages, 6, 'spread')).toEqual({ fraction: 1, segment: 'full' });
+
+    // Segment geometry projection (left = 0..0.5, right = 0.5..1.0)
+    expect(computeProgressBarSegmentRender(0, 'left')).toEqual({
+      localFill: 0, beadPos: 0, roundLeft: true, roundRight: false,
+    });
+    expect(computeProgressBarSegmentRender(0, 'right')).toEqual({
+      localFill: 0, beadPos: null, roundLeft: false, roundRight: true,
+    });
+    expect(computeProgressBarSegmentRender(0.25, 'left')).toEqual({
+      localFill: 0.5, beadPos: 0.5, roundLeft: true, roundRight: false,
+    });
+    expect(computeProgressBarSegmentRender(0.75, 'left')).toEqual({
+      localFill: 1, beadPos: null, roundLeft: true, roundRight: false,
+    });
+    expect(computeProgressBarSegmentRender(0.75, 'right')).toEqual({
+      localFill: 0.5, beadPos: 0.5, roundLeft: false, roundRight: true,
+    });
+
+    // HTML output reflects segment, bead presence, and flat spine ends
+    const leftHtml = buildProgressBarHtml(0, { segment: 'left' });
+    expect(leftHtml).toContain('data-progress-segment="left"');
+    expect(leftHtml).toContain('biw-progress-bead');
+    expect(leftHtml).toContain('left:0.00%');
+
+    const rightStartHtml = buildProgressBarHtml(0, { segment: 'right' });
+    expect(rightStartHtml).toContain('data-progress-segment="right"');
+    expect(rightStartHtml).not.toContain('biw-progress-bead');
+
+    const rightEndHtml = buildProgressBarHtml(1, { segment: 'right' });
+    expect(rightEndHtml).toContain('biw-progress-bead');
+    expect(rightEndHtml).toContain('left:100.00%');
+
+    // Theme option defaults & sanitization
+    expect(DEFAULT_THEME_STYLE_OPTIONS.progressBarSpan).toBe('page');
+    expect(sanitizeProgressBarSpan('spread')).toBe('spread');
+    expect(sanitizeProgressBarSpan('invalid')).toBe('page');
+    expect(normalizeThemeStyleOptions({ progressBarSpan: 'spread' }).progressBarSpan).toBe('spread');
+    expect(normalizeThemeStyleOptions({ progressBarSpan: 'bogus' }).progressBarSpan).toBe('page');
   });
 
   it('computes regional cropped close-up framing with normalized locator bounds', () => {

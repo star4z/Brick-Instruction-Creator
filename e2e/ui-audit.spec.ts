@@ -373,8 +373,13 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     await page.locator('#toggleArrowOutlines').click();
     await page.locator('#toggleArrowLighting').click();
 
-    // Verify Step Dividers default to LEGO-style Lines and Build Progress Bar toggle inside Style Popover (auto-forking built-in theme)
+    // Verify Step Dividers default to LEGO-style Lines and Build Progress Bar + Span controls inside Style Popover (auto-forking built-in theme)
     await expect(page.locator('#toggleProgressBar')).toBeVisible();
+    await expect(page.locator('#stylePopover .progress-bar-span-btn[data-progress-bar-span="page"]')).toHaveAttribute('aria-pressed', 'true');
+    await page.locator('#stylePopover .progress-bar-span-btn[data-progress-bar-span="spread"]').click();
+    await expect(page.locator('#stylePopover .progress-bar-span-btn[data-progress-bar-span="spread"]')).toHaveAttribute('aria-pressed', 'true');
+    await page.locator('#stylePopover .progress-bar-span-btn[data-progress-bar-span="page"]').click();
+    await expect(page.locator('#stylePopover .progress-bar-span-btn[data-progress-bar-span="page"]')).toHaveAttribute('aria-pressed', 'true');
     await expect(page.locator('#stylePopover .step-border-style-btn[data-step-border-style="lines"]')).toHaveAttribute('aria-pressed', 'true');
     await page.locator('#stylePopover .step-border-style-btn[data-step-border-style="boxes"]').click();
     await expect(page.locator('#stylePopover .step-border-style-btn[data-step-border-style="boxes"]')).toHaveAttribute('aria-pressed', 'true');
@@ -602,12 +607,49 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
 
     // Must span multiple step pages across submodel + main build chapters
     expect(progressFractions.length).toBeGreaterThanOrEqual(2);
-    // Final step page reaches 100% (1.0), and no earlier step page finishes early or restarts
+    // First step page starts all the way to the left (0.0), final step page reaches 100% (1.0)
+    expect(progressFractions[0]).toBe(0);
     expect(progressFractions[progressFractions.length - 1]).toBe(1);
     for (let i = 0; i < progressFractions.length - 1; i++) {
       expect(progressFractions[i]).toBeLessThan(1);
       expect(progressFractions[i + 1]).toBeGreaterThan(progressFractions[i]);
     }
+
+    // Enable 2-Page Spread progress bar from Page Setup modal and verify facing-page segments
+    await ensureMenuOpen(page);
+    await page.locator('#menuPageSetupBtn').click();
+    await expect(page.locator('#pageSetupModal')).toBeVisible();
+    await expect(page.locator('#toggleProgressBarSetup')).toBeChecked();
+    await page.locator('.progress-bar-span-setup-btn[data-progress-bar-span="spread"]').click();
+    await expect(page.locator('.progress-bar-span-setup-btn[data-progress-bar-span="spread"]')).toHaveAttribute('aria-pressed', 'true');
+    await page.locator('#btnClosePageSetup').click();
+    await expect(page.locator('#pageSetupModal')).toBeHidden();
+    await closeMenuOnMobile(page);
+
+    // Navigate back to first page and walk forward to inspect spread segments
+    const prevBtn = page.locator('#prevPage');
+    for (let guard = 0; guard < 30; guard++) {
+      if (await prevBtn.isDisabled()) break;
+      await prevBtn.click();
+    }
+    const spreadEntries: Array<{ frac: number; seg: string | null }> = [];
+    for (let guard = 0; guard < 30; guard++) {
+      const isStepPage = (await page.locator('#pageFrame [data-step-visual]').count()) > 0;
+      if (isStepPage) {
+        const bar = page.locator('#pageFrame .biw-progress-bar').first();
+        await expect(bar).toBeVisible();
+        spreadEntries.push({
+          frac: Number(await bar.getAttribute('data-progress-fraction')),
+          seg: await bar.getAttribute('data-progress-segment'),
+        });
+      }
+      if (await nextBtn.isDisabled()) break;
+      await nextBtn.click();
+    }
+    expect(spreadEntries.length).toBeGreaterThanOrEqual(2);
+    expect(spreadEntries[0].frac).toBe(0);
+    expect(spreadEntries.some((e) => e.seg === 'left')).toBe(true);
+    expect(spreadEntries.some((e) => e.seg === 'right')).toBe(true);
 
     runtime.assertClean(`${testInfo.project.name}: Absolute Step Progress Bar`);
   });

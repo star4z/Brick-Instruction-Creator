@@ -70,6 +70,15 @@ export function sanitizeLineWeight(value: unknown, fallback: LineWeightId = 'med
     : fallback;
 }
 
+export type ProgressBarSpan = 'page' | 'spread';
+
+export function sanitizeProgressBarSpan(
+  value: unknown,
+  fallback: ProgressBarSpan = 'page',
+): ProgressBarSpan {
+  return value === 'spread' || value === 'page' ? value : fallback;
+}
+
 /**
  * Returns clip-space (NDC) multi-tap offsets for crisp resolution-scaled WebGL line weights
  * (`light` | `medium` | `heavy` | `extra-heavy`) that bypass ANGLE/WebGL `gl.lineWidth(1)` limits.
@@ -184,6 +193,7 @@ export interface ThemeStyleOptions {
   showStepBorders: boolean;
   showPageTitle: boolean;
   showProgressBar: boolean;
+  progressBarSpan: ProgressBarSpan;
   bomConfig: BomConfig;
 }
 
@@ -210,6 +220,7 @@ export const THEME_STYLE_OPTION_KEYS: Array<keyof ThemeStyleOptions> = [
   'showStepBorders',
   'showPageTitle',
   'showProgressBar',
+  'progressBarSpan',
   'bomConfig',
 ];
 
@@ -236,6 +247,7 @@ export const DEFAULT_THEME_STYLE_OPTIONS: ThemeStyleOptions = {
   showStepBorders: false,
   showPageTitle: true,
   showProgressBar: true,
+  progressBarSpan: 'page',
   bomConfig: createDefaultBomConfig(),
 };
 
@@ -317,6 +329,7 @@ export function normalizeThemeStyleOptions(
     showStepBorders,
     showPageTitle: bool('showPageTitle'),
     showProgressBar: bool('showProgressBar'),
+    progressBarSpan: sanitizeProgressBarSpan(r.progressBarSpan, sanitizeProgressBarSpan(fb.progressBarSpan, 'page')),
     bomConfig: normalizeBomConfig(r.bomConfig, fb.bomConfig),
   };
 }
@@ -379,6 +392,7 @@ export interface ManualTheme {
   showStepBorders?: boolean;
   showPageTitle?: boolean;
   showProgressBar?: boolean;
+  progressBarSpan?: ProgressBarSpan;
   bomConfig?: BomConfig;
   createdAt?: string;
   updatedAt?: string;

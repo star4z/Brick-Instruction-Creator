@@ -734,6 +734,13 @@
             <span class="font-medium">Build Progress Bar</span>
             <input id="toggleProgressBar" type="checkbox" checked class="w-4 h-4 accent-[var(--primary)] cursor-pointer" />
           </label>
+          <div id="progressBarSpanGroup" class="space-y-1.5 pl-2.5 border-l-2 border-[var(--border)]">
+            <div class="text-xs text-[var(--muted-foreground)] font-medium">Progress Bar Span</div>
+            <div class="grid grid-cols-2 gap-1.5" role="group" aria-label="Progress bar span">
+              <button type="button" data-progress-bar-span="page" class="progress-bar-span-btn py-1.5 px-2 rounded-md border font-semibold text-xs transition-colors cursor-pointer">Single Page</button>
+              <button type="button" data-progress-bar-span="spread" class="progress-bar-span-btn py-1.5 px-2 rounded-md border font-semibold text-xs transition-colors cursor-pointer">2-Page Spread</button>
+            </div>
+          </div>
         </div>
 
         <!-- Parts List (saved with theme) -->
@@ -1505,6 +1512,30 @@
               </span>
               <input id="togglePageTitleSetup" type="checkbox" checked class="w-4 h-4 accent-[var(--primary)] cursor-pointer" />
             </label>
+            <label class="flex items-center justify-between py-1 cursor-pointer">
+              <span class="font-medium">Build Progress Bar</span>
+              <input id="toggleProgressBarSetup" type="checkbox" checked class="w-4 h-4 accent-[var(--primary)] cursor-pointer" />
+            </label>
+            <div id="progressBarSpanSetupGroup" class="space-y-2 pt-1">
+              <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Progress Bar Span</div>
+              <div class="grid grid-cols-2 gap-1.5" role="group" aria-label="Progress bar span">
+                <button data-progress-bar-span="page" type="button" class="progress-bar-span-setup-btn py-2.5 px-2.5 rounded-lg border font-semibold flex flex-col items-center gap-1.5 cursor-pointer">
+                  <span class="inline-flex items-center gap-0.5" aria-hidden="true">
+                    <span class="w-7 h-5 rounded-l border border-current/35 flex items-end px-1 pb-1"><span class="w-full h-0.5 rounded-full bg-current/70"></span></span>
+                    <span class="w-7 h-5 rounded-r border border-current/35 flex items-end px-1 pb-1"><span class="w-full h-0.5 rounded-full bg-current/70"></span></span>
+                  </span>
+                  <span class="text-[11px] leading-tight">Single Page</span>
+                </button>
+                <button data-progress-bar-span="spread" type="button" class="progress-bar-span-setup-btn py-2.5 px-2.5 rounded-lg border font-semibold flex flex-col items-center gap-1.5 cursor-pointer">
+                  <span class="inline-flex items-center gap-0" aria-hidden="true">
+                    <span class="w-7 h-5 rounded-l border border-current/35 flex items-end pl-1 pb-1"><span class="w-full h-0.5 rounded-l-full bg-current/80"></span></span>
+                    <span class="w-7 h-5 rounded-r border border-l-0 border-current/35 flex items-end pr-1 pb-1"><span class="w-full h-0.5 rounded-r-full bg-current/45"></span></span>
+                  </span>
+                  <span class="text-[11px] leading-tight">2-Page Spread (Print)</span>
+                </button>
+              </div>
+              <p id="progressBarSpanHint" class="text-[11px] text-[var(--muted-foreground)] leading-snug">Each step page displays its own complete progress bar.</p>
+            </div>
           </div>
 
           <div class="space-y-2 pt-4 border-t border-[var(--border)]">
