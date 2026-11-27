@@ -238,6 +238,9 @@ import {
   isStrictDeckUndersidePart,
 } from './engine/undersideAssembly';
 import {
+  analyzeTiltedHingedAssemblies,
+} from './engine/hingedAssembly';
+import {
   buildMinifigExplodedPlan,
   buildMinifigSequentialPlan,
   normalizeMinifigStepStyle,
@@ -2013,36 +2016,41 @@ function buildMeshBuffers(prevParts, newParts, opts) {
     };
 
     const arcLen = r * totalAng;
-    const headLen = Math.min(10.5, Math.max(5.5, arcLen * 0.34));
+    const isHingeTilt = ind.kind === 'hinge_tilt';
+    const headLen = isHingeTilt
+      ? Math.min(15.5, Math.max(10.5, arcLen * 0.36))
+      : Math.min(10.5, Math.max(5.5, arcLen * 0.34));
     const headAng = Math.min(totalAng * 0.42, headLen / Math.max(6, r));
     const shaftEndAng = Math.max(0.05, totalAng - headAng);
     const isBodyYaw = ind.kind === 'body_yaw';
-    const tubeR = isBodyYaw ? 1.85 : 2.05;
-    const coneR = isBodyYaw ? 5.1 : 5.5;
+    const tubeR = isHingeTilt ? 3.3 : (isBodyYaw ? 1.85 : 2.05);
+    const coneR = isHingeTilt ? 8.4 : (isBodyYaw ? 5.1 : 5.5);
     const segs = Math.max(10, Math.min(32, Math.ceil(((shaftEndAng * 180) / Math.PI) / 7)));
     const crossSegs = 8;
 
-    // 1. Start anchor marker ("FROM" node at angle = 0)
-    const startC = arcPt(0);
-    const nodeR = tubeR * 1.75;
-    const nodeH = tubeR * 0.95;
-    const nodeSegs = 10;
-    const nTopC = [startC[0] + ax[0] * nodeH, startC[1] + ax[1] * nodeH, startC[2] + ax[2] * nodeH];
-    const nBotC = [startC[0] - ax[0] * nodeH, startC[1] - ax[1] * nodeH, startC[2] - ax[2] * nodeH];
-    for (let k = 0; k < nodeSegs; k++) {
-      const p0 = (k / nodeSegs) * Math.PI * 2, p1 = ((k + 1) / nodeSegs) * Math.PI * 2, pm = (p0 + p1) / 2;
-      const dA = [Math.cos(p0) * u0[0] + Math.sin(p0) * u1[0], Math.cos(p0) * u0[1] + Math.sin(p0) * u1[1], Math.cos(p0) * u0[2] + Math.sin(p0) * u1[2]];
-      const dB = [Math.cos(p1) * u0[0] + Math.sin(p1) * u1[0], Math.cos(p1) * u0[1] + Math.sin(p1) * u1[1], Math.cos(p1) * u0[2] + Math.sin(p1) * u1[2]];
-      const sn = [Math.cos(pm) * u0[0] + Math.sin(pm) * u1[0], Math.cos(pm) * u0[1] + Math.sin(pm) * u1[1], Math.cos(pm) * u0[2] + Math.sin(pm) * u1[2]];
-      const t0 = [nTopC[0] + dA[0] * nodeR, nTopC[1] + dA[1] * nodeR, nTopC[2] + dA[2] * nodeR];
-      const t1 = [nTopC[0] + dB[0] * nodeR, nTopC[1] + dB[1] * nodeR, nTopC[2] + dB[2] * nodeR];
-      const b0 = [nBotC[0] + dA[0] * nodeR, nBotC[1] + dA[1] * nodeR, nBotC[2] + dA[2] * nodeR];
-      const b1 = [nBotC[0] + dB[0] * nodeR, nBotC[1] + dB[1] * nodeR, nBotC[2] + dB[2] * nodeR];
-      pushTri(b0, b1, t1, sn, col, 255); pushTri(b0, t1, t0, sn, col, 255);
-      pushTri(nTopC, t0, t1, ax, col, 255);
-      pushTri(nBotC, b1, b0, [-ax[0], -ax[1], -ax[2]], col, 255);
-      pushEdge(t0, t1, ink, 220);
-      pushEdge(b0, b1, ink, 220);
+    // 1. Start anchor marker ("FROM" node at angle = 0) — omitted on hinge_tilt for clean LEGO manual curved arrows
+    if (!isHingeTilt) {
+      const startC = arcPt(0);
+      const nodeR = tubeR * 1.75;
+      const nodeH = tubeR * 0.95;
+      const nodeSegs = 10;
+      const nTopC = [startC[0] + ax[0] * nodeH, startC[1] + ax[1] * nodeH, startC[2] + ax[2] * nodeH];
+      const nBotC = [startC[0] - ax[0] * nodeH, startC[1] - ax[1] * nodeH, startC[2] - ax[2] * nodeH];
+      for (let k = 0; k < nodeSegs; k++) {
+        const p0 = (k / nodeSegs) * Math.PI * 2, p1 = ((k + 1) / nodeSegs) * Math.PI * 2, pm = (p0 + p1) / 2;
+        const dA = [Math.cos(p0) * u0[0] + Math.sin(p0) * u1[0], Math.cos(p0) * u0[1] + Math.sin(p0) * u1[1], Math.cos(p0) * u0[2] + Math.sin(p0) * u1[2]];
+        const dB = [Math.cos(p1) * u0[0] + Math.sin(p1) * u1[0], Math.cos(p1) * u0[1] + Math.sin(p1) * u1[1], Math.cos(p1) * u0[2] + Math.sin(p1) * u1[2]];
+        const sn = [Math.cos(pm) * u0[0] + Math.sin(pm) * u1[0], Math.cos(pm) * u0[1] + Math.sin(pm) * u1[1], Math.cos(pm) * u0[2] + Math.sin(pm) * u1[2]];
+        const t0 = [nTopC[0] + dA[0] * nodeR, nTopC[1] + dA[1] * nodeR, nTopC[2] + dA[2] * nodeR];
+        const t1 = [nTopC[0] + dB[0] * nodeR, nTopC[1] + dB[1] * nodeR, nTopC[2] + dB[2] * nodeR];
+        const b0 = [nBotC[0] + dA[0] * nodeR, nBotC[1] + dA[1] * nodeR, nBotC[2] + dA[2] * nodeR];
+        const b1 = [nBotC[0] + dB[0] * nodeR, nBotC[1] + dB[1] * nodeR, nBotC[2] + dB[2] * nodeR];
+        pushTri(b0, b1, t1, sn, col, 255); pushTri(b0, t1, t0, sn, col, 255);
+        pushTri(nTopC, t0, t1, ax, col, 255);
+        pushTri(nBotC, b1, b0, [-ax[0], -ax[1], -ax[2]], col, 255);
+        pushEdge(t0, t1, ink, 220);
+        pushEdge(b0, b1, ink, 220);
+      }
     }
 
     // Crisp start & target reference ticks for whole-body/head turns so "from -> to" is unmistakable
@@ -3567,21 +3575,12 @@ class WebGLBrickEngine {
         gl.drawArrays(gl.TRIANGLES, 0, td.triPos.length / 3);
       }
       gl.disableVertexAttribArray(this.loc.xUv);
-      gl.polygonOffset(1.0, 1.0);
-      // Restore triProg for transparent bricks if needed
-      if (mesh.transCount > 0) {
-        gl.useProgram(this.triProg);
-        gl.bindBuffer(gl.ARRAY_BUFFER, this.bTriPos); gl.enableVertexAttribArray(this.loc.tPos); gl.vertexAttribPointer(this.loc.tPos, 3, gl.FLOAT, false, 0, 0);
-        gl.bindBuffer(gl.ARRAY_BUFFER, this.bTriNorm); gl.enableVertexAttribArray(this.loc.tNorm); gl.vertexAttribPointer(this.loc.tNorm, 3, gl.FLOAT, false, 0, 0);
-        gl.bindBuffer(gl.ARRAY_BUFFER, this.bTriCol); gl.enableVertexAttribArray(this.loc.tCol); gl.vertexAttribPointer(this.loc.tCol, 4, gl.UNSIGNED_BYTE, true, 0, 0);
+      if (this.loc.xCol >= 0 && this.loc.xCol !== this.loc.tPos && this.loc.xCol !== this.loc.tNorm && this.loc.xCol !== this.loc.tCol) {
+        gl.disableVertexAttribArray(this.loc.xCol);
       }
+      gl.polygonOffset(1.0, 1.0);
     }
 
-    if (mesh.transCount > 0) {
-      gl.depthMask(false);
-      gl.drawArrays(gl.TRIANGLES, mesh.opaqueCount, mesh.transCount);
-      gl.depthMask(true);
-    }
     if (lineAlpha > 0.01) {
       const outlineWeight = drawOpts?.outlineLineWeight ?? ((drawOpts?.boldLines || drawOpts?.starkBlackOutlines) ? 'medium' : 'light');
       const hlWeight = drawOpts?.highlightLineWeight ?? 'medium';
@@ -3618,6 +3617,7 @@ class WebGLBrickEngine {
         gl.disableVertexAttribArray(this.loc.cOther);
         gl.disableVertexAttribArray(this.loc.cCtrl1);
         gl.disableVertexAttribArray(this.loc.cCtrl2);
+        gl.disableVertexAttribArray(this.loc.cCol);
       };
 
       drawHard(this.bLinePos, this.bLineCol, mesh.linePos.length / 3, outlineTaps, lineAlpha);
@@ -3630,6 +3630,24 @@ class WebGLBrickEngine {
       if (mesh.hlCondPos && mesh.hlCondPos.length > 0) {
         drawCond(this.bHlCondPos, this.bHlCondOther, this.bHlCondC1, this.bHlCondC2, this.bHlCondCol, mesh.hlCondPos.length / 3, hlTaps, 1.0);
       }
+    }
+
+    if (mesh.transCount > 0) {
+      gl.useProgram(this.triProg);
+      gl.uniformMatrix4fv(this.loc.tMVP, false, mvp);
+      gl.uniform1f(this.loc.tHeroMode, heroShading ? 1.0 : 0.0);
+      gl.uniform1f(this.loc.tUnlit, unlit ? 1.0 : 0.0);
+      gl.uniform3f(this.loc.tEyePos, eyePos[0], eyePos[1], eyePos[2]);
+      gl.uniform3f(this.loc.tKeyDir, lights.key[0], lights.key[1], lights.key[2]);
+      gl.uniform3f(this.loc.tFillDir, lights.fill[0], lights.fill[1], lights.fill[2]);
+      gl.uniform3f(this.loc.tRimDir, lights.rim[0], lights.rim[1], lights.rim[2]);
+      gl.uniform3f(this.loc.tCamUp, up[0], up[1], up[2]);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.bTriPos); gl.enableVertexAttribArray(this.loc.tPos); gl.vertexAttribPointer(this.loc.tPos, 3, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.bTriNorm); gl.enableVertexAttribArray(this.loc.tNorm); gl.vertexAttribPointer(this.loc.tNorm, 3, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.bTriCol); gl.enableVertexAttribArray(this.loc.tCol); gl.vertexAttribPointer(this.loc.tCol, 4, gl.UNSIGNED_BYTE, true, 0, 0);
+      gl.depthMask(false);
+      gl.drawArrays(gl.TRIANGLES, mesh.opaqueCount, mesh.transCount);
+      gl.depthMask(true);
     }
 
     if (mesh.placementArrowSpecs && mesh.placementArrowSpecs.length > 0) {
@@ -5807,17 +5825,67 @@ function buildVerticalPrereqMap(boxes, adj, roles, claddingFlags, activeIndices,
 //   2. Flips the model upside down (side: 'bottom', cue: 'flip_vertical') to place deferred deck-underside plates,
 //      insert pre-built Technic mechanisms into deck holes, and snap completed underside sub-modules into place
 //   3. Flips right-side up (side: 'top', cue: 'flip_vertical') and builds the upper structure bottom-up
-function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount, outPrebuiltSubChapters = null) {
-  const n = canonicalParts.length;
-  const boxes = canonicalParts.map(p => computeWorldBox(p));
-  const subBoxes = canonicalParts.map(p => computeWorldSubBoxes(p));
-  const roles = canonicalParts.map(p => classifyPartRole(p));
-  const sideCaps = canonicalParts.map((p, i) => canConnectSideways(p, roles[i]));
-  const smoothTopFlags = canonicalParts.map((p, i) => isSmoothStudlessTopPart(p, boxes[i], roles[i], sideCaps[i]));
+function buildLocalSubmodelSteps(rawCanonicalParts, groupId, repeatCount, outPrebuiltSubChapters = null) {
+  const n = rawCanonicalParts.length;
+  const roles = rawCanonicalParts.map(p => classifyPartRole(p));
+  const origBoxes = rawCanonicalParts.map(p => computeWorldBox(p));
+  const origSubBoxes = rawCanonicalParts.map(p => computeWorldSubBoxes(p));
+  const origSideCaps = rawCanonicalParts.map((p, i) => canConnectSideways(p, roles[i]));
+  const origSmoothTopFlags = rawCanonicalParts.map((p, i) => isSmoothStudlessTopPart(p, origBoxes[i], roles[i], origSideCaps[i]));
+  const origAdj = buildSpatialAdjacency(rawCanonicalParts, origBoxes, roles, origSideCaps, origSubBoxes, origSmoothTopFlags);
+
+  // Detect oblique-tilted hinged assemblies (e.g. angled windshields / hoods / canopies)
+  // so hinge tops snap straight down upright (0°), build straight up-and-down, and tilt into
+  // their final angled pose only AFTER any adjacent roof/frame rest-stop pieces are attached!
+  const hingeInputs = rawCanonicalParts.map((p, i) => ({
+    index: i,
+    partId: normId(p.p),
+    partName: resolvePart(p.p)?.name || '',
+    role: roles[i],
+    x: p.x || 0,
+    y: p.y || 0,
+    z: p.z || 0,
+    m: p.m || R_ID,
+    box: origBoxes[i],
+  }));
+  const hingePlan = analyzeTiltedHingedAssemblies(hingeInputs, origAdj);
+  const hasHingeTilt = hingePlan.assemblies.length > 0;
+  let canonicalParts = rawCanonicalParts;
+  let boxes = origBoxes;
+  let subBoxes = origSubBoxes;
+  let sideCaps = origSideCaps;
+  let smoothTopFlags = origSmoothTopFlags;
+  let adj = origAdj;
+
+  if (hasHingeTilt) {
+    const uprightByIdx = new Map();
+    for (const asm of hingePlan.assemblies) {
+      for (const [idx, xf] of asm.uprightTransforms.entries()) {
+        uprightByIdx.set(idx, xf);
+      }
+    }
+    canonicalParts = rawCanonicalParts.map((p, i) => {
+      const xf = uprightByIdx.get(i);
+      return xf ? { ...p, x: xf.x, y: xf.y, z: xf.z, m: xf.m } : p;
+    });
+    boxes = canonicalParts.map(p => computeWorldBox(p));
+    subBoxes = canonicalParts.map(p => computeWorldSubBoxes(p));
+    sideCaps = canonicalParts.map((p, i) => canConnectSideways(p, roles[i]));
+    smoothTopFlags = canonicalParts.map((p, i) => isSmoothStudlessTopPart(p, boxes[i], roles[i], sideCaps[i]));
+    adj = buildSpatialAdjacency(canonicalParts, boxes, roles, sideCaps, subBoxes, smoothTopFlags);
+  }
+
   const claddingFlags = canonicalParts.map((p, i) => isSidewaysCladdingPart(p, boxes[i]));
   const layerY = canonicalParts.map((p, i) => computeBuildLayerY(p, boxes[i]));
-  const adj = buildSpatialAdjacency(canonicalParts, boxes, roles, sideCaps, subBoxes, smoothTopFlags);
   const { belowMap } = buildVerticalPrereqMap(boxes, adj, roles, claddingFlags, undefined, subBoxes, smoothTopFlags);
+
+  // Enforce physical hinge base -> hinge top prerequisites (e.g. 3937 base before 3938/6134 top)
+  for (const [topIdx, baseIdx] of hingePlan.allBasePrereqPairs) {
+    if (!adj[topIdx].includes(baseIdx)) adj[topIdx].push(baseIdx);
+    if (!adj[baseIdx].includes(topIdx)) adj[baseIdx].push(topIdx);
+    if (!belowMap[topIdx].includes(baseIdx)) belowMap[topIdx].push(baseIdx);
+  }
+
   const fastenerGuards = createHorizontalFastenerGuards(boxes, adj, roles, belowMap);
   const subDescriptors = canonicalParts.map((p, i) => ({
     index: i,
@@ -5837,6 +5905,49 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount, outPrebui
   const remaining = new Set(Array.from({ length: n }, (_, i) => i));
   const steps = [];
   let sNum = 0;
+
+  const emittedHingePoses = new Set();
+  const flushReadyHingePoses = (forceAll = false) => {
+    if (!hasHingeTilt) return;
+    for (const asm of hingePlan.assemblies) {
+      if (emittedHingePoses.has(asm.id)) continue;
+      if (!forceAll) {
+        if (asm.partIndices.some(i => !placed.has(i))) continue;
+        if (asm.restStopIndices.some(i => !placed.has(i))) continue;
+      } else {
+        if (asm.partIndices.some(i => !placed.has(i))) continue;
+      }
+      emittedHingePoses.add(asm.id);
+      const posedParts = asm.partIndices.map(i => rawCanonicalParts[i]);
+      const ghostParts = asm.partIndices.map(i => canonicalParts[i]);
+      for (const i of asm.partIndices) {
+        builtBounds = expandBoundsWithBox(builtBounds, origBoxes[i]);
+        builtBoxes.push(origBoxes[i]);
+      }
+      sNum++;
+      steps.push({
+        id: `${groupId}_hinge_${asm.id}`,
+        num: sNum,
+        side: 'top',
+        corner: activeCam.corner,
+        az: activeCam.az,
+        el: 28,
+        cue: 'none',
+        isHingePoseStep: true,
+        parts: [],
+        hingePose: {
+          id: asm.id,
+          angleDeg: asm.angleDeg,
+          tangent: asm.tangent,
+          partIds: asm.partIndices.map(i => rawCanonicalParts[i].id),
+          posedParts,
+          ghostParts,
+          indicators: asm.indicators,
+        },
+        isSubmodelStep: true,
+      });
+    }
+  };
 
   const undersideInputs = canonicalParts.map((p, i) => {
     const def = resolvePart(p.p);
@@ -6493,6 +6604,7 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount, outPrebui
         },
         isSubmodelStep: true,
       });
+      flushReadyHingePoses();
       continue;
     }
 
@@ -6528,6 +6640,7 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount, outPrebui
         },
         isSubmodelStep: true,
       });
+      flushReadyHingePoses();
       continue;
     }
 
@@ -6589,7 +6702,9 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount, outPrebui
       parts: stepIdx.map(i => canonicalParts[i]),
       isSubmodelStep: true,
     });
+    flushReadyHingePoses();
   }
+  flushReadyHingePoses(true);
   // Indicate ×N on ONLY the last step of repeated submodels (repeatCount > 1)
   if (steps.length > 0 && repeatCount > 1) {
     steps[steps.length - 1].isSubmodelFinal = true;
@@ -7009,8 +7124,11 @@ function optimizeManualStepCameras(chapters, targetAspect = getActivePageLayoutA
       } else {
         const occluderCountBefore = allOccluders.length;
         const builtBoundsBefore = builtBounds;
+        const activeParts = (step.isHingePoseStep && step.hingePose?.posedParts)
+          ? step.hingePose.posedParts
+          : step.parts;
         const stepOccs = [];
-        appendOccluderBoxes(step.parts, stepOccs);
+        appendOccluderBoxes(activeParts, stepOccs);
         const stepBoxes = stepOccs.map((o) => o.box);
 
         const isSubmodelAttach = Boolean(step.attachedSubmodel);
@@ -7044,7 +7162,12 @@ function optimizeManualStepCameras(chapters, targetAspect = getActivePageLayoutA
 
         const engagedSideNormals = [];
         const exposedSideStudNormals = [];
-        if (!isSubmodelAttach) {
+        if (step.isHingePoseStep && Array.isArray(step.hingePose?.tangent)) {
+          const [tx, , tz] = step.hingePose.tangent;
+          if (Math.hypot(tx, tz) > 0.1) {
+            engagedSideNormals.push([-tx, 0, -tz]);
+          }
+        } else if (!isSubmodelAttach && !step.isHingePoseStep) {
           const collectLeafSideNormals = (leaf) => {
             const role = classifyPartRole(leaf);
             const m = leaf.m || R_ID;
@@ -7173,6 +7296,7 @@ function assignAutoPlacementOffsets(chapters) {
       const skip = Boolean(
         step.isStandaloneFigure ||
         step.isMinifigPoseStep ||
+        step.isHingePoseStep ||
         step.attachedMinifig ||
         step.attachedSubmodel ||
         step.subassembly ||
@@ -7228,7 +7352,15 @@ function assignAutoPlacementOffsets(chapters) {
       } else {
         delete step.autoPartOffsets;
       }
-      for (const pi of stepInp.parts) prevPartInputs.push(pi);
+      if (step.isHingePoseStep && step.hingePose?.posedParts) {
+        const posedMap = new Map(step.hingePose.posedParts.map((p) => [p.id, partToInput(p)]));
+        for (let k = 0; k < prevPartInputs.length; k++) {
+          const repl = posedMap.get(prevPartInputs[k].id);
+          if (repl) prevPartInputs[k] = repl;
+        }
+      } else {
+        for (const pi of stepInp.parts) prevPartInputs.push(pi);
+      }
     }
   };
 
@@ -7961,6 +8093,53 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
         adj,
       );
 
+      // Detect oblique-tilted hinged assemblies whose rest-stop structure (e.g. a removable roof edge)
+      // lives in a DIFFERENT section module. Keep those assemblies upright (0°) while building their
+      // owner module and during section joining, then tilt them in Connect Sections & Finish right
+      // AFTER their rest-stop module is attached!
+      const globalPartToModuleKey = new Map();
+      const moduleRepeatCountByKey = new Map();
+      moduleSecs.forEach((sec, mIdx) => {
+        const repeatCount = sec.cleanRepeatGroups.length;
+        const subId = `mod_${mIdx + 1}_${sec.id}`;
+        sec.cleanRepeatGroups.forEach((grpIndices, copyIdx) => {
+          const mKey = `${subId}_c${copyIdx}`;
+          moduleRepeatCountByKey.set(mKey, repeatCount);
+          for (const gi of grpIndices) globalPartToModuleKey.set(gi, mKey);
+        });
+      });
+      for (const gi of joinIndices) globalPartToModuleKey.set(gi, '__join__');
+      const fullHingeInputs = parts.map((p, i) => ({
+        index: i,
+        partId: normId(p.p),
+        partName: resolvePart(p.p)?.name || '',
+        role: roles[i],
+        x: p.x || 0,
+        y: p.y || 0,
+        z: p.z || 0,
+        m: p.m || R_ID,
+        box: boxes[i],
+      }));
+      const fullHingePlan = analyzeTiltedHingedAssemblies(fullHingeInputs, adj);
+      const crossSectionHingeAssemblies = [];
+      const crossSectionUprightPartByIdx = new Map();
+      for (const asm of fullHingePlan.assemblies) {
+        const ownerKeys = new Set(asm.partIndices.map((gi) => globalPartToModuleKey.get(gi)).filter(Boolean));
+        if (ownerKeys.size !== 1) continue;
+        const ownerKey = Array.from(ownerKeys)[0];
+        if (ownerKey === '__join__' || (moduleRepeatCountByKey.get(ownerKey) || 1) !== 1) continue;
+        const hasExternalRestStop = asm.restStopIndices.some((ri) => {
+          const rk = globalPartToModuleKey.get(ri);
+          return Boolean(rk && rk !== ownerKey);
+        });
+        if (!hasExternalRestStop) continue;
+        crossSectionHingeAssemblies.push(asm);
+        for (const [gi, xf] of asm.uprightTransforms.entries()) {
+          crossSectionUprightPartByIdx.set(gi, { ...parts[gi], x: xf.x, y: xf.y, z: xf.z, m: xf.m });
+        }
+      }
+      const joinBuildPart = (i) => crossSectionUprightPartByIdx.get(i) || parts[i];
+
       const attachQueue = [];
       let builtSectionChapterCount = 0;
       moduleSecs.forEach((sec, mIdx) => {
@@ -7971,7 +8150,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
 
         let canonicalParts = null;
         if (!isSinglePartProp) {
-          canonicalParts = normalizeCanonicalSubParts(sec.cleanIndices.map(i => parts[i]), subId);
+          canonicalParts = normalizeCanonicalSubParts(sec.cleanIndices.map((i) => joinBuildPart(i)), subId);
           const prebuiltMechChapters = [];
           const subSteps = buildLocalSubmodelSteps(canonicalParts, subId, repeatCount, prebuiltMechChapters);
           if (prebuiltMechChapters.length === 0) {
@@ -8130,6 +8309,37 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
       // Emit Connect & Finish chapter joining all completed sections + any articulated joints or connector bricks!
       const joinSteps = [];
       const joinedPlaced = new Set();
+      const emittedJoinHingePoses = new Set();
+      const flushReadyJoinHingePoses = (forceAll = false) => {
+        if (crossSectionHingeAssemblies.length === 0) return;
+        for (const asm of crossSectionHingeAssemblies) {
+          if (emittedJoinHingePoses.has(asm.id)) continue;
+          if (asm.partIndices.some((gi) => !joinedPlaced.has(gi))) continue;
+          if (!forceAll && asm.restStopIndices.some((gi) => !joinedPlaced.has(gi))) continue;
+          emittedJoinHingePoses.add(asm.id);
+          const posedParts = asm.partIndices.map((gi) => parts[gi]);
+          const ghostParts = asm.partIndices.map((gi) => joinBuildPart(gi));
+          globalStep++;
+          joinSteps.push({
+            id: `join_hinge_${asm.id}_s${globalStep}`,
+            num: globalStep,
+            side: 'top',
+            corner: 'front_right',
+            cue: 'none',
+            isHingePoseStep: true,
+            parts: [],
+            hingePose: {
+              id: asm.id,
+              angleDeg: asm.angleDeg,
+              tangent: asm.tangent,
+              partIds: asm.partIndices.map((gi) => parts[gi].id),
+              posedParts,
+              ghostParts,
+              indicators: asm.indicators,
+            },
+          });
+        }
+      };
 
       if (useArticulatedSequence) {
         const countTouchEdges = (indices, targetSet) => {
@@ -8156,7 +8366,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
             side: 'top',
             corner: 'front_right',
             cue: 'none',
-            parts: item.indices.map(i => parts[i]),
+            parts: item.indices.map((i) => joinBuildPart(i)),
             attachedSubmodel: {
               id: item.id,
               name: item.name,
@@ -8167,6 +8377,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
               canonicalParts: item.canonicalParts,
             },
           });
+          flushReadyJoinHingePoses();
         };
         const emitArticulatedJointSteps = (joint, nextMod) => {
           const aj = joint.artJoin;
@@ -8247,7 +8458,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
               cue: 'none',
               stepHint: 'Slide sections together',
               defaultPartOffsets: modOffsets,
-              parts: nextMod.indices.map(i => parts[i]),
+              parts: nextMod.indices.map((i) => joinBuildPart(i)),
               attachedSubmodel: {
                 id: nextMod.id,
                 name: nextMod.name,
@@ -8258,6 +8469,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
                 canonicalParts: nextMod.canonicalParts,
               },
             });
+            flushReadyJoinHingePoses();
           }
 
           // Stage 4: Push the vertical Technic axle/rod through both sections & cross-axle pieces
@@ -8415,13 +8627,15 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
 
         // Stage 6: Any remaining finish/connector pieces after articulated joints are locked
         if (cleanFinishIndices.length > 0) {
-          const { steps: connectorSteps } = buildStepsForIndexList(
+          const { steps: connectorSteps, placed: afterFinish } = buildStepsForIndexList(
             cleanFinishIndices,
             'join_conn',
             joinedPlaced,
             adaptiveMaxSpread,
           );
+          for (const pi of afterFinish) joinedPlaced.add(pi);
           joinSteps.push(...connectorSteps);
+          flushReadyJoinHingePoses();
         }
       } else {
         const pendingAttach = [...mainAttachList];
@@ -8444,7 +8658,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
             side: 'top',
             corner: 'front_right',
             cue: 'none',
-            parts: item.indices.map(i => parts[i]),
+            parts: item.indices.map((i) => joinBuildPart(i)),
             attachedSubmodel: {
               id: item.id,
               name: item.name,
@@ -8455,6 +8669,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
               canonicalParts: item.canonicalParts,
             },
           });
+          flushReadyJoinHingePoses();
         };
 
         if (pendingAttach.length > 0) {
@@ -8479,6 +8694,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
             );
             for (const pi of afterBridge) joinedPlaced.add(pi);
             joinSteps.push(...bridgeSteps);
+            flushReadyJoinHingePoses();
             pendingJoin = [];
             continue;
           }
@@ -8486,13 +8702,15 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
         }
 
         if (pendingJoin.length > 0) {
-          const { steps: connectorSteps } = buildStepsForIndexList(
+          const { steps: connectorSteps, placed: afterConn } = buildStepsForIndexList(
             pendingJoin,
             'join_conn',
             joinedPlaced,
             adaptiveMaxSpread,
           );
+          for (const pi of afterConn) joinedPlaced.add(pi);
           joinSteps.push(...connectorSteps);
+          flushReadyJoinHingePoses();
         }
       }
 
@@ -8510,7 +8728,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
             side: 'top',
             corner: 'front_right',
             cue: 'none',
-            parts: item.indices.map(i => parts[i]),
+            parts: item.indices.map((i) => joinBuildPart(i)),
           });
         } else {
           joinSteps.push({
@@ -8519,7 +8737,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
             side: 'top',
             corner: 'front_right',
             cue: 'none',
-            parts: item.indices.map(i => parts[i]),
+            parts: item.indices.map((i) => joinBuildPart(i)),
             attachedSubmodel: {
               id: item.id,
               name: item.name,
@@ -8531,6 +8749,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
             },
           });
         }
+        flushReadyJoinHingePoses();
       };
 
       const minifigById = new Map(normalizedMinifigs.map(nm => [nm.id, nm]));
@@ -8591,7 +8810,9 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
             canonicalParts: cap.canonicalParts,
           },
         });
+        flushReadyJoinHingePoses();
       }
+      flushReadyJoinHingePoses(true);
 
       // Place exterior/freestanding minifigures (alongside any adjacent freestanding props) after closing removable caps!
       for (const mfId of scenePlan.exteriorMinifigIds) {
@@ -8675,7 +8896,79 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
     const indices = group.indices;
     const placed = new Set();
     const remaining = new Set(indices);
-    const { belowMap } = buildVerticalPrereqMap(boxes, adj, roles, claddingFlags, indices, subBoxes, smoothTopFlags);
+
+    // Detect oblique-tilted hinged assemblies & enforce physical hinge base -> top prerequisites
+    const localIdxToGlobal = indices;
+    const globalToLocalIdx = new Map();
+    for (let li = 0; li < indices.length; li++) globalToLocalIdx.set(indices[li], li);
+    const localOrigAdj = indices.map((gi) =>
+      adj[gi].filter((nb) => globalToLocalIdx.has(nb)).map((nb) => globalToLocalIdx.get(nb)),
+    );
+    const localHingeInputs = indices.map((gi, li) => {
+      const p = parts[gi];
+      return {
+        index: li,
+        partId: normId(p.p),
+        partName: resolvePart(p.p)?.name || '',
+        role: roles[gi],
+        x: p.x || 0,
+        y: p.y || 0,
+        z: p.z || 0,
+        m: p.m || R_ID,
+        box: boxes[gi],
+      };
+    });
+    const rawHingePlan = analyzeTiltedHingedAssemblies(localHingeInputs, localOrigAdj);
+    const hingeAssemblies = rawHingePlan.assemblies
+      .map((asm) => ({
+        ...asm,
+        globalPartIndices: asm.partIndices.map((li) => localIdxToGlobal[li]),
+        globalRestStopIndices: asm.restStopIndices.map((li) => localIdxToGlobal[li]),
+      }))
+      .filter((asm) => !asm.globalPartIndices.some((gi) => partToDup.has(gi)));
+    const hasHingeTilt = hingeAssemblies.length > 0;
+    const secParts = hasHingeTilt ? parts.slice() : parts;
+    const secBoxes = hasHingeTilt ? boxes.slice() : boxes;
+    const secSubBoxes = hasHingeTilt ? subBoxes.slice() : subBoxes;
+    const secAdj = (hasHingeTilt || rawHingePlan.allBasePrereqPairs.length > 0) ? adj.map((a) => a.slice()) : adj;
+    const secLayerY = hasHingeTilt ? layerY.slice() : layerY;
+    const secDescriptors = hasHingeTilt ? allPartDescriptors.slice() : allPartDescriptors;
+
+    if (hasHingeTilt) {
+      for (const asm of hingeAssemblies) {
+        for (const [li, xf] of asm.uprightTransforms.entries()) {
+          const gi = localIdxToGlobal[li];
+          const upPart = { ...parts[gi], x: xf.x, y: xf.y, z: xf.z, m: xf.m };
+          secParts[gi] = upPart;
+          secBoxes[gi] = computeWorldBox(upPart);
+          secSubBoxes[gi] = computeWorldSubBoxes(upPart);
+          secLayerY[gi] = computeBuildLayerY(upPart, secBoxes[gi]);
+          secDescriptors[gi] = { ...allPartDescriptors[gi], box: secBoxes[gi], layerY: secLayerY[gi] };
+        }
+      }
+      const localUpParts = indices.map((gi) => secParts[gi]);
+      const localUpBoxes = indices.map((gi) => secBoxes[gi]);
+      const localUpSubBoxes = indices.map((gi) => secSubBoxes[gi]);
+      const localUpRoles = indices.map((gi) => roles[gi]);
+      const localUpSideCaps = indices.map((gi) => canConnectSideways(secParts[gi], roles[gi]));
+      const localUpSmoothTop = indices.map((gi, li) => isSmoothStudlessTopPart(secParts[gi], localUpBoxes[li], roles[gi], localUpSideCaps[li]));
+      const rebuiltLocalAdj = buildSpatialAdjacency(localUpParts, localUpBoxes, localUpRoles, localUpSideCaps, localUpSubBoxes, localUpSmoothTop);
+      for (let li = 0; li < indices.length; li++) {
+        const gi = indices[li];
+        const externalNbs = secAdj[gi].filter((nb) => !globalToLocalIdx.has(nb));
+        secAdj[gi] = [...externalNbs, ...rebuiltLocalAdj[li].map((nli) => localIdxToGlobal[nli])];
+      }
+    }
+
+    const { belowMap } = buildVerticalPrereqMap(secBoxes, secAdj, roles, claddingFlags, indices, secSubBoxes, smoothTopFlags);
+    for (const [topLi, baseLi] of rawHingePlan.allBasePrereqPairs) {
+      const topGi = localIdxToGlobal[topLi];
+      const baseGi = localIdxToGlobal[baseLi];
+      if (!secAdj[topGi].includes(baseGi)) secAdj[topGi].push(baseGi);
+      if (!secAdj[baseGi].includes(topGi)) secAdj[baseGi].push(topGi);
+      if (!belowMap[topGi].includes(baseGi)) belowMap[topGi].push(baseGi);
+    }
+
     let curSteps = [];
 
     // Analyze support & overhead enclosure for minifigures belonging to this model section
@@ -8686,7 +8979,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
       const supportSet = new Set();
       const overheadSet = new Set();
       for (const j of indices) {
-        const b = boxes[j];
+        const b = secBoxes[j];
         const ovX = Math.min(wb.max[0] + 8, b.max[0]) - Math.max(wb.min[0] - 8, b.min[0]);
         const ovZ = Math.min(wb.max[2] + 8, b.max[2]) - Math.max(wb.min[2] - 8, b.min[2]);
         if (ovX > 2 && ovZ > 2 && b.max[1] <= wb.min[1] + 28 && b.max[1] >= wb.min[1] - 32) {
@@ -8699,8 +8992,8 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
         }
       }
       for (const mi of mfIdxSet) {
-        for (const nb of adj[mi]) {
-          if (indexSet.has(nb) && boxes[nb].max[1] <= wb.min[1] + 32) supportSet.add(nb);
+        for (const nb of secAdj[mi]) {
+          if (indexSet.has(nb) && secBoxes[nb].max[1] <= wb.min[1] + 32) supportSet.add(nb);
         }
       }
       return {
@@ -8781,35 +9074,74 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
       curSteps = [];
     };
 
-    const sectionBounds = computeBoundsFromBoxes(indices.map(i => boxes[i]));
-    const fastenerGuards = createHorizontalFastenerGuards(boxes, adj, roles, belowMap, indices);
+    const sectionBounds = computeBoundsFromBoxes(indices.map(i => secBoxes[i]));
+    const fastenerGuards = createHorizontalFastenerGuards(secBoxes, secAdj, roles, belowMap, indices);
     let builtBounds = null;
     const builtBoxes = [];
     let activeCam = { ...DEFAULT_STUDIO_CAMERA };
     let emittedInSection = 0;
 
+    const emittedHingePoses = new Set();
+    const flushReadyHingePoses = (forceAll = false) => {
+      if (!hasHingeTilt) return;
+      for (const asm of hingeAssemblies) {
+        if (emittedHingePoses.has(asm.id)) continue;
+        if (asm.globalPartIndices.some((gi) => !placed.has(gi))) continue;
+        if (!forceAll && asm.globalRestStopIndices.some((gi) => !placed.has(gi))) continue;
+        emittedHingePoses.add(asm.id);
+        const posedParts = asm.globalPartIndices.map((gi) => parts[gi]);
+        const ghostParts = asm.globalPartIndices.map((gi) => secParts[gi]);
+        for (const gi of asm.globalPartIndices) {
+          builtBounds = expandBoundsWithBox(builtBounds, boxes[gi]);
+          builtBoxes.push(boxes[gi]);
+        }
+        emittedInSection++;
+        globalStep++;
+        curSteps.push({
+          id: `ac${secIdx + 1}_hinge_${asm.id}_s${globalStep}`,
+          num: globalStep,
+          side: 'top',
+          corner: activeCam.corner,
+          az: activeCam.az,
+          el: 28,
+          cue: 'none',
+          isHingePoseStep: true,
+          parts: [],
+          hingePose: {
+            id: asm.id,
+            angleDeg: asm.angleDeg,
+            tangent: asm.tangent,
+            partIds: asm.globalPartIndices.map((gi) => parts[gi].id),
+            posedParts,
+            ghostParts,
+            indicators: asm.indicators,
+          },
+        });
+      }
+    };
+
     while (remaining.size > 0) {
       const isPrereqGrounded = placed.size > 0
-        ? createGroundedPrereqChecker(adj, belowMap, placed, remaining)
+        ? createGroundedPrereqChecker(secAdj, belowMap, placed, remaining)
         : null;
       let frontier;
       if (placed.size === 0) {
         const nonWheels = Array.from(remaining).filter(i => roles[i] !== 'wheel' && roles[i] !== 'pin' && !claddingFlags[i] && !isPartBlockedFromBelow(i, null));
         const pool = nonWheels.length > 0 ? nonWheels : Array.from(remaining);
-        pool.sort((a, b) => layerY[a] - layerY[b]);
-        const minY = layerY[pool[0]];
-        const lowBand = pool.filter(i => layerY[i] <= minY + 32);
+        pool.sort((a, b) => secLayerY[a] - secLayerY[b]);
+        const minY = secLayerY[pool[0]];
+        const lowBand = pool.filter(i => secLayerY[i] <= minY + 32);
         lowBand.sort((a, b) => {
-          const sa = (partToDup.has(a) ? -80 : 0) + (roles[a] === 'structural' || roles[a] === 'wheel_holder' ? 50 : 0) + adj[a].length * 6 - (layerY[a] - minY) * 0.8;
-          const sb = (partToDup.has(b) ? -80 : 0) + (roles[b] === 'structural' || roles[b] === 'wheel_holder' ? 50 : 0) + adj[b].length * 6 - (layerY[b] - minY) * 0.8;
+          const sa = (partToDup.has(a) ? -80 : 0) + (roles[a] === 'structural' || roles[a] === 'wheel_holder' ? 50 : 0) + secAdj[a].length * 6 - (secLayerY[a] - minY) * 0.8;
+          const sb = (partToDup.has(b) ? -80 : 0) + (roles[b] === 'structural' || roles[b] === 'wheel_holder' ? 50 : 0) + secAdj[b].length * 6 - (secLayerY[b] - minY) * 0.8;
           return sb - sa;
         });
         frontier = lowBand;
       } else {
-        const rawFrontier = Array.from(remaining).filter(i => adj[i].some(nb => placed.has(nb)));
+        const rawFrontier = Array.from(remaining).filter(i => secAdj[i].some(nb => placed.has(nb)));
         const emptyStepSet = new Set();
         const baseUnblocked = rawFrontier.filter(i =>
-          !isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, placed)
+          !isCladdingWaitingForUpperSupport(i, claddingFlags, secBoxes, secAdj, placed)
           && !isPartBlockedFromBelow(i, isPrereqGrounded)
         );
         const fastenerUnblocked = baseUnblocked.filter(i =>
@@ -8820,21 +9152,21 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
         } else if (baseUnblocked.length > 0) {
           frontier = baseUnblocked;
         } else {
-          const claddingReady = rawFrontier.filter(i => !isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, placed));
+          const claddingReady = rawFrontier.filter(i => !isCladdingWaitingForUpperSupport(i, claddingFlags, secBoxes, secAdj, placed));
           frontier = claddingReady.length > 0 ? claddingReady : rawFrontier;
         }
         if (frontier.length === 0) {
-          frontier = Array.from(remaining).sort((a, b) => layerY[a] - layerY[b]);
+          frontier = Array.from(remaining).sort((a, b) => secLayerY[a] - secLayerY[b]);
         }
-        const uprightInFrontier = frontier.filter(i => !isStrictDeckUndersidePart(i, boxes, adj, placed));
+        const uprightInFrontier = frontier.filter(i => !isStrictDeckUndersidePart(i, secBoxes, secAdj, placed));
         if (uprightInFrontier.length > 0 && uprightInFrontier.length < frontier.length) {
           let minUnderY = Infinity;
           for (const i of frontier) {
-            if (isStrictDeckUndersidePart(i, boxes, adj, placed) && layerY[i] < minUnderY) {
-              minUnderY = layerY[i];
+            if (isStrictDeckUndersidePart(i, secBoxes, secAdj, placed) && secLayerY[i] < minUnderY) {
+              minUnderY = secLayerY[i];
             }
           }
-          const uprightNearBand = uprightInFrontier.filter(i => layerY[i] <= minUnderY + 32);
+          const uprightNearBand = uprightInFrontier.filter(i => secLayerY[i] <= minUnderY + 32);
           if (uprightNearBand.length > 0) {
             frontier = uprightNearBand;
           }
@@ -8842,14 +9174,14 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
         const skuCountsInBand = new Map();
         const avoidableOverhangSet = new Set();
         for (const idx of frontier) {
-          const sku = allPartDescriptors[idx].sku;
+          const sku = secDescriptors[idx].sku;
           skuCountsInBand.set(sku, (skuCountsInBand.get(sku) || 0) + 1);
-          if (hasAvoidableOverhang(idx, boxes, adj, placed, remaining, roles, claddingFlags)) {
+          if (hasAvoidableOverhang(idx, secBoxes, secAdj, placed, remaining, roles, claddingFlags)) {
             avoidableOverhangSet.add(idx);
           }
         }
         const refBounds = builtBounds || sectionBounds;
-        frontier.sort((a, b) => compareFrontierCandidates(allPartDescriptors[a], allPartDescriptors[b], activeCam.corner, refBounds, skuCountsInBand, avoidableOverhangSet));
+        frontier.sort((a, b) => compareFrontierCandidates(secDescriptors[a], secDescriptors[b], activeCam.corner, refBounds, skuCountsInBand, avoidableOverhangSet));
       }
 
       const anchor = frontier[0];
@@ -8863,7 +9195,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
           const unplacedInSec = instIndices.filter(pi => remaining.has(pi));
           if (unplacedInSec.length === 0) return;
           const isAnchorInst = instIdx === dupInfo.instIdx;
-          const touchesPlaced = placed.size > 0 && unplacedInSec.some(pi => adj[pi].some(nb => placed.has(nb)));
+          const touchesPlaced = placed.size > 0 && unplacedInSec.some(pi => secAdj[pi].some(nb => placed.has(nb)));
           const underClear = !isInstBlockedFromBelow(instIndices, isPrereqGrounded);
           if (isAnchorInst || (touchesPlaced && underClear)) readyInsts.push(unplacedInSec);
         });
@@ -8888,7 +9220,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
         }
 
         for (const pi of attachIndices) { remaining.delete(pi); placed.add(pi); }
-        const attachBoxes = attachIndices.map(i => boxes[i]);
+        const attachBoxes = attachIndices.map(i => secBoxes[i]);
         const camChoice = chooseStickyStepCamera(attachBoxes, builtBoxes, builtBounds, activeCam);
         activeCam = { side: camChoice.side, corner: camChoice.corner, az: camChoice.az, el: camChoice.el };
         for (const b of attachBoxes) {
@@ -8905,7 +9237,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
           az: camChoice.az,
           el: camChoice.el,
           cue: emittedInSection === 1 ? 'none' : camChoice.cue,
-          parts: attachIndices.map(i => parts[i]),
+          parts: attachIndices.map(i => secParts[i]),
           attachedSubmodel: {
             id: g.id,
             name: g.name,
@@ -8914,39 +9246,40 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
             canonicalParts: g.canonicalParts,
           },
         });
+        flushReadyHingePoses();
         flushReadyEnclosedMinifigs();
         continue;
       }
 
       // NORMAL STEP (non-duplicate-submodel bricks)
       const placedBeforeStep = new Set(placed);
-      const anchorY = layerY[anchor];
-      const anchorConnectedToPrev = placedBeforeStep.size > 0 && adj[anchor].some(nb => placedBeforeStep.has(nb));
-      const anchorIsStrictUnderside = placedBeforeStep.size > 0 && isStrictDeckUndersidePart(anchor, boxes, adj, placedBeforeStep);
-      const anchorHasAvoidableOverhang = placedBeforeStep.size > 0 && hasAvoidableOverhang(anchor, boxes, adj, placedBeforeStep, remaining, roles, claddingFlags);
+      const anchorY = secLayerY[anchor];
+      const anchorConnectedToPrev = placedBeforeStep.size > 0 && secAdj[anchor].some(nb => placedBeforeStep.has(nb));
+      const anchorIsStrictUnderside = placedBeforeStep.size > 0 && isStrictDeckUndersidePart(anchor, secBoxes, secAdj, placedBeforeStep);
+      const anchorHasAvoidableOverhang = placedBeforeStep.size > 0 && hasAvoidableOverhang(anchor, secBoxes, secAdj, placedBeforeStep, remaining, roles, claddingFlags);
       const coPlanarFloorPartners = placedBeforeStep.size === 0
-        ? findCoPlanarFloorFoundation(anchor, remaining, boxes, adj, roles, claddingFlags, belowMap)
+        ? findCoPlanarFloorFoundation(anchor, remaining, secBoxes, secAdj, roles, claddingFlags, belowMap)
         : undefined;
       const stepIndices = selectDynamicStepIndices({
         anchor,
-        parts: allPartDescriptors,
+        parts: secDescriptors,
         getEligibleCandidates: (placedInStep) => {
           const supportSet = placedBeforeStep.size > 0 ? placedBeforeStep : placedInStep;
           return Array.from(remaining).filter(i => {
             if (placedInStep.has(i)) return false;
             if (partToDup.has(i)) return false;
-            if (isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, supportSet)) return false;
-            if (Math.abs(layerY[i] - anchorY) > 12) return false;
+            if (isCladdingWaitingForUpperSupport(i, claddingFlags, secBoxes, secAdj, supportSet)) return false;
+            if (Math.abs(secLayerY[i] - anchorY) > 12) return false;
             if (fastenerGuards.isBlocked(i, placedBeforeStep, placedInStep, remaining)) return false;
             if (placedBeforeStep.size > 0) {
-              if (isStrictDeckUndersidePart(i, boxes, adj, placedBeforeStep) !== anchorIsStrictUnderside) return false;
-              if (!anchorHasAvoidableOverhang && hasAvoidableOverhang(i, boxes, adj, placedBeforeStep, remaining, roles, claddingFlags)) return false;
+              if (isStrictDeckUndersidePart(i, secBoxes, secAdj, placedBeforeStep) !== anchorIsStrictUnderside) return false;
+              if (!anchorHasAvoidableOverhang && hasAvoidableOverhang(i, secBoxes, secAdj, placedBeforeStep, remaining, roles, claddingFlags)) return false;
               if (belowMap[i].some(u => !placedBeforeStep.has(u) && isPrereqGrounded(u))) return false;
             } else {
               if (belowMap[i].length > 0) return false;
               if (coPlanarFloorPartners?.has(i)) return true;
             }
-            return isCandidateConnectedForStep(i, anchorConnectedToPrev, adj, placedBeforeStep, placedInStep);
+            return isCandidateConnectedForStep(i, anchorConnectedToPrev, secAdj, placedBeforeStep, placedInStep);
           });
         },
         modelBounds: sectionBounds,
@@ -8965,7 +9298,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
       // If this step places an overhead roof brick over an enclosed minifig, pose & place that minifig right BEFORE!
       flushReadyEnclosedMinifigs(stepIndices);
 
-      const stepBoxes = stepIndices.map(i => boxes[i]);
+      const stepBoxes = stepIndices.map(i => secBoxes[i]);
       const camChoice = chooseStickyStepCamera(stepBoxes, builtBoxes, builtBounds, activeCam);
       activeCam = { side: camChoice.side, corner: camChoice.corner, az: camChoice.az, el: camChoice.el };
       for (const b of stepBoxes) {
@@ -8983,12 +9316,16 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
         az: camChoice.az,
         el: camChoice.el,
         cue: emittedInSection === 1 ? 'none' : camChoice.cue,
-        parts: stepIndices.map(i => parts[i]),
+        parts: stepIndices.map(i => secParts[i]),
       });
+
+      flushReadyHingePoses();
 
       // If this step finished the floor/seat under an enclosed minifig, pose & place it right now!
       flushReadyEnclosedMinifigs();
     }
+
+    flushReadyHingePoses(true);
 
     // Place any remaining open-air / exterior minifigures at the end of this build section
     while (unplacedMinifigs.length > 0) {
@@ -9317,9 +9654,20 @@ function resolveStepPageProgressBar(page, totalStepsOverride = null) {
 }
 function getMainSteps(model) { return model ? model.chapters.filter(ch => ch.kind !== 'submodel').flatMap(ch => ch.steps.map(step => ({ ch, step }))) : []; }
 function getAllParts(model) {
-  return getMainSteps(model)
-    .filter(({ step }) => !step.isMinifigPoseStep && !(step.isMinifigBuildStep && step.placedInMain))
+  const mainSteps = getMainSteps(model);
+  const posedById = new Map();
+  for (const { step } of mainSteps) {
+    if (step.isHingePoseStep && Array.isArray(step.hingePose?.posedParts)) {
+      for (const pp of step.hingePose.posedParts) {
+        posedById.set(pp.id, pp);
+      }
+    }
+  }
+  const list = mainSteps
+    .filter(({ step }) => !step.isMinifigPoseStep && !step.isHingePoseStep && !(step.isMinifigBuildStep && step.placedInMain))
     .flatMap(x => x.step.parts);
+  if (posedById.size === 0) return list;
+  return list.map((p) => posedById.get(p.id) || p);
 }
 function getEffectiveMinifigStyle(step) {
   const ovStyle = step ? state.overrides[step.id]?.minifigStyle : null;
@@ -9362,6 +9710,28 @@ function renumberContinuousSteps(model) {
     state.layoutGroups = migrateLegacyLayoutGroups(state.layoutGroups, refs);
   }
 }
+function getRenderNewPartsForStep(step) {
+  if (step?.isHingePoseStep && Array.isArray(step.hingePose?.posedParts)) {
+    return step.hingePose.posedParts;
+  }
+  return step?.parts || [];
+}
+function getPoseOverlayOptsForStep(step) {
+  if (step?.isMinifigPoseStep && step.minifigPrep) {
+    return {
+      minifigIndicators: step.minifigPrep.indicators || [],
+      ghostParts: step.minifigPrep.ghostParts || [],
+      highlightOnlyPartIds: new Set(step.minifigPrep.rotatedPartIds || []),
+    };
+  }
+  if (step?.isHingePoseStep && step.hingePose) {
+    return {
+      minifigIndicators: step.hingePose.indicators || [],
+      ghostParts: step.hingePose.ghostParts || [],
+    };
+  }
+  return null;
+}
 function getPreviousPartsForStep(model, ch, step) {
   const prev = [];
   if (step.isStandaloneFigure || step.isMinifigPoseStep) return prev;
@@ -9374,8 +9744,22 @@ function getPreviousPartsForStep(model, ch, step) {
       if ((c.sectionId || c.id) !== sec) continue;
     }
     for (const s of c.steps) {
-      if (s.id === step.id) return prev;
+      if (s.id === step.id) {
+        if (step.isHingePoseStep && Array.isArray(step.hingePose?.partIds) && step.hingePose.partIds.length > 0) {
+          const posedIdSet = new Set(step.hingePose.partIds);
+          return prev.filter((p) => !posedIdSet.has(p.id));
+        }
+        return prev;
+      }
       if (s.isMinifigPoseStep || s.isStandaloneFigure) continue;
+      if (s.isHingePoseStep && Array.isArray(s.hingePose?.posedParts)) {
+        const posedById = new Map(s.hingePose.posedParts.map((p) => [p.id, p]));
+        for (let i = 0; i < prev.length; i++) {
+          const repl = posedById.get(prev[i].id);
+          if (repl) prev[i] = repl;
+        }
+        continue;
+      }
       prev.push(...s.parts);
     }
     if (c.id === ch.id) break;
@@ -9770,7 +10154,7 @@ function rebuildPages() {
     const stepMetrics = ch.steps.map((step) => {
       const ov = state.overrides[step.id] || {};
       const effectivePartOffsets = getEffectivePartOffsets(step, ov);
-      const stepParts = step.parts || [];
+      const stepParts = getRenderNewPartsForStep(step);
       const canonicalNewBoxes = stepParts.map(getCachedPartBox);
       const stepBoxesForProj = [];
       const shiftedNewBoxes = canonicalNewBoxes.map((b, idx) => {
@@ -9807,12 +10191,12 @@ function rebuildPages() {
       const modelScale = ov.modelScale || 1.0;
 
       let pliUniqueCount = 0;
-      if (!isOfficialMfStyle) {
+      if (!isOfficialMfStyle && !step.isHingePoseStep) {
         if (step.attachedSubmodel || step.attachedMinifig || step.minifigPrep) {
           pliUniqueCount = 1;
         } else {
           const skuSet = new Set();
-          for (const p of stepParts) {
+          for (const p of step.parts || []) {
             skuSet.add(`${p.p}:${p.c}`);
             if (skuSet.size >= 7) break;
           }
@@ -10790,8 +11174,9 @@ function getCachedStaticPageSnap(kind, id, parts, az, el, w, h, opts) {
 function getCachedLiveStepSnapshot(ch, step, prev, cam, ov, rw, rh, modelScale, opts) {
   const sigMap = getStepPartSignaturesForModel();
   const sig = sigMap?.get(step.id);
+  const renderNewParts = getRenderNewPartsForStep(step);
   const prevSignature = sig ? sig.prevSignature : computeStepPreviewPartSignature(prev);
-  const stepSignature = sig ? sig.stepSignature : computeStepPreviewPartSignature(step.parts);
+  const stepSignature = sig ? sig.stepSignature : computeStepPreviewPartSignature(renderNewParts);
   const lightingMode = opts?.stepLighting ?? (opts?.highQualityStepRender ? 'studio' : 'standard');
   const rt = opts?.readableTarget;
   const po = opts?.pliObstacle;
@@ -10832,12 +11217,12 @@ function getCachedLiveStepSnapshot(ch, step, prev, cam, ov, rw, rh, modelScale, 
     panY: opts?.panY,
     partOffsets: opts?.partOffsets,
     selectedPartIds: opts?.selectedPartIds,
-    minifigPrepId: step.minifigPrep?.id || null,
-    minifigIndicatorCount: step.minifigPrep?.indicators?.length || 0,
+    minifigPrepId: step.minifigPrep?.id || step.hingePose?.id || null,
+    minifigIndicatorCount: (step.minifigPrep?.indicators?.length || 0) + (step.hingePose?.indicators?.length || 0),
   });
   const cached = pageRenderCache.get(cacheKey);
   if (isRenderEntryUsable(cached)) return cached;
-  const snap = renderSnapshot(prev, step.parts, cam.az, cam.el, rw, rh, modelScale, opts);
+  const snap = renderSnapshot(prev, renderNewParts, cam.az, cam.el, rw, rh, modelScale, opts);
   pageRenderCache.set(cacheKey, snap);
   return snap;
 }
@@ -11061,7 +11446,7 @@ function collectPrewarmTasksForPage(targetPage, dims, typo, dpr) {
         ? Math.max(4, Math.round(st.slotPad * 0.72))
         : st.slotPad;
       const poseLegendPx = (mfPrep && mfPrep.indicators && mfPrep.indicators.length > 0) ? Math.round(typo.pt(22)) : 0;
-      const estHeaderPx = useOverlayPli
+      const estHeaderPx = (useOverlayPli || step.isHingePoseStep)
         ? 0
         : Math.round(((slotRect.isCompact || estSlotH < typo.pt(250) || estSlotW < typo.pt(230)) ? st.pliThumbTight : st.pliThumb) + typo.pt(18));
       const estVisualW = Math.max(60, estSlotW - slotPadPx * 2);
@@ -11098,11 +11483,7 @@ function collectPrewarmTasksForPage(targetPage, dims, typo, dpr) {
           readableTarget: stepMeta?.readableTarget || null,
           pliObstacle: useOverlayPli ? stepMeta.pliObstacle : null,
           selectedPartIds: null,
-          ...(mfPrep ? {
-            minifigIndicators: mfPrep.indicators || [],
-            ghostParts: mfPrep.ghostParts || [],
-            highlightOnlyPartIds: new Set(mfPrep.rotatedPartIds || []),
-          } : {}),
+          ...(getPoseOverlayOptsForStep(step) || {}),
         };
         getCachedLiveStepSnapshot(ch, step, prev, cam, ov, stepRenderDims.width, stepRenderDims.height, modelScale, opts);
       });
@@ -12156,11 +12537,7 @@ function renderAll(renderOpts = {}) {
         readableTarget: stepMeta?.readableTarget || null,
         pliObstacle: useOverlayPli ? stepMeta.pliObstacle : null,
         selectedPartIds: state.mode === 'parts' && state.selectedStepId === step.id ? state.selectedPartIds : null,
-        ...(mfPrep ? {
-          minifigIndicators: mfPrep.indicators || [],
-          ghostParts: mfPrep.ghostParts || [],
-          highlightOnlyPartIds: new Set(mfPrep.rotatedPartIds || []),
-        } : {}),
+        ...(getPoseOverlayOptsForStep(step) || {}),
       };
       const resScale = getPreviewResolutionScale();
       const slotPadPx = isOfficialMfStyle
@@ -12169,7 +12546,7 @@ function renderAll(renderOpts = {}) {
             ? Math.max(4, Math.round(st.slotPad * 0.72))
             : st.slotPad);
       const poseLegendPx = (mfPrep && mfPrep.indicators && mfPrep.indicators.length > 0) ? Math.round(typo.pt(22)) : 0;
-      const estHeaderPx = (isOfficialMfStyle || useOverlayPli)
+      const estHeaderPx = (isOfficialMfStyle || useOverlayPli || step.isHingePoseStep)
         ? 0
         : Math.round(((slotRect.isCompact || estSlotH < typo.pt(250) || estSlotW < typo.pt(230)) ? st.pliThumbTight : st.pliThumb) + typo.pt(18));
       const estVisualW = Math.max(60, estSlotW - slotPadPx * 2);
@@ -12202,7 +12579,7 @@ function renderAll(renderOpts = {}) {
         const rw = stepRenderDims.width;
         const rh = stepRenderDims.height;
         snap = showLive3D
-          ? buildLiveStepMeshOnly(prev, step.parts, rw, rh, opts)
+          ? buildLiveStepMeshOnly(prev, getRenderNewPartsForStep(step), rw, rh, opts)
           : getCachedLiveStepSnapshot(ch, step, prev, cam, ov, rw, rh, modelScale, opts);
       }
 
@@ -12611,6 +12988,7 @@ function renderAll(renderOpts = {}) {
                   );
                   const hasHingeArticulation = Boolean(
                     !isOfficialMfStyle &&
+                    !step.isHingePoseStep &&
                     (Math.abs(ov.hingeAngleDeg || 0) >= 10 ||
                       (step.parts || []).some((p) => p.m && detectNonOrthogonalArticulationAngle(p.m) !== null)),
                   );
@@ -15222,7 +15600,7 @@ function renderApplyAngleModal(scrollToSource = false) {
       if (!url) {
         const prev = getPreviousPartsForStep(state.model, ch, step);
         const c = getStepCamera(step);
-        const snap = renderSnapshot(prev, step.parts, c.az, c.el, 112, 112, 1.0, {
+        const snap = renderSnapshot(prev, getRenderNewPartsForStep(step), c.az, c.el, 112, 112, 1.0, {
           highlightNew: state.highlightNew,
           highlightColor: state.highlightColor,
           fadePrev: state.fadePrev,
@@ -15231,6 +15609,7 @@ function renderApplyAngleModal(scrollToSource = false) {
           showArrows: false,
           accent: theme.accent,
           ov: state.overrides[step.id] || {},
+          ...(getPoseOverlayOptsForStep(step) || {}),
         });
         url = snap.url;
         applyAngleState.thumbCache.set(step.id, url);
@@ -16519,13 +16898,12 @@ function renderOverviewThumbTask(task) {
         }
       } else {
         prev = getPreviousPartsForStep(state.model, ch, step);
-        const mfPrep = step.isMinifigPoseStep ? step.minifigPrep : null;
-        if (mfPrep) {
+        next = getRenderNewPartsForStep(step);
+        const poseOverlay = getPoseOverlayOptsForStep(step);
+        if (poseOverlay) {
           snapOpts = {
             ...snapOpts,
-            minifigIndicators: mfPrep.indicators || [],
-            ghostParts: mfPrep.ghostParts || [],
-            highlightOnlyPartIds: new Set(mfPrep.rotatedPartIds || []),
+            ...poseOverlay,
           };
         }
       }
@@ -17543,6 +17921,7 @@ function renderOverviewModal(opts = {}) {
       else if (step.attachedSubmodel) metaParts.push(`Attach ${step.attachedSubmodel.name || 'Submodel'}`);
       else if (step.attachedMinifig) metaParts.push(`Place ${step.attachedMinifig.name || 'Minifigure'}`);
       else if (step.isMinifigPoseStep) metaParts.push('Pose');
+      else if (step.isHingePoseStep) metaParts.push('Angle');
       const stepMeta = metaParts.join(' · ');
 
       const stepRow = document.createElement('div');
@@ -17557,7 +17936,7 @@ function renderOverviewModal(opts = {}) {
       const sigInfo = stepSigs.get(step.id) || {
         prevCount: 0,
         prevSignature: '0:0',
-        stepSignature: computeStepPreviewPartSignature(step.parts),
+        stepSignature: computeStepPreviewPartSignature(getRenderNewPartsForStep(step)),
       };
       const cacheKey = buildStepPreviewCacheKey({
         epoch: thumbEpoch,
@@ -17575,7 +17954,7 @@ function renderOverviewModal(opts = {}) {
         accent: pageTheme.accent,
         minifigStyle: mfStyle,
         seqSlice: slot.minifigSeqSlice ? { start: slot.minifigSeqSlice.start, end: slot.minifigSeqSlice.end } : null,
-        isMinifigPoseStep: Boolean(step.isMinifigPoseStep),
+        isMinifigPoseStep: Boolean(step.isMinifigPoseStep || step.isHingePoseStep),
         width: thumbW,
         height: thumbH,
       });
@@ -20708,7 +21087,7 @@ function computeModelDiagnostics() {
   const allSteps = getMainSteps(state.model);
 
   for (const { step } of allSteps) {
-    if (step.isMinifigPoseStep || (step.isMinifigBuildStep && step.placedInMain)) continue;
+    if (step.isMinifigPoseStep || step.isHingePoseStep || (step.isMinifigBuildStep && step.placedInMain)) continue;
     for (const p of step.parts) {
       const leaves = p.children && p.children.length > 0 ? p.children : [p];
       // 1. Check for missing 3D piece shapes
@@ -23548,7 +23927,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
           mode: 'pdf',
           gpuMaxDim: state.highQualityStepRender ? getCoverHeroGpuMaxDim() : snapshotEngine.maxDim,
         });
-        const snap = renderSnapshot(prev, step.parts, cam.az, cam.el, pdfStepDims.width, pdfStepDims.height, modelScale, {
+        const snap = renderSnapshot(prev, getRenderNewPartsForStep(step), cam.az, cam.el, pdfStepDims.width, pdfStepDims.height, modelScale, {
           highlightNew: state.highlightNew, highlightColor: state.highlightColor,
           highlightLineWeight: state.highlightLineWeight,
           fadePrev: state.fadePrev, fadeOpacity: state.fadeOpacity,
@@ -23560,11 +23939,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
           showArrows: true, arrowColor: state.arrowColor, arrowStyle: state.arrowStyle, arrowOutlines: state.arrowOutlines, arrowLighting: state.arrowLighting, accent: theme.accent, ov, partOffsets: effectivePartOffsets,
           readableTarget: stepMeta?.readableTarget || null,
           pliObstacle: useOverlayPli ? stepMeta.pliObstacle : null,
-          ...(mfPrep ? {
-            minifigIndicators: mfPrep.indicators || [],
-            ghostParts: mfPrep.ghostParts || [],
-            highlightOnlyPartIds: new Set(mfPrep.rotatedPartIds || []),
-          } : {}),
+          ...(getPoseOverlayOptsForStep(step) || {}),
         });
         renderedStepSnap = snap;
         const stepImg = await resolveRenderDrawable(snap);
@@ -27527,18 +27902,21 @@ async function buildInteractiveHtmlArtifact(mode: 'export' | 'preview' = 'export
           const autoOffsets = (state.autoPlacementArrows !== false && step.autoPartOffsets)
             ? (filterAutoPartOffsets(step.autoPartOffsets, shouldSkipColorCamoOffsets(state)) || undefined)
             : undefined;
-          const animatedOffsetMap = computeAnimatedStepOffsets({
-            stepParts: (step.parts || []).map(toAnimatedPartInput),
-            prevParts: prev.map(toAnimatedPartInput),
-            explicitOffsets,
-            autoOffsets,
-          });
+          const stepPartsForScene = getRenderNewPartsForStep(step);
+          const animatedOffsetMap = step.isHingePoseStep
+            ? new Map()
+            : computeAnimatedStepOffsets({
+                stepParts: stepPartsForScene.map(toAnimatedPartInput),
+                prevParts: prev.map(toAnimatedPartInput),
+                explicitOffsets,
+                autoOffsets,
+              });
 
           const newPartIdx = [];
           const newPartOffsets = [];
-          for (const p of step.parts || []) {
+          for (const p of stepPartsForScene) {
             const leafIndices = registerPartLeaves(p);
-            const offVec = animatedOffsetMap.get(p.id) || [0, 32, 0];
+            const offVec = step.isHingePoseStep ? [0, 0, 0] : (animatedOffsetMap.get(p.id) || [0, 32, 0]);
             for (const li of leafIndices) {
               newPartIdx.push(li);
               newPartOffsets.push(offVec);

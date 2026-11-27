@@ -699,6 +699,7 @@ function analyzeContacts(
 
       // Any ring, bush, half-bush, gear, or wheel threaded around a slender protruding
       // horizontal rod/axle (along X or Z) MUST slide horizontally along that axle axis.
+      let matchedHorizRod = false;
       for (const hAxis of [0, 2] as const) {
         const pB = hAxis === 0 ? 2 : 0;
         const ovArr = [ovX, ovY, ovZ];
@@ -721,8 +722,42 @@ function analyzeContacts(
           horizontalCoaxial = true;
           horizontalCoaxialAxis = hAxis;
           coaxialHostIds.add(ref.id);
+          matchedHorizRod = true;
           break;
         }
+      }
+      if (matchedHorizRod) continue;
+
+      // Open-top / open-bottom vertical interlocking snaps (e.g. Hinge Brick Top 3938/6134
+      // snapping straight down into Hinge Brick Base 3937's open top U-slot):
+      // the part sits coaxially inside the host's XZ footprint (never hanging off one side)
+      // while its top rises to/above the host's top rim, so it physically inserts vertically
+      // from above (+Y), never sideways!
+      const isTopEntryInterlock =
+        coaxialXZ &&
+        !hangsOffOneSide &&
+        b.max[1] >= rb.max[1] - 1.5 &&
+        b.min[1] >= rb.min[1] + 2.0 &&
+        (!part.localUp || part.localUp[1] >= 0.7);
+      if (isTopEntryInterlock) {
+        supportedFromBelow = true;
+        verticalCoaxial = true;
+        verticalCoaxialBotBlocked = true;
+        coaxialHostIds.add(ref.id);
+        continue;
+      }
+      const isBottomEntryInterlock =
+        coaxialXZ &&
+        !hangsOffOneSide &&
+        b.min[1] <= rb.min[1] + 1.5 &&
+        b.max[1] <= rb.max[1] - 2.0 &&
+        Boolean(part.localUp && part.localUp[1] <= -0.7);
+      if (isBottomEntryInterlock) {
+        supportedFromAbove = true;
+        verticalCoaxial = true;
+        verticalCoaxialTopBlocked = true;
+        coaxialHostIds.add(ref.id);
+        continue;
       }
     }
 

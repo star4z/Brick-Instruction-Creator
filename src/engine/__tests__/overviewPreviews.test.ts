@@ -162,6 +162,35 @@ describe('overviewPreviews helpers', () => {
     expect(splitSigs.get('p_s2')?.prevCount).toBe(1);
   });
 
+  it('tracks isHingePoseStep posed transforms in step and downstream signatures without double-counting prevCount', () => {
+    const sigs = computeOverviewStepSignatures([
+      {
+        id: 'ch_main',
+        kind: 'main',
+        sectionId: 'sec_h',
+        steps: [
+          { id: 's1', parts: [{ id: 'h1', p: '3938', c: 0, x: 0, y: 133, z: -305 }] },
+          { id: 's2', parts: [{ id: 'r1', p: '11477', c: 71, x: 0, y: 217, z: -272 }] },
+          {
+            id: 's3_tilt',
+            isHingePoseStep: true,
+            parts: [],
+            hingePose: {
+              posedParts: [{ id: 'h1', p: '3938', c: 0, x: 0, y: 132.9, z: -304 }],
+            },
+          },
+          { id: 's4', parts: [{ id: 'f1', p: '3024', c: 4, x: 0, y: 225, z: -200 }] },
+        ],
+      },
+    ]);
+
+    expect(sigs.get('s3_tilt')?.prevCount).toBe(2);
+    // Downstream step sees updated prevSignature reflecting tilted pose, without adding duplicate part count
+    expect(sigs.get('s4')?.prevCount).toBe(2);
+    expect(sigs.get('s4')?.prevSignature).not.toBe(sigs.get('s3_tilt')?.prevSignature);
+    expect(sigs.get('s3_tilt')?.stepSignature).not.toBe('0:0');
+  });
+
   it('invalidates step preview cache keys when camera, offsets, display options, or sequential slice change', () => {
     const base = {
       epoch: 1,

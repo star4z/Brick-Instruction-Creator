@@ -1761,6 +1761,40 @@ describe('placementArrows — LEGO-style automatic placement arrows & offsets', 
     expect(res.arrows).toHaveLength(0);
     expect(res.requiredMag).toBe(0);
   });
+
+  it('inserts an upright open-top hinge top plate (3938) straight down from the top (+Y) into its hinge base (3937), never sideways', () => {
+    // Reproduces IMG_0472: 3937 Hinge Brick 1x2 Base occupies Y=[109..133], and upright 3938
+    // Hinge Brick 1x2 Top Plate seats coaxially inside its open top U-slot at Y=[118..137]
+    // (15 LDU vertical overlap while rising above the base top rim). It must snap straight
+    // down from above (+Y), never slide sideways along the hinge pin!
+    const hingeBase: PlacementPartInput = {
+      ...makePart('hinge_base_3937', 20, 109, -305.5, 40, 24, 20, BLACK),
+      localUp: [0, 1, 0],
+    };
+    const hingeTop: PlacementPartInput = {
+      ...makePart('hinge_top_3938', 20, 118, -305.5, 40, 19, 20, BLACK),
+      localUp: [0, 1, 0],
+    };
+
+    const res = computeAutoPlacementOffsetsForSequence([
+      {
+        id: 's1',
+        camera: { az: 38, el: 28, side: 'top' },
+        parts: [hingeBase],
+      },
+      {
+        id: 's2',
+        camera: { az: 38, el: 28, side: 'top' },
+        parts: [hingeTop],
+      },
+    ]);
+
+    const off = res.get('s2')?.['hinge_top_3938'];
+    expect(off).toBeDefined();
+    expect(off!.x).toBe(0);
+    expect(off!.z).toBe(0);
+    expect(off!.y).toBeGreaterThan(0);
+  });
 });
 
 describe('computeAnimatedStepOffsets', () => {

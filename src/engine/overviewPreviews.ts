@@ -65,6 +65,8 @@ export interface PreviewChapterLike {
     parts?: ReadonlyArray<PreviewPartLike>;
     isStandaloneFigure?: boolean;
     isMinifigPoseStep?: boolean;
+    isHingePoseStep?: boolean;
+    hingePose?: { posedParts?: ReadonlyArray<PreviewPartLike> } | null;
   }>;
 }
 
@@ -94,7 +96,10 @@ export function computeOverviewStepSignatures(
       : `main:${ch.sectionId || ch.id}`;
     const running = sectionState.get(sec) || { count: 0, hash: 2166136261 };
     for (const step of ch.steps) {
-      const stepSig = computeStepPreviewPartSignature(step.parts);
+      const sigParts = (step.isHingePoseStep && step.hingePose?.posedParts)
+        ? step.hingePose.posedParts
+        : step.parts;
+      const stepSig = computeStepPreviewPartSignature(sigParts);
       if (step.isStandaloneFigure || step.isMinifigPoseStep) {
         out.set(step.id, { prevCount: 0, prevSignature: '0:0', stepSignature: stepSig });
       } else {
@@ -103,7 +108,9 @@ export function computeOverviewStepSignatures(
           prevSignature: `${running.count}:${running.hash.toString(36)}`,
           stepSignature: stepSig,
         });
-        running.count += step.parts?.length || 0;
+        if (!step.isHingePoseStep) {
+          running.count += step.parts?.length || 0;
+        }
         running.hash = hashString32(running.hash, `${step.id}:${stepSig}`);
       }
     }
