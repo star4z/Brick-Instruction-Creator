@@ -13,7 +13,7 @@ An opinionated yet fully customizable client-side TypeScript web application tha
   2. **Global Design Tokens**: Page size/orientation, `auto`/`1-up`–`4-up` multi-step layouts, solid/gradient/blueprint/image backgrounds, typography, highlight outlines for new pieces, fade/desaturation for unmodified pieces, placement arrows, Cover/Back pages, and sortable Bill of Materials (BOM).
   3. **Per-Step Overrides**: Semantic camera overrides, live 3D orbit angle locking, Pin Page Breaks, and piece presentation poses.
 - **Exports & Persistence**: High-resolution streaming **PDF 1.4** (with bookmarks, metadata, clickable links & Ctrl+F searchable text), self-contained offline **Interactive 3D HTML Viewer**, **BrickLink Wanted XML / Rebrickable CSV** parts lists, portable `.biw` project and `.biwtheme` custom theme save/load, browser **IndexedDB** autosave, and local LDraw `complete.zip`/`.dat` library caching.
-- **Neocities Static Ready**: Relative asset paths (`base: './'`), only Neocities-allowed static extensions, and chunks strictly under 5 MB per file (verified automatically by `npm run check:neocities`).
+- **Neocities Static Ready**: Relative asset paths (`base: './'`), Neocities-allowed static extensions, and hosted `dist/` assets within Neocities Supporter limits (`<= 100 MB` per file, `<= 50 GB` total site cap; verified automatically by `npm run check:neocities`; does not restrict user-imported or exported files).
 
 ## Getting Started
 

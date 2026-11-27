@@ -9,7 +9,7 @@ Brick Instruction Creator is a pure client-side TypeScript web application that 
 2. **Zero Floating Pieces**: Every generated step is backed by a verified physical attachment in the hybrid connectivity graph (studs, anti-studs, bars/rods, clips, Technic pins/axles, hinges, plus geometric contact tolerance). Multi-directional (SNOT) and cantilevered sections are automatically extracted into **subassembly callouts** built in their own natural orientation before attaching as rigid units. Physically separate components (e.g., minifigures, accessories) become independent build chapters; truly unattached parts are surfaced in an inspector warning panel.
 3. **Optimal Automatic Camera & Rotations**: A global dynamic programming (Viterbi) optimizer selects discrete canonical isometric viewpoints (4 yaw 3/4 angles × top/bottom flip) across the entire step sequence, balancing new-part visibility/occlusion against rotation transition penalties and automatically placing rotation indicator icons whenever the viewpoint changes.
 4. **Opinionated Defaults, Infinite Customization**: A 3-tier cascading styling system (**Theme Presets → Global Design Tokens → Per-Page/Per-Step Local Overrides**) produces official-quality manuals out of the box while enabling deep personalization of backgrounds, typography, step numbers, rotation icons, highlight outlines, fade-outs, placement arrows, piece previews (PLI), Bill of Materials (BOM), cover/back pages, and multi-step page layouts.
-5. **Neocities-Ready Static Deployment**: 100% client-side SPA with relative asset paths (`base: './'`), strict per-file size compliance (`< 5 MB` per file via code-splitting and sharded `.json` part bundles), and only Neocities-allowed static file extensions (`.html`, `.js`, `.css`, `.json`, `.txt`, `.svg`, `.png`, `.woff2`, `.bin`).
+5. **Neocities-Ready Static Deployment**: 100% client-side SPA with relative asset paths (`base: './'`), Neocities Supporter hosted-asset limits (`<= 100 MB` per hosted file, `<= 50 GB` total site size; applies only to hosted `dist/` files, not user-imported or exported files), and Neocities-allowed static file extensions (`.html`, `.js`, `.css`, `.json`, `.txt`, `.svg`, `.png`, `.woff2`, `.bin`).
 
 ---
 
@@ -154,7 +154,7 @@ flowchart LR
 
 ## 6. Layered Neocities-Safe Parts Provider
 
-To satisfy both zero-setup usability and Neocities static hosting rules (no `.dat`/`.zip` files in `dist/`, every deployed file strictly `< 5 MB`, relative paths):
+To satisfy both zero-setup usability and Neocities Supporter static hosting rules (no `.dat`/`.zip` files in `dist/`, every hosted `dist/` file `<= 100 MB` and total site `<= 50 GB`, relative paths; does not apply to user-imported or exported files):
 1. **Layer 1 (In-Model Custom Parts)**: Subfiles and custom parts embedded inside `.io` or `.mpd` files.
 2. **Layer 2 (User Local Library)**: Optional user-imported `complete.zip` or `.dat` files stored in browser IndexedDB.
 3. **Layer 3 (IndexedDB Persistent Cache)**: Previously resolved LDraw geometry and snap metadata.

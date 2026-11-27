@@ -39,7 +39,7 @@ Unlike BrickLink Studio's instruction maker—where editing an early step cascad
   - Exports: high-resolution streaming PDF 1.4 (desktop & iOS WebView safe, with bookmarks & clickable links), self-contained offline Interactive 3D HTML Viewer, BrickLink XML / Rebrickable CSV BOM export, printable CSS layout (`@media print`), and portable `.biw` project / `.biwtheme` custom theme save/load.
 - **Technical & deployment constraints**:
   - 100% client-side static TypeScript + Vite + Tailwind CSS + custom WebGL1 + zero-dependency PDF 1.4 web app (`base: './'`).
-  - Deployed to GitHub Pages and verified for Neocities static hosting compliance (`< 5 MB` per output file, allowed static extensions only, checked via `npm run check:neocities`).
+  - Deployed to GitHub Pages and verified for Neocities Supporter static hosting compliance (`<= 100 MB` per hosted `dist/` file, `<= 50 GB` total site size, allowed static extensions only, checked via `npm run check:neocities`; applies only to hosted site files, not user-imported or exported files).
   - Existing DOM runtime hooks (`src/studioRuntime.ts` bindings in `index.html`) and Vitest engine/UI safety suite (`npm test`) must remain intact and passing.
 
 ## Brand Commitments

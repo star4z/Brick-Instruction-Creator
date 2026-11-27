@@ -21,9 +21,9 @@ function getArg(flag, fallback) {
 }
 
 const OUT_DIR = path.resolve(process.cwd(), getArg('--out', 'thirdparty/parts-chunks'));
-const TARGET_RAW_CHUNK_BYTES = Number(getArg('--target-raw-bytes', String(14 * 1024 * 1024))); // ~1.5-2.5 MB gzipped
-const MAX_COMPRESSED_CHUNK_BYTES = Number(getArg('--max-chunk-bytes', String(4_500_000))); // < 5 MB Neocities cap
-const MAX_TOTAL_BYTES = Number(getArg('--max-total-bytes', String(450 * 1024 * 1024))); // < 500 MB Neocities cap
+const TARGET_RAW_CHUNK_BYTES = Number(getArg('--target-raw-bytes', String(14 * 1024 * 1024))); // ~1.5-2.5 MB gzipped for fast lazy fetch
+const MAX_COMPRESSED_CHUNK_BYTES = Number(getArg('--max-chunk-bytes', String(100 * 1024 * 1024))); // <= 100 MB Neocities Supporter per-file cap
+const MAX_TOTAL_BYTES = Number(getArg('--max-total-bytes', String(50 * 1024 * 1024 * 1024))); // <= 50 GB Neocities Supporter total site cap
 const SKIP_UNOFFICIAL = args.includes('--official-only');
 
 const SOURCES = [

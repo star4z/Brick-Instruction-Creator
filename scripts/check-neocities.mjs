@@ -2,12 +2,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const DIST_DIR = path.resolve(process.cwd(), 'dist');
-// Conservative per-file cap (5 MB) — well under Neocities upload limits & fast in web uploader
-const MAX_FILE_BYTES = 5 * 1024 * 1024;
-// Conservative total site check (500 MB) — comfortably under Neocities 1 GB free storage cap
-const MAX_TOTAL_BYTES = 500 * 1024 * 1024;
+// Neocities Supporter per-file cap (100 MB) — applies only to hosted static assets in dist/
+// (compiled JS/CSS, 3D part models/chunks, catalogs, fonts), not user-imported or exported files.
+const MAX_FILE_BYTES = 100 * 1024 * 1024;
+// Neocities Supporter total site storage cap (50 GB) for hosted dist/ assets.
+const MAX_TOTAL_BYTES = 50 * 1024 * 1024 * 1024;
 
-// Subset of Neocities free-tier allowed static extensions
+// Allowed static extensions for hosted dist/ assets (Neocities Supporter compatible)
 const ALLOWED_EXTENSIONS = new Set([
   '.html', '.htm', '.css', '.js', '.mjs', '.cjs', '.json', '.geojson',
   '.txt', '.md', '.csv', '.tsv', '.xml', '.svg', '.png', '.jpg', '.jpeg',
@@ -50,15 +51,15 @@ for (const file of files) {
     largestFile = rel;
   }
   if (stat.size > MAX_FILE_BYTES) {
-    errors.push(`File exceeds 5 MB Neocities budget: ${rel} (${(stat.size / 1024 / 1024).toFixed(2)} MB)`);
+    errors.push(`Hosted file exceeds 100 MB Neocities Supporter limit: ${rel} (${(stat.size / 1024 / 1024).toFixed(2)} MB)`);
   }
   if (!ALLOWED_EXTENSIONS.has(ext)) {
-    errors.push(`Disallowed extension for Neocities free tier: ${rel} (${ext})`);
+    errors.push(`Disallowed hosted extension for Neocities: ${rel} (${ext})`);
   }
 }
 
 if (totalBytes > MAX_TOTAL_BYTES) {
-  errors.push(`Total dist size ${(totalBytes / 1024 / 1024).toFixed(2)} MB exceeds 500 MB budget.`);
+  errors.push(`Total hosted dist size ${(totalBytes / 1024 / 1024 / 1024).toFixed(2)} GB exceeds 50 GB Neocities Supporter cap.`);
 }
 
 const chunksManifestPath = path.join(DIST_DIR, 'parts-chunks', 'manifest.json');
@@ -80,5 +81,5 @@ if (errors.length > 0) {
 }
 
 console.log(
-  `Neocities compliance PASSED: ${files.length} files, total ${(totalBytes / 1024).toFixed(1)} KB, largest ${largestFile} (${(maxBytes / 1024).toFixed(1)} KB < 5120 KB).`
+  `Neocities compliance PASSED: ${files.length} hosted files, total ${(totalBytes / 1024).toFixed(1)} KB (< 50 GB), largest ${largestFile} (${(maxBytes / 1024).toFixed(1)} KB < 100 MB).`
 );
