@@ -1253,7 +1253,15 @@
         </div>
 
         <!-- Body: Stacked on mobile portrait, 2-pane split on desktop (lg+) -->
-        <div class="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden">
+        <div class="relative flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden">
+          <!-- Loading Progress Overlay (shown while hydrating/analyzing/rendering preview) -->
+          <div id="impLoadingOverlay" role="status" aria-live="polite" class="hidden absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-[var(--chrome)]/95 p-6 text-center">
+            <div class="w-7 h-7 rounded-full border-2 border-[var(--border-strong)] border-t-[var(--primary)] animate-spin" aria-hidden="true"></div>
+            <div id="impLoadingLabel" class="text-xs font-semibold text-[var(--foreground)]">Analyzing model…</div>
+            <div class="w-44 h-1.5 rounded-full bg-[var(--border)] overflow-hidden" aria-hidden="true">
+              <div id="impLoadingBarFill" class="h-full rounded-full bg-[var(--primary)] transition-[width] duration-200 ease-out" style="width: 15%"></div>
+            </div>
+          </div>
           <!-- Left / Top Pane: Live 3D Exploded Partition Preview -->
           <div id="impPreviewPane" class="lg:w-[46%] shrink-0 bg-[var(--surface-sunken)] border-b lg:border-b-0 lg:border-r border-[var(--border)] flex flex-col">
             <div class="relative h-[32vh] min-h-[195px] sm:h-[260px] lg:h-auto lg:min-h-[280px] lg:flex-1 w-full overflow-hidden">

@@ -27325,10 +27325,26 @@ document.getElementById('btnSysPrint').onclick = () => {
 const menuStepGenBtn = document.getElementById('menuStepGenBtn');
 if (menuStepGenBtn) {
   menuStepGenBtn.onclick = async () => {
-    const parsed = await ensureParsedModelHydrated();
-    if (!parsed) { showToast('Import a model first.'); return; }
+    if (!state.model) { showToast('Import a model first.'); return; }
     closeMenu();
-    openImportAssistant(parsed, true);
+    const openToken = ++impOpenSeq;
+    const titleEl = document.getElementById('impTitle');
+    const summaryEl = document.getElementById('impSummary');
+    if (titleEl) titleEl.textContent = 'Step Generation';
+    if (summaryEl) summaryEl.textContent = state.model.title || '';
+    document.getElementById('importModal')?.classList.remove('hidden');
+    setImportAssistantLoading(true, 'Loading model…', 15);
+    await waitForImportPaint();
+    if (openToken !== impOpenSeq) return;
+    const parsed = await ensureParsedModelHydrated();
+    if (openToken !== impOpenSeq) return;
+    if (!parsed) {
+      setImportAssistantLoading(false);
+      document.getElementById('importModal')?.classList.add('hidden');
+      showToast('Import a model first.');
+      return;
+    }
+    await openImportAssistant(parsed, true, { openToken });
   };
 }
 
@@ -27935,7 +27951,28 @@ let impState = {
   pickerFocusIdx: 0,
 };
 
+let impOpenSeq = 0;
+
+function setImportAssistantLoading(visible, label = 'Analyzing model…', pct = 20) {
+  const overlay = document.getElementById('impLoadingOverlay');
+  const labelEl = document.getElementById('impLoadingLabel');
+  const barEl = document.getElementById('impLoadingBarFill');
+  const autoBtn = document.getElementById('impBtnAuto');
+  if (labelEl && label) labelEl.textContent = label;
+  if (barEl) barEl.style.width = `${Math.max(5, Math.min(100, Math.round(pct)))}%`;
+  if (overlay) overlay.classList.toggle('hidden', !visible);
+  if (autoBtn) autoBtn.disabled = Boolean(visible);
+}
+
+function waitForImportPaint() {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => setTimeout(resolve, 0));
+  });
+}
+
 function closeImportAssistant(keepPendingRaw = false) {
+  impOpenSeq++;
+  setImportAssistantLoading(false);
   if (impExplodeAnimRaf) {
     cancelAnimationFrame(impExplodeAnimRaf);
     impExplodeAnimRaf = 0;
@@ -28434,17 +28471,54 @@ function renderImportAssistantUI() {
     : `Generate Manual (${active.title})`;
 }
 
-function openImportAssistant(parsed, isPostImport = false, opts = {}) {
+async function openImportAssistant(parsed, isPostImport = false, opts = {}) {
   if (impExplodeAnimRaf) {
     cancelAnimationFrame(impExplodeAnimRaf);
     impExplodeAnimRaf = 0;
   }
+  const openToken = opts?.openToken ?? ++impOpenSeq;
   const isWizardSubpage = Boolean(opts && opts.isWizardSubpage);
-  const prep = opts?.prep || prepareSubdivisionData(parsed);
-  const analyzed = opts?.assessment && opts?.proposals
+
+  const modalEl = document.getElementById('importModal');
+  const titleEl = document.getElementById('impTitle');
+  const summaryEl = document.getElementById('impSummary');
+  if (titleEl) {
+    titleEl.textContent = isWizardSubpage ? 'Step Generation — Slicing' : 'Step Generation';
+  }
+  if (summaryEl && parsed?.title) {
+    summaryEl.textContent = `${parsed.title} · ${formatPartCount(parsed.parts?.length || 0)}`;
+  }
+  modalEl?.classList.remove('hidden');
+
+  const cached = parsed?._cachedSubdivisionAnalysis || null;
+  const hasProvidedPrep = Boolean(opts?.prep);
+  const hasProvidedAnalysis = Boolean(opts?.assessment && opts?.proposals);
+  const needsCompute = (!hasProvidedPrep && !cached?.prep) || (!hasProvidedAnalysis && !cached?.analyzed);
+
+  let prep = opts?.prep || cached?.prep || null;
+  if (!prep) {
+    setImportAssistantLoading(true, 'Analyzing part connections…', 38);
+    await waitForImportPaint();
+    if (openToken !== impOpenSeq) return;
+    prep = prepareSubdivisionData(parsed);
+  }
+
+  let analyzed = hasProvidedAnalysis
     ? { assessment: opts.assessment, proposals: opts.proposals }
-    : analyzeModelSubdivisions(prep.inputs, prep.adjacency);
+    : (cached?.analyzed || null);
+  if (!analyzed) {
+    setImportAssistantLoading(true, 'Finding detachable sub-assemblies…', 70);
+    await waitForImportPaint();
+    if (openToken !== impOpenSeq) return;
+    analyzed = analyzeModelSubdivisions(prep.inputs, prep.adjacency);
+  }
+
+  if (parsed && !parsed._cachedSubdivisionAnalysis) {
+    parsed._cachedSubdivisionAnalysis = { prep, analyzed };
+  }
+
   const { assessment, proposals } = analyzed;
+  if (openToken !== impOpenSeq) return;
 
   state.pendingImport = parsed;
   impState.parsed = parsed;
@@ -28498,18 +28572,25 @@ function openImportAssistant(parsed, isPostImport = false, opts = {}) {
   impState.isExploded = Boolean(impState.activeProposal);
   impState.explodePct = impState.isExploded ? IMP_EXPLODED_PCT : 0;
 
-  document.getElementById('impTitle').textContent = isWizardSubpage
-    ? 'Step Generation — Slicing'
-    : 'Step Generation';
-
   const reasonStr = assessment.reasons.length > 0
     ? `${parsed.title} · ${assessment.reasons.join(' · ')}.`
     : `${parsed.title} · ${formatPartCount(parsed.parts.length)}${parsed.submodelCount ? ` across ${parsed.submodelCount} submodels` : ''}.`;
-  document.getElementById('impSummary').textContent = reasonStr;
+  if (summaryEl) summaryEl.textContent = reasonStr;
 
-  document.getElementById('importModal').classList.remove('hidden');
   renderImportAssistantUI();
-  requestAnimationFrame(() => rebuildAndDrawImportPreview());
+
+  if (needsCompute || (parsed.parts?.length || 0) >= 120) {
+    setImportAssistantLoading(true, 'Rendering 3D preview…', 92);
+    await waitForImportPaint();
+    if (openToken !== impOpenSeq) return;
+    rebuildAndDrawImportPreview();
+    setImportAssistantLoading(false);
+  } else {
+    setImportAssistantLoading(false);
+    requestAnimationFrame(() => {
+      if (openToken === impOpenSeq) rebuildAndDrawImportPreview();
+    });
+  }
 }
 
 // ============================================================================

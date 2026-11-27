@@ -753,6 +753,7 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     await ensureMenuOpen(page);
     await page.locator('#menuStepGenBtn').click();
     await expect(page.locator('#importModal')).toBeVisible();
+    await expect(page.locator('#impLoadingOverlay')).toBeHidden();
     await auditSurface(page, `${testInfo.project.name}: Step Generation Modal`, {
       activeContainerSelector: '#importModal',
     });
