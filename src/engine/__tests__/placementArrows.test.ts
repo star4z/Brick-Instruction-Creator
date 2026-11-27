@@ -1820,6 +1820,44 @@ describe('computeAnimatedStepOffsets', () => {
     expect(wMaxY).toBeLessThan(-60);
     expect(kMaxY).toBeLessThan(wMinY);
   });
+
+  it('detects a Technic bush/wheel sleeved around a protruding horizontal X axle in computeAutoPlacementOffsetsForSequence', () => {
+    const beam = makePart('beam', 0, 0, 0, 16, 16, 80, BLACK);
+    const horizAxle = makePart('h_axle', 24, 2, 0, 72, 12, 12, YELLOW);
+    const bush = makePart('h_bush', 36, 0, 0, 8, 16, 16, DARK_GRAY);
+
+    const res = computeAutoPlacementOffsetsForSequence([
+      { id: 's1', camera: { az: 38, el: 28, side: 'top' }, parts: [beam, horizAxle] },
+      { id: 's2', camera: { az: 38, el: 28, side: 'top' }, parts: [bush] },
+    ]);
+
+    const off = res.get('s2')?.['h_bush'];
+    expect(off).toBeDefined();
+    // Must slide strictly along +X (out past the axle tip), never vertically through the axle
+    expect(off!.y).toBe(0);
+    expect(off!.z).toBe(0);
+    expect(off!.x).toBeGreaterThan(20);
+  });
+
+  it('allows two coaxial siblings on the same vertical axle below a liftarm to both receive downward arrows', () => {
+    const liftarm = makePart('liftarm', 0, 0, 0, 80, 16, 16, BLACK);
+    const yellowAxle = makePart('axle', 0, -60, 0, 12, 84, 12, YELLOW);
+    const greyWasher = makePart('washer', 0, -8, 0, 16, 8, 16, DARK_GRAY);
+    const blackKnob = makePart('knob', 0, -24, 0, 16, 16, 16, BLACK);
+
+    const res = computeAutoPlacementOffsetsForSequence([
+      { id: 's1', camera: { az: 38, el: -24, side: 'bottom' }, parts: [liftarm, yellowAxle] },
+      { id: 's2', camera: { az: 38, el: -24, side: 'bottom' }, parts: [greyWasher, blackKnob] },
+    ]);
+
+    const stepOffs = res.get('s2') ?? {};
+    expect(stepOffs['washer']).toBeDefined();
+    expect(stepOffs['knob']).toBeDefined();
+    expect(stepOffs['washer'].x).toBe(0);
+    expect(stepOffs['washer'].y).toBeLessThan(-40);
+    expect(stepOffs['knob'].x).toBe(0);
+    expect(stepOffs['knob'].y).toBeLessThan(-40);
+  });
 });
 
 describe('placementArrows — sibling non-occlusion (never hide another piece behind an offset)', () => {
@@ -1981,6 +2019,7 @@ describe('placementArrows — sibling non-occlusion (never hide another piece be
     expect(directSkipped?.['side_pin']).toBeDefined();
   });
 });
+
 
 
 

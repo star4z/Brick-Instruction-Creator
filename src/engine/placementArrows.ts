@@ -694,6 +694,35 @@ function analyzeContacts(
         horizontalCoaxial = true;
         horizontalCoaxialAxis = s[0] >= s[2] ? 0 : 2;
         coaxialHostIds.add(ref.id);
+        continue;
+      }
+
+      // Any ring, bush, half-bush, gear, or wheel threaded around a slender protruding
+      // horizontal rod/axle (along X or Z) MUST slide horizontally along that axle axis.
+      for (const hAxis of [0, 2] as const) {
+        const pB = hAxis === 0 ? 2 : 0;
+        const ovArr = [ovX, ovY, ovZ];
+        const coaxialCross =
+          ovArr[1] >= Math.min(s[1], rs[1]) * 0.72 &&
+          ovArr[pB] >= Math.min(s[pB], rs[pB]) * 0.72;
+        const partWrapsRef = s[1] >= rs[1] + 1 && s[pB] >= rs[pB] + 1;
+        const refInsidePart =
+          rb.min[1] >= b.min[1] - 1.5 &&
+          rb.max[1] <= b.max[1] + 1.5 &&
+          rb.min[pB] >= b.min[pB] - 1.5 &&
+          rb.max[pB] <= b.max[pB] + 1.5;
+        const refHorizRod =
+          coaxialCross &&
+          partWrapsRef &&
+          refInsidePart &&
+          rs[hAxis] >= Math.max(rs[1], rs[pB]) * 1.8 &&
+          (rb.max[hAxis] > b.max[hAxis] + 2 || rb.min[hAxis] < b.min[hAxis] - 2);
+        if (refHorizRod) {
+          horizontalCoaxial = true;
+          horizontalCoaxialAxis = hAxis;
+          coaxialHostIds.add(ref.id);
+          break;
+        }
       }
     }
 
@@ -1135,6 +1164,7 @@ function resolveOffsetAlongAxis(
     coaxialHostIds?: ReadonlySet<string>;
     /** Same-step sibling pieces (at their rendered positions) that the lifted piece must not hide from the camera. */
     visibleSiblings?: ReadonlyArray<PlacementPartInput>;
+    coaxialSiblingIds?: ReadonlySet<string>;
   } = {},
 ): AutoPartOffset | null {
   const s = boxSize(part.box);
@@ -1150,6 +1180,7 @@ function resolveOffsetAlongAxis(
     camViewDir && visibleSiblings.length > 0
       ? visibleSiblings.map((sib) => estimateBoxOcclusionBySingle(sib.box, part.box, camViewDir))
       : [];
+  const coaxialSiblingIds = options.coaxialSiblingIds;
 
   const visObstacles: PlacementPartInput[] = [];
   if (camera) {
@@ -1305,9 +1336,14 @@ function resolveOffsetAlongAxis(
 
         // Reject this direction if ANY sibling part or non-coaxial solid obstacle sits inside
         // the swept withdrawal corridor ahead of `part` (prevents jumping through stacked plates/ceilings/walls).
+        // Exception: coaxial siblings sliding off the same shaft along `coaxialAxis` stack cleanly in order.
         for (let i = 0; i < siblingObstacles.length; i++) {
           const obs = siblingObstacles[i];
           if (obs.id === part.id) continue;
+          if (coaxialAxis === axis && coaxialSiblingIds && coaxialSiblingIds.size > 0) {
+            const rawId = obs.id.startsWith('__shifted_') ? obs.id.slice('__shifted_'.length) : obs.id;
+            if (coaxialSiblingIds.has(rawId)) continue;
+          }
           const isLeading = (obs.box.center[axis] - part.box.center[axis]) * sign > 1.0;
           if (
             boxesIntersectStrict(corridor, obs.box, 1.5) ||
@@ -1375,7 +1411,12 @@ function resolveOffsetAlongAxis(
         for (let i = 0; i < siblingObstacles.length; i++) {
           const obs = siblingObstacles[i];
           if (obs.id === part.id) continue;
-          if (boxesIntersectStrict(shifted, obs.box, 1.5)) {
+          const isShiftedCoaxialSib =
+            coaxialAxis === axis &&
+            coaxialSiblingIds &&
+            obs.id.startsWith('__shifted_') &&
+            coaxialSiblingIds.has(obs.id.slice('__shifted_'.length));
+          if (isShiftedCoaxialSib ? boxesWithinMargin(shifted, obs.box, 8) : boxesIntersectStrict(shifted, obs.box, 1.5)) {
             collides = true;
             break;
           }
@@ -1934,9 +1975,10 @@ function computeSubsequentStepOffsets(
         }
         // Check if `sib` vertically supports `part` along the build axis while `part` lacks
         // vertical support from `prevParts` on that same side (i.e. stacked onto a same-step brick).
+        // Coaxial sleeves threaded onto the same vertical shaft are supported by the shaft, not stacked bricks.
         const ovX = overlap1D(part.box.min[0], part.box.max[0], sib.box.min[0], sib.box.max[0]);
         const ovZ = overlap1D(part.box.min[2], part.box.max[2], sib.box.min[2], sib.box.max[2]);
-        if (ovX > 2 && ovZ > 2) {
+        if (!contacts.verticalCoaxial && ovX > 2 && ovZ > 2) {
           if (
             isBottomView &&
             !contacts.supportedFromAbove &&
@@ -2050,8 +2092,33 @@ function computeSubsequentStepOffsets(
       : MAX_SUBSEQUENT_STEP_OFFSETS;
     if (accepted.length >= cap) continue;
 
+    const coaxialAxis: 0 | 1 | 2 | null = c.contacts.verticalCoaxial
+      ? 1
+      : c.contacts.horizontalCoaxial
+        ? c.contacts.horizontalCoaxialAxis
+        : null;
+    const coaxialSiblingIds = new Set<string>();
+    if (coaxialAxis !== null && c.contacts.coaxialHostIds.size > 0) {
+      for (const other of candidates) {
+        if (other.part.id === c.part.id) continue;
+        const otherAxis: 0 | 1 | 2 | null = other.contacts.verticalCoaxial
+          ? 1
+          : other.contacts.horizontalCoaxial
+            ? other.contacts.horizontalCoaxialAxis
+            : null;
+        if (otherAxis !== coaxialAxis) continue;
+        for (const hid of other.contacts.coaxialHostIds) {
+          if (c.contacts.coaxialHostIds.has(hid)) {
+            coaxialSiblingIds.add(other.part.id);
+            break;
+          }
+        }
+      }
+    }
+
     // Never offset two or more physically touching bricks together as a floating cluster
-    if (accepted.some((acc) => boxesWithinMargin(c.part.box, acc.part.box, CONTACT_EPS))) {
+    // (exception: coaxial sleeves threaded onto the same shaft stack cleanly along the shaft).
+    if (accepted.some((acc) => !coaxialSiblingIds.has(acc.part.id) && boxesWithinMargin(c.part.box, acc.part.box, CONTACT_EPS))) {
       continue;
     }
 
@@ -2074,11 +2141,6 @@ function computeSubsequentStepOffsets(
       step.camera.az,
       c.part.headedShaftDir,
     );
-    const coaxialAxis: 0 | 1 | 2 | null = c.contacts.verticalCoaxial
-      ? 1
-      : c.contacts.horizontalCoaxial
-        ? c.contacts.horizontalCoaxialAxis
-        : null;
     const resolved = resolveOffsetAlongAxis(
       c.part,
       preferred,
@@ -2095,6 +2157,7 @@ function computeSubsequentStepOffsets(
         coaxialAxis,
         coaxialHostIds: c.contacts.coaxialHostIds,
         visibleSiblings,
+        ...(coaxialSiblingIds.size > 0 ? { coaxialSiblingIds } : {}),
       },
     );
     if (!resolved) continue;
@@ -2142,6 +2205,49 @@ function computeSubsequentStepOffsets(
       box: expandBoxMargin(shiftedBox, CONTACT_EPS * 0.5),
       rgb: c.part.rgb,
     });
+  }
+
+  // Harmonize lift heights for non-coaxial side-by-side peer parts moving in the exact same
+  // direction with matching thickness along that axis so they align cleanly instead of staggering.
+  if (accepted.length >= 2) {
+    const nonCoaxial = accepted.filter((a) => !a.isCoaxialOrLateral);
+    for (let i = 0; i < nonCoaxial.length; i++) {
+      const a = nonCoaxial[i];
+      const oa = out[a.part.id];
+      if (!oa) continue;
+      const magA = Math.hypot(oa.x, oa.y, oa.z);
+      if (magA < 6) continue;
+      const dirA: Vec3 = [oa.x / magA, oa.y / magA, oa.z / magA];
+      const sA = boxSize(a.part.box);
+      const dimA = Math.abs(dirA[0]) * sA[0] + Math.abs(dirA[1]) * sA[1] + Math.abs(dirA[2]) * sA[2];
+      let targetMag = magA;
+      for (let j = 0; j < nonCoaxial.length; j++) {
+        if (i === j) continue;
+        const b = nonCoaxial[j];
+        const ob = out[b.part.id];
+        if (!ob) continue;
+        const magB = Math.hypot(ob.x, ob.y, ob.z);
+        if (magB <= targetMag + 1) continue;
+        const dirB: Vec3 = [ob.x / magB, ob.y / magB, ob.z / magB];
+        if (dirA[0] * dirB[0] + dirA[1] * dirB[1] + dirA[2] * dirB[2] < 0.98) continue;
+        const sB = boxSize(b.part.box);
+        const dimB = Math.abs(dirB[0]) * sB[0] + Math.abs(dirB[1]) * sB[1] + Math.abs(dirB[2]) * sB[2];
+        if (Math.abs(dimA - dimB) > 4) continue;
+        targetMag = magB;
+      }
+      if (targetMag > magA + 1) {
+        const nx = Math.round(dirA[0] * targetMag);
+        const ny = Math.round(dirA[1] * targetMag);
+        const nz = Math.round(dirA[2] * targetMag);
+        const candBox = shiftBox(a.part.box, nx, ny, nz);
+        const hitsPrev = prevParts.some((p) => boxesIntersectStrict(candBox, p.box, 1.5));
+        const hitsAcc = accepted.some((acc) => acc.part.id !== a.part.id && boxesWithinMargin(candBox, acc.shiftedBox, CONTACT_EPS));
+        if (!hitsPrev && !hitsAcc) {
+          out[a.part.id] = { ...oa, x: nx, y: ny, z: nz };
+          a.shiftedBox = candBox;
+        }
+      }
+    }
   }
 
   return out;

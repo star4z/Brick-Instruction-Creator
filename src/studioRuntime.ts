@@ -17288,6 +17288,28 @@ function renderOverviewModal(opts = {}) {
     return box;
   };
 
+  const overviewSubmodelThumbs = new Map();
+  const getOverviewSubmodelThumb = (ch) => {
+    if (!ch) return '';
+    const key = (ch.isSectionModule && ch.sectionId) ? `sec_${ch.sectionId}` : `ch_${ch.id}`;
+    if (overviewSubmodelThumbs.has(key)) return overviewSubmodelThumbs.get(key);
+    const chapters = state.model?.chapters || [];
+    const matching = (ch.isSectionModule && ch.sectionId)
+      ? chapters.filter((c) => c.kind === 'submodel' && c.sectionId === ch.sectionId)
+      : [ch];
+    const canonicalParts = [];
+    for (const mc of matching) {
+      for (const st of mc.steps || []) {
+        for (const p of st.parts || []) canonicalParts.push(p);
+      }
+    }
+    const url = canonicalParts.length > 0
+      ? (getSubmodelThumb({ id: `ov_${key}`, name: ch.name || 'Submodel', canonicalParts }, 120, 90) || '')
+      : '';
+    overviewSubmodelThumbs.set(key, url);
+    return url;
+  };
+
   state.pages.forEach((pg, idx) => {
     const active = idx === state.pageIdx;
     const slots = pg.slots || [];
@@ -17597,11 +17619,19 @@ function renderOverviewModal(opts = {}) {
       leftWrap.className = 'flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1';
       leftWrap.appendChild(thumbBox);
 
+      const isSubStep = Boolean((step.isSubmodelStep || slot.ch?.kind === 'submodel') && !step.attachedSubmodel);
+      const subThumbUrl = isSubStep ? getOverviewSubmodelThumb(slot.ch) : '';
+      const rawSubRep = isSubStep ? Number(step.submodelRepeat || slot.ch?.repeatCount || 1) : 1;
+      const subPreviewHtml = subThumbUrl
+        ? `<span class="inline-flex items-center gap-0.5 px-1 py-0.5 rounded border border-[var(--border)] bg-[var(--background)]/90 shrink-0" title="Submodel"><img src="${subThumbUrl}" alt="" class="w-6 h-4 object-contain pointer-events-none" />${rawSubRep > 1 ? `<span class="text-[10px] font-extrabold text-[var(--primary)] leading-none">${rawSubRep}×</span>` : ''}</span>`
+        : '';
+
       const textWrap = document.createElement('div');
       textWrap.className = 'min-w-0 flex-1';
       textWrap.innerHTML = `
         <div class="flex items-center gap-1.5 min-w-0">
           ${isStepActive ? `<span class="ov-active-dot w-1.5 h-1.5 rounded-full bg-[var(--primary)] shrink-0 ${inSelRange ? 'hidden' : ''}" aria-hidden="true"></span>` : ''}
+          ${subPreviewHtml}
           <span class="ov-step-title font-semibold truncate ${inSelRange || isStepActive ? 'text-[var(--primary)]' : ''}">${escHtml(stepTitle)}</span>
           <span class="shrink-0 px-1 py-0.5 rounded border border-[var(--border)] font-mono text-[10px] font-semibold text-[var(--muted-foreground)]" title="Absolute step number (unique across the whole manual)">${absBadge}</span>
         </div>
@@ -28689,9 +28719,11 @@ function drawImportPreviewFrame() {
   const host = canvas.parentElement || canvas;
   const cssW = host.clientWidth || 360;
   const cssH = host.clientHeight || 240;
-  const dpr = Math.min(Math.max(window.devicePixelRatio || 1, 1.75), 3);
-  const w = Math.max(540, Math.round(cssW * dpr));
-  const h = Math.max(380, Math.round(cssH * dpr));
+  const maxDpr = deviceGpuBudget.constrained ? 2 : 2.5;
+  const dpr = Math.min(Math.max(window.devicePixelRatio || 1, 1.5), maxDpr);
+  const maxDim = deviceGpuBudget.maxWebGlDim || 2048;
+  const w = Math.min(maxDim, Math.max(540, Math.round(cssW * dpr)));
+  const h = Math.min(maxDim, Math.max(380, Math.round(cssH * dpr)));
   impPreviewEngine.draw(impPreviewMesh, w, h, impState.az, impState.el, impState.zoom || 1.0, 0, {
     heroShading: true,
     lineAlpha: 0.48,
@@ -30585,6 +30617,27 @@ window.addEventListener('resize', () => {
     renderBomSetupPreview(normalizeBomConfig(state.bomConfig));
   }
   updateStylePopoverTail();
+});
+
+window.addEventListener('pagehide', () => {
+  if (activeLiveEngine) {
+    try { activeLiveEngine.dispose(); } catch (_) {}
+    activeLiveEngine = null;
+  }
+  if (impPreviewEngine) {
+    try { impPreviewEngine.dispose(); } catch (_) {}
+    impPreviewEngine = null;
+  }
+  try { snapshotEngine?.dispose(); } catch (_) {}
+  try {
+    if (studioPhotoEngine) {
+      studioPhotoEngine.releaseTransientBuffers?.();
+    }
+  } catch (_) {}
+  if (snapshotCanvas) {
+    snapshotCanvas.width = 1;
+    snapshotCanvas.height = 1;
+  }
 });
 
 // Initialize responsive side menu immediately (expanded by default on desktop)
