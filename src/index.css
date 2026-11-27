@@ -112,7 +112,7 @@
 @media (prefers-color-scheme: dark) {
   :root {
     --brand-sky: #38bdf8;
-    --brand-maroon: #eb6a84;
+    --brand-maroon: #7c152e;
     --brand-orange: #f59342;
 
     --rail: #160c11;
@@ -134,11 +134,11 @@
     --border: #3c3543;
     --border-strong: #554c5e;
 
-    --primary: #eb6a84;
-    --primary-hover: #f28096;
-    --primary-foreground: #1a0a0f;
-    --primary-soft: rgba(235, 106, 132, 0.16);
-    --primary-border: rgba(235, 106, 132, 0.44);
+    --primary: #7c152e;
+    --primary-hover: #961d3a;
+    --primary-foreground: #ffffff;
+    --primary-soft: rgba(124, 21, 46, 0.28);
+    --primary-border: rgba(186, 62, 92, 0.55);
 
     --accent-warm: #f59342;
 
@@ -756,7 +756,7 @@ body {
   }
 }
 
-/* Swipe-right to expose delete action on custom theme cards */
+/* Swipe-left to expose iOS Mail style circular delete action on custom theme cards */
 .theme-card-swipe-wrap {
   position: relative;
   overflow: hidden;
@@ -764,19 +764,36 @@ body {
 }
 .theme-card-swipe-delete {
   position: absolute;
-  inset: 0 auto 0 0;
-  width: 76px;
+  inset: 0 0 0 auto;
+  width: 72px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
-  background: var(--danger);
-  color: #ffffff;
+  gap: 4px;
+  background: transparent;
+  color: var(--muted-foreground);
   font-size: 10px;
-  font-weight: 700;
+  font-weight: 600;
   border: 0;
   cursor: pointer;
+}
+.theme-card-swipe-circle {
+  width: 38px;
+  height: 38px;
+  border-radius: 9999px;
+  background: var(--danger);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 140ms var(--ease-press), opacity 140ms var(--ease-press);
+}
+.theme-card-swipe-delete:hover .theme-card-swipe-circle {
+  transform: scale(1.05);
+}
+.theme-card-swipe-delete:active .theme-card-swipe-circle {
+  transform: scale(0.95);
 }
 .theme-card-swipe-fg {
   position: relative;

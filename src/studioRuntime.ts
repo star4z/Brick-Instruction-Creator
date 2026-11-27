@@ -22823,6 +22823,7 @@ function setStylePopoverOpen(
     btnStylePopEl.setAttribute('aria-expanded', 'false');
     menuStyleBtnEl?.setAttribute('aria-expanded', 'false');
     closeThemeFontPicker();
+    frozenStyleThemeOrderIds = null;
     if (wasWizardStyle) {
       returnToImportWizard();
     } else if (prevOrigin === 'bom-setup') {
@@ -22838,6 +22839,9 @@ function setStylePopoverOpen(
     origin: opts.origin ?? null,
     targetThemeId: opts.targetThemeId ?? null,
   };
+  if (themeEditorSession.view === 'selector') {
+    frozenStyleThemeOrderIds = snapshotThemeOrderIds(state.themeId);
+  }
   const isWizardStyle = isStyleWizardActive();
   const pres = getStylePanelPresentation(themeEditorSession, isWizardStyle);
   stylePopEl.classList.remove('hidden');
@@ -22885,6 +22889,7 @@ function handleStyleBackAction() {
     if (nameEl && document.activeElement === nameEl) nameEl.blur();
     closeThemeFontPicker();
     themeEditorSession = createInitialThemeEditorSession();
+    frozenStyleThemeOrderIds = snapshotThemeOrderIds(state.themeId);
     syncStylePanelChrome();
     syncStylePanel();
     if (!isStyleWizardActive()) updateStylePopoverTail();
@@ -23003,7 +23008,7 @@ let themeContextMenuTarget: { themeId: string; source: 'styles' | 'settings' } |
 function setThemeCardSwipeOffset(wrap: HTMLElement | null, offsetPx: number, open: boolean) {
   if (!wrap) return;
   const fg = wrap.querySelector<HTMLElement>('.theme-card-swipe-fg');
-  if (fg) fg.style.transform = offsetPx > 0 ? `translateX(${offsetPx}px)` : '';
+  if (fg) fg.style.transform = offsetPx > 0 ? `translateX(-${offsetPx}px)` : '';
   wrap.dataset.swiped = open ? 'true' : 'false';
   if (open) {
     if (activeSwipedThemeCard && activeSwipedThemeCard !== wrap) {
@@ -23249,7 +23254,7 @@ function buildThemeSelectorCard(
     return card;
   }
 
-  // Swipe-right container for custom theme cards (reveals left-side Delete button)
+  // Swipe-left container for custom theme cards (reveals iOS Mail style circular Delete button on the right)
   const wrap = document.createElement('div');
   wrap.className = 'theme-card-swipe-wrap w-full min-w-0';
   wrap.dataset.swiped = 'false';
@@ -23258,14 +23263,14 @@ function buildThemeSelectorCard(
   delAction.type = 'button';
   delAction.className = 'theme-card-swipe-delete';
   delAction.setAttribute('aria-label', `Delete ${t.name}`);
-  delAction.innerHTML = '<svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg><span>Delete</span>';
+  delAction.innerHTML = '<span class="theme-card-swipe-circle"><svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg></span><span>Delete</span>';
   delAction.onclick = async (e) => {
     e.stopPropagation();
     closeAllSwipedThemeCards();
     await deleteThemeById(t.id);
   };
 
-  const MAX_SWIPE = 76;
+  const MAX_SWIPE = 72;
   let dragging = false;
   let swipeLocked = false;
   let swipeStartX = 0;
@@ -23292,7 +23297,7 @@ function buildThemeSelectorCard(
         dragging = false;
         return;
       }
-      if (Math.abs(dx) > 10 && (dx > 0 || baseOffset > 0)) {
+      if (Math.abs(dx) > 10 && (dx < 0 || baseOffset > 0)) {
         swipeLocked = true;
         clearLongPress();
         wrap.classList.add('is-swiping');
@@ -23300,8 +23305,8 @@ function buildThemeSelectorCard(
         return;
       }
     }
-    currentOffset = Math.max(0, Math.min(MAX_SWIPE, baseOffset + dx));
-    card.style.transform = currentOffset > 0 ? `translateX(${currentOffset}px)` : '';
+    currentOffset = Math.max(0, Math.min(MAX_SWIPE, baseOffset - dx));
+    card.style.transform = currentOffset > 0 ? `translateX(-${currentOffset}px)` : '';
   });
 
   const finishSwipe = () => {
@@ -23323,6 +23328,38 @@ function buildThemeSelectorCard(
   return wrap;
 }
 
+let frozenStyleThemeOrderIds: string[] | null = null;
+let frozenSettingsThemeOrderIds: string[] | null = null;
+
+function snapshotThemeOrderIds(selectedThemeId: string): string[] {
+  const resolvedId = resolveThemeById(selectedThemeId, customThemes).id;
+  return orderThemesByRecent(getAllThemes(customThemes), themeRecents, resolvedId).map((t) => t.id);
+}
+
+function resolveOrderedThemes(selectedThemeId: string, frozenOrderIds?: string[] | null) {
+  const all = getAllThemes(customThemes);
+  if (frozenOrderIds && frozenOrderIds.length > 0) {
+    const byId = new Map(all.map((t) => [t.id, t]));
+    const ordered = [];
+    const seen = new Set<string>();
+    for (const id of frozenOrderIds) {
+      const found = byId.get(id);
+      if (found && !seen.has(id)) {
+        ordered.push(found);
+        seen.add(id);
+      }
+    }
+    for (const t of all) {
+      if (!seen.has(t.id)) {
+        ordered.push(t);
+        seen.add(t.id);
+      }
+    }
+    return ordered;
+  }
+  return orderThemesByRecent(all, themeRecents, selectedThemeId);
+}
+
 /**
  * Shared Theme Selector renderer used in the Styles Theme Selector page,
  * Import Wizard Theme Selector, and App Settings Default Theme picker.
@@ -23334,6 +23371,7 @@ function renderThemeSelector(
     layout = 'grid',
     source = 'styles',
     allowSwipeDelete = false,
+    frozenOrderIds = null,
     onSelect,
     onReselect,
   }: {
@@ -23341,6 +23379,7 @@ function renderThemeSelector(
     layout?: 'grid' | 'strip';
     source?: 'styles' | 'settings';
     allowSwipeDelete?: boolean;
+    frozenOrderIds?: string[] | null;
     onSelect: (themeId: string) => void;
     onReselect?: (themeId: string) => void;
   },
@@ -23348,12 +23387,11 @@ function renderThemeSelector(
   if (!containerEl) return;
   if (layout === 'strip') attachHorizontalWheelScroll(containerEl);
   const resolvedId = resolveThemeById(selectedThemeId, customThemes).id;
-  const ordered = orderThemesByRecent(getAllThemes(customThemes), themeRecents, resolvedId);
+  const ordered = resolveOrderedThemes(resolvedId, frozenOrderIds);
   const sig = ordered.map(t => `${t.id}:${t.updatedAt || ''}:${t.name}`).join('|') + `#${resolvedId}#${layout}#${allowSwipeDelete ? '1' : '0'}`;
   if (containerEl.dataset.sig === sig) return;
-  const keepScroll = containerEl.dataset.sigHead === `${resolvedId}` ? containerEl.scrollLeft : 0;
+  const keepScroll = containerEl.scrollLeft;
   containerEl.dataset.sig = sig;
-  containerEl.dataset.sigHead = `${resolvedId}`;
   containerEl.innerHTML = '';
   for (const t of ordered) {
     containerEl.appendChild(
@@ -23371,6 +23409,7 @@ function renderThemeStrip() {
     layout: 'grid',
     source: 'styles',
     allowSwipeDelete: true,
+    frozenOrderIds: frozenStyleThemeOrderIds,
     onSelect: (id) => {
       if (id === state.themeId) return;
       selectTheme(id);
@@ -28516,10 +28555,10 @@ function renderSettingsModalUI() {
       selectedThemeId: cd.themeId || 'blue',
       layout: 'strip',
       source: 'settings',
+      frozenOrderIds: frozenSettingsThemeOrderIds,
       onSelect: (id) => {
         if (id === appSettings.customDefaults.themeId) return;
         patchCustomDefaults({ themeId: id });
-        defThemeStrip.scrollTo({ left: 0, behavior: 'smooth' });
       },
       onReselect: (id) => {
         closeSettingsModal();
@@ -28612,13 +28651,17 @@ function renderSettingsModalUI() {
 
 function openSettingsModal() {
   closeMenu();
+  frozenSettingsThemeOrderIds = snapshotThemeOrderIds(appSettings.customDefaults.themeId || 'blue');
   renderSettingsModalUI();
   document.getElementById('settingsModal')?.classList.remove('hidden');
   const scrollEl = document.getElementById('settingsScrollBody');
   if (scrollEl) scrollEl.scrollTop = 0;
+  const defStrip = document.getElementById('settingsDefThemeStrip');
+  if (defStrip) defStrip.scrollLeft = 0;
 }
 
 function closeSettingsModal() {
+  frozenSettingsThemeOrderIds = null;
   document.getElementById('settingsModal')?.classList.add('hidden');
 }
 

@@ -17,9 +17,10 @@ The Styles surface (`#stylePopover`) is split into two distinct pages backed by 
 - **Import Wizard → Theme** (opens the Styles Theme Selector page in modal mode, with one-click access into the Theme Editor).
 
 Each card shows a mini page preview (background, step number `"1"` in the heading font, a parts box, muted text in the body font, accent dot, and a compact pencil marker for custom themes) ordered via `orderThemesByRecent()` with the currently selected theme first:
-- **Selected styling**: uses the app's primary selection treatment (`bg-[var(--primary)] text-[var(--primary-foreground)]` — white label on reddish primary card).
+- **Stable order while open**: the theme order is snapshotted right before showing the selector (every time Styles opens, returns from Theme Editor to Theme Selector, or Settings opens) and stays frozen while open so cards never jump around under the pointer while browsing.
+- **Selected styling**: uses the app's primary maroon selection treatment (`bg-[var(--primary)] text-[var(--primary-foreground)]` — white label on logo maroon card in both light and dark modes).
 - **Tap/click selected to edit**: clicking an unselected card selects it; clicking the already-selected card opens the Theme Editor directly.
-- **Delete from selector**: custom themes can be deleted via (1) swiping right on the card to expose the red left-side Delete action, (2) right-clicking / long-pressing a card to open `#themeCardContextMenu` (`Edit Theme`, `Duplicate`, `Delete Theme`), or (3) the bottom `#btnSelectorDeleteTheme` button — all routed through `deleteThemeById()` and the permanent-action confirmation dialog.
+- **Delete from selector**: custom themes can be deleted via (1) swiping left on the card to expose an iOS Mail-style circular Delete button with label below on the right side, (2) right-clicking / long-pressing a card to open `#themeCardContextMenu` (`Edit Theme`, `Duplicate`, `Delete Theme`), or (3) the bottom `#btnSelectorDeleteTheme` button — all routed through `deleteThemeById()` and the permanent-action confirmation dialog.
 
 ## Theme Editor Layout & Editing Model
 

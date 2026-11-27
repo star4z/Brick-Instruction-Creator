@@ -10,7 +10,7 @@ colors:
   logo-maroon-foreground: "#ffffff"
   logo-maroon-soft: "rgba(124, 21, 46, 0.1)"
   logo-maroon-border: "rgba(124, 21, 46, 0.36)"
-  logo-maroon-dark: "#eb6a84"
+  logo-maroon-dark: "#7c152e"
   logo-maroon-hover-dark: "#f28096"
   logo-maroon-foreground-dark: "#1a0a0f"
   logo-maroon-soft-dark: "rgba(235, 106, 132, 0.16)"
@@ -218,7 +218,7 @@ Because builders spend long sessions verifying piece visibility, camera angles, 
 A calm pressroom neutral scale—cool slate stone, crisp archival paper, and deep claret-charcoal ink—paired with the logo's three signature colors calibrated for WCAG AA contrast in both light and system dark (`@media (prefers-color-scheme: dark)`) modes.
 
 ### Primary & Logo Triad
-- **Logo Maroon** (`--primary`: `#7c152e` light / `#eb6a84` dark): Primary actions (Import Model, Export pill, Export to PDF, Save, Done, Next Page), active mode pill buttons, active tabs, `.IO` file badge, checkboxes/sliders, caret color, and `:focus-visible` outlines.
+- **Logo Maroon** (`--primary`: `#7c152e` with `#ffffff` foreground in both light and dark modes): Primary actions (Import Model, Export pill, Export to PDF, Save, Done, Next Page), active mode pill buttons, active tabs, `.IO` file badge, checkboxes/sliders, caret color, and `:focus-visible` outlines.
 - **Logo Maroon Hover** (`--primary-hover`: `#641025` light / `#f28096` dark): Hover state for primary filled buttons, deepening in light mode and brightening in dark mode.
 - **Logo Maroon Foreground** (`--primary-foreground`: `#ffffff` light / `#1a0a0f` dark): High-contrast label and icon ink seated on primary fills (`10.48:1` light / `6.33:1` dark).
 - **Logo Maroon Soft / Border** (`--primary-soft` / `--primary-border`): Tinted fills and borders for secondary-emphasis buttons, active presets, dashed section dividers, and `::selection` highlights.
