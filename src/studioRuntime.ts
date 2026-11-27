@@ -1001,6 +1001,9 @@ const PARTS_CATALOG = {
   '25269':{name:'Quarter Round Tile 1×1',sx:1,sz:1,h:8,studs:false,shape:'quarter_round'},
   '98138':{name:'Round Tile 1×1',sx:1,sz:1,h:8,studs:false,shape:'round'}, '14769':{name:'Round Tile 2×2',sx:2,sz:2,h:8,studs:false,shape:'round'},
   '15535':{name:'Round Tile 2×2 w/ Hole',sx:2,sz:2,h:8,studs:false,shape:'round_hole'},
+  '27448':{name:'Turntable Flat Base 2×2',sx:2,sz:2,h:8,studs:false},
+  '3680':{name:'Turntable 2×2 Plate Base',sx:2,sz:2,h:8,studs:false},
+  '3679':{name:'Turntable 2×2 Plate Top',sx:2,sz:2,h:8,studs:true},
   // Round Bricks & Plates
   '4073':{name:'Round Plate 1×1',sx:1,sz:1,h:8,studs:true,shape:'round'}, '4032':{name:'Round Plate 2×2',sx:2,sz:2,h:8,studs:true,shape:'round'},
   '60474':{name:'Round Plate 4×4',sx:4,sz:4,h:8,studs:true,shape:'round'}, '3062b':{name:'Round Brick 1×1',sx:1,sz:1,h:24,studs:true,shape:'round'},

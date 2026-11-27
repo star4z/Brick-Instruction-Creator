@@ -228,12 +228,13 @@ export function analyzeUndersideAssembly(
   let chosenBelowComps: number[][] = [];
 
   for (const yCand of candYs) {
-    // Parts forming the horizontal deck band at yCand
+    // Parts forming the horizontal deck band at yCand (tight -4 LDU lower bound prevents
+    // grabbing recessed underside connectors sitting 1 plate = 8 LDU below the real deck)
     const bandParts: number[] = [];
     for (const i of structuralIndices) {
       if (mechFlags[i]) continue;
       const b = parts[i].box;
-      if (b.min[1] >= yCand - 6 && b.min[1] <= yCand + 12 && b.max[1] <= yCand + 32) {
+      if (b.min[1] >= yCand - 4 && b.min[1] <= yCand + 12 && b.max[1] <= yCand + 32) {
         bandParts.push(i);
       }
     }
@@ -245,19 +246,27 @@ export function analyzeUndersideAssembly(
     const deckSpan = horizontalSpan(mainDeckComp, parts);
     if (deckSpan < longSpan * 0.55 || mainDeckComp.length < 4) continue;
 
-    // Use the exact underside plane of `mainDeckComp` (rather than the 8-LDU quantized
+    // Require the deck's own base layer at yCand (minY <= yCand + 4) to cover a real structural
+    // span (>= 40% of longSpan) so a lone underside part 1 plate below the true deck cannot
+    // trigger a premature deck match at yCand - 8 while borrowing the real deck above via +12.
+    const baseLayerParts = mainDeckComp.filter((i) => parts[i].box.min[1] <= yCand + 4);
+    if (baseLayerParts.length < 2 || horizontalSpan(baseLayerParts, parts) < longSpan * 0.40) {
+      continue;
+    }
+
+    // Use the exact underside plane of `baseLayerParts` (rather than the 8-LDU quantized
     // bucket `yCand`) so bricks clutched directly beneath the deck with 4 LDU top studs
     // are never dropped when a model's deck sits slightly off an exact 8-LDU multiple.
-    const mainDeckSet = new Set(mainDeckComp);
     let actualDeckMinY = Infinity;
-    for (const idx of mainDeckComp) {
-      if (parts[idx].box.min[1] < actualDeckMinY) {
-        actualDeckMinY = parts[idx].box.min[1];
-      }
+    const mainDeckSet = new Set<number>(mainDeckComp);
+    for (const i of baseLayerParts) {
+      if (parts[i].box.min[1] < actualDeckMinY) actualDeckMinY = parts[i].box.min[1];
     }
-    const deckUnderPlaneY = Number.isFinite(actualDeckMinY) ? actualDeckMinY : yCand;
+    const deckFloorY = Number.isFinite(actualDeckMinY) ? actualDeckMinY : yCand;
 
-    // Collect parts strictly below the deck (plus vertical Technic mechanisms hanging below it)
+    // Collect parts strictly below the deck (plus vertical Technic mechanisms hanging below it
+    // and recessed underside connectors/turntables whose base sits below the deck while their
+    // upper snap lip/collar reaches up into a deck opening)
     const belowParts: number[] = [];
     const belowSet = new Set<number>();
     for (let i = 0; i < n; i++) {
@@ -265,11 +274,21 @@ export function analyzeUndersideAssembly(
       const p = parts[i];
       if (p.role === 'figure') continue;
       const b = p.box;
-      if (b.max[1] <= deckUnderPlaneY + 5.5) {
+      if (b.max[1] <= deckFloorY + 5.5) {
         belowParts.push(i);
         belowSet.add(i);
-      } else if (mechFlags[i] && b.min[1] < deckUnderPlaneY - 8.0 && b.center[1] < deckUnderPlaneY + 6.0) {
+      } else if (mechFlags[i] && b.min[1] < deckFloorY - 8.0 && b.center[1] < deckFloorY + 6.0) {
         // Vertical axle/mechanism extending from below up into a deck hole
+        belowParts.push(i);
+        belowSet.add(i);
+      } else if (
+        b.min[1] < deckFloorY - 4.0 &&
+        b.max[1] <= deckFloorY + 12.0 &&
+        b.center[1] <= deckFloorY + 4.0
+      ) {
+        // Recessed underside connector (e.g. 2x2 turntable flat base, socket plate, or coupler)
+        // resting on top of an underside sub-assembly whose upper snap collar reaches into a deck
+        // opening without rising above the deck floor.
         belowParts.push(i);
         belowSet.add(i);
       }
@@ -288,7 +307,7 @@ export function analyzeUndersideAssembly(
     // Require at least one substantial pocket (>= 4 parts) genuinely attached to the deck above
     const deckAndAbove = new Set<number>();
     for (let i = 0; i < n; i++) {
-      if (!belowSet.has(i) && parts[i].box.min[1] >= yCand - 6 && parts[i].role !== 'figure') {
+      if (!belowSet.has(i) && parts[i].box.min[1] >= deckFloorY - 4 && parts[i].role !== 'figure') {
         deckAndAbove.add(i);
       }
     }
@@ -299,7 +318,7 @@ export function analyzeUndersideAssembly(
     );
     if (!attachedPockets.some((comp) => comp.length >= 4)) continue;
 
-    chosenDeckY = yCand;
+    chosenDeckY = deckFloorY;
     chosenDeckComp = mainDeckComp;
     chosenBelowComps = attachedPockets;
     break;
@@ -311,11 +330,15 @@ export function analyzeUndersideAssembly(
 
   const deckBandMaxY = chosenDeckY + 20;
   const deckSet = new Set<number>(chosenDeckComp);
+  const chosenBelowSet = new Set<number>();
+  for (const comp of chosenBelowComps) {
+    for (const i of comp) chosenBelowSet.add(i);
+  }
   // Include any additional deck-band structural parts touching the main deck component
   for (const i of structuralIndices) {
-    if (deckSet.has(i) || mechFlags[i]) continue;
+    if (deckSet.has(i) || chosenBelowSet.has(i) || mechFlags[i]) continue;
     const b = parts[i].box;
-    if (b.min[1] >= chosenDeckY - 6 && b.max[1] <= deckBandMaxY + 12) {
+    if (b.min[1] >= chosenDeckY - 4 && b.max[1] <= deckBandMaxY + 12) {
       if ((adj[i] ?? []).some((nb) => deckSet.has(nb))) {
         deckSet.add(i);
       }

@@ -404,6 +404,90 @@ describe('undersideAssembly — general deck-first & upside-down underside physi
       new Set([upperA, upperB, midBrick, capPlate]),
     );
   });
+
+  it('captures recessed underside turntable/socket connectors (e.g. 27448) whose snap collar reaches into a deck opening inside the underside sub-module', () => {
+    const parts: UndersidePartInput[] = [];
+    const adj: number[][] = [];
+    const add = (
+      partId: string,
+      partName: string,
+      box: WorldBox,
+      extra: Partial<UndersidePartInput> = {},
+    ): number => {
+      const idx = parts.length;
+      parts.push({
+        index: idx,
+        partId,
+        partName,
+        role: extra.role ?? 'structural',
+        box,
+        isCladding: false,
+        hasStuds: extra.hasStuds ?? true,
+        ...extra,
+      });
+      adj.push([]);
+      return idx;
+    };
+
+    // 8-plate structural deck at non-integer Studio Y=[73.003..81.003] (quantizes to 72, testing exact deckFloorY!)
+    const deck: number[] = [];
+    for (let k = 0; k < 8; k++) {
+      const z0 = -320 + k * 80;
+      const pid = k === 4 ? '60474' : '3795';
+      const pname = k === 4 ? 'Round Plate 4 x 4 with 2 x 2 Round Opening' : 'Plate 2 x 6';
+      const idx = add(pid, pname, makeBox(-60, 73.003, z0, 60, 81.003, z0 + 80));
+      deck.push(idx);
+      if (k > 0) link(adj, deck[k - 1], idx);
+    }
+    // Upper body bricks above deck (enough parts for n >= 24)
+    for (let k = 0; k < 10; k++) {
+      const z0 = -300 + k * 60;
+      const w = add('3004', 'Brick 1 x 2', makeBox(-50, 81.003, z0, -30, 129.003, z0 + 40));
+      link(adj, w, deck[Math.min(7, Math.floor((z0 + 320) / 80))]);
+    }
+
+    // Wheeled underside sub-module under deck[4] (60474 round plate) topped by recessed 27448 turntable base:
+    // 27448 base sits at Y=65.003 (below deckFloorY=73.003), while its raised circular snap ring extends
+    // up into 60474's opening to Y=81.003 (above yCand+5=77!).
+    const topPlate = add('3031', 'Plate 4 x 4', makeBox(-40, 57.003, 0, 40, 65.003, 80));
+    const turntableBase = add('27448', 'Turntable Flat Base 2 x 2', makeBox(-20, 65.003, 20, 20, 81.003, 60), {
+      hasStuds: false,
+    });
+    const holder = add('38339', 'Train Wheel Holder', makeBox(-40, 33.003, 0, 40, 57.003, 80), {
+      role: 'wheel_holder',
+    });
+    const wheelL = add('38340', 'Train Wheel', makeBox(-50, 15, 20, -35, 45, 60), {
+      role: 'wheel',
+      hasStuds: false,
+    });
+    const wheelR = add('38340', 'Train Wheel', makeBox(35, 15, 20, 50, 45, 60), {
+      role: 'wheel',
+      hasStuds: false,
+    });
+    const topTileL = add('87079', 'Tile 2 x 4', makeBox(-40, 65.003, 0, 40, 73.003, 20), {
+      hasStuds: false,
+    });
+
+    link(adj, deck[4], turntableBase);
+    link(adj, turntableBase, topPlate);
+    link(adj, topTileL, topPlate);
+    link(adj, topPlate, holder);
+    link(adj, holder, wheelL);
+    link(adj, holder, wheelR);
+
+    const plan = analyzeUndersideAssembly(parts, adj);
+    expect(plan.hasSuspendedUnderside).toBe(true);
+    expect(plan.deckPartIndices).toContain(deck[4]);
+    expect(plan.deckPartIndices).not.toContain(turntableBase);
+    expect(plan.allUndersideIndices.has(turntableBase)).toBe(true);
+
+    const wheelSub = plan.subassemblies.find((s) => s.name === 'Wheel Assembly');
+    expect(wheelSub).toBeDefined();
+    expect(wheelSub!.partIndices).toContain(turntableBase);
+    expect(new Set(wheelSub!.partIndices)).toEqual(
+      new Set([topPlate, turntableBase, holder, wheelL, wheelR, topTileL]),
+    );
+  });
 });
 
 
