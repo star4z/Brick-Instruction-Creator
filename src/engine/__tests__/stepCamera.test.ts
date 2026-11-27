@@ -920,6 +920,42 @@ describe('Step Camera Stability & Steady Framing', () => {
     expect(res[2].corner).toBe(res[0].corner);
     expect(res[2].cue).toBe('none');
   });
+
+  it('turns the camera so a lifted attachedSubmodel sits near the camera without hiding its mating Technic axle behind itself', () => {
+    // Flipped underside chassis spanning Z in [-240, 240]; Technic axle + liftarm sit at the far -Z end (Z = -210),
+    // and the lifted Underside Module has a tall 2x6 brick on its +Z side (Z = -170..-130) that would hide the axle
+    // when viewed from front_right (+Z), but exposes the axle clearly when viewed from back_left / back_right (-Z).
+    const deck = [
+      makeBox(-60, 80, -240, 60, 92, -80),
+      makeBox(-60, 80, -80, 60, 92, 80),
+      makeBox(-60, 80, 80, 60, 92, 240),
+      makeBox(-60, 92, -240, 60, 100, 240),
+    ];
+    const mech = [
+      makeBox(-10, 20, -220, 10, 88, -200), // protruding vertical Technic axle at -Z end
+      makeBox(-12, 48, -225, 12, 58, -165), // horizontal Technic liftarm
+    ];
+    const subSeated = [
+      makeBox(-60, 24, -220, 60, 36, -140), // wedge/base plate (with hole around axle at Z=-210)
+      makeBox(-60, 36, -180, 60, 72, -140), // tall 2x6 brick on the +Z inner side of the submodel
+    ];
+    const subShifted = subSeated.map((b) =>
+      makeBox(b.min[0], b.min[1] - 44, b.min[2], b.max[0], b.max[1] - 44, b.max[2]),
+    );
+
+    const inputs = buildSequenceInputs([deck, mech, subSeated]);
+    inputs[1].forceSide = 'bottom';
+    inputs[1].isSubmodelAttach = true;
+    inputs[2].forceSide = 'bottom';
+    inputs[2].isSubmodelAttach = true;
+    inputs[2].shiftedStepBoxes = subShifted;
+
+    const res = optimizeStudioStepCameraSequence(inputs);
+    expect(res[2].side).toBe('bottom');
+    // Must turn to the -Z side (back_left or back_right) so the submodel and mating axle face/are near the camera!
+    expect(res[2].corner === 'back_left' || res[2].corner === 'back_right').toBe(true);
+  });
 });
+
 
 

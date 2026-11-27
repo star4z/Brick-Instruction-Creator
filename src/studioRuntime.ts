@@ -6588,6 +6588,35 @@ function optimizeManualStepCameras(chapters, targetAspect = getActivePageLayoutA
         appendOccluderBoxes(step.parts, stepOccs);
         const stepBoxes = stepOccs.map((o) => o.box);
 
+        const isSubmodelAttach = Boolean(step.attachedSubmodel);
+        let shiftedStepBoxes;
+        if (isSubmodelAttach && step.defaultPartOffsets) {
+          shiftedStepBoxes = [];
+          for (const p of step.parts || []) {
+            const off = step.defaultPartOffsets[p.id];
+            const ox = off ? (off.x || 0) : 0;
+            const oy = off ? (off.y || 0) : 0;
+            const oz = off ? (off.z || 0) : 0;
+            if (p.children && p.children.length > 0) {
+              for (const ch of p.children) {
+                const b = computeLeafWorldBox(ch);
+                shiftedStepBoxes.push({
+                  min: [b.min[0] + ox, b.min[1] + oy, b.min[2] + oz],
+                  max: [b.max[0] + ox, b.max[1] + oy, b.max[2] + oz],
+                  center: [b.center[0] + ox, b.center[1] + oy, b.center[2] + oz],
+                });
+              }
+            } else {
+              const b = computeLeafWorldBox(p);
+              shiftedStepBoxes.push({
+                min: [b.min[0] + ox, b.min[1] + oy, b.min[2] + oz],
+                max: [b.max[0] + ox, b.max[1] + oy, b.max[2] + oz],
+                center: [b.center[0] + ox, b.center[1] + oy, b.center[2] + oz],
+              });
+            }
+          }
+        }
+
         pendingSteps.push(step);
         pendingInputs.push({
           stepBoxes,
@@ -6595,6 +6624,8 @@ function optimizeManualStepCameras(chapters, targetAspect = getActivePageLayoutA
           occluderCountBefore,
           builtBoundsBefore,
           isSectionAttach: Boolean(step.attachedSubmodel?.isSectionAttach),
+          isSubmodelAttach,
+          shiftedStepBoxes,
           forceSide: step.isUpsideDownUndersideStep ? 'bottom' : undefined,
         });
 

@@ -34,6 +34,10 @@ export interface OptimizableStepCameraInput {
   builtBoundsBefore: WorldBox | null;
   /** True for large section/roof attachment steps that should stay extra steady. */
   isSectionAttach?: boolean;
+  /** True for pre-built submodel attachment steps (e.g. mechanisms, underside modules, wheel assemblies). */
+  isSubmodelAttach?: boolean;
+  /** Optional lifted/offset boxes of the attached submodel when `defaultPartOffsets` pulls it above its mating site. */
+  shiftedStepBoxes?: readonly WorldBox[];
   /** Optional hard side constraint (e.g. 'bottom' during an upside-down underside assembly phase). */
   forceSide?: 'top' | 'bottom';
 }
@@ -941,6 +945,54 @@ export function optimizeStudioStepCameraSequence(
 
     const deadband = step.isSectionAttach ? 0.6 : STEP_VISIBILITY_DEADBAND;
 
+    // For lifted pre-built submodel attachments (`isSubmodelAttach`), identify directly mating
+    // prior connectors (e.g. protruding Technic axles/pins/mechanisms or compact target parts)
+    // so we penalize viewpoints where the lifted submodel itself obscures the mating interface.
+    let matingBoxes: WorldBox[] = [];
+    if (
+      step.isSubmodelAttach &&
+      !step.isSectionAttach &&
+      step.shiftedStepBoxes &&
+      step.shiftedStepBoxes.length > 0 &&
+      occCount > 0 &&
+      step.stepBoxes.length > 0
+    ) {
+      const interlocking: WorldBox[] = [];
+      const compactTouching: WorldBox[] = [];
+      for (let i = 0; i < occCount; i++) {
+        const ob = extractBox(step.occludersBefore[i]);
+        let touches = false;
+        let interlocks = false;
+        for (let j = 0; j < step.stepBoxes.length; j++) {
+          const sb = step.stepBoxes[j];
+          const gx = Math.max(0, ob.min[0] - sb.max[0], sb.min[0] - ob.max[0]);
+          const gy = Math.max(0, ob.min[1] - sb.max[1], sb.min[1] - ob.max[1]);
+          const gz = Math.max(0, ob.min[2] - sb.max[2], sb.min[2] - ob.max[2]);
+          if (gx <= 4.0 && gy <= 4.0 && gz <= 4.0) {
+            touches = true;
+            const ovX = Math.min(ob.max[0], sb.max[0]) - Math.max(ob.min[0], sb.min[0]);
+            const ovY = Math.min(ob.max[1], sb.max[1]) - Math.max(ob.min[1], sb.min[1]);
+            const ovZ = Math.min(ob.max[2], sb.max[2]) - Math.max(ob.min[2], sb.min[2]);
+            if (ovX > 1.5 && ovY > 1.5 && ovZ > 1.5) {
+              interlocks = true;
+              break;
+            }
+          }
+        }
+        if (!touches) continue;
+        const ox = ob.max[0] - ob.min[0];
+        const oy = ob.max[1] - ob.min[1];
+        const oz = ob.max[2] - ob.min[2];
+        const isLargeFlatDeck = Math.max(ox, oz) > 100 && oy <= 14;
+        if (interlocks && !isLargeFlatDeck) {
+          interlocking.push(ob);
+        } else if (!isLargeFlatDeck) {
+          compactTouching.push(ob);
+        }
+      }
+      matingBoxes = interlocking.length > 0 ? interlocking : compactTouching;
+    }
+
     for (let v = 0; v < V; v++) {
       const view = canonicalViews[v];
       if (view.isBottom && !allowBottom) continue;
@@ -956,8 +1008,27 @@ export function optimizeStudioStepCameraSequence(
         occCount === 0 && !view.isBottom && step.stepBoxes.length >= 2
           ? computeStep1ConnectionFacingCost(step.stepBoxes, view.az, view.isBottom)
           : 0;
+      let subAttachCost = 0;
+      if (step.isSubmodelAttach && !step.isSectionAttach) {
+        if (matingBoxes.length > 0 && step.shiftedStepBoxes && step.shiftedStepBoxes.length > 0) {
+          const matingVis = evaluateStepOcclusionVisibility(
+            matingBoxes,
+            step.shiftedStepBoxes,
+            view.az,
+            view.el,
+          ).visibility;
+          subAttachCost += stepVisibilityPenalty(matingVis, STEP_VISIBILITY_DEADBAND);
+        }
+        if (builtBounds) {
+          subAttachCost += -0.35 * clamp(cornerDot(stepUnionBoxes[t], view.corner, builtBounds), -1, 1);
+        }
+      }
       const emissionCost =
-        stepVisibilityPenalty(vis, deadband) + uprightBias + startAnchorBias + step1FacingCost;
+        stepVisibilityPenalty(vis, deadband) +
+        uprightBias +
+        startAnchorBias +
+        step1FacingCost +
+        subAttachCost;
 
       if (t === 0) {
         const initTransCost = initialCam ? stepCameraTransitionCost(initialCam, view) : 0;
