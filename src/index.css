@@ -343,6 +343,22 @@ body {
   z-index: 1;
 }
 
+.style-section > summary {
+  list-style: none;
+}
+
+.style-section > summary::-webkit-details-marker {
+  display: none;
+}
+
+.style-section > summary .style-section-chevron {
+  transition: transform 160ms var(--ease-press);
+}
+
+.style-section:not([open]) > summary .style-section-chevron {
+  transform: rotate(-90deg);
+}
+
 #stylePopover.style-popover-wizard-mode {
   inset: 0;
   top: 0;

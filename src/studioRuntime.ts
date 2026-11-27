@@ -15043,6 +15043,7 @@ function syncMenuControls() {
     pageSetupDoneBtnEl.textContent = isPageSetupWizard ? 'Back to Import Wizard' : 'Done';
   }
   setVisible('styleBomSection', styleWizVis.showStyleBomLink);
+  setVisible('stylePopoverHeader', !styleWizVis.showStyleWizardChrome);
   setVisible('styleWizardHeader', styleWizVis.showStyleWizardChrome);
   setVisible('styleWizardFooter', styleWizVis.showStyleWizardChrome);
 
@@ -15172,7 +15173,7 @@ function syncMenuControls() {
   const curMfStyleGlobal = normalizeMinifigStepStyle(state.minifigStyle);
   document.querySelectorAll('.mf-style-btn').forEach(b => {
     const act = b.getAttribute('data-mf-style') === curMfStyleGlobal;
-    b.className = `mf-style-btn py-1.5 px-2 rounded-md border font-semibold text-xs transition ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--surface-sunken)]'}`;
+    b.className = `mf-style-btn flex flex-col items-center justify-center gap-1 py-1.5 px-1.5 rounded-md border font-semibold text-xs transition cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--surface-sunken)]'}`;
   });
 
   syncBomSetupUI();
@@ -15189,13 +15190,13 @@ function syncMenuControls() {
   if (hlWrap) hlWrap.classList.toggle('opacity-45', !state.highlightNew);
   document.querySelectorAll('.hl-weight-chip').forEach(b => {
     const act = b.getAttribute('data-hl-weight') === sanitizeLineWeight(state.highlightLineWeight, 'medium');
-    b.className = `hl-weight-chip py-1.5 px-1 rounded-md border font-semibold text-[11px] leading-tight transition cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
+    b.className = `hl-weight-chip flex flex-col items-center justify-center gap-1 py-1.5 px-1 rounded-md border font-semibold text-[11px] leading-tight transition cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
   });
   const outWrap = document.getElementById('outlineWeightWrap');
   if (outWrap) outWrap.classList.toggle('opacity-45', !state.starkBlackOutlines);
   document.querySelectorAll('.outline-weight-chip').forEach(b => {
     const act = b.getAttribute('data-outline-weight') === sanitizeLineWeight(state.outlineLineWeight, 'medium');
-    b.className = `outline-weight-chip py-1.5 px-1 rounded-md border font-semibold text-[11px] leading-tight transition cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
+    b.className = `outline-weight-chip flex flex-col items-center justify-center gap-1 py-1.5 px-1 rounded-md border font-semibold text-[11px] leading-tight transition cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
   });
 
   syncStylePanel();
@@ -15206,7 +15207,7 @@ function syncArrowStyleUI(opts = state) {
   const activeStyle = sanitizePlacementArrowStyle(opts?.arrowStyle, 'flat');
   document.querySelectorAll('.arrow-style-chip').forEach(b => {
     const act = b.getAttribute('data-arrow-style') === activeStyle;
-    b.className = `arrow-style-chip py-1.5 px-2 rounded-md border font-semibold text-xs transition cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
+    b.className = `arrow-style-chip inline-flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-md border font-semibold text-xs transition cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
   });
   const outChk = document.getElementById('toggleArrowOutlines');
   if (outChk) outChk.checked = Boolean(opts?.arrowOutlines);
@@ -15218,7 +15219,7 @@ function syncStepBorderStyleUI(mode = state.stepBorderStyle) {
   const activeMode = sanitizeStepBorderStyle(mode, state.showStepBorders ? 'boxes' : 'lines');
   document.querySelectorAll('.step-border-style-btn').forEach(b => {
     const act = b.getAttribute('data-step-border-style') === activeMode;
-    b.className = `step-border-style-btn py-1.5 px-2 rounded-md border font-semibold text-xs transition-colors cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)]'}`;
+    b.className = `step-border-style-btn flex flex-col items-center justify-center gap-1 py-1.5 px-2 rounded-md border font-semibold text-xs transition-colors cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)]'}`;
     b.setAttribute('aria-pressed', act ? 'true' : 'false');
   });
   document.querySelectorAll('.step-border-style-setup-btn').forEach(b => {
@@ -15231,7 +15232,7 @@ function syncStepBorderStyleUI(mode = state.stepBorderStyle) {
     const w = Number(b.getAttribute('data-step-num-weight'));
     const act = w === activeWeight;
     const wCls = w === 300 ? 'font-light' : (w === 500 ? 'font-medium' : 'font-extrabold');
-    b.className = `step-num-weight-btn py-1.5 px-2 rounded-md border ${wCls} text-xs transition-colors cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)]'}`;
+    b.className = `step-num-weight-btn flex flex-col items-center justify-center gap-0.5 py-1.5 px-2 rounded-md border ${wCls} text-xs transition-colors cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)]'}`;
     b.setAttribute('aria-pressed', act ? 'true' : 'false');
   });
 }
@@ -15249,7 +15250,7 @@ function syncProgressBarUI(opts = state) {
   if (setupGroup) setupGroup.classList.toggle('opacity-50', !showBar);
   document.querySelectorAll('.progress-bar-span-btn').forEach(b => {
     const act = b.getAttribute('data-progress-bar-span') === activeSpan;
-    b.className = `progress-bar-span-btn py-1.5 px-2 rounded-md border font-semibold text-xs transition-colors cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)]'}`;
+    b.className = `progress-bar-span-btn inline-flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-md border font-semibold text-xs transition-colors cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)]'}`;
     b.setAttribute('aria-pressed', act ? 'true' : 'false');
     b.disabled = !showBar;
   });
@@ -15273,7 +15274,7 @@ function syncStepLightingUI(mode = state.stepLighting) {
   const activeMode = sanitizeStepLightingMode(mode, state.highQualityStepRender ? 'studio' : 'none');
   document.querySelectorAll('.step-lighting-chip').forEach(b => {
     const act = b.getAttribute('data-step-lighting') === activeMode;
-    b.className = `step-lighting-chip py-1.5 px-2 rounded-md border font-semibold text-xs transition cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
+    b.className = `step-lighting-chip flex flex-col items-center justify-center gap-1 py-1.5 px-2 rounded-md border font-semibold text-xs transition cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
   });
   const hintEl = document.getElementById('stepLightingHint');
   if (hintEl) {
@@ -22300,6 +22301,45 @@ if (stylePopEl) {
     }
   });
 }
+
+function getStyleCollapsibleSections(): HTMLDetailsElement[] {
+  return Array.from(document.querySelectorAll<HTMLDetailsElement>('#stylePopover details.style-section'));
+}
+
+function syncStyleSectionsToggleAllUI() {
+  const sections = getStyleCollapsibleSections();
+  if (!sections.length) return;
+  const anyOpen = sections.some(s => s.open);
+  const labelText = anyOpen ? 'Collapse All' : 'Expand All';
+  const titleText = anyOpen ? 'Collapse all sections' : 'Expand all sections';
+  const iconPath = anyOpen
+    ? '<path d="m7 20 5-5 5 5"/><path d="m7 4 5 5 5-5"/>'
+    : '<path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/>';
+  document.querySelectorAll('.btn-toggle-all-style-sections').forEach(btn => {
+    btn.setAttribute('data-action', anyOpen ? 'collapse' : 'expand');
+    btn.setAttribute('title', titleText);
+    btn.setAttribute('aria-label', titleText);
+    const lbl = btn.querySelector('.toggle-all-style-sections-label');
+    if (lbl) lbl.textContent = labelText;
+    const svg = btn.querySelector('.toggle-all-style-sections-icon');
+    if (svg) svg.innerHTML = iconPath;
+  });
+}
+
+document.querySelectorAll('.btn-toggle-all-style-sections').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const sections = getStyleCollapsibleSections();
+    const shouldOpen = !sections.some(s => s.open);
+    sections.forEach(s => { s.open = shouldOpen; });
+    syncStyleSectionsToggleAllUI();
+  });
+});
+
+getStyleCollapsibleSections().forEach(s => {
+  s.addEventListener('toggle', syncStyleSectionsToggleAllUI);
+});
+syncStyleSectionsToggleAllUI();
+
 document.addEventListener('pointerdown', (e) => {
   if (!stylePopEl || stylePopEl.classList.contains('hidden')) return;
   if (importWizardState.active && importWizardState.subpage === 'style') return;
@@ -22436,11 +22476,11 @@ function syncStylePanel() {
   document.getElementById('themeAngleWrap')?.classList.toggle('hidden', !isGrad);
   document.querySelectorAll('.theme-bgtype-btn').forEach(b => {
     const act = b.getAttribute('data-bg-type') === t.bgType;
-    b.className = `theme-bgtype-btn px-2.5 py-1 rounded text-xs font-semibold transition cursor-pointer ${act ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'text-[var(--muted-foreground)]'}`;
+    b.className = `theme-bgtype-btn inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer ${act ? 'bg-[var(--primary)] text-[var(--primary-foreground)]' : 'text-[var(--muted-foreground)]'}`;
   });
   document.querySelectorAll('.theme-angle-btn').forEach(b => {
     const act = Number(b.getAttribute('data-bg-angle')) === Number(t.bgAngle);
-    b.className = `theme-angle-btn py-1.5 rounded-md border font-semibold transition cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
+    b.className = `theme-angle-btn inline-flex items-center justify-center gap-1 py-1.5 px-1.5 rounded-md border font-semibold transition cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
   });
 
   syncThemeFontUI(t);
@@ -26645,7 +26685,10 @@ function openStyleFromImportWizard(section = 'theme') {
     if (!scrollEl) return;
     if (section === 'rendering') {
       const target = document.getElementById('styleStepDisplaySection');
-      if (target) target.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      if (target) {
+        if (target instanceof HTMLDetailsElement) target.open = true;
+        target.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      }
     } else {
       scrollEl.scrollTop = 0;
     }

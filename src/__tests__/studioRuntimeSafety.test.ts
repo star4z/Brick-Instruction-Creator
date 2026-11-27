@@ -1126,8 +1126,64 @@ describe('studioRuntime safety checks', () => {
     expect(runtime).toContain('hideStartupLoadingScreen(');
     expect(runtime).toContain('isRestorableModelRecord(');
   });
+
+  it('gives the Styles popover a Styles header with Expand/Collapse All, collapsible sections, and widgets moved off section headers', () => {
+    const html = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf8');
+    const runtime = fs.readFileSync(path.resolve(process.cwd(), 'src/studioRuntime.ts'), 'utf8');
+
+    const popStart = html.indexOf('id="stylePopover"');
+    const popEnd = html.indexOf('id="overviewModal"', popStart);
+    expect(popStart).toBeGreaterThan(-1);
+    expect(popEnd).toBeGreaterThan(popStart);
+    const styleHtml = html.slice(popStart, popEnd);
+
+    // Styles header with Expand/Collapse All control
+    expect(styleHtml).toContain('id="stylePopoverHeader"');
+    expect(styleHtml).toContain('>Styles<');
+    expect(styleHtml).toContain('id="btnToggleAllStyleSections"');
+    expect(styleHtml).toContain('Collapse All');
+
+    // All major sections are collapsible <details class="style-section" ...>
+    for (const id of [
+      'styleThemesSection',
+      'styleThemeIdentitySection',
+      'stylePageBgSection',
+      'stylePaletteSection',
+      'styleTypographySection',
+      'styleStepDisplaySection',
+      'styleStepFeaturesSection',
+      'styleBomSection',
+    ]) {
+      expect(styleHtml).toContain(`<details id="${id}" class="style-section`);
+    }
+
+    // Solid / Gradient is inside Page Background body (after </summary>) and at the top (before themeColorBg)
+    const bgStart = styleHtml.indexOf('id="stylePageBgSection"');
+    const bgSummaryEnd = styleHtml.indexOf('</summary>', bgStart);
+    const bgSolidIdx = styleHtml.indexOf('data-bg-type="solid"', bgStart);
+    const bgColorIdx = styleHtml.indexOf('id="themeColorBg"', bgStart);
+    expect(bgSummaryEnd).toBeGreaterThan(bgStart);
+    expect(bgSolidIdx).toBeGreaterThan(bgSummaryEnd);
+    expect(bgColorIdx).toBeGreaterThan(bgSolidIdx);
+
+    // Upload Font is inside Typography body (after </summary>) and at the bottom (after themeFontPickerPanel)
+    const typoStart = styleHtml.indexOf('id="styleTypographySection"');
+    const typoEnd = styleHtml.indexOf('</details>', typoStart);
+    const typoSummaryEnd = styleHtml.indexOf('</summary>', typoStart);
+    const fontPickerIdx = styleHtml.indexOf('id="themeFontPickerPanel"', typoStart);
+    const uploadFontIdx = styleHtml.indexOf('id="btnUploadCustomFont"', typoStart);
+    expect(typoSummaryEnd).toBeGreaterThan(typoStart);
+    expect(uploadFontIdx).toBeGreaterThan(fontPickerIdx);
+    expect(uploadFontIdx).toBeLessThan(typoEnd);
+
+    // New from Current is inside Themes body (after </summary>) rather than inline in the header
+    const themesStart = styleHtml.indexOf('id="styleThemesSection"');
+    const themesSummaryEnd = styleHtml.indexOf('</summary>', themesStart);
+    const newThemeIdx = styleHtml.indexOf('id="btnNewCustomTheme"', themesStart);
+    expect(newThemeIdx).toBeGreaterThan(themesSummaryEnd);
+
+    // Runtime wires Expand/Collapse All toggle
+    expect(runtime).toContain('function syncStyleSectionsToggleAllUI(');
+    expect(runtime).toContain("setVisible('stylePopoverHeader'");
+  });
 });
-
-
-
-

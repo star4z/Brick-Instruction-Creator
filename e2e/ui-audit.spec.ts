@@ -367,9 +367,22 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     // 1. Style & Themes Popover + Font Picker + Undo/Redo
     await page.locator('#btnStylePop').click();
     await expect(page.locator('#stylePopover')).toBeVisible();
+    await expect(page.locator('#stylePopoverHeader')).toBeVisible();
+    await expect(page.locator('#stylePopoverHeader')).toContainText('Styles');
+    await expect(page.locator('#btnToggleAllStyleSections')).toContainText('Collapse All');
     await auditSurface(page, `${testInfo.project.name}: Style & Themes Popover`, {
       activeContainerSelector: '#stylePopover',
     });
+
+    // Verify Collapse All / Expand All and individual collapsible section toggle
+    await page.locator('#btnToggleAllStyleSections').click();
+    await expect(page.locator('#btnToggleAllStyleSections')).toContainText('Expand All');
+    await expect(page.locator('#stylePageBgSection')).not.toHaveAttribute('open', '');
+    await expect(page.locator('#styleTypographySection')).not.toHaveAttribute('open', '');
+    await page.locator('#btnToggleAllStyleSections').click();
+    await expect(page.locator('#btnToggleAllStyleSections')).toContainText('Collapse All');
+    await expect(page.locator('#stylePageBgSection')).toHaveAttribute('open', '');
+    await expect(page.locator('#styleTypographySection')).toHaveAttribute('open', '');
 
     // Open Typography Font Picker inside Style Popover
     await page.locator('#btnThemeHeadingFont').click();
