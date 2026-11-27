@@ -24,6 +24,8 @@ describe('computeMenuVisibility', () => {
     expect(vis).toEqual({
       showModelCard: false,
       showCloseModel: false,
+      showModelProjectSection: false,
+      showImportModel: false,
       showExportProject: false,
       showModelIssues: false,
       showPagePrintSection: false,
@@ -72,6 +74,8 @@ describe('computeMenuVisibility', () => {
     );
     expect(projectOnly.showModelCard).toBe(true);
     expect(projectOnly.showCloseModel).toBe(true);
+    expect(projectOnly.showModelProjectSection).toBe(true);
+    expect(projectOnly.showImportModel).toBe(true);
     expect(projectOnly.showExportProject).toBe(true);
     expect(projectOnly.showPagePrintSection).toBe(true);
     expect(projectOnly.showAutoGenerateSection).toBe(false);

@@ -66,23 +66,15 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
       });
     }
 
-    // Side menu items omit inline summaries and item descriptions
+    // Side menu hides Model & Project import controls when no model is open (welcome screen already shows both)
+    await expect(page.locator('#menuModelProjectSection')).toBeHidden();
+    await expect(page.locator('#menuImportBtn')).toBeHidden();
     await expect(page.locator('#menuScrollBody p')).toHaveCount(0);
     await expect(page.locator('#menuBricksLibBtn')).toHaveText(/^\s*Bricks Library\s*$/);
     await expect(page.locator('#menuShortcutsBtn')).toHaveText(/^\s*Keyboard Shortcuts\s*$/);
     await expect(page.locator('#menuSettingsBtn')).toHaveText(/^\s*Settings\s*$/);
 
-    // 1. Open Model Modal
-    await ensureMenuOpen(page);
-    await page.locator('#menuImportBtn').click();
-    await expect(page.locator('#openModelModal')).toBeVisible();
-    await auditSurface(page, `${testInfo.project.name}: Open Model Modal`, {
-      activeContainerSelector: '#openModelModal',
-    });
-    await page.locator('#btnCloseOpenModel').click();
-    await expect(page.locator('#openModelModal')).toBeHidden();
-
-    // 2. Keyboard Shortcuts Modal
+    // 1. Keyboard Shortcuts Modal
     await ensureMenuOpen(page);
     await page.locator('#menuShortcutsBtn').click();
     await expect(page.locator('#shortcutsModal')).toBeVisible();
@@ -647,6 +639,18 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     await page.goto('/');
     await loadCleanManual(page);
     await closeMenuOnMobile(page);
+
+    // 0. Open Model Modal (only available in side menu once a model is open)
+    await ensureMenuOpen(page);
+    await expect(page.locator('#menuModelProjectSection')).toBeVisible();
+    await expect(page.locator('#menuImportBtn')).toBeVisible();
+    await page.locator('#menuImportBtn').click();
+    await expect(page.locator('#openModelModal')).toBeVisible();
+    await auditSurface(page, `${testInfo.project.name}: Open Model Modal`, {
+      activeContainerSelector: '#openModelModal',
+    });
+    await page.locator('#btnCloseOpenModel').click();
+    await expect(page.locator('#openModelModal')).toBeHidden();
 
     // 1. Parts List (BOM) Setup Modal (Grid Auto, Grid Custom, Table)
     await ensureMenuOpen(page);

@@ -15216,6 +15216,8 @@ function syncMenuControls() {
 
   setVisible('menuModelCard', vis.showModelCard);
   setVisible('menuCloseModelBtn', vis.showCloseModel);
+  setVisible('menuModelProjectSection', vis.showModelProjectSection);
+  setVisible('menuImportBtn', vis.showImportModel);
   setVisible('menuSaveProj', vis.showExportProject);
   setVisible('menuErrorsBtn', vis.showModelIssues);
   setVisible('menuPagePrintSection', vis.showPagePrintSection);
@@ -15229,6 +15231,17 @@ function syncMenuControls() {
   setVisible('menuClearLibBtn', vis.showClearLibrary);
   setVisible('menuAutoGenSection', vis.showAutoGenerateSection);
   setVisible('menuStepGenBtn', vis.showAutoGenerateSection);
+  const bricksLibSection = document.getElementById('menuBricksLibSection');
+  if (bricksLibSection) {
+    const hasPrecedingSection =
+      vis.showModelCard ||
+      vis.showModelProjectSection ||
+      vis.showPagePrintSection ||
+      vis.showAutoGenerateSection;
+    bricksLibSection.classList.toggle('pt-4', hasPrecedingSection);
+    bricksLibSection.classList.toggle('border-t', hasPrecedingSection);
+    bricksLibSection.classList.toggle('border-[var(--border)]', hasPrecedingSection);
+  }
 
   const isPageSetupWizard = importWizardState.active && importWizardState.subpage === 'pageSetup';
   const pageSetupWizVis = getWizardSubpageVisibility(isPageSetupWizard);
@@ -26386,6 +26399,7 @@ document.getElementById('coverImageInput').onchange = (e) => {
 
 // Open / Import Model & Project Proofing Sheet Dialog
 function openOpenModelModal() {
+  if (!state.model) return;
   closeMenu();
   document.getElementById('openModelModal')?.classList.remove('hidden');
 }

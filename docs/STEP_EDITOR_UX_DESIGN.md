@@ -39,7 +39,7 @@ Visual range-picker modal tagged **`Step Range`**:
 - **Absolute Step Ranges**: The range is expressed in absolute step numbers (`step.absNum`, unique across the manual), never printed per-submodel numbers. Rows show `Step N` plus a `#abs` chip, chapter headers separate submodels, and the From/To chips read `Step 1 · #9`. See [`ABSOLUTE_STEP_NUMBERING_DESIGN.md`](./ABSOLUTE_STEP_NUMBERING_DESIGN.md).
 
 ### 4. Main Drawer Menu Reorganization
-- **Model & Project**: `Import Model or Project…` opens the dismissible Open Model dialog (`#openModelModal`, mirroring the initial welcome sheet with drag-and-drop, Import Model, and Import Project), plus `Export Project (.biw)` and `Model Issues`.
+- **Model & Project** (shown when a model is open): `Import Model or Project…` opens the dismissible Open Model dialog (`#openModelModal`, mirroring the initial welcome sheet with drag-and-drop, Import Model, and Import Project), plus `Export Project (.biw)` and `Model Issues`.
 - **Page & Export**: `Page Setup`, `Parts List Setup`, `Export Interactive 3D (.html)`, `Print / Export PDF`.
 - **Step Generation** *(placed directly below `Page & Export` and above `Bricks Library`)*: Single neutral-styled **`Step Generation >`** button opening the unified `#importModal` where **Build Organization** is a `<select>` dropdown paired with **Auto-Detect Duplicate Submodels** so subdivision and step regeneration apply together in one step.
 - **Bricks Library**.

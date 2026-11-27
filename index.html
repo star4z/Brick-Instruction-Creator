@@ -82,9 +82,9 @@
           </div>
 
           <!-- Model & Project Files -->
-          <div class="flex flex-col gap-2.5">
+          <div id="menuModelProjectSection" class="hidden flex flex-col gap-2.5">
             <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Model &amp; Project</div>
-            <button id="menuImportBtn" type="button" class="w-full py-2.5 px-4 rounded-lg bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] text-sm font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer">
+            <button id="menuImportBtn" type="button" class="hidden w-full py-2.5 px-4 rounded-lg bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] text-sm font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer">
               <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
               <span>Import Model or Project…</span>
             </button>
@@ -153,7 +153,7 @@
           </div>
 
           <!-- Bricks Library -->
-          <div id="menuBricksLibSection" class="flex flex-col gap-2.5 pt-4 border-t border-[var(--border)] transition-all">
+          <div id="menuBricksLibSection" class="flex flex-col gap-2.5 transition-all">
             <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Bricks Library</div>
             <button id="menuBricksLibBtn" type="button" class="w-full py-2.5 px-3.5 rounded-lg border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold text-left flex items-center justify-between gap-2 transition-colors cursor-pointer">
               <span class="flex items-center gap-2 min-w-0">

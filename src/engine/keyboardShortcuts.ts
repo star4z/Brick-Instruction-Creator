@@ -490,7 +490,7 @@ export const SHORTCUT_ACTIONS: readonly ShortcutActionDef[] = [
     description: 'Open the Import Model or Project dialog',
     defaultCombo: 'Mod+O',
     allowRepeat: false,
-    requiresModel: false,
+    requiresModel: true,
     allowedSurfaces: ['none', 'menu', 'openModel'],
   },
   {

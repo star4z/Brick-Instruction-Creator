@@ -229,12 +229,13 @@ describe('resolveShortcutActionForEvent & context gating', () => {
   });
 
   it('gates actions by model presence, page kind, Parts selection, repeat, and blocking surface', () => {
-    // No model loaded: Menu, Bricks Library, Import, and Shortcuts work; Undo & Navigation do not
+    // No model loaded: Menu, Bricks Library, and Shortcuts work; Import dialog, Undo & Navigation do not
     const emptyCtx = stepPageContext({ hasModel: false, pageKind: null });
     expect(resolveShortcutActionForEvent({ key: 'm' }, {}, emptyCtx)).toBe('toggleMenu');
     expect(resolveShortcutActionForEvent({ key: 'k' }, {}, emptyCtx)).toBe('openBricksLibrary');
     expect(resolveShortcutActionForEvent({ key: '?', shiftKey: true }, {}, emptyCtx)).toBe('openShortcuts');
-    expect(resolveShortcutActionForEvent({ key: 'o', ctrlKey: true }, {}, emptyCtx)).toBe('importFile');
+    expect(resolveShortcutActionForEvent({ key: 'o', ctrlKey: true }, {}, emptyCtx)).toBeNull();
+    expect(resolveShortcutActionForEvent({ key: 'o', ctrlKey: true }, {}, stepPageContext())).toBe('importFile');
     expect(resolveShortcutActionForEvent({ key: 'z', ctrlKey: true }, {}, emptyCtx)).toBeNull();
     expect(resolveShortcutActionForEvent({ key: 'ArrowRight' }, {}, emptyCtx)).toBeNull();
 

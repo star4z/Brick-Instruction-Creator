@@ -55,7 +55,7 @@ Manual creators iterate rapidly through dozens of pages—undoing camera tweaks,
 | **Panels & Files** | `openPageSetup` | Page Setup | `P` | `P` | No | Opens/closes the Page Setup modal. |
 | **Panels & Files** | `openBomSetup` | Parts List Setup | `L` | `L` | No | Opens/closes the Parts List Setup modal. |
 | **Panels & Files** | `openBricksLibrary` | Bricks Library | `K` | `K` | No | Opens/closes the 3D Bricks Library modal (works on Welcome screen too). |
-| **Panels & Files** | `importFile` | Import Model / Project | `Ctrl+O` | `⌘O` | No | Opens the Import Model or Project dialog (works on Welcome screen too). |
+| **Panels & Files** | `importFile` | Import Model / Project | `Ctrl+O` | `⌘O` | No | Opens the Import Model or Project dialog when a model is loaded. |
 | **Panels & Files** | `exportProject` | Export Project (`.biw`) | `Ctrl+S` | `⌘S` | No | Saves/exports the current project as a `.biw` file. |
 | **Panels & Files** | `openExport` | Print / Export PDF | `Ctrl+P` | `⌘P` | No | Opens the Print & Export PDF dialog when a model is loaded. |
 | **Panels & Files** | `openShortcuts` | Keyboard Shortcuts | `?` | `?` | No | Opens/closes the dedicated Keyboard Shortcuts screen and focuses the filter input. |

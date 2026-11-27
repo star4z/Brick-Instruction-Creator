@@ -22,6 +22,8 @@ export interface MenuVisibilityState {
 export interface MenuVisibility {
   showModelCard: boolean;
   showCloseModel: boolean;
+  showModelProjectSection: boolean;
+  showImportModel: boolean;
   showExportProject: boolean;
   showModelIssues: boolean;
   showPagePrintSection: boolean;
@@ -60,8 +62,10 @@ export function computeMenuVisibility(input: MenuVisibilityState): MenuVisibilit
 
   const showModelCard = hasModel;
   const showCloseModel = hasModel;
+  const showImportModel = hasModel;
   const showExportProject = hasModel;
   const showModelIssues = hasModel && input.diagnosticCount > 0;
+  const showModelProjectSection = showImportModel || showExportProject || showModelIssues;
 
   const showPageSetup = hasModel;
   const showStyle = hasModel;
@@ -79,6 +83,8 @@ export function computeMenuVisibility(input: MenuVisibilityState): MenuVisibilit
   return {
     showModelCard,
     showCloseModel,
+    showModelProjectSection,
+    showImportModel,
     showExportProject,
     showModelIssues,
     showPagePrintSection,
