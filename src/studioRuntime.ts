@@ -138,6 +138,7 @@ import {
   computeAutoPlacementOffsetsForSequence,
   computePlacementArrowSegments,
   computePrecisionAlignmentLines,
+  computeSubassemblyAttachmentOffsets,
   resolveContrastArrowColor,
 } from './engine/placementArrows';
 import {
@@ -2790,7 +2791,7 @@ function buildMeshBuffers(prevParts, newParts, opts) {
       const baseArrowHex = pOv?.arrowColorOverride || opts.arrowColor || DEFAULT_ARROW_COLOR;
       const adaptiveHex = resolveContrastArrowColor(baseArrowHex, partRgb);
       const arrowRgb = hexToRgb255(adaptiveHex, 0);
-      const precisionSegs = (!pOv?.arrowTo && !pOv?.throughGuideTo)
+      const precisionSegs = (!pOv?.arrowTo && !pOv?.throughGuideTo && !pOv?.extraArrows?.length && !pOv?.suppressPrimaryArrow)
         ? computePrecisionAlignmentLines(pOv?.arrowBox || box, [offX, offY, offZ])
         : null;
       if (precisionSegs) {
@@ -2803,6 +2804,8 @@ function buildMeshBuffers(prevParts, newParts, opts) {
           offset: [offX, offY, offZ],
           arrowTo: pOv?.arrowTo || null,
           throughGuideTo: pOv?.throughGuideTo || null,
+          extraSegments: pOv?.extraArrows || null,
+          suppressPrimary: Boolean(pOv?.suppressPrimaryArrow),
           rgb: [arrowRgb[0], arrowRgb[1], arrowRgb[2]],
         });
       }
@@ -6787,13 +6790,44 @@ function assignAutoPlacementOffsets(chapters) {
     });
 
     const offsetMap = computeAutoPlacementOffsetsForSequence(inputs);
-    for (const step of steps) {
+    const prevPartInputs = [];
+    for (let si = 0; si < steps.length; si++) {
+      const step = steps[si];
+      const stepInp = inputs[si];
+      if (
+        step.attachedSubmodel &&
+        !step.attachedSubmodel.isSectionAttach &&
+        step.defaultPartOffsets &&
+        stepInp.parts.length > 0 &&
+        prevPartInputs.length > 0
+      ) {
+        const firstOff = step.defaultPartOffsets[stepInp.parts[0].id];
+        if (firstOff) {
+          const ox = Number(firstOff.x) || 0;
+          const oy = Number(firstOff.y) || 0;
+          const oz = Number(firstOff.z) || 0;
+          const mag = Math.hypot(ox, oy, oz);
+          if (mag >= 6) {
+            const refined = computeSubassemblyAttachmentOffsets(
+              stepInp.parts,
+              prevPartInputs,
+              [ox / mag, oy / mag, oz / mag],
+              Math.round(mag),
+              stepInp.camera,
+            );
+            if (Object.keys(refined.offsets).length > 0) {
+              step.defaultPartOffsets = refined.offsets;
+            }
+          }
+        }
+      }
       const autoOffs = offsetMap.get(step.id);
       if (autoOffs && Object.keys(autoOffs).length > 0) {
         step.autoPartOffsets = autoOffs;
       } else {
         delete step.autoPartOffsets;
       }
+      for (const pi of stepInp.parts) prevPartInputs.push(pi);
     }
   };
 
@@ -25840,10 +25874,17 @@ async function buildInteractiveHtmlArtifact(mode: 'export' | 'preview' = 'export
               offset: [ox, oy, oz],
               arrowTo: pOv.arrowTo || null,
               throughGuideTo: pOv.throughGuideTo || null,
+              ...(pOv.extraArrows && pOv.extraArrows.length > 0 ? { extraSegments: pOv.extraArrows } : {}),
+              ...(pOv.suppressPrimaryArrow ? { suppressPrimary: true } : {}),
               color: adaptiveHex,
             });
-            const segs = computePlacementArrowSegments(targetBox, [ox, oy, oz], pOv.arrowTo || null, pOv.throughGuideTo || null, cam.az);
-            for (const seg of segs) stepArrows.push({ ...seg, color: adaptiveHex });
+            if (!pOv.suppressPrimaryArrow) {
+              const segs = computePlacementArrowSegments(targetBox, [ox, oy, oz], pOv.arrowTo || null, pOv.throughGuideTo || null, cam.az);
+              for (const seg of segs) stepArrows.push({ ...seg, color: adaptiveHex });
+            }
+            if (pOv.extraArrows && pOv.extraArrows.length > 0) {
+              for (const seg of pOv.extraArrows) stepArrows.push({ ...seg, color: seg.color || adaptiveHex });
+            }
           }
 
           const pliMap = new Map();

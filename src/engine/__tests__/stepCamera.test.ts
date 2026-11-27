@@ -955,7 +955,64 @@ describe('Step Camera Stability & Steady Framing', () => {
     // Must turn to the -Z side (back_left or back_right) so the submodel and mating axle face/are near the camera!
     expect(res[2].corner === 'back_left' || res[2].corner === 'back_right').toBe(true);
   });
+
+  it('flips upright (side=top) for a downward-lifted underside submodel receiving a vertical Technic axle when the lifted submodel and axle tip are clearly visible from above', () => {
+    // Deck spans Z in [-240, 240]; slender vertical 3L axle (8x60x8) protrudes downward at the front -Z edge (Z=-220)
+    const deck = [
+      makeBox(-60, 80, -240, 60, 88, 240),
+    ];
+    const mech = [
+      makeBox(-4, 25.4, -224, 4, 85.4, -216), // 8x60x8 vertical Technic axle protruding down to Y=25.4
+      makeBox(-10, 44, -230, 10, 52, -190),   // horizontal Technic liftarm
+    ];
+    const subSeated = [
+      makeBox(-20, 25, -240, 20, 33, -200),   // 2x2 round tile with hole wrapping axle
+      makeBox(-60, 17, -240, 60, 25, -160),   // lower base plate
+      makeBox(-60, 49, -190, 60, 80, -150),   // back brick attaching to deck underside
+    ];
+    const subShifted = subSeated.map((b) =>
+      makeBox(b.min[0], b.min[1] - 44, b.min[2], b.max[0], b.max[1] - 44, b.max[2]),
+    );
+
+    const inputs = buildSequenceInputs([deck, mech, subSeated]);
+    inputs[1].forceSide = 'bottom';
+    inputs[1].isSubmodelAttach = true;
+    inputs[2].forceSide = 'bottom';
+    inputs[2].isSubmodelAttach = true;
+    inputs[2].shiftedStepBoxes = subShifted;
+
+    const res = optimizeStudioStepCameraSequence(inputs);
+    expect(res[1].side).toBe('bottom');
+    // Step 2 flips upright so the builder clearly sees the top-facing hole and vertical axle entering it
+    expect(res[2].side).toBe('top');
+    expect(res[2].cue).toBe('flip_vertical');
+    expect(res[2].corner === 'back_left' || res[2].corner === 'back_right').toBe(true);
+  });
+
+  it('keeps side=bottom for an underside pin-in-hole submodel buried deep under the center of a wide hull where top views are occluded', () => {
+    // Huge wide hull covering [-300..300] x [-300..300] at Y=[80..88]
+    const hugeHull = [makeBox(-300, 80, -300, 300, 88, 300)];
+    const centerAxle = [makeBox(-4, 25.4, -4, 4, 85.4, 4)];
+    const subSeated = [
+      makeBox(-20, 25, -20, 20, 33, 20),
+      makeBox(-40, 17, -40, 40, 25, 40),
+    ];
+    const subShifted = subSeated.map((b) =>
+      makeBox(b.min[0], b.min[1] - 44, b.min[2], b.max[0], b.max[1] - 44, b.max[2]),
+    );
+
+    const inputs = buildSequenceInputs([hugeHull, centerAxle, subSeated]);
+    inputs[1].forceSide = 'bottom';
+    inputs[1].isSubmodelAttach = true;
+    inputs[2].forceSide = 'bottom';
+    inputs[2].isSubmodelAttach = true;
+    inputs[2].shiftedStepBoxes = subShifted;
+
+    const res = optimizeStudioStepCameraSequence(inputs);
+    expect(res[2].side).toBe('bottom');
+  });
 });
+
 
 
 

@@ -35,6 +35,10 @@ export interface AutoPartOffset {
   arrowBox?: PlacementAABB;
   /** Optional through-hole alignment guide endpoint extending cleanly through the destination hole/beam. */
   throughGuideTo?: [number, number, number];
+  /** Optional extra explicit arrow segments (e.g. coaxial Technic pin/axle-to-hole alignment arrows alongside stud arrows). */
+  extraArrows?: PlacementArrowSegment[];
+  /** When true, skip default box-derived stud arrows and render only `extraArrows` (e.g. pure pin-in-hole attachment with zero stud clutch). */
+  suppressPrimaryArrow?: boolean;
   /** Optional perceptual contrast-adapted arrow hex color (e.g. green on red bricks). */
   arrowColorOverride?: string;
 }
@@ -1414,6 +1418,23 @@ function resolveOffsetAlongAxis(
             if (guideTarget) res.throughGuideTo = guideTarget;
           }
         }
+        // Auto-detect coaxial Technic pin/axle-to-hole arrows in addition to stud arrows
+        if (isCardinal && obstacles.length > 0) {
+          const coaxial = detectCoaxialPinHoleArrows([part], obstacles, [dx, dy, dz]);
+          if (coaxial.arrows.length > 0) {
+            const primarySegs = computePlacementArrowSegments(
+              res.arrowBox ?? part.box,
+              [dx, dy, dz],
+              res.arrowTo ?? null,
+              res.throughGuideTo ?? null,
+              camera?.az ?? 38,
+            );
+            const deduped = filterDistinctCoaxialArrows(coaxial.arrows, primarySegs, axis);
+            if (deduped.length > 0) {
+              res.extraArrows = deduped;
+            }
+          }
+        }
         if (!options.preferShortestDir) {
           return res;
         }
@@ -2005,6 +2026,426 @@ export function computeAutoPlacementOffsetsForSequence(
   return result;
 }
 
+export interface CoaxialPinHoleResult {
+  arrows: PlacementArrowSegment[];
+  /** Minimum offset magnitude along the insertion axis so every hole clears its axle tip cleanly. */
+  requiredMag: number;
+  /** World AABBs of stationary coaxial shafts/pins involved in these connections. */
+  stationaryShaftBoxes: PlacementAABB[];
+}
+
+function isSlenderShaftAlongAxis(b: PlacementAABB, axis: number): boolean {
+  const s = boxSize(b);
+  const perpA = (axis + 1) % 3;
+  const perpB = (axis + 2) % 3;
+  const maxPerp = Math.max(s[perpA], s[perpB]);
+  return maxPerp <= 16.5 && s[axis] >= 16 && s[axis] >= maxPerp * 1.4;
+}
+
+function hostWrapsShaftPerp(hostBox: PlacementAABB, shaftBox: PlacementAABB, axis: number): boolean {
+  const hs = boxSize(hostBox);
+  const ss = boxSize(shaftBox);
+  const perpA = (axis + 1) % 3;
+  const perpB = (axis + 2) % 3;
+  if (Math.max(hs[perpA], hs[perpB]) < Math.max(ss[perpA], ss[perpB]) + 4) return false;
+  return (
+    shaftBox.center[perpA] >= hostBox.min[perpA] + 1.5 &&
+    shaftBox.center[perpA] <= hostBox.max[perpA] - 1.5 &&
+    shaftBox.center[perpB] >= hostBox.min[perpB] + 1.5 &&
+    shaftBox.center[perpB] <= hostBox.max[perpB] - 1.5
+  );
+}
+
+/**
+ * Purely geometric detector for coaxial Technic pin/axle-to-hole engagements between
+ * `movingParts` (a single part or a rigid sub-module) and `stationaryParts` (`prevParts`)
+ * along a cardinal offset vector `offset`.
+ *
+ * Returns dedicated arrow segments spanning cleanly along each shaft's centerline between
+ * the protruding tip of the axle/pin and the top/entry face of the hole it enters,
+ * pointing in the direction of assembly motion (`-offset`).
+ */
+export function detectCoaxialPinHoleArrows(
+  movingParts: ReadonlyArray<PlacementPartInput>,
+  stationaryParts: ReadonlyArray<PlacementPartInput>,
+  offset: readonly [number, number, number],
+  minGap = MIN_CORRIDOR_ARROW_GAP,
+): CoaxialPinHoleResult {
+  const mag = Math.hypot(offset[0], offset[1], offset[2]);
+  if (mag < 6 || movingParts.length === 0 || stationaryParts.length === 0) {
+    return { arrows: [], requiredMag: 0, stationaryShaftBoxes: [] };
+  }
+  const ux = offset[0] / mag;
+  const uy = offset[1] / mag;
+  const uz = offset[2] / mag;
+  const ax = Math.abs(ux);
+  const ay = Math.abs(uy);
+  const az = Math.abs(uz);
+  if (Math.max(ax, ay, az) < 0.94) {
+    return { arrows: [], requiredMag: 0, stationaryShaftBoxes: [] };
+  }
+  const axis = ax >= ay && ax >= az ? 0 : (ay >= az ? 1 : 2);
+  const sign = offset[axis] >= 0 ? 1 : -1;
+  const perpA = (axis + 1) % 3;
+  const perpB = (axis + 2) % 3;
+
+  type ShaftEntry = {
+    kind: 'stationary_shaft' | 'moving_shaft';
+    cA: number;
+    cB: number;
+    /** Moving endpoint coordinate along `axis` BEFORE applying `offset[axis]`. */
+    movingSeatedAxis: number;
+    /** Stationary endpoint coordinate along `axis`. */
+    stationaryAxis: number;
+    shaftBox: PlacementAABB;
+  };
+  const byLine = new Map<string, ShaftEntry>();
+
+  for (let i = 0; i < movingParts.length; i++) {
+    const mp = movingParts[i];
+    const mb = mp.box;
+    for (let j = 0; j < stationaryParts.length; j++) {
+      const sp = stationaryParts[j];
+      if (sp.id === mp.id) continue;
+      const sb = sp.box;
+      const ovAlong = overlap1D(mb.min[axis], mb.max[axis], sb.min[axis], sb.max[axis]);
+      if (ovAlong <= 4.5) continue;
+      const ovA = overlap1D(mb.min[perpA], mb.max[perpA], sb.min[perpA], sb.max[perpA]);
+      const ovB = overlap1D(mb.min[perpB], mb.max[perpB], sb.min[perpB], sb.max[perpB]);
+      if (ovA <= 1.5 || ovB <= 1.5) continue;
+
+      if (isSlenderShaftAlongAxis(sb, axis) && hostWrapsShaftPerp(mb, sb, axis)) {
+        // Case A: stationary axle/pin enters a hole in moving part `mp`
+        const axleTip = sign > 0 ? sb.max[axis] : sb.min[axis];
+        const holeEntry = sign > 0 ? mb.min[axis] : mb.max[axis];
+        const key = `S:${Math.round(sb.center[perpA] / 4)},${Math.round(sb.center[perpB] / 4)}`;
+        const prev = byLine.get(key);
+        if (!prev) {
+          byLine.set(key, {
+            kind: 'stationary_shaft',
+            cA: sb.center[perpA],
+            cB: sb.center[perpB],
+            movingSeatedAxis: holeEntry,
+            stationaryAxis: axleTip,
+            shaftBox: sb,
+          });
+        } else {
+          // Outermost hole entry face (first face the axle enters during insertion)
+          if ((holeEntry - prev.movingSeatedAxis) * -sign > 0) {
+            prev.movingSeatedAxis = holeEntry;
+          }
+          // Outermost protruding axle tip facing the lifted part
+          if ((axleTip - prev.stationaryAxis) * sign > 0) {
+            prev.stationaryAxis = axleTip;
+            prev.shaftBox = sb;
+          }
+        }
+      } else if (isSlenderShaftAlongAxis(mb, axis) && hostWrapsShaftPerp(sb, mb, axis)) {
+        // Case B: moving axle/pin enters a hole in stationary part `sp`
+        const holeEntry = sign > 0 ? sb.max[axis] : sb.min[axis];
+        const axleTip = sign > 0 ? mb.min[axis] : mb.max[axis];
+        const key = `M:${Math.round(mb.center[perpA] / 4)},${Math.round(mb.center[perpB] / 4)}`;
+        const prev = byLine.get(key);
+        if (!prev) {
+          byLine.set(key, {
+            kind: 'moving_shaft',
+            cA: mb.center[perpA],
+            cB: mb.center[perpB],
+            movingSeatedAxis: axleTip,
+            stationaryAxis: holeEntry,
+            shaftBox: mb,
+          });
+        } else {
+          // Outermost stationary hole entry face
+          if ((holeEntry - prev.stationaryAxis) * sign > 0) {
+            prev.stationaryAxis = holeEntry;
+          }
+          // Leading tip of the moving axle
+          if ((axleTip - prev.movingSeatedAxis) * -sign > 0) {
+            prev.movingSeatedAxis = axleTip;
+          }
+        }
+      }
+    }
+  }
+
+  const arrows: PlacementArrowSegment[] = [];
+  const stationaryShaftBoxes: PlacementAABB[] = [];
+  let requiredMag = 0;
+
+  for (const entry of byLine.values()) {
+    const req = minGap + (entry.stationaryAxis - entry.movingSeatedAxis) * sign;
+    if (req > requiredMag) requiredMag = req;
+    if (entry.kind === 'stationary_shaft') {
+      stationaryShaftBoxes.push(entry.shaftBox);
+    }
+
+    const fromAxis = entry.movingSeatedAxis + offset[axis];
+    const toAxis = entry.stationaryAxis;
+    if ((fromAxis - toAxis) * sign < 6) continue;
+
+    const from: Vec3 = [0, 0, 0];
+    const to: Vec3 = [0, 0, 0];
+    from[perpA] = entry.cA;
+    from[perpB] = entry.cB;
+    from[axis] = fromAxis;
+    to[perpA] = entry.cA;
+    to[perpB] = entry.cB;
+    to[axis] = toAxis;
+    arrows.push({ from, to });
+  }
+
+  return { arrows, requiredMag, stationaryShaftBoxes };
+}
+
+function filterDistinctCoaxialArrows(
+  coaxialArrows: ReadonlyArray<PlacementArrowSegment>,
+  primarySegs: ReadonlyArray<PlacementArrowSegment>,
+  axis: number,
+): PlacementArrowSegment[] {
+  const perpA = (axis + 1) % 3;
+  const perpB = (axis + 2) % 3;
+  return coaxialArrows.filter((ca) => {
+    for (let i = 0; i < primarySegs.length; i++) {
+      const ps = primarySegs[i];
+      if (ps.isGuideLine) continue;
+      const d = Math.hypot(ps.to[perpA] - ca.to[perpA], ps.to[perpB] - ca.to[perpB]);
+      if (d < 5) return false;
+    }
+    return true;
+  });
+}
+
+export interface SubassemblyAttachmentResult {
+  offsets: Record<string, AutoPartOffset>;
+  hasCoaxialPinHole: boolean;
+  stationaryShaftBoxes: PlacementAABB[];
+}
+
+/**
+ * Computes physically grounded offsets and arrows for attaching a pre-built multi-part
+ * sub-module (e.g. an underside module) onto `prevParts` along cardinal pull-off direction `dir`.
+ *
+ * - Anchors stud arrows strictly to the actual engaged stud contact region across all
+ *   sub-module parts (instead of an arbitrary centroid brick's full bounding box).
+ * - Adds dedicated coaxial Technic pin/axle-to-hole arrow(s) spanning between the axle
+ *   tip and the top/entry face of the hole it enters, enlarging the lift if needed so
+ *   every hole clears its axle tip cleanly.
+ */
+export function computeSubassemblyAttachmentOffsets(
+  subParts: ReadonlyArray<PlacementPartInput>,
+  prevParts: ReadonlyArray<PlacementPartInput>,
+  dir: readonly [number, number, number],
+  baseMag = 44,
+  camera?: { az: number; el: number },
+): SubassemblyAttachmentResult {
+  if (subParts.length === 0) {
+    return { offsets: {}, hasCoaxialPinHole: false, stationaryShaftBoxes: [] };
+  }
+  const dirLen = Math.hypot(dir[0], dir[1], dir[2]) || 1;
+  const ux = dir[0] / dirLen;
+  const uy = dir[1] / dirLen;
+  const uz = dir[2] / dirLen;
+  const ax = Math.abs(ux);
+  const ay = Math.abs(uy);
+  const az = Math.abs(uz);
+  const axis = ax >= ay && ax >= az ? 0 : (ay >= az ? 1 : 2);
+  const sign = (axis === 0 ? ux : axis === 1 ? uy : uz) >= 0 ? 1 : -1;
+  const perpA = (axis + 1) % 3;
+  const perpB = (axis + 2) % 3;
+
+  // 1. Check coaxial pin/axle-to-hole connections and ensure sufficient clearance past any axle tip
+  const initialOff: Vec3 = [Math.round(ux * baseMag), Math.round(uy * baseMag), Math.round(uz * baseMag)];
+  let coaxial = detectCoaxialPinHoleArrows(subParts, prevParts, initialOff);
+  let mag = baseMag;
+  if (coaxial.requiredMag > mag) {
+    mag = Math.min(72, Math.ceil(coaxial.requiredMag / 4) * 4);
+    const expandedOff: Vec3 = [Math.round(ux * mag), Math.round(uy * mag), Math.round(uz * mag)];
+    coaxial = detectCoaxialPinHoleArrows(subParts, prevParts, expandedOff);
+  }
+  const dx = Math.round(ux * mag);
+  const dy = Math.round(uy * mag);
+  const dz = Math.round(uz * mag);
+
+  // 2. Collect all engaged studs across the sub-module along `dir`
+  const engagedStudPoints: Vec3[] = [];
+  const engagedStudTips: Vec3[] = [];
+  const engagedSubParts: PlacementPartInput[] = [];
+  for (let i = 0; i < subParts.length; i++) {
+    const sp = subParts[i];
+    const touching = prevParts.filter((rp) => boxesWithinMargin(sp.box, rp.box, COLOR_NEIGHBOR_EPS));
+    if (touching.length === 0) continue;
+    const engaged = findEngagedStuds(sp, touching);
+    if (!engaged) continue;
+    const align = engaged.pullDir[0] * ux + engaged.pullDir[1] * uy + engaged.pullDir[2] * uz;
+    if (align < 0.94) continue;
+    engagedSubParts.push(sp);
+    for (let k = 0; k < engaged.studPoints.length; k++) {
+      engagedStudPoints.push(engaged.studPoints[k]);
+      engagedStudTips.push(engaged.studTips[k]);
+    }
+  }
+
+  let studArrowBox: PlacementAABB | null = null;
+  let studArrowTo: Vec3 | null = null;
+  let leadPart: PlacementPartInput | null = null;
+  let hasStudContact = false;
+
+  if (engagedStudPoints.length > 0 && engagedSubParts.length > 0) {
+    hasStudContact = true;
+    let unionEngaged = engagedSubParts[0].box;
+    for (let i = 1; i < engagedSubParts.length; i++) {
+      unionEngaged = unionBox(unionEngaged, engagedSubParts[i].box);
+    }
+    let minA = Infinity;
+    let maxA = -Infinity;
+    let minB = Infinity;
+    let maxB = -Infinity;
+    let tipAxis = sign > 0 ? -Infinity : Infinity;
+    for (let i = 0; i < engagedStudPoints.length; i++) {
+      const pt = engagedStudPoints[i];
+      if (pt[perpA] < minA) minA = pt[perpA];
+      if (pt[perpA] > maxA) maxA = pt[perpA];
+      if (pt[perpB] < minB) minB = pt[perpB];
+      if (pt[perpB] > maxB) maxB = pt[perpB];
+      const tv = engagedStudTips[i][axis];
+      if (sign > 0 ? tv > tipAxis : tv < tipAxis) tipAxis = tv;
+    }
+    const mn: Vec3 = [unionEngaged.min[0], unionEngaged.min[1], unionEngaged.min[2]];
+    const mx: Vec3 = [unionEngaged.max[0], unionEngaged.max[1], unionEngaged.max[2]];
+    mn[perpA] = minA - 10;
+    mx[perpA] = maxA + 10;
+    mn[perpB] = minB - 10;
+    mx[perpB] = maxB + 10;
+    studArrowBox = {
+      min: mn,
+      max: mx,
+      center: [(mn[0] + mx[0]) * 0.5, (mn[1] + mx[1]) * 0.5, (mn[2] + mx[2]) * 0.5],
+    };
+    studArrowTo = [studArrowBox.center[0], studArrowBox.center[1], studArrowBox.center[2]];
+    studArrowTo[axis] = tipAxis;
+
+    // Pick the engaged sub-part closest to the engaged stud centroid as lead carrier
+    let bestD = Infinity;
+    for (const sp of engagedSubParts) {
+      const d = Math.hypot(
+        sp.box.center[perpA] - studArrowBox.center[perpA],
+        sp.box.center[perpB] - studArrowBox.center[perpB],
+      );
+      if (d < bestD) {
+        bestD = d;
+        leadPart = sp;
+      }
+    }
+  } else {
+    // Fallback when compiled studs aren't present: use only sub-parts actually contacting `prevParts`
+    // along the mating face in direction `-sign`
+    const matingParts: PlacementPartInput[] = [];
+    const matingRefs: PlacementPartInput[] = [];
+    const seenRefs = new Set<string>();
+    for (const sp of subParts) {
+      const sb = sp.box;
+      let touchesMatingFace = false;
+      for (const rp of prevParts) {
+        const rb = rp.box;
+        const ovA = overlap1D(sb.min[perpA], sb.max[perpA], rb.min[perpA], rb.max[perpA]);
+        const ovB = overlap1D(sb.min[perpB], sb.max[perpB], rb.min[perpB], rb.max[perpB]);
+        if (ovA <= 2 || ovB <= 2) continue;
+        // Skip slender coaxial shafts (handled by coaxial pin/hole arrows)
+        if (isSlenderShaftAlongAxis(rb, axis)) continue;
+        const faceTouch =
+          sign > 0
+            ? sb.min[axis] >= rb.max[axis] - CONTACT_EPS && sb.min[axis] <= rb.max[axis] + SUPPORT_GAP_MAX
+            : rb.min[axis] >= sb.max[axis] - CONTACT_EPS && rb.min[axis] <= sb.max[axis] + SUPPORT_GAP_MAX;
+        if (faceTouch) {
+          touchesMatingFace = true;
+          if (!seenRefs.has(rp.id)) {
+            seenRefs.add(rp.id);
+            matingRefs.push(rp);
+          }
+        }
+      }
+      if (touchesMatingFace) matingParts.push(sp);
+    }
+
+    if (matingParts.length > 0) {
+      hasStudContact = true;
+      let unionMating = matingParts[0].box;
+      for (let i = 1; i < matingParts.length; i++) {
+        unionMating = unionBox(unionMating, matingParts[i].box);
+      }
+      studArrowBox = computeContactArrowBox(unionMating, matingRefs, axis, sign) ?? unionMating;
+      leadPart = matingParts[0];
+    }
+  }
+
+  // Fallback lead part if pure coaxial or disconnected
+  if (!leadPart) {
+    let cx = 0;
+    let cz = 0;
+    for (const sp of subParts) {
+      cx += sp.box.center[0];
+      cz += sp.box.center[2];
+    }
+    cx /= subParts.length;
+    cz /= subParts.length;
+    let bestScore = Infinity;
+    for (const sp of subParts) {
+      const d = Math.hypot(sp.box.center[0] - cx, sp.box.center[2] - cz) - sp.box.max[1] * 0.25;
+      if (d < bestScore) {
+        bestScore = d;
+        leadPart = sp;
+      }
+    }
+    leadPart = leadPart ?? subParts[0];
+  }
+
+  const suppressPrimaryArrow = !hasStudContact && coaxial.arrows.length > 0;
+  let extraArrows: PlacementArrowSegment[] | undefined;
+  if (coaxial.arrows.length > 0) {
+    if (suppressPrimaryArrow) {
+      extraArrows = coaxial.arrows;
+    } else {
+      const primarySegs = computePlacementArrowSegments(
+        studArrowBox ?? leadPart.box,
+        [dx, dy, dz],
+        studArrowTo,
+        null,
+        camera?.az ?? 38,
+      );
+      const deduped = filterDistinctCoaxialArrows(coaxial.arrows, primarySegs, axis);
+      if (deduped.length > 0) {
+        extraArrows = deduped;
+      }
+    }
+  }
+
+  const offsets: Record<string, AutoPartOffset> = {};
+  for (const sp of subParts) {
+    const isLead = sp.id === leadPart.id;
+    const entry: AutoPartOffset = {
+      x: dx,
+      y: dy,
+      z: dz,
+      tilt: 0,
+      arrow: isLead,
+    };
+    if (isLead) {
+      if (studArrowBox && !suppressPrimaryArrow) entry.arrowBox = studArrowBox;
+      if (studArrowTo && !suppressPrimaryArrow) entry.arrowTo = studArrowTo;
+      if (extraArrows && extraArrows.length > 0) entry.extraArrows = extraArrows;
+      if (suppressPrimaryArrow) entry.suppressPrimaryArrow = true;
+    }
+    offsets[sp.id] = entry;
+  }
+
+  return {
+    offsets,
+    hasCoaxialPinHole: coaxial.arrows.length > 0,
+    stationaryShaftBoxes: coaxial.stationaryShaftBoxes,
+  };
+}
+
 /**
  * Computes half-distance from box center to the outermost stud centers along a
  * horizontal axis (1 stud pitch = 20 LDU). Returns 0 for single-stud or narrower spans.
@@ -2201,6 +2642,10 @@ export interface PlacementArrowSpec {
   offset: [number, number, number];
   arrowTo?: [number, number, number] | null;
   throughGuideTo?: [number, number, number] | null;
+  /** Optional extra explicit arrow segments (e.g. coaxial Technic pin/axle-to-hole alignment arrows). */
+  extraSegments?: ReadonlyArray<PlacementArrowSegment> | null;
+  /** When true, skip default box-derived stud arrows and render only `extraSegments`. */
+  suppressPrimary?: boolean;
   rgb: [number, number, number];
 }
 
@@ -2291,13 +2736,20 @@ export function buildPlacementArrowGeometry(
 
   for (let si = 0; si < specs.length; si++) {
     const spec = specs[si];
-    const segs = computePlacementArrowSegments(
-      spec.box,
-      spec.offset,
-      spec.arrowTo || null,
-      spec.throughGuideTo || null,
-      azDeg,
-    );
+    const segs = spec.suppressPrimary
+      ? []
+      : computePlacementArrowSegments(
+          spec.box,
+          spec.offset,
+          spec.arrowTo || null,
+          spec.throughGuideTo || null,
+          azDeg,
+        );
+    if (spec.extraSegments && spec.extraSegments.length > 0) {
+      for (let ei = 0; ei < spec.extraSegments.length; ei++) {
+        segs.push(spec.extraSegments[ei]);
+      }
+    }
     const col = spec.rgb;
 
     for (let k = 0; k < segs.length; k++) {

@@ -890,8 +890,137 @@ export function optimizeStudioStepCameraSequence(
     const isTinyEarlyBase = occCount < 4 || (Math.max(spanX, spanZ) < 80 && spanY < 40);
 
     // Step 1 with zero prior occluders has nothing overhead and must always start upright ('top').
-    const forceBottom = step.forceSide === 'bottom' && occCount > 0;
-    const forceTop = step.forceSide === 'top';
+    let forceBottom = step.forceSide === 'bottom' && occCount > 0;
+    let forceTop = step.forceSide === 'top';
+
+    // For lifted pre-built submodel attachments (`isSubmodelAttach`), identify directly mating
+    // prior connectors (e.g. protruding Technic axles/pins/mechanisms or compact target parts)
+    // so we can (a) check whether an upright view clearly reveals a top-facing pin-in-hole
+    // interface that would be hidden behind the submodel's own underside from below, and
+    // (b) penalize viewpoints where the lifted submodel itself obscures the mating interface.
+    let matingBoxes: WorldBox[] = [];
+    let verticalShaftMatingBoxes: WorldBox[] = [];
+    let isDownwardLiftedSub = false;
+    if (
+      step.isSubmodelAttach &&
+      !step.isSectionAttach &&
+      step.shiftedStepBoxes &&
+      step.shiftedStepBoxes.length > 0 &&
+      occCount > 0 &&
+      step.stepBoxes.length > 0
+    ) {
+      let seatedSumY = 0;
+      let shiftedSumY = 0;
+      const cnt = Math.min(step.stepBoxes.length, step.shiftedStepBoxes.length);
+      for (let k = 0; k < cnt; k++) {
+        seatedSumY += step.stepBoxes[k].center[1];
+        shiftedSumY += step.shiftedStepBoxes[k].center[1];
+      }
+      isDownwardLiftedSub = cnt > 0 && (shiftedSumY - seatedSumY) / cnt < -8;
+
+      const interlocking: WorldBox[] = [];
+      const compactTouching: WorldBox[] = [];
+      for (let i = 0; i < occCount; i++) {
+        const ob = extractBox(step.occludersBefore[i]);
+        let touches = false;
+        let interlocks = false;
+        let shaftEntersFromAbove = false;
+        const ox = ob.max[0] - ob.min[0];
+        const oy = ob.max[1] - ob.min[1];
+        const oz = ob.max[2] - ob.min[2];
+        const isSlenderVertShaft =
+          Math.max(ox, oz) <= 16.5 && oy >= 16 && oy >= Math.max(ox, oz) * 1.4;
+        for (let j = 0; j < step.stepBoxes.length; j++) {
+          const sb = step.stepBoxes[j];
+          const gx = Math.max(0, ob.min[0] - sb.max[0], sb.min[0] - ob.max[0]);
+          const gy = Math.max(0, ob.min[1] - sb.max[1], sb.min[1] - ob.max[1]);
+          const gz = Math.max(0, ob.min[2] - sb.max[2], sb.min[2] - ob.max[2]);
+          if (gx <= 4.0 && gy <= 4.0 && gz <= 4.0) {
+            touches = true;
+            const ovX = Math.min(ob.max[0], sb.max[0]) - Math.max(ob.min[0], sb.min[0]);
+            const ovY = Math.min(ob.max[1], sb.max[1]) - Math.max(ob.min[1], sb.min[1]);
+            const ovZ = Math.min(ob.max[2], sb.max[2]) - Math.max(ob.min[2], sb.min[2]);
+            if (ovX > 1.5 && ovY > 1.5 && ovZ > 1.5) {
+              interlocks = true;
+              if (
+                isSlenderVertShaft &&
+                ovY > 4.5 &&
+                ob.max[1] > sb.max[1] + 2 &&
+                ob.center[0] >= sb.min[0] + 1.5 &&
+                ob.center[0] <= sb.max[0] - 1.5 &&
+                ob.center[2] >= sb.min[2] + 1.5 &&
+                ob.center[2] <= sb.max[2] - 1.5
+              ) {
+                shaftEntersFromAbove = true;
+              }
+              break;
+            }
+          }
+        }
+        if (!touches) continue;
+        const isLargeFlatDeck = Math.max(ox, oz) > 100 && oy <= 14;
+        if (interlocks && !isLargeFlatDeck) {
+          interlocking.push(ob);
+          if (shaftEntersFromAbove) {
+            const tipMaxY = Math.min(ob.max[1], ob.min[1] + 16);
+            verticalShaftMatingBoxes.push({
+              min: [ob.min[0], ob.min[1], ob.min[2]],
+              max: [ob.max[0], tipMaxY, ob.max[2]],
+              center: [ob.center[0], (ob.min[1] + tipMaxY) * 0.5, ob.center[2]],
+            });
+          }
+        } else if (!isLargeFlatDeck) {
+          compactTouching.push(ob);
+        }
+      }
+      matingBoxes = interlocking.length > 0 ? interlocking : compactTouching;
+    }
+
+    // If a downward-lifted underside submodel receives a protruding vertical Technic pin/axle
+    // into a top-facing hole, a bottom view hides that hole behind the submodel's own solid
+    // underside. When an upright top view clearly reveals BOTH the lifted submodel and the
+    // protruding vertical shaft, flip upright so the builder can see the pin entering the hole.
+    if (
+      forceBottom &&
+      isDownwardLiftedSub &&
+      verticalShaftMatingBoxes.length > 0 &&
+      step.shiftedStepBoxes &&
+      step.shiftedStepBoxes.length > 0
+    ) {
+      let hasClearTopPinHoleView = false;
+      for (let v = 0; v < 4; v++) {
+        const view = canonicalViews[v];
+        const shiftedVis = evaluateStepVisibilityWithProj(
+          step.shiftedStepBoxes,
+          getProj(step.occludersBefore, v),
+          occCount,
+          view.az,
+          view.el,
+        ).visibility;
+        if (shiftedVis < 0.65) continue;
+        const shaftVisVsOcc = evaluateStepVisibilityWithProj(
+          verticalShaftMatingBoxes,
+          getProj(step.occludersBefore, v),
+          occCount,
+          view.az,
+          view.el,
+        ).visibility;
+        const shaftVisVsSub = evaluateStepOcclusionVisibility(
+          verticalShaftMatingBoxes,
+          step.shiftedStepBoxes,
+          view.az,
+          view.el,
+        ).visibility;
+        if (Math.min(shaftVisVsOcc, shaftVisVsSub) >= 0.55) {
+          hasClearTopPinHoleView = true;
+          break;
+        }
+      }
+      if (hasClearTopPinHoleView) {
+        forceBottom = false;
+        forceTop = true;
+      }
+    }
 
     // Evaluate all 4 top canonical views first (always run exact occlusion whenever occCount > 0
     // so a tall Step-1 brick blocking Step-2 details lets Viterbi pick the unobstructed side from Step 1)
@@ -905,13 +1034,30 @@ export function optimizeStudioStepCameraSequence(
         visTable[t][v] = 1;
       } else {
         const view = canonicalViews[v];
-        visTable[t][v] = evaluateStepVisibilityWithProj(
+        const seatedVis = evaluateStepVisibilityWithProj(
           step.stepBoxes,
           getProj(step.occludersBefore, v),
           occCount,
           view.az,
           view.el,
         ).visibility;
+        if (
+          step.isSubmodelAttach &&
+          !step.isSectionAttach &&
+          step.shiftedStepBoxes &&
+          step.shiftedStepBoxes.length > 0
+        ) {
+          const shiftedVis = evaluateStepVisibilityWithProj(
+            step.shiftedStepBoxes,
+            getProj(step.occludersBefore, v),
+            occCount,
+            view.az,
+            view.el,
+          ).visibility;
+          visTable[t][v] = Math.max(seatedVis, shiftedVis);
+        } else {
+          visTable[t][v] = seatedVis;
+        }
       }
       if (visTable[t][v] > bestTopVis) bestTopVis = visTable[t][v];
     }
@@ -945,54 +1091,6 @@ export function optimizeStudioStepCameraSequence(
 
     const deadband = step.isSectionAttach ? 0.6 : STEP_VISIBILITY_DEADBAND;
 
-    // For lifted pre-built submodel attachments (`isSubmodelAttach`), identify directly mating
-    // prior connectors (e.g. protruding Technic axles/pins/mechanisms or compact target parts)
-    // so we penalize viewpoints where the lifted submodel itself obscures the mating interface.
-    let matingBoxes: WorldBox[] = [];
-    if (
-      step.isSubmodelAttach &&
-      !step.isSectionAttach &&
-      step.shiftedStepBoxes &&
-      step.shiftedStepBoxes.length > 0 &&
-      occCount > 0 &&
-      step.stepBoxes.length > 0
-    ) {
-      const interlocking: WorldBox[] = [];
-      const compactTouching: WorldBox[] = [];
-      for (let i = 0; i < occCount; i++) {
-        const ob = extractBox(step.occludersBefore[i]);
-        let touches = false;
-        let interlocks = false;
-        for (let j = 0; j < step.stepBoxes.length; j++) {
-          const sb = step.stepBoxes[j];
-          const gx = Math.max(0, ob.min[0] - sb.max[0], sb.min[0] - ob.max[0]);
-          const gy = Math.max(0, ob.min[1] - sb.max[1], sb.min[1] - ob.max[1]);
-          const gz = Math.max(0, ob.min[2] - sb.max[2], sb.min[2] - ob.max[2]);
-          if (gx <= 4.0 && gy <= 4.0 && gz <= 4.0) {
-            touches = true;
-            const ovX = Math.min(ob.max[0], sb.max[0]) - Math.max(ob.min[0], sb.min[0]);
-            const ovY = Math.min(ob.max[1], sb.max[1]) - Math.max(ob.min[1], sb.min[1]);
-            const ovZ = Math.min(ob.max[2], sb.max[2]) - Math.max(ob.min[2], sb.min[2]);
-            if (ovX > 1.5 && ovY > 1.5 && ovZ > 1.5) {
-              interlocks = true;
-              break;
-            }
-          }
-        }
-        if (!touches) continue;
-        const ox = ob.max[0] - ob.min[0];
-        const oy = ob.max[1] - ob.min[1];
-        const oz = ob.max[2] - ob.min[2];
-        const isLargeFlatDeck = Math.max(ox, oz) > 100 && oy <= 14;
-        if (interlocks && !isLargeFlatDeck) {
-          interlocking.push(ob);
-        } else if (!isLargeFlatDeck) {
-          compactTouching.push(ob);
-        }
-      }
-      matingBoxes = interlocking.length > 0 ? interlocking : compactTouching;
-    }
-
     for (let v = 0; v < V; v++) {
       const view = canonicalViews[v];
       if (view.isBottom && !allowBottom) continue;
@@ -1011,13 +1109,25 @@ export function optimizeStudioStepCameraSequence(
       let subAttachCost = 0;
       if (step.isSubmodelAttach && !step.isSectionAttach) {
         if (matingBoxes.length > 0 && step.shiftedStepBoxes && step.shiftedStepBoxes.length > 0) {
-          const matingVis = evaluateStepOcclusionVisibility(
+          const matingVisSub = evaluateStepOcclusionVisibility(
             matingBoxes,
             step.shiftedStepBoxes,
             view.az,
             view.el,
           ).visibility;
-          subAttachCost += stepVisibilityPenalty(matingVis, STEP_VISIBILITY_DEADBAND);
+          const matingVisOcc = !view.isBottom && verticalShaftMatingBoxes.length > 0
+            ? evaluateStepVisibilityWithProj(
+                verticalShaftMatingBoxes,
+                getProj(step.occludersBefore, v),
+                occCount,
+                view.az,
+                view.el,
+              ).visibility
+            : 1;
+          subAttachCost += stepVisibilityPenalty(
+            Math.min(matingVisSub, matingVisOcc),
+            STEP_VISIBILITY_DEADBAND,
+          );
         }
         if (builtBounds) {
           subAttachCost += -0.35 * clamp(cornerDot(stepUnionBoxes[t], view.corner, builtBounds), -1, 1);

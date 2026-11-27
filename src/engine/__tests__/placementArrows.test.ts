@@ -4,6 +4,8 @@ import {
   buildPlacementArrowGeometry,
   computeAutoPlacementOffsetsForSequence,
   computePlacementArrowSegments,
+  computeSubassemblyAttachmentOffsets,
+  detectCoaxialPinHoleArrows,
   perceptualRgbDistance,
   type PlacementAABB,
   type PlacementPartInput,
@@ -1471,7 +1473,94 @@ describe('placementArrows — LEGO-style automatic placement arrows & offsets', 
     const u1 = segs[1].to[0] * rx + segs[1].to[2] * rz;
     expect(Math.abs(u0 - u1)).toBeGreaterThanOrEqual(10);
   });
+
+  it('detects coaxial Technic pin/axle-to-hole arrows pointing between the axle tip and the top of the receiving hole', () => {
+    // Stationary vertical 3L Technic axle (8x60x8) protruding downward from Y=85.4 down to tip Y=25.4 at (0, -308)
+    const yellowAxle = makePart('axle_4519', 0, 25.4, -308, 8, 60, 8, [242, 205, 55]);
+    // Moving 2x2 round tile with center hole (40x8x40) seated at Y=[25..33] wrapping the axle
+    const holeTile = makePart('tile_15535', 0, 25, -308, 40, 8, 40, BLACK);
+
+    // Offset downward by -44 LDU (piece slides UP into place onto the axle)
+    const res = detectCoaxialPinHoleArrows([holeTile], [yellowAxle], [0, -44, 0]);
+    expect(res.arrows).toHaveLength(1);
+    const arrow = res.arrows[0];
+    // Centered exactly on the axle centerline (X=0, Z=-308)
+    expect(arrow.from[0]).toBeCloseTo(0, 4);
+    expect(arrow.from[2]).toBeCloseTo(-308, 4);
+    expect(arrow.to[0]).toBeCloseTo(0, 4);
+    expect(arrow.to[2]).toBeCloseTo(-308, 4);
+    // Starts at the lifted top of the hole (33 - 44 = -11) and terminates right at the axle tip (25.4)
+    expect(arrow.from[1]).toBeCloseTo(-11, 4);
+    expect(arrow.to[1]).toBeCloseTo(25.4, 4);
+    expect(res.stationaryShaftBoxes).toHaveLength(1);
+  });
+
+  it('anchors underside sub-module stud arrows strictly to engaged studs AND adds a coaxial axle-to-hole arrow', () => {
+    // Deck floor plate at Y=[73..81] + protruding vertical Technic axle at Z=-308 (tip at Y=25.4)
+    const deck = makePart('deck', 0, 73, -278, 120, 8, 100, [196, 40, 27]);
+    const yellowAxle = makePart('axle_4519', 0, 25.4, -308, 8, 60, 8, [242, 205, 55]);
+
+    // Pre-built underside sub-module:
+    // - 2x6 brick at back (Z=-248, Y=[49..73]) with top studs engaging deck underside at Y=73
+    // - lower wedge plate at Y=[17..25] (does NOT touch deck)
+    // - 2x2 round tile with hole at front (Z=-308, Y=[25..33]) receiving yellowAxle
+    const backBrick: PlacementPartInput = {
+      ...makePart('brick_2456', 0, 49, -248, 120, 24, 40, DARK_GRAY),
+      studs: [
+        [-50, 73, -258, 0, 1, 0],
+        [-30, 73, -258, 0, 1, 0],
+        [30, 73, -238, 0, 1, 0],
+        [50, 73, -238, 0, 1, 0],
+      ],
+    };
+    const basePlate = makePart('plate_32059', 0, 17, -288, 120, 8, 80, DARK_GRAY);
+    const holeTile = makePart('tile_15535', 0, 25, -308, 40, 8, 40, BLACK);
+
+    const attached = computeSubassemblyAttachmentOffsets(
+      [backBrick, basePlate, holeTile],
+      [deck, yellowAxle],
+      [0, -1, 0],
+      44,
+      { az: 38, el: 30 },
+    );
+
+    expect(attached.hasCoaxialPinHole).toBe(true);
+    // Lead arrow carrier must be the stud-engaging backBrick, NOT the untouched lower plate
+    const leadOff = attached.offsets['brick_2456'];
+    expect(leadOff.arrow).toBe(true);
+    expect(attached.offsets['plate_32059'].arrow).toBe(false);
+    expect(attached.offsets['tile_15535'].arrow).toBe(false);
+
+    // Primary stud arrowBox must tightly frame the engaged backBrick studs (Z in [-268..-228]), not basePlate
+    expect(leadOff.arrowBox).toBeDefined();
+    expect(leadOff.arrowBox!.min[2]).toBeCloseTo(-268, 4);
+    expect(leadOff.arrowBox!.max[2]).toBeCloseTo(-228, 4);
+    // Must ALSO include the dedicated coaxial axle-to-hole arrow in extraArrows at (0, -308)
+    expect(leadOff.extraArrows).toBeDefined();
+    expect(leadOff.extraArrows!).toHaveLength(1);
+    expect(leadOff.extraArrows![0].from).toEqual([0, 33 + leadOff.y, -308]);
+    expect(leadOff.extraArrows![0].to).toEqual([0, 25.4, -308]);
+
+    // buildPlacementArrowGeometry must render both stud arrows AND the coaxial extraSegment
+    const geom = buildPlacementArrowGeometry(
+      [
+        {
+          box: leadOff.arrowBox!,
+          offset: [leadOff.x, leadOff.y, leadOff.z],
+          arrowTo: leadOff.arrowTo ?? null,
+          extraSegments: leadOff.extraArrows ?? null,
+          rgb: [220, 38, 38],
+        },
+      ],
+      38,
+      30,
+      { style: 'flat' },
+    );
+    // 2 stud arrows + 1 coaxial arrow = 3 flat arrows × 3 triangles × 9 floats = 81 floats
+    expect(geom.triPos.length).toBe(81);
+  });
 });
+
 
 
 

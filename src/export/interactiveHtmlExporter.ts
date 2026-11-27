@@ -115,6 +115,8 @@ export interface InteractiveArrowSpec {
   offset: [number, number, number];
   arrowTo?: [number, number, number] | null;
   throughGuideTo?: [number, number, number] | null;
+  extraSegments?: Array<{ from: [number, number, number]; to: [number, number, number]; isGuideLine?: boolean; color?: string }> | null;
+  suppressPrimary?: boolean;
   color?: string;
 }
 
@@ -1440,23 +1442,35 @@ ${staticFallbackHtml}
             anchors = [[0, 0, 0]];
           }
         }
-        for (const anc of anchors) {
-          const bx = box.center[0] + anc[0], by = box.center[1] + anc[1], bz = box.center[2] + anc[2];
-          out.push({
-            from: [bx + ux*fromDist, by + uy*fromDist, bz + uz*fromDist],
-            to: [bx + ux*toDist, by + uy*toDist, bz + uz*toDist],
-            color: sp.color,
-          });
-          if (sp.throughGuideTo) {
-            const pg = (sp.throughGuideTo[0]-box.center[0])*ux + (sp.throughGuideTo[1]-box.center[1])*uy + (sp.throughGuideTo[2]-box.center[2])*uz;
-            if (toDist - pg >= 6) {
-              out.push({
-                from: [bx + ux*toDist, by + uy*toDist, bz + uz*toDist],
-                to: [bx + ux*pg, by + uy*pg, bz + uz*pg],
-                isGuideLine: true,
-                color: sp.color,
-              });
+        if (!sp.suppressPrimary) {
+          for (const anc of anchors) {
+            const bx = box.center[0] + anc[0], by = box.center[1] + anc[1], bz = box.center[2] + anc[2];
+            out.push({
+              from: [bx + ux*fromDist, by + uy*fromDist, bz + uz*fromDist],
+              to: [bx + ux*toDist, by + uy*toDist, bz + uz*toDist],
+              color: sp.color,
+            });
+            if (sp.throughGuideTo) {
+              const pg = (sp.throughGuideTo[0]-box.center[0])*ux + (sp.throughGuideTo[1]-box.center[1])*uy + (sp.throughGuideTo[2]-box.center[2])*uz;
+              if (toDist - pg >= 6) {
+                out.push({
+                  from: [bx + ux*toDist, by + uy*toDist, bz + uz*toDist],
+                  to: [bx + ux*pg, by + uy*pg, bz + uz*pg],
+                  isGuideLine: true,
+                  color: sp.color,
+                });
+              }
             }
+          }
+        }
+        if (Array.isArray(sp.extraSegments) && sp.extraSegments.length > 0) {
+          for (const es of sp.extraSegments) {
+            out.push({
+              from: es.from,
+              to: es.to,
+              ...(es.isGuideLine ? { isGuideLine: true } : {}),
+              color: es.color || sp.color,
+            });
           }
         }
       }
