@@ -1783,6 +1783,97 @@ function autoNameEndAssembly(indices: number[], allParts: SubdivisionPartInput[]
   return 'Center End Assembly';
 }
 
+function analyzeArticulatedJoinParts(
+  joinAll: number[],
+  allParts: SubdivisionPartInput[],
+  adjacency: number[][],
+  studAdjacency: number[][],
+): {
+  rods: number[];
+  collars: number[];
+  endAsm: number[];
+  finish: number[];
+  attachSide: 'bottom' | 'top';
+} {
+  const joinPool = new Set<number>(joinAll);
+  const joinRods = joinAll.filter((i) => isVerticalPivotRod(allParts[i]));
+  const rods: number[] = [];
+  const collars: number[] = [];
+  const endAsm: number[] = [];
+  const finish: number[] = [];
+  let attachSide: 'bottom' | 'top' = 'bottom';
+
+  for (const rIdx of joinRods) {
+    rods.push(rIdx);
+    joinPool.delete(rIdx);
+  }
+
+  if (joinRods.length > 0) {
+    const rodRef = allParts[joinRods[0]];
+    const rx = rodRef.box.center[0];
+    const rz = rodRef.box.center[2];
+    const rodMidY = rodRef.box.center[1];
+
+    const remainingJoinArr = Array.from(joinPool);
+    const joinSubComps = getConnectedComponents(remainingJoinArr, studAdjacency);
+    const subCompAssigned = new Set<number>();
+
+    // Collect compact circular cross-axle collars coaxial with the rod
+    for (let ci = 0; ci < joinSubComps.length; ci++) {
+      const comp = joinSubComps[ci];
+      const allCoaxialCrossCollars = comp.every((idx) => {
+        const p = allParts[idx];
+        if (!p.isAxleCollar) return false;
+        return joinRods.some((rIdx) => {
+          const rod = allParts[rIdx];
+          const dXZ = Math.hypot(p.box.center[0] - rod.box.center[0], p.box.center[2] - rod.box.center[2]);
+          return dXZ <= 12 && p.box.max[1] >= rod.box.min[1] - 4 && p.box.min[1] <= rod.box.max[1] + 4;
+        });
+      });
+      if (allCoaxialCrossCollars) {
+        collars.push(...comp);
+        subCompAssigned.add(ci);
+      }
+    }
+
+    const unassignedIndices: number[] = [];
+    for (let ci = 0; ci < joinSubComps.length; ci++) {
+      if (!subCompAssigned.has(ci)) unassignedIndices.push(...joinSubComps[ci]);
+    }
+    if (unassignedIndices.length > 0) {
+      const endComps = getConnectedComponents(unassignedIndices, adjacency);
+      for (const ec of endComps) {
+        const touchesRod = ec.some((idx) =>
+          joinRods.some((rIdx) => (adjacency[idx] ?? []).includes(rIdx)),
+        );
+        const nearRod = ec.some((idx) =>
+          Math.hypot(allParts[idx].box.center[0] - rx, allParts[idx].box.center[2] - rz) <= 80,
+        );
+        if (
+          (ec.length >= 2 && (touchesRod || nearRod)) ||
+          ec.some((idx) => allParts[idx].isWheel || allParts[idx].isWheelHolder)
+        ) {
+          endAsm.push(...ec);
+        } else {
+          finish.push(...ec);
+        }
+      }
+    }
+
+    if (endAsm.length > 0) {
+      const avgEndY =
+        endAsm.reduce((acc, i) => acc + allParts[i].box.center[1], 0) / endAsm.length;
+      attachSide = avgEndY <= rodMidY ? 'bottom' : 'top';
+    }
+  } else if (joinAll.length >= 2) {
+    endAsm.push(...joinAll);
+  } else {
+    finish.push(...joinAll);
+  }
+
+  return { rods, collars, endAsm, finish, attachSide };
+}
+
 /**
  * Strategy A: Longitudinal Halves & Multi-Segment Split ("Build Halves First, Then Connect").
  * Uses 2D PCA + the general LEGO Connection-Strength Graph (strong stud & cross-axle connections
@@ -2100,86 +2191,6 @@ export function buildLongitudinalHalvesProposal(
   let isIdenticalHalves = false;
   let heavySpanning = false;
 
-  const analyzeArticulatedJoinParts = (joinAll: number[]) => {
-    const joinPool = new Set<number>(joinAll);
-    const joinRods = joinAll.filter((i) => isVerticalPivotRod(allParts[i]));
-    const rods: number[] = [];
-    const collars: number[] = [];
-    const endAsm: number[] = [];
-    const finish: number[] = [];
-    let attachSide: 'bottom' | 'top' = 'bottom';
-
-    for (const rIdx of joinRods) {
-      rods.push(rIdx);
-      joinPool.delete(rIdx);
-    }
-
-    if (joinRods.length > 0) {
-      const rodRef = allParts[joinRods[0]];
-      const rx = rodRef.box.center[0];
-      const rz = rodRef.box.center[2];
-      const rodMidY = rodRef.box.center[1];
-
-      const remainingJoinArr = Array.from(joinPool);
-      const joinSubComps = getConnectedComponents(remainingJoinArr, studAdjacency);
-      const subCompAssigned = new Set<number>();
-
-      // Collect compact circular cross-axle collars coaxial with the rod
-      for (let ci = 0; ci < joinSubComps.length; ci++) {
-        const comp = joinSubComps[ci];
-        const allCoaxialCrossCollars = comp.every((idx) => {
-          const p = allParts[idx];
-          if (!p.isAxleCollar) return false;
-          return joinRods.some((rIdx) => {
-            const rod = allParts[rIdx];
-            const dXZ = Math.hypot(p.box.center[0] - rod.box.center[0], p.box.center[2] - rod.box.center[2]);
-            return dXZ <= 12 && p.box.max[1] >= rod.box.min[1] - 4 && p.box.min[1] <= rod.box.max[1] + 4;
-          });
-        });
-        if (allCoaxialCrossCollars) {
-          collars.push(...comp);
-          subCompAssigned.add(ci);
-        }
-      }
-
-      const unassignedIndices: number[] = [];
-      for (let ci = 0; ci < joinSubComps.length; ci++) {
-        if (!subCompAssigned.has(ci)) unassignedIndices.push(...joinSubComps[ci]);
-      }
-      if (unassignedIndices.length > 0) {
-        const endComps = getConnectedComponents(unassignedIndices, adjacency);
-        for (const ec of endComps) {
-          const touchesRod = ec.some((idx) =>
-            joinRods.some((rIdx) => (adjacency[idx] ?? []).includes(rIdx)),
-          );
-          const nearRod = ec.some((idx) =>
-            Math.hypot(allParts[idx].box.center[0] - rx, allParts[idx].box.center[2] - rz) <= 80,
-          );
-          if (
-            (ec.length >= 2 && (touchesRod || nearRod)) ||
-            ec.some((idx) => allParts[idx].isWheel || allParts[idx].isWheelHolder)
-          ) {
-            endAsm.push(...ec);
-          } else {
-            finish.push(...ec);
-          }
-        }
-      }
-
-      if (endAsm.length > 0) {
-        const avgEndY =
-          endAsm.reduce((acc, i) => acc + allParts[i].box.center[1], 0) / endAsm.length;
-        attachSide = avgEndY <= rodMidY ? 'bottom' : 'top';
-      }
-    } else if (joinAll.length >= 2) {
-      endAsm.push(...joinAll);
-    } else {
-      finish.push(...joinAll);
-    }
-
-    return { rods, collars, endAsm, finish, attachSide };
-  };
-
   // --- CASE 1: Articulated 2-Half Model (Intact Seam Hub: Vertical Technic Rod + Cross-Axle Collars + Optional End Assembly/Bogie) ---
   // Only activate when k === 2 AND the protected joint itself is a single connected assembly!
   const protectedList = Array.from(protectedJoinSet);
@@ -2253,7 +2264,7 @@ export function buildLongitudinalHalvesProposal(
         isConnectedSubgraph(h1, adjacency) &&
         isConnectedSubgraph(joinAll, adjacency)
       ) {
-        const analyzed = analyzeArticulatedJoinParts(joinAll);
+        const analyzed = analyzeArticulatedJoinParts(joinAll, allParts, adjacency, studAdjacency);
         cleanSegments = [h0, h1];
         pivotRodIndices = analyzed.rods;
         floatingCollarIndices = analyzed.collars;
@@ -2850,99 +2861,470 @@ export function buildStructuralModulesProposal(
   const bounds = computeModelBounds(primaryParts);
   const allBounds = computeModelBounds(active);
 
-  // Natural LEGO strong-component decomposition (clips, hinges, round-hole axles, tile-majority seams):
-  // If weak joints already separate primaryComp into 2..8 cohesive, strictly connected strong modules, prefer those exact seams!
+  // Weak-joint strong-component decomposition (clips, hinges, round-hole axles, tile-majority seams):
+  // Splits cleanly along physical weak joints into 2..12 intact sub-assemblies, recognizing any number of
+  // articulated Technic axle/pivot joints (2, 3, 4, 5+ segments), detachable tile-seam roofs/caps, and identical repeated modules.
   if (targetModules === undefined) {
     const pca = computeHorizontalPrincipalAxis(primaryParts);
     const [ux, uz] = pca.axis;
     const [mx, mz] = pca.centerXZ;
+    const aspect = pca.minorSpan > 1 ? pca.majorSpan / pca.minorSpan : 1;
     const pMin = new Map<number, number>();
     const pMax = new Map<number, number>();
     for (const p of primaryParts) {
-      const pr = (p.box.center[0] - mx) * ux + (p.box.center[2] - mz) * uz;
-      pMin.set(p.index, pr - 10);
-      pMax.set(p.index, pr + 10);
+      const corners: Array<[number, number]> = [
+        [p.box.min[0], p.box.min[2]],
+        [p.box.max[0], p.box.min[2]],
+        [p.box.min[0], p.box.max[2]],
+        [p.box.max[0], p.box.max[2]],
+      ];
+      let lo = Infinity;
+      let hi = -Infinity;
+      for (const [x, z] of corners) {
+        const pr = (x - mx) * ux + (z - mz) * uz;
+        if (pr < lo) lo = pr;
+        if (pr > hi) hi = pr;
+      }
+      pMin.set(p.index, lo);
+      pMax.set(p.index, hi);
     }
     const typed = buildTypedConnectionGraph(allParts, adjacency);
-    const { groups } = buildCohesiveStrongGroups(primaryParts, allParts, typed, pMin, pMax);
-    const substantive = groups.filter((g) => g.indices.length >= 4 && isConnectedSubgraph(g.indices, adjacency));
-    const tiny = groups.filter((g) => g.indices.length < 4 || !isConnectedSubgraph(g.indices, adjacency));
-    const maxGroupRatio =
-      substantive.length > 0
-        ? Math.max(...substantive.map((g) => g.indices.length)) / primaryParts.length
-        : 1;
+    const { groups, groupWeakAdj } = buildCohesiveStrongGroups(primaryParts, allParts, typed, pMin, pMax);
 
-    if (substantive.length >= 2 && substantive.length <= 8 && maxGroupRatio <= 0.85) {
-      const buckets = substantive.map((g) => ({
+    // 1. Identify substantive non-cap strong groups first so we can recognize compact articulated joint hubs bridging >= 2 of them
+    const substantiveBodyIds = new Set<number>();
+    for (const g of groups) {
+      if (!g.isTileSeamCap && g.indices.length >= 4 && isConnectedSubgraph(g.indices, adjacency)) {
+        substantiveBodyIds.add(g.id);
+      }
+    }
+
+    const jointHubIds = new Set<number>();
+    const groupById = new Map(groups.map((g) => [g.id, g]));
+    for (const g of groups) {
+      if (g.isTileSeamCap) continue;
+      if (!isConnectedSubgraph(g.indices, adjacency)) continue;
+      if (g.indices.length >= primaryParts.length * 0.35) continue;
+      const hasRod = g.indices.some((i) => isVerticalPivotRod(allParts[i]));
+      if (!hasRod) continue;
+      let bridgedBodies = 0;
+      for (const nbGid of groupWeakAdj.get(g.id) ?? []) {
+        if (nbGid !== g.id && substantiveBodyIds.has(nbGid)) bridgedBodies++;
+      }
+      if (bridgedBodies >= 2) {
+        jointHubIds.add(g.id);
+      }
+    }
+
+    // Absorb compact end assemblies (e.g., wheel/bogie assemblies or pivot bases sitting at the bottom/top
+    // of a vertical pivot rod) that weakly touch both the rod and the adjacent body modules into that joint hub
+    const absorbedEndIds = new Set<number>();
+    const jointExtraIndices = new Map<number, number[]>();
+    for (const jGid of jointHubIds) {
+      const jGroup = groupById.get(jGid)!;
+      const jRods = jGroup.indices.filter((i) => isVerticalPivotRod(allParts[i]));
+      const jPartSet = new Set(jGroup.indices);
+      for (const nbGid of groupWeakAdj.get(jGid) ?? []) {
+        if (nbGid === jGid || jointHubIds.has(nbGid) || absorbedEndIds.has(nbGid)) continue;
+        const nbG = groupById.get(nbGid);
+        if (!nbG || nbG.isTileSeamCap) continue;
+        if (nbG.indices.length >= primaryParts.length * 0.25) continue;
+        const nbBounds = computeModelBounds(nbG.indices.map((i) => allParts[i]));
+        const touchesJointPhysically = nbG.indices.some((u) =>
+          (adjacency[u] ?? []).some((v) => jPartSet.has(v)),
+        );
+        if (!touchesJointPhysically) continue;
+        const coaxialWithRod = jRods.some((rIdx) => {
+          const rod = allParts[rIdx];
+          const rx = rod.box.center[0];
+          const rz = rod.box.center[2];
+          const inXZ =
+            rx >= nbBounds.min[0] - 24 &&
+            rx <= nbBounds.max[0] + 24 &&
+            rz >= nbBounds.min[2] - 24 &&
+            rz <= nbBounds.max[2] + 24;
+          const compactSpan =
+            Math.max(nbBounds.spanX, nbBounds.spanZ) <= Math.max(160, pca.majorSpan * 0.25);
+          return inXZ && compactSpan;
+        });
+        const isWheelOrPivotEnd =
+          nbG.indices.some((i) => allParts[i].isWheel || allParts[i].isWheelHolder || allParts[i].isBogiePart) ||
+          coaxialWithRod;
+        if (!isWheelOrPivotEnd || !coaxialWithRod) continue;
+        // Only absorb if at least 2 other substantive body groups remain around this joint
+        const remainingBodies = Array.from(groupWeakAdj.get(jGid) ?? []).filter(
+          (gid) => gid !== jGid && gid !== nbGid && !jointHubIds.has(gid) && !absorbedEndIds.has(gid) && substantiveBodyIds.has(gid),
+        );
+        if (remainingBodies.length >= 2) {
+          absorbedEndIds.add(nbGid);
+          const list = jointExtraIndices.get(jGid) ?? [];
+          list.push(...nbG.indices);
+          jointExtraIndices.set(jGid, list);
+        }
+      }
+    }
+
+    const bodyGroups = groups.filter(
+      (g) =>
+        !jointHubIds.has(g.id) &&
+        !absorbedEndIds.has(g.id) &&
+        !g.isTileSeamCap &&
+        g.indices.length >= 4 &&
+        isConnectedSubgraph(g.indices, adjacency),
+    );
+    const capGroups = groups.filter(
+      (g) =>
+        !jointHubIds.has(g.id) &&
+        !absorbedEndIds.has(g.id) &&
+        g.isTileSeamCap &&
+        g.indices.length >= 6 &&
+        isConnectedSubgraph(g.indices, adjacency),
+    );
+    const jointGroups = groups
+      .filter((g) => jointHubIds.has(g.id))
+      .map((g) => {
+        const extra = jointExtraIndices.get(g.id);
+        return extra ? { ...g, indices: [...g.indices, ...extra] } : g;
+      });
+    const assignedGroupIds = new Set<number>([
+      ...bodyGroups.map((g) => g.id),
+      ...capGroups.map((g) => g.id),
+      ...jointGroups.map((g) => g.id),
+      ...absorbedEndIds,
+    ]);
+    const tinyGroups = groups.filter((g) => !assignedGroupIds.has(g.id));
+
+    const maxBodyRatio =
+      bodyGroups.length > 0
+        ? Math.max(...bodyGroups.map((g) => g.indices.length)) / primaryParts.length
+        : 1;
+    const hasEnoughSubAssemblies =
+      (bodyGroups.length >= 2 && bodyGroups.length <= 12) ||
+      (bodyGroups.length === 1 && capGroups.length >= 1);
+
+    if (hasEnoughSubAssemblies && (maxBodyRatio <= 0.88 || jointGroups.length > 0)) {
+      const bodyBuckets = bodyGroups.map((g) => ({
         indices: [...g.indices],
-        isTileSeamCap: g.isTileSeamCap,
+        centerP: g.centerP,
       }));
+      const capBuckets = capGroups.map((g) => ({
+        indices: [...g.indices],
+        centerP: g.centerP,
+        minY: g.minY,
+        maxY: g.maxY,
+      }));
+      const jointBuckets = jointGroups.map((g) => ({
+        indices: [...g.indices],
+        centerP: g.centerP,
+      }));
+
       // Fold any tiny (< 4 pcs) group strictly across physical adjacency edges so zero floating parts can appear
-      const remainingTiny = tiny.map((tg) => [...tg.indices]);
+      const allFoldTargets = [
+        ...bodyBuckets.map((b) => ({ kind: 'body' as const, ref: b })),
+        ...capBuckets.map((c) => ({ kind: 'cap' as const, ref: c })),
+        ...jointBuckets.map((j) => ({ kind: 'joint' as const, ref: j })),
+      ];
+      const remainingTiny = tinyGroups.map((tg) => [...tg.indices]);
       let progressed = true;
       while (remainingTiny.length > 0 && progressed) {
         progressed = false;
         for (let ti = remainingTiny.length - 1; ti >= 0; ti--) {
           const tNodes = remainingTiny[ti];
           const tSet = new Set(tNodes);
-          let bestBi = -1;
-          let bestEdges = 0;
-          buckets.forEach((b, bi) => {
-            const bSet = new Set(b.indices);
+          let bestTi = -1;
+          let bestScore = 0;
+          allFoldTargets.forEach((target, idx) => {
+            const bSet = new Set(target.ref.indices);
             let edges = 0;
             for (const u of tSet) {
               for (const nb of adjacency[u] ?? []) {
                 if (bSet.has(nb)) edges++;
               }
             }
-            if (edges > bestEdges) {
-              bestEdges = edges;
-              bestBi = bi;
+            if (edges > 0) {
+              // Prefer folding tiny fragments into body modules over joint hubs when tied
+              const score = edges * 10 + (target.kind === 'body' ? 2 : target.kind === 'cap' ? 1 : 0);
+              if (score > bestScore) {
+                bestScore = score;
+                bestTi = idx;
+              }
             }
           });
-          if (bestBi >= 0) {
-            buckets[bestBi].indices.push(...tNodes);
+          if (bestTi >= 0) {
+            allFoldTargets[bestTi].ref.indices.push(...tNodes);
             remainingTiny.splice(ti, 1);
             progressed = true;
           }
         }
       }
 
-      if (remainingTiny.length === 0 && buckets.every((b) => isConnectedSubgraph(b.indices, adjacency))) {
-        const capTagByFirstNode = new Map<number, boolean>();
-        for (const b of buckets) {
-          for (const idx of b.indices) capTagByFirstNode.set(idx, b.isTileSeamCap);
+      const allConnected =
+        remainingTiny.length === 0 &&
+        bodyBuckets.every((b) => isConnectedSubgraph(b.indices, adjacency)) &&
+        capBuckets.every((c) => isConnectedSubgraph(c.indices, adjacency)) &&
+        jointBuckets.every((j) => isConnectedSubgraph(j.indices, adjacency));
+
+      if (allConnected) {
+        // Order body modules deterministically: along PC1 for articulated/elongated chains, or contact order otherwise
+        let orderedBodies: number[][];
+        if (jointBuckets.length > 0 || aspect >= 1.8) {
+          orderedBodies = [...bodyBuckets]
+            .sort((a, b) => a.centerP - b.centerP)
+            .map((b) => b.indices);
+        } else {
+          orderedBodies = orderConnectedSections(
+            bodyBuckets.map((b) => b.indices),
+            allParts,
+            adjacency,
+          );
         }
-        const orderedLists = orderConnectedSections(
-          buckets.map((b) => b.indices),
-          allParts,
-          adjacency,
+        const orderedJoints = [...jointBuckets]
+          .sort((a, b) => a.centerP - b.centerP)
+          .map((j) => j.indices);
+
+        // Pair detachable tile-majority caps (e.g., removable roofs) with their parent body module
+        const capsByBody: typeof capBuckets[] = orderedBodies.map(() => []);
+        const idxToBody = new Map<number, number>();
+        orderedBodies.forEach((bIndices, bIdx) => {
+          for (const idx of bIndices) idxToBody.set(idx, bIdx);
+        });
+        const bodyBoundsList = orderedBodies.map((bIndices) =>
+          computeModelBounds(bIndices.map((i) => allParts[i])),
         );
-        const sectionBounds = orderedLists.map((indices) =>
-          computeModelBounds(indices.map((i) => allParts[i])),
+        for (const cap of capBuckets) {
+          const weakCounts = new Map<number, number>();
+          const allCounts = new Map<number, number>();
+          for (const idx of cap.indices) {
+            for (const nb of typed.weakAdj[idx] ?? []) {
+              const bi = idxToBody.get(nb);
+              if (bi !== undefined) weakCounts.set(bi, (weakCounts.get(bi) ?? 0) + 1);
+            }
+            for (const nb of adjacency[idx] ?? []) {
+              const bi = idxToBody.get(nb);
+              if (bi !== undefined) allCounts.set(bi, (allCounts.get(bi) ?? 0) + 1);
+            }
+          }
+          const counts = weakCounts.size > 0 ? weakCounts : allCounts;
+          let bestBody = 0;
+          let bestCount = -1;
+          for (const [bi, c] of counts.entries()) {
+            if (c > bestCount) {
+              bestCount = c;
+              bestBody = bi;
+            }
+          }
+          if (bestCount < 0) {
+            const capCenter = computeModelBounds(cap.indices.map((i) => allParts[i])).center;
+            let bestDist = Infinity;
+            bodyBoundsList.forEach((bb, bi) => {
+              const d = Math.hypot(
+                capCenter[0] - bb.center[0],
+                capCenter[1] - bb.center[1],
+                capCenter[2] - bb.center[2],
+              );
+              if (d < bestDist) {
+                bestDist = d;
+                bestBody = bi;
+              }
+            });
+          }
+          capsByBody[bestBody].push(cap);
+        }
+
+        // Compute clean 3D exploded preview offsets for all non-cap modules + articulated joints
+        const jointBoundsList = orderedJoints.map((jIndices) =>
+          computeModelBounds(jIndices.map((i) => allParts[i])),
         );
-        const radialOffsets = computeRadialExplodeOffsets(
-          sectionBounds.map((sb) => sb.center),
-          { scale: orderedLists.length >= 3 ? 1.1 : 1.0, yScale: 0.5, clampYNonNegative: true },
-        );
-        const sections: ProposedSection[] = orderedLists.map((indices, idx) => {
-          const sb = sectionBounds[idx];
-          const baseOff = radialOffsets[idx];
-          const isCap = Boolean(capTagByFirstNode.get(indices[0]));
-          const isTopCap = isCap && sb.max[1] >= bounds.max[1] - 16;
-          return {
-            id: `sec_nat_${idx + 1}`,
-            name: isTopCap ? `Removable Roof ${idx + 1}` : `Module ${idx + 1}`,
-            partIndices: indices,
-            partIds: indices.map((i) => allParts[i].id),
-            role: 'module',
-            isDetachableCap: isCap,
-            cutEdgeCount: countCutEdges(indices, adjacency),
-            explodeOffset: isCap
-              ? [baseOff[0] * 0.4, 0.9, baseOff[2] * 0.4]
-              : baseOff,
-            previewColor: SECTION_PREVIEW_PALETTE[idx % SECTION_PREVIEW_PALETTE.length],
+        let bodyExplodeOffsets: Vec3[];
+        let jointExplodeOffsets: Vec3[];
+        if (orderedBodies.length === 2 && orderedJoints.length === 1 && aspect >= 1.6) {
+          bodyExplodeOffsets = [
+            [-ux, 0, -uz],
+            [ux, 0, uz],
+          ];
+          // Keep single articulated center joint centered on track level
+          jointExplodeOffsets = [[0, 0, 0]];
+        } else {
+          const combinedCenters = [
+            ...bodyBoundsList.map((bb) => bb.center),
+            ...jointBoundsList.map((jb) => jb.center),
+          ];
+          const combinedOffsets = computeRadialExplodeOffsets(combinedCenters, {
+            scale: combinedCenters.length >= 3 ? 1.1 : 1.0,
+            yScale: 0.5,
+            clampYNonNegative: true,
+          });
+          bodyExplodeOffsets = combinedOffsets.slice(0, orderedBodies.length);
+          jointExplodeOffsets = combinedOffsets.slice(orderedBodies.length);
+        }
+
+        // Collapse structurally identical non-cap body modules (e.g., 2× identical end cars or 3× identical pods)
+        const bodyCollapsedInto = new Array<number>(orderedBodies.length).fill(-1);
+        const repeatGroupsByLeader = new Map<number, number[]>();
+        for (let i = 0; i < orderedBodies.length; i++) {
+          if (bodyCollapsedInto[i] >= 0) continue;
+          if (capsByBody[i].length > 0) continue;
+          const group = [i];
+          for (let j = i + 1; j < orderedBodies.length; j++) {
+            if (bodyCollapsedInto[j] >= 0 || capsByBody[j].length > 0) continue;
+            if (areSectionsStructurallyIdentical(orderedBodies[i], orderedBodies[j], allParts)) {
+              bodyCollapsedInto[j] = i;
+              group.push(j);
+            }
+          }
+          if (group.length >= 2) {
+            repeatGroupsByLeader.set(i, group);
+          }
+        }
+        const hasIdenticalCollapse = repeatGroupsByLeader.size > 0;
+        const isIdenticalHalves =
+          orderedBodies.length === 2 &&
+          repeatGroupsByLeader.has(0) &&
+          repeatGroupsByLeader.get(0)!.length === 2;
+
+        const sections: ProposedSection[] = [];
+        let colorCursor = 0;
+        let emittedModuleNum = 0;
+
+        orderedBodies.forEach((bIndices, bIdx) => {
+          if (bodyCollapsedInto[bIdx] >= 0) return;
+          emittedModuleNum++;
+          const repeatMembers = repeatGroupsByLeader.get(bIdx);
+          const secId = repeatMembers
+            ? `sec_det_${emittedModuleNum}_x${repeatMembers.length}`
+            : `sec_det_${emittedModuleNum}`;
+          const baseName = repeatMembers
+            ? orderedBodies.length === 2
+              ? 'End Section'
+              : `Module ${emittedModuleNum}`
+            : orderedBodies.length === 2 && (orderedJoints.length > 0 || aspect >= 1.8)
+              ? bIdx === 0
+                ? 'Front Section'
+                : 'Rear Section'
+              : `Module ${emittedModuleNum}`;
+          const parentOff = bodyExplodeOffsets[bIdx] ?? [0, 0, 0];
+
+          if (repeatMembers) {
+            const repeatIdxGroups = repeatMembers.map((mi) => orderedBodies[mi]);
+            sections.push({
+              id: secId,
+              name: baseName,
+              partIndices: bIndices,
+              partIds: bIndices.map((i) => allParts[i].id),
+              repeatPartIndexGroups: repeatIdxGroups,
+              repeatPartIdGroups: repeatIdxGroups.map((grp) => grp.map((i) => allParts[i].id)),
+              role: 'module',
+              cutEdgeCount: countCutEdges(bIndices, adjacency),
+              explodeOffset: parentOff,
+              previewColor: SECTION_PREVIEW_PALETTE[colorCursor++ % SECTION_PREVIEW_PALETTE.length],
+            });
+          } else {
+            sections.push({
+              id: secId,
+              name: baseName,
+              partIndices: bIndices,
+              partIds: bIndices.map((i) => allParts[i].id),
+              role: 'module',
+              cutEdgeCount: countCutEdges(bIndices, adjacency),
+              explodeOffset: parentOff,
+              previewColor: SECTION_PREVIEW_PALETTE[colorCursor++ % SECTION_PREVIEW_PALETTE.length],
+            });
+          }
+
+          // Emit detachable tile-majority caps (e.g., removable roofs) right after their parent module
+          const parentBounds = bodyBoundsList[bIdx];
+          capsByBody[bIdx].forEach((cap, capIdx) => {
+            const isTopRoof =
+              cap.minY >= parentBounds.center[1] - 4 && cap.maxY >= parentBounds.max[1] - 12;
+            const capPrefix =
+              orderedBodies.length === 2 && (orderedJoints.length > 0 || aspect >= 1.8)
+                ? bIdx === 0
+                  ? 'Front'
+                  : 'Rear'
+                : baseName;
+            const capName =
+              capsByBody[bIdx].length === 1
+                ? isTopRoof
+                  ? `${capPrefix} Roof`
+                  : `${capPrefix} Removable Cap`
+                : `${capPrefix} Roof ${capIdx + 1}`;
+            sections.push({
+              id: `${secId}_cap_${capIdx + 1}`,
+              name: capName,
+              partIndices: cap.indices,
+              partIds: cap.indices.map((i) => allParts[i].id),
+              role: 'module',
+              isDetachableCap: true,
+              attachToSectionId: secId,
+              attachNormal: [0, 1, 0],
+              cutEdgeCount: countCutEdges(cap.indices, adjacency),
+              explodeOffset: [parentOff[0], 0.85, parentOff[2]],
+              previewColor: SECTION_PREVIEW_PALETTE[colorCursor++ % SECTION_PREVIEW_PALETTE.length],
+            });
+          });
+        });
+
+        // Emit articulated join sections (1 or more joints for 2, 3, 4, 5+ segment builds)
+        const articulatedDescs: string[] = [];
+        orderedJoints.forEach((jIndices, jIdx) => {
+          const analyzed = analyzeArticulatedJoinParts(jIndices, allParts, adjacency, typed.strongAdj);
+          const orderedJoinParts = [
+            ...analyzed.collars,
+            ...analyzed.rods,
+            ...analyzed.endAsm,
+            ...analyzed.finish,
+          ];
+          const endAssemblyName =
+            analyzed.endAsm.length > 0 ? autoNameEndAssembly(analyzed.endAsm, allParts) : undefined;
+          const articulatedJoin: ArticulatedJoinPlan = {
+            slideAxis: [ux, uz],
+            floatingCollarIndices: analyzed.collars,
+            pivotRodIndices: analyzed.rods,
+            bogiePartIndices: analyzed.endAsm,
+            bogieName: endAssemblyName,
+            endAttachSide: analyzed.attachSide,
+            finishPartIndices: analyzed.finish,
           };
+
+          const isSingleJoint = orderedJoints.length === 1;
+          const jointPrefix = isSingleJoint ? 'Center Joint' : `Joint ${jIdx + 1}`;
+          const joinName =
+            analyzed.endAsm.length > 0 && analyzed.rods.length > 0
+              ? endAssemblyName === 'Center Wheel Assembly'
+                ? `${jointPrefix} & Wheels`
+                : `${jointPrefix} & ${endAssemblyName}`
+              : analyzed.endAsm.length > 0
+                ? isSingleJoint
+                  ? `${endAssemblyName} & Join`
+                  : `${jointPrefix} & ${endAssemblyName}`
+                : isSingleJoint
+                  ? 'Center Articulation Joint'
+                  : `Articulation Joint ${jIdx + 1}`;
+
+          const descParts = [
+            analyzed.endAsm.length > 0
+              ? `${(endAssemblyName || 'center assembly').toLowerCase()} (${analyzed.endAsm.length} parts)`
+              : null,
+            analyzed.rods.length > 0
+              ? `${analyzed.rods.length} Technic axle${analyzed.rods.length === 1 ? '' : 's'}`
+              : null,
+            analyzed.collars.length > 0
+              ? `${analyzed.collars.length} cross-axle part${analyzed.collars.length === 1 ? '' : 's'}`
+              : null,
+          ].filter(Boolean);
+          if (descParts.length > 0) articulatedDescs.push(descParts.join(' + '));
+
+          sections.push({
+            id: isSingleJoint ? 'sec_join_center' : `sec_join_${jIdx + 1}`,
+            name: joinName,
+            partIndices: orderedJoinParts,
+            partIds: orderedJoinParts.map((i) => allParts[i].id),
+            role: 'join',
+            cutEdgeCount: countCutEdges(orderedJoinParts, adjacency),
+            explodeOffset: jointExplodeOffsets[jIdx] ?? [0, 0, 0],
+            previewColor: JOIN_PREVIEW_COLOR,
+            articulatedJoin,
+          });
         });
 
         placeSecondaryGlobalComponents(
@@ -2952,27 +3334,44 @@ export function buildStructuralModulesProposal(
           adjacency,
           allBounds.center,
           'modular_chapters',
-          false,
+          orderedJoints.length > 0,
         );
 
-        const maxModDiag = Math.max(...orderedLists.map((b) => computeSectionDiag(b, allParts)), 1);
+        const maxModDiag = Math.max(...orderedBodies.map((b) => computeSectionDiag(b, allParts)), 1);
         const zoomGainEstimate = Math.max(1.1, Math.round((bounds.diag / maxModDiag) * 10) / 10);
         const { estimatedStepCount, estimatedPageCount } = estimateStepsAndPages(
           active.length,
           sections.length,
         );
 
+        const capCount = capBuckets.length;
+        const roofNote =
+          capCount > 0 ? ` + ${capCount} removable roof${capCount === 1 ? '' : 's'}` : '';
+        let confidence = 88;
+        if (orderedJoints.length > 0) confidence += 6;
+        if (capCount > 0) confidence += 4;
+        if (hasIdenticalCollapse) confidence += 4;
+        confidence = Math.min(96, confidence);
+
+        const rationale =
+          orderedJoints.length === 1 && articulatedDescs.length === 1
+            ? `Builds ${orderedBodies.length} sub-assemblies separately${roofNote}, then connects via ${articulatedDescs[0]}.`
+            : orderedJoints.length >= 2
+              ? `Builds ${orderedBodies.length} sub-assemblies separately${roofNote}, then connects via ${orderedJoints.length} articulated joints.`
+              : `Splits cleanly along weak joints (clips, hinges, round-hole axles, and tile-majority seams) into ${sections.length} intact, connected sub-assemblies.`;
+
         return {
-          id: `prop_modules_${sections.length}`,
+          id: `prop_modules_${sections.length}${isIdenticalHalves ? '_x2' : ''}`,
           strategy: 'structural_modules',
           outputMode: 'modular_chapters',
-          title: 'Natural Sub-Assemblies',
-          rationale: `Splits cleanly along weak joints (clips, hinges, round-hole axles, and tile-majority seams) into ${sections.length} intact, connected modules.`,
+          title: 'Detachable Sub-Assemblies',
+          rationale,
           zoomGainEstimate,
-          confidence: 87,
+          confidence,
           sections,
           estimatedStepCount,
           estimatedPageCount,
+          hasIdenticalHalves: isIdenticalHalves,
         };
       }
     }
@@ -3729,9 +4128,6 @@ export function analyzeModelSubdivisions(
 ): SubdivisionAnalysisResult {
   const assessment = assessModelSubdivisionNeed(parts);
   const proposals: SubdivisionProposal[] = [];
-
-  const halves = buildLongitudinalHalvesProposal(parts, adjacency, 2, true);
-  if (halves) proposals.push(halves);
 
   const floors = buildHorizontalFloorsProposal(parts, adjacency);
   if (floors) proposals.push(floors);

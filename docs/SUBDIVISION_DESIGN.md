@@ -98,33 +98,27 @@ Rather than relying on model-specific heuristics (such as train-only rules), sub
 3. **Priority Frontier Expansion**: Claims all remaining/detached bricks strictly across physical `adjacency` edges into an already-connected core (weighted by spatial fidelity, shared-edge strength, and balance), inductively guaranteeing 100% single-component connectivity at every step.
 4. **Articulation-Guarded Boundary Smoothing**: Moves boundary bricks to an adjacent section with stronger physical attachment **only** when an early-exit BFS cut-vertex check (`wouldStayConnectedWithout`) confirms removing the brick does not split its current section.
 
-### Strategy A: Longitudinal Halves & Segments (`longitudinal_halves`)
-*Best for elongated models (trains, light rail vehicles, articulated vehicles, ships, bridges, fuselages).*
-1. **2D PCA Principal Horizontal Axis**: Computes the dominant lengthwise axis on horizontal XZ part centroids (snapping nearly orthogonal axes within ~5° to exact X or Z), so diagonal models split just as cleanly as axis-aligned ones.
-2. **Minimum-Strong-Cut Transverse Sweep**: Sweeps candidate transverse cut planes around ideal split fractions (within `±14%` of length) minimizing strong-edge cuts (without penalizing compact articulated seam hubs) and snapping onto a vertical Technic pivot rod when one sits in the seam window.
-3. **Whole Strong-Group Partitioning, Zero-Floating Enforcement & Detachable Roofs/Caps**:
-   - **Removable Roofs / Caps** (`isDetachableCap: true`): Tile-majority upper assemblies (e.g., **Front Roof** and **Rear Roof** resting on mostly smooth tiles with minimal anchor studs) are automatically paired with their parent half, lifted upward in the 3D exploded preview, built in their own zoomed-in chapter, and lowered onto the model **after** minifigures are placed inside.
-   - **Stud-Owned Seam Parts**: Entire strong body groups—including curved scoops and round-hole coupler tongues protruding slightly past the cut plane—stay intact on their corresponding half.
-   - **Articulated Joint Isolation**: Only compact intact seam hubs bridging the halves (e.g., vertical Technic pivot rod + coaxial cross-axle circular pieces + any intact end assembly such as a Center Wheel Assembly or Pivot Assembly) go into the Center Join section when they form a single connected assembly. For articulated axle joints, [`buildManualFromParsed`](../src/studioRuntime.ts) builds any multi-part end assembly as its own zoomed-in chapter and sequences **Connect Halves & Finish** in physical assembly order with 3D directional arrows and step badges:
-     1. **Place** First Half
-     2. **Drop into cavity** — floating circular cross-axle pieces positioned inside the seam cavity
-     3. **Slide halves together** — Second Half slides in around the center pieces
-     4. **Push rod through** — vertical Technic axle with 1:1 actual-size guide
-     5. **Attach end assembly to rod** — pre-built end assembly (e.g., Center Wheel Assembly) pushes onto the protruding bottom or top end of the axle (`endAttachSide`)
-     6. **Place minifigures**, then **Snap on removable roofs/caps** from above
-   - **General Solid / Multi-Segment Splits**: For solid monolithic models without weak joints (or `3–6` segment splits), runs `enforceConnectedPartition` directly on the primary connected component with **no floating Join debris cloud** so every segment (`Front Section`, `Middle Section`, `Rear Section`) is a solid, single-connected-component build that snaps directly onto its neighbor.
-4. **Identical Half Detection (`2×` Collapse)**: Compares part+color multisets and centroid-relative quantized distance profiles (invariant under 180° rotation and reflection) to detect `2×` identical halves. Only emits a separate `Center Connector` when both halves match **and** the center connector itself is a single connected component touching both halves.
-5. **Zoom Gain Estimate**: Computes `fullDiagonal / maxSectionDiagonal` to show the expected zoom improvement (e.g., `~2.3× larger bricks per step`).
+### Strategy A (Legacy): Longitudinal Halves & Segments (`longitudinal_halves`)
+*Retained internally for backwards compatibility with previously saved plans, but no longer offered as a preset in `analyzeModelSubdivisions()`.* Hardcoding a 2-way split breaks down on 3-, 4-, or 5-segment articulated builds and models without a natural halving; **Detachable Sub-Assemblies** (`structural_modules`) now handles any number of articulated segments, joints, removable roofs, and identical repeated modules directly from physical weak joints.
 
 ### Strategy B: Modular Floors & Vertical Layers (`horizontal_floors`)
 *Best for modular buildings, towers, and multi-story structures (`spanY >= 72 LDU`).*
 - Sweeps horizontal planes at plate resolution (`8 LDU`) to score cross-plane edges, spanning parts, and smooth-tile perimeter tops (`isTile`), then runs `enforceConnectedPartition` so every floor is 100% internally connected.
 - Sharp local minima flanked by smooth tiles indicate detachable **Ground Floor / Floor N / Roof** modular seams (`modular_chapters`); tightly interlocked stacks produce vertical **Numbered Bags**.
 
-### Strategy C: Structural Modules (`structural_modules`)
-*Best for vehicles, spaceships, mechs, and multi-pod assemblies.*
-- **Natural Weak-Joint Fast Path**: When the general Typed Connection-Strength Graph (clips, hinges, round-hole axles, and tile-majority seams) naturally separates a model into `2–8` cohesive, single-connected-component strong modules, uses those exact LEGO seams directly without cutting through any strong stud cluster.
-- **Graph-Clustering Fallback**: For tightly stud-welded models, uses farthest-point spatial seeding inside the primary connected component, balanced multi-source BFS growth along physical connections, and articulation-guarded boundary modularity smoothing (`wouldStayConnectedWithout`) to isolate cohesive, 100% connected modules ordered in a grounded contact sequence.
+### Strategy C: Detachable Sub-Assemblies & Structural Modules (`structural_modules`)
+*Primary weak-joint strategy for articulated vehicles/trains (2, 3, 4, 5+ segments), spaceships, mechs, and multi-pod assemblies — with a graph-clustering fallback for monolithic builds.*
+- **Detachable Sub-Assemblies (Weak-Joint Fast Path)**: When the general Typed Connection-Strength Graph (clips, hinges, round-hole axles, and tile-majority seams) separates a model into `2–12` intact, single-connected-component sub-assemblies, uses those exact LEGO seams directly without cutting through any strong stud cluster:
+  - **Multi-Joint Articulated Recognition**: Automatically identifies **1 or more** compact vertical Technic pivot/axle hubs bridging adjacent sub-assemblies (e.g., 1 center joint on a 2-car train, 2 joints on a 3-car train, or 3–4 joints on a 4–5 segment build). For each articulated joint, [`buildManualFromParsed`](../src/studioRuntime.ts) builds any multi-part end assembly (e.g., Center Wheel Assembly or Pivot Assembly) as its own zoomed-in chapter and sequences **Connect Sections & Finish** in physical assembly order with 3D directional arrows and step badges:
+    1. **Place** First Section
+    2. **Drop into joint** — floating circular cross-axle pieces positioned inside the seam cavity
+    3. **Slide sections together** — next section slides in around the joint pieces
+    4. **Push axle through** — vertical Technic axle with 1:1 actual-size guide
+    5. **Attach end assembly to axle** — pre-built end assembly pushes onto the protruding bottom or top end of the axle (`endAttachSide`)
+    6. Repeats cleanly for each subsequent articulated joint along the build, then **places minifigures** and **snaps on removable roofs/caps** from above.
+  - **Removable Roofs / Caps** (`isDetachableCap: true`): Tile-majority upper assemblies are paired with their parent sub-assembly, lifted upward in the 3D exploded preview, built in their own zoomed-in chapter, and lowered onto the model after minifigures are placed inside.
+  - **Identical Repeated Module Collapse (`×N`)**: Structurally identical non-cap modules (e.g., identical end cars or repeated pods) collapse into a single build-once chapter with a `×N` badge.
+- **Structural Modules (Graph-Clustering Fallback)**: For tightly stud-welded monolithic models without weak joints, uses farthest-point spatial seeding inside the primary connected component, balanced multi-source BFS growth along physical connections, and articulation-guarded boundary modularity smoothing (`wouldStayConnectedWithout`) to isolate cohesive, 100% connected modules ordered in a grounded contact sequence.
 
 ### Strategy D: Numbered Build Bags (`numbered_bags`)
 *Universal fallback—valid on any model.*
@@ -169,7 +163,7 @@ The upgraded `#importModal` in [`index.html`](../index.html) adapts automaticall
 - **Always-Visible Overlay Icons**: Subtle circular overlay icon buttons sit in the top-right corner of the 3D preview:
   - **Animated Explode Toggle**: Shown for multi-section proposals; smoothly eases (`340 ms` cubic ease-in-out) each connected section outward along its computed `explodeOffset` vector (and collapses back cleanly). Whole-minifigure assemblies (via `extractMinifigureGroups`) ride with their host section.
   - **Color Mode Toggle**: Switches between colorblind-safe **Section Colors** and true **Part Colors**. When **Single Continuous Build** is selected with **Section Colors** active, the entire model renders in one unified section color (`SECTION_PREVIEW_PALETTE[0]`) while the explode toggle is hidden.
-- **Curated Wizard Proposals**: `analyzeModelSubdivisions()` offers **2-Half Longitudinal Splits**, **Horizontal Floors**, **Footprint Quadrants**, **Natural Sub-Assemblies / Structural Modules**, and **Split by Baseplate** (alongside **Single Continuous Build**). Arbitrary 3-segment longitudinal splits and random Numbered Build Bags are excluded from wizard proposals, and confusing `~N× zoom` / redundant header chips are omitted.
+- **Curated Wizard Proposals**: `analyzeModelSubdivisions()` offers **Detachable Sub-Assemblies / Structural Modules**, **Horizontal Floors**, **Footprint Quadrants**, and **Split by Baseplate** (alongside **Single Continuous Build**). Hardcoded 2-half lengthwise splits and random Numbered Build Bags are excluded from wizard proposals, and confusing `~N× zoom` / redundant header chips are omitted.
 
 ### Build Organization Picker
 The proposal chooser is a custom, theme-matched listbox (`#impProposalPicker`, rendered by `renderImportProposalPicker()` in [`studioRuntime.ts`](../src/studioRuntime.ts)) instead of a native `<select>` plus a separate description box:

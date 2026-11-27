@@ -21,7 +21,7 @@
 
 | Row | Selected Default Shown | Links To (Editable Page) | Scroll Target |
 |---|---|---|---|
-| **Slicing** | Concise slicing method name (e.g. `Split into Halves`, `Modular Floors`, `Natural Sub-Assemblies`, `Single Continuous Build`, or `Keep Existing File Steps`) | **Step Generation** (`#importModal` in wizard mode) | Top |
+| **Slicing** | Concise slicing method name (e.g. `Detachable Sub-Assemblies`, `Modular Floors`, `Split by Baseplate`, `Single Continuous Build`, or `Keep Existing File Steps`) | **Step Generation** (`#importModal` in wizard mode) | Top |
 | **Theme** | Active theme name (`Classic Blue` by default) + live color swatch (background, text, accent) | **Style & Themes** (`#stylePopover` in centered wizard modal mode) | Top (`Themes`) |
 | **Text & Labels** | `Wordless` (default) or `With Text Labels` | **Page Setup** (`#pageSetupModal` in wizard mode) | `#pageSetupWordlessSection` |
 | **Rendering Style** | `Flat` (default), `Standard`, or `Studio` | **Style & Themes** (`#stylePopover` in centered wizard modal mode) | `#styleStepDisplaySection` |

@@ -95,7 +95,7 @@ function buildSyntheticModularBuildingLdr(): string {
 }
 
 describe('Large & Elongated Model Subdivision Analyzer', () => {
-  it('triggers subdivision on elongated train chassis and recommends Building Halves First with ~2x zoom gain', () => {
+  it('triggers subdivision on elongated train chassis and recommends Structural Modules without hardcoded halves', () => {
     const model = parseLDrawSource(buildSyntheticTrainChassisLdr(), 'train_chassis.ldr', 'ldr');
     const graph = buildConnectivityGraph(model.parts);
     const { parts, adjacency } = buildSubdivisionInputsFromCanonical(model, graph);
@@ -107,14 +107,15 @@ describe('Large & Elongated Model Subdivision Analyzer', () => {
     const elongatedReason = assessment.reasons.find((r) => r.startsWith('elongated '));
     expect(elongatedReason).toBeDefined();
     expect(elongatedReason).not.toMatch(/\(\d+ studs\)/);
-    expect(proposals.length).toBeGreaterThanOrEqual(2);
+    expect(proposals.length).toBeGreaterThanOrEqual(1);
+    expect(proposals.some((p) => p.strategy === 'longitudinal_halves')).toBe(false);
 
-    // Top recommendation for an elongated train chassis should be longitudinal halves!
+    // Top recommendation for an elongated train chassis should be Detachable Sub-Assemblies
     const top = proposals[0];
-    expect(top.strategy).toBe('longitudinal_halves');
-    expect(top.title).toBe('Split into Halves');
+    expect(top.strategy).toBe('structural_modules');
+    expect(top.title).toBe('Detachable Sub-Assemblies');
     expect(top.outputMode).toBe('modular_chapters');
-    expect(top.zoomGainEstimate).toBeGreaterThanOrEqual(1.5);
+    expect(top.zoomGainEstimate).toBeGreaterThanOrEqual(1.3);
 
     // Every non-minifig part must be accounted for exactly once across sections (including repeat groups)
     const covered = new Set<number>();
@@ -415,7 +416,8 @@ describe('Large & Elongated Model Subdivision Analyzer', () => {
 
     const { proposals } = analyzeModelSubdivisions(parts, adj);
     const top = proposals[0];
-    expect(top.strategy).toBe('longitudinal_halves');
+    expect(top.strategy).toBe('structural_modules');
+    expect(top.title).toBe('Detachable Sub-Assemblies');
     expect(top.outputMode).toBe('modular_chapters');
 
     const frontSec = top.sections.find((s) => s.role === 'module' && s.partIndices.includes(frontFloorEnd));
@@ -571,7 +573,8 @@ describe('Large & Elongated Model Subdivision Analyzer', () => {
 
     const { proposals } = analyzeModelSubdivisions(parts, adj);
     const top = proposals[0];
-    expect(top.strategy).toBe('longitudinal_halves');
+    expect(top.strategy).toBe('structural_modules');
+    expect(top.title).toBe('Detachable Sub-Assemblies');
     const frontSec = top.sections.find((s) => s.role === 'module' && s.partIndices.includes(flEnd))!;
     const rearSec = top.sections.find((s) => s.role === 'module' && s.partIndices.includes(frEnd))!;
     const joinSec = top.sections.find((s) => s.role === 'join')!;
@@ -926,11 +929,12 @@ describe('Large & Elongated Model Subdivision Analyzer', () => {
     link(collar, rear.tongue);
 
     const { proposals } = analyzeModelSubdivisions(parts, adj);
-    const longProp = proposals.find((p) => p.strategy === 'longitudinal_halves')!;
-    expect(longProp).toBeDefined();
+    const detProp = proposals.find((p) => p.strategy === 'structural_modules')!;
+    expect(detProp).toBeDefined();
+    expect(detProp.title).toBe('Detachable Sub-Assemblies');
 
     // Both removable roofs should be cleanly detected as separate detachable cap sections!
-    const capSecs = longProp.sections.filter((s) => s.isDetachableCap);
+    const capSecs = detProp.sections.filter((s) => s.isDetachableCap);
     expect(capSecs).toHaveLength(2);
     expect(capSecs.map((c) => c.name).sort()).toEqual(['Front Roof', 'Rear Roof']);
 
@@ -943,7 +947,7 @@ describe('Large & Elongated Model Subdivision Analyzer', () => {
     expect(rearRoofSec.explodeOffset[1]).toBeGreaterThan(0.5);
 
     // Center joint contains ONLY the Technic axle and cross-axle collar (zero train-specific parts!)
-    const joinSec = longProp.sections.find((s) => s.role === 'join')!;
+    const joinSec = detProp.sections.find((s) => s.role === 'join')!;
     expect(joinSec).toBeDefined();
     expect(new Set(joinSec.partIndices)).toEqual(new Set([rod, collar]));
     expect(joinSec.articulatedJoin!.pivotRodIndices).toEqual([rod]);
@@ -951,7 +955,7 @@ describe('Large & Elongated Model Subdivision Analyzer', () => {
 
     // Exact partition check
     const covered = new Set<number>();
-    for (const sec of longProp.sections) {
+    for (const sec of detProp.sections) {
       for (const idx of sec.partIndices) {
         expect(covered.has(idx)).toBe(false);
         covered.add(idx);
@@ -966,9 +970,124 @@ describe('Large & Elongated Model Subdivision Analyzer', () => {
         : { ...p },
     );
     const studResult = analyzeModelSubdivisions(studParts, adj);
-    const studLongProp = studResult.proposals.find((p) => p.strategy === 'longitudinal_halves')!;
-    expect(studLongProp).toBeDefined();
-    expect(studLongProp.sections.filter((s) => s.isDetachableCap)).toHaveLength(0);
+    const studDetProp = studResult.proposals.find((p) => p.strategy === 'structural_modules')!;
+    expect(studDetProp).toBeDefined();
+    expect(studDetProp.sections.filter((s) => s.isDetachableCap)).toHaveLength(0);
+  });
+
+  it('recognizes multiple articulated joints cleanly on a 3-segment articulated build (3 modules + 2 joints)', () => {
+    const parts: SubdivisionPartInput[] = [];
+    const adj: number[][] = [];
+    const addPart = (
+      id: string,
+      partId: string,
+      partName: string,
+      min: [number, number, number],
+      max: [number, number, number],
+    ): number => {
+      const index = parts.length;
+      parts.push({
+        index,
+        id,
+        partId,
+        partName,
+        colorId: 72,
+        box: {
+          min,
+          max,
+          center: [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2],
+        },
+      });
+      adj.push([]);
+      return index;
+    };
+    const link = (a: number, b: number) => {
+      if (a === b) return;
+      if (!adj[a].includes(b)) adj[a].push(b);
+      if (!adj[b].includes(a)) adj[b].push(a);
+    };
+
+    // Build 3 separate car segments along X: [-440..-200], [-120..120], [200..440]
+    const buildSegment = (tag: string, xStart: number, xEnd: number) => {
+      let prev = -1;
+      let first = -1;
+      let last = -1;
+      for (let x = xStart; x <= xEnd; x += 80) {
+        const fl = addPart(`${tag}_fl_${x}`, '3020', 'Plate 2x4', [x - 40, 24, -40], [x + 40, 32, 40]);
+        const wl = addPart(`${tag}_wl_${x}`, '3001', 'Brick 2x4', [x - 40, 32, -40], [x + 40, 56, 40]);
+        link(fl, wl);
+        if (prev >= 0) {
+          const tie = addPart(`${tag}_t_${x}`, '3020', 'Plate 2x4', [x - 80, 32, -20], [x, 40, 20]);
+          link(prev, tie);
+          link(fl, tie);
+        }
+        if (first < 0) first = fl;
+        last = fl;
+        prev = fl;
+      }
+      return { first, last };
+    };
+
+    const seg1 = buildSegment('s1', -400, -240);
+    const seg2 = buildSegment('s2', -80, 80);
+    const seg3 = buildSegment('s3', 240, 400);
+
+    // Helper to add an articulated vertical axle + collar + wheel-holder joint at jointX
+    const addArticulatedJoint = (tag: string, jointX: number, leftAttach: number, rightAttach: number) => {
+      const tL = addPart(`${tag}_tL`, '3176', 'Plate 3 x 2 with Hole', [jointX - 50, 32, -20], [jointX + 10, 40, 20]);
+      const rSup = addPart(`${tag}_rSup`, '3020', 'Plate 2x4', [jointX + 15, 32, -20], [jointX + 95, 40, 20]);
+      const tR = addPart(`${tag}_tR`, '3176', 'Plate 3 x 2 with Hole', [jointX - 10, 40, -20], [jointX + 50, 48, 20]);
+      link(leftAttach, tL);
+      link(rightAttach, rSup);
+      link(rSup, tR);
+      link(tL, tR);
+
+      const rod = addPart(`${tag}_rod`, '3706', 'Technic Axle 6L', [jointX - 4, 8, -4], [jointX + 4, 72, 4]);
+      const collar = addPart(`${tag}_col`, '4032', 'Plate 2 x 2 Round with Axlehole', [jointX - 20, 48, -20], [jointX + 20, 56, 20]);
+      const bogiePlate = addPart(`${tag}_bp`, '4025', 'Train Bogie Plate', [jointX - 30, 8, -20], [jointX + 30, 24, 20]);
+      const w1 = addPart(`${tag}_w1`, '50254', 'Train Wheel Small', [jointX - 30, 0, -24], [jointX - 10, 16, -16]);
+      const w2 = addPart(`${tag}_w2`, '50254', 'Train Wheel Small', [jointX + 10, 0, 16], [jointX + 30, 16, 24]);
+      link(rod, tL);
+      link(rod, tR);
+      link(rod, collar);
+      link(collar, tR);
+      link(rod, bogiePlate);
+      link(bogiePlate, w1);
+      link(bogiePlate, w2);
+      return { rod, collar, bogie: [bogiePlate, w1, w2] };
+    };
+
+    const j1 = addArticulatedJoint('j1', -160, seg1.last, seg2.first);
+    const j2 = addArticulatedJoint('j2', 160, seg2.last, seg3.first);
+
+    const { proposals } = analyzeModelSubdivisions(parts, adj);
+    const top = proposals[0];
+    expect(top.strategy).toBe('structural_modules');
+    expect(top.title).toBe('Detachable Sub-Assemblies');
+    expect(top.outputMode).toBe('modular_chapters');
+
+    const joinSecs = top.sections.filter((s) => s.role === 'join');
+    expect(joinSecs).toHaveLength(2);
+    expect(joinSecs[0].articulatedJoin).toBeDefined();
+    expect(joinSecs[1].articulatedJoin).toBeDefined();
+    expect(joinSecs[0].articulatedJoin!.pivotRodIndices).toEqual([j1.rod]);
+    expect(joinSecs[0].articulatedJoin!.floatingCollarIndices).toEqual([j1.collar]);
+    expect(new Set(joinSecs[0].articulatedJoin!.bogiePartIndices)).toEqual(new Set(j1.bogie));
+    expect(joinSecs[1].articulatedJoin!.pivotRodIndices).toEqual([j2.rod]);
+    expect(joinSecs[1].articulatedJoin!.floatingCollarIndices).toEqual([j2.collar]);
+    expect(new Set(joinSecs[1].articulatedJoin!.bogiePartIndices)).toEqual(new Set(j2.bogie));
+
+    // All 3 segments accounted for (either distinct or collapsed if identical) + zero floating parts
+    expect(verifyProposalZeroFloating(top, adj).valid).toBe(true);
+    const covered = new Set<number>();
+    for (const sec of top.sections) {
+      const list = sec.repeatPartIndexGroups ? sec.repeatPartIndexGroups.flat() : sec.partIndices;
+      for (const idx of list) {
+        expect(covered.has(idx)).toBe(false);
+        covered.add(idx);
+      }
+    }
+    expect(covered.size).toBe(parts.length);
   });
 
   it('uses general clip/hinge weak edges to separate non-train hinged assemblies cleanly in structural modules', () => {
