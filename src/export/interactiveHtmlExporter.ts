@@ -608,13 +608,15 @@ ${customFontFacesCss}  :root {
     --font-body: ${bodyFontStack};
     --font-heading: ${headingFontStack};
   }
-  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
   html, body {
     margin: 0; padding: 0; width: 100%; min-height: 100%;
+    touch-action: manipulation;
     font-family: var(--font-body);
     background: var(--page-bg);
     color: var(--text);
   }
+  button, [role="button"] { user-select: none; -webkit-user-select: none; }
   h1, h2, .sf-step-num, .sf-h2, .hero-title, .step-num-big, .pli-qty, .bom-qty {
     font-family: var(--font-heading);
   }

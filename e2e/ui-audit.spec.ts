@@ -1285,6 +1285,20 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
 
     expect(await page.evaluate(() => window.location.hash)).toBe('#/cover');
 
+    // Verify Safari double-tap-to-zoom is disabled globally & on nav buttons while stage retains touch-action: none
+    const touchActions = await page.evaluate(() => ({
+      html: getComputedStyle(document.documentElement).touchAction,
+      body: getComputedStyle(document.body).touchAction,
+      nextPage: getComputedStyle(document.getElementById('nextPage')!).touchAction,
+      prevPage: getComputedStyle(document.getElementById('prevPage')!).touchAction,
+      stage: getComputedStyle(document.getElementById('stageViewport')!).touchAction,
+    }));
+    expect(touchActions.html).toBe('manipulation');
+    expect(touchActions.body).toBe('manipulation');
+    expect(touchActions.nextPage).toBe('manipulation');
+    expect(touchActions.prevPage).toBe('manipulation');
+    expect(touchActions.stage).toBe('none');
+
     // Navigate to Page 2 and confirm URL updates to #/page/2
     await page.locator('#nextPage').click();
     await expect.poll(() => page.evaluate(() => window.location.hash)).toBe('#/page/2');

@@ -591,6 +591,8 @@ describe('interactiveHtmlExporter font stacks', () => {
       fadePrev: false,
     });
     expect(neitherEnabled).toContain('aria-label="Fade previous pieces"');
+    expect(neitherEnabled).toContain('touch-action: manipulation;');
+    expect(neitherEnabled).toContain('touch-action: none; cursor: grab;');
   });
 });
 
