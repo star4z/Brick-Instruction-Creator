@@ -140,6 +140,7 @@ import {
 } from './engine/dynamicStepSizer';
 import {
   STEP_CAMERA_FRAMING_MARGIN,
+  computeCameraProximityStepOrder,
   computeLayoutAlignedCanonicalAzimuth,
   computeProjectedBoxesExtents,
   computeProjectedOrthoHalfExtents,
@@ -6826,6 +6827,36 @@ function optimizeManualStepCameras(chapters, targetAspect = getActivePageLayoutA
         s.el = ch.el;
         s.cue = lastModelCam ? computeStudioRotationCue(lastModelCam, ch) : 'none';
         lastModelCam = { side: ch.side, corner: ch.corner, az: ch.az, el: ch.el };
+      }
+      if (pendingSteps.length >= 2) {
+        const proximityOrder = computeCameraProximityStepOrder(
+          pendingSteps.map((s, k) => ({
+            stepBoxes: pendingInputs[k].stepBoxes,
+            occludersBefore: pendingInputs[k].occludersBefore,
+            occluderCountBefore: pendingInputs[k].occluderCountBefore,
+            camera: { side: s.side, corner: s.corner, az: s.az, el: s.el },
+            cue: s.cue || 'none',
+            reorderable: Boolean(
+              !s.attachedSubmodel &&
+              !s.attachedMinifig &&
+              !s.isStandaloneFigure &&
+              !s.isMinifigPoseStep &&
+              !(s.defaultPartOffsets && Object.keys(s.defaultPartOffsets).length > 0) &&
+              !(s.callouts && s.callouts.length > 0) &&
+              !(s.substeps && s.substeps.length > 0) &&
+              Array.isArray(s.parts) &&
+              s.parts.length > 0,
+            ),
+          })),
+        );
+        if (proximityOrder.some((idx, k) => idx !== k)) {
+          const origParts = pendingSteps.map((s) => s.parts);
+          for (let k = 0; k < pendingSteps.length; k++) {
+            if (proximityOrder[k] !== k) {
+              pendingSteps[k].parts = origParts[proximityOrder[k]];
+            }
+          }
+        }
       }
       pendingSteps = [];
       pendingInputs = [];

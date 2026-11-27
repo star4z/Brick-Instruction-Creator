@@ -14,8 +14,11 @@ import {
 } from '../dynamicStepSizer';
 import {
   AUTO_FOCUS_MIN_FULL_RADIUS_LDU,
+  STEP_CAMERA_FLIP_COST,
   STEP_CAMERA_FRAMING_MARGIN,
+  STEP_CAMERA_YAW_90_COST,
   STEP_VISIBILITY_DEADBAND,
+  computeCameraProximityStepOrder,
   computeLayoutAlignedCanonicalAzimuth,
   computeProjectedBoxesExtents,
   computeProjectedOrthoHalfExtents,
@@ -27,6 +30,7 @@ import {
   optimizeStudioStepCameraSequence,
   resolveEffectiveStudioStepCue,
   resolveStudioStepCamera,
+  stepCameraTransitionCost,
   stepVisibilityPenalty,
   type OptimizableStepCameraInput,
 } from '../stepCamera';
@@ -1076,6 +1080,125 @@ describe('Step Camera Stability & Steady Framing', () => {
     expect(res[0].corner).toBe('front_right');
     expect(res[1].corner).toBe('front_right');
     expect(res[1].cue).toBe('none');
+  });
+
+  it('absorbs a needed yaw change directly into a vertical flip instead of emitting a separate 90-degree turn later', () => {
+    const sameCornerFlip = stepCameraTransitionCost(
+      { side: 'top', corner: 'front_right' },
+      { side: 'bottom', corner: 'front_right' },
+    );
+    const yawedFlip = stepCameraTransitionCost(
+      { side: 'top', corner: 'front_right' },
+      { side: 'bottom', corner: 'back_right' },
+    );
+    expect(sameCornerFlip).toBe(STEP_CAMERA_FLIP_COST);
+    expect(yawedFlip).toBeGreaterThan(sameCornerFlip);
+    expect(yawedFlip).toBeLessThan(STEP_CAMERA_FLIP_COST + STEP_CAMERA_YAW_90_COST);
+
+    const deck = [makeBox(-60, 81, -300, 60, 89, 240)];
+    const farEndPlate = [makeBox(-50, 73, 130, 50, 81, 200)];
+    const nearEndPlate = [makeBox(-50, 73, -280, 50, 81, -240)];
+    const cornerSlope = [makeBox(40, 65, -270, 60, 73, -250)];
+    const backEndSub = [makeBox(-40, 40, -300, 40, 73, -260)];
+
+    const inputs = buildSequenceInputs([deck, farEndPlate, nearEndPlate, cornerSlope, backEndSub]);
+    inputs[1].forceSide = 'bottom';
+    inputs[2].forceSide = 'bottom';
+    inputs[3].forceSide = 'bottom';
+    inputs[4].forceSide = 'bottom';
+    inputs[4].isSubmodelAttach = true;
+
+    const res = optimizeStudioStepCameraSequence(inputs);
+    expect(res[0].side).toBe('top');
+    expect(res[1].side).toBe('bottom');
+    expect(res[1].cue).toBe('flip_vertical');
+    expect(res[1].corner === 'back_right' || res[1].corner === 'back_left').toBe(true);
+    expect(res[2].cue).toBe('none');
+    expect(res[3].cue).toBe('none');
+    expect(res[4].cue).toBe('none');
+    expect(res[4].corner).toBe(res[1].corner);
+  });
+
+  it('never pulls a same-side 90-degree yaw early onto a zero-benefit step just for a cornerDot tie-break', () => {
+    const deck = [makeBox(-60, 0, -280, 60, 8, 240)];
+    const frontDetail = [makeBox(-40, 8, 220, 40, 48, 240)];
+    const cornerBrick = [makeBox(40, 8, -260, 60, 24, -240)];
+    const backSub = [makeBox(-40, 8, -280, 40, 48, -260)];
+
+    const inputs = buildSequenceInputs([deck, frontDetail, cornerBrick, backSub]);
+    inputs[1].engagedSideNormals = [[0, 0, 1]];
+    inputs[3].isSubmodelAttach = true;
+    inputs[3].engagedSideNormals = [[0, 0, -1]];
+
+    const res = optimizeStudioStepCameraSequence(inputs);
+    expect(res[0].corner).toBe('front_right');
+    expect(res[1].corner).toBe('front_right');
+    // Step 3 (index 2, cornerBrick) has zero visibility/facing benefit from turning -> must stay on front_right
+    expect(res[2].corner).toBe('front_right');
+    expect(res[2].cue).toBe('none');
+    // Step 4 (index 3, backSub) performs the rotation when it is actually needed
+    expect(res[3].corner === 'back_right' || res[3].corner === 'back_left').toBe(true);
+    expect(res[3].cue).not.toBe('none');
+  });
+
+  it('orders independent same-elevation steps closest-to-camera after a flip while respecting touch dependencies and occlusion', () => {
+    const deck = [makeBox(-60, 81, -300, 60, 89, 240)];
+    const plusZPlate = [makeBox(-50, 73, 130, 50, 81, 200)];
+    const minusZPlate = [makeBox(-50, 73, -280, 50, 81, -240)];
+    const midPlate = [makeBox(-50, 73, -20, 50, 81, 20)];
+
+    const camBackRight: StudioCameraPose = {
+      side: 'bottom',
+      corner: 'back_right',
+      az: 156,
+      el: -30,
+    };
+
+    const order = computeCameraProximityStepOrder([
+      {
+        stepBoxes: plusZPlate,
+        occludersBefore: deck,
+        camera: camBackRight,
+        cue: 'flip_vertical',
+        reorderable: true,
+      },
+      {
+        stepBoxes: minusZPlate,
+        occludersBefore: [...deck, ...plusZPlate],
+        camera: camBackRight,
+        cue: 'none',
+        reorderable: true,
+      },
+      {
+        stepBoxes: midPlate,
+        occludersBefore: [...deck, ...plusZPlate, ...minusZPlate],
+        camera: camBackRight,
+        cue: 'none',
+        reorderable: true,
+      },
+    ]);
+
+    expect(order).toEqual([1, 2, 0]);
+
+    const touchingA = [makeBox(-40, 73, 0, 40, 81, 40)];
+    const touchingB = [makeBox(-40, 73, -40, 40, 81, 0)];
+    const touchingOrder = computeCameraProximityStepOrder([
+      {
+        stepBoxes: touchingA,
+        occludersBefore: deck,
+        camera: camBackRight,
+        cue: 'flip_vertical',
+        reorderable: true,
+      },
+      {
+        stepBoxes: touchingB,
+        occludersBefore: [...deck, ...touchingA],
+        camera: camBackRight,
+        cue: 'none',
+        reorderable: true,
+      },
+    ]);
+    expect(touchingOrder).toEqual([0, 1]);
   });
 });
 

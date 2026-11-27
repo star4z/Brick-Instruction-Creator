@@ -150,6 +150,9 @@ export const UNDERSIDE_MAX_OVERHEAD_GAP_LDU = 32;
 export const STEP_CAMERA_YAW_90_COST = 0.68;
 export const STEP_CAMERA_YAW_180_COST = 0.95;
 export const STEP_CAMERA_FLIP_COST = 1.35;
+/** Small corner-consistency bias when changing yaw during a vertical flip (flipping in-hand absorbs the turn). */
+export const STEP_CAMERA_FLIP_YAW_90_BIAS = 0.12;
+export const STEP_CAMERA_FLIP_YAW_180_BIAS = 0.18;
 /** Extra penalty for re-entering bottom view within 2 steps of flipping back upright (stops consecutive flip ping-pongs). */
 export const STEP_CAMERA_RAPID_REFLIP_COST = 2.4;
 
@@ -554,18 +557,29 @@ export function stepCameraTransitionCost(
   to: Pick<StudioCameraPose, 'side' | 'corner'>,
 ): number {
   if (from.side === to.side && from.corner === to.corner) return 0;
-  const flipCost = from.side !== to.side ? STEP_CAMERA_FLIP_COST : 0;
   const yFrom = CORNER_YAW_INDEX.get(from.corner) ?? 0;
   const yTo = CORNER_YAW_INDEX.get(to.corner) ?? 0;
   const diff = Math.abs(yFrom - yTo);
   const minYawSteps = Math.min(diff, 4 - diff);
+  if (from.side !== to.side) {
+    // Flipping the model in-hand (end-over-end vs. side-to-side) is a single flip motion;
+    // keep a small bias toward preserving corner when indifferent, but always prefer folding
+    // a needed yaw into the flip over emitting a separate rotation step afterward.
+    const flipYawBias =
+      minYawSteps === 0
+        ? 0
+        : minYawSteps === 1
+          ? STEP_CAMERA_FLIP_YAW_90_BIAS
+          : STEP_CAMERA_FLIP_YAW_180_BIAS;
+    return STEP_CAMERA_FLIP_COST + flipYawBias;
+  }
   const yawCost =
     minYawSteps === 0
       ? 0
       : minYawSteps === 1
         ? STEP_CAMERA_YAW_90_COST
         : STEP_CAMERA_YAW_180_COST;
-  return flipCost + yawCost;
+  return yawCost;
 }
 
 /**
@@ -1123,6 +1137,7 @@ export function optimizeStudioStepCameraSequence(
         studDirZ = sz / norm;
       }
     }
+    const emissionCosts = new Array<number>(V).fill(Infinity);
     for (let v = 0; v < V; v++) {
       const view = canonicalViews[v];
       if (view.isBottom && !allowBottom) continue;
@@ -1177,13 +1192,19 @@ export function optimizeStudioStepCameraSequence(
           studFacingCost = -dot * 0.22;
         }
       }
-      const emissionCost =
+      emissionCosts[v] =
         stepVisibilityPenalty(vis, deadband) +
         uprightBias +
         startAnchorBias +
         step1FacingCost +
         subAttachCost +
         studFacingCost;
+    }
+
+    for (let v = 0; v < V; v++) {
+      const emissionCost = emissionCosts[v];
+      if (!Number.isFinite(emissionCost)) continue;
+      const view = canonicalViews[v];
 
       if (t === 0) {
         const initTransCost = initialCam ? stepCameraTransitionCost(initialCam, view) : 0;
@@ -1199,11 +1220,25 @@ export function optimizeStudioStepCameraSequence(
         for (let u = 0; u < V; u++) {
           const prevView = canonicalViews[u];
           const baseTrans = stepCameraTransitionCost(prevView, view);
-          // Tiny one-time tie-break ONLY on actual turns (u !== v) so it never accumulates while staying put
-          const tieBreak =
-            u !== v && builtBounds
-              ? -0.01 * clamp(cornerDot(stepUnionBoxes[t], view.corner, builtBounds), -1, 1)
-              : 0;
+          // Only award the corner-facing tie-break on turns that actually improve this step's
+          // emission (or on vertical flips); defer zero-benefit same-side turns to the step that
+          // actually needs the new viewpoint so a turn is never pulled early onto an unrelated step.
+          let tieBreak = 0;
+          if (u !== v) {
+            const isSameSideYaw = prevView.side === view.side;
+            const prevSameStepEmit = emissionCosts[u];
+            const improvesThisStep =
+              !isSameSideYaw ||
+              !Number.isFinite(prevSameStepEmit) ||
+              emissionCost < prevSameStepEmit - 1e-4;
+            if (improvesThisStep) {
+              tieBreak = builtBounds
+                ? -0.01 * clamp(cornerDot(stepUnionBoxes[t], view.corner, builtBounds), -1, 1)
+                : 0;
+            } else {
+              tieBreak = 0.002;
+            }
+          }
           const isExitingBottom = prevView.isBottom && !view.isBottom;
           const isEnteringBottom = !prevView.isBottom && view.isBottom;
 
@@ -1265,6 +1300,170 @@ export function optimizeStudioStepCameraSequence(
   }
 
   return out;
+}
+
+export interface CameraProximityReorderStepInput {
+  stepBoxes: readonly WorldBox[];
+  occludersBefore: ReadonlyArray<WorldBox | OccluderBox>;
+  occluderCountBefore?: number;
+  camera: StudioCameraPose;
+  cue: StudioRotationCue;
+  /** True only for plain, self-contained placement steps that can safely swap payloads. */
+  reorderable: boolean;
+}
+
+function boxesTouchOrOverlap(
+  boxesA: readonly WorldBox[],
+  boxesB: readonly WorldBox[],
+  gapEps = 4,
+): boolean {
+  for (let i = 0; i < boxesA.length; i++) {
+    const a = boxesA[i];
+    for (let j = 0; j < boxesB.length; j++) {
+      const b = boxesB[j];
+      const gx = Math.max(0, a.min[0] - b.max[0], b.min[0] - a.max[0]);
+      if (gx > gapEps) continue;
+      const gy = Math.max(0, a.min[1] - b.max[1], b.min[1] - a.max[1]);
+      if (gy > gapEps) continue;
+      const gz = Math.max(0, a.min[2] - b.max[2], b.min[2] - a.max[2]);
+      if (gz <= gapEps) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Computes a dependency-safe permutation for a camera-optimized step sequence so that
+ * whenever a vertical flip or rotation introduces a new viewpoint, any contiguous run of
+ * physically independent, same-elevation placement steps immediately on that viewpoint
+ * is ordered closest-to-camera first (provided reordering does not introduce occlusion).
+ */
+export function computeCameraProximityStepOrder(
+  steps: readonly CameraProximityReorderStepInput[],
+): number[] {
+  const n = steps.length;
+  const order = Array.from({ length: n }, (_, i) => i);
+  if (n < 2) return order;
+
+  const ELEVATION_EPS = 4;
+  let i = 0;
+  while (i < n) {
+    const first = steps[i];
+    if (!first.reorderable || first.stepBoxes.length === 0 || first.cue === 'none') {
+      i++;
+      continue;
+    }
+
+    const cam = first.camera;
+    const isBottom = cam.side === 'bottom';
+    const firstUnion = unionBoxes(first.stepBoxes);
+    const refElev = isBottom ? firstUnion.max[1] : firstUnion.min[1];
+
+    // Collect the maximal contiguous run of reorderable, same-camera, same-elevation,
+    // mutually non-touching steps starting at i.
+    let end = i;
+    while (end + 1 < n) {
+      const cand = steps[end + 1];
+      if (
+        !cand.reorderable ||
+        cand.stepBoxes.length === 0 ||
+        cand.cue !== 'none' ||
+        cand.camera.side !== cam.side ||
+        cand.camera.corner !== cam.corner ||
+        cand.camera.az !== cam.az ||
+        cand.camera.el !== cam.el
+      ) {
+        break;
+      }
+      const candUnion = unionBoxes(cand.stepBoxes);
+      const candElev = isBottom ? candUnion.max[1] : candUnion.min[1];
+      if (Math.abs(candElev - refElev) > ELEVATION_EPS) break;
+
+      // Must be physically independent of every earlier step in the run
+      let touches = false;
+      for (let prev = i; prev <= end; prev++) {
+        if (boxesTouchOrOverlap(steps[prev].stepBoxes, cand.stepBoxes, 4)) {
+          touches = true;
+          break;
+        }
+      }
+      if (touches) break;
+      end++;
+    }
+
+    if (end > i) {
+      const azRad = (cam.az * Math.PI) / 180;
+      const vx = Math.sin(azRad);
+      const vz = Math.cos(azRad);
+      const runIndices: number[] = [];
+      for (let k = i; k <= end; k++) runIndices.push(k);
+
+      const projScore = (idx: number): number => {
+        const u = unionBoxes(steps[idx].stepBoxes);
+        return u.center[0] * vx + u.center[2] * vz;
+      };
+
+      const sorted = [...runIndices].sort((a, b) => {
+        const diff = projScore(b) - projScore(a);
+        return Math.abs(diff) > 1 ? diff : a - b;
+      });
+
+      const changed = sorted.some((idx, pos) => idx !== runIndices[pos]);
+      if (changed) {
+        // Guard against creating occlusion when placing nearer steps before farther ones
+        const baseOccCount = Math.min(
+          first.occludersBefore.length,
+          first.occluderCountBefore ?? first.occludersBefore.length,
+        );
+        const baseOccs: Array<WorldBox | OccluderBox> = [];
+        for (let oi = 0; oi < baseOccCount; oi++) baseOccs.push(first.occludersBefore[oi]);
+
+        const origVis = new Map<number, number>();
+        {
+          const occs = [...baseOccs];
+          for (const idx of runIndices) {
+            const v = evaluateStepOcclusionVisibility(
+              steps[idx].stepBoxes,
+              occs,
+              cam.az,
+              cam.el,
+            ).visibility;
+            origVis.set(idx, v);
+            for (const b of steps[idx].stepBoxes) occs.push(b);
+          }
+        }
+
+        let safe = true;
+        {
+          const occs = [...baseOccs];
+          for (const idx of sorted) {
+            const v = evaluateStepOcclusionVisibility(
+              steps[idx].stepBoxes,
+              occs,
+              cam.az,
+              cam.el,
+            ).visibility;
+            const prevV = origVis.get(idx) ?? 1;
+            if (v < Math.min(STEP_VISIBILITY_DEADBAND, prevV - 0.02)) {
+              safe = false;
+              break;
+            }
+            for (const b of steps[idx].stepBoxes) occs.push(b);
+          }
+        }
+
+        if (safe) {
+          for (let pos = 0; pos < sorted.length; pos++) {
+            order[i + pos] = sorted[pos];
+          }
+        }
+      }
+    }
+
+    i = end + 1;
+  }
+
+  return order;
 }
 
 /**
