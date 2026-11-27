@@ -190,7 +190,7 @@ describe('Import Wizard Engine', () => {
       }),
     ).toEqual({
       value: 'Flat',
-      detail: 'No outlines · Heavy fade',
+      detail: 'No outlines · Faint fade',
     });
   });
 

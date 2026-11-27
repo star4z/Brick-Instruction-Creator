@@ -440,16 +440,30 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     await page.locator('#btnCloseFontPicker').click();
     await expect(page.locator('#themeFontPickerPanel')).toBeHidden();
 
-    // Verify default rendering style: lighting off, outline all parts on, fade earlier pieces off
+    // Verify default rendering style: lighting off, outline all parts on (medium), outline new parts off, fade earlier parts off
     await expect(page.locator('#stepLightingHint')).toHaveText('Flat uniform colors');
-    await expect(page.locator('#toggleStarkBlackOutlines')).toBeChecked();
+    await expect(page.locator('.hl-weight-chip[data-hl-weight="off"]')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('.outline-weight-chip[data-outline-weight="off"]')).toHaveAttribute('aria-pressed', 'false');
     await expect(page.locator('#fadePreviewStatus')).toHaveText('Off');
 
-    // Verify Placement Arrow Style controls (default: Flat 2D, no outlines, no lighting) & customization
+    // Verify Fade Earlier Parts labels (Off | Subtle | Muted | Faint)
+    await page.locator('.fade-chip[data-fade="0.65"]').click();
+    await expect(page.locator('#fadePreviewStatus')).toHaveText('Muted fade');
+    await page.locator('.fade-chip[data-fade="0.45"]').click();
+    await expect(page.locator('#fadePreviewStatus')).toHaveText('Faint fade');
+    await page.locator('.fade-chip[data-fade="1.0"]').click();
+    await expect(page.locator('#fadePreviewStatus')).toHaveText('Off');
+
+    // Verify Placement Arrow Style controls (default: Flat 2D, no outlines, no lighting) & Off chip
     await expect(page.locator('#arrowStyleWrap')).toBeVisible();
+    await expect(page.locator('.arrow-style-chip[data-arrow-style="flat"]')).toHaveAttribute('aria-pressed', 'true');
     await expect(page.locator('#toggleArrowOutlines')).not.toBeChecked();
     await expect(page.locator('#toggleArrowLighting')).not.toBeChecked();
+    await page.locator('.arrow-style-chip[data-arrow-style="off"]').click();
+    await expect(page.locator('.arrow-style-chip[data-arrow-style="off"]')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('#arrowSubOptions')).toBeHidden();
     await page.locator('.arrow-style-chip[data-arrow-style="3d"]').click();
+    await expect(page.locator('#arrowSubOptions')).toBeVisible();
     await page.locator('#toggleArrowOutlines').click();
     await expect(page.locator('#toggleArrowOutlines')).toBeChecked();
     await page.locator('#toggleArrowLighting').click();

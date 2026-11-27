@@ -15322,37 +15322,56 @@ function syncMenuControls() {
   document.querySelectorAll('.fade-chip').forEach(b => {
     const act = Math.abs(parseFloat(b.getAttribute('data-fade')) - effectiveFade) < 0.05;
     b.className = `fade-chip flex flex-col items-center gap-1 py-1.5 px-1 rounded-md border font-semibold text-xs transition cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
+    b.setAttribute('aria-pressed', act ? 'true' : 'false');
   });
   syncFadeVisibilityPreview();
   syncStepLightingUI(state.stepLighting);
   syncArrowStyleUI(state);
-  const hlWrap = document.getElementById('highlightWeightWrap');
-  if (hlWrap) hlWrap.classList.toggle('opacity-45', !state.highlightNew);
-  document.querySelectorAll('.hl-weight-chip').forEach(b => {
-    const act = b.getAttribute('data-hl-weight') === sanitizeLineWeight(state.highlightLineWeight, 'medium');
-    b.className = `hl-weight-chip flex flex-col items-center justify-center gap-1 py-1.5 px-1 rounded-md border font-semibold text-[11px] leading-tight transition cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
-  });
-  const outWrap = document.getElementById('outlineWeightWrap');
-  if (outWrap) outWrap.classList.toggle('opacity-45', !state.starkBlackOutlines);
-  document.querySelectorAll('.outline-weight-chip').forEach(b => {
-    const act = b.getAttribute('data-outline-weight') === sanitizeLineWeight(state.outlineLineWeight, 'medium');
-    b.className = `outline-weight-chip flex flex-col items-center justify-center gap-1 py-1.5 px-1 rounded-md border font-semibold text-[11px] leading-tight transition cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
-  });
+  syncHighlightWeightUI(state);
+  syncOutlineWeightUI(state);
 
   syncStylePanel();
   syncKeyboardShortcutsMenuSummary();
 }
 
 function syncArrowStyleUI(opts = state) {
-  const activeStyle = sanitizePlacementArrowStyle(opts?.arrowStyle, 'flat');
+  const arrowsOn = opts?.autoPlacementArrows !== false;
+  const activeStyle = arrowsOn ? sanitizePlacementArrowStyle(opts?.arrowStyle, 'flat') : 'off';
   document.querySelectorAll('.arrow-style-chip').forEach(b => {
     const act = b.getAttribute('data-arrow-style') === activeStyle;
-    b.className = `arrow-style-chip inline-flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-md border font-semibold text-xs transition cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
+    b.className = `arrow-style-chip flex flex-col items-center justify-center gap-1 py-1.5 px-2 rounded-md border font-semibold text-xs transition cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
+    b.setAttribute('aria-pressed', act ? 'true' : 'false');
   });
+  const arrCol = document.getElementById('arrowColor');
+  if (arrCol) arrCol.classList.toggle('opacity-40', !arrowsOn);
+  const subOpts = document.getElementById('arrowSubOptions');
+  if (subOpts) subOpts.classList.toggle('hidden', !arrowsOn);
   const outChk = document.getElementById('toggleArrowOutlines');
   if (outChk) outChk.checked = Boolean(opts?.arrowOutlines);
   const litChk = document.getElementById('toggleArrowLighting');
   if (litChk) litChk.checked = Boolean(opts?.arrowLighting);
+}
+
+function syncHighlightWeightUI(opts = state) {
+  const hlOn = Boolean(opts?.highlightNew);
+  const activeWeight = hlOn ? sanitizeLineWeight(opts?.highlightLineWeight, 'medium') : 'off';
+  const hlCol = document.getElementById('highlightColor');
+  if (hlCol) hlCol.classList.toggle('opacity-40', !hlOn);
+  document.querySelectorAll('.hl-weight-chip').forEach(b => {
+    const act = b.getAttribute('data-hl-weight') === activeWeight;
+    b.className = `hl-weight-chip flex flex-col items-center justify-center gap-1 py-1.5 px-0.5 rounded-md border font-semibold text-[11px] leading-tight transition cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
+    b.setAttribute('aria-pressed', act ? 'true' : 'false');
+  });
+}
+
+function syncOutlineWeightUI(opts = state) {
+  const outOn = Boolean(opts?.starkBlackOutlines);
+  const activeWeight = outOn ? sanitizeLineWeight(opts?.outlineLineWeight, 'medium') : 'off';
+  document.querySelectorAll('.outline-weight-chip').forEach(b => {
+    const act = b.getAttribute('data-outline-weight') === activeWeight;
+    b.className = `outline-weight-chip flex flex-col items-center justify-center gap-1 py-1.5 px-0.5 rounded-md border font-semibold text-[11px] leading-tight transition cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
+    b.setAttribute('aria-pressed', act ? 'true' : 'false');
+  });
 }
 
 function syncStepBorderStyleUI(mode = state.stepBorderStyle) {
@@ -15452,9 +15471,9 @@ function syncFadeVisibilityPreview(opts = null) {
     statusEl.textContent = effectiveOpacity >= 0.99
       ? 'Off'
       : effectiveOpacity <= 0.55
-        ? 'Heavy fade'
+        ? 'Faint fade'
         : effectiveOpacity <= 0.74
-          ? 'Medium fade'
+          ? 'Muted fade'
           : 'Subtle fade';
   }
 }
@@ -20123,16 +20142,14 @@ async function restoreLastSessionOnStart() {
     if (bomChk) bomChk.checked = state.showPartsList;
     const backChk = document.getElementById('toggleShowBackCover');
     if (backChk) backChk.checked = state.showBackCover;
-    const arrChk = document.getElementById('toggleAutoPlacementArrows');
-    if (arrChk) arrChk.checked = state.autoPlacementArrows !== false;
     const arrCol = document.getElementById('arrowColor');
     if (arrCol) arrCol.value = state.arrowColor || DEFAULT_ARROW_COLOR;
     syncArrowStyleUI(state);
-    document.getElementById('toggleHighlight').checked = state.highlightNew;
-    document.getElementById('highlightColor').value = state.highlightColor;
+    const hlCol = document.getElementById('highlightColor');
+    if (hlCol) hlCol.value = state.highlightColor;
+    syncHighlightWeightUI(state);
     syncStepLightingUI(state.stepLighting);
-    const sbEl = document.getElementById('toggleStarkBlackOutlines');
-    if (sbEl) sbEl.checked = Boolean(state.starkBlackOutlines);
+    syncOutlineWeightUI(state);
     document.getElementById('toggleRotCues').checked = state.showRotCues;
     document.getElementById('toggleSizeGuides').checked = state.showSizeGuides;
     const attachSbEl = document.getElementById('toggleAttachmentStarburst');
@@ -22834,12 +22851,11 @@ function syncStylePanel() {
 
   const opts = getThemeStyleOptions(t);
   const setChk = (id, val) => { const el = document.getElementById(id); if (el) el.checked = Boolean(val); };
-  setChk('toggleAutoPlacementArrows', opts.autoPlacementArrows);
   syncArrowStyleUI(opts);
-  setChk('toggleHighlight', opts.highlightNew);
+  syncHighlightWeightUI(opts);
   syncFadeVisibilityPreview(opts);
   syncStepLightingUI(opts.stepLighting);
-  setChk('toggleStarkBlackOutlines', opts.starkBlackOutlines);
+  syncOutlineWeightUI(opts);
   setChk('toggleRotCues', opts.showRotCues);
   setChk('toggleSizeGuides', opts.showSizeGuides);
   setChk('toggleAttachmentStarburst', opts.showAttachmentStarburst);
@@ -24600,7 +24616,12 @@ document.querySelectorAll('.fade-chip').forEach(b => {
 document.querySelectorAll('.hl-weight-chip').forEach(b => {
   b.onclick = () => {
     overviewThumbCache.bumpEpoch();
-    patchEditedTheme({ highlightLineWeight: sanitizeLineWeight(b.getAttribute('data-hl-weight'), 'medium') });
+    const raw = b.getAttribute('data-hl-weight');
+    if (raw === 'off') {
+      patchEditedTheme({ highlightNew: false });
+      return;
+    }
+    patchEditedTheme({ highlightNew: true, highlightLineWeight: sanitizeLineWeight(raw, 'medium') });
   };
 });
 document.querySelectorAll('.outline-weight-chip').forEach(b => {
@@ -24610,7 +24631,12 @@ document.querySelectorAll('.outline-weight-chip').forEach(b => {
     libThumbCache.clear();
     libPreviewMeshCache = { key: '', mesh: null };
     overviewThumbCache.bumpEpoch();
-    patchEditedTheme({ outlineLineWeight: sanitizeLineWeight(b.getAttribute('data-outline-weight'), 'medium') });
+    const raw = b.getAttribute('data-outline-weight');
+    if (raw === 'off') {
+      patchEditedTheme({ starkBlackOutlines: false });
+    } else {
+      patchEditedTheme({ starkBlackOutlines: true, outlineLineWeight: sanitizeLineWeight(raw, 'medium') });
+    }
     if (isBricksLibraryModalOpen()) renderBricksLibraryModal(false);
   };
 });
@@ -24796,11 +24822,6 @@ for (const [btnId, kind] of [
   if (el) el.onclick = () => openExtraPageSettings(kind);
 }
 // Rendering style & step display options are part of the edited theme (built-ins fork on first edit)
-const toggleAutoArrowsEl = document.getElementById('toggleAutoPlacementArrows');
-if (toggleAutoArrowsEl) toggleAutoArrowsEl.onchange = (e) => {
-  overviewThumbCache.bumpEpoch();
-  patchEditedTheme({ autoPlacementArrows: e.target.checked });
-};
 const arrowColorEl = document.getElementById('arrowColor');
 if (arrowColorEl) arrowColorEl.oninput = (e) => {
   clearMinifigDiagramCaches();
@@ -24811,7 +24832,12 @@ document.querySelectorAll('.arrow-style-chip').forEach(b => {
   b.onclick = () => {
     clearMinifigDiagramCaches();
     overviewThumbCache.bumpEpoch();
-    patchEditedTheme({ arrowStyle: sanitizePlacementArrowStyle(b.getAttribute('data-arrow-style'), 'flat') });
+    const raw = b.getAttribute('data-arrow-style');
+    if (raw === 'off') {
+      patchEditedTheme({ autoPlacementArrows: false });
+      return;
+    }
+    patchEditedTheme({ autoPlacementArrows: true, arrowStyle: sanitizePlacementArrowStyle(raw, 'flat') });
   };
 });
 const toggleArrowOutlinesEl = document.getElementById('toggleArrowOutlines');
@@ -24826,18 +24852,8 @@ if (toggleArrowLightingEl) toggleArrowLightingEl.onchange = (e) => {
   overviewThumbCache.bumpEpoch();
   patchEditedTheme({ arrowLighting: e.target.checked });
 };
-document.getElementById('toggleHighlight').onchange = (e) => patchEditedTheme({ highlightNew: e.target.checked });
-document.getElementById('highlightColor').oninput = (e) => patchEditedTheme({ highlightColor: e.target.value });
-const starkBlackToggleEl = document.getElementById('toggleStarkBlackOutlines');
-if (starkBlackToggleEl) starkBlackToggleEl.onchange = (e) => {
-  pliThumbCache.clear();
-  clearMinifigDiagramCaches();
-  libThumbCache.clear();
-  libPreviewMeshCache = { key: '', mesh: null };
-  overviewThumbCache.bumpEpoch();
-  patchEditedTheme({ starkBlackOutlines: e.target.checked });
-  if (isBricksLibraryModalOpen()) renderBricksLibraryModal(false);
-};
+const highlightColorEl = document.getElementById('highlightColor');
+if (highlightColorEl) highlightColorEl.oninput = (e) => patchEditedTheme({ highlightColor: e.target.value });
 document.getElementById('toggleRotCues').onchange = (e) => patchEditedTheme({ showRotCues: e.target.checked });
 document.getElementById('toggleSizeGuides').onchange = (e) => patchEditedTheme({ showSizeGuides: e.target.checked });
 const attachStarburstToggleEl = document.getElementById('toggleAttachmentStarburst');

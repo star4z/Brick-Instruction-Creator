@@ -743,31 +743,29 @@
                 </button>
               </div>
             </div>
-            <div class="flex items-center justify-between gap-2" title="Automatically offset hard-to-notice parts and first-step connections with placement arrows">
-              <label for="toggleAutoPlacementArrows" class="inline-flex items-center gap-2 font-medium cursor-pointer flex-1 min-w-0">
-                <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></svg>
-                <span class="truncate">Placement Arrows &amp; Offsets</span>
-              </label>
-              <div class="flex items-center gap-2 shrink-0">
-                <input id="arrowColor" type="color" value="#dc2626" aria-label="Placement arrow color" class="w-6 h-6 rounded border border-[var(--border)] bg-transparent cursor-pointer" />
-                <input id="toggleAutoPlacementArrows" type="checkbox" checked class="w-4 h-4 accent-[var(--primary)] cursor-pointer" />
+            <div id="arrowStyleWrap" class="space-y-1.5">
+              <div class="flex items-center justify-between gap-2" title="Automatically offset hard-to-notice parts and first-step connections with placement arrows">
+                <span class="inline-flex items-center gap-1.5 font-medium min-w-0">
+                  <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></svg>
+                  <span class="truncate">Placement Arrows &amp; Offsets</span>
+                </span>
+                <input id="arrowColor" type="color" value="#dc2626" aria-label="Placement arrow color" class="w-6 h-6 rounded border border-[var(--border)] bg-transparent cursor-pointer shrink-0 transition-opacity" />
               </div>
-            </div>
-            <div id="arrowStyleWrap" class="space-y-2 pl-2.5 border-l-2 border-[var(--border)]">
-              <div class="space-y-1">
-                <div class="text-xs text-[var(--muted-foreground)]">Arrow Style</div>
-                <div class="grid grid-cols-2 gap-1.5">
-                  <button data-arrow-style="flat" type="button" class="arrow-style-chip inline-flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-md border font-semibold text-xs transition cursor-pointer" title="Flat 2D placement arrows">
-                    <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M10 3h4v10h4l-6 8-6-8h4V3Z"/></svg>
-                    <span>Flat 2D</span>
-                  </button>
-                  <button data-arrow-style="3d" type="button" class="arrow-style-chip inline-flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-md border font-semibold text-xs transition cursor-pointer" title="Cylindrical 3D placement arrows">
-                    <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="4.5" rx="3" ry="1.5"/><path d="M9 4.5v8.5H6l6 8 6-8h-3V4.5"/></svg>
-                    <span>3D</span>
-                  </button>
-                </div>
+              <div class="grid grid-cols-3 gap-1.5">
+                <button data-arrow-style="off" type="button" class="arrow-style-chip flex flex-col items-center justify-center gap-1 py-1.5 px-2 rounded-md border font-semibold text-xs transition cursor-pointer" title="Off — hide automatic placement arrows and offsets">
+                  <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="m4.93 4.93 14.14 14.14"/></svg>
+                  <span>Off</span>
+                </button>
+                <button data-arrow-style="flat" type="button" class="arrow-style-chip flex flex-col items-center justify-center gap-1 py-1.5 px-2 rounded-md border font-semibold text-xs transition cursor-pointer" title="Flat 2D placement arrows">
+                  <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M10 3h4v10h4l-6 8-6-8h4V3Z"/></svg>
+                  <span>Flat 2D</span>
+                </button>
+                <button data-arrow-style="3d" type="button" class="arrow-style-chip flex flex-col items-center justify-center gap-1 py-1.5 px-2 rounded-md border font-semibold text-xs transition cursor-pointer" title="Cylindrical 3D placement arrows">
+                  <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="4.5" rx="3" ry="1.5"/><path d="M9 4.5v8.5H6l6 8 6-8h-3V4.5"/></svg>
+                  <span>3D</span>
+                </button>
               </div>
-              <div class="grid grid-cols-2 gap-1.5">
+              <div id="arrowSubOptions" class="grid grid-cols-2 gap-1.5">
                 <label class="flex items-center justify-between gap-2 px-2 py-1 rounded-md bg-[var(--surface-sunken)] border border-[var(--border)] text-xs cursor-pointer" title="Draw dark outlines around placement arrows">
                   <span>Arrow Outlines</span>
                   <input id="toggleArrowOutlines" type="checkbox" class="w-3.5 h-3.5 accent-[var(--primary)] cursor-pointer" />
@@ -778,60 +776,62 @@
                 </label>
               </div>
             </div>
-            <div class="flex items-center justify-between gap-2">
-              <label for="toggleHighlight" class="inline-flex items-center gap-2 font-medium cursor-pointer flex-1 min-w-0">
-                <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="3 2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"/></svg>
-                <span class="truncate">Outline New Parts</span>
-              </label>
-              <div class="flex items-center gap-2 shrink-0">
-                <input id="highlightColor" type="color" value="#ff2d55" aria-label="New parts outline color" class="w-6 h-6 rounded border border-[var(--border)] bg-transparent cursor-pointer" />
-                <input id="toggleHighlight" type="checkbox" class="w-4 h-4 accent-[var(--primary)] cursor-pointer" />
-              </div>
-            </div>
             <div id="highlightWeightWrap" class="space-y-1.5">
-              <div class="text-xs text-[var(--muted-foreground)]">New Part Line Weight</div>
-              <div class="grid grid-cols-4 gap-1">
-                <button data-hl-weight="light" type="button" class="hl-weight-chip flex flex-col items-center justify-center gap-1 py-1.5 px-1 rounded-md border font-semibold text-[11px] cursor-pointer">
+              <div class="flex items-center justify-between gap-2">
+                <span class="inline-flex items-center gap-1.5 font-medium min-w-0">
+                  <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="3 2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"/></svg>
+                  <span class="truncate">Outline New Parts</span>
+                </span>
+                <input id="highlightColor" type="color" value="#ff2d55" aria-label="New parts outline color" class="w-6 h-6 rounded border border-[var(--border)] bg-transparent cursor-pointer shrink-0 transition-opacity" />
+              </div>
+              <div class="grid grid-cols-5 gap-1">
+                <button data-hl-weight="off" type="button" class="hl-weight-chip flex flex-col items-center justify-center gap-1 py-1.5 px-0.5 rounded-md border font-semibold text-[11px] leading-tight cursor-pointer" title="Off — do not highlight new parts with colored outlines">
+                  <svg class="w-5 h-2 shrink-0" viewBox="0 0 20 8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><line x1="7" y1="1.5" x2="13" y2="6.5"/><line x1="13" y1="1.5" x2="7" y2="6.5"/></svg>
+                  <span>Off</span>
+                </button>
+                <button data-hl-weight="light" type="button" class="hl-weight-chip flex flex-col items-center justify-center gap-1 py-1.5 px-0.5 rounded-md border font-semibold text-[11px] leading-tight cursor-pointer">
                   <svg class="w-5 h-2 shrink-0" viewBox="0 0 20 8" aria-hidden="true"><line x1="2" y1="4" x2="18" y2="4" stroke="currentColor" stroke-width="1" stroke-linecap="round"/></svg>
                   <span>Light</span>
                 </button>
-                <button data-hl-weight="medium" type="button" class="hl-weight-chip flex flex-col items-center justify-center gap-1 py-1.5 px-1 rounded-md border font-semibold text-[11px] cursor-pointer">
+                <button data-hl-weight="medium" type="button" class="hl-weight-chip flex flex-col items-center justify-center gap-1 py-1.5 px-0.5 rounded-md border font-semibold text-[11px] leading-tight cursor-pointer">
                   <svg class="w-5 h-2 shrink-0" viewBox="0 0 20 8" aria-hidden="true"><line x1="2" y1="4" x2="18" y2="4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
                   <span>Medium</span>
                 </button>
-                <button data-hl-weight="heavy" type="button" class="hl-weight-chip flex flex-col items-center justify-center gap-1 py-1.5 px-1 rounded-md border font-semibold text-[11px] cursor-pointer">
+                <button data-hl-weight="heavy" type="button" class="hl-weight-chip flex flex-col items-center justify-center gap-1 py-1.5 px-0.5 rounded-md border font-semibold text-[11px] leading-tight cursor-pointer">
                   <svg class="w-5 h-2 shrink-0" viewBox="0 0 20 8" aria-hidden="true"><line x1="2" y1="4" x2="18" y2="4" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"/></svg>
                   <span>Heavy</span>
                 </button>
-                <button data-hl-weight="extra-heavy" type="button" class="hl-weight-chip flex flex-col items-center justify-center gap-1 py-1.5 px-1 rounded-md border font-semibold text-[11px] leading-tight cursor-pointer">
+                <button data-hl-weight="extra-heavy" type="button" class="hl-weight-chip flex flex-col items-center justify-center gap-1 py-1.5 px-0.5 rounded-md border font-semibold text-[11px] leading-tight cursor-pointer">
                   <svg class="w-5 h-2 shrink-0" viewBox="0 0 20 8" aria-hidden="true"><line x1="2" y1="4" x2="18" y2="4" stroke="currentColor" stroke-width="4.6" stroke-linecap="round"/></svg>
                   <span>X-Heavy</span>
                 </button>
               </div>
             </div>
-            <label class="flex items-center justify-between gap-2 cursor-pointer">
-              <span class="inline-flex items-center gap-2 font-medium min-w-0">
-                <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"/></svg>
-                <span class="truncate">Outline All Parts</span>
-              </span>
-              <input id="toggleStarkBlackOutlines" type="checkbox" checked class="w-4 h-4 accent-[var(--primary)] cursor-pointer shrink-0" />
-            </label>
             <div id="outlineWeightWrap" class="space-y-1.5">
-              <div class="text-xs text-[var(--muted-foreground)]">Outline Weight</div>
-              <div class="grid grid-cols-4 gap-1">
-                <button data-outline-weight="light" type="button" class="outline-weight-chip flex flex-col items-center justify-center gap-1 py-1.5 px-1 rounded-md border font-semibold text-[11px] cursor-pointer">
+              <div class="flex items-center justify-between gap-2">
+                <span class="inline-flex items-center gap-1.5 font-medium min-w-0">
+                  <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"/></svg>
+                  <span class="truncate">Outline All Parts</span>
+                </span>
+              </div>
+              <div class="grid grid-cols-5 gap-1">
+                <button data-outline-weight="off" type="button" class="outline-weight-chip flex flex-col items-center justify-center gap-1 py-1.5 px-0.5 rounded-md border font-semibold text-[11px] leading-tight cursor-pointer" title="Off — hide black outlines on all parts">
+                  <svg class="w-5 h-2 shrink-0" viewBox="0 0 20 8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><line x1="7" y1="1.5" x2="13" y2="6.5"/><line x1="13" y1="1.5" x2="7" y2="6.5"/></svg>
+                  <span>Off</span>
+                </button>
+                <button data-outline-weight="light" type="button" class="outline-weight-chip flex flex-col items-center justify-center gap-1 py-1.5 px-0.5 rounded-md border font-semibold text-[11px] leading-tight cursor-pointer">
                   <svg class="w-5 h-2 shrink-0" viewBox="0 0 20 8" aria-hidden="true"><line x1="2" y1="4" x2="18" y2="4" stroke="currentColor" stroke-width="1" stroke-linecap="round"/></svg>
                   <span>Light</span>
                 </button>
-                <button data-outline-weight="medium" type="button" class="outline-weight-chip flex flex-col items-center justify-center gap-1 py-1.5 px-1 rounded-md border font-semibold text-[11px] cursor-pointer">
+                <button data-outline-weight="medium" type="button" class="outline-weight-chip flex flex-col items-center justify-center gap-1 py-1.5 px-0.5 rounded-md border font-semibold text-[11px] leading-tight cursor-pointer">
                   <svg class="w-5 h-2 shrink-0" viewBox="0 0 20 8" aria-hidden="true"><line x1="2" y1="4" x2="18" y2="4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
                   <span>Medium</span>
                 </button>
-                <button data-outline-weight="heavy" type="button" class="outline-weight-chip flex flex-col items-center justify-center gap-1 py-1.5 px-1 rounded-md border font-semibold text-[11px] cursor-pointer">
+                <button data-outline-weight="heavy" type="button" class="outline-weight-chip flex flex-col items-center justify-center gap-1 py-1.5 px-0.5 rounded-md border font-semibold text-[11px] leading-tight cursor-pointer">
                   <svg class="w-5 h-2 shrink-0" viewBox="0 0 20 8" aria-hidden="true"><line x1="2" y1="4" x2="18" y2="4" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"/></svg>
                   <span>Heavy</span>
                 </button>
-                <button data-outline-weight="extra-heavy" type="button" class="outline-weight-chip flex flex-col items-center justify-center gap-1 py-1.5 px-1 rounded-md border font-semibold text-[11px] leading-tight cursor-pointer">
+                <button data-outline-weight="extra-heavy" type="button" class="outline-weight-chip flex flex-col items-center justify-center gap-1 py-1.5 px-0.5 rounded-md border font-semibold text-[11px] leading-tight cursor-pointer">
                   <svg class="w-5 h-2 shrink-0" viewBox="0 0 20 8" aria-hidden="true"><line x1="2" y1="4" x2="18" y2="4" stroke="currentColor" stroke-width="4.6" stroke-linecap="round"/></svg>
                   <span>X-Heavy</span>
                 </button>
@@ -866,13 +866,13 @@
                   <span class="block w-6 h-2 rounded-sm ring-1 ring-black/20" style="background:#cf5b52" aria-hidden="true"></span>
                   <span>Subtle</span>
                 </button>
-                <button data-fade="0.65" type="button" class="fade-chip flex flex-col items-center gap-1 py-1.5 px-1 rounded-md border font-semibold text-xs transition cursor-pointer" title="Medium fade on earlier parts">
+                <button data-fade="0.65" type="button" class="fade-chip flex flex-col items-center gap-1 py-1.5 px-1 rounded-md border font-semibold text-xs transition cursor-pointer" title="Muted fade on earlier parts">
                   <span class="block w-6 h-2 rounded-sm ring-1 ring-black/20" style="background:#d17b75" aria-hidden="true"></span>
-                  <span>Medium</span>
+                  <span>Muted</span>
                 </button>
-                <button data-fade="0.45" type="button" class="fade-chip flex flex-col items-center gap-1 py-1.5 px-1 rounded-md border font-semibold text-xs transition cursor-pointer" title="Heavy fade on earlier parts">
+                <button data-fade="0.45" type="button" class="fade-chip flex flex-col items-center gap-1 py-1.5 px-1 rounded-md border font-semibold text-xs transition cursor-pointer" title="Faint fade on earlier parts">
                   <span class="block w-6 h-2 rounded-sm ring-1 ring-black/20" style="background:#d5a09d" aria-hidden="true"></span>
-                  <span>Heavy</span>
+                  <span>Faint</span>
                 </button>
               </div>
             </div>

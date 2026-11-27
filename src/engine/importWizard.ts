@@ -152,8 +152,8 @@ function formatLineWeightLabel(weight?: string): string {
 function formatFadeLabel(fadeOpacity: number): string {
   if (!Number.isFinite(fadeOpacity) || fadeOpacity >= 0.99) return 'Off';
   if (fadeOpacity >= 0.74) return 'Subtle fade';
-  if (fadeOpacity >= 0.55) return 'Medium fade';
-  return 'Heavy fade';
+  if (fadeOpacity >= 0.55) return 'Muted fade';
+  return 'Faint fade';
 }
 
 function formatDensityLabel(density: 'compact' | 'balanced' | 'spacious'): string {

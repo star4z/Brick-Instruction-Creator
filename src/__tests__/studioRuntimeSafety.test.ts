@@ -280,15 +280,19 @@ describe('studioRuntime safety checks', () => {
     expect(renderStyleChunk).toContain('data-step-lighting="none"');
     expect(renderStyleChunk).toContain('data-step-lighting="standard"');
     expect(renderStyleChunk).toContain('data-step-lighting="studio"');
-    expect(renderStyleChunk).toContain('id="toggleHighlight"');
-    expect(renderStyleChunk).toContain('id="toggleStarkBlackOutlines"');
+    expect(renderStyleChunk).toContain('data-arrow-style="off"');
+    expect(renderStyleChunk).toContain('data-hl-weight="off"');
+    expect(renderStyleChunk).toContain('data-outline-weight="off"');
+    expect(renderStyleChunk).not.toContain('id="toggleAutoPlacementArrows"');
+    expect(renderStyleChunk).not.toContain('id="toggleHighlight"');
+    expect(renderStyleChunk).not.toContain('id="toggleStarkBlackOutlines"');
     expect(renderStyleChunk).toContain('Outline All Parts');
     expect(renderStyleChunk).toContain('data-hl-weight="extra-heavy"');
     expect(renderStyleChunk).toContain('data-outline-weight="extra-heavy"');
     expect(renderStyleChunk).toContain('Fade Earlier Parts');
 
     expect(runtime).toContain("querySelectorAll('.step-lighting-chip')");
-    expect(runtime).toContain("getElementById('toggleStarkBlackOutlines')");
+    expect(runtime).toContain("querySelectorAll('.outline-weight-chip')");
     expect(runtime).toContain('function renderStepWithStudioPhoto(');
     expect(runtime).toContain('uniform float uUnlit;');
     expect(runtime).toContain('stepLighting');
