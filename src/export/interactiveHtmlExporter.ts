@@ -1001,7 +1001,7 @@ ${staticFallbackHtml}
       <button id="btnFirst" class="nav-btn icon-only" type="button" title="First page" aria-label="First page">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m17 18-6-6 6-6"/><path d="M7 6v12"/></svg>
       </button>
-      <button id="btnPrev" class="nav-btn" type="button" aria-label="Previous">${wordless ? '←' : '← Prev'}</button>
+      <button id="btnPrev" class="nav-btn primary" type="button" aria-label="Previous">${wordless ? '←' : '← Prev'}</button>
       <button id="btnPagePicker" class="page-btn" type="button">${wordless ? '1' : 'Page 1'}</button>
       <button id="btnNext" class="nav-btn primary" type="button" aria-label="Next">${wordless ? '→' : 'Next →'}</button>
       <button id="btnLast" class="nav-btn icon-only" type="button" title="Last page" aria-label="Last page">
