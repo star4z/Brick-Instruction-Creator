@@ -209,12 +209,16 @@ function isMirrorSymmetric(a: WorldBox, b: WorldBox, refBounds: WorldBox): boole
   const horizDist = Math.hypot(a.center[0] - b.center[0], a.center[2] - b.center[2]);
   if (horizDist < 12 || horizDist > 165) return false;
 
+  const spanX = refBounds.max[0] - refBounds.min[0];
+  const spanZ = refBounds.max[2] - refBounds.min[2];
   const cx = refBounds.center[0];
   const cz = refBounds.center[2];
   const mirrorX =
+    spanX <= 180 &&
     Math.abs((a.center[0] - cx) + (b.center[0] - cx)) <= 6 &&
     Math.abs(a.center[2] - b.center[2]) <= 6;
   const mirrorZ =
+    spanZ <= 180 &&
     Math.abs((a.center[2] - cz) + (b.center[2] - cz)) <= 6 &&
     Math.abs(a.center[0] - b.center[0]) <= 6;
 
@@ -312,15 +316,9 @@ export function classifySameSkuPattern(
     }
   }
 
-  // 4. Mirror-symmetric pair across section/model centerline (on compact visible span)
-  const modelSpan = Math.max(
-    modelBounds.max[0] - modelBounds.min[0],
-    modelBounds.max[2] - modelBounds.min[2],
-  );
-  if (modelSpan <= 180) {
-    for (const b of existingBoxes) {
-      if (isMirrorSymmetric(candBox, b, modelBounds)) return 'structured';
-    }
+  // 4. Mirror-symmetric pair across section/model centerline (on compact mirror-axis span)
+  for (const b of existingBoxes) {
+    if (isMirrorSymmetric(candBox, b, modelBounds)) return 'structured';
   }
 
   return 'scattered';

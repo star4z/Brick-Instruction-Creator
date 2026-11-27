@@ -651,4 +651,32 @@ describe('dynamicStepSizer', () => {
     // Spanning plate (2) DOES have unplaced lower support (1) -> avoidable overhang!
     expect(hasAvoidableOverhang(2, boxes, adj, placed, remAfter, roles, cladding)).toBe(true);
   });
+
+  it('groups compact mirror-symmetric pairs across the narrow axis of an elongated model into a single 2x step', () => {
+    // Elongated 6-stud-wide (120 LDU) by 27-stud-long (540 LDU) chassis:
+    // Two identical 3665 inverted slopes mirrored at x=-50 and x=+50, same z=-265, same y=61.
+    const modelBounds = makeBox(0, 60, -30, 120, 120, 540);
+    const slopeL = makePart(0, '3665', 72, makeBox(-50, 61, -265, 20, 24, 40));
+    const slopeR = makePart(1, '3665', 72, makeBox(50, 61, -265, 20, 24, 40));
+
+    expect(classifySameSkuPattern(slopeR.box, [slopeL.box], modelBounds)).toBe('structured');
+
+    const picked = selectDynamicStepIndices({
+      anchor: 0,
+      parts: [slopeL, slopeR],
+      getEligibleCandidates: (placed) => [0, 1].filter((i) => !placed.has(i)),
+      modelBounds,
+      builtBounds: modelBounds,
+      activeCam: DEFAULT_STUDIO_CAMERA,
+      isFirstStep: false,
+      totalPartsInScope: 20,
+    });
+    expect(picked).toEqual([0, 1]);
+
+    // Wide building (320 x 320): opposite-wall bricks > 180 LDU apart must still stay separated
+    const wideBounds = makeBox(0, 60, 0, 320, 120, 320);
+    const wallL = makePart(0, '3665', 72, makeBox(-150, 12, 0, 20, 24, 40));
+    const wallR = makePart(1, '3665', 72, makeBox(150, 12, 0, 20, 24, 40));
+    expect(classifySameSkuPattern(wallR.box, [wallL.box], wideBounds)).toBe('scattered');
+  });
 });

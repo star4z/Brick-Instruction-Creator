@@ -27988,6 +27988,7 @@ function closeImportAssistant(keepPendingRaw = false) {
   if (impPreviewEngine) {
     try { impPreviewEngine.dispose(); } catch (_) {}
     impPreviewEngine = null;
+    replaceImportPreviewCanvas();
   }
   document.getElementById('importModal').classList.add('hidden');
   if (wasWizardSubpage && !keepPendingRaw) {
@@ -28085,10 +28086,33 @@ function getPreviewPartMaps() {
   return { parts, partOffsets, partColorOverrides };
 }
 
+function replaceImportPreviewCanvas() {
+  const oldCanvas = document.getElementById('impPreviewCanvas');
+  if (!oldCanvas || !oldCanvas.parentNode) return oldCanvas;
+  const fresh = document.createElement('canvas');
+  fresh.id = oldCanvas.id;
+  fresh.className = oldCanvas.className;
+  oldCanvas.parentNode.replaceChild(fresh, oldCanvas);
+  bindImportPreviewCanvasEvents(fresh);
+  return fresh;
+}
+
 function rebuildAndDrawImportPreview() {
-  const canvas = document.getElementById('impPreviewCanvas');
+  let canvas = document.getElementById('impPreviewCanvas');
   if (!canvas || !impState.parsed) return;
-  if (!impPreviewEngine) impPreviewEngine = new WebGLBrickEngine(canvas, deviceGpuBudget.maxWebGlDim);
+  if (impPreviewEngine && (!impPreviewEngine.gl || impPreviewEngine.gl.isContextLost())) {
+    try { impPreviewEngine.dispose(); } catch (_) {}
+    impPreviewEngine = null;
+    canvas = replaceImportPreviewCanvas() || canvas;
+  }
+  if (!impPreviewEngine) {
+    impPreviewEngine = new WebGLBrickEngine(canvas, deviceGpuBudget.maxWebGlDim);
+    if (!impPreviewEngine.gl || impPreviewEngine.gl.isContextLost()) {
+      canvas = replaceImportPreviewCanvas() || canvas;
+      impPreviewEngine = new WebGLBrickEngine(canvas, deviceGpuBudget.maxWebGlDim);
+    }
+  }
+  if (!impPreviewEngine.gl || impPreviewEngine.gl.isContextLost()) return;
 
   const { parts, partOffsets, partColorOverrides } = getPreviewPartMaps();
   impPreviewMesh = buildMeshBuffers([], parts, {
@@ -28106,6 +28130,10 @@ function rebuildAndDrawImportPreview() {
 function drawImportPreviewFrame() {
   const canvas = document.getElementById('impPreviewCanvas');
   if (!canvas || !impPreviewEngine || !impPreviewMesh) return;
+  if (!impPreviewEngine.gl || impPreviewEngine.gl.isContextLost()) {
+    rebuildAndDrawImportPreview();
+    return;
+  }
   const host = canvas.parentElement || canvas;
   const cssW = host.clientWidth || 360;
   const cssH = host.clientHeight || 240;
@@ -28188,8 +28216,7 @@ function animateImportExplode(nextExploded) {
   impExplodeAnimRaf = requestAnimationFrame(stepFrame);
 }
 
-(function bindImportPreviewOrbit() {
-  const canvas = document.getElementById('impPreviewCanvas');
+function bindImportPreviewCanvasEvents(canvas) {
   if (!canvas) return;
   const pointers = new Map();
   let lastPinchDist = 0;
@@ -28285,6 +28312,12 @@ function animateImportExplode(nextExploded) {
     impState.zoom = Math.max(IMP_MIN_ZOOM, Math.min(IMP_MAX_ZOOM, (impState.zoom || 1.0) * step));
     drawImportPreviewFrame();
   }, { passive: false });
+}
+
+(function bindImportPreviewOrbit() {
+  const canvas = document.getElementById('impPreviewCanvas');
+  if (!canvas) return;
+  bindImportPreviewCanvasEvents(canvas);
 
   if (typeof ResizeObserver !== 'undefined' && canvas.parentElement) {
     const ro = new ResizeObserver(() => {
