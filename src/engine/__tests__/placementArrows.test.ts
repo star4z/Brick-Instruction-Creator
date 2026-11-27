@@ -1667,6 +1667,66 @@ describe('placementArrows — LEGO-style automatic placement arrows & offsets', 
   });
 });
 
+describe('computeAnimatedStepOffsets', () => {
+  it('gives side-by-side plates of different widths/lengths uniform lift distances instead of 2x discrepancy', async () => {
+    const { computeAnimatedStepOffsets } = await import('../placementArrows');
+    const baseHull = makePart('hull', 0, 0, 0, 120, 16, 120, RED);
+    const plate1x6 = makePart('p_1x6', 0, -12, -50, 120, 8, 20, RED);
+    const plate2x6 = makePart('p_2x6', 0, -12, -20, 120, 8, 40, RED);
+
+    const offsets = computeAnimatedStepOffsets({
+      stepParts: [plate1x6, plate2x6],
+      prevParts: [baseHull],
+      // Only one of the two plates received an auto-arrow offset (e.g. 32 LDU downward)
+      autoOffsets: { p_1x6: { x: 0, y: -32, z: 0 } },
+    });
+
+    const off1 = offsets.get('p_1x6')!;
+    const off2 = offsets.get('p_2x6')!;
+    expect(off1[1]).toBeLessThan(0);
+    expect(off2[1]).toBeLessThan(0);
+    // Both 8-LDU-thick plates should lift by the exact same ~32 LDU distance
+    expect(Math.abs(Math.hypot(...off1) - Math.hypot(...off2))).toBeLessThanOrEqual(4);
+    expect(Math.hypot(...off2)).toBeLessThanOrEqual(40);
+  });
+
+  it('offsets a Technic washer and knob DOWN along a vertical axle when blocked above by a liftarm, even if washer localUp is horizontal', async () => {
+    const { computeAnimatedStepOffsets } = await import('../placementArrows');
+    // Black liftarm at top (y = 0..16), yellow vertical axle running down through it (y = -60..24)
+    const liftarm = makePart('liftarm', 0, 0, 0, 80, 16, 16, BLACK);
+    const yellowAxle = makePart('axle', 0, -60, 0, 12, 84, 12, YELLOW);
+    // Grey 1/2 bush washer sitting just below the liftarm (y = -8..0), with horizontal localUp (like LDraw 4265c rotated)
+    const greyWasher = {
+      ...makePart('washer', 0, -8, 0, 16, 8, 16, DARK_GRAY),
+      localUp: [1, 0, 0] as [number, number, number],
+    };
+    // Black knob/bush below the washer on the same axle (y = -24..-8)
+    const blackKnob = makePart('knob', 0, -24, 0, 16, 16, 16, BLACK);
+
+    const offsets = computeAnimatedStepOffsets({
+      stepParts: [greyWasher, blackKnob],
+      prevParts: [liftarm, yellowAxle],
+    });
+
+    const wOff = offsets.get('washer')!;
+    const kOff = offsets.get('knob')!;
+    // Both must offset strictly DOWN (-Y), never sideways along localUp (+X)
+    expect(wOff[0]).toBe(0);
+    expect(wOff[2]).toBe(0);
+    expect(wOff[1]).toBeLessThan(-40);
+    expect(kOff[0]).toBe(0);
+    expect(kOff[2]).toBe(0);
+    expect(kOff[1]).toBeLessThan(-40);
+    // Both must clear the bottom tip of the yellow axle (y = -60) and not overlap each other
+    const wMaxY = greyWasher.box.max[1] + wOff[1];
+    const wMinY = greyWasher.box.min[1] + wOff[1];
+    const kMaxY = blackKnob.box.max[1] + kOff[1];
+    expect(wMaxY).toBeLessThan(-60);
+    expect(kMaxY).toBeLessThan(wMinY);
+  });
+});
+
+
 
 
 

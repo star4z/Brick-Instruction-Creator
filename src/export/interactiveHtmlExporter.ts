@@ -144,7 +144,7 @@ export interface InteractiveStepScene extends InteractiveSceneSpec {
   pli: InteractivePliEntry[];
   subLabel?: string;
   isSubmodelStep?: boolean;
-  submodelName?: string;
+  submodelThumbKey?: string;
   submodelRepeat?: number;
   previewUrl?: string; // Static preview fallback image for JS-disabled viewers (e.g., iOS Quick Look)
 }
@@ -250,6 +250,8 @@ export interface InteractiveHtmlPayload {
   skipStaticFallback?: boolean;
   prototypes: InteractivePartPrototype[];
   textures: Record<string, string>;
+  /** Deduplicated finished-submodel preview thumbnails keyed by submodelThumbKey. */
+  submodelThumbs?: Record<string, string>;
   parts: InteractivePartPlacement[];
   pages: InteractiveViewerPage[];
 }
@@ -801,15 +803,15 @@ ${customFontFacesCss}  :root {
   }
 
   .submodel-pill {
-    display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 999px;
+    display: inline-flex; align-items: center; gap: 6px; padding: 4px 7px; border-radius: 12px;
     background: var(--callout-bg); border: 1.5px solid var(--callout-border); color: var(--text);
-    font-size: 11px; font-weight: 800; line-height: 1.2; width: fit-content;
+    width: fit-content;
     box-shadow: 0 3px 10px rgba(0,0,0,0.16);
   }
-  .submodel-pill svg { color: var(--accent); flex-shrink: 0; }
+  .submodel-pill img { width: 46px; height: 34px; object-fit: contain; display: block; }
   .submodel-pill .submodel-rep {
-    padding: 1px 6px; border-radius: 999px; background: var(--accent); color: #fff;
-    font-size: 10px; font-weight: 900; margin-left: 2px;
+    padding: 2px 7px; border-radius: 999px; background: var(--accent); color: #fff;
+    font-size: 11px; font-weight: 900; line-height: 1.1;
   }
 
   .pli-panel {
@@ -843,13 +845,6 @@ ${customFontFacesCss}  :root {
     box-shadow: 0 4px 14px rgba(0,0,0,0.14);
   }
   .tool-btn.active { background: var(--accent); color: #fff; border-color: transparent; }
-
-  .hint-chip {
-    position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(max(14px, env(safe-area-inset-bottom)) + 78px); z-index: 12;
-    padding: 4px 12px; border-radius: 999px; font-size: 11px; font-weight: 600;
-    background: rgba(0,0,0,0.48); color: #fff; pointer-events: none; white-space: nowrap;
-    transition: opacity 400ms ease;
-  }
 
   .bottom-dock {
     position: fixed; bottom: max(14px, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); z-index: 20;
@@ -948,6 +943,13 @@ ${customFontFacesCss}  :root {
   }
   .drawer-item.active .drawer-thumb { border-color: rgba(255,255,255,0.35); }
   .drawer-thumb img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .drawer-sub-preview {
+    width: 30px; height: 24px; border-radius: 6px; flex-shrink: 0; overflow: hidden;
+    background: var(--callout-bg); border: 1px solid var(--callout-border);
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .drawer-item.active .drawer-sub-preview { border-color: rgba(255,255,255,0.45); background: rgba(0,0,0,0.2); }
+  .drawer-sub-preview img { width: 100%; height: 100%; object-fit: contain; display: block; }
   .drawer-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   @media (max-width: 600px) {
@@ -983,7 +985,6 @@ ${staticFallbackHtml}
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m8 7 4-4 4 4"/><path d="m8 11 4 4 4-4"/><path d="M5 20h14"/></svg>
       </button>
     </div>
-    <div id="hintChip" class="hint-chip">${wordless ? '360° ↻ · ±' : 'Drag to rotate · Pinch or scroll to zoom · Shift-drag or 2-finger to pan'}</div>
     <div id="flatView" class="flat-view"></div>
   </div>
 
@@ -1988,8 +1989,6 @@ ${staticFallbackHtml}
   function hideHintSoon() {
     if (interacted) return;
     interacted = true;
-    const el = document.getElementById('hintChip');
-    if (el) el.style.opacity = '0';
   }
 
   canvas.addEventListener('pointerdown', (e) => {
@@ -2096,7 +2095,6 @@ ${staticFallbackHtml}
     const stepHud = document.getElementById('stepHud');
     const camTools = document.getElementById('camTools');
     const flatEl = document.getElementById('flatView');
-    const hintEl = document.getElementById('hintChip');
     const btnPli = document.getElementById('btnTogglePli');
 
     heroEl.style.display = 'none';
@@ -2119,7 +2117,6 @@ ${staticFallbackHtml}
       const hasPrevAssembly = Boolean(step && prevList.length > 0);
       canvas.style.display = 'block';
       camTools.style.display = 'flex';
-      hintEl.style.display = interacted ? 'none' : 'block';
       btnPli.style.display = step && step.pli && step.pli.length > 0 ? 'flex' : 'none';
       btnPli.classList.toggle('active', showPli);
       const btnXray = document.getElementById('btnXrayToggle');
@@ -2136,7 +2133,6 @@ ${staticFallbackHtml}
     } else {
       canvas.style.display = 'none';
       camTools.style.display = 'none';
-      hintEl.style.display = 'none';
     }
 
     const isWordless = Boolean(DATA.wordless);
@@ -2150,12 +2146,11 @@ ${staticFallbackHtml}
 
     if (pg.kind === 'steps' && step) {
       const isSubStep = Boolean(step.isSubmodelStep);
-      const subCubeSvg = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 3 7.5 12 12l9-4.5L12 3Z"/><path d="M3 7.5V16.5L12 21l9-4.5V7.5"/><path d="M12 12v9"/></svg>';
+      const subThumbUrl = isSubStep && step.submodelThumbKey && DATA.submodelThumbs ? safeImgSrc(DATA.submodelThumbs[step.submodelThumbKey]) : '';
       const subRep = Number(step.submodelRepeat) || 0;
-      const subBadgeHtml = isSubStep
-        ? '<span class="submodel-pill" title="Submodel step">' +
-            subCubeSvg +
-            (isWordless ? '' : '<span>' + esc(step.submodelName || 'Submodel') + '</span>') +
+      const subBadgeHtml = isSubStep && (subThumbUrl || subRep > 1)
+        ? '<span class="submodel-pill" aria-label="Submodel">' +
+            (subThumbUrl ? '<img src="' + subThumbUrl + '" alt="" />' : '') +
             (subRep > 1 ? '<span class="submodel-rep">' + subRep + '×</span>' : '') +
           '</span>'
         : '';
@@ -2394,8 +2389,15 @@ ${staticFallbackHtml}
       const thumbAttr = hasScene
         ? ' data-thumb-idx="' + idx + '"' + (cachedUrl ? ' data-thumb-loaded="1"' : '')
         : '';
+      const subThumbUrl = (it.step && it.step.isSubmodelStep && it.step.submodelThumbKey && DATA.submodelThumbs)
+        ? DATA.submodelThumbs[it.step.submodelThumbKey]
+        : '';
+      const subPreviewHtml = subThumbUrl
+        ? '<span class="drawer-sub-preview"><img src="' + subThumbUrl + '" alt="" /></span>'
+        : '';
       return '<button type="button" class="drawer-item ' + (idx === curIdx ? 'active' : '') + '" data-idx="' + idx + '">' +
         '<span class="drawer-thumb"' + thumbAttr + '>' + thumbInner + '</span>' +
+        subPreviewHtml +
         '<span class="drawer-label">' + esc(label) + '</span>' +
       '</button>';
     }).join('');

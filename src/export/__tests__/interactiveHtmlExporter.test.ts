@@ -471,5 +471,72 @@ describe('interactiveHtmlExporter font stacks', () => {
     expect(darkHtml).toContain('--glass-bg: rgba(24, 28, 38, 0.88);');
     expect(darkHtml).toContain('--glass-text: #f8fafc;');
   });
+
+  it('renders finished submodel preview thumbnail with optional multiplier, drawer submodel preview, and omits cryptic hintChip', () => {
+    const html = generateInteractiveHtmlDocument({
+      version: 1,
+      title: 'Submodel Preview Test',
+      editorUrl: DEFAULT_EDITOR_URL,
+      wordless: true,
+      totalPieces: 8,
+      totalSteps: 2,
+      theme: {
+        bg: '#0b0e14',
+        text: '#f8fafc',
+        muted: '#94a3b8',
+        accent: '#ef4444',
+        pliBg: '#0f172a',
+        pliBorder: '#334155',
+        calloutBg: '#111827',
+        calloutBorder: '#374151',
+        isDark: true,
+      },
+      highlightNew: false,
+      highlightColor: '#ef4444',
+      fadePrev: true,
+      fadeOpacity: 0.7,
+      prototypes: [],
+      textures: {},
+      submodelThumbs: {
+        ch_wing: 'data:image/png;base64,SUBMODEL_THUMB_DATA',
+      },
+      parts: [],
+      pages: [
+        {
+          id: 'p1',
+          kind: 'steps',
+          num: 1,
+          label: '1',
+          steps: [
+            {
+              stepId: 's1',
+              stepNum: 1,
+              label: '1',
+              isSubmodelStep: true,
+              submodelThumbKey: 'ch_wing',
+              submodelRepeat: 2,
+              pli: [],
+              prevPartIdx: [],
+              newPartIdx: [],
+              az: 38,
+              el: 28,
+              zoom: 1,
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(html).not.toContain('id="hintChip"');
+    expect(html).not.toContain('360°');
+    expect(html).toContain('SUBMODEL_THUMB_DATA');
+    expect(html).toContain('class="submodel-pill"');
+    expect(html).toContain('class="submodel-rep"');
+    expect(html).toContain('class="drawer-sub-preview"');
+    const scriptMatch = html.match(/<script>([\s\S]*?)<\/script>/);
+    expect(scriptMatch).toBeTruthy();
+    expect(() => new Function(scriptMatch![1])).not.toThrow();
+  });
 });
+
 

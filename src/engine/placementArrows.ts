@@ -3106,5 +3106,354 @@ export function detectThroughHoleGuideTarget(
   return tip;
 }
 
+export interface AnimatedStepOffsetsInput {
+  stepParts: ReadonlyArray<PlacementPartInput>;
+  prevParts: ReadonlyArray<PlacementPartInput>;
+  /** Manual user overrides or structural default offsets (e.g. submodel attachments) whose exact [x,y,z] are preserved verbatim. */
+  explicitOffsets?: Record<string, { x: number; y: number; z: number }>;
+  /** Automatic placement-arrow offsets: their insertion direction is honored, while non-coaxial magnitudes are harmonized to uniform animated lift distances. */
+  autoOffsets?: Record<string, { x: number; y: number; z: number }>;
+}
+
+/**
+ * Computes physically grounded per-part animated offsets for every part in a step
+ * (used by the Interactive 3D Viewer's animated offset toggle).
+ *
+ * General physical/geometric rules:
+ * 1. Explicit manual or structural offsets (`explicitOffsets`) are preserved verbatim.
+ * 2. Automatic arrow offsets (`autoOffsets`) contribute their exact insertion direction,
+ *    with a uniform thickness-based lift distance (`dimAlong + 24`, clamped to `[28, 48]` LDU)
+ *    so side-by-side plates of different lengths never fly 2x farther than each other.
+ * 3. Coaxial rod/axle/pin sleeves and through-holes are detected across all 3 world axes
+ *    so Technic bushes, washers, gears, and pins always slide along their host shaft axis
+ *    toward the unblocked end and clear the shaft tip, regardless of LDraw local-Y orientation.
+ * 4. Engaged compiled studs (`detectEngagedStudDirection`) determine pull-off direction
+ *    for upright, inverted, and SNOT pieces; otherwise falls back to obstacle-aware `localUp`.
+ * 5. Coaxial/stacked siblings moving along the same direction are cleanly separated so
+ *    their offset positions never overlap.
+ */
+export function computeAnimatedStepOffsets(
+  input: AnimatedStepOffsetsInput,
+): Map<string, Vec3> {
+  const { stepParts, prevParts, explicitOffsets, autoOffsets } = input;
+  const result = new Map<string, Vec3>();
+  if (stepParts.length === 0) return result;
+
+  let prevUnion: PlacementAABB | null = null;
+  if (prevParts.length > 0) {
+    let minX = Infinity, minY = Infinity, minZ = Infinity;
+    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+    for (let i = 0; i < prevParts.length; i++) {
+      const b = prevParts[i].box;
+      if (b.min[0] < minX) minX = b.min[0]; if (b.max[0] > maxX) maxX = b.max[0];
+      if (b.min[1] < minY) minY = b.min[1]; if (b.max[1] > maxY) maxY = b.max[1];
+      if (b.min[2] < minZ) minZ = b.min[2]; if (b.max[2] > maxZ) maxZ = b.max[2];
+    }
+    prevUnion = {
+      min: [minX, minY, minZ],
+      max: [maxX, maxY, maxZ],
+      center: [(minX + maxX) * 0.5, (minY + maxY) * 0.5, (minZ + maxZ) * 0.5],
+    };
+  }
+
+  interface CoaxialMatch {
+    axis: 0 | 1 | 2;
+    isSleeveAroundRod: boolean;
+    rodMin: number;
+    rodMax: number;
+    hostIds: Set<string>;
+  }
+
+  const findCoaxialMatch = (pBox: PlacementAABB): CoaxialMatch | null => {
+    const s = boxSize(pBox);
+    const bestByAxis: Array<CoaxialMatch | null> = [null, null, null];
+    for (let i = 0; i < prevParts.length; i++) {
+      const ref = prevParts[i];
+      const rb = ref.box;
+      const ov0 = overlap1D(pBox.min[0], pBox.max[0], rb.min[0], rb.max[0]);
+      const ov1 = overlap1D(pBox.min[1], pBox.max[1], rb.min[1], rb.max[1]);
+      const ov2 = overlap1D(pBox.min[2], pBox.max[2], rb.min[2], rb.max[2]);
+      if (ov0 <= 1.5 || ov1 <= 1.5 || ov2 <= 1.5) continue;
+      const ov = [ov0, ov1, ov2];
+      const rs = boxSize(rb);
+
+      for (let a = 0; a < 3; a++) {
+        const axis = a as 0 | 1 | 2;
+        const pA = (axis + 1) % 3;
+        const pB = (axis + 2) % 3;
+        const coaxialCross =
+          ov[pA] >= Math.min(s[pA], rs[pA]) * 0.68 &&
+          ov[pB] >= Math.min(s[pB], rs[pB]) * 0.68;
+        if (!coaxialCross) continue;
+
+        const refElongated = rs[axis] >= Math.max(rs[pA], rs[pB]) * 1.5;
+        const refProtrudes = rb.max[axis] > pBox.max[axis] + 2 || rb.min[axis] < pBox.min[axis] - 2;
+        const partWrapsRef = s[pA] >= rs[pA] - 1 && s[pB] >= rs[pB] - 1;
+        const isSleeveAroundRod = refElongated && refProtrudes && partWrapsRef;
+
+        const partElongated = s[axis] >= Math.max(s[pA], s[pB]) * 1.35;
+        const partProtrudes = pBox.max[axis] > rb.max[axis] + 2 || pBox.min[axis] < rb.min[axis] - 2;
+        const refWider = Math.max(rs[pA], rs[pB]) >= Math.max(s[pA], s[pB]) * 1.2;
+        const isPinInHost = partElongated && partProtrudes && refWider;
+
+        if (!isSleeveAroundRod && !isPinInHost) continue;
+
+        const existing = bestByAxis[axis];
+        if (!existing) {
+          bestByAxis[axis] = {
+            axis,
+            isSleeveAroundRod,
+            rodMin: isSleeveAroundRod ? rb.min[axis] : pBox.min[axis],
+            rodMax: isSleeveAroundRod ? rb.max[axis] : pBox.max[axis],
+            hostIds: new Set([ref.id]),
+          };
+        } else {
+          existing.hostIds.add(ref.id);
+          if (isSleeveAroundRod) {
+            existing.isSleeveAroundRod = true;
+            if (rb.min[axis] < existing.rodMin) existing.rodMin = rb.min[axis];
+            if (rb.max[axis] > existing.rodMax) existing.rodMax = rb.max[axis];
+          }
+        }
+      }
+    }
+    // Prefer sleeve-around-rod matches first, then Y axis, then X/Z
+    for (const a of [1, 0, 2] as const) {
+      if (bestByAxis[a]?.isSleeveAroundRod) return bestByAxis[a];
+    }
+    for (const a of [1, 0, 2] as const) {
+      if (bestByAxis[a]) return bestByAxis[a];
+    }
+    return null;
+  };
+
+  const isDirBlockedByPrev = (
+    pBox: PlacementAABB,
+    axis: 0 | 1 | 2,
+    sign: 1 | -1,
+    ignoreIds: ReadonlySet<string>,
+  ): boolean => {
+    const pA = (axis + 1) % 3;
+    const pB = (axis + 2) % 3;
+    for (let i = 0; i < prevParts.length; i++) {
+      const ref = prevParts[i];
+      if (ignoreIds.has(ref.id)) continue;
+      const rb = ref.box;
+      if (
+        overlap1D(pBox.min[pA], pBox.max[pA], rb.min[pA], rb.max[pA]) <= 2 ||
+        overlap1D(pBox.min[pB], pBox.max[pB], rb.min[pB], rb.max[pB]) <= 2
+      ) {
+        continue;
+      }
+      if (sign > 0) {
+        if (rb.max[axis] > pBox.max[axis] + 2 && rb.min[axis] > pBox.min[axis] - 2) return true;
+      } else {
+        if (rb.min[axis] < pBox.min[axis] - 2 && rb.max[axis] < pBox.max[axis] + 2) return true;
+      }
+    }
+    return false;
+  };
+
+  interface ResolvedItem {
+    part: PlacementPartInput;
+    dir: Vec3;
+    dist: number;
+    isExplicit: boolean;
+  }
+
+  const items: ResolvedItem[] = [];
+  const emptySet = new Set<string>();
+
+  for (let i = 0; i < stepParts.length; i++) {
+    const p = stepParts[i];
+    const pBox = p.box;
+    const s = boxSize(pBox);
+
+    const exp = explicitOffsets?.[p.id];
+    if (exp) {
+      const mag = Math.hypot(Number(exp.x) || 0, Number(exp.y) || 0, Number(exp.z) || 0);
+      if (mag >= 6) {
+        const ox = Number(exp.x) || 0;
+        const oy = Number(exp.y) || 0;
+        const oz = Number(exp.z) || 0;
+        items.push({
+          part: p,
+          dir: [ox / mag, oy / mag, oz / mag],
+          dist: mag,
+          isExplicit: true,
+        });
+        continue;
+      }
+    }
+
+    const coaxial = findCoaxialMatch(pBox);
+    let dir: Vec3 | null = null;
+    let tipClearDist = 0;
+
+    const auto = autoOffsets?.[p.id];
+    if (auto) {
+      const ox = Number(auto.x) || 0;
+      const oy = Number(auto.y) || 0;
+      const oz = Number(auto.z) || 0;
+      const mag = Math.hypot(ox, oy, oz);
+      if (mag >= 6) {
+        dir = [ox / mag, oy / mag, oz / mag];
+        if (coaxial && coaxial.isSleeveAroundRod && Math.abs(dir[coaxial.axis]) >= 0.85) {
+          const sgn = dir[coaxial.axis] >= 0 ? 1 : -1;
+          tipClearDist = sgn > 0
+            ? Math.max(0, coaxial.rodMax - pBox.min[coaxial.axis] + 16)
+            : Math.max(0, pBox.max[coaxial.axis] - coaxial.rodMin + 16);
+        }
+      }
+    }
+
+    if (!dir && coaxial) {
+      const a = coaxial.axis;
+      const posBlocked = isDirBlockedByPrev(pBox, a, 1, coaxial.hostIds);
+      const negBlocked = isDirBlockedByPrev(pBox, a, -1, coaxial.hostIds);
+      let sgn: 1 | -1;
+      if (posBlocked && !negBlocked) {
+        sgn = -1;
+      } else if (negBlocked && !posBlocked) {
+        sgn = 1;
+      } else if (coaxial.isSleeveAroundRod) {
+        const distToMax = coaxial.rodMax - pBox.max[a];
+        const distToMin = pBox.min[a] - coaxial.rodMin;
+        sgn = distToMax <= distToMin ? 1 : -1;
+      } else if (prevUnion) {
+        sgn = pBox.center[a] - prevUnion.center[a] < -2 ? -1 : 1;
+      } else {
+        sgn = 1;
+      }
+      dir = [a === 0 ? sgn : 0, a === 1 ? sgn : 0, a === 2 ? sgn : 0];
+      if (coaxial.isSleeveAroundRod) {
+        tipClearDist = sgn > 0
+          ? Math.max(0, coaxial.rodMax - pBox.min[a] + 16)
+          : Math.max(0, pBox.max[a] - coaxial.rodMin + 16);
+      }
+    }
+
+    if (!dir && prevParts.length > 0) {
+      const studRes = findEngagedStuds(p, prevParts);
+      if (studRes?.pullDir) {
+        dir = studRes.pullDir;
+      }
+    }
+
+    if (!dir) {
+      const rawUp = p.localUp ?? [0, 1, 0];
+      const upLen = Math.hypot(rawUp[0], rawUp[1], rawUp[2]) || 1;
+      const su: Vec3 = [rawUp[0] / upLen, rawUp[1] / upLen, rawUp[2] / upLen];
+      let refBox = prevUnion;
+      if (prevParts.length > 0) {
+        let nMinX = Infinity, nMinY = Infinity, nMinZ = Infinity;
+        let nMaxX = -Infinity, nMaxY = -Infinity, nMaxZ = -Infinity;
+        let nearCount = 0;
+        for (let j = 0; j < prevParts.length; j++) {
+          const b = prevParts[j].box;
+          const dx = Math.max(0, pBox.min[0] - b.max[0], b.min[0] - pBox.max[0]);
+          const dy = Math.max(0, pBox.min[1] - b.max[1], b.min[1] - pBox.max[1]);
+          const dz = Math.max(0, pBox.min[2] - b.max[2], b.min[2] - pBox.max[2]);
+          if (dx <= 10 && dy <= 10 && dz <= 10) {
+            if (b.min[0] < nMinX) nMinX = b.min[0]; if (b.max[0] > nMaxX) nMaxX = b.max[0];
+            if (b.min[1] < nMinY) nMinY = b.min[1]; if (b.max[1] > nMaxY) nMaxY = b.max[1];
+            if (b.min[2] < nMinZ) nMinZ = b.min[2]; if (b.max[2] > nMaxZ) nMaxZ = b.max[2];
+            nearCount++;
+          }
+        }
+        if (nearCount > 0) {
+          refBox = {
+            min: [nMinX, nMinY, nMinZ],
+            max: [nMaxX, nMaxY, nMaxZ],
+            center: [(nMinX + nMaxX) * 0.5, (nMinY + nMaxY) * 0.5, (nMinZ + nMaxZ) * 0.5],
+          };
+        }
+      }
+      let sgn: 1 | -1 = 1;
+      if (refBox) {
+        const proj =
+          (pBox.center[0] - refBox.center[0]) * su[0] +
+          (pBox.center[1] - refBox.center[1]) * su[1] +
+          (pBox.center[2] - refBox.center[2]) * su[2];
+        sgn = proj < -2 ? -1 : 1;
+      }
+      const ax = Math.abs(su[0]), ay = Math.abs(su[1]), az = Math.abs(su[2]);
+      if (Math.max(ax, ay, az) >= 0.94 && prevParts.length > 0) {
+        const axis: 0 | 1 | 2 = ax >= ay && ax >= az ? 0 : (ay >= az ? 1 : 2);
+        const effSign: 1 | -1 = su[axis] * sgn >= 0 ? 1 : -1;
+        if (
+          isDirBlockedByPrev(pBox, axis, effSign, emptySet) &&
+          !isDirBlockedByPrev(pBox, axis, (effSign === 1 ? -1 : 1), emptySet)
+        ) {
+          sgn = sgn === 1 ? -1 : 1;
+        }
+      }
+      dir = [su[0] * sgn, su[1] * sgn, su[2] * sgn];
+    }
+
+    const dimAlong = Math.abs(dir[0]) * s[0] + Math.abs(dir[1]) * s[1] + Math.abs(dir[2]) * s[2];
+    const baseDist = Math.max(28, Math.min(48, Math.round(dimAlong + 24)));
+    const dist = Math.min(96, Math.max(baseDist, Math.round(tipClearDist)));
+    items.push({ part: p, dir, dist, isExplicit: false });
+  }
+
+  // Separate any sibling parts moving along the same direction whose shifted boxes overlap
+  // (e.g. a washer and knob sliding off the same end of an axle, or stacked plates).
+  const placedBoxes: Array<{ item: ResolvedItem; box: PlacementAABB }> = [];
+  const order = items
+    .map((item, idx) => ({
+      item,
+      idx,
+      proj:
+        item.part.box.center[0] * item.dir[0] +
+        item.part.box.center[1] * item.dir[1] +
+        item.part.box.center[2] * item.dir[2],
+    }))
+    .sort((a, b) => a.proj - b.proj);
+
+  for (let i = 0; i < order.length; i++) {
+    const it = order[i].item;
+    let shifted = shiftBox(it.part.box, it.dir[0] * it.dist, it.dir[1] * it.dist, it.dir[2] * it.dist);
+    if (!it.isExplicit) {
+      for (let pass = 0; pass < 4; pass++) {
+        let bumped = false;
+        for (let j = 0; j < placedBoxes.length; j++) {
+          const prevPlaced = placedBoxes[j];
+          const dot =
+            it.dir[0] * prevPlaced.item.dir[0] +
+            it.dir[1] * prevPlaced.item.dir[1] +
+            it.dir[2] * prevPlaced.item.dir[2];
+          if (dot < 0.95) continue;
+          if (!boxesIntersectStrict(shifted, prevPlaced.box, 1.0)) continue;
+          // Push this outer sibling cleanly past `prevPlaced.box` along `it.dir`
+          const ax = Math.abs(it.dir[0]), ay = Math.abs(it.dir[1]), az = Math.abs(it.dir[2]);
+          const axis: 0 | 1 | 2 = ax >= ay && ax >= az ? 0 : (ay >= az ? 1 : 2);
+          const sgn = it.dir[axis] >= 0 ? 1 : -1;
+          const reqShift = sgn > 0
+            ? (prevPlaced.box.max[axis] + 8 - shifted.min[axis])
+            : (shifted.max[axis] - (prevPlaced.box.min[axis] - 8));
+          const extra = Math.max(8, Math.ceil(reqShift / Math.max(0.5, Math.abs(it.dir[axis]))));
+          it.dist = Math.min(136, it.dist + extra);
+          shifted = shiftBox(it.part.box, it.dir[0] * it.dist, it.dir[1] * it.dist, it.dir[2] * it.dist);
+          bumped = true;
+        }
+        if (!bumped) break;
+      }
+    }
+    placedBoxes.push({ item: it, box: shifted });
+  }
+
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    result.set(it.part.id, [
+      +(it.dir[0] * it.dist).toFixed(2),
+      +(it.dir[1] * it.dist).toFixed(2),
+      +(it.dir[2] * it.dist).toFixed(2),
+    ]);
+  }
+  return result;
+}
+
+
 
 

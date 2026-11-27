@@ -152,6 +152,7 @@ import {
 import {
   DEFAULT_ARROW_COLOR,
   buildPlacementArrowGeometry,
+  computeAnimatedStepOffsets,
   computeAutoPlacementOffsetsForSequence,
   computePlacementArrowSegments,
   computePrecisionAlignmentLines,
@@ -26604,6 +26605,60 @@ async function buildInteractiveHtmlArtifact(mode: 'export' | 'preview' = 'export
     const showCoverText = cm.showText !== false;
     const showCompleteText = state.completeMeta?.showText !== false;
     const exportPages = [];
+    const submodelThumbs = {};
+    const ensureSubmodelThumb = (ch) => {
+      if (!ch) return undefined;
+      const key = (ch.isSectionModule && ch.sectionId) ? `sec_${ch.sectionId}` : `ch_${ch.id}`;
+      if (submodelThumbs[key]) return key;
+      const chapters = state.model?.chapters || [];
+      const matchingChapters = (ch.isSectionModule && ch.sectionId)
+        ? chapters.filter((c) => c.kind === 'submodel' && c.sectionId === ch.sectionId)
+        : [ch];
+      const canonicalParts = [];
+      for (const mc of matchingChapters) {
+        for (const st of mc.steps || []) {
+          for (const p of st.parts || []) canonicalParts.push(p);
+        }
+      }
+      if (canonicalParts.length === 0) return undefined;
+      const url = getSubmodelThumb({ id: `ih_${key}`, name: ch.name || 'Submodel', canonicalParts }, 180, 135);
+      if (!url) return undefined;
+      submodelThumbs[key] = url;
+      return key;
+    };
+    const toAnimatedPartInput = (part) => {
+      const studs = [];
+      const pushLeafStuds = (leaf) => {
+        const compiled = compileEmbeddedDat(leaf.p);
+        if (!compiled || !compiled.studs || compiled.studs.length === 0 || compiled.studs.length > 512) return;
+        const m = leaf.m || R_ID;
+        const ox = leaf.x || 0, oy = leaf.y || 0, oz = leaf.z || 0;
+        for (let i = 0; i < compiled.studs.length; i++) {
+          const st = compiled.studs[i];
+          const wb = xformPt([st[0], st[1], st[2]], m, ox, oy, oz, 0);
+          const wn = xformNorm([st[3], st[4], st[5]], m, 0);
+          studs.push([wb[0], wb[1], wb[2], wn[0], wn[1], wn[2]]);
+        }
+      };
+      if (part.children && part.children.length > 0) {
+        for (const c of part.children) pushLeafStuds(c);
+      } else {
+        pushLeafStuds(part);
+      }
+      const localUp = (!part.children || part.children.length === 0)
+        ? xformNorm([0, 1, 0], part.m || R_ID, 0)
+        : undefined;
+      const subBoxes = computeWorldSubBoxes(part);
+      return {
+        id: part.id,
+        box: computeWorldBox(part),
+        rgb: [156, 163, 175],
+        sku: `${part.p}:${part.c}`,
+        ...(localUp ? { localUp } : {}),
+        ...(studs.length > 0 ? { studs } : {}),
+        ...(subBoxes && subBoxes.length > 1 ? { subBoxes } : {}),
+      };
+    };
 
     for (const pg of state.pages) {
       if (pg.kind === 'cover') {
@@ -26779,78 +26834,24 @@ async function buildInteractiveHtmlArtifact(mode: 'export' | 'preview' = 'export
           const ov = state.overrides[step.id] || {};
           const effOffsets = getEffectivePartOffsets(step, ov);
           const prevPartIdx = prev.flatMap((p) => registerPartLeaves(p));
-          const prevBoxes = prev.length > 0 ? prev.map((p) => computeWorldBox(p)) : [];
-          let prevUnion = null;
-          if (prevBoxes.length > 0) {
-            let minX = Infinity, minY = Infinity, minZ = Infinity;
-            let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-            for (const b of prevBoxes) {
-              if (b.min[0] < minX) minX = b.min[0]; if (b.max[0] > maxX) maxX = b.max[0];
-              if (b.min[1] < minY) minY = b.min[1]; if (b.max[1] > maxY) maxY = b.max[1];
-              if (b.min[2] < minZ) minZ = b.min[2]; if (b.max[2] > maxZ) maxZ = b.max[2];
-            }
-            prevUnion = {
-              min: [minX, minY, minZ],
-              max: [maxX, maxY, maxZ],
-              center: [(minX + maxX) * 0.5, (minY + maxY) * 0.5, (minZ + maxZ) * 0.5],
-            };
-          }
-          const computeAnimatedOffsetForPart = (p, pOv) => {
-            if (pOv) {
-              const ox = Number(pOv.x) || 0;
-              const oy = Number(pOv.y) || 0;
-              const oz = Number(pOv.z) || 0;
-              if (Math.hypot(ox, oy, oz) >= 6) {
-                return [+ox.toFixed(2), +oy.toFixed(2), +oz.toFixed(2)];
-              }
-            }
-            const pBox = computeWorldBox(p);
-            const pDiag = Math.hypot(pBox.max[0] - pBox.min[0], pBox.max[1] - pBox.min[1], pBox.max[2] - pBox.min[2]);
-            const dist = Math.max(28, Math.min(72, pDiag * 0.85));
-            let refBox = prevUnion;
-            if (prevBoxes.length > 0) {
-              let nMinX = Infinity, nMinY = Infinity, nMinZ = Infinity;
-              let nMaxX = -Infinity, nMaxY = -Infinity, nMaxZ = -Infinity;
-              let nearCount = 0;
-              for (const b of prevBoxes) {
-                const dx = Math.max(0, pBox.min[0] - b.max[0], b.min[0] - pBox.max[0]);
-                const dy = Math.max(0, pBox.min[1] - b.max[1], b.min[1] - pBox.max[1]);
-                const dz = Math.max(0, pBox.min[2] - b.max[2], b.min[2] - pBox.max[2]);
-                if (dx <= 10 && dy <= 10 && dz <= 10) {
-                  if (b.min[0] < nMinX) nMinX = b.min[0]; if (b.max[0] > nMaxX) nMaxX = b.max[0];
-                  if (b.min[1] < nMinY) nMinY = b.min[1]; if (b.max[1] > nMaxY) nMaxY = b.max[1];
-                  if (b.min[2] < nMinZ) nMinZ = b.min[2]; if (b.max[2] > nMaxZ) nMaxZ = b.max[2];
-                  nearCount++;
-                }
-              }
-              if (nearCount > 0) {
-                refBox = {
-                  min: [nMinX, nMinY, nMinZ],
-                  max: [nMaxX, nMaxY, nMaxZ],
-                  center: [(nMinX + nMaxX) * 0.5, (nMinY + nMaxY) * 0.5, (nMinZ + nMaxZ) * 0.5],
-                };
-              }
-            }
-            const studUp = xformNorm([0, 1, 0], p.m || R_ID, 0);
-            const suLen = Math.hypot(studUp[0], studUp[1], studUp[2]) || 1;
-            const su = [studUp[0] / suLen, studUp[1] / suLen, studUp[2] / suLen];
-            if (!refBox) return [+(su[0] * dist).toFixed(2), +(su[1] * dist).toFixed(2), +(su[2] * dist).toFixed(2)];
-            const sep = [
-              pBox.center[0] - refBox.center[0],
-              pBox.center[1] - refBox.center[1],
-              pBox.center[2] - refBox.center[2],
-            ];
-            const proj = sep[0] * su[0] + sep[1] * su[1] + sep[2] * su[2];
-            const sgn = proj < -2 ? -1 : 1;
-            const dir = [su[0] * sgn, su[1] * sgn, su[2] * sgn];
-            return [+(dir[0] * dist).toFixed(2), +(dir[1] * dist).toFixed(2), +(dir[2] * dist).toFixed(2)];
-          };
+          const explicitOffsets = (step.defaultPartOffsets || ov.partOffsets)
+            ? { ...(step.defaultPartOffsets || {}), ...(ov.partOffsets || {}) }
+            : undefined;
+          const autoOffsets = (state.autoPlacementArrows !== false && step.autoPartOffsets)
+            ? step.autoPartOffsets
+            : undefined;
+          const animatedOffsetMap = computeAnimatedStepOffsets({
+            stepParts: (step.parts || []).map(toAnimatedPartInput),
+            prevParts: prev.map(toAnimatedPartInput),
+            explicitOffsets,
+            autoOffsets,
+          });
 
           const newPartIdx = [];
           const newPartOffsets = [];
           for (const p of step.parts || []) {
             const leafIndices = registerPartLeaves(p);
-            const offVec = computeAnimatedOffsetForPart(p, effOffsets[p.id] || null);
+            const offVec = animatedOffsetMap.get(p.id) || [0, 32, 0];
             for (const li of leafIndices) {
               newPartIdx.push(li);
               newPartOffsets.push(offVec);
@@ -26900,11 +26901,10 @@ async function buildInteractiveHtmlArtifact(mode: 'export' | 'preview' = 'export
             }
             pliEntries = Array.from(pliMap.values());
           }
-          const isSubmodelStep = Boolean(step.isSubmodelStep || ch.kind === 'submodel');
-          const submodelName = isSubmodelStep ? (ch.name || pg.chapterName || 'Submodel') : undefined;
-          const submodelRepeat = (isSubmodelStep && step.isSubmodelFinal && Number(step.submodelRepeat) > 1)
-            ? Number(step.submodelRepeat)
-            : undefined;
+          const isSubmodelStep = Boolean((step.isSubmodelStep || ch.kind === 'submodel') && !step.attachedSubmodel);
+          const submodelThumbKey = isSubmodelStep ? ensureSubmodelThumb(ch) : undefined;
+          const rawSubRep = Number(step.submodelRepeat || ch.repeatCount || 1);
+          const submodelRepeat = (isSubmodelStep && rawSubRep > 1) ? rawSubRep : undefined;
           const effectiveCue = getEffectiveStepCue(ch, step);
           const hasCue = Boolean(state.showRotCues && effectiveCue && effectiveCue !== 'none');
           const cueLabel = hasCue ? getRotationCueLabel(effectiveCue, wordless) : undefined;
@@ -26920,7 +26920,7 @@ async function buildInteractiveHtmlArtifact(mode: 'export' | 'preview' = 'export
             rotationCueKind: hasCue ? effectiveCue : undefined,
             subLabel,
             isSubmodelStep: isSubmodelStep || undefined,
-            submodelName,
+            submodelThumbKey,
             submodelRepeat,
             pli: pliEntries,
             previewUrl: allSteps.length <= 24
@@ -26998,6 +26998,7 @@ async function buildInteractiveHtmlArtifact(mode: 'export' | 'preview' = 'export
       skipStaticFallback: isPreview,
       prototypes,
       textures,
+      submodelThumbs: Object.keys(submodelThumbs).length > 0 ? submodelThumbs : undefined,
       parts: exportedParts,
       pages: exportPages,
     });
