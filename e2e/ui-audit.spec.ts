@@ -173,6 +173,12 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     await expect(page.locator('#settingsModal')).toBeVisible();
 
     await page.locator('[data-settings-defaults-mode="builtin"]').click();
+    await page.locator('[data-settings-appearance="dark"]').click();
+    await expect(page.locator('html')).toHaveAttribute('data-appearance', 'dark');
+    await page.locator('[data-settings-appearance="light"]').click();
+    await expect(page.locator('html')).toHaveAttribute('data-appearance', 'light');
+    await page.locator('[data-settings-appearance="system"]').click();
+    await expect(page.locator('html')).not.toHaveAttribute('data-appearance', /.+/);
     await page.locator('#btnCloseSettings').click();
     await expect(page.locator('#settingsModal')).toBeHidden();
 

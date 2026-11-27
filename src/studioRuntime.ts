@@ -8496,7 +8496,18 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
 // =========================================================================
 // 4. APPLICATION STATE, UNDO/REDO STACK & PAGINATION
 // =========================================================================
+function applyAppAppearance(mode: 'system' | 'light' | 'dark') {
+  const root = document.documentElement;
+  if (!root) return;
+  if (mode === 'light' || mode === 'dark') {
+    root.setAttribute('data-appearance', mode);
+  } else {
+    root.removeAttribute('data-appearance');
+  }
+}
+
 let appSettings = loadAppSettings();
+applyAppAppearance(appSettings.appearance);
 const initialWordlessDefaults = getWordlessSurfaceDefaults(DEFAULT_WORDLESS_MODE);
 const state = {
   model: null,
@@ -28525,6 +28536,7 @@ document.getElementById('fileInput').onchange = async (e) => {
 // ============================================================================
 function persistAndSyncAppSettings(next) {
   appSettings = normalizeAppSettings(next);
+  applyAppAppearance(appSettings.appearance);
   saveAppSettings(appSettings);
   syncMenuControls();
   renderSettingsModalUI();
@@ -28638,6 +28650,12 @@ function renderSettingsModalUI() {
   if (subInput && document.activeElement !== subInput) {
     subInput.value = appSettings.defaultCoverSubtitle || '';
   }
+
+  document.querySelectorAll('.settings-appearance-btn').forEach((b) => {
+    const act = b.getAttribute('data-settings-appearance') === appSettings.appearance;
+    b.setAttribute('aria-pressed', act ? 'true' : 'false');
+    stylePillBtn(b, act);
+  });
 
   document.querySelectorAll('.settings-unit-btn').forEach((b) => {
     const act = b.getAttribute('data-settings-unit') === appSettings.measurementUnit;
@@ -28794,6 +28812,14 @@ if (settingsDefCoverSubtitleEl) {
     saveAppSettings(appSettings);
   };
 }
+
+document.querySelectorAll('.settings-appearance-btn').forEach((b) => {
+  b.onclick = () => {
+    const mode = b.getAttribute('data-settings-appearance');
+    const nextMode = mode === 'light' || mode === 'dark' ? mode : 'system';
+    persistAndSyncAppSettings({ ...appSettings, appearance: nextMode });
+  };
+});
 
 document.querySelectorAll('.settings-unit-btn').forEach((b) => {
   b.onclick = () => {

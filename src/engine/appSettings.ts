@@ -16,6 +16,7 @@ export type ImportWizardPromptMode = 'always' | 'when_needed' | 'never';
 export type DesktopSideMenuStartup = 'expanded' | 'collapsed' | 'remember';
 export type MissingPartsFetchPolicy = 'ask' | 'auto' | 'never';
 export type MeasurementUnit = 'in' | 'cm';
+export type AppAppearanceMode = 'system' | 'light' | 'dark';
 export type PageDensityMode = 'compact' | 'balanced' | 'spacious';
 export type PageOrientationMode = 'landscape' | 'portrait';
 
@@ -40,6 +41,7 @@ export interface AppSettings {
   importWizardMode: ImportWizardPromptMode;
   defaultCreatorLogoSrc: string | null;
   defaultCoverSubtitle: string;
+  appearance: AppAppearanceMode;
   measurementUnit: MeasurementUnit;
   desktopSideMenuStartup: DesktopSideMenuStartup;
   lastDesktopSideMenuExpanded: boolean;
@@ -50,6 +52,7 @@ const VALID_DEFAULTS_MODES = new Set<ImportDefaultsMode>(['builtin', 'custom', '
 const VALID_WIZARD_MODES = new Set<ImportWizardPromptMode>(['always', 'when_needed', 'never']);
 const VALID_MENU_STARTUP = new Set<DesktopSideMenuStartup>(['expanded', 'collapsed', 'remember']);
 const VALID_MISSING_PARTS_POLICY = new Set<MissingPartsFetchPolicy>(['ask', 'auto', 'never']);
+const VALID_APPEARANCE_MODES = new Set<AppAppearanceMode>(['system', 'light', 'dark']);
 const VALID_UNITS = new Set<MeasurementUnit>(['in', 'cm']);
 const VALID_DENSITIES = new Set<PageDensityMode>(['compact', 'balanced', 'spacious']);
 const VALID_ORIENTATIONS = new Set<PageOrientationMode>(['landscape', 'portrait']);
@@ -99,6 +102,7 @@ export function createDefaultAppSettings(): AppSettings {
     importWizardMode: 'always',
     defaultCreatorLogoSrc: null,
     defaultCoverSubtitle: '',
+    appearance: 'system',
     measurementUnit: 'in',
     desktopSideMenuStartup: 'expanded',
     lastDesktopSideMenuExpanded: true,
@@ -166,6 +170,9 @@ export function normalizeAppSettings(
   )
     ? (raw.missingPartsPolicy as MissingPartsFetchPolicy)
     : def.missingPartsPolicy;
+  const appearance = VALID_APPEARANCE_MODES.has(raw.appearance as AppAppearanceMode)
+    ? (raw.appearance as AppAppearanceMode)
+    : def.appearance;
   const measurementUnit = VALID_UNITS.has(raw.measurementUnit as MeasurementUnit)
     ? (raw.measurementUnit as MeasurementUnit)
     : def.measurementUnit;
@@ -187,6 +194,7 @@ export function normalizeAppSettings(
     importWizardMode,
     defaultCreatorLogoSrc,
     defaultCoverSubtitle,
+    appearance,
     measurementUnit,
     desktopSideMenuStartup,
     lastDesktopSideMenuExpanded:
@@ -292,6 +300,7 @@ export function summarizeAppSettings(settings: AppSettings): string {
     settings.importWizardMode !== def.importWizardMode ||
     Boolean(settings.defaultCreatorLogoSrc) ||
     settings.defaultCoverSubtitle.trim().length > 0 ||
+    settings.appearance !== def.appearance ||
     settings.measurementUnit !== def.measurementUnit ||
     settings.desktopSideMenuStartup !== def.desktopSideMenuStartup ||
     settings.missingPartsPolicy !== def.missingPartsPolicy;
