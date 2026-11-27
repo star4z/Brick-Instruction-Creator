@@ -627,6 +627,22 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     await ensureMenuOpen(page);
     await page.locator('#menuBomSetupBtn').click();
     await expect(page.locator('#bomSetupModal')).toBeVisible();
+    const minSizeMetrics = await page.locator('.bom-minsize-btn').evaluateAll((buttons) =>
+      buttons.map((btn) => {
+        const rect = btn.getBoundingClientRect();
+        const labelRects = Array.from(btn.querySelectorAll('span > span')).map((s) => s.getBoundingClientRect());
+        return {
+          height: Math.round(rect.height),
+          overflowX: btn.scrollWidth > btn.clientWidth + 1,
+          labelLineHeights: labelRects.map((r) => Math.round(r.height)),
+        };
+      }),
+    );
+    expect(minSizeMetrics).toHaveLength(4);
+    for (const m of minSizeMetrics) {
+      expect(m.height).toBe(minSizeMetrics[0].height);
+      expect(m.overflowX).toBe(false);
+    }
     await auditSurface(page, `${testInfo.project.name}: Parts List Setup (Grid Auto)`, {
       activeContainerSelector: '#bomSetupModal',
     });
