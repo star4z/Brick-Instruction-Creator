@@ -544,6 +544,9 @@ export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload)
   const glassBg = effectiveIsDark ? 'rgba(24, 28, 38, 0.88)' : 'rgba(255, 255, 255, 0.90)';
   const glassBorder = effectiveIsDark ? 'rgba(255, 255, 255, 0.18)' : 'rgba(15, 23, 42, 0.14)';
   const glassText = effectiveIsDark ? '#f8fafc' : '#0f172a';
+  const scrubTrack = effectiveIsDark ? 'rgba(255, 255, 255, 0.22)' : 'rgba(15, 23, 42, 0.16)';
+  const showTopEditorLink = !payload.skipStaticFallback && !wordless;
+  const topOffsetCss = showTopEditorLink ? 'calc(max(12px, env(safe-area-inset-top)) + 52px)' : 'max(12px, env(safe-area-inset-top))';
   const staticFallbackHtml = buildStaticFallbackHtml(payload, safeEditorUrl);
 
   // Strip static fallback preview URLs and embedded font binaries from the JS 3D payload to avoid duplicating bytes in RAM
@@ -589,6 +592,7 @@ ${customFontFacesCss}  :root {
     --glass-bg: ${glassBg};
     --glass-border: ${glassBorder};
     --glass-text: ${glassText};
+    --scrub-track: ${scrubTrack};
     --font-body: ${bodyFontStack};
     --font-heading: ${headingFontStack};
   }
@@ -735,7 +739,7 @@ ${customFontFacesCss}  :root {
   .editor-link:hover { opacity: 1; }
 
   .hero-overlay {
-    position: fixed; top: calc(max(12px, env(safe-area-inset-top)) + 52px); left: 50%; transform: translateX(-50%); z-index: 15;
+    position: fixed; top: ${topOffsetCss}; left: 50%; transform: translateX(-50%); z-index: 15;
     width: min(calc(100vw - 116px), 520px); text-align: center; pointer-events: none;
     display: flex; flex-direction: column; align-items: center; gap: 6px;
   }
@@ -757,15 +761,20 @@ ${customFontFacesCss}  :root {
   }
 
   .step-hud {
-    position: fixed; top: calc(max(12px, env(safe-area-inset-top)) + 52px); left: 12px; z-index: 15;
-    display: flex; flex-direction: column; align-items: flex-start; gap: 8px;
-    max-width: min(64vw, 380px); pointer-events: none;
+    position: fixed; top: ${topOffsetCss}; left: 12px; z-index: 15;
+    display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
+    max-width: min(calc(100vw - 68px), 420px); pointer-events: none;
   }
   .step-hud > * { pointer-events: auto; }
   .step-header-card {
-    display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-radius: 18px;
+    display: flex; align-items: center; gap: 10px; padding: 2px 4px;
+    color: var(--text);
   }
-  .step-num-big { font-size: 30px; font-weight: 900; line-height: 1; letter-spacing: -0.03em; }
+  .step-num-big {
+    font-size: 32px; font-weight: 900; line-height: 1; letter-spacing: -0.03em;
+    color: var(--text);
+    text-shadow: 0 2px 10px rgba(0,0,0,0.28);
+  }
   .step-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .step-chapter { font-size: 11px; font-weight: 700; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
   .sf-rot-badge {
@@ -774,7 +783,7 @@ ${customFontFacesCss}  :root {
   }
   .step-cue {
     display: inline-flex; align-items: center; gap: 7px; padding: 0;
-    background: transparent; color: var(--glass-text); border: none;
+    background: transparent; color: var(--text); border: none;
     font-size: 13px; font-weight: 800; width: fit-content; box-shadow: none;
   }
   .step-cue-icon {
@@ -784,21 +793,21 @@ ${customFontFacesCss}  :root {
   }
 
   .pli-panel {
-    border-radius: 16px; padding: 8px 10px; max-width: min(88vw, 360px); max-height: 34vh; overflow-y: auto;
+    border-radius: 14px; padding: 6px 8px; max-width: min(calc(100vw - 68px), 420px); max-height: 22vh; overflow-y: auto;
     background: var(--pli-bg); border: 1.5px solid var(--pli-border);
-    box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.14);
   }
-  .pli-grid { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .pli-grid { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
   .pli-item {
-    display: flex; align-items: center; gap: 6px; padding: 4px 7px; border-radius: 10px;
+    display: flex; align-items: center; gap: 5px; padding: 3px 6px; border-radius: 9px;
     background: rgba(127,127,127,0.08);
   }
-  .pli-item img { width: 34px; height: 34px; object-fit: contain; display: block; }
+  .pli-item img { width: 30px; height: 30px; object-fit: contain; display: block; }
   .pli-qty { font-size: 13px; font-weight: 800; line-height: 1; }
   .pli-id { font-size: 10px; color: var(--muted); font-weight: 600; }
 
   .cam-tools {
-    position: fixed; right: 12px; top: calc(max(12px, env(safe-area-inset-top)) + 52px); z-index: 15;
+    position: fixed; right: 12px; top: ${topOffsetCss}; z-index: 15;
     display: flex; flex-direction: column; gap: 6px;
   }
   .tool-btn {
@@ -819,8 +828,8 @@ ${customFontFacesCss}  :root {
 
   .bottom-dock {
     position: fixed; bottom: max(14px, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); z-index: 20;
-    width: min(94vw, 560px); border-radius: 24px; padding: 8px 10px;
-    display: flex; flex-direction: column; gap: 6px;
+    width: min(94vw, 560px); border-radius: 24px; padding: 8px 10px 10px;
+    display: flex; flex-direction: column; gap: 8px;
   }
   .dock-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
   .nav-btn {
@@ -837,7 +846,22 @@ ${customFontFacesCss}  :root {
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   .page-btn:hover { background: rgba(127,127,127,0.12); }
-  .scrubber { width: 100%; accent-color: var(--accent); height: 4px; cursor: pointer; margin: 0; }
+  .scrubber {
+    -webkit-appearance: none; appearance: none;
+    width: 100%; height: 5px; border-radius: 999px; outline: none; cursor: pointer; margin: 2px 0;
+    background: linear-gradient(to right, var(--accent) var(--scrub-pct, 0%), var(--scrub-track) var(--scrub-pct, 0%));
+  }
+  .scrubber::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 16px; height: 16px; border-radius: 999px;
+    background: var(--accent); border: 2px solid var(--glass-text);
+    box-shadow: 0 1px 5px rgba(0,0,0,0.35); cursor: pointer;
+  }
+  .scrubber::-moz-range-thumb {
+    width: 16px; height: 16px; border-radius: 999px;
+    background: var(--accent); border: 2px solid var(--glass-text);
+    box-shadow: 0 1px 5px rgba(0,0,0,0.35); cursor: pointer;
+  }
 
   .flat-view {
     position: absolute; inset: 0; z-index: 16; overflow-y: auto; padding: 74px 16px 116px;
@@ -887,16 +911,23 @@ ${customFontFacesCss}  :root {
   .drawer-jump-top { top: 8px; }
   .drawer-jump-bottom { bottom: 8px; }
   .drawer-item {
-    display: flex; align-items: center; justify-content: space-between; gap: 8px;
-    width: 100%; padding: 10px 12px; border-radius: 14px; border: 1px solid var(--glass-border);
-    background: transparent; color: var(--text); font-size: 12px; font-weight: 700; cursor: pointer; text-align: left;
+    display: flex; align-items: center; gap: 10px;
+    width: 100%; padding: 6px 10px; border-radius: 14px; border: 1px solid var(--glass-border);
+    background: transparent; color: var(--glass-text); font-size: 13px; font-weight: 700; cursor: pointer; text-align: left;
   }
   .drawer-item.active { background: var(--accent); color: #fff; border-color: transparent; }
-  .drawer-num { font-size: 11px; opacity: 0.72; flex-shrink: 0; }
+  .drawer-thumb {
+    width: 56px; height: 42px; border-radius: 8px; flex-shrink: 0; overflow: hidden;
+    background: var(--page-bg); border: 1px solid var(--glass-border);
+    display: inline-flex; align-items: center; justify-content: center; color: var(--muted);
+  }
+  .drawer-item.active .drawer-thumb { border-color: rgba(255,255,255,0.35); }
+  .drawer-thumb img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .drawer-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   @media (max-width: 600px) {
-    .step-num-big { font-size: 24px; }
-    .pli-panel { max-height: 24vh; }
+    .step-num-big { font-size: 28px; }
+    .pli-panel { max-height: 20vh; }
     .dock-row { gap: 4px; }
     .nav-btn { height: 34px; padding: 0 10px; font-size: 12px; }
     .nav-btn.icon-only { width: 34px; padding: 0; }
@@ -907,16 +938,11 @@ ${customFontFacesCss}  :root {
 ${staticFallbackHtml}
 
 <div id="interactiveApp" class="app">
-  <header class="topbar">
-    <button id="btnPagesTop" class="pill title-pill" type="button" title="Browse pages" aria-label="Browse pages">
-      ${wordless
-        ? `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="7" height="7" rx="1.4"/><rect x="14" y="4" width="7" height="7" rx="1.4"/><rect x="3" y="13" width="7" height="7" rx="1.4"/><rect x="14" y="13" width="7" height="7" rx="1.4"/></svg>`
-        : `<span>${safeTitle}</span>`}
-    </button>
-    ${payload.skipStaticFallback || wordless ? '' : `<a class="pill editor-link" href="${safeEditorUrl}" target="_blank" rel="noopener noreferrer" title="Open ${TOOL_DISPLAY_NAME}" aria-label="${TOOL_DISPLAY_NAME}">
+  ${showTopEditorLink ? `<header class="topbar" style="justify-content:flex-end">
+    <a class="pill editor-link" href="${safeEditorUrl}" target="_blank" rel="noopener noreferrer" title="Open ${TOOL_DISPLAY_NAME}" aria-label="${TOOL_DISPLAY_NAME}">
       <span>${TOOL_DISPLAY_NAME} ↗</span>
-    </a>`}
-  </header>
+    </a>
+  </header>` : ''}
 
   <div class="stage-wrap">
     <canvas id="glStage"></canvas>
@@ -937,7 +963,7 @@ ${staticFallbackHtml}
     <div id="flatView" class="flat-view"></div>
   </div>
 
-  <footer class="bottom-dock glass">
+  <footer id="bottomDock" class="bottom-dock glass">
     <div class="dock-row">
       <button id="btnFirst" class="nav-btn icon-only" type="button" title="First page" aria-label="First page">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m17 18-6-6 6-6"/><path d="M7 6v12"/></svg>
@@ -951,10 +977,6 @@ ${staticFallbackHtml}
     </div>
     <input id="pageScrubber" class="scrubber" type="range" min="0" max="0" value="0" aria-label="Jump to step" />
   </footer>
-  <div id="viewerProgressBar" aria-hidden="true" style="position:fixed;left:16px;right:16px;bottom:3px;height:4px;border-radius:999px;background:rgba(100,116,139,0.24);z-index:40;pointer-events:none">
-    <div id="viewerProgressFill" style="height:100%;width:0%;border-radius:999px;background:var(--accent);transition:width .18s ease"></div>
-    <div id="viewerProgressBead" style="position:absolute;top:50%;left:0%;width:9px;height:9px;transform:translate(-50%,-50%);border-radius:999px;background:var(--accent);border:1.5px solid #0f172a;transition:left .18s ease"></div>
-  </div>
 
   <div id="drawerBackdrop" class="drawer-backdrop" role="dialog" aria-modal="true" aria-label="Pages and steps">
     <div class="drawer glass">
@@ -1643,19 +1665,41 @@ ${staticFallbackHtml}
     });
   }
 
-  function drawScene() {
-    if (!activeScene) return;
-    const rect = canvas.getBoundingClientRect();
-    const isCompactViewport = (navigator.maxTouchPoints || 0) > 0 || window.innerWidth < 1024;
-    const maxDpr = isCompactViewport ? 2 : 2.5;
-    const maxDim = isCompactViewport ? 2048 : 2560;
-    const dpr = Math.min(Math.max(window.devicePixelRatio || 1, 1), maxDpr);
-    const rawW = Math.max(100, Math.round((rect.width || window.innerWidth) * dpr));
-    const rawH = Math.max(100, Math.round((rect.height || window.innerHeight) * dpr));
-    const dimScale = Math.min(1, maxDim / Math.max(rawW, rawH));
-    const w = Math.max(100, Math.round(rawW * dimScale));
-    const h = Math.max(100, Math.round(rawH * dimScale));
-    if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+  function computeStageVerticalFraming(rect) {
+    const H = Math.max(100, rect.height || window.innerHeight || 600);
+    let topInset = 12;
+    const stepHudEl = document.getElementById('stepHud');
+    const heroEl = document.getElementById('heroOverlay');
+    if (stepHudEl && stepHudEl.style.display !== 'none') {
+      const hr = stepHudEl.getBoundingClientRect();
+      if (hr.height > 0) topInset = Math.max(topInset, hr.bottom - rect.top + 10);
+    } else if (heroEl && heroEl.style.display !== 'none') {
+      const hr = heroEl.getBoundingClientRect();
+      if (hr.height > 0) topInset = Math.max(topInset, hr.bottom - rect.top + 10);
+    }
+    topInset = Math.min(topInset, H * 0.45);
+    let bottomInset = 92;
+    const dockEl = document.getElementById('bottomDock');
+    if (dockEl) {
+      const dr = dockEl.getBoundingClientRect();
+      if (dr.height > 0) bottomInset = Math.max(12, rect.bottom - dr.top + 10);
+    }
+    bottomInset = Math.min(bottomInset, H * 0.32);
+    const availH = Math.max(120, H - topInset - bottomInset);
+    const clearCenterY = topInset + availH * 0.5;
+    const ndcShiftY = ((H * 0.5) - clearCenterY) / Math.max(1, H * 0.5);
+    const fitScale = Math.max(1.0, (H * 0.88) / availH);
+    return { ndcShiftY, fitScale };
+  }
+
+  function renderSceneIntoViewport(scene, bounds, viewCam, w, h, opts) {
+    if (!scene) return;
+    const isThumb = Boolean(opts && opts.isThumb);
+    const ndcShiftY = (opts && opts.ndcShiftY) || 0;
+    const fitScale = (opts && opts.fitScale) || 1.0;
+    const liftVal = isThumb ? 0 : explodeLift;
+    const useXray = isThumb ? false : xrayPrev;
+    const useHl = isThumb ? false : highlightNew;
 
     gl.viewport(0, 0, w, h);
     gl.clearColor(0, 0, 0, 0);
@@ -1664,28 +1708,28 @@ ${staticFallbackHtml}
     gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     gl.enable(gl.POLYGON_OFFSET_FILL); gl.polygonOffset(1.0, 1.0);
 
-    const az = cam.az * Math.PI / 180;
-    const el = cam.el * Math.PI / 180;
-    const c = activeBounds.center;
-    const r = activeBounds.radius;
+    const az = viewCam.az * Math.PI / 180;
+    const el = viewCam.el * Math.PI / 180;
+    const c = bounds.center;
+    const r = bounds.radius;
     const dist = r * 3.0;
     const eye = [c[0] + dist*Math.sin(az)*Math.cos(el), c[1] + dist*Math.sin(el), c[2] + dist*Math.cos(az)*Math.cos(el)];
     const view = lookAtMat4(eye, c, [0, 1, 0]);
-    const halfH = (r * 1.38) / Math.max(0.35, cam.zoom);
+    const halfH = (r * 1.38 * fitScale) / Math.max(0.35, viewCam.zoom);
     const halfW = halfH * (w / Math.max(1, h));
-    const pxX = cam.panX * halfW;
-    const pxY = cam.panY * halfH;
+    const pxX = (viewCam.panX || 0) * halfW;
+    const pxY = (viewCam.panY || 0) * halfH - ndcShiftY * halfH;
     const vp = mulMat4(orthoMat4(-halfW - pxX, halfW - pxX, -halfH + pxY, halfH + pxY, Math.max(1, dist - r * 3.2), dist + r * 3.2), view);
 
     const vdir = [Math.sin(az)*Math.cos(el), Math.sin(el), Math.cos(az)*Math.cos(el)];
-    const isHero = activeScene.hero ? 1.0 : 0.0;
-    const isUnlit = (DATA.unlit && !activeScene.hero) ? 1.0 : 0.0;
-    const prevIdx = activeScene.prevPartIdx || [];
-    const newIdx = activeScene.newPartIdx || [];
+    const isHero = scene.hero ? 1.0 : 0.0;
+    const isUnlit = (DATA.unlit && !scene.hero) ? 1.0 : 0.0;
+    const prevIdx = scene.prevPartIdx || [];
+    const newIdx = scene.newPartIdx || [];
 
     const drawGroups = [
-      { list: prevIdx, fade: xrayPrev ? 0.78 : (fadePrev ? fadeMixVal : 0.0), hl: false, isNewGrp: false },
-      { list: newIdx, fade: 0.0, hl: highlightNew && prevIdx.length > 0, isNewGrp: true },
+      { list: prevIdx, fade: useXray ? 0.78 : (fadePrev ? fadeMixVal : 0.0), hl: false, isNewGrp: false },
+      { list: newIdx, fade: 0.0, hl: useHl && prevIdx.length > 0, isNewGrp: true },
     ];
 
     // 1. Opaque triangles
@@ -1700,7 +1744,7 @@ ${staticFallbackHtml}
     const liftM4 = new Float32Array(16);
     for (const grp of drawGroups) {
       gl.uniform1f(progs.tri.fade, grp.fade);
-      const yLift = grp.isNewGrp && explodeLift > 0 ? explodeLift * 0.45 : 0;
+      const yLift = grp.isNewGrp && liftVal > 0 ? liftVal * 0.45 : 0;
       for (let i = 0; i < grp.list.length; i++) {
         const pm = partMats[grp.list[i]];
         if (!pm) continue;
@@ -1807,7 +1851,7 @@ ${staticFallbackHtml}
     }
 
     // 5. Placement arrows (default: flat 2D, unlit, no outlines, stud-aligned to current camera azimuth)
-    const arrowGpu = buildArrowGpu(activeScene, cam.az, cam.el);
+    const arrowGpu = isThumb ? null : buildArrowGpu(scene, viewCam.az, viewCam.el);
     if (arrowGpu) {
       if (arrowGpu.count > 0) {
         gl.useProgram(progs.tri.p);
@@ -1837,6 +1881,104 @@ ${staticFallbackHtml}
         gl.drawArrays(gl.LINES, 0, arrowGpu.lineCount);
       }
     }
+  }
+
+  function drawScene() {
+    if (!activeScene) return;
+    const rect = canvas.getBoundingClientRect();
+    const isCompactViewport = (navigator.maxTouchPoints || 0) > 0 || window.innerWidth < 1024;
+    const maxDpr = isCompactViewport ? 2 : 2.5;
+    const maxDim = isCompactViewport ? 2048 : 2560;
+    const dpr = Math.min(Math.max(window.devicePixelRatio || 1, 1), maxDpr);
+    const rawW = Math.max(100, Math.round((rect.width || window.innerWidth) * dpr));
+    const rawH = Math.max(100, Math.round((rect.height || window.innerHeight) * dpr));
+    const dimScale = Math.min(1, maxDim / Math.max(rawW, rawH));
+    const w = Math.max(100, Math.round(rawW * dimScale));
+    const h = Math.max(100, Math.round(rawH * dimScale));
+    if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+    const framing = computeStageVerticalFraming(rect);
+    renderSceneIntoViewport(activeScene, activeBounds, cam, w, h, framing);
+  }
+
+  const THUMB_W = 112;
+  const THUMB_H = 84;
+  let thumb2dCanvas = null;
+  let thumb2dCtx = null;
+  const drawerThumbCache = new Map();
+  let drawerThumbObserver = null;
+  let drawerThumbQueue = [];
+  let drawerThumbPumpScheduled = false;
+
+  function renderDrawerThumbToDataUrl(item) {
+    const sc = item && (item.step || item.page.scene);
+    if (!sc) return '';
+    if (canvas.width < THUMB_W || canvas.height < THUMB_H) {
+      canvas.width = Math.max(canvas.width || 0, THUMB_W);
+      canvas.height = Math.max(canvas.height || 0, THUMB_H);
+    }
+    if (!thumb2dCanvas) {
+      thumb2dCanvas = document.createElement('canvas');
+      thumb2dCanvas.width = THUMB_W;
+      thumb2dCanvas.height = THUMB_H;
+      thumb2dCtx = thumb2dCanvas.getContext('2d');
+    }
+    if (!thumb2dCtx) return '';
+    const allIdx = [...(sc.prevPartIdx || []), ...(sc.newPartIdx || [])];
+    const bounds = computeSceneBounds(allIdx);
+    const tCam = { az: sc.az ?? 38, el: sc.el ?? 28, zoom: sc.zoom ?? 1.0, panX: 0, panY: 0 };
+    gl.enable(gl.SCISSOR_TEST);
+    gl.scissor(0, 0, THUMB_W, THUMB_H);
+    renderSceneIntoViewport(sc, bounds, tCam, THUMB_W, THUMB_H, { isThumb: true });
+    gl.disable(gl.SCISSOR_TEST);
+    thumb2dCtx.clearRect(0, 0, THUMB_W, THUMB_H);
+    thumb2dCtx.drawImage(canvas, 0, canvas.height - THUMB_H, THUMB_W, THUMB_H, 0, 0, THUMB_W, THUMB_H);
+    try {
+      return thumb2dCanvas.toDataURL('image/png');
+    } catch (_) {
+      return '';
+    }
+  }
+
+  function pumpDrawerThumbs() {
+    drawerThumbPumpScheduled = false;
+    const backdrop = document.getElementById('drawerBackdrop');
+    if (!backdrop || !backdrop.classList.contains('open') || drawerThumbQueue.length === 0) return;
+    let rendered = 0;
+    while (drawerThumbQueue.length > 0 && rendered < 3) {
+      const idx = drawerThumbQueue.shift();
+      const slot = document.querySelector('#drawerList [data-thumb-idx="' + idx + '"]');
+      if (!slot || slot.getAttribute('data-thumb-loaded') === '1') continue;
+      let url = drawerThumbCache.get(idx);
+      if (!url) {
+        url = renderDrawerThumbToDataUrl(viewerItems[idx]);
+        if (url) {
+          if (drawerThumbCache.size >= 60) {
+            const firstKey = drawerThumbCache.keys().next().value;
+            if (firstKey !== undefined) drawerThumbCache.delete(firstKey);
+          }
+          drawerThumbCache.set(idx, url);
+        }
+      }
+      if (url) {
+        slot.innerHTML = '<img src="' + url + '" alt="" />';
+        slot.setAttribute('data-thumb-loaded', '1');
+      }
+      rendered++;
+    }
+    if (rendered > 0 && activeScene) drawScene();
+    if (drawerThumbQueue.length > 0) {
+      drawerThumbPumpScheduled = true;
+      requestAnimationFrame(pumpDrawerThumbs);
+    }
+  }
+
+  function closeDrawer() {
+    document.getElementById('drawerBackdrop').classList.remove('open');
+    if (drawerThumbObserver) {
+      drawerThumbObserver.disconnect();
+      drawerThumbObserver = null;
+    }
+    drawerThumbQueue = [];
   }
 
   const pointers = new Map();
@@ -1951,14 +2093,6 @@ ${staticFallbackHtml}
     const pg = item.page;
     const step = item.step;
 
-    const pFill = document.getElementById('viewerProgressFill');
-    const pBead = document.getElementById('viewerProgressBead');
-    if (pFill && pBead) {
-      const pct = viewerItems.length > 1 ? Math.max(0, Math.min(100, (curIdx / (viewerItems.length - 1)) * 100)) : 100;
-      pFill.style.width = pct.toFixed(2) + '%';
-      pBead.style.left = pct.toFixed(2) + '%';
-    }
-
     const heroEl = document.getElementById('heroOverlay');
     const stepHud = document.getElementById('stepHud');
     const camTools = document.getElementById('camTools');
@@ -2003,7 +2137,6 @@ ${staticFallbackHtml}
         btnExplode.classList.remove('active');
       }
       try { localStorage.setItem(STORAGE_KEY, String(curIdx)); } catch {}
-      requestDraw();
     } else {
       canvas.style.display = 'none';
       camTools.style.display = 'none';
@@ -2038,11 +2171,11 @@ ${staticFallbackHtml}
           ? '<span class="step-cue" style="' + (step.rotationCue ? '' : 'padding:3px') + '"><span class="step-cue-icon">' + rotIconSvg(step.rotationCueKind) + '</span>' + (step.rotationCue ? '<span>' + esc(step.rotationCue) + '</span>' : '') + '</span>'
           : '');
       stepHud.innerHTML =
-        '<div class="step-header-card glass">' +
+        pliHtml +
+        '<div class="step-header-card">' +
           '<div class="step-num-big">' + step.stepNum + '</div>' +
           (metaInner ? '<div class="step-meta">' + metaInner + '</div>' : '') +
-        '</div>' +
-        pliHtml;
+        '</div>';
       stepHud.style.display = 'flex';
     } else if (pg.kind === 'cover' || pg.kind === 'complete' || pg.kind === 'section_divider' || pg.kind === 'submodel_page' || pg.kind === 'back') {
       const ctaBtn = pg.kind === 'back'
@@ -2195,8 +2328,12 @@ ${staticFallbackHtml}
       pgPicker.textContent = stepText + ' · ' + (curIdx + 1) + ' / ' + viewerItems.length;
     }
     const scrub = document.getElementById('pageScrubber');
-    scrub.max = String(Math.max(0, viewerItems.length - 1));
+    const maxScrub = Math.max(0, viewerItems.length - 1);
+    scrub.max = String(maxScrub);
     scrub.value = String(curIdx);
+    const scrubPct = maxScrub > 0 ? (curIdx / maxScrub) * 100 : 100;
+    scrub.style.setProperty('--scrub-pct', scrubPct.toFixed(2) + '%');
+    if (scene) requestDraw();
   }
 
   function syncDrawerScrollButtons() {
@@ -2232,19 +2369,34 @@ ${staticFallbackHtml}
   function openDrawer() {
     const isWordless = Boolean(DATA.wordless);
     const list = document.getElementById('drawerList');
+    const bomIcon = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.6"/></svg>';
+    const docIcon = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><line x1="8" x2="16" y1="8" y2="8"/><line x1="8" x2="16" y1="12" y2="12"/><line x1="8" x2="12" y1="16" y2="16"/></svg>';
+    if (drawerThumbObserver) {
+      drawerThumbObserver.disconnect();
+      drawerThumbObserver = null;
+    }
+    drawerThumbQueue = [];
     list.innerHTML = viewerItems.map((it, idx) => {
       const label = isWordless
-        ? (it.step ? String(it.step.stepNum) : (it.page.bagNumber ? '#' + it.page.bagNumber : (it.page.badge || String(it.page.num))))
+        ? (it.step ? String(it.step.stepNum) : (it.page.bagNumber ? '#' + it.page.bagNumber : (it.page.badge || it.page.label || String(idx + 1))))
         : (it.step ? ('Step ' + it.step.stepNum + (it.page.chapterName ? ' · ' + it.page.chapterName : '')) : it.page.label);
+      const hasScene = Boolean(it.step || it.page.scene);
+      const cachedUrl = hasScene ? drawerThumbCache.get(idx) : '';
+      const thumbInner = hasScene
+        ? (cachedUrl ? '<img src="' + cachedUrl + '" alt="" />' : '')
+        : (it.page.kind === 'bom' ? bomIcon : docIcon);
+      const thumbAttr = hasScene
+        ? ' data-thumb-idx="' + idx + '"' + (cachedUrl ? ' data-thumb-loaded="1"' : '')
+        : '';
       return '<button type="button" class="drawer-item ' + (idx === curIdx ? 'active' : '') + '" data-idx="' + idx + '">' +
-        '<span>' + esc(label) + '</span>' +
-        '<span class="drawer-num">' + (idx + 1) + '</span>' +
+        '<span class="drawer-thumb"' + thumbAttr + '>' + thumbInner + '</span>' +
+        '<span class="drawer-label">' + esc(label) + '</span>' +
       '</button>';
     }).join('');
     list.querySelectorAll('[data-idx]').forEach((btn) => {
       btn.onclick = () => {
         curIdx = Number(btn.getAttribute('data-idx'));
-        document.getElementById('drawerBackdrop').classList.remove('open');
+        closeDrawer();
         renderView();
       };
     });
@@ -2252,6 +2404,31 @@ ${staticFallbackHtml}
     const activeItem = list.querySelector('.drawer-item.active');
     if (activeItem && typeof activeItem.scrollIntoView === 'function') {
       activeItem.scrollIntoView({ block: 'center' });
+    }
+    const queueThumb = (idx) => {
+      if (drawerThumbQueue.indexOf(idx) < 0) drawerThumbQueue.push(idx);
+      if (!drawerThumbPumpScheduled) {
+        drawerThumbPumpScheduled = true;
+        requestAnimationFrame(pumpDrawerThumbs);
+      }
+    };
+    const slots = list.querySelectorAll('[data-thumb-idx]:not([data-thumb-loaded="1"])');
+    if (typeof IntersectionObserver === 'function') {
+      drawerThumbObserver = new IntersectionObserver((entries) => {
+        for (const ent of entries) {
+          if (!ent.isIntersecting) continue;
+          const idx = Number(ent.target.getAttribute('data-thumb-idx'));
+          if (Number.isFinite(idx)) queueThumb(idx);
+          if (drawerThumbObserver) drawerThumbObserver.unobserve(ent.target);
+        }
+      }, { root: list, rootMargin: '140px 0px' });
+      slots.forEach((s) => drawerThumbObserver.observe(s));
+    } else {
+      const start = Math.max(0, curIdx - 6);
+      const end = Math.min(viewerItems.length - 1, curIdx + 12);
+      for (let i = start; i <= end; i++) {
+        if (viewerItems[i].step || viewerItems[i].page.scene) queueThumb(i);
+      }
     }
     syncDrawerScrollButtons();
     requestAnimationFrame(syncDrawerScrollButtons);
@@ -2263,9 +2440,8 @@ ${staticFallbackHtml}
   document.getElementById('btnLast').onclick = () => { if (curIdx < viewerItems.length - 1) { curIdx = viewerItems.length - 1; renderView(); } };
   document.getElementById('pageScrubber').oninput = (e) => { curIdx = Number(e.target.value) || 0; renderView(); };
   document.getElementById('btnPagePicker').onclick = openDrawer;
-  document.getElementById('btnPagesTop').onclick = openDrawer;
-  document.getElementById('btnCloseDrawer').onclick = () => document.getElementById('drawerBackdrop').classList.remove('open');
-  document.getElementById('drawerBackdrop').onclick = (e) => { if (e.target.id === 'drawerBackdrop') e.target.classList.remove('open'); };
+  document.getElementById('btnCloseDrawer').onclick = closeDrawer;
+  document.getElementById('drawerBackdrop').onclick = (e) => { if (e.target.id === 'drawerBackdrop') closeDrawer(); };
   document.getElementById('drawerList').addEventListener('scroll', syncDrawerScrollButtons, { passive: true });
   document.getElementById('btnDrawerJumpTop').onclick = () => scrollDrawerTo('top');
   document.getElementById('btnDrawerJumpBottom').onclick = () => scrollDrawerTo('bottom');
@@ -2300,7 +2476,7 @@ ${staticFallbackHtml}
     else if (e.key === 'r' || e.key === 'R') { resetCameraSmooth(); }
     else if (e.key === '+' || e.key === '=') { cam.zoom = Math.min(4.8, cam.zoom * 1.15); requestDraw(); }
     else if (e.key === '-' || e.key === '_') { cam.zoom = Math.max(0.4, cam.zoom / 1.15); requestDraw(); }
-    else if (e.key === 'Escape') { document.getElementById('drawerBackdrop').classList.remove('open'); }
+    else if (e.key === 'Escape') { closeDrawer(); }
   });
   window.addEventListener('resize', () => { requestDraw(); syncDrawerScrollButtons(); });
 

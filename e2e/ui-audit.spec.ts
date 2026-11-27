@@ -957,6 +957,12 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     await expect(previewFrame.locator('html')).toHaveClass(/js-3d-active/, { timeout: 15_000 });
     await expect(previewFrame.locator('#glStage')).toBeVisible();
     await expect(previewFrame.locator('#btnNext')).toBeVisible();
+    // Open steps drawer via bottom dock picker and verify live 3D preview thumbnails render
+    await previewFrame.locator('#btnPagePicker').click();
+    await expect(previewFrame.locator('#drawerBackdrop')).toHaveClass(/open/);
+    await expect(previewFrame.locator('#drawerList .drawer-thumb img').first()).toBeVisible({ timeout: 10_000 });
+    await previewFrame.locator('#btnCloseDrawer').click();
+    await expect(previewFrame.locator('#drawerBackdrop')).not.toHaveClass(/open/);
     await auditSurface(page, `${testInfo.project.name}: Interactive 3D Viewer Preview Modal`);
     await page.locator('#btnCloseInteractiveHtmlPreview').click();
     await expect(page.locator('#interactiveHtmlPreviewModal')).toBeHidden();

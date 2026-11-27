@@ -128,7 +128,13 @@ describe('interactiveHtmlExporter', () => {
     expect(html).toContain('data:image/jpeg;base64,STEP1PREVIEW');
     expect(html).toContain('canvas id="glStage"');
     expect(html).not.toContain('id="heroStartBtn"');
+    expect(html).not.toContain('id="btnPagesTop"');
+    expect(html).not.toContain('id="viewerProgressBar"');
     expect(html).not.toContain('page-step-tabs');
+    expect(html).not.toContain('class="drawer-num"');
+    expect(html).toContain('class="drawer-thumb"');
+    expect(html).toContain('--scrub-track:');
+    expect(html).toContain('computeStageVerticalFraming');
     expect(html).toContain('id="btnToggleExplode"');
     expect(html).not.toContain('id="explodeSlider"');
     expect(html).toContain('lookAtMat4(eye, c, [0, 1, 0])');
