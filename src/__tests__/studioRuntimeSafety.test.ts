@@ -285,7 +285,7 @@ describe('studioRuntime safety checks', () => {
     expect(renderStyleChunk).toContain('Outline All Parts');
     expect(renderStyleChunk).toContain('data-hl-weight="extra-heavy"');
     expect(renderStyleChunk).toContain('data-outline-weight="extra-heavy"');
-    expect(renderStyleChunk).toContain('Fade Earlier Pieces');
+    expect(renderStyleChunk).toContain('Fade Earlier Parts');
 
     expect(runtime).toContain("querySelectorAll('.step-lighting-chip')");
     expect(runtime).toContain("getElementById('toggleStarkBlackOutlines')");
@@ -366,7 +366,6 @@ describe('studioRuntime safety checks', () => {
 
     // Static inline notice slots are strictly for undoable off-screen / cross-surface overrides
     for (const id of [
-      'impKeepNotice',
       'impActionNotice',
       'grpOverlapNotice',
       'wordlessToggleNotice',
@@ -889,7 +888,8 @@ describe('studioRuntime safety checks', () => {
     expect(stepGenHtml).not.toContain('imp-wordless-btn');
     expect(stepGenHtml).not.toContain('Instruction Language');
     expect(stepGenHtml).toContain('id="impProposalPicker"');
-    expect(stepGenHtml).toContain('id="toggleDetectDuplicates"');
+    expect(stepGenHtml).not.toContain('id="toggleDetectDuplicates"');
+    expect(stepGenHtml).not.toContain('id="impKeepWrap"');
     expect(stepGenHtml).toContain('id="impBtnWizardDone"');
 
     // Wordless toggle lives in Page Setup (#pageSetupModal)

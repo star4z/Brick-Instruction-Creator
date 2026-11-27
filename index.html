@@ -132,7 +132,7 @@
             </button>
             <button id="menuPrintBtn" type="button" class="hidden w-full py-2.5 px-3.5 rounded-lg border border-[var(--border-strong)] bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer">
               <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect width="12" height="8" x="6" y="14"/></svg>
-              <span>Print / Export PDF</span>
+              <span>Export &amp; Print</span>
             </button>
           </div>
 
@@ -172,13 +172,13 @@
                   <rect x="2" y="5" width="20" height="14" rx="2"/>
                   <path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M8 13h.01M12 13h.01M16 13h.01M7 17h10"/>
                 </svg>
-                <span>Customize Shortcuts</span>
+                <span>Keyboard Shortcuts</span>
               </span>
               <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
             </button>
           </div>
 
-          <!-- App Settings -->
+          <!-- Settings -->
           <div id="menuSettingsSection" class="flex flex-col gap-2.5 pt-4 border-t border-[var(--border)]">
             <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Settings</div>
             <button id="menuSettingsBtn" type="button" class="w-full py-2.5 px-3.5 rounded-lg border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold text-left flex items-center justify-between gap-2 transition-colors cursor-pointer">
@@ -187,7 +187,7 @@
                   <circle cx="12" cy="12" r="3"/>
                   <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.604.852.997 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
                 </svg>
-                <span>App Settings</span>
+                <span>Settings</span>
               </span>
               <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
             </button>
@@ -737,9 +737,9 @@
                 <span id="stepLightingHint" class="text-[11px] text-[var(--muted-foreground)] truncate">Flat uniform colors</span>
               </div>
               <div class="grid grid-cols-3 gap-1.5">
-                <button data-step-lighting="none" type="button" class="step-lighting-chip flex flex-col items-center justify-center gap-1 py-1.5 px-2 rounded-md border font-semibold text-xs transition cursor-pointer" title="No lighting at all — flat, uniform part colors with zero shading or highlights">
+                <button data-step-lighting="none" type="button" class="step-lighting-chip flex flex-col items-center justify-center gap-1 py-1.5 px-2 rounded-md border font-semibold text-xs transition cursor-pointer" title="No lighting — flat, uniform part colors with zero shading or highlights">
                   <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="m4.93 4.93 14.14 14.14"/></svg>
-                  <span>None</span>
+                  <span>Flat</span>
                 </button>
                 <button data-step-lighting="standard" type="button" class="step-lighting-chip flex flex-col items-center justify-center gap-1 py-1.5 px-2 rounded-md border font-semibold text-xs transition cursor-pointer" title="Clean 3-point ABS plastic shading">
                   <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16Z" fill="currentColor"/></svg>
@@ -751,7 +751,7 @@
                 </button>
               </div>
             </div>
-            <div class="flex items-center justify-between gap-2" title="Automatically offset hard-to-notice pieces and first-step connections with LEGO-style placement arrows">
+            <div class="flex items-center justify-between gap-2" title="Automatically offset hard-to-notice parts and first-step connections with placement arrows">
               <label for="toggleAutoPlacementArrows" class="inline-flex items-center gap-2 font-medium cursor-pointer flex-1 min-w-0">
                 <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></svg>
                 <span class="truncate">Placement Arrows &amp; Offsets</span>
@@ -765,7 +765,7 @@
               <div class="space-y-1">
                 <div class="text-xs text-[var(--muted-foreground)]">Arrow Style</div>
                 <div class="grid grid-cols-2 gap-1.5">
-                  <button data-arrow-style="flat" type="button" class="arrow-style-chip inline-flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-md border font-semibold text-xs transition cursor-pointer" title="Flat 2D placement arrows (official LEGO manual style)">
+                  <button data-arrow-style="flat" type="button" class="arrow-style-chip inline-flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-md border font-semibold text-xs transition cursor-pointer" title="Flat 2D placement arrows">
                     <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M10 3h4v10h4l-6 8-6-8h4V3Z"/></svg>
                     <span>Flat 2D</span>
                   </button>
@@ -797,7 +797,7 @@
               </div>
             </div>
             <div id="highlightWeightWrap" class="space-y-1.5">
-              <div class="text-xs text-[var(--muted-foreground)]">New Piece Line Weight</div>
+              <div class="text-xs text-[var(--muted-foreground)]">New Part Line Weight</div>
               <div class="grid grid-cols-4 gap-1">
                 <button data-hl-weight="light" type="button" class="hl-weight-chip flex flex-col items-center justify-center gap-1 py-1.5 px-1 rounded-md border font-semibold text-[11px] cursor-pointer">
                   <svg class="w-5 h-2 shrink-0" viewBox="0 0 20 8" aria-hidden="true"><line x1="2" y1="4" x2="18" y2="4" stroke="currentColor" stroke-width="1" stroke-linecap="round"/></svg>
@@ -849,9 +849,9 @@
               <div class="flex items-center justify-between gap-2">
                 <span class="inline-flex items-center gap-1.5 font-medium min-w-0">
                   <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65" opacity="0.45"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65" opacity="0.7"/></svg>
-                  <span class="truncate">Fade Earlier Pieces</span>
+                  <span class="truncate">Fade Earlier Parts</span>
                 </span>
-                <span id="fadeVisibilityPreview" class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-[var(--surface-sunken)] border border-[var(--border)] text-[11px] font-medium text-[var(--muted-foreground)] shrink-0" title="Visual preview: earlier piece (bottom) vs. new piece (top)">
+                <span id="fadeVisibilityPreview" class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-[var(--surface-sunken)] border border-[var(--border)] text-[11px] font-medium text-[var(--muted-foreground)] shrink-0" title="Visual preview: earlier part (bottom) vs. new part (top)">
                   <svg viewBox="0 0 34 20" class="w-[30px] h-[18px] shrink-0 overflow-visible" aria-hidden="true">
                     <g id="fadePreviewEarlier" fill="#c91a09" stroke="#6b1108" stroke-width="1">
                       <rect x="5" y="9" width="6.5" height="2.4" rx="0.9" />
@@ -862,23 +862,23 @@
                       <rect x="16.5" y="3.5" width="14" height="7.5" rx="1.4" />
                     </g>
                   </svg>
-                  <span id="fadePreviewStatus">No fade</span>
+                  <span id="fadePreviewStatus">Off</span>
                 </span>
               </div>
               <div class="grid grid-cols-4 gap-1.5">
-                <button data-fade="1.0" type="button" class="fade-chip flex flex-col items-center gap-1 py-1.5 px-1 rounded-md border font-semibold text-xs transition cursor-pointer" title="No fade — earlier pieces at full color">
+                <button data-fade="1.0" type="button" class="fade-chip flex flex-col items-center gap-1 py-1.5 px-1 rounded-md border font-semibold text-xs transition cursor-pointer" title="Off — earlier parts at full color">
                   <span class="block w-6 h-2 rounded-sm ring-1 ring-black/20" style="background:#c91a09" aria-hidden="true"></span>
                   <span>Off</span>
                 </button>
-                <button data-fade="0.82" type="button" class="fade-chip flex flex-col items-center gap-1 py-1.5 px-1 rounded-md border font-semibold text-xs transition cursor-pointer" title="Subtle fade on earlier pieces">
+                <button data-fade="0.82" type="button" class="fade-chip flex flex-col items-center gap-1 py-1.5 px-1 rounded-md border font-semibold text-xs transition cursor-pointer" title="Subtle fade on earlier parts">
                   <span class="block w-6 h-2 rounded-sm ring-1 ring-black/20" style="background:#cf5b52" aria-hidden="true"></span>
                   <span>Subtle</span>
                 </button>
-                <button data-fade="0.65" type="button" class="fade-chip flex flex-col items-center gap-1 py-1.5 px-1 rounded-md border font-semibold text-xs transition cursor-pointer" title="Medium fade on earlier pieces">
+                <button data-fade="0.65" type="button" class="fade-chip flex flex-col items-center gap-1 py-1.5 px-1 rounded-md border font-semibold text-xs transition cursor-pointer" title="Medium fade on earlier parts">
                   <span class="block w-6 h-2 rounded-sm ring-1 ring-black/20" style="background:#d17b75" aria-hidden="true"></span>
                   <span>Medium</span>
                 </button>
-                <button data-fade="0.45" type="button" class="fade-chip flex flex-col items-center gap-1 py-1.5 px-1 rounded-md border font-semibold text-xs transition cursor-pointer" title="Heavy fade on earlier pieces">
+                <button data-fade="0.45" type="button" class="fade-chip flex flex-col items-center gap-1 py-1.5 px-1 rounded-md border font-semibold text-xs transition cursor-pointer" title="Heavy fade on earlier parts">
                   <span class="block w-6 h-2 rounded-sm ring-1 ring-black/20" style="background:#d5a09d" aria-hidden="true"></span>
                   <span>Heavy</span>
                 </button>
@@ -983,7 +983,7 @@
             <label id="togglePageTitleLabel" class="flex items-center justify-between gap-2 cursor-pointer">
               <span class="font-medium inline-flex items-center gap-2 min-w-0">
                 <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12h8"/><path d="M4 18V6"/><path d="M12 18V6"/><path d="M17 12h3"/><path d="M17 18h3"/><path d="M17 6h3"/></svg>
-                <span class="truncate">Model Title on Pages</span>
+                <span class="truncate">Model Title on Every Page</span>
                 <span id="pageTitleWordlessNote" class="hidden text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-[var(--surface-sunken)] text-[var(--muted-foreground)] shrink-0">Wordless</span>
               </span>
               <input id="togglePageTitle" type="checkbox" checked class="w-4 h-4 accent-[var(--primary)] cursor-pointer shrink-0" />
@@ -1050,7 +1050,7 @@
         <div class="px-5 py-4 border-b border-[var(--border)] bg-[var(--chrome)] flex items-center justify-between gap-3 shrink-0">
           <div>
             <h2 class="text-base font-bold tracking-tight">Pages &amp; Steps</h2>
-            <p id="overviewSubtitle" class="text-xs text-[var(--muted-foreground)] mt-0.5">Select any folio or step to jump to it</p>
+            <p id="overviewSubtitle" class="text-xs text-[var(--muted-foreground)] mt-0.5">Select any page or step to jump to it</p>
           </div>
           <div class="flex items-center gap-2 shrink-0">
             <button id="btnOverviewRangeMode" type="button" class="px-3 py-1.5 rounded-md border border-[var(--border)] bg-[var(--card)] hover:border-[var(--primary)] text-xs font-semibold transition-colors cursor-pointer">Select Range</button>
@@ -1282,36 +1282,12 @@
             </div>
           </div>
 
-          <!-- Right / Bottom Pane: Build Organization Dropdown + Slicing Options -->
+          <!-- Right / Bottom Pane: Inline Build Organization Options -->
           <div class="flex-1 min-h-0 lg:overflow-y-auto overscroll-contain p-5 space-y-4">
             <div class="space-y-2.5">
               <div id="impProposalLabel" class="block text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Build Organization</div>
-              <!-- Custom listbox picker (rendered by renderImportAssistantUI): trigger shows the selected option with its description; options expand inline -->
+              <!-- Inline selectable options list (rendered by renderImportProposalPicker) -->
               <div id="impProposalPicker" class="relative"></div>
-            </div>
-
-            <!-- Slicing Options -->
-            <div class="space-y-3 pt-4 border-t border-[var(--border)]">
-              <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Step Options</div>
-              <label class="flex items-start justify-between gap-3 p-3 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)]/55 cursor-pointer">
-                <div class="min-w-0">
-                  <div class="font-semibold text-xs text-[var(--foreground)]">Auto-Detect Duplicate Submodels</div>
-                  <p class="text-[11px] text-[var(--muted-foreground)] mt-0.5 leading-snug">Automatically group repeated subassemblies (wheels, pillars, wings) into reusable ×N submodels.</p>
-                </div>
-                <input id="toggleDetectDuplicates" type="checkbox" checked class="mt-0.5 w-4 h-4 accent-[var(--primary)] shrink-0 cursor-pointer" />
-              </label>
-            </div>
-
-            <!-- Keep Existing File Steps -->
-            <div id="impKeepWrap" class="hidden pt-4 border-t border-[var(--border)] space-y-2">
-              <button id="impBtnKeep" type="button" class="w-full text-left p-3.5 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] hover:border-[var(--primary)] transition-colors cursor-pointer">
-                <div class="flex items-center justify-between gap-2">
-                  <div class="text-sm font-semibold">Keep Existing File Steps</div>
-                  <span id="impKeepSelectedBadge" class="hidden px-1.5 py-0.5 rounded text-[10px] font-semibold bg-[var(--primary)] text-[var(--primary-foreground)]">Selected</span>
-                </div>
-                <div class="text-xs text-[var(--muted-foreground)] mt-1">Preserves the exact STEP markers saved in your file without regenerating.</div>
-              </button>
-              <div id="impKeepNotice" role="note" class="hidden destructive-notice"></div>
             </div>
           </div>
         </div>
@@ -1421,7 +1397,7 @@
             <div class="flex items-center gap-3.5 p-3.5 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)]/55">
               <div class="flex-1 min-w-0 space-y-1.5">
                 <select id="paperFormatSelect" class="w-full px-3 py-2.5 rounded-md border border-[var(--border)] bg-[var(--card)] text-xs font-semibold outline-none focus:border-[var(--primary)] cursor-pointer">
-                  <option value="screen">Screen Fit (Adapts to Screen)</option>
+                  <option value="screen">Screen Fit</option>
                   <option value="letter">US Letter (8.5 × 11 in)</option>
                   <option value="a4">A4 (210 × 297 mm)</option>
                   <option value="a5">A5 Booklet (148 × 210 mm)</option>
@@ -1508,11 +1484,10 @@
               <div id="layoutGridPreview" class="shrink-0 flex items-center justify-center min-w-[144px] min-h-[100px]" aria-label="Live step grid preview"></div>
               <div class="flex-1 min-w-0 space-y-1 text-center sm:text-left">
                 <div id="layoutGridPreviewTitle" class="font-bold text-xs text-[var(--foreground)]">Smart Auto Grid · Dynamic by Page Size</div>
-                <p id="layoutGridPreviewDesc" class="text-[11px] text-[var(--muted-foreground)] leading-snug">Adapts columns and rows dynamically to the active page size and each step's physical size—keeping at least 1″ × 1″ step area (+ margins) and 1 stud ≥ 0.5 cm, with no fixed step limit.</p>
+                <p id="layoutGridPreviewDesc" class="text-[11px] text-[var(--muted-foreground)] leading-snug">Adapts columns and rows dynamically to the active page size and each step's physical size—keeping at least 1″ × 1″ step area (+ margins) and 1 stud ≥ 0.5 cm. Set Columns × Rows to fix the count, or add page breaks to start new pages.</p>
               </div>
             </div>
 
-            <p class="text-[11px] text-[var(--muted-foreground)] leading-snug">Steps per page follow the layout: set Columns × Rows to fix the count, and add page breaks to start new pages. Leave Columns &amp; Rows on Auto for dynamic pagination with any step proportions.</p>
             <div class="grid grid-cols-2 gap-2.5">
               <label class="space-y-1">
                 <span class="text-xs text-[var(--muted-foreground)]">Columns</span>
@@ -1653,10 +1628,10 @@
                   </select>
                 </label>
                 <label class="space-y-1">
-                  <span class="text-xs text-[var(--muted-foreground)]">Order</span>
+                  <span class="text-xs text-[var(--muted-foreground)]">Step Order Direction</span>
                   <select id="grpFlowSelect" class="w-full px-2.5 py-2 rounded-md border border-[var(--border)] bg-[var(--card)] font-semibold outline-none focus:border-[var(--primary)]">
-                    <option value="column">Columns (T to B)</option>
-                    <option value="row">Rows (L to R)</option>
+                    <option value="column">Columns (1 ↓ 2)</option>
+                    <option value="row">Rows (1 → 2)</option>
                   </select>
                 </label>
               </div>
@@ -1664,11 +1639,11 @@
                 <label class="space-y-1">
                   <span class="text-xs text-[var(--muted-foreground)]">Step Proportions</span>
                   <select id="grpMixedSelect" class="w-full px-2.5 py-2 rounded-md border border-[var(--border)] bg-[var(--card)] font-semibold outline-none focus:border-[var(--primary)]">
-                    <option value="even">Even Grid</option>
-                    <option value="hero_left">Large First (Left)</option>
-                    <option value="hero_top">Large First (Top)</option>
-                    <option value="hero_right">Large Last (Right)</option>
-                    <option value="custom_weights">Custom Sizes (S/M/L)</option>
+                    <option value="even">Even</option>
+                    <option value="hero_left">Large Left</option>
+                    <option value="hero_top">Large Top</option>
+                    <option value="hero_right">Large Right</option>
+                    <option value="custom_weights">Custom Sizes</option>
                   </select>
                 </label>
                 <label class="space-y-1">
@@ -1695,7 +1670,7 @@
 
           <div class="space-y-2 pt-4 border-t border-[var(--border)]">
             <div class="flex items-center justify-between gap-2">
-              <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Page Density &amp; Margins</div>
+              <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Page Margins</div>
               <span class="px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-[var(--info-soft)] text-[var(--info)] border border-[var(--info)]/30 whitespace-nowrap">All Pages</span>
             </div>
             <div class="grid grid-cols-3 gap-2">
@@ -1838,7 +1813,7 @@
                     <span class="w-7 h-5 rounded-l border border-current/35 flex items-end pl-1 pb-1"><span class="w-full h-0.5 rounded-l-full bg-current/80"></span></span>
                     <span class="w-7 h-5 rounded-r border border-l-0 border-current/35 flex items-end pr-1 pb-1"><span class="w-full h-0.5 rounded-r-full bg-current/45"></span></span>
                   </span>
-                  <span class="text-[11px] leading-tight">2-Page Spread (Print)</span>
+                  <span class="text-[11px] leading-tight">2-Page Spread</span>
                 </button>
               </div>
               <p id="progressBarSpanHint" class="text-[11px] text-[var(--muted-foreground)] leading-snug">Each step page displays its own complete progress bar.</p>
@@ -2340,7 +2315,7 @@
                   <option value="qty">Quantity (Most First)</option>
                   <option value="size">Part Size (Largest First)</option>
                   <option value="name">Part Name (A–Z)</option>
-                  <option value="partId">LEGO Part ID (Low to High)</option>
+                  <option value="partId">Part ID (Low to High)</option>
                 </select>
               </label>
               <label class="space-y-1.5">
@@ -2351,7 +2326,7 @@
                   <option value="qty">Quantity (Most First)</option>
                   <option value="size">Part Size (Largest First)</option>
                   <option value="name">Part Name (A–Z)</option>
-                  <option value="partId">LEGO Part ID (Low to High)</option>
+                  <option value="partId">Part ID (Low to High)</option>
                 </select>
               </label>
             </div>
@@ -2567,7 +2542,7 @@
                 <option value="other">Other Parts</option>
               </select>
               <div id="libColorFilterWrap" class="relative flex items-center gap-1">
-                <button id="libColorFilterBtn" type="button" aria-haspopup="dialog" aria-expanded="false" title="Filter parts by the LEGO colors they are actually produced in" class="inline-flex items-center gap-2 py-2.5 px-3 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] hover:border-[var(--primary-border)] text-xs font-semibold transition-colors cursor-pointer">
+                <button id="libColorFilterBtn" type="button" aria-haspopup="dialog" aria-expanded="false" title="Filter parts by colors they are actually produced in" class="inline-flex items-center gap-2 py-2.5 px-3 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] hover:border-[var(--primary-border)] text-xs font-semibold transition-colors cursor-pointer">
                   <span id="libColorFilterBtnSwatch" class="w-3.5 h-3.5 rounded-full border border-black/25 dark:border-white/25 shrink-0" style="background:conic-gradient(#c91a09 0 90deg,#f2cd37 90deg 180deg,#0055bf 180deg 270deg,#237841 270deg 360deg)"></span>
                   <span id="libColorFilterBtnLabel" class="max-w-[130px] truncate">All Colors</span>
                   <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
@@ -2779,7 +2754,7 @@
         </div>
         <div class="relative shrink-0">
           <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-          <input id="libColorFilterSearchInput" aria-label="Filter library by brick color" type="search" placeholder="Search available LEGO colors by name or ID…" class="w-full pl-8 pr-2.5 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] text-xs outline-none focus:border-[var(--primary)]" />
+          <input id="libColorFilterSearchInput" aria-label="Filter library by brick color" type="search" placeholder="Search available colors by name or ID…" class="w-full pl-8 pr-2.5 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] text-xs outline-none focus:border-[var(--primary)]" />
         </div>
         <button id="libColorFilterAllBtn" type="button" class="w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition cursor-pointer shrink-0">
           <span class="inline-flex items-center gap-2 min-w-0">

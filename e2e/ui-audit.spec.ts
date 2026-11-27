@@ -69,8 +69,8 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     // Side menu items omit inline summaries and item descriptions
     await expect(page.locator('#menuScrollBody p')).toHaveCount(0);
     await expect(page.locator('#menuBricksLibBtn')).toHaveText(/^\s*Bricks Library\s*$/);
-    await expect(page.locator('#menuShortcutsBtn')).toHaveText(/^\s*Customize Shortcuts\s*$/);
-    await expect(page.locator('#menuSettingsBtn')).toHaveText(/^\s*App Settings\s*$/);
+    await expect(page.locator('#menuShortcutsBtn')).toHaveText(/^\s*Keyboard Shortcuts\s*$/);
+    await expect(page.locator('#menuSettingsBtn')).toHaveText(/^\s*Settings\s*$/);
 
     // 1. Open Model Modal
     await ensureMenuOpen(page);
@@ -173,18 +173,20 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     await expect(page.locator('#missingPartsModal')).toBeHidden();
     await expect(page.locator('#importWizardModal')).toBeVisible();
     await expect(page.locator('#impWizItemsList')).not.toContainText('LEGO-Style');
-    await expect(page.locator('#impWizItemsList button[data-wiz-section="slicing"] > span').nth(1).locator('> span')).toHaveCount(2);
-    await expect(page.locator('#impWizItemsList button[data-wiz-section="theme"] > span').nth(1).locator('> span')).toHaveCount(2);
+    for (const section of ['slicing', 'theme', 'wordless', 'rendering', 'format']) {
+      await expect(page.locator(`#impWizItemsList button[data-wiz-section="${section}"] > span`).nth(1).locator('> span')).toHaveCount(2);
+    }
     await auditSurface(page, `${testInfo.project.name}: Import Wizard Modal`, {
       activeContainerSelector: '#importWizardModal',
     });
 
-    // Click into Step Generation — Slicing from Import Wizard and verify back-navigation
+    // Click into Step Generation — Slicing from Import Wizard and verify inline options & back-navigation
     const wizardSlicingBtn = page.locator('#impWizItemsList button[data-wiz-section="slicing"]');
     if (await wizardSlicingBtn.isVisible()) {
       await wizardSlicingBtn.click();
       await expect(page.locator('#importModal')).toBeVisible();
       await expect(page.locator('#btnBackStepGenWizard')).toBeVisible();
+      await expect(page.locator('#impProposalList [role="radio"]').first()).toBeVisible();
       await auditSurface(page, `${testInfo.project.name}: Import Wizard -> Step Generation`, {
         activeContainerSelector: '#importModal',
       });
@@ -395,7 +397,7 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     // Verify default rendering style: lighting off, outline all parts on, fade earlier pieces off
     await expect(page.locator('#stepLightingHint')).toHaveText('Flat uniform colors');
     await expect(page.locator('#toggleStarkBlackOutlines')).toBeChecked();
-    await expect(page.locator('#fadePreviewStatus')).toHaveText('No fade');
+    await expect(page.locator('#fadePreviewStatus')).toHaveText('Off');
 
     // Verify Placement Arrow Style controls (default: Flat 2D, no outlines, no lighting) & customization
     await expect(page.locator('#arrowStyleWrap')).toBeVisible();

@@ -15395,7 +15395,7 @@ function syncFadeVisibilityPreview(opts = null) {
   const statusEl = document.getElementById('fadePreviewStatus');
   if (statusEl) {
     statusEl.textContent = effectiveOpacity >= 0.99
-      ? 'No fade'
+      ? 'Off'
       : effectiveOpacity <= 0.55
         ? 'Heavy fade'
         : effectiveOpacity <= 0.74
@@ -18410,7 +18410,7 @@ function renderLibColorFilterControls() {
 
   if (sectionsEl) {
     if (!partColorsCatalog && partColorsCatalogPromise) {
-      sectionsEl.innerHTML = `<div class="py-6 text-center text-xs text-[var(--muted-foreground)]">Loading LEGO part color availability…</div>`;
+      sectionsEl.innerHTML = `<div class="py-6 text-center text-xs text-[var(--muted-foreground)]">Loading part color availability…</div>`;
     } else {
       const sections = buildLibraryColorPalette(COLORS, {
         modelColorCounts: state.model ? modelColorCounts : null,
@@ -18419,7 +18419,7 @@ function renderLibColorFilterControls() {
         query: libUiState.colorFilterQuery,
       });
       if (sections.length === 0) {
-        sectionsEl.innerHTML = `<div class="py-6 text-center text-xs text-[var(--muted-foreground)]">No available LEGO colors matching “${escHtml(libUiState.colorFilterQuery)}”</div>`;
+        sectionsEl.innerHTML = `<div class="py-6 text-center text-xs text-[var(--muted-foreground)]">No available colors matching “${escHtml(libUiState.colorFilterQuery)}”</div>`;
       } else {
         sectionsEl.innerHTML = sections.map((sec) => {
           const swatches = sec.colors.map((c) => {
@@ -19981,7 +19981,7 @@ async function restoreLastSessionOnStart() {
     state.layoutConfig = normalizePageLayoutSpec(prefs.layoutConfig, prefs.layout);
     state.layoutGroups = normalizeLayoutGroups(prefs.layoutGroups);
     syncLegacyLayoutFlag();
-    if (typeof prefs.detectDuplicates === 'boolean') state.detectDuplicates = prefs.detectDuplicates;
+    state.detectDuplicates = true;
     adoptLegacyStyleOptions(prefs);
     // Legacy sessions saved before Wordless mode keep their prior labeled defaults.
     state.wordlessMode = typeof prefs.wordlessMode === 'boolean' ? prefs.wordlessMode : false;
@@ -26329,6 +26329,8 @@ function formatPartCount(n) {
   return `${v.toLocaleString()} part${v === 1 ? '' : 's'}`;
 }
 
+const KEEP_FILE_STEPS_DESCRIPTION = 'Preserves the exact STEP markers saved in your file without regenerating.';
+
 function getImportPickerOptions() {
   const shouldPrompt = Boolean(impState.assessment?.shouldPrompt);
   const opts = impState.proposals.map((prop, idx) => {
@@ -26353,6 +26355,16 @@ function getImportPickerOptions() {
     sections: [],
     totalParts: impState.parsed?.parts?.length || 0,
   });
+  if (impState.parsed?.hasSteps) {
+    opts.push({
+      id: 'keep',
+      title: 'Keep Existing File Steps',
+      description: KEEP_FILE_STEPS_DESCRIPTION,
+      isRec: false,
+      sections: [],
+      totalParts: impState.parsed?.parts?.length || 0,
+    });
+  }
   return opts;
 }
 
@@ -26369,21 +26381,19 @@ const RECOMMENDED_BADGE_HTML = '<span class="px-1.5 py-0.5 rounded bg-[var(--pri
 
 function selectImportProposal(pid) {
   impState.selectedId = pid;
-  if (pid === 'none') {
+  if (pid === 'none' || pid === 'keep') {
     impState.activeProposal = null;
   } else {
     const found = impState.proposals.find(p => p.id === pid);
     impState.activeProposal = found ? JSON.parse(JSON.stringify(found)) : null;
   }
   if (impState.isWizardSubpage && importWizardState.active) {
-    importWizardState.importMode = 'auto';
+    importWizardState.importMode = pid === 'keep' ? 'keep' : 'auto';
     importWizardState.selectedId = impState.selectedId;
     importWizardState.activeProposal = impState.activeProposal;
   }
-  impState.pickerOpen = false;
   renderImportAssistantUI();
   rebuildAndDrawImportPreview();
-  document.getElementById('impProposalTrigger')?.focus();
 }
 
 function renderImportProposalPicker() {
@@ -26391,125 +26401,47 @@ function renderImportProposalPicker() {
   if (!pickerEl) return;
   const opts = getImportPickerOptions();
   const selectedIdx = Math.max(0, opts.findIndex(o => o.id === (impState.selectedId || 'none')));
-  const sel = opts[selectedIdx];
-  const isOpen = Boolean(impState.pickerOpen);
-  const focusIdx = Math.max(0, Math.min(opts.length - 1, impState.pickerFocusIdx ?? selectedIdx));
-
-  const chevron = `<svg class="w-4 h-4 shrink-0 mt-0.5 text-[var(--muted-foreground)] transition-transform duration-150 ${isOpen ? 'rotate-180' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>`;
   const check = `<svg class="w-4 h-4 shrink-0 mt-0.5 text-[var(--primary)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>`;
 
-  const triggerHtml = `
-    <button id="impProposalTrigger" type="button" aria-haspopup="listbox" aria-expanded="${isOpen ? 'true' : 'false'}" aria-controls="impProposalListbox" aria-labelledby="impProposalLabel impProposalTrigger"
-      class="w-full text-left p-3 rounded-lg border ${isOpen ? 'border-[var(--primary)]' : 'border-[var(--border)]'} bg-[var(--surface-sunken)] hover:border-[var(--primary)] focus-visible:outline-2 focus-visible:outline-[var(--primary)] transition-colors cursor-pointer flex items-start gap-2.5">
-      <div class="min-w-0 flex-1 space-y-1">
-        <div class="flex items-center gap-1.5 flex-wrap">
-          <span class="text-[13px] font-bold text-[var(--foreground)]">${escHtml(sel.title)}</span>
-          ${sel.isRec ? RECOMMENDED_BADGE_HTML : ''}
-        </div>
-        <p class="text-xs text-[var(--muted-foreground)] leading-snug">${escHtml(sel.description)}</p>
-        ${renderSectionChips(sel.sections)}
-      </div>
-      ${chevron}
-    </button>`;
-
-  const listHtml = isOpen ? `
-    <ul id="impProposalListbox" role="listbox" tabindex="-1" aria-labelledby="impProposalLabel" aria-activedescendant="impProposalOpt_${focusIdx}"
-      class="mt-1.5 p-1 rounded-lg border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow-sheet)] space-y-0.5 outline-none">
+  pickerEl.innerHTML = `
+    <div id="impProposalList" role="radiogroup" aria-labelledby="impProposalLabel" class="space-y-2">
       ${opts.map((o, i) => {
         const isSel = i === selectedIdx;
-        const isFocus = i === focusIdx;
         const secCount = o.sections.length;
-        const meta = o.id === 'none'
-          ? `1 chapter · ${formatPartCount(o.totalParts)}`
-          : `${secCount} section${secCount === 1 ? '' : 's'} · ${formatPartCount(o.totalParts)}`;
+        const meta = o.id === 'keep'
+          ? `Existing file steps · ${formatPartCount(o.totalParts)}`
+          : o.id === 'none'
+            ? `1 chapter · ${formatPartCount(o.totalParts)}`
+            : `${secCount} section${secCount === 1 ? '' : 's'} · ${formatPartCount(o.totalParts)}`;
         return `
-        <li id="impProposalOpt_${i}" role="option" aria-selected="${isSel ? 'true' : 'false'}" data-opt-idx="${i}" data-opt-id="${escHtml(o.id)}"
-          class="flex items-start gap-2.5 px-2.5 py-2.5 rounded-md cursor-pointer transition-colors ${isFocus ? 'bg-[var(--surface-hover)]' : 'hover:bg-[var(--surface-hover)]'}">
-          <div class="min-w-0 flex-1 space-y-0.5">
+        <button id="impProposalOpt_${i}" type="button" role="radio" aria-checked="${isSel ? 'true' : 'false'}" data-opt-id="${escHtml(o.id)}"
+          class="w-full text-left p-3 rounded-lg border transition-colors cursor-pointer flex items-start gap-2.5 ${
+            isSel
+              ? 'border-[var(--primary)] bg-[var(--primary-soft)]/35 ring-1 ring-[var(--primary)]/25'
+              : 'border-[var(--border)] bg-[var(--surface-sunken)] hover:border-[var(--primary)]'
+          }">
+          <div class="min-w-0 flex-1 space-y-1">
             <div class="flex items-center gap-1.5 flex-wrap">
-              <span class="text-[13px] font-semibold ${isSel ? 'text-[var(--primary)]' : 'text-[var(--foreground)]'}">${escHtml(o.title)}</span>
+              <span class="text-[13px] font-bold ${isSel ? 'text-[var(--primary)]' : 'text-[var(--foreground)]'}">${escHtml(o.title)}</span>
               ${o.isRec ? RECOMMENDED_BADGE_HTML : ''}
             </div>
             <p class="text-xs text-[var(--muted-foreground)] leading-snug">${escHtml(o.description)}</p>
-            <p class="text-[11px] text-[var(--muted-foreground)] font-medium">${meta}</p>
+            ${isSel && o.sections.length > 0 ? renderSectionChips(o.sections) : `<p class="text-[11px] text-[var(--muted-foreground)] font-medium">${meta}</p>`}
           </div>
           ${isSel ? check : '<span class="w-4 shrink-0" aria-hidden="true"></span>'}
-        </li>`;
+        </button>`;
       }).join('')}
-    </ul>` : '';
+    </div>`;
 
-  pickerEl.innerHTML = triggerHtml + listHtml;
-
-  const trigger = document.getElementById('impProposalTrigger');
-  const listbox = document.getElementById('impProposalListbox');
-  const openAt = (idx) => {
-    impState.pickerOpen = true;
-    impState.pickerFocusIdx = idx;
-    renderImportProposalPicker();
-    document.getElementById('impProposalListbox')?.focus();
-    document.getElementById(`impProposalOpt_${idx}`)?.scrollIntoView({ block: 'nearest' });
-  };
-  const close = () => {
-    impState.pickerOpen = false;
-    renderImportProposalPicker();
-    document.getElementById('impProposalTrigger')?.focus();
-  };
-
-  trigger.onclick = () => {
-    if (impState.pickerOpen) close();
-    else openAt(selectedIdx);
-  };
-  trigger.onkeydown = (e) => {
-    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-      e.preventDefault();
-      openAt(selectedIdx);
-    }
-  };
-  if (listbox) {
-    listbox.onkeydown = (e) => {
-      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-        e.preventDefault();
-        const delta = e.key === 'ArrowDown' ? 1 : -1;
-        openAt((focusIdx + delta + opts.length) % opts.length);
-      } else if (e.key === 'Home' || e.key === 'End') {
-        e.preventDefault();
-        openAt(e.key === 'Home' ? 0 : opts.length - 1);
-      } else if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        selectImportProposal(opts[focusIdx].id);
-      } else if (e.key === 'Escape') {
-        e.preventDefault();
-        e.stopPropagation();
-        close();
-      } else if (e.key === 'Tab') {
-        impState.pickerOpen = false;
-        renderImportProposalPicker();
-      }
-    };
-    listbox.querySelectorAll('[role="option"]').forEach((li) => {
-      li.addEventListener('click', () => selectImportProposal(li.getAttribute('data-opt-id')));
-    });
-  }
+  pickerEl.querySelectorAll('[role="radio"]').forEach((btn) => {
+    btn.addEventListener('click', () => selectImportProposal(btn.getAttribute('data-opt-id')));
+  });
 }
-
-// Close the Build Organization picker when tapping anywhere outside it
-document.addEventListener('pointerdown', (e) => {
-  if (!impState.pickerOpen) return;
-  const pickerEl = document.getElementById('impProposalPicker');
-  if (pickerEl && !pickerEl.contains(e.target)) {
-    impState.pickerOpen = false;
-    renderImportProposalPicker();
-  }
-});
 
 function renderImportAssistantUI() {
   const autoBtn = document.getElementById('impBtnAuto');
   const cancelBtn = document.getElementById('impBtnCancel');
   const wizDoneBtn = document.getElementById('impBtnWizardDone');
-  const keepBtn = document.getElementById('impBtnKeep');
-  const keepBadge = document.getElementById('impKeepSelectedBadge');
-  const dupChk = document.getElementById('toggleDetectDuplicates');
-  if (dupChk) dupChk.checked = Boolean(state.detectDuplicates);
 
   const isWizardSub = Boolean(impState.isWizardSubpage);
   const stepGenVis = getWizardSubpageVisibility(isWizardSub);
@@ -26519,19 +26451,10 @@ function renderImportAssistantUI() {
   if (wizDoneBtn) wizDoneBtn.classList.toggle('hidden', !isWizardSub);
   document.getElementById('btnBackStepGenWizard')?.classList.toggle('hidden', !stepGenVis.showWizardBackButton);
 
-  const keepSelected = isWizardSub && importWizardState.importMode === 'keep';
-  if (keepBadge) keepBadge.classList.toggle('hidden', !keepSelected);
-  if (keepBtn) {
-    keepBtn.className = `w-full text-left p-3.5 rounded-lg border transition-colors cursor-pointer ${
-      keepSelected
-        ? 'border-[var(--primary)] bg-[var(--primary-soft)] ring-1 ring-[var(--primary)]/30'
-        : 'border-[var(--border)] bg-[var(--surface-sunken)] hover:border-[var(--primary)]'
-    }`;
-  }
-
   syncImportPreviewControlsUI();
   renderImportProposalPicker();
 
+  const isKeepSelected = impState.selectedId === 'keep';
   const editsSummary = getCurrentManualEditsSummary();
   applyDestructiveNoticeToEl(
     'impActionNotice',
@@ -26540,23 +26463,17 @@ function renderImportAssistantUI() {
           isPostImport: impState.isPostImport,
           editsSummary,
           wordlessResetNotice: null,
-          isKeepStepsAction: false,
-        })
-      : null,
-  );
-  applyDestructiveNoticeToEl(
-    'impKeepNotice',
-    stepGenVis.showStepGenDestructiveNotice && impState.parsed?.hasSteps
-      ? getStepGenerationDestructiveNotice({
-          isPostImport: impState.isPostImport,
-          editsSummary,
-          wordlessResetNotice: null,
-          isKeepStepsAction: true,
+          isKeepStepsAction: isKeepSelected,
         })
       : null,
   );
 
   if (isWizardSub || !autoBtn) return;
+
+  if (isKeepSelected) {
+    autoBtn.textContent = impState.isPostImport ? 'Apply Existing File Steps' : 'Keep Existing File Steps';
+    return;
+  }
 
   const active = impState.activeProposal;
   if (!active) {
@@ -26564,13 +26481,9 @@ function renderImportAssistantUI() {
     return;
   }
 
-  const isMod = active.outputMode === 'modular_chapters';
-  const primarySecs = active.sections.filter(s => s.role !== 'join');
-  const hasJoin = active.sections.some(s => s.role === 'join');
-  const secCountLabel = isMod
-    ? `${primarySecs.length} Section${primarySecs.length === 1 ? '' : 's'}${hasJoin ? ' + Join' : ''}`
-    : `${active.sections.length} Sections`;
-  autoBtn.textContent = `${impState.isPostImport ? 'Apply & Regenerate' : 'Generate Manual'} (${secCountLabel})`;
+  autoBtn.textContent = impState.isPostImport
+    ? `Apply & Regenerate (${active.title})`
+    : `Generate Manual (${active.title})`;
 }
 
 function openImportAssistant(parsed, isPostImport = false, opts = {}) {
@@ -26601,10 +26514,14 @@ function openImportAssistant(parsed, isPostImport = false, opts = {}) {
   impState.panY = 0;
 
   if (isWizardSubpage) {
-    impState.selectedId = importWizardState.selectedId || 'none';
-    impState.activeProposal = importWizardState.activeProposal
-      ? JSON.parse(JSON.stringify(importWizardState.activeProposal))
-      : null;
+    impState.selectedId = importWizardState.importMode === 'keep'
+      ? 'keep'
+      : (importWizardState.selectedId || 'none');
+    impState.activeProposal = importWizardState.importMode === 'keep'
+      ? null
+      : importWizardState.activeProposal
+        ? JSON.parse(JSON.stringify(importWizardState.activeProposal))
+        : null;
   } else {
     // When reopened from Step Generation menu, match the currently active plan if any; otherwise pick recommended
     const currentPlan = isPostImport ? state.model?._subdivisionPlan : null;
@@ -26635,11 +26552,10 @@ function openImportAssistant(parsed, isPostImport = false, opts = {}) {
     : 'Step Generation';
 
   const reasonStr = assessment.reasons.length > 0
-    ? `${parsed.title} · Detected ${assessment.reasons.join(' · ')}.`
+    ? `${parsed.title} · ${assessment.reasons.join(' · ')}.`
     : `${parsed.title} · ${formatPartCount(parsed.parts.length)}${parsed.submodelCount ? ` across ${parsed.submodelCount} submodels` : ''}.`;
   document.getElementById('impSummary').textContent = reasonStr;
 
-  document.getElementById('impKeepWrap').classList.toggle('hidden', !parsed.hasSteps);
   document.getElementById('importModal').classList.remove('hidden');
   renderImportAssistantUI();
   requestAnimationFrame(() => rebuildAndDrawImportPreview());
@@ -27106,22 +27022,8 @@ async function finishImport(parsed, mode, subdivisionPlan = null, isPostImport =
 
 document.getElementById('impBtnAuto').onclick = () => {
   if (!impState.parsed) return;
-  void finishImport(impState.parsed, 'auto', impState.activeProposal, impState.isPostImport, {
-    skipAutoFetch: impState.skipAutoFetch,
-  });
-};
-document.getElementById('impBtnKeep').onclick = () => {
-  if (!impState.parsed) return;
-  if (impState.isWizardSubpage && importWizardState.active) {
-    importWizardState.importMode = 'keep';
-    importWizardState.selectedId = 'none';
-    importWizardState.activeProposal = null;
-    impState.selectedId = 'none';
-    impState.activeProposal = null;
-    closeImportAssistant(false);
-    return;
-  }
-  void finishImport(impState.parsed, 'keep', null, impState.isPostImport, {
+  const isKeep = impState.selectedId === 'keep';
+  void finishImport(impState.parsed, isKeep ? 'keep' : 'auto', isKeep ? null : impState.activeProposal, impState.isPostImport, {
     skipAutoFetch: impState.skipAutoFetch,
   });
 };

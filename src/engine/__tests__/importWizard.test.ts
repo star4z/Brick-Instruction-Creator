@@ -85,23 +85,30 @@ describe('Import Wizard Engine', () => {
     expect(byId.wordless.targetSection).toBe('wordless');
     expect(byId.wordless.targetPageLabel).toBe('Page Setup');
     expect(byId.wordless.value).toBe('Wordless');
+    expect(byId.wordless.detail).toBe('');
 
     expect(byId.rendering.targetSubpage).toBe('style');
     expect(byId.rendering.targetSection).toBe('rendering');
     expect(byId.rendering.targetPageLabel).toBe('Style & Themes');
-    expect(byId.rendering.value).toBe('Flat (No Lighting)');
-    expect(byId.rendering.detail).toContain('Outline all parts (Medium)');
-    expect(byId.rendering.detail).toContain('No fade');
+    expect(byId.rendering.value).toBe('Flat');
+    expect(byId.rendering.detail).toBe('');
 
     expect(byId.format.targetSubpage).toBe('pageSetup');
     expect(byId.format.targetSection).toBe('format');
     expect(byId.format.targetPageLabel).toBe('Page Setup');
     expect(byId.format.value).toBe('Screen Fit');
-    expect(byId.format.detail).toBe('Auto grid · Balanced margins');
+    expect(byId.format.detail).toBe('');
 
-    const bookletFormat = buildImportWizardSummaryItems(baseInput({ pageNumberPosition: 'outside' }))
-      .find((item) => item.id === 'format');
-    expect(bookletFormat?.detail).toBe('Auto grid · Balanced margins · Outside page numbers');
+    const bookletFormat = formatWizardPageFormatSummary({
+      paperFormat: 'screen',
+      paperFormatLabel: 'Screen Fit',
+      supportsOrientation: false,
+      orientation: 'landscape',
+      layoutSummary: 'Auto',
+      density: 'balanced',
+      pageNumberPosition: 'outside',
+    });
+    expect(bookletFormat.detail).toBe('Auto grid · Balanced margins · Outside page numbers');
   });
 
   it('formats slicing summaries with the slicing method name and no wizard description', () => {
@@ -155,8 +162,8 @@ describe('Import Wizard Engine', () => {
         fadeOpacity: 1.0,
       }),
     ).toEqual({
-      value: 'Studio Lighting',
-      detail: 'Outline all parts (Heavy) · No fade',
+      value: 'Studio',
+      detail: 'Outline all parts (Heavy) · Off',
     });
 
     expect(
@@ -169,7 +176,7 @@ describe('Import Wizard Engine', () => {
         fadeOpacity: 0.82,
       }),
     ).toEqual({
-      value: 'Standard Lighting',
+      value: 'Standard',
       detail: 'Outline new parts (Medium) · Subtle fade',
     });
 
@@ -182,7 +189,7 @@ describe('Import Wizard Engine', () => {
         fadeOpacity: 0.45,
       }),
     ).toEqual({
-      value: 'Flat (No Lighting)',
+      value: 'Flat',
       detail: 'No outlines · Heavy fade',
     });
   });

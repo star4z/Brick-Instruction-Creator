@@ -150,7 +150,7 @@ function formatLineWeightLabel(weight?: string): string {
 }
 
 function formatFadeLabel(fadeOpacity: number): string {
-  if (!Number.isFinite(fadeOpacity) || fadeOpacity >= 0.99) return 'No fade';
+  if (!Number.isFinite(fadeOpacity) || fadeOpacity >= 0.99) return 'Off';
   if (fadeOpacity >= 0.74) return 'Subtle fade';
   if (fadeOpacity >= 0.55) return 'Medium fade';
   return 'Heavy fade';
@@ -206,10 +206,10 @@ export function formatWizardRenderingSummary(input: {
   const lighting = input.stepLighting ?? (input.highQualityStepRender ? 'studio' : 'none');
   const value =
     lighting === 'none'
-      ? 'Flat (No Lighting)'
+      ? 'Flat'
       : lighting === 'studio'
-        ? 'Studio Lighting'
-        : 'Standard Lighting';
+        ? 'Studio'
+        : 'Standard';
   const parts: string[] = [];
 
   if (input.autoPlacementArrows) {
@@ -303,7 +303,7 @@ export function buildImportWizardSummaryItems(
       id: 'slicing',
       label: 'Slicing',
       value: slicing.value,
-      detail: slicing.detail,
+      detail: '',
       targetSubpage: 'slicing',
       targetSection: 'slicing',
       targetPageLabel: 'Step Generation',
@@ -328,9 +328,7 @@ export function buildImportWizardSummaryItems(
       id: 'wordless',
       label: 'Text & Labels',
       value: input.wordlessMode ? 'Wordless' : 'With Text Labels',
-      detail: input.wordlessMode
-        ? 'Icons, diagrams & numbers only'
-        : 'Titles, section names & part names',
+      detail: '',
       targetSubpage: 'pageSetup',
       targetSection: 'wordless',
       targetPageLabel: 'Page Setup',
@@ -339,7 +337,7 @@ export function buildImportWizardSummaryItems(
       id: 'rendering',
       label: 'Rendering Style',
       value: rendering.value,
-      detail: rendering.detail,
+      detail: '',
       targetSubpage: 'style',
       targetSection: 'rendering',
       targetPageLabel: 'Style & Themes',
@@ -348,7 +346,7 @@ export function buildImportWizardSummaryItems(
       id: 'format',
       label: 'Page Format',
       value: pageFormat.value,
-      detail: pageFormat.detail,
+      detail: '',
       targetSubpage: 'pageSetup',
       targetSection: 'format',
       targetPageLabel: 'Page Setup',

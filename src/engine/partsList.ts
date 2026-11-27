@@ -114,7 +114,7 @@ export const BOM_FIELD_META: Record<BomFieldId, BomFieldMeta> = {
   },
   partId: {
     id: 'partId',
-    label: 'LEGO Part ID',
+    label: 'Part ID',
     tableHeader: 'Part ID',
     sample: '3001',
     align: 'left',
