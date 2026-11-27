@@ -61,7 +61,6 @@ export {
 
 export type ThemeBgType = 'solid' | 'gradient';
 
-export type ThemeMinifigStyle = 'exploded' | 'sequential' | 'classic';
 export type LineWeightId = 'light' | 'medium' | 'heavy' | 'extra-heavy';
 
 export function sanitizeLineWeight(value: unknown, fallback: LineWeightId = 'medium'): LineWeightId {
@@ -196,7 +195,6 @@ export interface ThemeStyleOptions {
   showRotCues: boolean;
   showSizeGuides: boolean;
   showAttachmentStarburst: boolean;
-  minifigStyle: ThemeMinifigStyle;
   showMinifig1to1: boolean;
   stepBorderStyle: StepBorderStyle;
   showStepBorders: boolean;
@@ -225,7 +223,6 @@ export const THEME_STYLE_OPTION_KEYS: Array<keyof ThemeStyleOptions> = [
   'showRotCues',
   'showSizeGuides',
   'showAttachmentStarburst',
-  'minifigStyle',
   'showMinifig1to1',
   'stepBorderStyle',
   'showStepBorders',
@@ -254,7 +251,6 @@ export const DEFAULT_THEME_STYLE_OPTIONS: ThemeStyleOptions = {
   showRotCues: true,
   showSizeGuides: true,
   showAttachmentStarburst: false,
-  minifigStyle: 'exploded',
   showMinifig1to1: false,
   stepBorderStyle: 'lines',
   showStepBorders: false,
@@ -285,9 +281,6 @@ export function normalizeThemeStyleOptions(
     : fb.fadeOpacity;
   const fade = r.fadePrev === false ? 1 : rawFade;
   const fadePrev = fade < 0.99;
-  const mf = r.minifigStyle === 'exploded' || r.minifigStyle === 'sequential' || r.minifigStyle === 'classic'
-    ? r.minifigStyle
-    : fb.minifigStyle;
   const fbLighting: StepLightingMode =
     fb.stepLighting === 'none' || fb.stepLighting === 'standard' || fb.stepLighting === 'studio'
       ? fb.stepLighting
@@ -338,7 +331,6 @@ export function normalizeThemeStyleOptions(
     showRotCues: bool('showRotCues'),
     showSizeGuides: bool('showSizeGuides'),
     showAttachmentStarburst: bool('showAttachmentStarburst'),
-    minifigStyle: mf,
     showMinifig1to1: bool('showMinifig1to1'),
     stepBorderStyle,
     showStepBorders,
@@ -403,7 +395,6 @@ export interface ManualTheme {
   showRotCues?: boolean;
   showSizeGuides?: boolean;
   showAttachmentStarburst?: boolean;
-  minifigStyle?: ThemeMinifigStyle;
   showMinifig1to1?: boolean;
   stepBorderStyle?: StepBorderStyle;
   showStepBorders?: boolean;

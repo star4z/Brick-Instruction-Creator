@@ -41,7 +41,7 @@ Official LEGO instruction manuals use two distinct visual conventions for minifi
 
 ## User Controls & Persistence
 
-- **Style Popover (`#stylePopover`)**: Segmented **Minifigure Steps** selector (`Exploded` | `Step-by-Step` | `Classic`) directly above **1:1 Minifigure View**.
-- **Full-Page Step Editor (`#stepEditModal`, opened via the bottom `Edit` tab)**: Displays clearly labeled descriptive cards for `Exploded`, `Step-by-Step`, and `Classic` (tagged `All minifigure steps`) alongside the **1:1 Actual-Size Minifigure Preview** toggle, keeping `Rotate` and `Arrange` focused strictly on 3D camera orientation and 2D box positioning.
+- **Step Generation (`#importModal`)**: Segmented **Minifigure Steps** selector (`Exploded` | `Step-by-Step` | `Classic`) below **Build Organization**. When reopened post-import, changing only **Minifigure Steps** applies non-destructively (`Apply Minifigure Steps`) without regenerating or discarding manual step edits.
+- **Full-Page Step Editor (`#stepEditModal`, opened via the bottom `Edit` tab)**: Displays clearly labeled descriptive cards for `Exploded`, `Step-by-Step`, and `Classic` (tagged `All Minifigures`) alongside the **1:1 Actual-Size Minifigure Preview** toggle, keeping `Rotate` and `Arrange` focused strictly on 3D camera orientation and 2D box positioning.
 - **Step Numbering**: In `exploded` and `sequential` styles, minifigure chapters use local numbering so the main model build begins cleanly at **Step 1**.
-- **Persistence**: `minifigStyle` is saved automatically in IndexedDB session preferences and embedded in `.biw` project exports/imports (defaulting to `'exploded'`).
+- **Persistence**: `minifigStyle` is stored as a project/manual-level setting (independent of visual themes), saved automatically in IndexedDB session preferences and embedded in `.biw` project exports/imports (defaulting to `'exploded'`). Legacy `.biw` files that stored `minifigStyle` inside `customTheme` continue to restore cleanly.

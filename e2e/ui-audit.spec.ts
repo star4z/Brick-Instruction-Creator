@@ -839,19 +839,27 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     await expect(page.locator('#pageLabelText')).toContainText(/Minifigure/i);
     await expect(page.locator('#pageFrame canvas').first()).toBeVisible();
 
-    // Switch to Sequential style + 1:1 reference via Style popover
+    // Enable 1:1 reference via Style popover (Minifigure Steps now lives in Step Generation)
     await page.locator('#btnStylePop').click();
     await expect(page.locator('#stylePopover')).toBeVisible();
+    await expect(page.locator('#stylePopover .mf-style-btn')).toHaveCount(0);
     const mf1Chk = page.locator('#toggleMinifig1to1');
     if (await mf1Chk.isVisible() && !(await mf1Chk.isChecked())) {
       await mf1Chk.click();
     }
-    const seqBtn = page.locator('.mf-style-btn[data-mf-style="sequential"]');
-    if (await seqBtn.isVisible()) {
-      await seqBtn.click();
-    }
     await page.locator('#btnStylePop').click();
     await expect(page.locator('#stylePopover')).toBeHidden();
+
+    // Switch to Sequential style via Step Generation modal
+    await ensureMenuOpen(page);
+    await page.locator('#menuStepGenBtn').click();
+    await expect(page.locator('#importModal')).toBeVisible();
+    const seqBtn = page.locator('#importModal .mf-style-btn[data-mf-style="sequential"]');
+    await expect(seqBtn).toBeVisible();
+    await seqBtn.click();
+    await expect(page.locator('#impBtnAuto')).toHaveText(/Apply Minifigure Steps/i);
+    await page.locator('#impBtnAuto').click();
+    await expect(page.locator('#importModal')).toBeHidden();
 
     // Verify Sequential Minifigure page mounts stage + 1:1 canvases cleanly
     await expect(page.locator('#pageLabelText')).toContainText(/Minifigure/i);

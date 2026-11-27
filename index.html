@@ -911,26 +911,6 @@
               </span>
               <input id="toggleAttachmentStarburst" type="checkbox" class="w-4 h-4 accent-[var(--primary)] cursor-pointer shrink-0" />
             </label>
-            <div class="space-y-1.5 pt-1">
-              <div class="inline-flex items-center gap-1.5 font-medium">
-                <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="7" r="3"/><path d="M7 21v-4a3 3 0 0 1 3-3h4a3 3 0 0 1 3 3v4"/></svg>
-                <span>Minifigure Steps</span>
-              </div>
-              <div class="grid grid-cols-3 gap-1.5">
-                <button type="button" data-mf-style="exploded" class="mf-style-btn flex flex-col items-center justify-center gap-1 py-1.5 px-1.5 rounded-md border font-semibold text-xs transition-colors cursor-pointer">
-                  <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="5" r="2.2"/><path d="M12 7.5v2"/><rect x="8.5" y="10.5" width="7" height="4.5" rx="1"/><path d="M12 15v2"/><path d="M9.5 18h5v3h-5Z"/></svg>
-                  <span>Exploded</span>
-                </button>
-                <button type="button" data-mf-style="sequential" class="mf-style-btn flex flex-col items-center justify-center gap-1 py-1.5 px-1.5 rounded-md border font-semibold text-xs transition-colors cursor-pointer">
-                  <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="12" r="2.5"/><path d="M10.5 12h3"/><path d="m12 10 2 2-2 2"/><circle cx="18" cy="12" r="2.5"/></svg>
-                  <span>Step-by-Step</span>
-                </button>
-                <button type="button" data-mf-style="classic" class="mf-style-btn flex flex-col items-center justify-center gap-1 py-1.5 px-1.5 rounded-md border font-semibold text-xs transition-colors cursor-pointer">
-                  <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="6.5" r="2.5"/><path d="M8.5 10.5h7l1 5h-9l1-5Z"/><path d="M9.5 15.5V21"/><path d="M14.5 15.5V21"/></svg>
-                  <span>Classic</span>
-                </button>
-              </div>
-            </div>
             <label class="flex items-center justify-between gap-2 cursor-pointer">
               <span class="inline-flex items-center gap-2 font-medium min-w-0">
                 <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8.5 9.5v5"/><path d="M15.5 9.5v5"/><circle cx="12" cy="10.5" r=".5" fill="currentColor"/><circle cx="12" cy="13.5" r=".5" fill="currentColor"/></svg>
@@ -1281,6 +1261,26 @@
               <div id="impProposalLabel" class="block text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Build Organization</div>
               <!-- Inline selectable options list (rendered by renderImportProposalPicker) -->
               <div id="impProposalPicker" class="relative"></div>
+            </div>
+            <div id="impMinifigStepsSection" class="space-y-2 pt-3 border-t border-[var(--border)]">
+              <div class="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">
+                <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="7" r="3"/><path d="M7 21v-4a3 3 0 0 1 3-3h4a3 3 0 0 1 3 3v4"/></svg>
+                <span>Minifigure Steps</span>
+              </div>
+              <div class="grid grid-cols-3 gap-1.5" role="group" aria-label="Minifigure steps">
+                <button type="button" data-mf-style="exploded" class="mf-style-btn flex flex-col items-center justify-center gap-1 py-1.5 px-1.5 rounded-md border font-semibold text-xs transition-colors cursor-pointer">
+                  <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="5" r="2.2"/><path d="M12 7.5v2"/><rect x="8.5" y="10.5" width="7" height="4.5" rx="1"/><path d="M12 15v2"/><path d="M9.5 18h5v3h-5Z"/></svg>
+                  <span>Exploded</span>
+                </button>
+                <button type="button" data-mf-style="sequential" class="mf-style-btn flex flex-col items-center justify-center gap-1 py-1.5 px-1.5 rounded-md border font-semibold text-xs transition-colors cursor-pointer">
+                  <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="12" r="2.5"/><path d="M10.5 12h3"/><path d="m12 10 2 2-2 2"/><circle cx="18" cy="12" r="2.5"/></svg>
+                  <span>Step-by-Step</span>
+                </button>
+                <button type="button" data-mf-style="classic" class="mf-style-btn flex flex-col items-center justify-center gap-1 py-1.5 px-1.5 rounded-md border font-semibold text-xs transition-colors cursor-pointer">
+                  <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="6.5" r="2.5"/><path d="M8.5 10.5h7l1 5h-9l1-5Z"/><path d="M9.5 15.5V21"/><path d="M14.5 15.5V21"/></svg>
+                  <span>Classic</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>

@@ -927,9 +927,20 @@ describe('studioRuntime safety checks', () => {
     expect(stepGenHtml).not.toContain('imp-wordless-btn');
     expect(stepGenHtml).not.toContain('Instruction Language');
     expect(stepGenHtml).toContain('id="impProposalPicker"');
+    expect(stepGenHtml).toContain('id="impMinifigStepsSection"');
+    expect(stepGenHtml).toContain('data-mf-style="exploded"');
     expect(stepGenHtml).not.toContain('id="toggleDetectDuplicates"');
     expect(stepGenHtml).not.toContain('id="impKeepWrap"');
     expect(stepGenHtml).toContain('id="impBtnWizardDone"');
+
+    // Minifigure Steps setting lives in Step Generation, not Style Popover
+    const stylePopStart = html.indexOf('id="stylePopover"');
+    const stylePopEnd = html.indexOf('id="importWizardModal"', stylePopStart);
+    expect(stylePopStart).toBeGreaterThan(-1);
+    expect(stylePopEnd).toBeGreaterThan(stylePopStart);
+    const stylePopHtml = html.slice(stylePopStart, stylePopEnd);
+    expect(stylePopHtml).not.toContain('data-mf-style=');
+    expect(stylePopHtml).not.toContain('Minifigure Steps');
 
     // Wordless toggle lives in Page Setup (#pageSetupModal)
     expect(html).toContain('id="pageSetupWordlessSection"');

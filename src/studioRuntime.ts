@@ -14540,13 +14540,22 @@ function toggleStepPageBreak(step, opts = {}) {
 function applyMinifigStyleChange(rawStyle, anchorStepId = null) {
   const nextStyle = normalizeMinifigStepStyle(rawStyle);
   const currentStepId = anchorStepId || state.pages[state.pageIdx]?.slots?.[0]?.step?.id || null;
-  patchActiveTheme({ minifigStyle: nextStyle }, { render: false });
+  state.minifigStyle = nextStyle;
   rebuildPages();
   if (currentStepId) {
     const idx = state.pages.findIndex(pg => pg.slots?.some(sl => sl.step.id === currentStepId));
     if (idx >= 0) state.pageIdx = idx;
   }
   renderAll({ skipRebuildPages: true });
+}
+
+function syncMinifigStyleButtonsUI(rawStyle = state.minifigStyle) {
+  const activeStyle = normalizeMinifigStepStyle(rawStyle);
+  document.querySelectorAll('.mf-style-btn').forEach(b => {
+    const act = b.getAttribute('data-mf-style') === activeStyle;
+    b.setAttribute('aria-pressed', act ? 'true' : 'false');
+    b.className = `mf-style-btn flex flex-col items-center justify-center gap-1 py-1.5 px-1.5 rounded-md border font-semibold text-xs transition-colors cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)]'}`;
+  });
 }
 
 // =========================================================================
@@ -15348,11 +15357,7 @@ function syncMenuControls() {
   }
   setChk('toggleDetectDuplicates', state.detectDuplicates);
   setChk('toggleMinifig1to1', state.showMinifig1to1);
-  const curMfStyleGlobal = normalizeMinifigStepStyle(state.minifigStyle);
-  document.querySelectorAll('.mf-style-btn').forEach(b => {
-    const act = b.getAttribute('data-mf-style') === curMfStyleGlobal;
-    b.className = `mf-style-btn flex flex-col items-center justify-center gap-1 py-1.5 px-1.5 rounded-md border font-semibold text-xs transition cursor-pointer ${act ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--surface-sunken)]'}`;
-  });
+  syncMinifigStyleButtonsUI(state.minifigStyle);
 
   syncBomSetupUI();
 
@@ -20094,6 +20099,7 @@ async function restoreLastSessionOnStart() {
     state.layoutGroups = normalizeLayoutGroups(prefs.layoutGroups);
     syncLegacyLayoutFlag();
     state.detectDuplicates = true;
+    if (prefs.minifigStyle) state.minifigStyle = normalizeMinifigStepStyle(prefs.minifigStyle);
     adoptLegacyStyleOptions(prefs);
     // Legacy sessions saved before Wordless mode keep their prior labeled defaults.
     state.wordlessMode = typeof prefs.wordlessMode === 'boolean' ? prefs.wordlessMode : false;
@@ -24905,12 +24911,12 @@ const mf1to1ToggleEl = document.getElementById('toggleMinifig1to1');
 if (mf1to1ToggleEl) mf1to1ToggleEl.onchange = (e) => patchEditedTheme({ showMinifig1to1: e.target.checked });
 document.querySelectorAll('.mf-style-btn').forEach(b => {
   b.onclick = () => {
-    const rawStyle = b.getAttribute('data-mf-style');
-    if (isEditingSettingsTheme()) {
-      patchEditedTheme({ minifigStyle: normalizeMinifigStepStyle(rawStyle) });
-    } else {
-      applyMinifigStyleChange(rawStyle);
+    const nextStyle = normalizeMinifigStepStyle(b.getAttribute('data-mf-style'));
+    impState.minifigStyle = nextStyle;
+    if (impState.isWizardSubpage) {
+      state.minifigStyle = nextStyle;
     }
+    renderImportAssistantUI();
   };
 });
 const applyStepBorderStyle = (mode, useEdited = false) => {
@@ -25895,6 +25901,7 @@ async function handleIncomingProjectFile(f) {
     }
     // Pre-theme projects stored step display & parts list options at the top level.
     if (!data.customTheme) adoptLegacyStyleOptions(data);
+    state.minifigStyle = normalizeMinifigStepStyle(data.minifigStyle ?? data.customTheme?.minifigStyle ?? 'exploded');
     if (data.paperFormat) state.paperFormat = data.paperFormat;
     if (typeof data.customPaperW === 'number' && Number.isFinite(data.customPaperW)) state.customPaperW = data.customPaperW;
     if (typeof data.customPaperH === 'number' && Number.isFinite(data.customPaperH)) state.customPaperH = data.customPaperH;
@@ -26361,7 +26368,9 @@ let impState = {
   assessment: null,
   proposals: [],
   selectedId: 'none', // 'none' or proposal.id
+  initialSelectedId: 'none',
   activeProposal: null,
+  minifigStyle: 'exploded',
   explodePct: 50,
   isExploded: true,
   colorMode: 'sections', // 'sections' | 'bricks'
@@ -26831,12 +26840,19 @@ function renderImportAssistantUI() {
 
   syncImportPreviewControlsUI();
   renderImportProposalPicker();
+  syncMinifigStyleButtonsUI(impState.minifigStyle);
 
   const isKeepSelected = impState.selectedId === 'keep';
+  const isMinifigOnlyChange = Boolean(
+    impState.isPostImport
+      && !isWizardSub
+      && impState.selectedId === impState.initialSelectedId
+      && normalizeMinifigStepStyle(impState.minifigStyle) !== normalizeMinifigStepStyle(state.minifigStyle),
+  );
   const editsSummary = getCurrentManualEditsSummary();
   applyDestructiveNoticeToEl(
     'impActionNotice',
-    stepGenVis.showStepGenDestructiveNotice
+    stepGenVis.showStepGenDestructiveNotice && !isMinifigOnlyChange
       ? getStepGenerationDestructiveNotice({
           isPostImport: impState.isPostImport,
           editsSummary,
@@ -26847,6 +26863,11 @@ function renderImportAssistantUI() {
   );
 
   if (isWizardSub || !autoBtn) return;
+
+  if (isMinifigOnlyChange) {
+    autoBtn.textContent = 'Apply Minifigure Steps';
+    return;
+  }
 
   if (isKeepSelected) {
     autoBtn.textContent = impState.isPostImport ? 'Apply Existing File Steps' : 'Keep Existing File Steps';
@@ -26922,6 +26943,8 @@ function openImportAssistant(parsed, isPostImport = false, opts = {}) {
     }
   }
 
+  impState.initialSelectedId = impState.selectedId;
+  impState.minifigStyle = normalizeMinifigStepStyle(state.minifigStyle);
   impState.isExploded = Boolean(impState.activeProposal);
   impState.explodePct = impState.isExploded ? IMP_EXPLODED_PCT : 0;
 
@@ -26961,6 +26984,7 @@ function capturePreWizardStateSnapshot() {
     showPartsList: state.showPartsList,
     showBackCover: state.showBackCover,
     detectDuplicates: state.detectDuplicates,
+    minifigStyle: normalizeMinifigStepStyle(state.minifigStyle),
     coverMeta: JSON.parse(JSON.stringify(state.coverMeta || {})),
     completeMeta: JSON.parse(JSON.stringify(state.completeMeta || {})),
   };
@@ -26986,6 +27010,7 @@ function restorePreWizardStateSnapshot(snap) {
   state.showPartsList = snap.showPartsList;
   state.showBackCover = snap.showBackCover;
   state.detectDuplicates = snap.detectDuplicates;
+  if (snap.minifigStyle) state.minifigStyle = normalizeMinifigStepStyle(snap.minifigStyle);
   state.coverMeta = snap.coverMeta;
   state.completeMeta = snap.completeMeta;
 }
@@ -27435,6 +27460,18 @@ async function finishImport(parsed, mode, subdivisionPlan = null, isPostImport =
 
 document.getElementById('impBtnAuto').onclick = () => {
   if (!impState.parsed) return;
+  const nextMfStyle = normalizeMinifigStepStyle(impState.minifigStyle);
+  const isMinifigOnlyChange = Boolean(
+    impState.isPostImport
+      && impState.selectedId === impState.initialSelectedId
+      && nextMfStyle !== normalizeMinifigStepStyle(state.minifigStyle),
+  );
+  if (isMinifigOnlyChange) {
+    closeImportAssistant(false);
+    applyMinifigStyleChange(nextMfStyle);
+    return;
+  }
+  state.minifigStyle = nextMfStyle;
   const isKeep = impState.selectedId === 'keep';
   void finishImport(impState.parsed, isKeep ? 'keep' : 'auto', isKeep ? null : impState.activeProposal, impState.isPostImport, {
     skipAutoFetch: impState.skipAutoFetch,

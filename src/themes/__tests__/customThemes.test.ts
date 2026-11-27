@@ -267,7 +267,6 @@ describe('theme style options, recents & naming', () => {
     const t = normalizeCustomTheme({
       name: 'Bold',
       showStepBorders: false,
-      minifigStyle: 'sequential',
       fadeOpacity: 7,
       highlightColor: 'red;}',
       highQualityStepRender: true,
@@ -279,7 +278,6 @@ describe('theme style options, recents & naming', () => {
       arrowLighting: true,
     })!;
     expect(t.showStepBorders).toBe(false);
-    expect(t.minifigStyle).toBe('sequential');
     expect(t.fadeOpacity).toBe(1);
     expect(t.fadePrev).toBe(false);
     expect(t.highlightColor).toBe('#ff2d55');
