@@ -304,8 +304,10 @@ describe('interactiveHtmlExporter font stacks', () => {
     expect(markup).not.toContain('All Steps');
     expect(markup).not.toContain('Parts List');
     expect(markup).not.toContain('Part Name');
-    // Wordless BOM table headers use brick icon + × + #
-    expect(markup).toContain('<th class="col-qty">×</th><th class="col-partId">#</th>');
+    // Wordless BOM table headers use unified vector icons (brick + × + #)
+    expect(markup).toContain('<th class="col-image"><svg ');
+    expect(markup).toContain('<th class="col-qty"><svg ');
+    expect(markup).toContain('<th class="col-partId"><svg ');
     // Numbered bag SVG is rendered in static fallback
     expect(markup).toContain('viewBox="0 0 64 76"');
     // Wordless payload flag, rotation cue kind, and wordless runtime branch are embedded

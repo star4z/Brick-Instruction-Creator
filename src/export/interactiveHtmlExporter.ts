@@ -343,8 +343,12 @@ function buildStaticFallbackHtml(payload: InteractiveHtmlPayload, safeEditorUrl:
     const mirror = kind === 'yaw_90_ccw' ? ' transform="translate(24 0) scale(-1 1)"' : '';
     return `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><g${mirror}><path d="M19.8 10.2A8.2 8.2 0 0 0 6.1 6.3L4.4 8"/><polyline points="4.4 4.2 4.4 8 8.2 8"/><path d="M4.2 13.8A8.2 8.2 0 0 0 17.9 17.7L19.6 16"/><polyline points="19.6 19.8 19.6 16 15.8 16"/></g></svg>`;
   };
-  const partsIconSvg = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.6"/></svg>';
-  const brickIconSvg = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="9" width="18" height="11" rx="2"/><path d="M6.5 9V6.2A1.2 1.2 0 0 1 7.7 5h2.6a1.2 1.2 0 0 1 1.2 1.2V9"/><path d="M12.5 9V6.2A1.2 1.2 0 0 1 13.7 5h2.6a1.2 1.2 0 0 1 1.2 1.2V9"/></svg>';
+  const partsIconSvg = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="2.5" y="2.5" width="19" height="19" rx="2.6" stroke="currentColor" stroke-width="2"/><circle cx="8.25" cy="8.25" r="2.2" fill="currentColor"/><circle cx="15.75" cy="8.25" r="2.2" fill="currentColor"/><circle cx="8.25" cy="15.75" r="2.2" fill="currentColor"/><circle cx="15.75" cy="15.75" r="2.2" fill="currentColor"/></svg>';
+  const brickIconSvg = '<svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5" y="5.5" width="4.8" height="4.4" rx="0.8"/><rect x="14.2" y="5.5" width="4.8" height="4.4" rx="0.8"/><rect x="2" y="9.5" width="20" height="9.5" rx="1.2"/></svg>';
+  const qtyIconSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M6.5 6.5 17.5 17.5"/><path d="M17.5 6.5 6.5 17.5"/></svg>';
+  const partIdIconSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M5 9.5h14"/><path d="M5 14.5h14"/><path d="M10 4.5 8.5 19.5"/><path d="M15.5 4.5 14 19.5"/></svg>';
+  const nameIconSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16"/><path d="M4 12h12"/><path d="M4 17h9"/></svg>';
+  const colorIconSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="7.5" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3.8" fill="currentColor"/></svg>';
   const cards: string[] = [];
 
   for (const pg of payload.pages) {
@@ -388,10 +392,10 @@ function buildStaticFallbackHtml(payload: InteractiveHtmlPayload, safeEditorUrl:
       const colHeaders: Record<string, string> = wordless
         ? {
             image: brickIconSvg,
-            qty: '×',
-            name: 'Aa',
-            partId: '#',
-            color: '●',
+            qty: qtyIconSvg,
+            name: nameIconSvg,
+            partId: partIdIconSvg,
+            color: colorIconSvg,
           }
         : {
             image: 'Part',
@@ -409,7 +413,7 @@ function buildStaticFallbackHtml(payload: InteractiveHtmlPayload, safeEditorUrl:
       };
       const bodyHtml = pg.bomFormat === 'table'
         ? `<table class="sf-bom-table"><thead><tr>${fields
-            .map((f) => `<th class="col-${f}">${wordless && f === 'image' ? colHeaders[f] : escapeHtmlText(colHeaders[f] || f)}</th>`)
+            .map((f) => `<th class="col-${f}">${wordless ? (colHeaders[f] || '') : escapeHtmlText(colHeaders[f] || f)}</th>`)
             .join('')}</tr></thead><tbody>${pg.bomItems
             .map(
               (b) =>
@@ -2061,17 +2065,21 @@ ${staticFallbackHtml}
       const fields = (pg.bomFields && pg.bomFields.length > 0)
         ? pg.bomFields
         : (isWordless ? ['image', 'qty', 'partId'] : ['image', 'qty', 'name', 'partId']);
-      const partsSvg = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.6"/></svg>';
-      const brickSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="9" width="18" height="11" rx="2"/><path d="M6.5 9V6.2A1.2 1.2 0 0 1 7.7 5h2.6a1.2 1.2 0 0 1 1.2 1.2V9"/><path d="M12.5 9V6.2A1.2 1.2 0 0 1 13.7 5h2.6a1.2 1.2 0 0 1 1.2 1.2V9"/></svg>';
+      const partsSvg = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="2.5" y="2.5" width="19" height="19" rx="2.6" stroke="currentColor" stroke-width="2"/><circle cx="8.25" cy="8.25" r="2.2" fill="currentColor"/><circle cx="15.75" cy="8.25" r="2.2" fill="currentColor"/><circle cx="8.25" cy="15.75" r="2.2" fill="currentColor"/><circle cx="15.75" cy="15.75" r="2.2" fill="currentColor"/></svg>';
+      const brickSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5" y="5.5" width="4.8" height="4.4" rx="0.8"/><rect x="14.2" y="5.5" width="4.8" height="4.4" rx="0.8"/><rect x="2" y="9.5" width="20" height="9.5" rx="1.2"/></svg>';
+      const qtySvg = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M6.5 6.5 17.5 17.5"/><path d="M17.5 6.5 6.5 17.5"/></svg>';
+      const partIdSvg = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M5 9.5h14"/><path d="M5 14.5h14"/><path d="M10 4.5 8.5 19.5"/><path d="M15.5 4.5 14 19.5"/></svg>';
+      const nameSvg = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16"/><path d="M4 12h12"/><path d="M4 17h9"/></svg>';
+      const colorSvg = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="7.5" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3.8" fill="currentColor"/></svg>';
       const headers = isWordless
-        ? { image: brickSvg, qty: '×', name: 'Aa', partId: '#', color: '●' }
+        ? { image: brickSvg, qty: qtySvg, name: nameSvg, partId: partIdSvg, color: colorSvg }
         : { image: 'Part', qty: 'Qty', name: 'Part Name', partId: 'Part ID', color: 'Color' };
       const colorHtml = (b) => '<span class="bom-color-cell">' +
         (b.colorHex ? '<span class="bom-swatch" style="background:' + esc(b.colorHex) + '"></span>' : '') +
         '<span>' + esc(b.colorName || '') + '</span></span>';
       const bodyHtml = pg.bomFormat === 'table'
         ? '<table class="bom-table"><thead><tr>' +
-            fields.map((f) => '<th class="col-' + f + '">' + (isWordless && f === 'image' ? headers[f] : esc(headers[f] || f)) + '</th>').join('') +
+            fields.map((f) => '<th class="col-' + f + '">' + (isWordless ? (headers[f] || '') : esc(headers[f] || f)) + '</th>').join('') +
           '</tr></thead><tbody>' +
             items.map((b, bi) => {
               const key = pg.id + ':' + bi;

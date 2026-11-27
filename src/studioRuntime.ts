@@ -518,6 +518,7 @@ import {
 import {
   DEFAULT_WORDLESS_MODE,
   buildAttachArrowIconSvg,
+  buildBomTableHeaderIconSvg,
   buildBrickGlyphSvg,
   buildFlipVerticalIconInnerSvg,
   buildMinifigPoseIconSvg,
@@ -529,6 +530,7 @@ import {
   buildYawRotateIconInnerSvg,
   classifyStepHintAction,
   drawAttachArrowIconCanvas,
+  drawBomTableHeaderIconCanvas,
   drawBrickGlyphCanvas,
   drawMinifigPoseIconCanvas,
   drawNumberedBagCanvas,
@@ -539,7 +541,6 @@ import {
   formatManualPageNumber,
   formatMinifig1to1Header,
   formatMinifigPoseBadgeText,
-  getBomTableHeaderText,
   getRotationCueDisplay,
   getWordlessSurfaceDefaults,
   resolveEffectiveBomConfig,
@@ -11441,11 +11442,9 @@ function renderAll(renderOpts = {}) {
           ${tCols.map((c) => {
             const ta = c.align === 'right' ? 'text-right justify-end' : c.align === 'center' ? 'text-center justify-center' : 'text-left justify-start';
             const colInner = wordless
-              ? (c.id === 'image'
-                ? buildBrickGlyphSvg(Math.max(11, Math.round(tTypo.headerFont * 1.35)))
-                : `<span class="truncate">${escHtml(getBomTableHeaderText(c.id, true))}</span>`)
+              ? buildBomTableHeaderIconSvg(c.id, Math.max(12, Math.min(tTypo.headerH - 4, Math.round(tTypo.headerFont * 1.45))))
               : `<span class="truncate">${escHtml(c.label)}</span>`;
-            return `<div class="h-full flex items-center overflow-hidden ${ta}" style="width:${(c.widthFrac * 100).toFixed(4)}%;padding:0 ${tTypo.cellPadX}px">${colInner}</div>`;
+            return `<div class="h-full flex items-center overflow-hidden ${ta}" style="width:${(c.widthFrac * 100).toFixed(4)}%;padding:0 ${tTypo.cellPadX}px" title="${escHtml(c.label)}">${colInner}</div>`;
           }).join('')}
         </div>`;
 
@@ -16183,8 +16182,11 @@ function renderBomSetupPreview(bc) {
     }
 
     const headCols = tCols.map(c => {
-      const lbl = state.wordlessMode ? (c.id === 'image' ? '▪' : getBomTableHeaderText(c.id, true)) : c.label;
-      return `<div class="truncate font-bold ${state.wordlessMode ? '' : 'uppercase'}" style="width:${(c.widthFrac * 100).toFixed(1)}%;font-size:6px;text-align:${c.align};padding:0 2px">${escHtml(lbl)}</div>`;
+      const jc = c.align === 'right' ? 'justify-end' : c.align === 'center' ? 'justify-center' : 'justify-start';
+      const inner = state.wordlessMode
+        ? buildBomTableHeaderIconSvg(c.id, 7)
+        : `<span class="truncate">${escHtml(c.label)}</span>`;
+      return `<div class="flex items-center ${jc} overflow-hidden font-bold ${state.wordlessMode ? '' : 'uppercase'}" style="width:${(c.widthFrac * 100).toFixed(1)}%;font-size:6px;padding:0 2px">${inner}</div>`;
     }).join('');
     const rowHtml = Array.from({ length: visRows }, (_, ri) => {
       const cells = tCols.map(c => {
@@ -16208,7 +16210,7 @@ function renderBomSetupPreview(bc) {
 
     // Sample row anatomy
     const sampleRowCells = enabledFields.map((id) => {
-      if (id === 'image') return '<span class="px-1.5 py-0.5 rounded bg-[#c91a09]/15 text-[#c91a09] font-bold text-[10px]">🧱</span>';
+      if (id === 'image') return `<span class="inline-flex items-center justify-center px-1.5 py-0.5 rounded bg-[#c91a09]/15 text-[#c91a09]">${buildBrickGlyphSvg(13)}</span>`;
       if (id === 'qty') return '<span class="font-extrabold text-[11px]">4×</span>';
       if (id === 'name') {
         return bc.wrapPartNames
@@ -21441,12 +21443,17 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       ctx.font = themeCanvasFont(theme, 700, tTypo.headerFont);
       for (const col of tCols) {
         const midY = bodyY + tTypo.headerH / 2;
-        if (wordless && col.id === 'image') {
-          const icoSz = Math.max(11, Math.min(tTypo.headerH - 4, Math.round(tTypo.headerFont * 1.35)));
-          drawBrickGlyphCanvas(ctx, bodyX + col.x + (col.width - icoSz) / 2, midY - icoSz / 2, icoSz, theme.muted);
+        if (wordless) {
+          const icoSz = Math.max(12, Math.min(tTypo.headerH - 4, Math.round(tTypo.headerFont * 1.45)));
+          const icoX = col.align === 'right'
+            ? bodyX + col.x + col.width - tTypo.cellPadX - icoSz
+            : col.align === 'center'
+              ? bodyX + col.x + (col.width - icoSz) / 2
+              : bodyX + col.x + tTypo.cellPadX;
+          drawBomTableHeaderIconCanvas(ctx, col.id, icoX, midY - icoSz / 2, icoSz, theme.muted);
           continue;
         }
-        const label = wordless ? getBomTableHeaderText(col.id, true) : col.label.toUpperCase();
+        const label = col.label.toUpperCase();
         const maxW = Math.max(8, col.width - tTypo.cellPadX * 2);
         const fitted = fitText(label, maxW);
         if (col.align === 'right') {

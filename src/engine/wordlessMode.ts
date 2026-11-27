@@ -216,16 +216,33 @@ export function formatMinifig1to1Header(
 // SVG ICON BUILDERS (DOM Live Preview & Interactive 3D HTML)
 // =========================================================================
 
-/** Classic LEGO 2-stud brick silhouette glyph (replaces English "pcs" label). */
+/** Solid 2-stud LEGO brick silhouette glyph (clear stud separation, unmistakable at 11–20px). */
 export function buildBrickGlyphSvg(sizePx: number): string {
   const s = Math.max(10, Math.round(sizePx));
-  return `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="width:${s}px;height:${s}px;flex-shrink:0"><rect x="3" y="9" width="18" height="11" rx="2"/><path d="M6.5 9V6.2A1.2 1.2 0 0 1 7.7 5h2.6a1.2 1.2 0 0 1 1.2 1.2V9"/><path d="M12.5 9V6.2A1.2 1.2 0 0 1 13.7 5h2.6a1.2 1.2 0 0 1 1.2 1.2V9"/></svg>`;
+  return `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" style="width:${s}px;height:${s}px;flex-shrink:0"><rect x="5" y="5.5" width="4.8" height="4.4" rx="0.8"/><rect x="14.2" y="5.5" width="4.8" height="4.4" rx="0.8"/><rect x="2" y="9.5" width="20" height="9.5" rx="1.2"/></svg>`;
 }
 
-/** Parts inventory 2×2 grid icon (replaces English "Parts List" heading). */
+/** Iconic top-down 2×2 LEGO stud-plate icon (replaces English "Parts List" heading). */
 export function buildPartsGridIconSvg(sizePx: number): string {
   const s = Math.max(12, Math.round(sizePx));
-  return `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="width:${s}px;height:${s}px;flex-shrink:0"><rect x="3" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.6"/></svg>`;
+  return `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="width:${s}px;height:${s}px;flex-shrink:0"><rect x="2.5" y="2.5" width="19" height="19" rx="2.6" stroke="currentColor" stroke-width="2"/><circle cx="8.25" cy="8.25" r="2.2" fill="currentColor"/><circle cx="15.75" cy="8.25" r="2.2" fill="currentColor"/><circle cx="8.25" cy="15.75" r="2.2" fill="currentColor"/><circle cx="15.75" cy="15.75" r="2.2" fill="currentColor"/></svg>`;
+}
+
+/** Unified vector icon for Parts List Table column headers in Wordless mode. */
+export function buildBomTableHeaderIconSvg(fieldId: BomFieldId, sizePx: number): string {
+  const s = Math.max(10, Math.round(sizePx));
+  if (fieldId === 'image') return buildBrickGlyphSvg(s);
+  if (fieldId === 'qty') {
+    return `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true" style="width:${s}px;height:${s}px;flex-shrink:0"><path d="M6.5 6.5 17.5 17.5"/><path d="M17.5 6.5 6.5 17.5"/></svg>`;
+  }
+  if (fieldId === 'partId') {
+    return `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true" style="width:${s}px;height:${s}px;flex-shrink:0"><path d="M5 9.5h14"/><path d="M5 14.5h14"/><path d="M10 4.5 8.5 19.5"/><path d="M15.5 4.5 14 19.5"/></svg>`;
+  }
+  if (fieldId === 'name') {
+    return `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true" style="width:${s}px;height:${s}px;flex-shrink:0"><path d="M4 7h16"/><path d="M4 12h12"/><path d="M4 17h9"/></svg>`;
+  }
+  // color swatch ring + center dot
+  return `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="width:${s}px;height:${s}px;flex-shrink:0"><circle cx="12" cy="12" r="7.5" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3.8" fill="currentColor"/></svg>`;
 }
 
 /** Booklet / steps sequence icon (paired with "1–18" numeric step range). */
@@ -365,17 +382,18 @@ export function drawBrickGlyphCanvas(
   ctx.save();
   ctx.translate(x, y);
   ctx.scale(size / 24, size / 24);
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 2.1;
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
+  ctx.fillStyle = color;
+  // Two clearly separated studs
+  const drawRoundedRect = (rx: number, ry: number, rw: number, rh: number, r: number) => {
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(rx, ry, rw, rh, r);
+    else ctx.rect(rx, ry, rw, rh);
+    ctx.fill();
+  };
+  drawRoundedRect(5, 5.5, 4.8, 4.4, 0.8);
+  drawRoundedRect(14.2, 5.5, 4.8, 4.4, 0.8);
   // Brick body
-  ctx.beginPath();
-  ctx.roundRect ? ctx.roundRect(3, 9, 18, 11, 2) : ctx.rect(3, 9, 18, 11);
-  ctx.stroke();
-  // Two top studs
-  ctx.strokeRect(6.5, 5, 4.5, 4);
-  ctx.strokeRect(13, 5, 4.5, 4);
+  drawRoundedRect(2, 9.5, 20, 9.5, 1.2);
   ctx.restore();
 }
 
@@ -390,19 +408,84 @@ export function drawPartsGridIconCanvas(
   ctx.translate(x, y);
   ctx.scale(size / 24, size / 24);
   ctx.strokeStyle = color;
-  ctx.lineWidth = 2.2;
-  ctx.lineJoin = 'round';
-  const rects: Array<[number, number]> = [
-    [3, 3],
-    [13.5, 3],
-    [3, 13.5],
-    [13.5, 13.5],
+  ctx.fillStyle = color;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  if (ctx.roundRect) ctx.roundRect(2.5, 2.5, 19, 19, 2.6);
+  else ctx.rect(2.5, 2.5, 19, 19);
+  ctx.stroke();
+  const studs: Array<[number, number]> = [
+    [8.25, 8.25],
+    [15.75, 8.25],
+    [8.25, 15.75],
+    [15.75, 15.75],
   ];
-  for (const [rx, ry] of rects) {
+  for (const [cx, cy] of studs) {
     ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(rx, ry, 7.5, 7.5, 1.6);
-    else ctx.rect(rx, ry, 7.5, 7.5);
+    ctx.arc(cx, cy, 2.2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+export function drawBomTableHeaderIconCanvas(
+  ctx: CanvasRenderingContext2D,
+  fieldId: BomFieldId,
+  x: number,
+  y: number,
+  size: number,
+  color: string,
+): void {
+  if (fieldId === 'image') {
+    drawBrickGlyphCanvas(ctx, x, y, size, color);
+    return;
+  }
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(size / 24, size / 24);
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  if (fieldId === 'qty') {
+    ctx.lineWidth = 2.6;
+    ctx.beginPath();
+    ctx.moveTo(6.5, 6.5);
+    ctx.lineTo(17.5, 17.5);
+    ctx.moveTo(17.5, 6.5);
+    ctx.lineTo(6.5, 17.5);
     ctx.stroke();
+  } else if (fieldId === 'partId') {
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    ctx.moveTo(5, 9.5);
+    ctx.lineTo(19, 9.5);
+    ctx.moveTo(5, 14.5);
+    ctx.lineTo(19, 14.5);
+    ctx.moveTo(10, 4.5);
+    ctx.lineTo(8.5, 19.5);
+    ctx.moveTo(15.5, 4.5);
+    ctx.lineTo(14, 19.5);
+    ctx.stroke();
+  } else if (fieldId === 'name') {
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    ctx.moveTo(4, 7);
+    ctx.lineTo(20, 7);
+    ctx.moveTo(4, 12);
+    ctx.lineTo(16, 12);
+    ctx.moveTo(4, 17);
+    ctx.lineTo(13, 17);
+    ctx.stroke();
+  } else {
+    // color swatch ring + center dot
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(12, 12, 7.5, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(12, 12, 3.8, 0, Math.PI * 2);
+    ctx.fill();
   }
   ctx.restore();
 }

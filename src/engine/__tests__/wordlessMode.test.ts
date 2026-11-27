@@ -3,6 +3,7 @@ import { createDefaultBomConfig } from '../partsList';
 import {
   DEFAULT_WORDLESS_MODE,
   buildAttachArrowIconSvg,
+  buildBomTableHeaderIconSvg,
   buildBrickGlyphSvg,
   buildFlipVerticalIconInnerSvg,
   buildMinifigPoseIconSvg,
@@ -177,6 +178,11 @@ describe('Wordless Instructions Mode Engine', () => {
     for (const svg of [
       buildBrickGlyphSvg(14),
       buildPartsGridIconSvg(18),
+      buildBomTableHeaderIconSvg('image', 14),
+      buildBomTableHeaderIconSvg('qty', 14),
+      buildBomTableHeaderIconSvg('partId', 14),
+      buildBomTableHeaderIconSvg('name', 14),
+      buildBomTableHeaderIconSvg('color', 14),
       buildStepsBookletIconSvg(14),
       buildAttachArrowIconSvg(14),
       buildPoseAdjustIconSvg(16),
