@@ -62,12 +62,31 @@ if (totalBytes > MAX_TOTAL_BYTES) {
   errors.push(`Total hosted dist size ${(totalBytes / 1024 / 1024 / 1024).toFixed(2)} GB exceeds 50 GB Neocities Supporter cap.`);
 }
 
-const chunksManifestPath = path.join(DIST_DIR, 'parts-chunks', 'manifest.json');
+const chunksDir = path.join(DIST_DIR, 'parts-chunks');
+const chunksManifestPath = path.join(chunksDir, 'manifest.json');
 if (fs.existsSync(chunksManifestPath)) {
   try {
     const manifest = JSON.parse(fs.readFileSync(chunksManifestPath, 'utf8'));
-    if (!manifest || !Array.isArray(manifest.chunks) || manifest.chunks.length === 0) {
-      errors.push('dist/parts-chunks/manifest.json is missing a non-empty chunks array.');
+    const isV2 =
+      manifest &&
+      Number(manifest.version) >= 2 &&
+      Boolean(manifest.index?.file) &&
+      Array.isArray(manifest.packs) &&
+      manifest.packs.length > 0;
+    const isV1 = manifest && Array.isArray(manifest.chunks) && manifest.chunks.length > 0;
+    if (!isV2 && !isV1) {
+      errors.push('dist/parts-chunks/manifest.json must contain either v2 (index + packs) or v1 (chunks).');
+    } else if (isV2) {
+      const requiredFiles = [
+        manifest.index.file,
+        ...(manifest.coreBundle?.file ? [manifest.coreBundle.file] : []),
+        ...manifest.packs.map((p) => p.file),
+      ];
+      for (const f of requiredFiles) {
+        if (!fs.existsSync(path.join(chunksDir, f))) {
+          errors.push(`dist/parts-chunks/manifest.json references missing file: ${f}`);
+        }
+      }
     }
   } catch (err) {
     errors.push(`dist/parts-chunks/manifest.json is invalid JSON: ${err.message}`);
