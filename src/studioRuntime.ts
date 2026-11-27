@@ -543,7 +543,6 @@ import {
   buildFlipVerticalIconInnerSvg,
   buildMinifigPoseIconSvg,
   buildNumberedBagSvg,
-  buildPartsGridIconSvg,
   buildPoseAdjustIconSvg,
   buildStepHintIconSvg,
   buildStepsBookletIconSvg,
@@ -554,7 +553,6 @@ import {
   drawBrickGlyphCanvas,
   drawMinifigPoseIconCanvas,
   drawNumberedBagCanvas,
-  drawPartsGridIconCanvas,
   drawPoseAdjustIconCanvas,
   drawStepHintIconCanvas,
   drawStepsBookletIconCanvas,
@@ -9221,8 +9219,9 @@ function getBomUsableAreaInches() {
     density: state.density,
     bomDensity: cfg.density,
   });
+  const bomHeaderH = state.wordlessMode ? 0 : typo.bom.headerH;
   const contentWidthIn = Math.max(1.5, (dims.width - typo.pad * 2) / dims.pxPerInch);
-  const contentHeightIn = Math.max(1.5, (dims.height - typo.pad * 2 - typo.footerH - typo.bom.headerH) / dims.pxPerInch);
+  const contentHeightIn = Math.max(1.5, (dims.height - typo.pad * 2 - typo.footerH - bomHeaderH) / dims.pxPerInch);
   return { dims, typo, contentWidthIn, contentHeightIn };
 }
 
@@ -11700,8 +11699,9 @@ function renderAll(renderOpts = {}) {
     const wrapPartNames = Boolean(cfg.wrapPartNames);
     const entries = page.bomEntries || [];
     const bt = typo.bom;
+    const bomHeaderH = wordless ? 0 : bt.headerH;
     const bodyW = Math.max(60, dims.width - padPx * 2);
-    const bodyH = Math.max(60, dims.height - padPx * 2 - footerH - bt.headerH);
+    const bodyH = Math.max(60, dims.height - padPx * 2 - footerH - bomHeaderH);
 
     let bomBodyHtml = '';
     if (page.bomFormat === 'table') {
@@ -11843,13 +11843,7 @@ function renderAll(renderOpts = {}) {
     }
 
     const bomHeaderHtml = wordless
-      ? `<div class="shrink-0 flex items-center justify-between border-b" style="border-color:${theme.pliBorder};padding-bottom:${bt.headerPb}px;margin-bottom:${bt.headerMb}px;gap:${Math.round(typo.pt(8))}px">
-          <div class="flex items-center min-w-0" style="gap:${Math.round(typo.pt(7))}px">
-            <span class="inline-flex items-center shrink-0" style="color:${theme.accent}">${buildPartsGridIconSvg(Math.max(14, Math.round(bt.titleFont * 1.12)))}</span>
-            ${page.bomPageCount > 1 ? `<span class="font-bold opacity-80 shrink-0 tabular-nums" style="font-size:${bt.pageCountFont}px">${page.bomPageIdx + 1} / ${page.bomPageCount}</span>` : ''}
-          </div>
-          <span class="shrink-0 inline-flex items-center font-bold tabular-nums" style="gap:${Math.round(typo.pt(4))}px;color:${theme.muted};font-size:${bt.summaryFont}px">${buildBrickGlyphSvg(Math.max(12, Math.round(bt.summaryFont * 1.2)))}<span>${page.bomTotalPieces}</span></span>
-        </div>`
+      ? ''
       : `<div class="shrink-0 flex items-baseline justify-between border-b" style="border-color:${theme.pliBorder};padding-bottom:${bt.headerPb}px;margin-bottom:${bt.headerMb}px;gap:${Math.round(typo.pt(8))}px">
           <div class="flex items-baseline min-w-0" style="gap:${Math.round(typo.pt(8))}px">
             <h2 class="font-bold truncate leading-tight" style="font-size:${bt.titleFont}px">Parts List</h2>
@@ -16413,7 +16407,7 @@ function renderBomSetupPreview(bc) {
     }).join('');
 
     previewEl.innerHTML = `<div class="rounded-md border shadow-xs flex flex-col overflow-hidden" style="width:${box.widthPx}px;height:${box.heightPx}px;padding:6px;border-color:${theme.pliBorder};color:${theme.text}">
-      <div class="shrink-0 flex items-center justify-between pb-1 mb-1 border-b" style="border-color:${theme.pliBorder};font-size:7px;font-weight:800"><span>Parts List</span><span style="color:${theme.muted};font-size:6px">Table</span></div>
+      ${state.wordlessMode ? '' : `<div class="shrink-0 flex items-center justify-between pb-1 mb-1 border-b" style="border-color:${theme.pliBorder};font-size:7px;font-weight:800"><span>Parts List</span><span style="color:${theme.muted};font-size:6px">Table</span></div>`}
       <div class="flex-1 min-h-0 flex flex-col overflow-hidden">
         <div class="shrink-0 flex items-center py-0.5 border-b" style="background:${theme.pliBg};border-color:${theme.pliBorder};color:${theme.muted}">${headCols}</div>
         <div class="flex-1 min-h-0 flex flex-col">${rowHtml}</div>
@@ -16491,7 +16485,7 @@ function renderBomSetupPreview(bc) {
     }).join('');
 
     previewEl.innerHTML = `<div class="rounded-md border shadow-xs flex flex-col overflow-hidden" style="width:${box.widthPx}px;height:${box.heightPx}px;padding:6px;border-color:${theme.pliBorder};color:${theme.text}">
-      <div class="shrink-0 flex items-center justify-between pb-1 mb-1 border-b" style="border-color:${theme.pliBorder};font-size:7px;font-weight:800"><span>Parts List</span><span class="font-mono" style="color:${theme.muted};font-size:6.5px">${actualCols}×${actualRows}</span></div>
+      ${state.wordlessMode ? '' : `<div class="shrink-0 flex items-center justify-between pb-1 mb-1 border-b" style="border-color:${theme.pliBorder};font-size:7px;font-weight:800"><span>Parts List</span><span class="font-mono" style="color:${theme.muted};font-size:6.5px">${actualCols}×${actualRows}</span></div>`}
       <div class="relative flex-1 min-h-0 w-full">${cellsHtml}</div>
     </div>`;
     applyThemeBackgroundToElement(previewEl.firstElementChild, theme);
@@ -22036,31 +22030,8 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       return lo > 0 ? text.slice(0, lo).trimEnd() + ell : ell;
     };
 
-    const headerH = bt.headerH;
-    if (wordless) {
-      const hdrContentH = Math.max(14, headerH - bt.headerMb - bt.headerPb);
-      const hdrMidY = pad + hdrContentH / 2;
-      const gridSz = Math.max(14, Math.round(bt.titleFont * 1.12));
-      drawPartsGridIconCanvas(ctx, pad, hdrMidY - gridSz / 2, gridSz, theme.accent);
-      if (page.bomPageCount > 1) {
-        ctx.fillStyle = theme.muted;
-        ctx.font = themeCanvasFont(theme, 700, bt.pageCountFont);
-        ctx.textBaseline = 'middle';
-        ctx.fillText(`${page.bomPageIdx + 1} / ${page.bomPageCount}`, pad + gridSz + Math.round(typo.pt(7)), hdrMidY + 0.5);
-      }
-      const totalStr = String(page.bomTotalPieces || allParts.length);
-      const brickSz = Math.max(12, Math.round(bt.summaryFont * 1.2));
-      const brickGap = Math.round(typo.pt(4));
-      ctx.font = themeCanvasFont(theme, 700, bt.summaryFont);
-      const totalW = Math.ceil(ctx.measureText(totalStr).width);
-      drawBrickGlyphCanvas(ctx, pxW - pad - totalW - brickGap - brickSz, hdrMidY - brickSz / 2, brickSz, theme.muted);
-      ctx.fillStyle = theme.muted;
-      ctx.textAlign = 'right';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(totalStr, pxW - pad, hdrMidY + 0.5);
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'top';
-    } else {
+    const headerH = wordless ? 0 : bt.headerH;
+    if (!wordless) {
       ctx.fillStyle = theme.text;
       ctx.font = themeCanvasFont(theme, 700, bt.titleFont);
       ctx.fillText(headerTitle, pad, pad);
@@ -22069,10 +22040,10 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       ctx.font = themeCanvasFont(theme, 500, bt.summaryFont);
       ctx.fillText(`${page.bomTotalPieces || allParts.length} pcs · ${page.bomTotalUnique || entries.length} unique`, pxW - pad, pad + Math.round((bt.titleFont - bt.summaryFont) * 0.72));
       ctx.textAlign = 'left';
-    }
 
-    ctx.strokeStyle = theme.pliBorder; ctx.lineWidth = 1.25;
-    ctx.beginPath(); ctx.moveTo(pad, pad + headerH - bt.headerMb); ctx.lineTo(pxW - pad, pad + headerH - bt.headerMb); ctx.stroke();
+      ctx.strokeStyle = theme.pliBorder; ctx.lineWidth = 1.25;
+      ctx.beginPath(); ctx.moveTo(pad, pad + headerH - bt.headerMb); ctx.lineTo(pxW - pad, pad + headerH - bt.headerMb); ctx.stroke();
+    }
 
     const bodyX = pad, bodyY = pad + headerH;
     const bodyW = pxW - pad * 2, bodyH = pxH - bodyY - pad - footerH;

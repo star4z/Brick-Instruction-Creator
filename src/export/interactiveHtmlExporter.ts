@@ -350,7 +350,6 @@ function buildStaticFallbackHtml(payload: InteractiveHtmlPayload, safeEditorUrl:
     const mirror = kind === 'yaw_90_ccw' ? ' transform="translate(24 0) scale(-1 1)"' : '';
     return `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><g${mirror}><path d="M19.8 10.2A8.2 8.2 0 0 0 6.1 6.3L4.4 8"/><polyline points="4.4 4.2 4.4 8 8.2 8"/><path d="M4.2 13.8A8.2 8.2 0 0 0 17.9 17.7L19.6 16"/><polyline points="19.6 19.8 19.6 16 15.8 16"/></g></svg>`;
   };
-  const partsIconSvg = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="2.5" y="2.5" width="19" height="19" rx="2.6" stroke="currentColor" stroke-width="2"/><circle cx="8.25" cy="8.25" r="2.2" fill="currentColor"/><circle cx="15.75" cy="8.25" r="2.2" fill="currentColor"/><circle cx="8.25" cy="15.75" r="2.2" fill="currentColor"/><circle cx="15.75" cy="15.75" r="2.2" fill="currentColor"/></svg>';
   const brickIconSvg = '<svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5" y="5.5" width="4.8" height="4.4" rx="0.8"/><rect x="14.2" y="5.5" width="4.8" height="4.4" rx="0.8"/><rect x="2" y="9.5" width="20" height="9.5" rx="1.2"/></svg>';
   const qtyIconSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M6.5 6.5 17.5 17.5"/><path d="M17.5 6.5 6.5 17.5"/></svg>';
   const partIdIconSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M5 9.5h14"/><path d="M5 14.5h14"/><path d="M10 4.5 8.5 19.5"/><path d="M15.5 4.5 14 19.5"/></svg>';
@@ -450,14 +449,16 @@ function buildStaticFallbackHtml(payload: InteractiveHtmlPayload, safeEditorUrl:
             )
             .join('')}</div>`;
       const bomTitleHtml = wordless
-        ? `<h2 class="sf-h2" style="display:inline-flex;align-items:center;gap:8px">${partsIconSvg}${pg.title ? `<span>${escapeHtmlText(pg.title)}</span>` : ''}</h2>`
+        ? (pg.title ? `<h2 class="sf-h2">${escapeHtmlText(pg.title)}</h2>` : '')
         : `<h2 class="sf-h2">${escapeHtmlText(pg.title || 'Parts List')}</h2>`;
       cards.push(`
         <section class="sf-card">
-          <div class="sf-card-head">
+          ${bomTitleHtml || pgLabel(pg.num)
+            ? `<div class="sf-card-head">
             <div class="sf-meta">${bomTitleHtml}</div>
             <span class="sf-pg-num">${pgLabel(pg.num)}</span>
-          </div>
+          </div>`
+            : ''}
           ${bodyHtml}
         </section>`);
     } else {
@@ -2204,7 +2205,6 @@ ${staticFallbackHtml}
       const fields = (pg.bomFields && pg.bomFields.length > 0)
         ? pg.bomFields
         : (isWordless ? ['image', 'qty', 'partId'] : ['image', 'qty', 'name', 'partId']);
-      const partsSvg = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="2.5" y="2.5" width="19" height="19" rx="2.6" stroke="currentColor" stroke-width="2"/><circle cx="8.25" cy="8.25" r="2.2" fill="currentColor"/><circle cx="15.75" cy="8.25" r="2.2" fill="currentColor"/><circle cx="8.25" cy="15.75" r="2.2" fill="currentColor"/><circle cx="15.75" cy="15.75" r="2.2" fill="currentColor"/></svg>';
       const brickSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5" y="5.5" width="4.8" height="4.4" rx="0.8"/><rect x="14.2" y="5.5" width="4.8" height="4.4" rx="0.8"/><rect x="2" y="9.5" width="20" height="9.5" rx="1.2"/></svg>';
       const qtySvg = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M6.5 6.5 17.5 17.5"/><path d="M17.5 6.5 6.5 17.5"/></svg>';
       const partIdSvg = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M5 9.5h14"/><path d="M5 14.5h14"/><path d="M10 4.5 8.5 19.5"/><path d="M15.5 4.5 14 19.5"/></svg>';
@@ -2247,10 +2247,10 @@ ${staticFallbackHtml}
             '</div>';
           }).join('') + '</div>';
       const bomHeadingHtml = isWordless
-        ? '<h2 style="margin:0;font-size:20px;font-weight:900;display:inline-flex;align-items:center;gap:8px">' + partsSvg + (pg.title ? '<span>' + esc(pg.title) + '</span>' : '') + '</h2>'
+        ? (pg.title ? '<h2 style="margin:0;font-size:20px;font-weight:900">' + esc(pg.title) + '</h2>' : '')
         : '<h2 style="margin:0;font-size:22px;font-weight:900">' + esc(pg.title || 'Parts List') + '</h2>';
       const bomSummaryHtml = isWordless
-        ? '<span style="font-size:12px;color:var(--muted);font-weight:700;display:inline-flex;align-items:center;gap:5px">' + brickSvg + '<span>' + DATA.totalPieces + '</span></span>'
+        ? ''
         : '<span style="font-size:12px;color:var(--muted);font-weight:600">Tap parts to check them off · ' + DATA.totalPieces + ' total pcs</span>';
       const partStepMap = new Map();
       viewerItems.forEach((vi, vIdx) => {
