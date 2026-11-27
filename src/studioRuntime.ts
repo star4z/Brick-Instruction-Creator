@@ -7144,15 +7144,19 @@ function assignAutoPlacementOffsets(chapters) {
       : undefined;
     const headedShaftDir = getPartWorldHeadedShaftDir(part);
     const subBoxes = computeWorldSubBoxes(part);
+    const box = computeWorldBox(part);
+    const role = classifyPartRole(part);
+    const smoothTop = isSmoothStudlessTopPart(part, box, role, canConnectSideways(part, role));
     return {
       id: part.id,
-      box: computeWorldBox(part),
+      box,
       rgb: [rgb[0], rgb[1], rgb[2]],
       sku: `${part.p}:${part.c}`,
       ...(localUp ? { localUp } : {}),
       ...(studs.length > 0 ? { studs } : {}),
       ...(headedShaftDir ? { headedShaftDir } : {}),
       ...(subBoxes && subBoxes.length > 1 ? { subBoxes } : {}),
+      ...(smoothTop ? { smoothTop: true } : {}),
     };
   };
 

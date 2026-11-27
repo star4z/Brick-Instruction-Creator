@@ -61,6 +61,8 @@ export interface PlacementPartInput {
   headedShaftDir?: readonly [number, number, number];
   /** Optional world-space tight convex sub-boxes for concave parts (e.g. L-brackets, arches, frames). */
   subBoxes?: ReadonlyArray<PlacementAABB>;
+  /** Optional true when the part's top face (+Y) is smooth and studless (e.g. flat tiles), providing zero vertical stud clutch. */
+  smoothTop?: boolean;
 }
 
 export interface PlacementStepInput {
@@ -2391,6 +2393,203 @@ function filterDistinctCoaxialArrows(
   });
 }
 
+export interface InterlockingSocketResult {
+  arrows: PlacementArrowSegment[];
+  requiredMag: number;
+  leadPart: PlacementPartInput | null;
+}
+
+/**
+ * Detects non-shaft 3-axis interlocking socket/turntable/snap-ring connections (such as a 2×2
+ * turntable flat base `27448` snapping into a 4×4 round plate opening `60474`, or a pivot/socket
+ * coupler) between a moving subassembly and stationary prior parts along `offset`.
+ *
+ * Emits a single centered placement arrow per socket directly from the lifted connector's
+ * mating face to the stationary socket's entry center, and computes a camera-aware lift
+ * clearance so wide subassemblies (like wheeled bogies or turrets) uncover the mating socket
+ * cleanly—matching official LEGO manual conventions.
+ */
+export function detectInterlockingSocketArrows(
+  movingParts: ReadonlyArray<PlacementPartInput>,
+  stationaryParts: ReadonlyArray<PlacementPartInput>,
+  offset: readonly [number, number, number],
+  camera?: { az: number; el: number },
+): InterlockingSocketResult {
+  const mag = Math.hypot(offset[0], offset[1], offset[2]);
+  if (mag < 6 || movingParts.length === 0 || stationaryParts.length === 0) {
+    return { arrows: [], requiredMag: 0, leadPart: null };
+  }
+  const ux = offset[0] / mag;
+  const uy = offset[1] / mag;
+  const uz = offset[2] / mag;
+  const ax = Math.abs(ux);
+  const ay = Math.abs(uy);
+  const az = Math.abs(uz);
+  if (Math.max(ax, ay, az) < 0.94) {
+    return { arrows: [], requiredMag: 0, leadPart: null };
+  }
+  const axis = ax >= ay && ax >= az ? 0 : (ay >= az ? 1 : 2);
+  const sign = offset[axis] >= 0 ? 1 : -1;
+  const perpA = (axis + 1) % 3;
+  const perpB = (axis + 2) % 3;
+
+  // Union bounding box of the whole moving subassembly for socket-clearing lift geometry
+  let subUnion = movingParts[0].box;
+  for (let i = 1; i < movingParts.length; i++) {
+    subUnion = unionBox(subUnion, movingParts[i].box);
+  }
+
+  type SocketEntry = {
+    cA: number;
+    cB: number;
+    movingSeatedAxis: number;
+    stationaryAxis: number;
+    socketRadius: number;
+    movingPart: PlacementPartInput;
+  };
+  const bySocket = new Map<string, SocketEntry>();
+
+  const hasOutwardStudAlong = (p: PlacementPartInput, dirAxis: number, dirSign: number): boolean => {
+    if (!p.studs || p.studs.length === 0) return false;
+    for (let k = 0; k < p.studs.length; k++) {
+      if (p.studs[k][3 + dirAxis] * dirSign >= 0.7) return true;
+    }
+    return false;
+  };
+
+  for (let i = 0; i < movingParts.length; i++) {
+    const mp = movingParts[i];
+    const mb = mp.box;
+    if (isSlenderShaftAlongAxis(mb, axis)) continue;
+    const mSpanA = mb.max[perpA] - mb.min[perpA];
+    const mSpanB = mb.max[perpB] - mb.min[perpB];
+    if (Math.max(mSpanA, mSpanB) > 84) continue;
+    const mpHasMatingStuds = hasOutwardStudAlong(mp, axis, -sign);
+
+    for (let j = 0; j < stationaryParts.length; j++) {
+      const sp = stationaryParts[j];
+      if (sp.id === mp.id) continue;
+      const sb = sp.box;
+      if (isSlenderShaftAlongAxis(sb, axis)) continue;
+
+      const ovAlong = overlap1D(mb.min[axis], mb.max[axis], sb.min[axis], sb.max[axis]);
+      // Require genuine 3D interpenetration:
+      // - Deep (> 4.5 LDU) non-shaft interlocks (e.g. tall turntable rings / sockets), OR
+      // - Studless snap-collar interlocks (3.2..4.5 LDU, e.g. 27448 turntable flat base
+      //   snapping 4 LDU into 60474 round plate opening) where neither part uses standard studs.
+      if (ovAlong < 3.2) continue;
+      if (ovAlong < 4.5) {
+        if (mp.smoothTop || mpHasMatingStuds || hasOutwardStudAlong(sp, axis, sign)) continue;
+      }
+      const ovA = overlap1D(mb.min[perpA], mb.max[perpA], sb.min[perpA], sb.max[perpA]);
+      const ovB = overlap1D(mb.min[perpB], mb.max[perpB], sb.min[perpB], sb.max[perpB]);
+      if (ovA < 8.0 || ovB < 8.0 || ovA > 84 || ovB > 84) continue;
+
+      // Connector approaches stationary socket from the `sign` side without poking past its far face
+      if ((mb.center[axis] - sb.center[axis]) * sign < 1.0) continue;
+      const leadingTip = sign > 0 ? mb.min[axis] : mb.max[axis];
+      const farFace = sign > 0 ? sb.min[axis] : sb.max[axis];
+      if ((leadingTip - farFace) * sign < -2.5) continue;
+
+      // Guard against concave hollow arch AABB false overlaps when subBoxes are available
+      if (mp.subBoxes && mp.subBoxes.length > 1) {
+        const hitSub = mp.subBoxes.some((msb) =>
+          overlap1D(msb.min[axis], msb.max[axis], sb.min[axis], sb.max[axis]) >= 3.2 &&
+          overlap1D(msb.min[perpA], msb.max[perpA], sb.min[perpA], sb.max[perpA]) >= 4.0 &&
+          overlap1D(msb.min[perpB], msb.max[perpB], sb.min[perpB], sb.max[perpB]) >= 4.0,
+        );
+        if (!hitSub) continue;
+      }
+      if (sp.subBoxes && sp.subBoxes.length > 1) {
+        // Hollow-ring sockets (e.g. 60474 round plate w/ 2x2 center hole) have perimeter subBoxes
+        // closely ringing the connector snap collar (within 2.5 LDU), whereas a big arch sits far away.
+        const hitRing = sp.subBoxes.some((ssb) =>
+          overlap1D(mb.min[axis], mb.max[axis], ssb.min[axis], ssb.max[axis]) >= 3.2 &&
+          overlap1D(mb.min[perpA] - 2.5, mb.max[perpA] + 2.5, ssb.min[perpA], ssb.max[perpA]) > 0 &&
+          overlap1D(mb.min[perpB] - 2.5, mb.max[perpB] + 2.5, ssb.min[perpB], ssb.max[perpB]) > 0,
+        );
+        if (!hitRing) continue;
+      }
+
+      const iMinA = Math.max(mb.min[perpA], sb.min[perpA]);
+      const iMaxA = Math.min(mb.max[perpA], sb.max[perpA]);
+      const iMinB = Math.max(mb.min[perpB], sb.min[perpB]);
+      const iMaxB = Math.min(mb.max[perpB], sb.max[perpB]);
+      const cA = (iMinA + iMaxA) * 0.5;
+      const cB = (iMinB + iMaxB) * 0.5;
+      const movingSeatedAxis = leadingTip;
+      const stationaryAxis = sign > 0 ? sb.max[axis] : sb.min[axis];
+      const socketRadius = Math.max(iMaxA - iMinA, iMaxB - iMinB) * 0.5;
+
+      const key = `${Math.round(cA / 8)},${Math.round(cB / 8)}`;
+      const prev = bySocket.get(key);
+      if (!prev) {
+        bySocket.set(key, { cA, cB, movingSeatedAxis, stationaryAxis, socketRadius, movingPart: mp });
+      } else {
+        if ((movingSeatedAxis - prev.movingSeatedAxis) * -sign > 0) {
+          prev.movingSeatedAxis = movingSeatedAxis;
+        }
+        if ((stationaryAxis - prev.stationaryAxis) * sign > 0) {
+          prev.stationaryAxis = stationaryAxis;
+        }
+      }
+    }
+  }
+
+  if (bySocket.size === 0) {
+    return { arrows: [], requiredMag: 0, leadPart: null };
+  }
+
+  const arrows: PlacementArrowSegment[] = [];
+  let requiredMag = 0;
+  let leadPart: PlacementPartInput | null = null;
+  const azRad = ((camera?.az ?? 38) * Math.PI) / 180;
+  const elRad = Math.abs(((camera?.el ?? 30) * Math.PI) / 180);
+  const tanEl = Math.tan(Math.max(0.22, Math.min(0.95, elRad)));
+
+  for (const entry of bySocket.values()) {
+    if (!leadPart) leadPart = entry.movingPart;
+    const engagementDepth = Math.max(0, (entry.stationaryAxis - entry.movingSeatedAxis) * sign);
+    let clearAirGap = 36;
+    if (axis === 1) {
+      // Compute how far the lifted subassembly overhangs past the socket center toward the camera
+      // so the mating socket plate and center hole remain unobstructed below the lifted subassembly.
+      const camX = Math.sin(azRad);
+      const camZ = Math.cos(azRad);
+      const halfSpanX = Math.max(subUnion.max[0] - entry.cB, entry.cB - subUnion.min[0]);
+      const halfSpanZ = Math.max(subUnion.max[2] - entry.cA, entry.cA - subUnion.min[2]);
+      const nearOverhang = Math.abs(camX) * halfSpanX + Math.abs(camZ) * halfSpanZ;
+      if (nearOverhang > entry.socketRadius + 10) {
+        clearAirGap = Math.max(44, Math.min(80, nearOverhang * tanEl + 22));
+      }
+    } else {
+      const subSpanA = subUnion.max[perpA] - subUnion.min[perpA];
+      const subSpanB = subUnion.max[perpB] - subUnion.min[perpB];
+      if (Math.max(subSpanA, subSpanB) > entry.socketRadius * 2 + 20) {
+        clearAirGap = 56;
+      }
+    }
+    const req = engagementDepth + clearAirGap;
+    if (req > requiredMag) requiredMag = req;
+
+    const fromAxis = entry.movingSeatedAxis + offset[axis];
+    const toAxis = entry.stationaryAxis;
+    if ((fromAxis - toAxis) * sign < 6) continue;
+
+    const from: Vec3 = [0, 0, 0];
+    const to: Vec3 = [0, 0, 0];
+    from[perpA] = entry.cA;
+    from[perpB] = entry.cB;
+    from[axis] = fromAxis;
+    to[perpA] = entry.cA;
+    to[perpB] = entry.cB;
+    to[axis] = toAxis;
+    arrows.push({ from, to });
+  }
+
+  return { arrows, requiredMag, leadPart };
+}
+
 export interface SubassemblyAttachmentResult {
   offsets: Record<string, AutoPartOffset>;
   hasCoaxialPinHole: boolean;
@@ -2406,6 +2605,9 @@ export interface SubassemblyAttachmentResult {
  * - Adds dedicated coaxial Technic pin/axle-to-hole arrow(s) spanning between the axle
  *   tip and the top/entry face of the hole it enters, enlarging the lift if needed so
  *   every hole clears its axle tip cleanly.
+ * - Detects 3-axis interlocking turntable/socket connectors (e.g. 27448 → 60474) and
+ *   emits a single centered connector arrow with socket-clearing lift instead of spurious
+ *   arrows on passive smooth bearing tiles or non-connecting outer studs.
  */
 export function computeSubassemblyAttachmentOffsets(
   subParts: ReadonlyArray<PlacementPartInput>,
@@ -2429,14 +2631,19 @@ export function computeSubassemblyAttachmentOffsets(
   const perpA = (axis + 1) % 3;
   const perpB = (axis + 2) % 3;
 
-  // 1. Check coaxial pin/axle-to-hole connections and ensure sufficient clearance past any axle tip
+  // 1. Check coaxial pin/axle-to-hole AND 3-axis interlocking socket/turntable connections
+  //    and ensure sufficient clearance past any axle tip or wide socket-covering body
   const initialOff: Vec3 = [Math.round(ux * baseMag), Math.round(uy * baseMag), Math.round(uz * baseMag)];
   let coaxial = detectCoaxialPinHoleArrows(subParts, prevParts, initialOff);
+  let socket = detectInterlockingSocketArrows(subParts, prevParts, initialOff, camera);
   let mag = baseMag;
-  if (coaxial.requiredMag > mag) {
-    mag = Math.min(72, Math.ceil(coaxial.requiredMag / 4) * 4);
+  const neededMag = Math.max(coaxial.requiredMag, socket.requiredMag);
+  const maxLift = socket.requiredMag > coaxial.requiredMag ? 88 : 72;
+  if (neededMag > mag) {
+    mag = Math.min(maxLift, Math.ceil(neededMag / 4) * 4);
     const expandedOff: Vec3 = [Math.round(ux * mag), Math.round(uy * mag), Math.round(uz * mag)];
     coaxial = detectCoaxialPinHoleArrows(subParts, prevParts, expandedOff);
+    socket = detectInterlockingSocketArrows(subParts, prevParts, expandedOff, camera);
   }
   const dx = Math.round(ux * mag);
   const dy = Math.round(uy * mag);
@@ -2512,16 +2719,18 @@ export function computeSubassemblyAttachmentOffsets(
         leadPart = sp;
       }
     }
-  } else {
-    // Fallback when compiled studs aren't present: use only sub-parts actually contacting `prevParts`
-    // along the mating face in direction `-sign`
+  } else if (coaxial.arrows.length === 0 && socket.arrows.length === 0) {
+    // Fallback when compiled studs aren't present and no coaxial/socket connector exists:
+    // use only non-smooth sub-parts actually contacting `prevParts` along the mating face
     const matingParts: PlacementPartInput[] = [];
     const matingRefs: PlacementPartInput[] = [];
     const seenRefs = new Set<string>();
     for (const sp of subParts) {
+      if (axis === 1 && sign < 0 && sp.smoothTop) continue;
       const sb = sp.box;
       let touchesMatingFace = false;
       for (const rp of prevParts) {
+        if (axis === 1 && sign > 0 && rp.smoothTop) continue;
         const rb = rp.box;
         const ovA = overlap1D(sb.min[perpA], sb.max[perpA], rb.min[perpA], rb.max[perpA]);
         const ovB = overlap1D(sb.min[perpB], sb.max[perpB], rb.min[perpB], rb.max[perpB]);
@@ -2554,6 +2763,11 @@ export function computeSubassemblyAttachmentOffsets(
     }
   }
 
+  // Prefer actual socket connector part as carrier when pure socket attachment
+  if (!leadPart && socket.leadPart) {
+    leadPart = socket.leadPart;
+  }
+
   // Fallback lead part if pure coaxial or disconnected
   if (!leadPart) {
     let cx = 0;
@@ -2575,11 +2789,19 @@ export function computeSubassemblyAttachmentOffsets(
     leadPart = leadPart ?? subParts[0];
   }
 
-  const suppressPrimaryArrow = !hasStudContact && coaxial.arrows.length > 0;
+  const dedicatedArrows: PlacementArrowSegment[] = [...coaxial.arrows];
+  if (socket.arrows.length > 0) {
+    const distinctSockets = dedicatedArrows.length > 0
+      ? filterDistinctCoaxialArrows(socket.arrows, dedicatedArrows, axis)
+      : socket.arrows;
+    dedicatedArrows.push(...distinctSockets);
+  }
+
+  const suppressPrimaryArrow = !hasStudContact && dedicatedArrows.length > 0;
   let extraArrows: PlacementArrowSegment[] | undefined;
-  if (coaxial.arrows.length > 0) {
+  if (dedicatedArrows.length > 0) {
     if (suppressPrimaryArrow) {
-      extraArrows = coaxial.arrows;
+      extraArrows = dedicatedArrows;
     } else {
       const primarySegs = computePlacementArrowSegments(
         studArrowBox ?? leadPart.box,
@@ -2588,7 +2810,7 @@ export function computeSubassemblyAttachmentOffsets(
         null,
         camera?.az ?? 38,
       );
-      const deduped = filterDistinctCoaxialArrows(coaxial.arrows, primarySegs, axis);
+      const deduped = filterDistinctCoaxialArrows(dedicatedArrows, primarySegs, axis);
       if (deduped.length > 0) {
         extraArrows = deduped;
       }
@@ -2616,7 +2838,7 @@ export function computeSubassemblyAttachmentOffsets(
 
   return {
     offsets,
-    hasCoaxialPinHole: coaxial.arrows.length > 0,
+    hasCoaxialPinHole: coaxial.arrows.length > 0 || socket.arrows.length > 0,
     stationaryShaftBoxes: coaxial.stationaryShaftBoxes,
   };
 }

@@ -6,6 +6,7 @@ import {
   computePlacementArrowSegments,
   computeSubassemblyAttachmentOffsets,
   detectCoaxialPinHoleArrows,
+  detectInterlockingSocketArrows,
   perceptualRgbDistance,
   type PlacementAABB,
   type PlacementPartInput,
@@ -1665,6 +1666,101 @@ describe('placementArrows — LEGO-style automatic placement arrows & offsets', 
       expect(off.y).toBeLessThanOrEqual(0);
     }
   });
+
+  it('emits a single centered connector arrow with socket-clearing lift for a turntable/socket subassembly (27448 -> 60474) instead of arrows on smooth bearing tiles or outer studs', () => {
+    // Reproduces IMG_0466 / IMG_0467 (Wheel Assembly attaching to underside 4x4 round plate 60474):
+    // - 60474 yellow 4x4 round plate at Y=[73..85] centered at (0, -75)
+    // - Red deck plates flanking at Y=[73..85]
+    // - 27448 white 2x2 turntable flat base at Y=[65..77] centered at (0, -75): 4 LDU studless snap-collar enters 60474!
+    // - Two smooth 2x4 bearing tiles (87079, smoothTop=true) at Y=[65..73] grazing the red deck with zero clutch
+    // - Two outer wheel holders (38339) spanning Z=[-155..5] at Y=[41..69] (not connecting to deck)
+    const roundSocket60474: PlacementPartInput = {
+      ...makePart('socket_60474', 0, 73, -75, 80, 12, 80, YELLOW),
+      studs: [
+        [-20, 81, -95, 0, 1, 0],
+        [20, 81, -95, 0, 1, 0],
+        [-20, 81, -55, 0, 1, 0],
+        [20, 81, -55, 0, 1, 0],
+      ],
+    };
+    const redDeckA = makePart('deck_a', 0, 73, -155, 120, 12, 80, RED);
+    const redDeckB = makePart('deck_b', 0, 73, 5, 120, 12, 80, RED);
+
+    const turntable27448: PlacementPartInput = makePart('tt_27448', 0, 65, -75, 40, 12, 40, [245, 245, 245]);
+    const smoothTileA: PlacementPartInput = {
+      ...makePart('tile_87079_a', 0, 65, -35, 80, 8, 40, BLACK),
+      smoothTop: true,
+    };
+    const smoothTileB: PlacementPartInput = {
+      ...makePart('tile_87079_b', 0, 65, -115, 80, 8, 40, BLACK),
+      smoothTop: true,
+    };
+    const wheelHolderA = makePart('wh_a', 0, 41, -6, 120, 28, 20, BLACK);
+    const wheelHolderB = makePart('wh_b', 0, 41, -146, 120, 28, 20, BLACK);
+
+    const attached = computeSubassemblyAttachmentOffsets(
+      [turntable27448, smoothTileA, smoothTileB, wheelHolderA, wheelHolderB],
+      [roundSocket60474, redDeckA, redDeckB],
+      [0, -1, 0],
+      44,
+      { az: 210, el: -30 },
+    );
+
+    expect(attached.hasCoaxialPinHole).toBe(true);
+    // Lead carrier must be the actual 27448 turntable connector, NOT a smooth tile or outer wheel holder
+    const leadOff = attached.offsets['tt_27448'];
+    expect(leadOff.arrow).toBe(true);
+    expect(leadOff.suppressPrimaryArrow).toBe(true);
+    expect(attached.offsets['tile_87079_a'].arrow).toBe(false);
+    expect(attached.offsets['tile_87079_b'].arrow).toBe(false);
+    expect(attached.offsets['wh_a'].arrow).toBe(false);
+    expect(attached.offsets['wh_b'].arrow).toBe(false);
+
+    // Lift must clear the wide bogie body cleanly above the 4x4 round socket (>= 72 LDU, matching LEGO manuals)
+    expect(Math.abs(leadOff.y)).toBeGreaterThanOrEqual(72);
+
+    // Must emit EXACTLY ONE centered arrow directly between 27448 snap-collar and 60474 center hole (0, -75)
+    expect(leadOff.extraArrows).toBeDefined();
+    expect(leadOff.extraArrows!).toHaveLength(1);
+    expect(leadOff.extraArrows![0].from[0]).toBeCloseTo(0, 3);
+    expect(leadOff.extraArrows![0].from[2]).toBeCloseTo(-75, 3);
+    expect(leadOff.extraArrows![0].from[1]).toBeCloseTo(77 + leadOff.y, 3);
+    expect(leadOff.extraArrows![0].to).toEqual([0, 73, -75]);
+
+    // Rendered arrow geometry must produce exactly 1 flat arrow (3 triangles × 9 floats = 27 floats)
+    const geom = buildPlacementArrowGeometry(
+      [
+        {
+          box: turntable27448.box,
+          offset: [leadOff.x, leadOff.y, leadOff.z],
+          extraSegments: leadOff.extraArrows ?? null,
+          suppressPrimary: Boolean(leadOff.suppressPrimaryArrow),
+          rgb: [220, 38, 38],
+        },
+      ],
+      210,
+      -30,
+      { style: 'flat' },
+    );
+    expect(geom.triPos.length).toBe(27);
+  });
+
+  it('does not false-trigger detectInterlockingSocketArrows on normal studded brick stacks with 4 LDU stud overlap', () => {
+    const lowerBrick: PlacementPartInput = {
+      ...makePart('brick_lower', 0, 49, 0, 40, 28, 40, RED),
+      studs: [
+        [-10, 73, -10, 0, 1, 0],
+        [10, 73, -10, 0, 1, 0],
+        [-10, 73, 10, 0, 1, 0],
+        [10, 73, 10, 0, 1, 0],
+      ],
+    };
+    const upperPlate: PlacementPartInput = makePart('plate_upper', 0, 73, 0, 80, 12, 80, DARK_GRAY);
+
+    const res = detectInterlockingSocketArrows([lowerBrick], [upperPlate], [0, -44, 0], { az: 38, el: -30 });
+    expect(res.arrows).toHaveLength(0);
+    expect(res.requiredMag).toBe(0);
+  });
 });
 
 describe('computeAnimatedStepOffsets', () => {
@@ -1885,6 +1981,7 @@ describe('placementArrows — sibling non-occlusion (never hide another piece be
     expect(directSkipped?.['side_pin']).toBeDefined();
   });
 });
+
 
 
 
