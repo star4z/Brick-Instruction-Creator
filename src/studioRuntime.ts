@@ -26819,31 +26819,18 @@ async function buildInteractiveHtmlArtifact(mode: 'export' | 'preview' = 'export
                 };
               }
             }
-            if (!refBox) return [0, +dist.toFixed(2), 0];
+            const studUp = xformNorm([0, 1, 0], p.m || R_ID, 0);
+            const suLen = Math.hypot(studUp[0], studUp[1], studUp[2]) || 1;
+            const su = [studUp[0] / suLen, studUp[1] / suLen, studUp[2] / suLen];
+            if (!refBox) return [+(su[0] * dist).toFixed(2), +(su[1] * dist).toFixed(2), +(su[2] * dist).toFixed(2)];
             const sep = [
               pBox.center[0] - refBox.center[0],
               pBox.center[1] - refBox.center[1],
               pBox.center[2] - refBox.center[2],
             ];
-            const studUp = xformNorm([0, 1, 0], p.m || R_ID, 0);
-            const suLen = Math.hypot(studUp[0], studUp[1], studUp[2]) || 1;
-            const su = [studUp[0] / suLen, studUp[1] / suLen, studUp[2] / suLen];
-            let dir = [0, 1, 0];
-            if (Math.abs(su[1]) < 0.35) {
-              // Side-mounted / SNOT / bracket-attached part: animate horizontally along stud normal
-              const dot = sep[0] * su[0] + sep[1] * su[1] + sep[2] * su[2];
-              const sgn = dot >= 0 ? 1 : -1;
-              dir = [su[0] * sgn, su[1] * sgn, su[2] * sgn];
-            } else if (pBox.max[1] <= refBox.min[1] + 4) {
-              dir = [0, -1, 0];
-            } else if (pBox.min[1] >= refBox.max[1] - 4) {
-              dir = [0, 1, 0];
-            } else {
-              const ax = Math.abs(sep[0]), ay = Math.abs(sep[1]), az = Math.abs(sep[2]);
-              if (ax >= ay && ax >= az && ax > 2) dir = [sep[0] >= 0 ? 1 : -1, 0, 0];
-              else if (az >= ax && az >= ay && az > 2) dir = [0, 0, sep[2] >= 0 ? 1 : -1];
-              else if (ay > 2) dir = [0, sep[1] >= 0 ? 1 : -1, 0];
-            }
+            const proj = sep[0] * su[0] + sep[1] * su[1] + sep[2] * su[2];
+            const sgn = proj < -2 ? -1 : 1;
+            const dir = [su[0] * sgn, su[1] * sgn, su[2] * sgn];
             return [+(dir[0] * dist).toFixed(2), +(dir[1] * dist).toFixed(2), +(dir[2] * dist).toFixed(2)];
           };
 
@@ -26858,30 +26845,60 @@ async function buildInteractiveHtmlArtifact(mode: 'export' | 'preview' = 'export
             }
           }
 
-          const pliMap = new Map();
-          for (const p of step.parts || []) {
-            const k = `${p.p}:${p.c}`;
-            if (!pliMap.has(k)) {
-              pliMap.set(k, {
-                partId: p.p,
-                name: resolvePart(p.p).name,
-                colorName: COLORS[p.c]?.name || '',
-                qty: 0,
-                thumb: getPliThumb(p),
-              });
+          let pliEntries = [];
+          if (step.attachedSubmodel) {
+            const attThumb = getSubmodelThumb(step.attachedSubmodel, 220, 165) || '';
+            pliEntries = [{
+              partId: step.attachedSubmodel.name || 'Submodel',
+              name: step.attachedSubmodel.name || 'Submodel',
+              qty: step.attachedSubmodel.repeatCount || 1,
+              thumb: attThumb,
+              isSubmodel: true,
+            }];
+          } else if (step.attachedMinifig) {
+            const attMfThumb = getMinifigThumb(
+              step.attachedMinifig.canonicalParts || step.attachedMinifig.previewParts,
+              `att_${step.attachedMinifig.id}`,
+              MINIFIG_BUILD_CAMERA.az,
+              MINIFIG_BUILD_CAMERA.el,
+              220,
+              220,
+            ) || '';
+            pliEntries = [{
+              partId: step.attachedMinifig.name || 'Minifigure',
+              name: step.attachedMinifig.name || 'Minifigure',
+              qty: 1,
+              thumb: attMfThumb,
+              isSubmodel: true,
+            }];
+          } else {
+            const pliMap = new Map();
+            for (const p of step.parts || []) {
+              const k = `${p.p}:${p.c}`;
+              if (!pliMap.has(k)) {
+                pliMap.set(k, {
+                  partId: p.p,
+                  name: resolvePart(p.p).name,
+                  colorName: COLORS[p.c]?.name || '',
+                  qty: 0,
+                  thumb: getPliThumb(p),
+                });
+              }
+              pliMap.get(k).qty++;
             }
-            pliMap.get(k).qty++;
+            pliEntries = Array.from(pliMap.values());
           }
+          const isSubmodelStep = Boolean(step.isSubmodelStep || ch.kind === 'submodel');
+          const submodelName = isSubmodelStep ? (ch.name || pg.chapterName || 'Submodel') : undefined;
+          const submodelRepeat = (isSubmodelStep && step.isSubmodelFinal && Number(step.submodelRepeat) > 1)
+            ? Number(step.submodelRepeat)
+            : undefined;
           const effectiveCue = getEffectiveStepCue(ch, step);
           const hasCue = Boolean(state.showRotCues && effectiveCue && effectiveCue !== 'none');
           const cueLabel = hasCue ? getRotationCueLabel(effectiveCue, wordless) : undefined;
-          const subLabel = step.attachedSubmodel
-            ? (wordless ? `×${step.attachedSubmodel.repeatCount || 1}` : `Attach ${step.attachedSubmodel.name} (×${step.attachedSubmodel.repeatCount || 1})`)
-            : step.subassembly
-              ? (wordless ? `×${step.subassembly.repeatCount || 1}` : `Includes ${step.subassembly.name} (×${step.subassembly.repeatCount || 1})`)
-              : step.isSubmodelFinal
-                ? (wordless ? `×${step.submodelRepeat || 2}` : `Repeat ×${step.submodelRepeat || 2}`)
-                : undefined;
+          const subLabel = (!wordless && step.subassembly)
+            ? `Includes ${step.subassembly.name}${(step.subassembly.repeatCount || 1) > 1 ? ` (×${step.subassembly.repeatCount})` : ''}`
+            : undefined;
 
           stepScenes.push({
             stepId: step.id,
@@ -26890,7 +26907,10 @@ async function buildInteractiveHtmlArtifact(mode: 'export' | 'preview' = 'export
             rotationCue: cueLabel,
             rotationCueKind: hasCue ? effectiveCue : undefined,
             subLabel,
-            pli: Array.from(pliMap.values()),
+            isSubmodelStep: isSubmodelStep || undefined,
+            submodelName,
+            submodelRepeat,
+            pli: pliEntries,
             previewUrl: allSteps.length <= 24
               ? renderFallbackPreview(prev, step.parts || [], cam.az, cam.el, ov.modelScale || 1.0, {
                   partOffsets: effOffsets,

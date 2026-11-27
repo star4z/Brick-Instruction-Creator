@@ -104,6 +104,8 @@ export interface InteractivePliEntry {
   colorHex?: string;
   /** Optional official length badge (`(4)` circle for axles/bars, `[5]` square for liftarms/beams). */
   lengthBadge?: { label: string; shape: 'circle' | 'square' } | null;
+  /** True when this PLI entry represents a completed submodel being attached. */
+  isSubmodel?: boolean;
 }
 
 export interface InteractiveArrowSpec {
@@ -141,6 +143,9 @@ export interface InteractiveStepScene extends InteractiveSceneSpec {
   rotationCueKind?: 'none' | 'yaw_90_cw' | 'yaw_90_ccw' | 'yaw_180' | 'flip_vertical';
   pli: InteractivePliEntry[];
   subLabel?: string;
+  isSubmodelStep?: boolean;
+  submodelName?: string;
+  submodelRepeat?: number;
   previewUrl?: string; // Static preview fallback image for JS-disabled viewers (e.g., iOS Quick Look)
 }
 
@@ -794,10 +799,26 @@ ${customFontFacesCss}  :root {
     display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
   }
 
+  .submodel-pill {
+    display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 999px;
+    background: var(--callout-bg); border: 1.5px solid var(--callout-border); color: var(--text);
+    font-size: 11px; font-weight: 800; line-height: 1.2; width: fit-content;
+    box-shadow: 0 3px 10px rgba(0,0,0,0.16);
+  }
+  .submodel-pill svg { color: var(--accent); flex-shrink: 0; }
+  .submodel-pill .submodel-rep {
+    padding: 1px 6px; border-radius: 999px; background: var(--accent); color: #fff;
+    font-size: 10px; font-weight: 900; margin-left: 2px;
+  }
+
   .pli-panel {
     border-radius: 14px; padding: 6px 8px; max-width: min(calc(100vw - 68px), 420px); max-height: 22vh; overflow-y: auto;
     background: var(--pli-bg); border: 1.5px solid var(--pli-border);
     box-shadow: 0 8px 24px rgba(0,0,0,0.14);
+  }
+  .pli-panel.is-submodel {
+    border-color: var(--callout-border);
+    background: var(--callout-bg);
   }
   .pli-grid { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
   .pli-item {
@@ -805,6 +826,7 @@ ${customFontFacesCss}  :root {
     background: rgba(127,127,127,0.08);
   }
   .pli-item img { width: 30px; height: 30px; object-fit: contain; display: block; }
+  .pli-item.is-submodel img { width: 46px; height: 36px; }
   .pli-qty { font-size: 13px; font-weight: 800; line-height: 1; }
   .pli-id { font-size: 10px; color: var(--muted); font-weight: 600; }
 
@@ -2126,19 +2148,30 @@ ${staticFallbackHtml}
     };
 
     if (pg.kind === 'steps' && step) {
+      const isSubStep = Boolean(step.isSubmodelStep);
+      const subCubeSvg = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 3 7.5 12 12l9-4.5L12 3Z"/><path d="M3 7.5V16.5L12 21l9-4.5V7.5"/><path d="M12 12v9"/></svg>';
+      const subRep = Number(step.submodelRepeat) || 0;
+      const subBadgeHtml = isSubStep
+        ? '<span class="submodel-pill" title="Submodel step">' +
+            subCubeSvg +
+            (isWordless ? '' : '<span>' + esc(step.submodelName || 'Submodel') + '</span>') +
+            (subRep > 1 ? '<span class="submodel-rep">' + subRep + '×</span>' : '') +
+          '</span>'
+        : '';
       const pliHtml = showPli && step.pli && step.pli.length > 0
-        ? '<div class="pli-panel"><div class="pli-grid">' + step.pli.map(p =>
-            '<div class="pli-item">' +
+        ? '<div class="pli-panel' + (isSubStep ? ' is-submodel' : '') + '"><div class="pli-grid">' + step.pli.map(p =>
+            '<div class="pli-item' + (p.isSubmodel ? ' is-submodel' : '') + '">' +
               (p.thumb ? '<img src="' + p.thumb + '" alt="' + esc(p.name) + '" />' : '') +
               '<div><div class="pli-qty">' + p.qty + '×' +
               (p.lengthBadge ? ' <span style="display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;padding:0 3px;font-size:10px;font-weight:800;border:1.2px solid currentColor;border-radius:' + (p.lengthBadge.shape === 'circle' ? '999px' : '3px') + ';margin-left:2px">' + esc(p.lengthBadge.label) + '</span>' : '') +
-              '</div>' + (isWordless ? '' : '<div class="pli-id">' + esc(p.partId.toUpperCase()) + '</div>') + '</div>' +
+              '</div>' + (isWordless || p.isSubmodel ? '' : '<div class="pli-id">' + esc(p.partId.toUpperCase()) + '</div>') + '</div>' +
             '</div>'
           ).join('') + '</div></div>'
         : '';
       const showRot = Boolean(step.rotationCue || (step.rotationCueKind && step.rotationCueKind !== 'none'));
       const metaInner =
-        (isWordless ? '' : '<div class="step-chapter">' + esc(pg.chapterName || step.label || '') + '</div>') +
+        subBadgeHtml +
+        (isWordless || isSubStep ? '' : '<div class="step-chapter">' + esc(pg.chapterName || step.label || '') + '</div>') +
         (step.subLabel ? '<div class="step-chapter" style="color:var(--accent)">' + esc(step.subLabel) + '</div>' : '') +
         (showRot
           ? '<span class="step-cue" style="' + (step.rotationCue ? '' : 'padding:3px') + '"><span class="step-cue-icon">' + rotIconSvg(step.rotationCueKind) + '</span>' + (step.rotationCue ? '<span>' + esc(step.rotationCue) + '</span>' : '') + '</span>'
