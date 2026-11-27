@@ -248,6 +248,19 @@ describe('Cover Metadata & LEGO-Style Layout Geometry', () => {
     expect(def.showProgramBadge).toBe(true);
     expect(def.el).toBe(18);
 
+    const withCreatorDefaults = createDefaultCoverMeta({
+      showText: true,
+      creatorLogoSrc: 'data:image/png;base64,AAA=',
+      subtitle: 'Designed by Test Studio',
+    });
+    expect(withCreatorDefaults.creatorLogoSrc).toBe('data:image/png;base64,AAA=');
+    expect(withCreatorDefaults.subtitle).toBe('Designed by Test Studio');
+    expect(withCreatorDefaults.showText).toBe(true);
+
+    const emptyLogo = createDefaultCoverMeta({ creatorLogoSrc: '', subtitle: '' });
+    expect(emptyLogo.creatorLogoSrc).toBeNull();
+    expect(emptyLogo.subtitle).toBe('');
+
     const backDef = createDefaultBackMeta();
     expect(backDef.subtitle).toBe(BACK_COVER_CREDIT);
     expect(backDef.bgSrc).toBeNull();

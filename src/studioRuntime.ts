@@ -27802,10 +27802,11 @@ async function finishImport(parsed, mode, subdivisionPlan = null, isPostImport =
         : wlDefs.pageNumberFormat;
       state.overrides = {}; state.stepInserts = {}; state.pageInserts = {}; state.dividerAfter = {};
       state.layoutGroups = [];
+      const defaultCoverSubtitle = (appSettings.defaultCoverSubtitle || '').trim();
       state.coverMeta = createDefaultCoverMeta({
-        showText: wlDefs.coverShowText,
+        showText: wlDefs.coverShowText || defaultCoverSubtitle.length > 0,
         creatorLogoSrc: appSettings.defaultCreatorLogoSrc,
-        subtitle: appSettings.defaultCoverSubtitle,
+        subtitle: defaultCoverSubtitle,
       });
       state.completeMeta = { ...createDefaultCompleteMeta(), showText: wlDefs.completeShowText };
       state.backMeta = createDefaultBackMeta();

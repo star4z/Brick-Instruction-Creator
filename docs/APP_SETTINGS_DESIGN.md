@@ -20,7 +20,7 @@ The **App Settings** modal (`#settingsModal`), accessible from the Side Menu (`#
 
 ### 2.2 Creator & Cover Defaults
 - **Default Creator Logo**: Optional saved image (`data:image/*`, up to 2 MB) automatically applied to the Front Cover of every newly imported manual.
-- **Default Cover Subtitle**: Optional default subtitle string applied to `coverMeta.subtitle` on new manuals (visible when Text & Labels is enabled).
+- **Default Cover Subtitle**: Optional default subtitle string applied to `coverMeta.subtitle` on new manuals (automatically enables Front Cover title text when non-empty).
 
 ### 2.3 Editor & Workspace
 - **Measurement Units**: `Inches (in)` *(default)* or `Centimeters (cm)` — sets the default unit for custom page dimensions and orders physical page size readouts with the preferred unit first.

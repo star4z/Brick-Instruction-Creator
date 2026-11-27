@@ -79,15 +79,24 @@ export interface CompleteMeta {
   showFireworks: boolean;
 }
 
-export function createDefaultCoverMeta(opts?: { showText?: boolean }): CoverMeta {
+export function createDefaultCoverMeta(opts?: {
+  showText?: boolean;
+  creatorLogoSrc?: string | null;
+  subtitle?: string;
+}): CoverMeta {
+  const subtitle = typeof opts?.subtitle === 'string' ? opts.subtitle : '';
+  const creatorLogoSrc =
+    typeof opts?.creatorLogoSrc === 'string' && opts.creatorLogoSrc.length > 0
+      ? opts.creatorLogoSrc
+      : null;
   return {
     title: '',
-    subtitle: '',
+    subtitle,
     az: 34,
     el: 18,
     zoom: 1.0,
     bgSrc: null,
-    creatorLogoSrc: null,
+    creatorLogoSrc,
     themeImageSrc: null,
     showQrCode: true,
     showProgramBadge: true,
