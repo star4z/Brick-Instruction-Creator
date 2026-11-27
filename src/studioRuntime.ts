@@ -25,6 +25,7 @@ import {
   shouldOpenImportWizard,
 } from './engine/appSettings';
 import {
+  getOperationLoadingViewModel,
   getStartupLoadingViewModel,
   isRestorableModelRecord,
   readStartupModelHint,
@@ -19814,6 +19815,28 @@ function hideStartupLoadingScreen() {
   if (screenEl) screenEl.classList.add('hidden');
 }
 
+function showOperationLoadingOverlay(phase, options = {}) {
+  const vm = getOperationLoadingViewModel(phase, options);
+  const overlayEl = document.getElementById('operationLoadingOverlay');
+  const titleEl = document.getElementById('opLoadTitle');
+  const statusEl = document.getElementById('opLoadStatus');
+  const pctEl = document.getElementById('opLoadPct');
+  const barEl = document.getElementById('opLoadBar');
+  if (titleEl) titleEl.textContent = vm.title;
+  if (statusEl) statusEl.textContent = vm.status;
+  if (pctEl) pctEl.textContent = `${vm.progressPct}%`;
+  if (barEl) {
+    barEl.style.width = `${vm.progressPct}%`;
+    barEl.setAttribute('aria-valuenow', String(vm.progressPct));
+  }
+  if (overlayEl) overlayEl.classList.remove('hidden');
+}
+
+function hideOperationLoadingOverlay() {
+  const overlayEl = document.getElementById('operationLoadingOverlay');
+  if (overlayEl) overlayEl.classList.add('hidden');
+}
+
 function yieldToBrowserPaint() {
   return new Promise((resolve) => {
     if (typeof requestAnimationFrame === 'function') {
@@ -24574,6 +24597,9 @@ async function runInteractiveHtmlExport() {
     if (progPct) progPct.textContent = '15%';
     if (progBar) progBar.style.width = '15%';
     await new Promise((r) => setTimeout(r, 15));
+  } else {
+    showOperationLoadingOverlay('export_html_meshes', { progressPct: 15 });
+    await yieldToBrowserPaint();
   }
 
   try {
@@ -24670,7 +24696,14 @@ async function runInteractiveHtmlExport() {
     };
 
     const allPartIndices = allParts.map((p) => registerPart(p));
-    if (modalOpen && progPct && progBar) { progPct.textContent = '55%'; progBar.style.width = '55%'; await new Promise((r) => setTimeout(r, 10)); }
+    if (modalOpen && progPct && progBar) {
+      progPct.textContent = '55%';
+      progBar.style.width = '55%';
+      await new Promise((r) => setTimeout(r, 10));
+    } else if (!modalOpen) {
+      showOperationLoadingOverlay('export_html_pages', { progressPct: 55 });
+      await yieldToBrowserPaint();
+    }
 
     const fbCanvas = document.createElement('canvas');
     fbCanvas.width = 480;
@@ -24968,7 +25001,13 @@ async function runInteractiveHtmlExport() {
       }
     }
 
-    if (modalOpen && progPct && progBar) { progPct.textContent = '90%'; progBar.style.width = '90%'; }
+    if (modalOpen && progPct && progBar) {
+      progPct.textContent = '90%';
+      progBar.style.width = '90%';
+    } else if (!modalOpen) {
+      showOperationLoadingOverlay('export_html_packaging', { progressPct: 90 });
+      await yieldToBrowserPaint();
+    }
 
     const htmlDoc = generateInteractiveHtmlDocument({
       version: 1,
@@ -25014,6 +25053,7 @@ async function runInteractiveHtmlExport() {
     const fileName = buildInteractiveHtmlFilename(state.model.title);
     const blob = new Blob([htmlDoc], { type: 'text/html;charset=utf-8' });
     if (modalOpen && progWrap) progWrap.classList.add('hidden');
+    else hideOperationLoadingOverlay();
 
     let shared = false;
     if (navigator.canShare && typeof File !== 'undefined') {
@@ -25038,6 +25078,7 @@ async function runInteractiveHtmlExport() {
     showToast(`Exported ${fileName}`);
   } catch (err) {
     if (modalOpen && progWrap) progWrap.classList.add('hidden');
+    else hideOperationLoadingOverlay();
     showToast('Could not export Interactive 3D HTML.');
   }
 }
@@ -25294,6 +25335,9 @@ async function handleIncomingProjectFile(f) {
   if (!f) return;
   try {
     assertProjectFileName(f.name);
+    closeOpenModelModal();
+    showOperationLoadingOverlay('project_reading', { label: f.name });
+    await yieldToBrowserPaint();
     const data = parseStudioProjectJson(await f.text());
     const replaceConfirm = getReplaceModelConfirmDialog({
       hasOpenModel: Boolean(state.model),
@@ -25302,7 +25346,11 @@ async function handleIncomingProjectFile(f) {
       editsSummary: getCurrentManualEditsSummary(),
       undoHistoryCount: state.undoStack.length,
     });
-    if (replaceConfirm && !(await openConfirmActionDialog(replaceConfirm))) return;
+    if (replaceConfirm) {
+      hideOperationLoadingOverlay();
+      if (!(await openConfirmActionDialog(replaceConfirm))) return;
+    }
+    const projLabel = data.title || f.name;
     submodelThumbCache.clear();
     coverHeroCache.clear();
     clearMinifigDiagramCaches();
@@ -25339,6 +25387,8 @@ async function handleIncomingProjectFile(f) {
     if (typeof data.fadeOpacity === 'number' && Number.isFinite(data.fadeOpacity)) state.fadeOpacity = data.fadeOpacity;
     if (typeof data.showRotCues === 'boolean') state.showRotCues = data.showRotCues;
     if (Array.isArray(data.customFonts) && data.customFonts.length > 0) {
+      showOperationLoadingOverlay('project_fonts', { label: projLabel });
+      await yieldToBrowserPaint();
       await hydrateCustomUploadedFonts(data.customFonts);
       persistCustomUploadedFonts();
     }
@@ -25373,9 +25423,14 @@ async function handleIncomingProjectFile(f) {
     state.pageSizeWarning = null;
     errFilter = 'all';
     lastSourceRecord = { kind: 'project', fileName: f.name };
+    showOperationLoadingOverlay('project_rendering', { label: projLabel });
+    await yieldToBrowserPaint();
     computeModelDiagnostics();
-    closeMenu(); closeOpenModelModal(); renderAll(); showToast(`Imported ${state.model.title}.`);
+    closeMenu(); closeOpenModelModal(); renderAll();
+    hideOperationLoadingOverlay();
+    showToast(`Imported ${state.model.title}.`);
   } catch (err) {
+    hideOperationLoadingOverlay();
     showToast(err?.message || `Could not read project (${PROJECT_FILE_EXT}) file.`);
   }
 }
@@ -26856,82 +26911,93 @@ if (impColorModeToggleBtn) {
   };
 }
 
-function finishImport(parsed, mode, subdivisionPlan = null, isPostImport = false, importOpts = {}) {
-  if (isPostImport) pushUndo();
-  const skipAutoFetch = Boolean(
-    (importOpts && importOpts.skipAutoFetch) || appSettings.missingPartsPolicy === 'never',
-  );
-  const hasExplicitWordless = typeof importOpts?.wordlessMode === 'boolean';
-  const targetWordless = hasExplicitWordless
-    ? importOpts.wordlessMode
-    : (isPostImport ? Boolean(state.wordlessMode) : DEFAULT_WORDLESS_MODE);
-  const preservePageNumberFormat = Boolean(importOpts && importOpts.preservePageNumberFormat);
-  submodelThumbCache.clear();
-  coverHeroCache.clear();
-  clearMinifigDiagramCaches();
-  overviewThumbCache.bumpEpoch();
-  state.model = buildManualFromParsed(parsed, mode, subdivisionPlan);
-  if (!isPostImport) {
-    const wlDefs = getWordlessSurfaceDefaults(targetWordless);
-    state.wordlessMode = targetWordless;
-    state.bomShowTextFields = wlDefs.bomShowTextFields;
-    state.pageNumberFormat = preservePageNumberFormat
-      ? resolvePageNumberFormatForMode(state.pageNumberFormat, targetWordless)
-      : wlDefs.pageNumberFormat;
-    state.overrides = {}; state.stepInserts = {}; state.pageInserts = {}; state.dividerAfter = {};
-    state.layoutGroups = [];
-    state.coverMeta = createDefaultCoverMeta({
-      showText: wlDefs.coverShowText,
-      creatorLogoSrc: appSettings.defaultCreatorLogoSrc,
-      subtitle: appSettings.defaultCoverSubtitle,
-    });
-    state.completeMeta = { ...createDefaultCompleteMeta(), showText: wlDefs.completeShowText };
-    state.backMeta = createDefaultBackMeta();
-    state.undoStack = []; state.redoStack = [];
-    state.seenDiagnosticKeys = new Set();
-  } else if (hasExplicitWordless && targetWordless !== Boolean(state.wordlessMode)) {
-    applyWordlessMode(targetWordless, { pushHistory: false, render: false });
-  }
-  state.pageIdx = 0; state.mode = 'pan'; state.selectedPartIds.clear();
-  errFilter = 'all';
+async function finishImport(parsed, mode, subdivisionPlan = null, isPostImport = false, importOpts = {}) {
+  const opLabel = parsed?.title || pendingRawFile?.fileName || lastSourceRecord?.fileName || '';
   closeImportAssistant(true);
-  if (!isPostImport && pendingRawFile) {
-    lastSourceRecord = { ...pendingRawFile, importMode: mode, subdivisionPlan: subdivisionPlan || null };
-    dbPut('lastModel', lastSourceRecord);
-    if (lastSourceRecord.kind === 'io' || lastSourceRecord.kind === 'ldr') {
+  showOperationLoadingOverlay('generate_building', { label: opLabel, isUpdate: isPostImport });
+  try {
+    await yieldToBrowserPaint();
+    if (isPostImport) pushUndo();
+    const skipAutoFetch = Boolean(
+      (importOpts && importOpts.skipAutoFetch) || appSettings.missingPartsPolicy === 'never',
+    );
+    const hasExplicitWordless = typeof importOpts?.wordlessMode === 'boolean';
+    const targetWordless = hasExplicitWordless
+      ? importOpts.wordlessMode
+      : (isPostImport ? Boolean(state.wordlessMode) : DEFAULT_WORDLESS_MODE);
+    const preservePageNumberFormat = Boolean(importOpts && importOpts.preservePageNumberFormat);
+    submodelThumbCache.clear();
+    coverHeroCache.clear();
+    clearMinifigDiagramCaches();
+    overviewThumbCache.bumpEpoch();
+    state.model = buildManualFromParsed(parsed, mode, subdivisionPlan);
+    if (!isPostImport) {
+      const wlDefs = getWordlessSurfaceDefaults(targetWordless);
+      state.wordlessMode = targetWordless;
+      state.bomShowTextFields = wlDefs.bomShowTextFields;
+      state.pageNumberFormat = preservePageNumberFormat
+        ? resolvePageNumberFormatForMode(state.pageNumberFormat, targetWordless)
+        : wlDefs.pageNumberFormat;
+      state.overrides = {}; state.stepInserts = {}; state.pageInserts = {}; state.dividerAfter = {};
+      state.layoutGroups = [];
+      state.coverMeta = createDefaultCoverMeta({
+        showText: wlDefs.coverShowText,
+        creatorLogoSrc: appSettings.defaultCreatorLogoSrc,
+        subtitle: appSettings.defaultCoverSubtitle,
+      });
+      state.completeMeta = { ...createDefaultCompleteMeta(), showText: wlDefs.completeShowText };
+      state.backMeta = createDefaultBackMeta();
+      state.undoStack = []; state.redoStack = [];
+      state.seenDiagnosticKeys = new Set();
+    } else if (hasExplicitWordless && targetWordless !== Boolean(state.wordlessMode)) {
+      applyWordlessMode(targetWordless, { pushHistory: false, render: false });
+    }
+    state.pageIdx = 0; state.mode = 'pan'; state.selectedPartIds.clear();
+    errFilter = 'all';
+    if (!isPostImport && pendingRawFile) {
+      lastSourceRecord = { ...pendingRawFile, importMode: mode, subdivisionPlan: subdivisionPlan || null };
+      dbPut('lastModel', lastSourceRecord);
+      if (lastSourceRecord.kind === 'io' || lastSourceRecord.kind === 'ldr') {
+        writeStartupModelHint({
+          fileName: lastSourceRecord.fileName || '',
+          kind: lastSourceRecord.kind,
+          title: parsed?.title || state.model?.title,
+        });
+      }
+      pendingRawFile = null;
+    } else if (isPostImport && lastSourceRecord && (lastSourceRecord.kind === 'io' || lastSourceRecord.kind === 'ldr')) {
+      lastSourceRecord = { ...lastSourceRecord, importMode: mode, subdivisionPlan: subdivisionPlan || null };
+      dbPut('lastModel', lastSourceRecord);
       writeStartupModelHint({
         fileName: lastSourceRecord.fileName || '',
         kind: lastSourceRecord.kind,
         title: parsed?.title || state.model?.title,
       });
     }
-    pendingRawFile = null;
-  } else if (isPostImport && lastSourceRecord && (lastSourceRecord.kind === 'io' || lastSourceRecord.kind === 'ldr')) {
-    lastSourceRecord = { ...lastSourceRecord, importMode: mode, subdivisionPlan: subdivisionPlan || null };
-    dbPut('lastModel', lastSourceRecord);
-    writeStartupModelHint({
-      fileName: lastSourceRecord.fileName || '',
-      kind: lastSourceRecord.kind,
-      title: parsed?.title || state.model?.title,
-    });
-  }
-  state.pageSizeWarning = null;
-  computeModelDiagnostics();
-  resetZoom(); renderAll();
-  const steps = getAllSteps(state.model);
-  const subSummary = subdivisionPlan && subdivisionPlan.strategy !== 'none'
-    ? ` · ${subdivisionPlan.title}`
-    : '';
-  showToast(`${isPostImport ? 'Updated' : 'Imported'} ${parsed.title} (${formatPartCount(parsed.parts.length)}, ${steps.length} steps${subSummary}).`);
-  if (!isPostImport && state.diagnostics.length > 0) showImportErrorBanner();
-  if (!isPostImport && !skipAutoFetch && lastSourceRecord?.kind === 'ldr') {
-    void fetchMissingPartsOnline({ silent: true });
+    state.pageSizeWarning = null;
+    showOperationLoadingOverlay('generate_diagnostics', { label: state.model?.title || opLabel, isUpdate: isPostImport });
+    await yieldToBrowserPaint();
+    computeModelDiagnostics();
+    showOperationLoadingOverlay('generate_rendering', { label: state.model?.title || opLabel, isUpdate: isPostImport });
+    await yieldToBrowserPaint();
+    resetZoom(); renderAll();
+    const steps = getAllSteps(state.model);
+    const subSummary = subdivisionPlan && subdivisionPlan.strategy !== 'none'
+      ? ` · ${subdivisionPlan.title}`
+      : '';
+    showToast(`${isPostImport ? 'Updated' : 'Imported'} ${parsed.title} (${formatPartCount(parsed.parts.length)}, ${steps.length} steps${subSummary}).`);
+    if (!isPostImport && state.diagnostics.length > 0) showImportErrorBanner();
+    if (!isPostImport && !skipAutoFetch && lastSourceRecord?.kind === 'ldr') {
+      void fetchMissingPartsOnline({ silent: true });
+    }
+  } finally {
+    hideOperationLoadingOverlay();
   }
 }
 
 document.getElementById('impBtnAuto').onclick = () => {
   if (!impState.parsed) return;
-  finishImport(impState.parsed, 'auto', impState.activeProposal, impState.isPostImport, {
+  void finishImport(impState.parsed, 'auto', impState.activeProposal, impState.isPostImport, {
     skipAutoFetch: impState.skipAutoFetch,
   });
 };
@@ -26946,7 +27012,7 @@ document.getElementById('impBtnKeep').onclick = () => {
     closeImportAssistant(false);
     return;
   }
-  finishImport(impState.parsed, 'keep', null, impState.isPostImport, {
+  void finishImport(impState.parsed, 'keep', null, impState.isPostImport, {
     skipAutoFetch: impState.skipAutoFetch,
   });
 };
@@ -26969,7 +27035,7 @@ function analyzePendingImportMissingParts(parsed) {
   });
 }
 
-function proceedAfterMissingPartsCheck(parsed, opts = {}) {
+async function proceedAfterMissingPartsCheck(parsed, opts = {}) {
   const skipAutoFetch = Boolean(opts && opts.skipAutoFetch);
   const prep = prepareSubdivisionData(parsed);
   const { assessment, proposals } = analyzeModelSubdivisions(prep.inputs, prep.adjacency);
@@ -26980,6 +27046,7 @@ function proceedAfterMissingPartsCheck(parsed, opts = {}) {
     shouldPromptSubdivision: Boolean(assessment.shouldPrompt),
   });
   if (openWiz) {
+    hideOperationLoadingOverlay();
     openImportWizard(parsed, { skipAutoFetch, prep, assessment, proposals });
     return;
   }
@@ -26989,7 +27056,7 @@ function proceedAfterMissingPartsCheck(parsed, opts = {}) {
     assessment.shouldPrompt && proposals.length > 0
       ? JSON.parse(JSON.stringify(proposals[0]))
       : null;
-  finishImport(parsed, 'auto', defaultPlan, false, {
+  await finishImport(parsed, 'auto', defaultPlan, false, {
     skipAutoFetch,
     wordlessMode: resolved.wordlessMode,
   });
@@ -27262,43 +27329,58 @@ async function handleIncomingModelFile(file) {
     undoHistoryCount: state.undoStack.length,
   });
   if (replaceConfirm && !(await openConfirmActionDialog(replaceConfirm))) return;
-  showToast(`Reading ${file.name}…`);
+  closeOpenModelModal();
+  showOperationLoadingOverlay('import_reading', { label: file.name });
   try {
+    await yieldToBrowserPaint();
     let parsed;
     if (lower.endsWith('.io')) {
       const ab = await file.arrayBuffer();
       pendingRawFile = { kind: 'io', fileName: file.name, data: ab };
+      showOperationLoadingOverlay('import_extracting', { label: file.name });
+      await yieldToBrowserPaint();
       const { m1Text, m2Text } = await extractIoArchive(ab);
+      showOperationLoadingOverlay('import_parsing', { label: file.name });
+      await yieldToBrowserPaint();
       parsed = parseImportedModel(m1Text, m2Text, file.name);
+      showOperationLoadingOverlay('import_textures', { label: parsed?.title || file.name });
       await textureStore.predecodeAllPending();
     } else {
       embeddedDatRaw.clear(); embeddedDatTitles.clear(); embeddedDatCompiled.clear(); compositePartDefs.clear(); pliThumbCache.clear(); submodelThumbCache.clear(); clearMinifigDiagramCaches(); overviewThumbCache.bumpEpoch();
       textureStore.clearEmbedded();
       const txt = await file.text();
       pendingRawFile = { kind: 'ldr', fileName: file.name, data: txt };
+      showOperationLoadingOverlay('import_parsing', { label: file.name });
+      await yieldToBrowserPaint();
       parsed = parseImportedModel(txt, '', file.name);
+      showOperationLoadingOverlay('import_textures', { label: parsed?.title || file.name });
       await textureStore.predecodeAllPending();
     }
+    showOperationLoadingOverlay('import_analyzing', { label: parsed?.title || file.name });
+    await yieldToBrowserPaint();
     const missingAnalysis = analyzePendingImportMissingParts(parsed);
     if (missingAnalysis.shouldPrompt) {
       if (appSettings.missingPartsPolicy === 'never') {
-        proceedAfterMissingPartsCheck(parsed, { skipAutoFetch: true });
+        await proceedAfterMissingPartsCheck(parsed, { skipAutoFetch: true });
       } else if (appSettings.missingPartsPolicy === 'auto') {
         if (missingAnalysis.fetchableCount > 0) {
+          hideOperationLoadingOverlay();
           openMissingPartsPrompt(parsed, missingAnalysis);
           document.getElementById('mpBtnFetch')?.click();
         } else {
-          proceedAfterMissingPartsCheck(parsed, { skipAutoFetch: true });
+          await proceedAfterMissingPartsCheck(parsed, { skipAutoFetch: true });
         }
       } else {
+        hideOperationLoadingOverlay();
         openMissingPartsPrompt(parsed, missingAnalysis);
       }
     } else {
-      proceedAfterMissingPartsCheck(parsed, {
+      await proceedAfterMissingPartsCheck(parsed, {
         skipAutoFetch: appSettings.missingPartsPolicy === 'never',
       });
     }
   } catch (err) {
+    hideOperationLoadingOverlay();
     showToast(err?.message || 'Could not import this file.');
   }
 }

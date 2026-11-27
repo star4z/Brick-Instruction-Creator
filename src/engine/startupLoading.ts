@@ -124,3 +124,74 @@ export function getStartupLoadingViewModel(
     progressPct,
   };
 }
+
+export type OperationLoadingPhase =
+  | 'import_reading'
+  | 'import_extracting'
+  | 'import_parsing'
+  | 'import_textures'
+  | 'import_analyzing'
+  | 'generate_building'
+  | 'generate_diagnostics'
+  | 'generate_rendering'
+  | 'project_reading'
+  | 'project_fonts'
+  | 'project_rendering'
+  | 'export_html_meshes'
+  | 'export_html_pages'
+  | 'export_html_packaging';
+
+export interface OperationLoadingOptions {
+  label?: string;
+  isUpdate?: boolean;
+  progressPct?: number;
+}
+
+const OPERATION_PHASE_COPY: Record<
+  OperationLoadingPhase,
+  { verb: string; fallbackTitle: string; status: string; progressPct: number }
+> = {
+  import_reading: { verb: 'Opening', fallbackTitle: 'Opening Model', status: 'Reading model file…', progressPct: 18 },
+  import_extracting: { verb: 'Opening', fallbackTitle: 'Opening Model', status: 'Unpacking studio archive…', progressPct: 36 },
+  import_parsing: { verb: 'Opening', fallbackTitle: 'Opening Model', status: 'Reading model parts…', progressPct: 56 },
+  import_textures: { verb: 'Opening', fallbackTitle: 'Opening Model', status: 'Preparing part decals…', progressPct: 74 },
+  import_analyzing: { verb: 'Opening', fallbackTitle: 'Opening Model', status: 'Checking parts & structure…', progressPct: 88 },
+  generate_building: { verb: 'Building', fallbackTitle: 'Building Manual', status: 'Generating build steps…', progressPct: 42 },
+  generate_diagnostics: { verb: 'Building', fallbackTitle: 'Building Manual', status: 'Checking model connections…', progressPct: 74 },
+  generate_rendering: { verb: 'Building', fallbackTitle: 'Building Manual', status: 'Rendering manual pages…', progressPct: 92 },
+  project_reading: { verb: 'Opening', fallbackTitle: 'Opening Project', status: 'Reading project file…', progressPct: 24 },
+  project_fonts: { verb: 'Opening', fallbackTitle: 'Opening Project', status: 'Loading custom fonts…', progressPct: 58 },
+  project_rendering: { verb: 'Opening', fallbackTitle: 'Opening Project', status: 'Rendering manual pages…', progressPct: 88 },
+  export_html_meshes: { verb: 'Exporting', fallbackTitle: 'Exporting 3D Viewer', status: 'Building 3D part meshes…', progressPct: 15 },
+  export_html_pages: { verb: 'Exporting', fallbackTitle: 'Exporting 3D Viewer', status: 'Rendering step previews…', progressPct: 55 },
+  export_html_packaging: { verb: 'Exporting', fallbackTitle: 'Exporting 3D Viewer', status: 'Packaging interactive HTML…', progressPct: 90 },
+};
+
+export function stripProjectOrModelExtension(name: string): string {
+  return name.replace(/\.(io|ldr|mpd|biw)$/i, '').trim();
+}
+
+export function getOperationLoadingViewModel(
+  phase: OperationLoadingPhase,
+  options: OperationLoadingOptions = {},
+): StartupLoadingViewModel {
+  const spec = OPERATION_PHASE_COPY[phase] ?? OPERATION_PHASE_COPY.import_reading;
+  const rawLabel = (options.label || '').trim();
+  const displayName = rawLabel ? stripProjectOrModelExtension(rawLabel) : '';
+  const verb = options.isUpdate && spec.verb === 'Building' ? 'Updating' : spec.verb;
+  const title = phase.startsWith('export_html_')
+    ? spec.fallbackTitle
+    : displayName
+      ? `${verb} ${displayName}`
+      : options.isUpdate && spec.verb === 'Building'
+        ? 'Updating Manual'
+        : spec.fallbackTitle;
+  const pct = typeof options.progressPct === 'number' && Number.isFinite(options.progressPct)
+    ? Math.max(0, Math.min(100, Math.round(options.progressPct)))
+    : spec.progressPct;
+  return {
+    title,
+    status: spec.status,
+    progressPct: pct,
+  };
+}

@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   STARTUP_MODEL_HINT_KEY,
+  getOperationLoadingViewModel,
   getStartupLoadingViewModel,
   isRestorableModelRecord,
   readStartupModelHint,
   stripModelExtension,
+  stripProjectOrModelExtension,
   writeStartupModelHint,
+  type OperationLoadingPhase,
   type StartupLoadingPhase,
 } from '../startupLoading';
 
@@ -94,5 +97,38 @@ describe('startupLoading', () => {
 
     const fallback = getStartupLoadingViewModel('restoring', null);
     expect(fallback.title).toBe('Loading Last Model');
+  });
+
+  it('produces clean titles and monotonic progress for import, generate, project, and HTML export operations', () => {
+    expect(stripProjectOrModelExtension('my-project.biw')).toBe('my-project');
+
+    const checkMonotonic = (phases: OperationLoadingPhase[], opts: { label?: string; isUpdate?: boolean }) => {
+      let prev = 0;
+      for (const phase of phases) {
+        const vm = getOperationLoadingViewModel(phase, opts);
+        expect(vm.title.length).toBeGreaterThan(0);
+        expect(vm.status.length).toBeGreaterThan(0);
+        expect(vm.progressPct).toBeGreaterThan(prev);
+        prev = vm.progressPct;
+      }
+    };
+
+    checkMonotonic(
+      ['import_reading', 'import_extracting', 'import_parsing', 'import_textures', 'import_analyzing'],
+      { label: 'castle.io' },
+    );
+    checkMonotonic(['generate_building', 'generate_diagnostics', 'generate_rendering'], { label: 'Castle' });
+    checkMonotonic(['project_reading', 'project_fonts', 'project_rendering'], { label: 'castle.biw' });
+    checkMonotonic(['export_html_meshes', 'export_html_pages', 'export_html_packaging'], {});
+
+    expect(getOperationLoadingViewModel('import_reading', { label: 'castle.io' }).title).toBe('Opening castle');
+    expect(getOperationLoadingViewModel('generate_building', { label: 'Castle', isUpdate: false }).title).toBe('Building Castle');
+    expect(getOperationLoadingViewModel('generate_building', { label: 'Castle', isUpdate: true }).title).toBe('Updating Castle');
+    expect(getOperationLoadingViewModel('project_reading', { label: 'my-set.biw' }).title).toBe('Opening my-set');
+    expect(getOperationLoadingViewModel('export_html_pages', { progressPct: 72 })).toEqual({
+      title: 'Exporting 3D Viewer',
+      status: 'Rendering step previews…',
+      progressPct: 72,
+    });
   });
 });

@@ -827,21 +827,36 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     expect(savedHint).toBeTruthy();
     expect(savedHint).toContain('test-tower');
 
-    // Reload with a brief IndexedDB delay so we can reliably verify and audit the startup loading screen
+    // Reload with a deterministic IndexedDB gate so we can audit the startup loading screen without racing
     await page.addInitScript(() => {
+      const w = window as unknown as {
+        __idbGateReleased?: boolean;
+        __idbPendingCallbacks?: Array<() => void>;
+        __releaseStartupIdb?: () => void;
+      };
+      w.__idbGateReleased = !localStorage.getItem('biw.lastModelHint.v1');
+      w.__idbPendingCallbacks = [];
+      w.__releaseStartupIdb = () => {
+        w.__idbGateReleased = true;
+        const cbs = w.__idbPendingCallbacks || [];
+        w.__idbPendingCallbacks = [];
+        for (const fn of cbs) fn();
+      };
       const origOpen = indexedDB.open.bind(indexedDB);
       indexedDB.open = ((name: string, version?: number) => {
         const realReq = version !== undefined ? origOpen(name, version) : origOpen(name);
         const proxy: Record<string, unknown> = {};
-        let delayedSuccess: ((ev: Event) => void) | null = null;
+        let userSuccess: ((ev: Event) => void) | null = null;
         Object.defineProperty(proxy, 'onsuccess', {
-          get: () => delayedSuccess,
+          get: () => userSuccess,
           set: (fn: ((ev: Event) => void) | null) => {
-            delayedSuccess = fn;
+            userSuccess = fn;
             realReq.onsuccess = (ev: Event) => {
-              setTimeout(() => {
-                if (delayedSuccess) delayedSuccess.call(realReq, ev);
-              }, 350);
+              const invoke = () => {
+                if (userSuccess) userSuccess.call(realReq, ev);
+              };
+              if (w.__idbGateReleased) invoke();
+              else (w.__idbPendingCallbacks ||= []).push(invoke);
             };
           },
         });
@@ -868,10 +883,41 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
       activeContainerSelector: '#startupLoadingScreen',
     });
 
-    // Once restore finishes, the loading screen hides and the manual stage appears
+    // Release IndexedDB and confirm restore finishes cleanly into the manual stage
+    await page.evaluate(() => {
+      (window as unknown as { __releaseStartupIdb?: () => void }).__releaseStartupIdb?.();
+    });
     await expect(page.locator('#stageViewport')).toBeVisible({ timeout: 15_000 });
     await expect(page.locator('#startupLoadingScreen')).toBeHidden();
     await expect(page.locator('#emptyState')).toBeHidden();
+    await expect(page.locator('#operationLoadingOverlay')).toBeHidden();
+    await expect(page.locator('#operationLoadingOverlay')).toHaveAttribute('role', 'status');
+    await expect(page.locator('#operationLoadingOverlay')).toHaveAttribute('aria-live', 'polite');
+
+    // Audit the shared operation loading overlay layout on both Desktop and Mobile
+    await page.evaluate(() => {
+      const ov = document.getElementById('operationLoadingOverlay');
+      const title = document.getElementById('opLoadTitle');
+      const status = document.getElementById('opLoadStatus');
+      const pct = document.getElementById('opLoadPct');
+      const bar = document.getElementById('opLoadBar');
+      if (title) title.textContent = 'Building test-tower';
+      if (status) status.textContent = 'Generating build steps…';
+      if (pct) pct.textContent = '42%';
+      if (bar) {
+        bar.style.width = '42%';
+        bar.setAttribute('aria-valuenow', '42');
+      }
+      if (ov) ov.classList.remove('hidden');
+    });
+    await expect(page.locator('#operationLoadingOverlay')).toBeVisible();
+    await auditSurface(page, `${testInfo.project.name}: Operation Loading Overlay`, {
+      activeContainerSelector: '#operationLoadingOverlay',
+    });
+    await page.evaluate(() => {
+      document.getElementById('operationLoadingOverlay')?.classList.add('hidden');
+    });
+    await expect(page.locator('#operationLoadingOverlay')).toBeHidden();
 
     // Closing the model clears the startup hint so a fresh reload lands directly on Empty State
     await ensureMenuOpen(page);

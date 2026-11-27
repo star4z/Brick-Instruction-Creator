@@ -544,6 +544,7 @@ body {
 
 #overviewModal:not(.hidden) .studio-sheet,
 #importFetchOverlay:not(.hidden) .studio-sheet,
+#operationLoadingOverlay:not(.hidden) .studio-sheet,
 #missingPartsModal:not(.hidden) .studio-sheet,
 #importWizardModal:not(.hidden) .studio-sheet,
 #importModal:not(.hidden) .studio-sheet,

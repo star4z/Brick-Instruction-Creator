@@ -1110,6 +1110,30 @@
     </div>
 
     <!-- ================================================================ -->
+    <!-- SHARED OPERATION LOADING OVERLAY (import, generate, HTML export) -->
+    <!-- ================================================================ -->
+    <div id="operationLoadingOverlay" role="status" aria-live="polite" aria-busy="true" class="no-print hidden fixed inset-0 z-[56] bg-black/50 flex items-center justify-center p-4">
+      <div class="w-full max-w-sm rounded-xl studio-sheet p-5 space-y-4 text-xs">
+        <div class="flex items-center gap-3">
+          <div class="w-9 h-9 rounded-lg bg-[var(--primary-soft)] text-[var(--primary)] flex items-center justify-center shrink-0">
+            <svg class="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" aria-hidden="true">
+              <circle cx="12" cy="12" r="9" class="opacity-25"></circle>
+              <path d="M21 12a9 9 0 0 0-9-9" stroke-linecap="round"></path>
+            </svg>
+          </div>
+          <div class="min-w-0 flex-1">
+            <h3 id="opLoadTitle" class="text-sm font-bold text-[var(--foreground)] truncate">Loading…</h3>
+            <p id="opLoadStatus" class="text-xs text-[var(--muted-foreground)] mt-0.5 truncate">Please wait…</p>
+          </div>
+          <span id="opLoadPct" class="font-mono text-xs font-semibold text-[var(--muted-foreground)] shrink-0">0%</span>
+        </div>
+        <div class="w-full h-1.5 rounded-full bg-[var(--surface-sunken)] overflow-hidden">
+          <div id="opLoadBar" role="progressbar" aria-label="Operation progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" class="h-full bg-[var(--primary)] rounded-full transition-all duration-150" style="width:0%"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================================================================ -->
     <!-- PRE-IMPORT MISSING PARTS PROMPT                                  -->
     <!-- ================================================================ -->
     <div id="missingPartsModal" role="dialog" aria-modal="true" aria-label="Missing parts found" class="no-print hidden fixed inset-0 z-50 bg-black/55 flex items-end sm:items-center justify-center p-0 sm:p-4">

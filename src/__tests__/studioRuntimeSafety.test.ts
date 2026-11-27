@@ -1125,6 +1125,15 @@ describe('studioRuntime safety checks', () => {
     expect(runtime).toContain('showStartupLoadingScreen(');
     expect(runtime).toContain('hideStartupLoadingScreen(');
     expect(runtime).toContain('isRestorableModelRecord(');
+
+    // Shared operation loading overlay for model import, manual generation, .biw project import, and side-menu HTML export
+    expect(html).toContain('id="operationLoadingOverlay"');
+    expect(html).toContain('id="opLoadTitle"');
+    expect(html).toContain('id="opLoadStatus"');
+    expect(html).toContain('id="opLoadPct"');
+    expect(html).toContain('id="opLoadBar"');
+    expect(runtime).toContain('showOperationLoadingOverlay(');
+    expect(runtime).toContain('hideOperationLoadingOverlay(');
   });
 
   it('gives the Styles popover a Styles header with Expand/Collapse All, collapsible sections, and widgets moved off section headers', () => {
