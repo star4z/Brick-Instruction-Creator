@@ -652,31 +652,77 @@ describe('dynamicStepSizer', () => {
     expect(hasAvoidableOverhang(2, boxes, adj, placed, remAfter, roles, cladding)).toBe(true);
   });
 
-  it('groups compact mirror-symmetric pairs across the narrow axis of an elongated model into a single 2x step', () => {
-    // Elongated 6-stud-wide (120 LDU) by 27-stud-long (540 LDU) chassis:
-    // Two identical 3665 inverted slopes mirrored at x=-50 and x=+50, same z=-265, same y=61.
-    const modelBounds = makeBox(0, 60, -30, 120, 120, 540);
+  it('groups compact mirror-symmetric pairs generically across elongated, 8-to-10-stud, winged, and asymmetric-protrusion models', () => {
+    // 1. Elongated 6-stud-wide (120 LDU) by 27-stud-long (540 LDU) chassis: pairDist = 100
+    const elongatedBounds = makeBox(0, 60, -30, 120, 120, 540);
     const slopeL = makePart(0, '3665', 72, makeBox(-50, 61, -265, 20, 24, 40));
     const slopeR = makePart(1, '3665', 72, makeBox(50, 61, -265, 20, 24, 40));
+    expect(classifySameSkuPattern(slopeR.box, [slopeL.box], elongatedBounds)).toBe('structured');
+    expect(
+      selectDynamicStepIndices({
+        anchor: 0,
+        parts: [slopeL, slopeR],
+        getEligibleCandidates: (placed) => [0, 1].filter((i) => !placed.has(i)),
+        modelBounds: elongatedBounds,
+        builtBounds: elongatedBounds,
+        activeCam: DEFAULT_STUDIO_CAMERA,
+        isFirstStep: false,
+        totalPartsInScope: 20,
+      }),
+    ).toEqual([0, 1]);
 
-    expect(classifySameSkuPattern(slopeR.box, [slopeL.box], modelBounds)).toBe('structured');
+    // 2. 10-stud-wide (200 LDU) elongated vehicle: pairDist = 180 (within COMPACT_MIRROR_MAX_DIST_LDU)
+    const tenStudBounds = makeBox(0, 40, 0, 200, 80, 440);
+    const fenderL = makePart(0, '3040', 4, makeBox(-90, 24, -120, 20, 24, 40));
+    const fenderR = makePart(1, '3040', 4, makeBox(90, 24, -120, 20, 24, 40));
+    expect(areOnOppositeWalls(fenderL.box, fenderR.box, tenStudBounds, true)).toBe(false);
+    expect(
+      selectDynamicStepIndices({
+        anchor: 0,
+        parts: [fenderL, fenderR],
+        getEligibleCandidates: (placed) => [0, 1].filter((i) => !placed.has(i)),
+        modelBounds: tenStudBounds,
+        builtBounds: tenStudBounds,
+        activeCam: DEFAULT_STUDIO_CAMERA,
+        isFirstStep: false,
+        totalPartsInScope: 40,
+      }),
+    ).toEqual([0, 1]);
 
-    const picked = selectDynamicStepIndices({
-      anchor: 0,
-      parts: [slopeL, slopeR],
-      getEligibleCandidates: (placed) => [0, 1].filter((i) => !placed.has(i)),
-      modelBounds,
-      builtBounds: modelBounds,
-      activeCam: DEFAULT_STUDIO_CAMERA,
-      isFirstStep: false,
-      totalPartsInScope: 20,
-    });
-    expect(picked).toEqual([0, 1]);
+    // 3. Wide winged starfighter (spanX = 360): inner cockpit pair at x = ±40 (pairDist = 80) still groups
+    const wingedBounds = makeBox(0, 40, 0, 360, 80, 300);
+    const cockpitL = makePart(0, '3665', 71, makeBox(-40, 24, 60, 20, 24, 40));
+    const cockpitR = makePart(1, '3665', 71, makeBox(40, 24, 60, 20, 24, 40));
+    expect(classifySameSkuPattern(cockpitR.box, [cockpitL.box], wingedBounds)).toBe('structured');
 
-    // Wide building (320 x 320): opposite-wall bricks > 180 LDU apart must still stay separated
+    // 4. Asymmetric side protrusion shifting modelBounds.center[0] to +40 while structural median stays at x = 0
+    const skewedBounds = makeBox(40, 40, 0, 200, 80, 240);
+    const coreParts: DynamicPartDescriptor[] = [
+      makePart(0, '3665', 72, makeBox(-50, 24, -60, 20, 24, 40)),
+      makePart(1, '3665', 72, makeBox(50, 24, -60, 20, 24, 40)),
+      makePart(2, '3001', 4, makeBox(0, 12, -40, 80, 24, 40)),
+      makePart(3, '3001', 4, makeBox(0, 12, 0, 80, 24, 40)),
+      makePart(4, '3001', 4, makeBox(0, 12, 40, 80, 24, 40)),
+      makePart(5, '3023', 15, makeBox(130, 36, 0, 20, 8, 20)), // single side protrusion
+    ];
+    expect(
+      selectDynamicStepIndices({
+        anchor: 0,
+        parts: coreParts,
+        getEligibleCandidates: (placed) => [0, 1].filter((i) => !placed.has(i)),
+        modelBounds: skewedBounds,
+        builtBounds: skewedBounds,
+        activeCam: DEFAULT_STUDIO_CAMERA,
+        isFirstStep: false,
+        totalPartsInScope: 30,
+      }),
+    ).toEqual([0, 1]);
+
+    // 5. Wide building (320 x 320): opposite exterior walls (pairDist = 300 > 180) remain separated
     const wideBounds = makeBox(0, 60, 0, 320, 120, 320);
     const wallL = makePart(0, '3665', 72, makeBox(-150, 12, 0, 20, 24, 40));
     const wallR = makePart(1, '3665', 72, makeBox(150, 12, 0, 20, 24, 40));
     expect(classifySameSkuPattern(wallR.box, [wallL.box], wideBounds)).toBe('scattered');
+    expect(areOnOppositeWalls(wallL.box, wallR.box, wideBounds, true)).toBe(true);
   });
 });

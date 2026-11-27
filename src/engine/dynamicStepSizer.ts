@@ -172,9 +172,35 @@ export function computeEvenRunTarget(
 }
 
 /**
+ * Maximum center-to-center horizontal distance (LDU) for a readable bilateral mirror pair
+ * (~9 studs separation, covering up to 10-stud-wide vehicles/sections and inner-core pairs
+ * on wider winged models while keeping wide opposite exterior walls separated).
+ */
+export const COMPACT_MIRROR_MAX_DIST_LDU = 180;
+
+export type HorizontalCenter = readonly [number, number];
+
+/**
+ * Computes the part-count median horizontal center `(x, z)` for a set of parts.
+ * Unlike an AABB midpoint, the median stays pinned to a model's true structural symmetry
+ * axis even when asymmetric protrusions (antennas, mirrors, cranes, balconies) shift the AABB.
+ */
+export function computeMedianHorizontalCenter(
+  parts: readonly DynamicPartDescriptor[],
+): HorizontalCenter | null {
+  if (parts.length === 0) return null;
+  const xs = parts.map((p) => p.box.center[0]).sort((a, b) => a - b);
+  const zs = parts.map((p) => p.box.center[2]).sort((a, b) => a - b);
+  const mid = Math.floor(parts.length / 2);
+  const medX = parts.length % 2 === 1 ? xs[mid] : (xs[mid - 1] + xs[mid]) * 0.5;
+  const medZ = parts.length % 2 === 1 ? zs[mid] : (zs[mid - 1] + zs[mid]) * 0.5;
+  return [medX, medZ];
+}
+
+/**
  * Prevents a single step from mixing opposite exterior walls of a sizeable build,
- * unless the pair is mirror-symmetric across a compact section where both sides
- * remain easy to read in a single frame.
+ * unless the pair is a compact mirror-symmetric pair (pair separation <= COMPACT_MIRROR_MAX_DIST_LDU)
+ * where both sides remain easy to read in a single frame.
  */
 export function areOnOppositeWalls(
   anchorBox: WorldBox,
@@ -191,38 +217,56 @@ export function areOnOppositeWalls(
     const ax = (anchorBox.center[0] - refBounds.center[0]) / halfX;
     const bx = (candBox.center[0] - refBounds.center[0]) / halfX;
     if (Math.abs(ax) >= 0.45 && Math.abs(bx) >= 0.45 && ax * bx < -0.25) {
-      if (!(allowCompactMirror && spanX <= 140)) return true;
+      const pairDistX = Math.abs(anchorBox.center[0] - candBox.center[0]);
+      if (!(allowCompactMirror && pairDistX <= COMPACT_MIRROR_MAX_DIST_LDU)) return true;
     }
   }
   if (spanZ >= 80 && halfZ > 0) {
     const az = (anchorBox.center[2] - refBounds.center[2]) / halfZ;
     const bz = (candBox.center[2] - refBounds.center[2]) / halfZ;
     if (Math.abs(az) >= 0.45 && Math.abs(bz) >= 0.45 && az * bz < -0.25) {
-      if (!(allowCompactMirror && spanZ <= 140)) return true;
+      const pairDistZ = Math.abs(anchorBox.center[2] - candBox.center[2]);
+      if (!(allowCompactMirror && pairDistZ <= COMPACT_MIRROR_MAX_DIST_LDU)) return true;
     }
   }
   return false;
 }
 
-function isMirrorSymmetric(a: WorldBox, b: WorldBox, refBounds: WorldBox): boolean {
+function isMirrorSymmetric(
+  a: WorldBox,
+  b: WorldBox,
+  refBounds: WorldBox,
+  extraCenters?: readonly HorizontalCenter[],
+): boolean {
   if (Math.abs(a.center[1] - b.center[1]) > 5) return false;
-  const horizDist = Math.hypot(a.center[0] - b.center[0], a.center[2] - b.center[2]);
-  if (horizDist < 12 || horizDist > 165) return false;
 
-  const spanX = refBounds.max[0] - refBounds.min[0];
-  const spanZ = refBounds.max[2] - refBounds.min[2];
-  const cx = refBounds.center[0];
-  const cz = refBounds.center[2];
-  const mirrorX =
-    spanX <= 180 &&
-    Math.abs((a.center[0] - cx) + (b.center[0] - cx)) <= 6 &&
-    Math.abs(a.center[2] - b.center[2]) <= 6;
-  const mirrorZ =
-    spanZ <= 180 &&
-    Math.abs((a.center[2] - cz) + (b.center[2] - cz)) <= 6 &&
-    Math.abs(a.center[0] - b.center[0]) <= 6;
+  const dx = Math.abs(a.center[0] - b.center[0]);
+  const dz = Math.abs(a.center[2] - b.center[2]);
+  const isAlignedX = dz <= 6 && dx >= 12 && dx <= COMPACT_MIRROR_MAX_DIST_LDU;
+  const isAlignedZ = dx <= 6 && dz >= 12 && dz <= COMPACT_MIRROR_MAX_DIST_LDU;
+  if (!isAlignedX && !isAlignedZ) return false;
 
-  return mirrorX || mirrorZ;
+  // Mirrored identical pieces share matching horizontal footprint dimensions
+  const wA = a.max[0] - a.min[0];
+  const dA = a.max[2] - a.min[2];
+  const wB = b.max[0] - b.min[0];
+  const dB = b.max[2] - b.min[2];
+  if (Math.abs(wA - wB) > 2.5 || Math.abs(dA - dB) > 2.5) return false;
+
+  const midX = (a.center[0] + b.center[0]) * 0.5;
+  const midZ = (a.center[2] + b.center[2]) * 0.5;
+
+  const matchesCenter = (cx: number, cz: number): boolean =>
+    (isAlignedX && Math.abs(midX - cx) <= 6) ||
+    (isAlignedZ && Math.abs(midZ - cz) <= 6);
+
+  if (matchesCenter(refBounds.center[0], refBounds.center[2])) return true;
+  if (extraCenters) {
+    for (let i = 0; i < extraCenters.length; i++) {
+      if (matchesCenter(extraCenters[i][0], extraCenters[i][1])) return true;
+    }
+  }
+  return false;
 }
 
 function axisGap(minA: number, maxA: number, minB: number, maxB: number): number {
@@ -238,6 +282,7 @@ export function classifySameSkuPattern(
   candBox: WorldBox,
   existingBoxes: readonly WorldBox[],
   modelBounds: WorldBox,
+  extraCenters?: readonly HorizontalCenter[],
 ): RepeatPatternKind {
   if (existingBoxes.length === 0) return 'structured';
 
@@ -316,9 +361,9 @@ export function classifySameSkuPattern(
     }
   }
 
-  // 4. Mirror-symmetric pair across section/model centerline (on compact mirror-axis span)
+  // 4. Mirror-symmetric pair across any structural centerline (compact pair separation)
   for (const b of existingBoxes) {
-    if (isMirrorSymmetric(candBox, b, modelBounds)) return 'structured';
+    if (isMirrorSymmetric(candBox, b, modelBounds, extraCenters)) return 'structured';
   }
 
   return 'scattered';
@@ -627,8 +672,10 @@ function estimateReadyStructuredRunSize(
   modelBounds: WorldBox,
   refBounds: WorldBox,
   maxSpread: number,
+  extraCenters?: readonly HorizontalCenter[],
 ): number {
   const anchorBox = anchor.box;
+  const maxStructuredDist = Math.max(maxSpread * 1.45, COMPACT_MIRROR_MAX_DIST_LDU);
   const sameSku = initialCandidates.filter((i) => {
     const p = parts[i];
     if (p.sku !== anchor.sku) return false;
@@ -638,7 +685,7 @@ function estimateReadyStructuredRunSize(
       p.box.center[1] - anchorBox.center[1],
       p.box.center[2] - anchorBox.center[2],
     );
-    return d <= maxSpread * 1.45;
+    return d <= maxStructuredDist;
   });
 
   const accepted: WorldBox[] = [anchorBox];
@@ -648,7 +695,7 @@ function estimateReadyStructuredRunSize(
     progressed = false;
     for (const idx of Array.from(pool)) {
       const box = parts[idx].box;
-      if (classifySameSkuPattern(box, accepted, modelBounds) === 'structured') {
+      if (classifySameSkuPattern(box, accepted, modelBounds, extraCenters) === 'structured') {
         accepted.push(box);
         pool.delete(idx);
         progressed = true;
@@ -686,6 +733,14 @@ export function selectDynamicStepIndices(options: DynamicStepSelectionOptions): 
 
   const anchorPart = parts[anchor];
   const refBounds = builtBounds ?? modelBounds;
+  const symmetryCenters: HorizontalCenter[] = [];
+  if (builtBounds) {
+    symmetryCenters.push([builtBounds.center[0], builtBounds.center[2]]);
+  }
+  const medianCenter = computeMedianHorizontalCenter(parts);
+  if (medianCenter) {
+    symmetryCenters.push(medianCenter);
+  }
   const modelHorizSpan = Math.max(
     modelBounds.max[0] - modelBounds.min[0],
     modelBounds.max[2] - modelBounds.min[2],
@@ -742,6 +797,7 @@ export function selectDynamicStepIndices(options: DynamicStepSelectionOptions): 
       modelBounds,
       refBounds,
       baseMaxSpread,
+      symmetryCenters,
     );
     if (readyRunSize > MAX_TOTAL_PARTS_PER_STEP) {
       anchorRunTarget = computeEvenRunTarget(readyRunSize);
@@ -779,7 +835,7 @@ export function selectDynamicStepIndices(options: DynamicStepSelectionOptions): 
       const isSameSku = Boolean(existingOfSku && existingOfSku.length > 0);
       const alreadyScattered = (skuScatteredCounts.get(cand.sku) ?? 0) >= 1;
       const pattern: RepeatPatternKind | null = isSameSku
-        ? (alreadyScattered ? 'scattered' : classifySameSkuPattern(cand.box, existingOfSku!, modelBounds))
+        ? (alreadyScattered ? 'scattered' : classifySameSkuPattern(cand.box, existingOfSku!, modelBounds, symmetryCenters))
         : null;
       const isCoPlanarPartner = Boolean(coPlanarFloorPartners && coPlanarFloorPartners.has(idx));
 
@@ -827,7 +883,7 @@ export function selectDynamicStepIndices(options: DynamicStepSelectionOptions): 
         cand.box.center[2] - stepBounds.center[2],
       );
       const maxCandDist = isSameSku && pattern === 'structured'
-        ? baseMaxSpread * 1.45
+        ? Math.max(baseMaxSpread * 1.45, COMPACT_MIRROR_MAX_DIST_LDU)
         : baseMaxSpread;
       if (!isCoPlanarPartner && distToCluster > maxCandDist) continue;
 
@@ -877,7 +933,7 @@ export function selectDynamicStepIndices(options: DynamicStepSelectionOptions): 
         score += 80;
       } else if (cand.partId === anchorPart.partId) {
         // Same part shape in another color (e.g. alternating stripe/checkerboard)
-        const sameShapePattern = classifySameSkuPattern(cand.box, [anchorPart.box], modelBounds);
+        const sameShapePattern = classifySameSkuPattern(cand.box, [anchorPart.box], modelBounds, symmetryCenters);
         score += sameShapePattern === 'structured' ? 55 : 30;
       }
       if (cand.role === anchorPart.role) score += 15;
