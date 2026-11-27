@@ -509,7 +509,6 @@ describe('studioRuntime safety checks', () => {
     expect(runtime).toContain('buildSmartAutoPageContext(');
     expect(runtime).toContain('packSmartAutoPage(');
     expect(runtime).toContain('analyzePageSizeFit(');
-    expect(runtime).toContain('formatPageSizeWarningForPage(');
     expect(runtime).toContain('getPageSizeWarningStepLinks(');
     expect(runtime).toContain('function jumpToStepById(');
     expect(runtime).toContain('function renderPageSizeWarningMessageHtml(');

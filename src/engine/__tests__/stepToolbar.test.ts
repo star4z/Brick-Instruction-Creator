@@ -29,8 +29,8 @@ import {
 } from '../stepToolbar';
 
 describe('Step Toolbar & Scope-Based Editor Capabilities', () => {
-  it('exposes scope-based Pan, Parts, Step, and Page tabs on step pages', () => {
-    expect(getVisibleModeTabs('steps')).toEqual(['pan', 'parts', 'step', 'page']);
+  it('exposes scope-based Pan, Parts, and Step tabs on step pages', () => {
+    expect(getVisibleModeTabs('steps')).toEqual(['pan', 'parts', 'step']);
   });
 
   it('exposes Pan, Camera, and Page tabs on Cover and Build Complete pages', () => {
@@ -55,7 +55,7 @@ describe('Step Toolbar & Scope-Based Editor Capabilities', () => {
     expect(resolveModeForPage('select', 'steps')).toBe('parts');
     expect(resolveModeForPage('rotate', 'steps')).toBe('step');
     expect(resolveModeForPage('rotate', 'cover')).toBe('camera');
-    expect(resolveModeForPage('edit', 'steps')).toBe('page');
+    expect(resolveModeForPage('edit', 'steps')).toBe('pan');
     expect(resolveModeForPage('edit', 'cover')).toBe('page');
     expect(resolveModeForPage('arrange', 'steps')).toBe('pan');
 
@@ -65,6 +65,7 @@ describe('Step Toolbar & Scope-Based Editor Capabilities', () => {
     expect(resolveModeForPage('step', 'complete')).toBe('camera');
     expect(resolveModeForPage('parts', 'cover')).toBe('pan');
     expect(resolveModeForPage('camera', 'bom')).toBe('pan');
+    expect(resolveModeForPage('page', 'steps')).toBe('pan');
     expect(resolveModeForPage('page', 'bom')).toBe('page');
     expect(resolveModeForPage('page', null)).toBe('pan');
   });
@@ -461,10 +462,10 @@ describe('Step Toolbar & Scope-Based Editor Capabilities', () => {
       dismissedTransientOverlay: false,
     };
 
-    // Step pages: Parts, Step, and Page all switch back to Pan
+    // Step pages: Parts and Step switch back to Pan (Page mode is not shown on step pages)
     expect(shouldResetModeOnBlankStageClick({ ...base, pageKind: 'steps', mode: 'parts' })).toBe(true);
     expect(shouldResetModeOnBlankStageClick({ ...base, pageKind: 'steps', mode: 'step' })).toBe(true);
-    expect(shouldResetModeOnBlankStageClick({ ...base, pageKind: 'steps', mode: 'page' })).toBe(true);
+    expect(shouldResetModeOnBlankStageClick({ ...base, pageKind: 'steps', mode: 'page' })).toBe(false);
     expect(shouldResetModeOnBlankStageClick({ ...base, pageKind: 'steps', mode: 'pan' })).toBe(false);
 
     // Cover & Build Complete pages: Camera and Page switch back to Pan

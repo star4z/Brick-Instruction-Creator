@@ -345,12 +345,8 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
       await expect(page.locator('#applyAngleModal')).toBeHidden();
     }
 
-    await page.locator('#modePill [data-mode="page"]').click();
-    await expect(page.locator('#contextOverlay')).toBeVisible();
-    await auditSurface(page, `${testInfo.project.name}: Step Page (Page Mode)`, {
-      checkWorkspaceChrome: true,
-      hasModel: true,
-    });
+    // Step pages omit the redundant Page button (controls live in Parts / Step bottom sheet)
+    await expect(page.locator('#modePill [data-mode="page"]')).toBeHidden();
     await page.locator('#modePill [data-mode="pan"]').click();
 
     // Zoom controls: visible on desktop, hidden on mobile
@@ -1121,10 +1117,8 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     await step3Row.click();
     await expect(page.locator('#overviewModal')).toBeHidden();
 
-    // Verify Page Options no longer renders page break buttons
-    await page.locator('#modePill [data-mode="page"]').click();
-    await expect(page.locator('#contextOverlay')).toBeVisible();
-    await expect(page.locator('#contextOverlay .page-break-slot-btn')).toHaveCount(0);
+    // Verify Page mode button is hidden on step pages
+    await expect(page.locator('#modePill [data-mode="page"]')).toBeHidden();
 
     // Pin a page break before Step 3 via the Step bottom sheet (Layout sub-tab)
     await page.locator('#modePill [data-mode="step"]').click();

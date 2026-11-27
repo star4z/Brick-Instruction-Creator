@@ -369,7 +369,7 @@ export function clampStepModelScale(scale: number): number {
 
 export function getVisibleModeTabs(pageKind: string | null | undefined): StudioMode[] {
   if (pageKind === 'steps') {
-    return ['pan', 'parts', 'step', 'page'];
+    return ['pan', 'parts', 'step'];
   }
   if (pageKind === 'cover' || pageKind === 'complete') {
     return ['pan', 'camera', 'page'];

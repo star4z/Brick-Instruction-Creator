@@ -272,7 +272,6 @@ import {
   describePageLayoutSpec,
   evaluateStepInSlot,
   findLayoutGroupForStep,
-  formatPageSizeWarningForPage,
   getPageSizeWarningStepLinks,
   getSpecStepsPerPageCap,
   DEFAULT_PAGE_NUMBER_POSITION,
@@ -14376,104 +14375,6 @@ function renderContextOverlay(page) {
         };
       });
     }
-    return;
-  }
-
-  // =========================================================================
-  // STEP PAGES — PAGE MODE (This Page Flow vs Step Range vs All Pages)
-  // =========================================================================
-  if (state.mode === 'page') {
-    const canAddDiv = canInsertDividerAfterPage(page, state.dividerAfter);
-    const activeGroup = page.layoutGroup || null;
-    const firstAbs = slots.length > 0 ? getAbsStepNum(slots[0].step) : getAbsStepNum(step);
-    const lastAbs = slots.length > 0 ? getAbsStepNum(slots[slots.length - 1].step) : firstAbs;
-    const paperSpec = PAPER_FORMAT_SPECS[state.paperFormat] || PAPER_FORMAT_SPECS.screen;
-    const orientTxt = paperSpec.supportsOrientation ? (state.orientation === 'portrait' ? 'Portrait' : 'Landscape') : '';
-    const gridSummary = describePageLayoutSpec(state.layoutConfig);
-    const manualSummary = [paperSpec.shortName, orientTxt, gridSummary].filter(Boolean).join(' · ');
-    const pgWarn = state.pageSizeWarning?.hasWarning ? state.pageSizeWarning : null;
-    const pgWarnAction = pgWarn ? getPrimaryPageSizeAction(pgWarn) : null;
-    const pgWarnText = pgWarn ? formatPageSizeWarningForPage(pgWarn, page.id) : '';
-    const pgWarnLinks = pgWarn ? getPageSizeWarningStepLinks(pgWarn, page.id) : [];
-    const pgWarnTriggerHtml = pgWarn ? renderPageSizeWarningStepTriggerHtml(pgWarnLinks) : '';
-    const pgWarnListHtml = pgWarn ? renderPageSizeWarningStepListHtml(pgWarnLinks) : '';
-
-    box.innerHTML = `
-      <div class="pointer-events-auto studio-surface rounded-xl p-3.5 w-full max-h-[46vh] overflow-y-auto space-y-2.5 text-xs">
-        <div class="flex items-center justify-between gap-2 pb-2 border-b border-[var(--border)]">
-          <div class="flex items-center gap-2 min-w-0">
-            <span class="font-bold truncate">Page ${page.num} of ${state.pages.length}</span>
-            <span class="text-[11px] text-[var(--muted-foreground)] truncate">${escHtml(page.label)}</span>
-          </div>
-          ${renderScopeBadge('local', 'This Page')}
-        </div>
-
-        ${pgWarn ? `
-          <div id="pageCardSizeWarning" role="alert" data-tone="warning" class="destructive-notice destructive-notice-compact">
-            ${DESTRUCTIVE_ALERT_SVG}
-            <div class="min-w-0 flex-1 space-y-1.5">
-              <div>${renderPageSizeWarningMessageHtml(pgWarnText, pgWarnLinks)}</div>
-              ${(pgWarnAction || pgWarnTriggerHtml) ? `
-                <div class="flex items-center gap-1.5 flex-wrap">
-                  ${pgWarnAction ? `<button id="pageCardApplyLargerSizeBtn" type="button" class="px-2.5 py-1 rounded-md bg-[var(--warning)] text-white hover:opacity-90 font-semibold text-[11px] transition-opacity cursor-pointer">${escHtml(pgWarnAction.buttonLabel)}</button>` : ''}
-                  ${pgWarnTriggerHtml}
-                </div>` : ''}
-              ${pgWarnListHtml}
-            </div>
-          </div>` : ''}
-
-        ${canAddDiv ? `
-        <!-- Page Inserts (affects later pages) -->
-        <div class="space-y-1.5">
-          <div class="flex items-center justify-between gap-2 flex-wrap">
-            <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Page Inserts</span>
-            ${renderScopeBadge('range', 'Affects Later Pages')}
-          </div>
-          <div class="flex items-center gap-1.5 flex-wrap">
-            <button id="pageInsertDividerBtn" type="button" class="px-2.5 py-1.5 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold inline-flex items-center gap-1 cursor-pointer">
-              <span>+ Divider After</span>
-            </button>
-          </div>
-        </div>` : ''}
-
-        <!-- Step Range Group (affects a custom range of steps/pages) -->
-        <div class="${canAddDiv || pgWarn ? 'pt-2 border-t border-[var(--border)] ' : ''}flex items-center justify-between gap-2 flex-wrap">
-          <div class="flex items-center gap-2 min-w-0 flex-1">
-            ${renderScopeBadge('range', 'Step Range')}
-            <span class="text-[11px] text-[var(--muted-foreground)] truncate">${activeGroup ? `${escHtml(activeGroup.name)} (#${activeGroup.startStepNum}–#${activeGroup.endStepNum})` : 'Using manual default grid'}</span>
-          </div>
-          <button id="pageRangeGroupBtn" type="button" class="px-2.5 py-1.5 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold shrink-0 cursor-pointer">${activeGroup ? 'Edit Group…' : 'Custom Layout for Page…'}</button>
-        </div>
-
-        <!-- Whole-Manual Settings (affects all pages) -->
-        <div class="pt-2 border-t border-[var(--border)] flex items-center justify-between gap-2 flex-wrap">
-          <div class="flex items-center gap-2 min-w-0 flex-1">
-            ${renderScopeBadge('manual', 'All Pages')}
-            <span class="font-mono text-[11px] text-[var(--muted-foreground)] truncate">${escHtml(manualSummary)}</span>
-          </div>
-          <div class="flex items-center gap-1.5 shrink-0">
-            <button id="pageOpenSetupBtn" type="button" class="px-2.5 py-1.5 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold cursor-pointer">Page Setup…</button>
-            <button id="pageOpenStyleBtn" type="button" class="px-2.5 py-1.5 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold cursor-pointer">Style…</button>
-          </div>
-        </div>
-      </div>`;
-
-    const pgWarnBtn = box.querySelector('#pageCardApplyLargerSizeBtn');
-    if (pgWarnBtn && pgWarnAction) {
-      pgWarnBtn.onclick = () => applySuggestedPageSize(pgWarnAction);
-    }
-    bindPageSizeWarningStepLinks(box.querySelector('#pageCardSizeWarning'));
-    const divBtn = box.querySelector('#pageInsertDividerBtn');
-    if (divBtn) {
-      divBtn.onclick = () => insertDividerAfterCurrentPage(page);
-    }
-    box.querySelector('#pageRangeGroupBtn').onclick = () => {
-      openPageSetupModal();
-      if (activeGroup) openLayoutGroupEditor(activeGroup);
-      else openLayoutGroupEditor(null, { start: firstAbs, end: lastAbs });
-    };
-    box.querySelector('#pageOpenSetupBtn').onclick = () => openPageSetupModal();
-    box.querySelector('#pageOpenStyleBtn').onclick = () => setStylePopoverOpen(true);
     return;
   }
 }
