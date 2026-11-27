@@ -973,6 +973,28 @@ describe('Large & Elongated Model Subdivision Analyzer', () => {
     const studDetProp = studResult.proposals.find((p) => p.strategy === 'structural_modules')!;
     expect(studDetProp).toBeDefined();
     expect(studDetProp.sections.filter((s) => s.isDetachableCap)).toHaveLength(0);
+
+    // Regression: when buildSpatialAdjacency omits non-structural smooth-tile resting edges (2431 <-> roof),
+    // Detachable Sub-Assemblies MUST still detect both roofs via spatial smooth-tile resting discovery,
+    // and Horizontal Floors MUST preserve both disconnected roofs instead of absorbing one into the body.
+    const tileSet = new Set(parts.filter((p) => p.partId === '2431').map((p) => p.index));
+    const roofSet = new Set([...front.roofIds, ...rear.roofIds]);
+    const adjNoTileRest = adj.map((nbs, i) =>
+      nbs.filter((nb) => !((tileSet.has(i) && roofSet.has(nb)) || (tileSet.has(nb) && roofSet.has(i)))),
+    );
+    const noTileRes = analyzeModelSubdivisions(parts, adjNoTileRest);
+    const detNoTile = noTileRes.proposals.find((p) => p.strategy === 'structural_modules')!;
+    expect(detNoTile).toBeDefined();
+    expect(detNoTile.title).toBe('Detachable Sub-Assemblies');
+    expect(detNoTile.sections.filter((s) => s.isDetachableCap)).toHaveLength(2);
+    expect(verifyProposalZeroFloating(detNoTile, adjNoTileRest).valid).toBe(true);
+
+    const floorProp = noTileRes.proposals.find((p) => p.strategy === 'horizontal_floors');
+    if (floorProp) {
+      const upperRoofSecs = floorProp.sections.filter((s) => s.explodeOffset[1] > 0.5);
+      expect(upperRoofSecs.length).toBeGreaterThanOrEqual(2);
+      expect(verifyProposalZeroFloating(floorProp, adjNoTileRest).valid).toBe(true);
+    }
   });
 
   it('recognizes multiple articulated joints cleanly on a 3-segment articulated build (3 modules + 2 joints)', () => {

@@ -28373,15 +28373,16 @@ function openImportAssistant(parsed, isPostImport = false, opts = {}) {
       ? proposals.find(p => p.id === currentPlan.id || p.strategy === currentPlan.strategy)
       : null;
 
+    const defaultProp = pickDefaultSubdivisionProposal(assessment, proposals);
     if (matchedExisting) {
       impState.selectedId = matchedExisting.id;
       impState.activeProposal = JSON.parse(JSON.stringify(matchedExisting));
     } else if (isPostImport && !currentPlan) {
       impState.selectedId = 'none';
       impState.activeProposal = null;
-    } else if (assessment.shouldPrompt && proposals.length > 0) {
-      impState.selectedId = proposals[0].id;
-      impState.activeProposal = JSON.parse(JSON.stringify(proposals[0]));
+    } else if (defaultProp) {
+      impState.selectedId = defaultProp.id;
+      impState.activeProposal = JSON.parse(JSON.stringify(defaultProp));
     } else {
       impState.selectedId = 'none';
       impState.activeProposal = null;
@@ -28491,10 +28492,19 @@ function cancelImportWizard() {
   else syncMenuControls();
 }
 
+function pickDefaultSubdivisionProposal(assessment, proposals) {
+  if (!Array.isArray(proposals) || proposals.length === 0) return null;
+  const detachable = proposals.find(
+    (p) => p && p.strategy === 'structural_modules' && p.title === 'Detachable Sub-Assemblies',
+  );
+  if (detachable) return detachable;
+  return assessment?.shouldPrompt ? proposals[0] : null;
+}
+
 function getImportWizardItemIconSvg(itemId) {
   switch (itemId) {
     case 'slicing':
-      return '<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="7" height="16" rx="1.5"/><rect x="14" y="4" width="7" height="16" rx="1.5"/></svg>';
+      return '<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="10" x2="21" y1="6" y2="6"/><line x1="10" x2="21" y1="12" y2="12"/><line x1="10" x2="21" y1="18" y2="18"/><path d="M4 6h1v4"/><path d="M4 10h2"/><path d="M6 18H4c0-1 2-2 2-3s-1-1.5-2-1"/></svg>';
     case 'wordless':
       return '<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 11.5A8.5 8.5 0 0 0 6.2 5.4L4 7.6"/><polyline points="4 3.5 4 7.6 8.1 7.6"/><path d="M3.5 12.5A8.5 8.5 0 0 0 17.8 18.6L20 16.4"/><polyline points="20 20.5 20 16.4 15.9 16.4"/></svg>';
     case 'rendering':
@@ -28704,9 +28714,10 @@ function openImportWizard(parsed, opts = {}) {
   importWizardState.skipAutoFetch = skipAutoFetch;
   importWizardState.importMode = 'auto';
 
-  if (assessment.shouldPrompt && proposals.length > 0) {
-    importWizardState.selectedId = proposals[0].id;
-    importWizardState.activeProposal = JSON.parse(JSON.stringify(proposals[0]));
+  const defaultProp = pickDefaultSubdivisionProposal(assessment, proposals);
+  if (defaultProp) {
+    importWizardState.selectedId = defaultProp.id;
+    importWizardState.activeProposal = JSON.parse(JSON.stringify(defaultProp));
   } else {
     importWizardState.selectedId = 'none';
     importWizardState.activeProposal = null;
@@ -28961,10 +28972,8 @@ async function proceedAfterMissingPartsCheck(parsed, opts = {}) {
   }
   const lastUsedSnapshot = captureCurrentProjectAsImportDefaults();
   const resolved = applyResolvedImportDefaults(lastUsedSnapshot);
-  const defaultPlan =
-    assessment.shouldPrompt && proposals.length > 0
-      ? JSON.parse(JSON.stringify(proposals[0]))
-      : null;
+  const defaultProp = pickDefaultSubdivisionProposal(assessment, proposals);
+  const defaultPlan = defaultProp ? JSON.parse(JSON.stringify(defaultProp)) : null;
   await finishImport(parsed, 'auto', defaultPlan, false, {
     skipAutoFetch,
     wordlessMode: resolved.wordlessMode,

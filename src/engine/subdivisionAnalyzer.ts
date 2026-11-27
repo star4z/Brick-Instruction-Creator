@@ -1485,6 +1485,81 @@ export function buildTypedConnectionGraph(
     }
   }
 
+  // Supplement with physical resting contacts on smooth tiles (studFraction <= 0.05):
+  // `buildSpatialAdjacency` intentionally omits non-structural smooth-tile resting edges so bricks
+  // don't clutch onto tiles during step building. Record them in `tileRestUnder` (without mutating
+  // `weakAdj`, so `weakAdj` remains a strict subset of `adjacency`) for accurate tile-majority seam detection.
+  const tileRestUnder = new Map<number, Array<{ lowerIdx: number; area: number }>>();
+  const smoothTileIndices: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const p = allParts[i];
+    if (!p || p.isMinifig || p.isInverted) continue;
+    const frac = p.studFraction ?? (p.hasTopStuds === false ? 0 : 1);
+    if ((p.isTile || frac <= 0.05) && p.isUpright !== false) {
+      smoothTileIndices.push(i);
+    }
+  }
+  if (smoothTileIndices.length > 0) {
+    const cellSize = 80;
+    const tileGrid = new Map<string, number[]>();
+    for (const ti of smoothTileIndices) {
+      const b = allParts[ti].box;
+      const x0 = Math.floor((b.min[0] - 4) / cellSize);
+      const x1 = Math.floor((b.max[0] + 4) / cellSize);
+      const z0 = Math.floor((b.min[2] - 4) / cellSize);
+      const z1 = Math.floor((b.max[2] + 4) / cellSize);
+      for (let cx = x0; cx <= x1; cx++) {
+        for (let cz = z0; cz <= z1; cz++) {
+          const k = `${cx},${cz}`;
+          let arr = tileGrid.get(k);
+          if (!arr) {
+            arr = [];
+            tileGrid.set(k, arr);
+          }
+          arr.push(ti);
+        }
+      }
+    }
+    for (let u = 0; u < n; u++) {
+      const pu = allParts[u];
+      if (!pu || pu.isMinifig || pu.isInverted || pu.isUpright === false) continue;
+      const bu = pu.box;
+      const x0 = Math.floor((bu.min[0] - 4) / cellSize);
+      const x1 = Math.floor((bu.max[0] + 4) / cellSize);
+      const z0 = Math.floor((bu.min[2] - 4) / cellSize);
+      const z1 = Math.floor((bu.max[2] + 4) / cellSize);
+      const checked = new Set<number>();
+      for (let cx = x0; cx <= x1; cx++) {
+        for (let cz = z0; cz <= z1; cz++) {
+          const bucket = tileGrid.get(`${cx},${cz}`);
+          if (!bucket) continue;
+          for (const ti of bucket) {
+            if (ti === u || checked.has(ti)) continue;
+            checked.add(ti);
+            const lo = ti < u ? ti : u;
+            const hi = ti < u ? u : ti;
+            if (edgeMap.has(lo * n + hi)) continue;
+            const pt = allParts[ti];
+            const bt = pt.box;
+            if (bu.center[1] <= bt.center[1] + 1.0) continue;
+            const faceGap = Math.abs(bt.max[1] - bu.min[1]);
+            if (faceGap > 6.5) continue;
+            const ovX = Math.min(bt.max[0], bu.max[0]) - Math.max(bt.min[0], bu.min[0]);
+            const ovZ = Math.min(bt.max[2], bu.max[2]) - Math.max(bt.min[2], bu.min[2]);
+            if (ovX >= 3.0 && ovZ >= 3.0) {
+              let list = tileRestUnder.get(u);
+              if (!list) {
+                list = [];
+                tileRestUnder.set(u, list);
+              }
+              list.push({ lowerIdx: ti, area: ovX * ovZ });
+            }
+          }
+        }
+      }
+    }
+  }
+
   // Tile-Majority Seam Weakening:
   // Inspect each initial strong component for horizontal interfaces with smooth tiles
   // (or partial-stud jumper plates) where smooth tile area > stud contact area.
@@ -1505,6 +1580,11 @@ export function buildTypedConnectionGraph(
     // Collect candidate horizontal seam Y values where tile_rest or partial-stud contacts occur
     const candidateYs = new Set<number>();
     for (const u of comp) {
+      for (const tr of tileRestUnder.get(u) ?? []) {
+        if (compSet.has(tr.lowerIdx)) {
+          candidateYs.add(Math.round(allParts[tr.lowerIdx].box.max[1] / 4) * 4);
+        }
+      }
       for (const v of weakAdj[u] ?? []) {
         if (v <= u || !compSet.has(v)) continue;
         const e = getEdge(u, v);
@@ -1541,36 +1621,87 @@ export function buildTypedConnectionGraph(
         if (upperComp.length < 4 || remainingInComp.size - upperComp.length < 4) continue;
         const upperSet = new Set(upperComp);
 
+        // Absorb hanging roof eaves / downward brow slopes / trim that hang below the tile seam `y`
+        // (strongly attached UP into the roof, with strictly less or zero strong attachment to the body below).
+        for (let pass = 0; pass < 3; pass++) {
+          let absorbedAny = false;
+          const candidates = new Set<number>();
+          for (const u of upperSet) {
+            for (const nb of strongAdj[u] ?? []) {
+              if (!remainingInComp.has(nb) || upperSet.has(nb)) continue;
+              const nbBox = allParts[nb].box;
+              // Bounded strictly to the roof-overhang band right below the seam (max ~1 brick + 1 plate)
+              if (nbBox.min[1] >= y - 28 && nbBox.max[1] >= y - 4.5) {
+                candidates.add(nb);
+              }
+            }
+          }
+          for (const h of candidates) {
+            let upStrongArea = 0;
+            let bodyStrongArea = 0;
+            let trappedByBody = false;
+            for (const nb of strongAdj[h] ?? []) {
+              if (!remainingInComp.has(nb)) continue;
+              const e = getEdge(h, nb);
+              if (!e || e.strength !== 'strong') continue;
+              const area = Math.max(200, e.contactArea);
+              if (upperSet.has(nb)) {
+                upStrongArea += area;
+              } else {
+                if (e.lowerIdx === h && e.upperIdx === nb) {
+                  trappedByBody = true;
+                  break;
+                }
+                bodyStrongArea += area;
+              }
+            }
+            if (!trappedByBody && upStrongArea > bodyStrongArea && bodyStrongArea <= 450) {
+              upperSet.add(h);
+              absorbedAny = true;
+            }
+          }
+          if (!absorbedAny) break;
+        }
+
+        if (remainingInComp.size - upperSet.size < 4) continue;
+
         let tileArea = 0;
         let studArea = 0;
         let trappedUnderOverhang = false;
         const strongSeamEdges: TypedConnectionEdge[] = [];
 
-        for (const u of upperComp) {
-          for (const nb of adjacency[u] ?? []) {
+        for (const u of upperSet) {
+          for (const nb of strongAdj[u] ?? []) {
             if (!remainingInComp.has(nb) || upperSet.has(nb)) continue;
             const e = getEdge(u, nb);
             if (!e) continue;
-
-            if (e.strength === 'strong') {
-              // If a lower/spanning part sits rigidly ON TOP of upperComp, upperComp cannot lift off cleanly
-              if (e.lowerIdx === u && e.upperIdx === nb) {
-                trappedUnderOverhang = true;
-                break;
-              }
-              strongSeamEdges.push(e);
-              if (e.kind === 'stud' && e.lowerIdx === nb && e.upperIdx === u) {
-                const frac = allParts[nb].studFraction ?? 1;
-                studArea += e.contactArea * frac;
-                tileArea += e.contactArea * (1 - frac);
-              } else {
-                studArea += Math.max(400, e.contactArea);
-              }
-            } else if (e.kind === 'tile_rest' && e.lowerIdx === nb && e.upperIdx === u) {
-              tileArea += e.contactArea;
+            // If a lower/spanning part sits rigidly ON TOP of upperSet, upperSet cannot lift off cleanly
+            if (e.lowerIdx === u && e.upperIdx === nb) {
+              trappedUnderOverhang = true;
+              break;
+            }
+            strongSeamEdges.push(e);
+            if (e.kind === 'stud' && e.lowerIdx === nb && e.upperIdx === u) {
+              const frac = allParts[nb].studFraction ?? 1;
+              studArea += e.contactArea * frac;
+              tileArea += e.contactArea * (1 - frac);
+            } else {
+              studArea += Math.max(400, e.contactArea);
             }
           }
           if (trappedUnderOverhang) break;
+          for (const nb of weakAdj[u] ?? []) {
+            if (!remainingInComp.has(nb) || upperSet.has(nb)) continue;
+            const e = getEdge(u, nb);
+            if (e && e.kind === 'tile_rest' && e.lowerIdx === nb && e.upperIdx === u) {
+              tileArea += e.contactArea;
+            }
+          }
+          for (const tr of tileRestUnder.get(u) ?? []) {
+            if (remainingInComp.has(tr.lowerIdx) && !upperSet.has(tr.lowerIdx)) {
+              tileArea += tr.area;
+            }
+          }
         }
 
         // Majority rule: smooth tile contact strictly exceeds stud contact!
@@ -1585,7 +1716,7 @@ export function buildTypedConnectionGraph(
             if (!weakAdj[e.b].includes(e.a)) weakAdj[e.b].push(e.a);
           }
           tileSeamCapPartSets.push(upperSet);
-          for (const u of upperComp) remainingInComp.delete(u);
+          for (const u of upperSet) remainingInComp.delete(u);
         }
       }
     }
@@ -2720,24 +2851,58 @@ export function buildHorizontalFloorsProposal(
   if (chosen.length === 0) return null;
   chosen.sort((a, b) => a.y - b.y);
 
-  const initialBucketOf = new Map<number, number>();
+  const bandPartLists: number[][] = Array.from({ length: chosen.length + 1 }, () => []);
   for (const p of primaryParts) {
     let f = 0;
     while (f < chosen.length && p.box.center[1] >= chosen[f].y) f++;
-    initialBucketOf.set(p.index, f);
+    bandPartLists[f].push(p.index);
   }
 
-  const floorBandCenters = Array.from({ length: chosen.length + 1 }, (_, f) => {
+  const rawBandCenters = Array.from({ length: chosen.length + 1 }, (_, f) => {
     const lo = f === 0 ? bounds.min[1] : chosen[f - 1].y;
     const hi = f === chosen.length ? bounds.max[1] : chosen[f].y;
     return (lo + hi) * 0.5;
   });
 
-  const minFloorSize = Math.max(4, Math.floor(primaryComp.length * 0.08));
-  const { segments } = enforceConnectedPartition(
+  // Preserve multiple substantial disconnected components on the same horizontal level
+  // (e.g., twin roofs on a 2-car train, twin castle turrets, or two detached upper stories)
+  const initialBucketOf = new Map<number, number>();
+  const floorBandCenters: number[] = [];
+  const bandOfBucket: number[] = [];
+  const minSubBandSize = Math.max(10, Math.floor(primaryComp.length * 0.05));
+
+  for (let f = 0; f < bandPartLists.length; f++) {
+    const bParts = bandPartLists[f];
+    if (bParts.length === 0) continue;
+    const bComps = getConnectedComponents(bParts, adjacency);
+    const substantial = bComps.filter((c) => c.length >= minSubBandSize);
+    if (substantial.length >= 2) {
+      const firstBid = floorBandCenters.length;
+      for (const comp of substantial) {
+        const bid = floorBandCenters.length;
+        floorBandCenters.push(rawBandCenters[f]);
+        bandOfBucket.push(f);
+        for (const idx of comp) initialBucketOf.set(idx, bid);
+      }
+      // Assign tiny scraps in this band to the first bucket of this band (partitioner will absorb across edges)
+      for (const comp of bComps) {
+        if (comp.length >= minSubBandSize) continue;
+        for (const idx of comp) initialBucketOf.set(idx, firstBid);
+      }
+    } else {
+      const bid = floorBandCenters.length;
+      floorBandCenters.push(rawBandCenters[f]);
+      bandOfBucket.push(f);
+      for (const idx of bParts) initialBucketOf.set(idx, bid);
+    }
+  }
+
+  const bucketCount = floorBandCenters.length;
+  const minFloorSize = Math.max(4, Math.floor(primaryComp.length * 0.05));
+  const { segments, bucketIds } = enforceConnectedPartition(
     primaryComp,
     initialBucketOf,
-    chosen.length + 1,
+    bucketCount,
     adjacency,
     {
       minSegmentSize: minFloorSize,
@@ -2746,7 +2911,7 @@ export function buildHorizontalFloorsProposal(
         const origBucket = initialBucketOf.get(node) ?? 0;
         const cy = allParts[node].box.center[1];
         const yDist = Math.abs(cy - (floorBandCenters[targetBucketId] ?? cy));
-        const sameBonus = targetBucketId === origBucket ? 36 : -Math.abs(targetBucketId - origBucket) * 16;
+        const sameBonus = targetBucketId === origBucket ? 36 : -Math.abs((bandOfBucket[targetBucketId] ?? 0) - (bandOfBucket[origBucket] ?? 0)) * 16;
         const yPen = (yDist / Math.max(24, bounds.spanY)) * 20;
         const balPen = targetSize > idealSize * 1.3 ? (targetSize - idealSize * 1.3) * 0.35 : 0;
         return sameBonus + edgesToTarget * 12 - yPen - balPen;
@@ -2754,14 +2919,16 @@ export function buildHorizontalFloorsProposal(
     },
   );
 
-  // Order connected floors strictly bottom-to-top
-  const nonEmpty = segments
-    .filter((b) => b.length >= 4)
-    .sort((a, b) => {
-      const meanA = a.reduce((acc, idx) => acc + allParts[idx].box.center[1], 0) / a.length;
-      const meanB = b.reduce((acc, idx) => acc + allParts[idx].box.center[1], 0) / b.length;
-      return meanA - meanB;
-    });
+  // Order connected floors strictly bottom-to-top (preserving band metadata for naming & explode)
+  const nonEmptyEntries = segments
+    .map((indices, i) => ({
+      indices,
+      band: bandOfBucket[bucketIds[i] ?? 0] ?? 0,
+      meanY: indices.reduce((acc, idx) => acc + allParts[idx].box.center[1], 0) / Math.max(1, indices.length),
+    }))
+    .filter((e) => e.indices.length >= 4)
+    .sort((a, b) => a.band - b.band || a.meanY - b.meanY);
+  const nonEmpty = nonEmptyEntries.map((e) => e.indices);
   if (nonEmpty.length < 2) return null;
 
   const avgTiles = chosen.reduce((acc, c) => acc + c.tileCount, 0) / chosen.length;
@@ -2769,29 +2936,44 @@ export function buildHorizontalFloorsProposal(
   const hasModularTileSeams = avgTiles >= 3 && avgCut <= Math.max(18, primaryParts.length * 0.08);
   const outputMode: SubdivisionOutputMode = hasModularTileSeams ? 'modular_chapters' : 'numbered_bags';
 
-  const floorName = (idx: number, total: number): string => {
+  const uniqueBands = Array.from(new Set(nonEmptyEntries.map((e) => e.band))).sort((a, b) => a - b);
+  const bandRankOf = new Map<number, number>(uniqueBands.map((b, rank) => [b, rank]));
+  const countPerBand = new Map<number, number>();
+  for (const e of nonEmptyEntries) countPerBand.set(e.band, (countPerBand.get(e.band) ?? 0) + 1);
+  const seenInBand = new Map<number, number>();
+
+  const floorName = (band: number): string => {
+    const rank = bandRankOf.get(band) ?? 0;
+    const totalBands = uniqueBands.length;
+    const bandTotal = countPerBand.get(band) ?? 1;
+    const subIdx = (seenInBand.get(band) ?? 0) + 1;
+    seenInBand.set(band, subIdx);
+    const suffix = bandTotal > 1 ? ` ${subIdx}` : '';
     if (hasModularTileSeams) {
-      if (idx === 0) return 'Ground Floor';
-      if (idx === total - 1) return 'Roof & Top Level';
-      return `Floor ${idx + 1}`;
+      if (rank === 0) return `Ground Floor${suffix}`;
+      if (rank === totalBands - 1) return bandTotal > 1 ? `Roof ${subIdx}` : 'Roof & Top Level';
+      return `Floor ${rank + 1}${suffix}`;
     }
-    if (total === 2) return idx === 0 ? 'Lower Section' : 'Upper Section';
-    if (total === 3) return idx === 0 ? 'Base Layer' : idx === 1 ? 'Middle Section' : 'Top Section';
-    return `Layer ${idx + 1}`;
+    if (totalBands === 2) return rank === 0 ? `Lower Section${suffix}` : `Upper Section${suffix}`;
+    if (totalBands === 3) return rank === 0 ? `Base Layer${suffix}` : rank === 1 ? `Middle Section${suffix}` : `Top Section${suffix}`;
+    return `Layer ${rank + 1}${suffix}`;
   };
 
-  const mid = (nonEmpty.length - 1) / 2;
-  const sections: ProposedSection[] = nonEmpty.map((indices, idx) => ({
-    id: `sec_floor_${idx + 1}`,
-    name: floorName(idx, nonEmpty.length),
-    partIndices: indices,
-    partIds: indices.map((i) => allParts[i].id),
-    role: outputMode === 'modular_chapters' ? 'module' : 'bag',
-    cutEdgeCount: countCutEdges(indices, adjacency),
-    attachNormal: [0, 1, 0],
-    explodeOffset: [0, (idx - mid) / Math.max(0.5, mid), 0],
-    previewColor: SECTION_PREVIEW_PALETTE[idx % SECTION_PREVIEW_PALETTE.length],
-  }));
+  const midBand = (uniqueBands.length - 1) / 2;
+  const sections: ProposedSection[] = nonEmptyEntries.map((entry, idx) => {
+    const rank = bandRankOf.get(entry.band) ?? 0;
+    return {
+      id: `sec_floor_${idx + 1}`,
+      name: floorName(entry.band),
+      partIndices: entry.indices,
+      partIds: entry.indices.map((i) => allParts[i].id),
+      role: outputMode === 'modular_chapters' ? 'module' : 'bag',
+      cutEdgeCount: countCutEdges(entry.indices, adjacency),
+      attachNormal: [0, 1, 0],
+      explodeOffset: [0, (rank - midBand) / Math.max(0.5, midBand), 0],
+      previewColor: SECTION_PREVIEW_PALETTE[idx % SECTION_PREVIEW_PALETTE.length],
+    };
+  });
 
   placeSecondaryGlobalComponents(
     sections,
@@ -3347,11 +3529,11 @@ export function buildStructuralModulesProposal(
         const capCount = capBuckets.length;
         const roofNote =
           capCount > 0 ? ` + ${capCount} removable roof${capCount === 1 ? '' : 's'}` : '';
-        let confidence = 88;
-        if (orderedJoints.length > 0) confidence += 6;
-        if (capCount > 0) confidence += 4;
-        if (hasIdenticalCollapse) confidence += 4;
-        confidence = Math.min(96, confidence);
+        let confidence = 94;
+        if (orderedJoints.length > 0) confidence += 2;
+        if (capCount > 0) confidence += 1;
+        if (hasIdenticalCollapse) confidence += 1;
+        confidence = Math.min(98, confidence);
 
         const rationale =
           orderedJoints.length === 1 && articulatedDescs.length === 1
