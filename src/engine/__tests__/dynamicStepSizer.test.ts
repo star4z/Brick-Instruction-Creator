@@ -14,6 +14,8 @@ import {
   computeEvenRunTarget,
   createGroundedPrereqChecker,
   expandBoundsWithBox,
+  findCoPlanarFloorFoundation,
+  hasAvoidableOverhang,
   isCandidateConnectedForStep,
   selectDynamicStepIndices,
   type DynamicPartDescriptor,
@@ -526,5 +528,127 @@ describe('dynamicStepSizer', () => {
     expect(isCandidateConnectedForStep(3, false, adj, prevWithA, fallbackStep)).toBe(true);
     // 4 is in separate Island C -> NEVER lumped with Island B
     expect(isCandidateConnectedForStep(4, false, adj, prevWithA, fallbackStep)).toBe(false);
+  });
+
+  it('co-places co-planar floor foundation plates in Step 1 so Step 2 bridging plates never awkwardly overhang', () => {
+    // 2-layer staggered plate sandwich on a wide chassis (span >= 400 LDU):
+    // Layer 0 (y = 0..8):
+    //   0: 2x6 plate at rear (x=0..120, z=0..40)
+    //   1: 1x10 plate along right edge (x=100..120, z=40..240)
+    //   2: 4x4 plate in middle (x=20..100, z=40..120)
+    //   3: 1x10 plate along left edge (x=0..20, z=40..240)
+    //   4: 4x4 round plate further forward (x=20..100, z=120..200) — NOT under U1/U2
+    // Layer 1 (y = 8..16):
+    //   5: 4x6 plate (x=0..80, z=0..120) — bridges 0, 2, 3 (only 33% on 0 alone!)
+    //   6: 2x6 plate (x=80..120, z=0..120) — bridges 0, 2, 1 (only 33% on 0 alone!)
+    //   7: 2x2 plate (x=40..80, z=100..140) — sits on 2 and 4
+    //   8: 4x6 plate (x=0..80, z=120..240) — bridges 3 and 4 (overhangs while 4 is unplaced!)
+    const parts: DynamicPartDescriptor[] = [
+      makePart(0, '3795', 4, makeBox(60, 4, 20, 120, 8, 40)),
+      makePart(1, '4477', 4, makeBox(110, 4, 140, 20, 8, 200)),
+      makePart(2, '3031', 72, makeBox(60, 4, 80, 80, 8, 80)),
+      makePart(3, '4477', 4, makeBox(10, 4, 140, 20, 8, 200)),
+      makePart(4, '60474', 14, makeBox(60, 4, 160, 80, 8, 80)),
+      makePart(5, '3032', 4, makeBox(40, 12, 60, 80, 8, 120)),
+      makePart(6, '3795', 4, makeBox(100, 12, 60, 40, 8, 120)),
+      makePart(7, '3022', 4, makeBox(60, 12, 120, 40, 8, 40)),
+      makePart(8, '3032', 4, makeBox(40, 12, 180, 80, 8, 120)),
+    ];
+    const boxes = parts.map((p) => p.box);
+    const roles = parts.map((p) => p.role);
+    const cladding = parts.map(() => false);
+    const adj: number[][] = [
+      [5, 6],       // 0: rear 2x6
+      [6],          // 1: right 1x10
+      [5, 6, 7],    // 2: middle 4x4
+      [5, 8],       // 3: left 1x10
+      [7, 8],       // 4: forward 4x4 round
+      [0, 2, 3],    // 5: 4x6 bridge
+      [0, 1, 2],    // 6: 2x6 bridge
+      [2, 4],       // 7: 2x2 bridge
+      [3, 4],       // 8: forward 4x6 bridge
+    ];
+    const belowMap: number[][] = parts.map(() => []);
+    const remaining = new Set<number>(parts.map((p) => p.index));
+    // Simulate a wide model (span 480 >= 400 so baseMaxSpread = 120)
+    const wideModelBounds: WorldBox = {
+      min: [0, 0, 0],
+      max: [120, 80, 480],
+      center: [60, 40, 240],
+    };
+
+    const partners = findCoPlanarFloorFoundation(0, remaining, boxes, adj, roles, cladding, belowMap);
+    expect(Array.from(partners).sort((a, b) => a - b)).toEqual([1, 2, 3]);
+    expect(partners.has(4)).toBe(false);
+
+    const step1 = selectDynamicStepIndices({
+      anchor: 0,
+      parts,
+      getEligibleCandidates: (placedInStep) =>
+        Array.from(remaining).filter((i) => {
+          if (placedInStep.has(i)) return false;
+          if (Math.abs(parts[i].layerY - parts[0].layerY) > 12) return false;
+          if (partners.has(i)) return true;
+          return isCandidateConnectedForStep(i, false, adj, new Set(), placedInStep);
+        }),
+      modelBounds: wideModelBounds,
+      builtBounds: null,
+      activeCam: DEFAULT_STUDIO_CAMERA,
+      isFirstStep: true,
+      totalPartsInScope: 342,
+      coPlanarFloorPartners: partners,
+    });
+
+    // Step 1 places all 4 co-planar foundation plates together on the table
+    expect(step1.slice().sort((a, b) => a - b)).toEqual([0, 1, 2, 3]);
+
+    // After Step 1, U1 (5) and U2 (6) have 100% support (zero avoidable overhang),
+    // while forward 4x6 (8) has avoidable overhang because round plate (4) is still unplaced!
+    const placedAfter1 = new Set<number>(step1);
+    const remAfter1 = new Set<number>([4, 5, 6, 7, 8]);
+    expect(hasAvoidableOverhang(5, boxes, adj, placedAfter1, remAfter1, roles, cladding)).toBe(false);
+    expect(hasAvoidableOverhang(6, boxes, adj, placedAfter1, remAfter1, roles, cladding)).toBe(false);
+    expect(hasAvoidableOverhang(8, boxes, adj, placedAfter1, remAfter1, roles, cladding)).toBe(true);
+
+    // compareFrontierCandidates orders well-supported U1 (5) ahead of avoidably overhanging U4 (8)
+    const overhangSet = new Set<number>([8]);
+    const builtBounds1 = computeBoundsFromBoxes(step1.map((i) => boxes[i]));
+    expect(
+      compareFrontierCandidates(parts[5], parts[8], DEFAULT_STUDIO_CAMERA.corner, builtBounds1, undefined, overhangSet),
+    ).toBeLessThan(0);
+  });
+
+  it('ignores non-coplanar suspended parts in findCoPlanarFloorFoundation and never flags intentional cantilevers', () => {
+    // 0: Floor plate (y=0..8, 4x4)
+    // 1: Hanging skirt (y=2..8, NOT co-planar — minY differs by 2 LDU > 1.5!)
+    // 2: Spanning upper plate (y=8..16, 4x8) sitting on 0 and 1
+    // 3: Intentional cantilever wingtip (y=8..16, 2x6) sitting 33% on 0 with NOTHING under its overhanging 67%
+    const boxes: WorldBox[] = [
+      makeBox(0, 4, 0, 80, 8, 80),     // 0: minY=0, maxY=8
+      makeBox(80, 5, 0, 80, 6, 80),    // 1: minY=2, maxY=8 (suspended skirt)
+      makeBox(40, 12, 0, 160, 8, 80),  // 2: minY=8, maxY=16
+      makeBox(-60, 12, 0, 120, 8, 40), // 3: minY=8, maxY=16 (overhangs left into empty air)
+    ];
+    const roles = ['structural', 'structural', 'structural', 'structural'];
+    const cladding = [false, false, false, false];
+    const adj: number[][] = [
+      [2, 3],
+      [2],
+      [0, 1],
+      [0],
+    ];
+    const belowMap: number[][] = [[], [], [], []];
+    const remaining = new Set<number>([0, 1, 2, 3]);
+
+    // Suspended skirt (1) is NOT co-planar with floor (0) -> excluded
+    const partners = findCoPlanarFloorFoundation(0, remaining, boxes, adj, roles, cladding, belowMap);
+    expect(partners.size).toBe(0);
+
+    // Wingtip (3) has NO unplaced lower support -> NOT an avoidable overhang!
+    const placed = new Set<number>([0]);
+    const remAfter = new Set<number>([1, 2, 3]);
+    expect(hasAvoidableOverhang(3, boxes, adj, placed, remAfter, roles, cladding)).toBe(false);
+    // Spanning plate (2) DOES have unplaced lower support (1) -> avoidable overhang!
+    expect(hasAvoidableOverhang(2, boxes, adj, placed, remAfter, roles, cladding)).toBe(true);
   });
 });

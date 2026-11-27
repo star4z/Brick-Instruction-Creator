@@ -47,6 +47,12 @@ export interface DynamicStepSelectionOptions {
   isFirstStep: boolean;
   totalPartsInScope: number;
   isSubmodel?: boolean;
+  /**
+   * Optional set of Step 1 co-planar floor-plane partners that sit directly
+   * underneath an immediate upper bridging piece touching `anchor` so Step 2
+   * does not awkwardly overhang `anchor`.
+   */
+  coPlanarFloorPartners?: ReadonlySet<number>;
 }
 
 export const STEP_COGNITIVE_BUDGET = 8.0;
@@ -331,6 +337,7 @@ export function compareFrontierCandidates(
   activeCorner: StudioCornerId,
   refBounds: WorldBox,
   sameSkuBandCounts?: ReadonlyMap<string, number>,
+  avoidableOverhangSet?: ReadonlySet<number>,
 ): number {
   const wa = a.role === 'wheel' ? 1 : 0;
   const wb = b.role === 'wheel' ? 1 : 0;
@@ -347,6 +354,14 @@ export function compareFrontierCandidates(
   const tallA = a.box.max[1] - a.box.min[1] >= 48 ? 1 : 0;
   const tallB = b.box.max[1] - b.box.min[1] >= 48 ? 1 : 0;
   if (tallA !== tallB) return tallA - tallB;
+
+  // Prefer solidly supported pieces before avoidably overhanging pieces that still
+  // have unplaced lower support sitting directly underneath them.
+  if (avoidableOverhangSet) {
+    const ovA = avoidableOverhangSet.has(a.index) ? 1 : 0;
+    const ovB = avoidableOverhangSet.has(b.index) ? 1 : 0;
+    if (ovA !== ovB) return ovA - ovB;
+  }
 
   const bucketA = cameraCornerBucket(a.box, activeCorner, refBounds);
   const bucketB = cameraCornerBucket(b.box, activeCorner, refBounds);
@@ -466,6 +481,144 @@ export function isCandidateConnectedForStep(
 }
 
 /**
+ * Identifies co-planar floor-plane partners of Step 1's `anchor` that sit directly
+ * underneath an immediate upper bridging piece `U` (`U ∈ adj[anchor]`) which would
+ * otherwise awkwardly overhang `anchor` on Step 2 (< 55% footprint supported by
+ * `anchor` alone).
+ *
+ * All returned partners share the exact same floor plane (`min[1]` and `max[1]`
+ * within 1.5 LDU of `anchor`), sit unblocked on the floor, and directly support `U`
+ * from below — so laying them out flat on the table in Step 1 lets `U` drop cleanly
+ * straight down onto a fully supported foundation in Step 2 with zero overhang and
+ * zero upside-down underside tucking.
+ */
+export function findCoPlanarFloorFoundation(
+  anchor: number,
+  scopeRemaining: ReadonlySet<number>,
+  boxes: readonly WorldBox[],
+  adjacency: readonly (readonly number[])[],
+  roles: readonly string[],
+  claddingFlags: readonly boolean[],
+  belowMap: readonly (readonly number[])[],
+): Set<number> {
+  const partners = new Set<number>();
+  const ba = boxes[anchor];
+  if (!ba) return partners;
+  const anchorRole = roles[anchor];
+  if (
+    anchorRole === 'wheel' ||
+    anchorRole === 'pin' ||
+    anchorRole === 'figure' ||
+    anchorRole === 'wheel_holder' ||
+    claddingFlags[anchor]
+  ) {
+    return partners;
+  }
+
+  let baseFloorY = Infinity;
+  for (const i of scopeRemaining) {
+    const r = roles[i];
+    if (r === 'wheel' || r === 'pin' || r === 'figure' || claddingFlags[i]) continue;
+    const b = boxes[i];
+    if (b && b.min[1] < baseFloorY) baseFloorY = b.min[1];
+  }
+  if (!Number.isFinite(baseFloorY) || ba.min[1] > baseFloorY + 4.5) {
+    return partners;
+  }
+
+  for (const u of adjacency[anchor] ?? []) {
+    if (!scopeRemaining.has(u)) continue;
+    const ur = roles[u];
+    if (ur === 'wheel' || ur === 'pin' || ur === 'figure' || claddingFlags[u]) continue;
+    const bu = boxes[u];
+    if (!bu) continue;
+    // U must sit directly on top of anchor
+    if (bu.min[1] < ba.max[1] - 4.5 || bu.min[1] > ba.max[1] + 4.5) continue;
+    if (bu.center[1] <= ba.center[1] + 2.0) continue;
+
+    const ovX = Math.min(bu.max[0], ba.max[0]) - Math.max(bu.min[0], ba.min[0]);
+    const ovZ = Math.min(bu.max[2], ba.max[2]) - Math.max(bu.min[2], ba.min[2]);
+    if (ovX < 3.0 || ovZ < 3.0) continue;
+
+    const uArea = Math.max(1, (bu.max[0] - bu.min[0]) * (bu.max[2] - bu.min[2]));
+    const anchorSupportRatio = (ovX * ovZ) / uArea;
+    // If anchor alone already supports >= 55% of U, U does not awkwardly overhang anchor
+    if (anchorSupportRatio >= 0.55) continue;
+
+    for (const q of adjacency[u] ?? []) {
+      if (q === anchor || !scopeRemaining.has(q)) continue;
+      const qr = roles[q];
+      if (qr === 'wheel' || qr === 'pin' || qr === 'figure' || qr === 'wheel_holder' || claddingFlags[q]) continue;
+      if ((belowMap[q] ?? []).some((b) => scopeRemaining.has(b))) continue;
+      const bq = boxes[q];
+      if (!bq) continue;
+      // Strictly co-planar with anchor (same table plane & same top contact plane)
+      if (Math.abs(bq.min[1] - ba.min[1]) > 1.5) continue;
+      if (Math.abs(bq.max[1] - ba.max[1]) > 1.5) continue;
+
+      const qOvX = Math.min(bu.max[0], bq.max[0]) - Math.max(bu.min[0], bq.min[0]);
+      const qOvZ = Math.min(bu.max[2], bq.max[2]) - Math.max(bu.min[2], bq.min[2]);
+      if (qOvX < 3.0 || qOvZ < 3.0) continue;
+
+      partners.add(q);
+    }
+  }
+
+  return partners;
+}
+
+/**
+ * Returns true when placing `idx` right now would leave it significantly overhanging
+ * (< 50% of its horizontal footprint supported by `placedBeforeStep`, and < 65% of
+ * its total underlying support placed) WHILE unplaced lower support parts still exist
+ * directly underneath `idx` in `remaining`.
+ *
+ * Intentional cantilevers (wings, spoilers, eaves with nothing underneath them) have
+ * zero unplaced underlying support and return `false`.
+ */
+export function hasAvoidableOverhang(
+  idx: number,
+  boxes: readonly WorldBox[],
+  adjacency: readonly (readonly number[])[],
+  placedBeforeStep: ReadonlySet<number>,
+  remaining: ReadonlySet<number>,
+  roles: readonly string[],
+  claddingFlags: readonly boolean[],
+): boolean {
+  const b = boxes[idx];
+  if (!b || placedBeforeStep.size === 0) return false;
+  const area = Math.max(1, (b.max[0] - b.min[0]) * (b.max[2] - b.min[2]));
+  let placedSupportArea = 0;
+  let unplacedSupportArea = 0;
+
+  for (const nb of adjacency[idx] ?? []) {
+    const r = roles[nb];
+    if (r === 'wheel' || r === 'pin' || r === 'figure' || claddingFlags[nb]) continue;
+    const bn = boxes[nb];
+    if (!bn) continue;
+    // Must sit directly underneath idx
+    if (bn.max[1] < b.min[1] - 4.5 || bn.max[1] > b.min[1] + 4.5) continue;
+    if (bn.center[1] >= b.center[1] - 2.0) continue;
+
+    const ovX = Math.min(b.max[0], bn.max[0]) - Math.max(b.min[0], bn.min[0]);
+    const ovZ = Math.min(b.max[2], bn.max[2]) - Math.max(b.min[2], bn.min[2]);
+    if (ovX < 3.0 || ovZ < 3.0) continue;
+
+    const ovArea = ovX * ovZ;
+    if (placedBeforeStep.has(nb)) {
+      placedSupportArea += ovArea;
+    } else if (remaining.has(nb)) {
+      unplacedSupportArea += ovArea;
+    }
+  }
+
+  if (unplacedSupportArea <= 4) return false;
+  const placedRatio = placedSupportArea / area;
+  const coveredShare = placedSupportArea / (placedSupportArea + unplacedSupportArea);
+  return placedRatio < 0.55 && coveredShare < 0.65;
+}
+
+/**
  * Estimates the contiguous/structured run size of `anchor.sku` currently ready
  * in the same layer & camera-facing zone so large uniform runs can be split evenly.
  */
@@ -530,6 +683,7 @@ export function selectDynamicStepIndices(options: DynamicStepSelectionOptions): 
     isFirstStep,
     totalPartsInScope,
     isSubmodel = false,
+    coPlanarFloorPartners,
   } = options;
 
   const anchorPart = parts[anchor];
@@ -547,13 +701,24 @@ export function selectDynamicStepIndices(options: DynamicStepSelectionOptions): 
 
   // Step 1 of a model or section starts gently (1-3 foundation bricks),
   // and tiny submodels (<= 6 parts) pace gently so they aren't dumped in 1 step.
+  // When Step 1 lays out a co-planar floor foundation supporting an immediate bridging
+  // plate, allow up to 5 floor parts / 4 SKUs so flanking base plates sit together cleanly.
+  const hasCoPlanarFloor = isFirstStep && Boolean(coPlanarFloorPartners && coPlanarFloorPartners.size > 0);
   let budget = STEP_COGNITIVE_BUDGET;
   let maxParts = MAX_TOTAL_PARTS_PER_STEP;
   let maxUnique = MAX_UNIQUE_SKUS_PER_STEP;
   if (isFirstStep) {
-    budget = totalPartsInScope <= 4 ? 2.0 : 3.0;
-    maxParts = totalPartsInScope <= 4 ? 2 : FIRST_STEP_MAX_PARTS;
-    maxUnique = totalPartsInScope <= 4 ? 2 : FIRST_STEP_MAX_PARTS;
+    budget = totalPartsInScope <= 4 ? 2.0 : hasCoPlanarFloor ? 4.2 : 3.0;
+    maxParts = totalPartsInScope <= 4
+      ? 2
+      : hasCoPlanarFloor
+        ? Math.max(FIRST_STEP_MAX_PARTS, Math.min(5, 1 + coPlanarFloorPartners!.size))
+        : FIRST_STEP_MAX_PARTS;
+    maxUnique = totalPartsInScope <= 4
+      ? 2
+      : hasCoPlanarFloor
+        ? Math.max(FIRST_STEP_MAX_PARTS, Math.min(4, 1 + coPlanarFloorPartners!.size))
+        : FIRST_STEP_MAX_PARTS;
   } else if (isSubmodel && totalPartsInScope <= 6) {
     const gentleCap = Math.max(2, Math.ceil(totalPartsInScope / 2));
     budget = gentleCap;
@@ -618,15 +783,24 @@ export function selectDynamicStepIndices(options: DynamicStepSelectionOptions): 
       const pattern: RepeatPatternKind | null = isSameSku
         ? (alreadyScattered ? 'scattered' : classifySameSkuPattern(cand.box, existingOfSku!, modelBounds))
         : null;
+      const isCoPlanarPartner = Boolean(coPlanarFloorPartners && coPlanarFloorPartners.has(idx));
+
+      // When Step 1 is laying out a co-planar floor foundation, keep it flat on the floor
+      // plane so upper bridging plates drop cleanly on top in Step 2 instead of covering
+      // or overhanging the foundation in Step 1.
+      if (hasCoPlanarFloor && !isCoPlanarPartner && Math.abs(cand.box.min[1] - anchorPart.box.min[1]) > 1.5) {
+        continue;
+      }
 
       // When splitting a very large uniform run, keep the chunk purely homogeneous.
       if (splittingLargeRun && (!isSameSku || cand.sku !== anchorPart.sku || pattern !== 'structured')) {
         continue;
       }
 
-      // Opposite-wall spatial guard (allow compact mirror pair only for same-SKU structured mirror)
+      // Opposite-wall spatial guard (allow compact mirror pair only for same-SKU structured mirror,
+      // and allow Step 1 co-planar floor partners that sit directly under the same bridging plate).
       const allowMirror = isSameSku && pattern === 'structured';
-      if (areOnOppositeWalls(anchorPart.box, cand.box, refBounds, allowMirror)) {
+      if (!isCoPlanarPartner && areOnOppositeWalls(anchorPart.box, cand.box, refBounds, allowMirror)) {
         continue;
       }
 
@@ -647,7 +821,7 @@ export function selectDynamicStepIndices(options: DynamicStepSelectionOptions): 
         cand.box.max[2] - cand.box.min[2],
       );
       const effectiveFootprintLimit = Math.max(footprintLimit, candSelfSpan + 80);
-      if (nextSpan > effectiveFootprintLimit) continue;
+      if (!isCoPlanarPartner && nextSpan > effectiveFootprintLimit) continue;
 
       const distToCluster = Math.hypot(
         cand.box.center[0] - stepBounds.center[0],
@@ -657,7 +831,7 @@ export function selectDynamicStepIndices(options: DynamicStepSelectionOptions): 
       const maxCandDist = isSameSku && pattern === 'structured'
         ? baseMaxSpread * 1.45
         : baseMaxSpread;
-      if (distToCluster > maxCandDist) continue;
+      if (!isCoPlanarPartner && distToCluster > maxCandDist) continue;
 
       // Cognitive cost calculation
       let cost: number;
@@ -686,7 +860,11 @@ export function selectDynamicStepIndices(options: DynamicStepSelectionOptions): 
         // If we already built a clean structured run of >= 4 identical pieces,
         // avoid cluttering it with unrelated 1x pieces unless very tight.
         const switchSurcharge = maxRepeatInStep >= 4 ? 1.6 : maxRepeatInStep >= 2 ? 0.75 : 0;
-        const spreadSurcharge = distToCluster > 60 ? ((distToCluster - 60) / 100) * 0.6 : 0;
+        const spreadSurcharge = isCoPlanarPartner
+          ? 0
+          : distToCluster > 60
+            ? ((distToCluster - 60) / 100) * 0.6
+            : 0;
         cost = 1.0 + switchSurcharge + spreadSurcharge;
       }
 
@@ -705,6 +883,7 @@ export function selectDynamicStepIndices(options: DynamicStepSelectionOptions): 
         score += sameShapePattern === 'structured' ? 55 : 30;
       }
       if (cand.role === anchorPart.role) score += 15;
+      if (isCoPlanarPartner) score += 40;
 
       // Prefer extending closely from the existing cluster and same exact height
       let nearestDist = Infinity;

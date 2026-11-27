@@ -135,6 +135,8 @@ import {
   computeEvenRunTarget,
   createGroundedPrereqChecker,
   expandBoundsWithBox,
+  findCoPlanarFloorFoundation,
+  hasAvoidableOverhang,
   isCandidateConnectedForStep,
   selectDynamicStepIndices,
 } from './engine/dynamicStepSizer';
@@ -5961,16 +5963,24 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount, outPrebui
           frontier = (nonUnderRem.length > 0 ? nonUnderRem : Array.from(deckRem)).sort((a, b) => layerY[a] - layerY[b]);
         }
         const skuCountsInBand = new Map();
+        const avoidableOverhangSet = new Set();
         for (const idx of frontier) {
           const sku = subDescriptors[idx].sku;
           skuCountsInBand.set(sku, (skuCountsInBand.get(sku) || 0) + 1);
+          if (hasAvoidableOverhang(idx, boxes, adj, placedBeforeStep, deckRem, roles, claddingFlags)) {
+            avoidableOverhangSet.add(idx);
+          }
         }
         const refBounds = builtBounds || subModelBounds;
-        frontier.sort((a, b) => compareFrontierCandidates(subDescriptors[a], subDescriptors[b], activeCam.corner, refBounds, skuCountsInBand));
+        frontier.sort((a, b) => compareFrontierCandidates(subDescriptors[a], subDescriptors[b], activeCam.corner, refBounds, skuCountsInBand, avoidableOverhangSet));
       }
       const anchor = frontier[0];
       const anchorY = layerY[anchor];
       const anchorConnectedToPrev = placedBeforeStep.size > 0 && adj[anchor].some(nb => placedBeforeStep.has(nb));
+      const anchorHasAvoidableOverhang = placedBeforeStep.size > 0 && hasAvoidableOverhang(anchor, boxes, adj, placedBeforeStep, deckRem, roles, claddingFlags);
+      const coPlanarFloorPartners = placedBeforeStep.size === 0
+        ? findCoPlanarFloorFoundation(anchor, deckRem, boxes, adj, roles, claddingFlags, belowMap)
+        : undefined;
       const stepIdx = selectDynamicStepIndices({
         anchor,
         parts: subDescriptors,
@@ -5980,9 +5990,11 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount, outPrebui
             if (Math.abs(layerY[i] - anchorY) > 12) return false;
             if (placedBeforeStep.size > 0) {
               if (strictUnderInDeck.has(i)) return false;
+              if (!anchorHasAvoidableOverhang && hasAvoidableOverhang(i, boxes, adj, placedBeforeStep, deckRem, roles, claddingFlags)) return false;
               if (belowMap[i].some(u => deckRem.has(u) && !strictUnderInDeck.has(u) && !placedBeforeStep.has(u) && isDeckPrereqGrounded(u))) return false;
             } else {
               if (belowMap[i].some(u => deckRem.has(u))) return false;
+              if (coPlanarFloorPartners?.has(i)) return true;
             }
             return isCandidateConnectedForStep(i, anchorConnectedToPrev, adj, placedBeforeStep, placedInStep);
           }),
@@ -5992,6 +6004,7 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount, outPrebui
         isFirstStep: sNum === 0,
         totalPartsInScope: n,
         isSubmodel: true,
+        coPlanarFloorPartners,
       });
       for (const i of stepIdx) { deckRem.delete(i); remaining.delete(i); placed.add(i); }
       const stepBoxes = stepIdx.map(i => boxes[i]);
@@ -6374,12 +6387,16 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount, outPrebui
         }
       }
       const skuCountsInBand = new Map();
+      const avoidableOverhangSet = new Set();
       for (const idx of frontier) {
         const sku = subDescriptors[idx].sku;
         skuCountsInBand.set(sku, (skuCountsInBand.get(sku) || 0) + 1);
+        if (hasAvoidableOverhang(idx, boxes, adj, placedBeforeStep, remaining, roles, claddingFlags)) {
+          avoidableOverhangSet.add(idx);
+        }
       }
       const refBounds = builtBounds || subModelBounds;
-      frontier.sort((a, b) => compareFrontierCandidates(subDescriptors[a], subDescriptors[b], activeCam.corner, refBounds, skuCountsInBand));
+      frontier.sort((a, b) => compareFrontierCandidates(subDescriptors[a], subDescriptors[b], activeCam.corner, refBounds, skuCountsInBand, avoidableOverhangSet));
     }
     const anchor = frontier[0];
     const dupInfo = localPartToDup.get(anchor);
@@ -6436,6 +6453,10 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount, outPrebui
     const anchorY = layerY[anchor];
     const anchorConnectedToPrev = placedBeforeStep.size > 0 && adj[anchor].some(nb => placedBeforeStep.has(nb));
     const anchorIsStrictUnderside = placedBeforeStep.size > 0 && isStrictDeckUndersidePart(anchor, boxes, adj, placedBeforeStep);
+    const anchorHasAvoidableOverhang = placedBeforeStep.size > 0 && hasAvoidableOverhang(anchor, boxes, adj, placedBeforeStep, remaining, roles, claddingFlags);
+    const coPlanarFloorPartners = placedBeforeStep.size === 0
+      ? findCoPlanarFloorFoundation(anchor, remaining, boxes, adj, roles, claddingFlags, belowMap)
+      : undefined;
     const stepIdx = selectDynamicStepIndices({
       anchor,
       parts: subDescriptors,
@@ -6449,9 +6470,11 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount, outPrebui
           if (fastenerGuards.isBlocked(i, placedBeforeStep, placedInStep, remaining)) return false;
           if (placedBeforeStep.size > 0) {
             if (isStrictDeckUndersidePart(i, boxes, adj, placedBeforeStep) !== anchorIsStrictUnderside) return false;
+            if (!anchorHasAvoidableOverhang && hasAvoidableOverhang(i, boxes, adj, placedBeforeStep, remaining, roles, claddingFlags)) return false;
             if (belowMap[i].some(u => !placedBeforeStep.has(u) && isPrereqGrounded(u))) return false;
           } else {
             if (belowMap[i].length > 0) return false;
+            if (coPlanarFloorPartners?.has(i)) return true;
           }
           return isCandidateConnectedForStep(i, anchorConnectedToPrev, adj, placedBeforeStep, placedInStep);
         });
@@ -6462,6 +6485,7 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount, outPrebui
       isFirstStep: sNum === 0,
       totalPartsInScope: n,
       isSubmodel: true,
+      coPlanarFloorPartners,
     });
     for (const i of stepIdx) { remaining.delete(i); placed.add(i); }
     const stepBoxes = stepIdx.map(i => boxes[i]);
@@ -7473,18 +7497,26 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
           }
         }
         const skuCountsInBand = new Map();
+        const avoidableOverhangSet = new Set();
         for (const idx of frontier) {
           const sku = allPartDescriptors[idx].sku;
           skuCountsInBand.set(sku, (skuCountsInBand.get(sku) || 0) + 1);
+          if (hasAvoidableOverhang(idx, boxes, adj, placedBeforeStep, remaining, roles, claddingFlags)) {
+            avoidableOverhangSet.add(idx);
+          }
         }
         const refBounds = builtBounds || scopeBounds;
-        frontier.sort((a, b) => compareFrontierCandidates(allPartDescriptors[a], allPartDescriptors[b], activeCam.corner, refBounds, skuCountsInBand));
+        frontier.sort((a, b) => compareFrontierCandidates(allPartDescriptors[a], allPartDescriptors[b], activeCam.corner, refBounds, skuCountsInBand, avoidableOverhangSet));
       }
 
       const anchor = frontier[0];
       const anchorY = layerY[anchor];
       const anchorConnectedToPrev = placedBeforeStep.size > 0 && adj[anchor].some(nb => placedBeforeStep.has(nb));
       const anchorIsStrictUnderside = placedBeforeStep.size > 0 && isStrictDeckUndersidePart(anchor, boxes, adj, placedBeforeStep);
+      const anchorHasAvoidableOverhang = placedBeforeStep.size > 0 && hasAvoidableOverhang(anchor, boxes, adj, placedBeforeStep, remaining, roles, claddingFlags);
+      const coPlanarFloorPartners = placedBeforeStep.size === 0
+        ? findCoPlanarFloorFoundation(anchor, remaining, boxes, adj, roles, claddingFlags, belowMap)
+        : undefined;
       const stepIndices = selectDynamicStepIndices({
         anchor,
         parts: allPartDescriptors,
@@ -7497,9 +7529,11 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
             if (fastenerGuards.isBlocked(i, placedBeforeStep, placedInStep, remaining)) return false;
             if (placedBeforeStep.size > 0) {
               if (isStrictDeckUndersidePart(i, boxes, adj, placedBeforeStep) !== anchorIsStrictUnderside) return false;
+              if (!anchorHasAvoidableOverhang && hasAvoidableOverhang(i, boxes, adj, placedBeforeStep, remaining, roles, claddingFlags)) return false;
               if (belowMap[i].some(u => !placedBeforeStep.has(u) && isPrereqGrounded(u))) return false;
             } else {
               if (belowMap[i].length > 0) return false;
+              if (coPlanarFloorPartners?.has(i)) return true;
             }
             return isCandidateConnectedForStep(i, anchorConnectedToPrev, adj, placedBeforeStep, placedInStep);
           });
@@ -7509,6 +7543,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
         activeCam,
         isFirstStep: localStepCount === 0 && prePlacedSet.size === 0,
         totalPartsInScope: idxList.length,
+        coPlanarFloorPartners,
       });
 
       for (const i of stepIndices) {
@@ -8634,12 +8669,16 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
           }
         }
         const skuCountsInBand = new Map();
+        const avoidableOverhangSet = new Set();
         for (const idx of frontier) {
           const sku = allPartDescriptors[idx].sku;
           skuCountsInBand.set(sku, (skuCountsInBand.get(sku) || 0) + 1);
+          if (hasAvoidableOverhang(idx, boxes, adj, placed, remaining, roles, claddingFlags)) {
+            avoidableOverhangSet.add(idx);
+          }
         }
         const refBounds = builtBounds || sectionBounds;
-        frontier.sort((a, b) => compareFrontierCandidates(allPartDescriptors[a], allPartDescriptors[b], activeCam.corner, refBounds, skuCountsInBand));
+        frontier.sort((a, b) => compareFrontierCandidates(allPartDescriptors[a], allPartDescriptors[b], activeCam.corner, refBounds, skuCountsInBand, avoidableOverhangSet));
       }
 
       const anchor = frontier[0];
@@ -8713,6 +8752,10 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
       const anchorY = layerY[anchor];
       const anchorConnectedToPrev = placedBeforeStep.size > 0 && adj[anchor].some(nb => placedBeforeStep.has(nb));
       const anchorIsStrictUnderside = placedBeforeStep.size > 0 && isStrictDeckUndersidePart(anchor, boxes, adj, placedBeforeStep);
+      const anchorHasAvoidableOverhang = placedBeforeStep.size > 0 && hasAvoidableOverhang(anchor, boxes, adj, placedBeforeStep, remaining, roles, claddingFlags);
+      const coPlanarFloorPartners = placedBeforeStep.size === 0
+        ? findCoPlanarFloorFoundation(anchor, remaining, boxes, adj, roles, claddingFlags, belowMap)
+        : undefined;
       const stepIndices = selectDynamicStepIndices({
         anchor,
         parts: allPartDescriptors,
@@ -8726,9 +8769,11 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
             if (fastenerGuards.isBlocked(i, placedBeforeStep, placedInStep, remaining)) return false;
             if (placedBeforeStep.size > 0) {
               if (isStrictDeckUndersidePart(i, boxes, adj, placedBeforeStep) !== anchorIsStrictUnderside) return false;
+              if (!anchorHasAvoidableOverhang && hasAvoidableOverhang(i, boxes, adj, placedBeforeStep, remaining, roles, claddingFlags)) return false;
               if (belowMap[i].some(u => !placedBeforeStep.has(u) && isPrereqGrounded(u))) return false;
             } else {
               if (belowMap[i].length > 0) return false;
+              if (coPlanarFloorPartners?.has(i)) return true;
             }
             return isCandidateConnectedForStep(i, anchorConnectedToPrev, adj, placedBeforeStep, placedInStep);
           });
@@ -8738,6 +8783,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
         activeCam,
         isFirstStep: placedBeforeStep.size === 0,
         totalPartsInScope: indices.length,
+        coPlanarFloorPartners,
       });
 
       for (const i of stepIndices) {
