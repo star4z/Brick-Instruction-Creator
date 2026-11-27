@@ -491,13 +491,21 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     await expect(page.locator('.outline-weight-chip[data-outline-weight="off"]')).toHaveAttribute('aria-pressed', 'false');
     await expect(page.locator('#fadePreviewStatus')).toHaveText('Off');
 
-    // Verify Fade Earlier Parts labels (Off | Subtle | Muted | Faint)
+    // Verify Fade Earlier Parts labels (Off | Subtle | Muted | Faint) and Skip same-color offsets sub-option
+    await expect(page.locator('#fadeSubOptions')).toBeHidden();
     await page.locator('.fade-chip[data-fade="0.65"]').click();
     await expect(page.locator('#fadePreviewStatus')).toHaveText('Muted fade');
+    await expect(page.locator('#fadeSubOptions')).toBeVisible();
+    await expect(page.locator('#toggleSkipColorCamoOffsets')).toBeChecked();
+    await page.locator('#toggleSkipColorCamoOffsets').click();
+    await expect(page.locator('#toggleSkipColorCamoOffsets')).not.toBeChecked();
+    await page.locator('#toggleSkipColorCamoOffsets').click();
+    await expect(page.locator('#toggleSkipColorCamoOffsets')).toBeChecked();
     await page.locator('.fade-chip[data-fade="0.45"]').click();
     await expect(page.locator('#fadePreviewStatus')).toHaveText('Faint fade');
     await page.locator('.fade-chip[data-fade="1.0"]').click();
     await expect(page.locator('#fadePreviewStatus')).toHaveText('Off');
+    await expect(page.locator('#fadeSubOptions')).toBeHidden();
 
     // Verify Placement Arrow Style controls (default: Flat 2D, no outlines, no lighting) & Off chip
     await expect(page.locator('#arrowStyleWrap')).toBeVisible();

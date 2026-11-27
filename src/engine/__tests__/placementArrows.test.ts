@@ -1841,6 +1841,49 @@ describe('placementArrows — sibling non-occlusion (never hide another piece be
     // Should remain compact (~28–36 LDU) since lifting `red_back` does not hide `gray_front`
     expect(Math.abs(offs!['red_back'].y)).toBeLessThanOrEqual(36);
   });
+
+  it('tags same-color camouflage offsets as colorCamouflageOnly so they can be skipped when earlier parts are faded, while keeping lateral/pin offsets', async () => {
+    const { filterAutoPartOffsets } = await import('../placementArrows');
+    const steps: PlacementStepInput[] = [
+      {
+        id: 's1',
+        camera: { az: 38, el: 30, side: 'top' },
+        parts: [
+          makePart('frame_a', 0, 0, 0, 80, 8, 80, DARK_GRAY),
+          makePart('frame_b', 80, 0, 0, 80, 8, 80, DARK_GRAY),
+          makePart('edge_a', 0, 0, -50, 80, 8, 20, LIGHT_BLUE),
+          makePart('edge_b', 80, 0, -50, 80, 8, 20, LIGHT_BLUE),
+          makePart('beam', 0, 8, 20, 80, 24, 20, DARK_GRAY),
+        ],
+      },
+      {
+        id: 's2',
+        camera: { az: 38, el: 30, side: 'top' },
+        parts: [
+          // Triggered ONLY by same-color camouflage against `edge_b`
+          makePart('camo_1x4', 80, 8, -50, 80, 8, 20, LIGHT_BLUE),
+          // Triggered by lateral insertion (pin into side of `beam`)
+          makePart('side_pin', 0, 14, 34, 12, 12, 16, BLACK),
+        ],
+      },
+    ];
+
+    const full = computeAutoPlacementOffsetsForSequence(steps).get('s2');
+    expect(full?.['camo_1x4']).toBeDefined();
+    expect(full!['camo_1x4'].colorCamouflageOnly).toBe(true);
+    expect(full?.['side_pin']).toBeDefined();
+    expect(full!['side_pin'].colorCamouflageOnly).toBeUndefined();
+
+    // Filtering with skipColorCamouflage=true removes `camo_1x4` but keeps `side_pin`
+    const filtered = filterAutoPartOffsets(full, true);
+    expect(filtered?.['camo_1x4']).toBeUndefined();
+    expect(filtered?.['side_pin']).toBeDefined();
+
+    // Direct computation option matches filtered output
+    const directSkipped = computeAutoPlacementOffsetsForSequence(steps, { skipColorCamouflage: true }).get('s2');
+    expect(directSkipped?.['camo_1x4']).toBeUndefined();
+    expect(directSkipped?.['side_pin']).toBeDefined();
+  });
 });
 
 

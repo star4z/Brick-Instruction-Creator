@@ -41,6 +41,8 @@ export interface AutoPartOffset {
   suppressPrimaryArrow?: boolean;
   /** Optional perceptual contrast-adapted arrow hex color (e.g. green on red bricks). */
   arrowColorOverride?: string;
+  /** True when this offset was triggered solely by same-color camouflage against touching earlier parts (can be skipped when earlier parts are faded). */
+  colorCamouflageOnly?: boolean;
 }
 
 /** World-space external stud descriptor: [baseX, baseY, baseZ, dirX, dirY, dirZ] where dir is a unit outward stud normal. */
@@ -1840,6 +1842,7 @@ interface NoticeabilityCandidate {
   contacts: ContactSummary;
   isLateral: boolean;
   isCoaxialOrLateral: boolean;
+  colorCamouflageOnly: boolean;
   extraHosts?: PlacementPartInput[];
 }
 
@@ -1863,6 +1866,7 @@ function computeSubsequentStepOffsets(
   step: PlacementStepInput,
   prevParts: ReadonlyArray<PlacementPartInput>,
   builtBounds: PlacementAABB | null,
+  options?: { skipColorCamouflage?: boolean },
 ): Record<string, AutoPartOffset> {
   if (step.parts.length === 0 || prevParts.length === 0 || !builtBounds) return {};
 
@@ -1971,47 +1975,52 @@ function computeSubsequentStepOffsets(
     const isCoaxialOrLateral = isLateral || contacts.verticalCoaxial || contacts.horizontalCoaxial;
 
     // 1. Lateral / horizontal insertion or coaxial through-hole/sleeve insertion (pins, axles, bushes, beams, SNOT)
-    let score = 0;
+    let nonColorScore = 0;
     if (isCoaxialOrLateral) {
       // Sideways and coaxial insertions are hard to read from an isometric view without an arrow
-      score += 3.5;
+      nonColorScore += 3.5;
     }
 
     // 2. Partial occlusion from the step's actual camera view
     const occlusion = estimateCameraOcclusion(part.box, prevParts, step.camera.az, step.camera.el);
     if (occlusion >= 0.18) {
-      score += 2.2 + occlusion * 2.0;
+      nonColorScore += 2.2 + occlusion * 2.0;
     }
 
     // 3. Color camouflage against directly touching existing neighbors
-    const colorRefs = contacts.colorTouchingRefs;
-    let minColorDist = Infinity;
-    for (const ref of colorRefs) {
-      const d = perceptualRgbDistance(part.rgb, ref.rgb);
-      if (d < minColorDist) minColorDist = d;
-    }
-    const isSlenderOrModest =
-      minHoriz <= 22 ||
-      (height <= 10 && minHoriz <= 44 && maxHoriz <= 84 && relDiag < 0.42) ||
-      relDiag < 0.30;
-    if (
-      colorRefs.length > 0 &&
-      minColorDist < SAME_COLOR_DIST_THRESHOLD &&
-      isSlenderOrModest &&
-      prevParts.length >= 4
-    ) {
-      // Blends visually into adjacent same-color brick(s)
-      score += 1.8 + (1 - minColorDist / SAME_COLOR_DIST_THRESHOLD) * 0.8;
+    let colorScore = 0;
+    if (!options?.skipColorCamouflage) {
+      const colorRefs = contacts.colorTouchingRefs;
+      let minColorDist = Infinity;
+      for (const ref of colorRefs) {
+        const d = perceptualRgbDistance(part.rgb, ref.rgb);
+        if (d < minColorDist) minColorDist = d;
+      }
+      const isSlenderOrModest =
+        minHoriz <= 22 ||
+        (height <= 10 && minHoriz <= 44 && maxHoriz <= 84 && relDiag < 0.42) ||
+        relDiag < 0.30;
+      if (
+        colorRefs.length > 0 &&
+        minColorDist < SAME_COLOR_DIST_THRESHOLD &&
+        isSlenderOrModest &&
+        prevParts.length >= 4
+      ) {
+        // Blends visually into adjacent same-color brick(s)
+        colorScore += 1.8 + (1 - minColorDist / SAME_COLOR_DIST_THRESHOLD) * 0.8;
+      }
     }
 
     // 4. Truly tiny detail (e.g. 1x1 plate/tile/stud/clip, NOT full-height 1x2 bricks) on a much larger model
     const isTinyPiece = maxHoriz <= 24 && height <= 18 && vol <= 8500;
     if (prevParts.length >= 4 && isTinyPiece && relDiag < 0.22) {
-      score += 1.6 + Math.max(0, 0.22 - relDiag) * 4.0;
+      nonColorScore += 1.6 + Math.max(0, 0.22 - relDiag) * 4.0;
     }
 
+    const score = nonColorScore + colorScore;
     if (score >= 1.5) {
-      candidates.push({ part, score, contacts, isLateral, isCoaxialOrLateral, extraHosts });
+      const colorCamouflageOnly = colorScore > 0 && nonColorScore < 1.5;
+      candidates.push({ part, score, contacts, isLateral, isCoaxialOrLateral, colorCamouflageOnly, extraHosts });
     }
   }
 
@@ -2116,6 +2125,9 @@ function computeSubsequentStepOffsets(
     }
     if (crowdsExisting) continue;
 
+    if (c.colorCamouflageOnly) {
+      resolved.colorCamouflageOnly = true;
+    }
     out[c.part.id] = resolved;
     accepted.push({
       part: c.part,
@@ -2134,6 +2146,26 @@ function computeSubsequentStepOffsets(
 }
 
 /**
+ * Filters a step's automatic placement offsets when same-color camouflage offsets
+ * are suppressed (e.g. while Fade Earlier Parts is active).
+ */
+export function filterAutoPartOffsets<T extends { colorCamouflageOnly?: boolean }>(
+  offsets: Record<string, T> | null | undefined,
+  skipColorCamouflage: boolean,
+): Record<string, T> | null {
+  if (!offsets) return null;
+  if (!skipColorCamouflage) return offsets;
+  const out: Record<string, T> = {};
+  let count = 0;
+  for (const [id, off] of Object.entries(offsets)) {
+    if (off && off.colorCamouflageOnly) continue;
+    out[id] = off;
+    count++;
+  }
+  return count > 0 ? out : null;
+}
+
+/**
  * Computes automatic LEGO-style placement offsets for every step in a single
  * continuous build sequence (a submodel chapter or a main/bag/join section).
  *
@@ -2142,6 +2174,7 @@ function computeSubsequentStepOffsets(
  */
 export function computeAutoPlacementOffsetsForSequence(
   steps: ReadonlyArray<PlacementStepInput>,
+  options?: { skipColorCamouflage?: boolean },
 ): Map<string, Record<string, AutoPartOffset>> {
   const result = new Map<string, Record<string, AutoPartOffset>>();
   const prevParts: PlacementPartInput[] = [];
@@ -2153,7 +2186,7 @@ export function computeAutoPlacementOffsetsForSequence(
       const offsets =
         prevParts.length === 0
           ? computeFirstStepOffsets(step)
-          : computeSubsequentStepOffsets(step, prevParts, builtBounds);
+          : computeSubsequentStepOffsets(step, prevParts, builtBounds, options);
       if (Object.keys(offsets).length > 0) {
         result.set(step.id, offsets);
       }

@@ -188,6 +188,7 @@ export interface ThemeStyleOptions {
   highlightLineWeight: LineWeightId;
   fadePrev: boolean;
   fadeOpacity: number;
+  skipColorCamoOffsetsWhenFaded: boolean;
   stepLighting: StepLightingMode;
   highQualityStepRender: boolean;
   starkBlackOutlines: boolean;
@@ -216,6 +217,7 @@ export const THEME_STYLE_OPTION_KEYS: Array<keyof ThemeStyleOptions> = [
   'highlightLineWeight',
   'fadePrev',
   'fadeOpacity',
+  'skipColorCamoOffsetsWhenFaded',
   'stepLighting',
   'highQualityStepRender',
   'starkBlackOutlines',
@@ -244,6 +246,7 @@ export const DEFAULT_THEME_STYLE_OPTIONS: ThemeStyleOptions = {
   highlightLineWeight: 'medium',
   fadePrev: false,
   fadeOpacity: 1.0,
+  skipColorCamoOffsetsWhenFaded: true,
   stepLighting: 'none',
   highQualityStepRender: false,
   starkBlackOutlines: true,
@@ -324,6 +327,7 @@ export function normalizeThemeStyleOptions(
     highlightLineWeight: sanitizeLineWeight(r.highlightLineWeight, sanitizeLineWeight(fb.highlightLineWeight, 'medium')),
     fadePrev,
     fadeOpacity: fade,
+    skipColorCamoOffsetsWhenFaded: bool('skipColorCamoOffsetsWhenFaded'),
     stepLighting,
     highQualityStepRender,
     starkBlackOutlines: bool('starkBlackOutlines'),
@@ -388,6 +392,7 @@ export interface ManualTheme {
   highlightLineWeight?: LineWeightId;
   fadePrev?: boolean;
   fadeOpacity?: number;
+  skipColorCamoOffsetsWhenFaded?: boolean;
   stepLighting?: StepLightingMode;
   highQualityStepRender?: boolean;
   starkBlackOutlines?: boolean;

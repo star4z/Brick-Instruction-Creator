@@ -255,6 +255,7 @@ describe('theme style options, recents & naming', () => {
     expect(m.DEFAULT_THEME_STYLE_OPTIONS.starkBlackOutlines).toBe(true);
     expect(m.DEFAULT_THEME_STYLE_OPTIONS.fadePrev).toBe(false);
     expect(m.DEFAULT_THEME_STYLE_OPTIONS.fadeOpacity).toBe(1);
+    expect(m.DEFAULT_THEME_STYLE_OPTIONS.skipColorCamoOffsetsWhenFaded).toBe(true);
     expect(m.DEFAULT_THEME_STYLE_OPTIONS.highlightLineWeight).toBe('medium');
     expect(m.DEFAULT_THEME_STYLE_OPTIONS.outlineLineWeight).toBe('medium');
     expect(m.DEFAULT_THEME_STYLE_OPTIONS.arrowStyle).toBe('flat');
@@ -270,6 +271,7 @@ describe('theme style options, recents & naming', () => {
       name: 'Bold',
       showStepBorders: false,
       fadeOpacity: 7,
+      skipColorCamoOffsetsWhenFaded: false,
       highlightColor: 'red;}',
       highQualityStepRender: true,
       starkBlackOutlines: false,
@@ -282,6 +284,7 @@ describe('theme style options, recents & naming', () => {
     expect(t.showStepBorders).toBe(false);
     expect(t.fadeOpacity).toBe(1);
     expect(t.fadePrev).toBe(false);
+    expect(t.skipColorCamoOffsetsWhenFaded).toBe(false);
     expect(t.highlightColor).toBe('#ff2d55');
     expect(t.stepLighting).toBe('studio');
     expect(t.highQualityStepRender).toBe(true);
@@ -293,6 +296,7 @@ describe('theme style options, recents & naming', () => {
     expect(t.arrowLighting).toBe(true);
     const [back] = parseImportedThemesJson(serializeThemeExport(t));
     expect(m.themeStyleOptionsEqual(m.getThemeStyleOptions(back), m.getThemeStyleOptions(t))).toBe(true);
+    expect(back.skipColorCamoOffsetsWhenFaded).toBe(false);
     expect(back.stepLighting).toBe('studio');
     expect(back.highQualityStepRender).toBe(true);
     expect(back.starkBlackOutlines).toBe(false);
@@ -302,6 +306,7 @@ describe('theme style options, recents & naming', () => {
     expect(back.arrowOutlines).toBe(true);
     expect(back.arrowLighting).toBe(true);
     expect(createThemeDraftFromBase(t).showStepBorders).toBe(false);
+    expect(createThemeDraftFromBase(t).skipColorCamoOffsetsWhenFaded).toBe(false);
     expect(createThemeDraftFromBase(t).stepLighting).toBe('studio');
     expect(createThemeDraftFromBase(t).highQualityStepRender).toBe(true);
     expect(createThemeDraftFromBase(t).starkBlackOutlines).toBe(false);

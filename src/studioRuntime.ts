@@ -158,6 +158,7 @@ import {
   computePlacementArrowSegments,
   computePrecisionAlignmentLines,
   computeSubassemblyAttachmentOffsets,
+  filterAutoPartOffsets,
   resolveContrastArrowColor,
 } from './engine/placementArrows';
 import {
@@ -810,11 +811,11 @@ function selectTheme(id) {
   const prevLighting = sanitizeStepLightingMode(state.stepLighting, state.highQualityStepRender ? 'studio' : 'none');
   const prevOutW = state.outlineLineWeight;
   const prevHlW = state.highlightLineWeight;
-  const prevArrowSig = `${state.autoPlacementArrows !== false}|${state.arrowColor}|${state.arrowStyle}|${Boolean(state.arrowOutlines)}|${Boolean(state.arrowLighting)}`;
+  const prevArrowSig = `${state.autoPlacementArrows !== false}|${state.arrowColor}|${state.arrowStyle}|${Boolean(state.arrowOutlines)}|${Boolean(state.arrowLighting)}|${shouldSkipColorCamoOffsets(state)}`;
   state.themeId = resolveThemeById(id, customThemes).id;
   applyActiveThemeStyleToState();
   const nextLighting = sanitizeStepLightingMode(state.stepLighting, state.highQualityStepRender ? 'studio' : 'none');
-  const nextArrowSig = `${state.autoPlacementArrows !== false}|${state.arrowColor}|${state.arrowStyle}|${Boolean(state.arrowOutlines)}|${Boolean(state.arrowLighting)}`;
+  const nextArrowSig = `${state.autoPlacementArrows !== false}|${state.arrowColor}|${state.arrowStyle}|${Boolean(state.arrowOutlines)}|${Boolean(state.arrowLighting)}|${shouldSkipColorCamoOffsets(state)}`;
   if (prevStark !== Boolean(state.starkBlackOutlines) || prevOutW !== state.outlineLineWeight || prevLighting !== nextLighting) {
     pliThumbCache.clear();
     submodelThumbCache.clear();
@@ -8817,6 +8818,7 @@ const state = {
   layoutGroups: [],        // editable StepLayoutGroup[] for per-range layouts & styles
   detectDuplicates: true,  // auto-detect explicit + geometric duplicate submodels
   autoPlacementArrows: true,
+  skipColorCamoOffsetsWhenFaded: true,
   arrowColor: DEFAULT_ARROW_COLOR,
   arrowStyle: 'flat',
   arrowOutlines: false,
@@ -8873,8 +8875,17 @@ const state = {
   redoStack: [],
 };
 
+function shouldSkipColorCamoOffsets(opts = state) {
+  return Boolean(
+    opts?.fadePrev &&
+    Number(opts?.fadeOpacity ?? 1) < 0.99 &&
+    opts?.skipColorCamoOffsetsWhenFaded !== false,
+  );
+}
+
 function getBaseDefaultPartOffsets(step) {
-  const auto = state.autoPlacementArrows !== false ? (step?.autoPartOffsets || null) : null;
+  const rawAuto = state.autoPlacementArrows !== false ? (step?.autoPartOffsets || null) : null;
+  const auto = filterAutoPartOffsets(rawAuto, shouldSkipColorCamoOffsets(state));
   const def = step?.defaultPartOffsets || null;
   const hasAuto = Boolean(auto && Object.keys(auto).length > 0);
   const hasDef = Boolean(def && Object.keys(def).length > 0);
@@ -15945,6 +15956,16 @@ function syncFadeVisibilityPreview(opts = null) {
           ? 'Muted fade'
           : 'Subtle fade';
   }
+  const arrowsOn = opts ? opts.autoPlacementArrows !== false : state.autoPlacementArrows !== false;
+  const showFadeSub = effectiveOpacity < 0.99 && arrowsOn;
+  const fadeSubEl = document.getElementById('fadeSubOptions');
+  if (fadeSubEl) fadeSubEl.classList.toggle('hidden', !showFadeSub);
+  const skipChk = document.getElementById('toggleSkipColorCamoOffsets');
+  if (skipChk) {
+    skipChk.checked = opts
+      ? opts.skipColorCamoOffsetsWhenFaded !== false
+      : state.skipColorCamoOffsetsWhenFaded !== false;
+  }
 }
 
 let overviewThumbObserver = null;
@@ -20509,7 +20530,7 @@ function scheduleSaveSessionPrefs() {
       arrowStyle: state.arrowStyle, arrowOutlines: state.arrowOutlines, arrowLighting: state.arrowLighting,
       highlightNew: state.highlightNew, highlightColor: state.highlightColor,
       highlightLineWeight: state.highlightLineWeight,
-      fadePrev: state.fadePrev, fadeOpacity: state.fadeOpacity, stepLighting: state.stepLighting, highQualityStepRender: state.highQualityStepRender,
+      fadePrev: state.fadePrev, fadeOpacity: state.fadeOpacity, skipColorCamoOffsetsWhenFaded: state.skipColorCamoOffsetsWhenFaded, stepLighting: state.stepLighting, highQualityStepRender: state.highQualityStepRender,
       starkBlackOutlines: state.starkBlackOutlines, outlineLineWeight: state.outlineLineWeight, showRotCues: state.showRotCues,
       showSizeGuides: state.showSizeGuides, showAttachmentStarburst: state.showAttachmentStarburst, minifigStyle: state.minifigStyle, showMinifig1to1: state.showMinifig1to1, stepBorderStyle: state.stepBorderStyle, showStepBorders: state.showStepBorders,
       showPageTitle: state.showPageTitle, wordlessMode: state.wordlessMode, bomShowTextFields: state.bomShowTextFields,
@@ -20600,6 +20621,7 @@ function buildBiwProjectPayload({ includeSessionMeta = false } = {}) {
     outlineLineWeight: state.outlineLineWeight,
     fadePrev: state.fadePrev,
     fadeOpacity: state.fadeOpacity,
+    skipColorCamoOffsetsWhenFaded: state.skipColorCamoOffsetsWhenFaded,
     showRotCues: state.showRotCues,
     showSizeGuides: state.showSizeGuides,
     showAttachmentStarburst: state.showAttachmentStarburst,
@@ -26020,10 +26042,16 @@ document.querySelectorAll('.step-lighting-chip').forEach(b => {
 });
 document.querySelectorAll('.fade-chip').forEach(b => {
   b.onclick = () => {
+    overviewThumbCache.bumpEpoch();
     const val = parseFloat(b.getAttribute('data-fade'));
     patchEditedTheme({ fadeOpacity: val, fadePrev: val < 0.99 });
   };
 });
+const toggleSkipColorCamoEl = document.getElementById('toggleSkipColorCamoOffsets');
+if (toggleSkipColorCamoEl) toggleSkipColorCamoEl.onchange = (e) => {
+  overviewThumbCache.bumpEpoch();
+  patchEditedTheme({ skipColorCamoOffsetsWhenFaded: e.target.checked });
+};
 document.querySelectorAll('.hl-weight-chip').forEach(b => {
   b.onclick = () => {
     overviewThumbCache.bumpEpoch();
@@ -26874,7 +26902,7 @@ async function buildInteractiveHtmlArtifact(mode: 'export' | 'preview' = 'export
             ? { ...(step.defaultPartOffsets || {}), ...(ov.partOffsets || {}) }
             : undefined;
           const autoOffsets = (state.autoPlacementArrows !== false && step.autoPartOffsets)
-            ? step.autoPartOffsets
+            ? (filterAutoPartOffsets(step.autoPartOffsets, shouldSkipColorCamoOffsets(state)) || undefined)
             : undefined;
           const animatedOffsetMap = computeAnimatedStepOffsets({
             stepParts: (step.parts || []).map(toAnimatedPartInput),
@@ -27326,6 +27354,7 @@ async function handleIncomingProjectFile(f) {
     if (typeof data.outlineLineWeight === 'string') state.outlineLineWeight = data.outlineLineWeight;
     if (typeof data.fadePrev === 'boolean') state.fadePrev = data.fadePrev;
     if (typeof data.fadeOpacity === 'number' && Number.isFinite(data.fadeOpacity)) state.fadeOpacity = data.fadeOpacity;
+    if (typeof data.skipColorCamoOffsetsWhenFaded === 'boolean') state.skipColorCamoOffsetsWhenFaded = data.skipColorCamoOffsetsWhenFaded;
     if (typeof data.showRotCues === 'boolean') state.showRotCues = data.showRotCues;
     if (typeof data.showSizeGuides === 'boolean') state.showSizeGuides = data.showSizeGuides;
     if (typeof data.showAttachmentStarburst === 'boolean') state.showAttachmentStarburst = data.showAttachmentStarburst;
