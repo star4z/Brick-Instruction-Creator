@@ -6,6 +6,8 @@ import { buildConnectivityGraph } from '../connectivity';
 import { generateInstructionPlan } from '../stepGenerator';
 import { buildPagePlans } from '../layoutEngine';
 import {
+  analyzePageBreakChangesOnRegeneration,
+  areStepPartsEqual,
   clearAllStepPageBreaks,
   computeHelpTooltipPosition,
   countStepPageBreaks,
@@ -15,6 +17,7 @@ import {
   getStepBreakTooltip,
   hasStepPageBreak,
   isStepBreakContinuationSlice,
+  remapPageBreaksAfterRegeneration,
   toggleStepPageBreakOverride,
   type RuntimeChapterLike,
   type RuntimeOverrideLike,
@@ -280,5 +283,128 @@ describe('Per-Step Page Breaks', () => {
     expect(clampedLeft.left).toBe(12);
     expect(clampedLeft.arrowLeft).toBeGreaterThanOrEqual(14);
   });
+
+  it('compares step part multisets order-independently by part id or geometric signature', () => {
+    const a = { id: 's1', num: 1, parts: [{ id: 'imp_1', p: '3001', c: 4 }, { id: 'imp_2', p: '3003', c: 15 }] };
+    const bSameReordered = { id: 's1', num: 1, parts: [{ id: 'imp_2', p: '3003', c: 15 }, { id: 'imp_1', p: '3001', c: 4 }] };
+    const cDifferent = { id: 's1', num: 1, parts: [{ id: 'imp_1', p: '3001', c: 4 }, { id: 'imp_3', p: '3004', c: 15 }] };
+    expect(areStepPartsEqual(a, bSameReordered)).toBe(true);
+    expect(areStepPartsEqual(a, cDifferent)).toBe(false);
+    expect(areStepPartsEqual(null, null)).toBe(true);
+    expect(areStepPartsEqual(a, null)).toBe(false);
+  });
+
+  it('detects when the step before a page break changes parts on step regeneration', () => {
+    const prevChapters: RuntimeChapterLike[] = [
+      {
+        id: 'ch1',
+        steps: [
+          { id: 'ac1_s1', num: 1, parts: [{ id: 'imp_1' }] },
+          { id: 'ac1_s2', num: 2, parts: [{ id: 'imp_2' }, { id: 'imp_3' }] },
+          { id: 'ac1_s3', num: 3, parts: [{ id: 'imp_4' }] },
+          { id: 'ac1_s4', num: 4, parts: [{ id: 'imp_5' }] },
+        ],
+      },
+    ];
+    const overrides: Record<string, RuntimeOverrideLike> = {
+      ac1_s3: { pin: true },
+      deleted_step: { pin: true }, // stale override should be ignored
+    };
+
+    // Identical step 2 (even with reordered parts or changed step 3) -> no change warning
+    const unchangedNext: RuntimeChapterLike[] = [
+      {
+        id: 'ch1',
+        steps: [
+          { id: 'ac1_s1', num: 1, parts: [{ id: 'imp_1' }] },
+          { id: 'ac1_s2', num: 2, parts: [{ id: 'imp_3' }, { id: 'imp_2' }] },
+          { id: 'ac1_s3', num: 3, parts: [{ id: 'imp_4' }, { id: 'imp_5' }] },
+        ],
+      },
+    ];
+    const unchangedRes = analyzePageBreakChangesOnRegeneration(prevChapters, unchangedNext, overrides);
+    expect(unchangedRes.totalPageBreaks).toBe(1);
+    expect(unchangedRes.hasChangedPredecessors).toBe(false);
+    expect(unchangedRes.changedBreaks).toEqual([]);
+
+    // Step 2 (immediately before the page break at Step 3) changed parts -> warning triggered
+    const changedNext: RuntimeChapterLike[] = [
+      {
+        id: 'ch1',
+        steps: [
+          { id: 'ac1_s1', num: 1, parts: [{ id: 'imp_1' }] },
+          { id: 'ac1_s2', num: 2, parts: [{ id: 'imp_2' }, { id: 'imp_3' }, { id: 'imp_4' }] },
+          { id: 'ac1_s3', num: 3, parts: [{ id: 'imp_5' }] },
+        ],
+      },
+    ];
+    const changedRes = analyzePageBreakChangesOnRegeneration(prevChapters, changedNext, overrides);
+    expect(changedRes.totalPageBreaks).toBe(1);
+    expect(changedRes.hasChangedPredecessors).toBe(true);
+    expect(changedRes.changedBreaks).toEqual([
+      {
+        stepId: 'ac1_s3',
+        stepNum: 3,
+        beforeStepNum: 2,
+        nextStepId: 'ac1_s3',
+        reason: 'parts_changed',
+      },
+    ]);
+
+    // Regenerated manual has fewer steps so pinned Step 3 no longer exists -> warning triggered
+    const shorterNext: RuntimeChapterLike[] = [
+      {
+        id: 'ch1',
+        steps: [
+          { id: 'kc1_s1', num: 1, parts: [{ id: 'imp_1' }, { id: 'imp_2' }] },
+          { id: 'kc1_s2', num: 2, parts: [{ id: 'imp_3' }, { id: 'imp_4' }, { id: 'imp_5' }] },
+        ],
+      },
+    ];
+    const removedRes = analyzePageBreakChangesOnRegeneration(prevChapters, shorterNext, overrides);
+    expect(removedRes.hasChangedPredecessors).toBe(true);
+    expect(removedRes.changedBreaks[0]).toMatchObject({
+      stepId: 'ac1_s3',
+      stepNum: 3,
+      beforeStepNum: 2,
+      nextStepId: null,
+      reason: 'step_removed',
+    });
+  });
+
+  it('remaps kept page breaks by step number when regenerated step IDs change prefix', () => {
+    const prevChapters: RuntimeChapterLike[] = [
+      {
+        id: 'ch1',
+        steps: [
+          { id: 'ac1_s1', num: 1, parts: [{ id: 'imp_1' }] },
+          { id: 'ac1_s2', num: 2, parts: [{ id: 'imp_2' }] },
+          { id: 'ac1_s3', num: 3, parts: [{ id: 'imp_3' }] },
+        ],
+      },
+    ];
+    const nextChapters: RuntimeChapterLike[] = [
+      {
+        id: 'kch1',
+        steps: [
+          { id: 'kc1_s1', num: 1, parts: [{ id: 'imp_1' }] },
+          { id: 'kc1_s2', num: 2, parts: [{ id: 'imp_2' }] },
+          { id: 'kc1_s3', num: 3, parts: [{ id: 'imp_3' }] },
+        ],
+      },
+    ];
+    const initial: Record<string, RuntimeOverrideLike> = {
+      ac1_s3: { pin: true, az: 40 },
+    };
+
+    const remapped = remapPageBreaksAfterRegeneration(prevChapters, nextChapters, initial);
+    expect(remapped.ac1_s3.pin).toBeUndefined();
+    expect(remapped.ac1_s3.az).toBe(40);
+    expect(remapped.kc1_s3.pin).toBe(true);
+    // Original object untouched
+    expect(initial.ac1_s3.pin).toBe(true);
+    expect(initial.kc1_s3).toBeUndefined();
+  });
 });
+
 

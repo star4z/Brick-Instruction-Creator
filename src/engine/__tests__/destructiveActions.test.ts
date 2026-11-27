@@ -11,6 +11,7 @@ import {
   getPartsMoveStepDestructiveNotice,
   getReplaceModelConfirmDialog,
   getStepGenerationDestructiveNotice,
+  getStepRegenerationPageBreakDialog,
   getWordlessToggleDestructiveNotice,
   hasCustomPartOffset,
   summarizeManualEdits,
@@ -562,5 +563,64 @@ describe('destructiveActions engine', () => {
       expect(clearNoImpact?.message).toContain('10 downloaded files');
       expect(clearNoImpact?.detail).toBeUndefined();
     });
+
+    it('Step Regeneration page-break warning returns null when unchanged and offers 3 choices when preceding step parts change', () => {
+      expect(
+        getStepRegenerationPageBreakDialog({
+          totalPageBreaks: 2,
+          changedBreaks: [],
+          hasChangedPredecessors: false,
+        }),
+      ).toBeNull();
+
+      const single = getStepRegenerationPageBreakDialog({
+        totalPageBreaks: 1,
+        changedBreaks: [
+          {
+            stepId: 'ac1_s4',
+            stepNum: 4,
+            beforeStepNum: 3,
+            nextStepId: 'ac1_s4',
+            reason: 'parts_changed',
+          },
+        ],
+        hasChangedPredecessors: true,
+      });
+      expect(single?.tone).toBe('warning');
+      expect(single?.title).toBe('Step before a page break changed');
+      expect(single?.message).toContain('Step 3');
+      expect(single?.message).toContain('Step 4');
+      expect(single?.confirmLabel).toBe('Proceed & Remove Page Breaks');
+      expect(single?.secondaryLabel).toBe('Proceed & Keep Page Breaks');
+      expect(single?.cancelLabel).toBe('Cancel');
+
+      const multi = getStepRegenerationPageBreakDialog({
+        totalPageBreaks: 2,
+        changedBreaks: [
+          {
+            stepId: 'ac1_s4',
+            stepNum: 4,
+            beforeStepNum: 3,
+            nextStepId: 'ac1_s4',
+            reason: 'parts_changed',
+          },
+          {
+            stepId: 'ac1_s8',
+            stepNum: 8,
+            beforeStepNum: 7,
+            nextStepId: null,
+            reason: 'step_removed',
+          },
+        ],
+        hasChangedPredecessors: true,
+      });
+      expect(multi?.title).toBe('Steps before page breaks changed');
+      expect(multi?.message).toContain('2 page breaks');
+      expect(multi?.message).toContain('Step 3 and Step 7');
+      expect(multi?.confirmLabel).toBe('Proceed & Remove Page Breaks');
+      expect(multi?.secondaryLabel).toBe('Proceed & Keep Page Breaks');
+      expect(multi?.cancelLabel).toBe('Cancel');
+    });
   });
 });
+

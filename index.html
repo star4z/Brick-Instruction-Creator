@@ -3083,7 +3083,7 @@
     <!-- PERMANENT ACTION CONFIRMATION DIALOG ("Are you sure?")           -->
     <!-- ================================================================ -->
     <div id="confirmActionModal" role="alertdialog" aria-modal="true" aria-labelledby="confirmActionTitle" aria-describedby="confirmActionMessage" class="no-print hidden fixed inset-0 z-[65] bg-black/55 backdrop-blur-xs flex items-center justify-center p-4">
-      <div class="bg-[var(--card)] border border-[var(--border)] rounded-xl shadow-[var(--shadow-sheet)] w-full max-w-[420px] overflow-hidden text-[var(--foreground)]">
+      <div id="confirmActionCard" class="bg-[var(--card)] border border-[var(--border)] rounded-xl shadow-[var(--shadow-sheet)] w-full max-w-[420px] overflow-hidden text-[var(--foreground)]">
         <div class="p-5 flex items-start gap-3.5">
           <div id="confirmActionIcon" class="w-9 h-9 rounded-lg bg-[var(--danger-soft)] text-[var(--danger)] flex items-center justify-center shrink-0" aria-hidden="true">
             <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
@@ -3094,8 +3094,9 @@
             <p id="confirmActionDetail" class="hidden text-xs font-medium text-[var(--foreground)] leading-relaxed pt-1"></p>
           </div>
         </div>
-        <div class="px-5 py-3.5 border-t border-[var(--border)] bg-[var(--chrome)] flex items-center justify-end gap-2">
+        <div class="px-5 py-3.5 border-t border-[var(--border)] bg-[var(--chrome)] flex flex-col-reverse sm:flex-row sm:flex-wrap items-stretch sm:items-center justify-end gap-2">
           <button id="confirmActionCancel" type="button" class="px-3.5 py-2 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] text-xs font-semibold transition-colors cursor-pointer">Cancel</button>
+          <button id="confirmActionSecondary" type="button" class="hidden px-3.5 py-2 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] text-xs font-semibold transition-colors cursor-pointer"></button>
           <button id="confirmActionConfirm" type="button" class="px-4 py-2 rounded-md bg-[var(--danger)] hover:opacity-95 text-white text-xs font-semibold transition-opacity cursor-pointer">Confirm</button>
         </div>
       </div>

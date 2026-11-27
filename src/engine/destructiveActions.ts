@@ -8,6 +8,7 @@ import {
   type CoverMeta,
 } from '../cover/coverLayout';
 import type { StepLayoutGroup } from './pageLayout';
+import type { PageBreakRegenerationAnalysis } from './pageBreaks';
 import type { StepOverrideLike } from './stepToolbar';
 import {
   getWordlessSurfaceDefaults,
@@ -29,6 +30,11 @@ export interface PermanentActionConfirmSpec {
   detail?: string;
   confirmLabel: string;
   cancelLabel: string;
+}
+
+export interface ChoiceActionDialogSpec extends PermanentActionConfirmSpec {
+  tone?: DestructiveTone;
+  secondaryLabel: string;
 }
 
 export interface PartOffsetLike {
@@ -879,3 +885,49 @@ export function getLibraryClearSavedConfirmDialog(input: {
     cancelLabel: 'Cancel',
   };
 }
+
+/**
+ * Conditional 3-option warning dialog when rerunning step generation changes the parts
+ * in the step immediately before one or more active page breaks.
+ * Gives the user the choice to proceed & remove page breaks, proceed & keep page breaks,
+ * or cancel regeneration.
+ */
+export function getStepRegenerationPageBreakDialog(
+  analysis: PageBreakRegenerationAnalysis | null | undefined,
+): ChoiceActionDialogSpec | null {
+  if (!analysis || !analysis.hasChangedPredecessors || analysis.changedBreaks.length === 0) {
+    return null;
+  }
+
+  const changed = analysis.changedBreaks;
+  if (changed.length === 1) {
+    const cb = changed[0];
+    const message =
+      cb.beforeStepNum != null
+        ? `Rerunning step generation changes the parts in Step ${cb.beforeStepNum} (immediately before the page break at Step ${cb.stepNum}), so the break may no longer land where you placed it.`
+        : `Rerunning step generation changes the step layout around the page break at Step ${cb.stepNum}, so the break may no longer land where you placed it.`;
+    return {
+      tone: 'warning',
+      title: 'Step before a page break changed',
+      message,
+      detail: 'Choose whether to remove page breaks, keep them, or cancel. Undo is available after proceeding.',
+      confirmLabel: 'Proceed & Remove Page Breaks',
+      secondaryLabel: 'Proceed & Keep Page Breaks',
+      cancelLabel: 'Cancel',
+    };
+  }
+
+  const labels = changed.map((cb) =>
+    cb.beforeStepNum != null ? `Step ${cb.beforeStepNum}` : `before Step ${cb.stepNum}`,
+  );
+  return {
+    tone: 'warning',
+    title: 'Steps before page breaks changed',
+    message: `Rerunning step generation changes the parts in the steps immediately before ${plural(changed.length, 'page break')} (${formatCompactList(labels, 3)}), so those breaks may no longer land where you placed them.`,
+    detail: 'Choose whether to remove page breaks, keep them, or cancel. Undo is available after proceeding.',
+    confirmLabel: 'Proceed & Remove Page Breaks',
+    secondaryLabel: 'Proceed & Keep Page Breaks',
+    cancelLabel: 'Cancel',
+  };
+}
+

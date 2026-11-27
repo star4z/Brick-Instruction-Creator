@@ -218,6 +218,7 @@ import {
   paginateMinifigSequentialStages,
 } from './engine/minifigSteps';
 import {
+  analyzePageBreakChangesOnRegeneration,
   clearAllStepPageBreaks,
   computeHelpTooltipPosition,
   countStepPageBreaks,
@@ -227,6 +228,7 @@ import {
   getStepBreakTooltip,
   hasStepPageBreak,
   isStepBreakContinuationSlice,
+  remapPageBreaksAfterRegeneration,
   toggleStepPageBreakOverride,
 } from './engine/pageBreaks';
 import {
@@ -333,6 +335,7 @@ import {
   getPartsMoveStepDestructiveNotice,
   getReplaceModelConfirmDialog,
   getStepGenerationDestructiveNotice,
+  getStepRegenerationPageBreakDialog,
   getWordlessToggleDestructiveNotice,
   hasCameraAngleOverride,
   hasCameraFramingOverride,
@@ -12738,38 +12741,51 @@ function getCurrentManualEditsSummary() {
 
 let confirmActionResolver = null;
 let confirmActionPriorFocus = null;
+let confirmActionChoiceMode = false;
 
 function isConfirmActionDialogOpen() {
   const modal = document.getElementById('confirmActionModal');
   return Boolean(modal && !modal.classList.contains('hidden'));
 }
 
-function closeConfirmActionDialog(confirmed = false) {
+function closeConfirmActionDialog(result = false) {
   const modal = document.getElementById('confirmActionModal');
   if (modal) modal.classList.add('hidden');
   const resolve = confirmActionResolver;
   confirmActionResolver = null;
+  const wasChoiceMode = confirmActionChoiceMode;
+  confirmActionChoiceMode = false;
   const prior = confirmActionPriorFocus;
   confirmActionPriorFocus = null;
   if (prior && typeof prior.focus === 'function' && document.contains(prior)) {
     try { prior.focus(); } catch (_) {}
   }
-  if (resolve) resolve(Boolean(confirmed));
+  if (resolve) {
+    if (wasChoiceMode) {
+      if (result === true || result === 'confirm') resolve('confirm');
+      else if (result === 'secondary') resolve('secondary');
+      else resolve('cancel');
+    } else {
+      resolve(Boolean(result));
+    }
+  }
 }
 
-function openConfirmActionDialog(spec) {
-  if (!spec) return Promise.resolve(true);
+function showConfirmActionDialogInternal(spec, choiceMode = false) {
   const modal = document.getElementById('confirmActionModal');
+  const cardEl = document.getElementById('confirmActionCard');
   const iconEl = document.getElementById('confirmActionIcon');
   const titleEl = document.getElementById('confirmActionTitle');
   const msgEl = document.getElementById('confirmActionMessage');
   const detailEl = document.getElementById('confirmActionDetail');
   const cancelBtn = document.getElementById('confirmActionCancel');
+  const secondaryBtn = document.getElementById('confirmActionSecondary');
   const confirmBtn = document.getElementById('confirmActionConfirm');
   if (!modal || !titleEl || !msgEl || !cancelBtn || !confirmBtn) {
-    return Promise.resolve(true);
+    return Promise.resolve(choiceMode ? 'confirm' : true);
   }
   if (confirmActionResolver) closeConfirmActionDialog(false);
+  confirmActionChoiceMode = Boolean(choiceMode);
   confirmActionPriorFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   const isWarning = spec.tone === 'warning';
   if (iconEl) {
@@ -12784,6 +12800,16 @@ function openConfirmActionDialog(spec) {
   confirmBtn.classList.toggle('bg-[var(--danger)]', !isWarning);
   confirmBtn.classList.toggle('hover:opacity-95', !isWarning);
   confirmBtn.classList.toggle('text-white', !isWarning);
+  const secondaryLabel = choiceMode ? String(spec.secondaryLabel || '').trim() : '';
+  const hasSecondary = Boolean(choiceMode && secondaryLabel && secondaryBtn);
+  if (cardEl) {
+    cardEl.classList.toggle('max-w-[520px]', hasSecondary);
+    cardEl.classList.toggle('max-w-[420px]', !hasSecondary);
+  }
+  if (secondaryBtn) {
+    secondaryBtn.textContent = secondaryLabel;
+    secondaryBtn.classList.toggle('hidden', !hasSecondary);
+  }
   titleEl.textContent = spec.title || 'Are you sure?';
   msgEl.textContent = spec.message || '';
   if (detailEl) {
@@ -12800,6 +12826,16 @@ function openConfirmActionDialog(spec) {
   });
 }
 
+function openConfirmActionDialog(spec) {
+  if (!spec) return Promise.resolve(true);
+  return showConfirmActionDialogInternal(spec, false);
+}
+
+function openChoiceActionDialog(spec) {
+  if (!spec) return Promise.resolve('confirm');
+  return showConfirmActionDialogInternal(spec, true);
+}
+
 const confirmActionModalEl = document.getElementById('confirmActionModal');
 if (confirmActionModalEl) {
   confirmActionModalEl.onclick = (e) => {
@@ -12808,6 +12844,8 @@ if (confirmActionModalEl) {
 }
 const confirmActionCancelBtnEl = document.getElementById('confirmActionCancel');
 if (confirmActionCancelBtnEl) confirmActionCancelBtnEl.onclick = () => closeConfirmActionDialog(false);
+const confirmActionSecondaryBtnEl = document.getElementById('confirmActionSecondary');
+if (confirmActionSecondaryBtnEl) confirmActionSecondaryBtnEl.onclick = () => closeConfirmActionDialog('secondary');
 const confirmActionConfirmBtnEl = document.getElementById('confirmActionConfirm');
 if (confirmActionConfirmBtnEl) confirmActionConfirmBtnEl.onclick = () => closeConfirmActionDialog(true);
 
@@ -27273,10 +27311,34 @@ if (impColorModeToggleBtn) {
 
 async function finishImport(parsed, mode, subdivisionPlan = null, isPostImport = false, importOpts = {}) {
   const opLabel = parsed?.title || pendingRawFile?.fileName || lastSourceRecord?.fileName || '';
-  closeImportAssistant(true);
+  if (!isPostImport) closeImportAssistant(true);
   showOperationLoadingOverlay('generate_building', { label: opLabel, isUpdate: isPostImport });
   try {
     await yieldToBrowserPaint();
+    const nextModel = buildManualFromParsed(parsed, mode, subdivisionPlan);
+    let pageBreakResolution = 'keep';
+    let removedPageBreakCount = 0;
+
+    if (isPostImport && state.model) {
+      const pbAnalysis = analyzePageBreakChangesOnRegeneration(
+        state.model.chapters,
+        nextModel.chapters,
+        state.overrides,
+      );
+      if (pbAnalysis.hasChangedPredecessors) {
+        const pbDialog = getStepRegenerationPageBreakDialog(pbAnalysis);
+        if (pbDialog) {
+          hideOperationLoadingOverlay();
+          const choice = await openChoiceActionDialog(pbDialog);
+          if (choice === 'cancel') return;
+          pageBreakResolution = choice === 'confirm' ? 'remove' : 'keep';
+          showOperationLoadingOverlay('generate_diagnostics', { label: nextModel?.title || opLabel, isUpdate: true });
+        }
+      }
+      closeImportAssistant(true);
+    }
+
+    const prevChapters = state.model?.chapters || null;
     if (isPostImport) pushUndo();
     const skipAutoFetch = Boolean(
       (importOpts && importOpts.skipAutoFetch) || appSettings.missingPartsPolicy === 'never',
@@ -27290,7 +27352,7 @@ async function finishImport(parsed, mode, subdivisionPlan = null, isPostImport =
     coverHeroCache.clear();
     clearMinifigDiagramCaches();
     overviewThumbCache.bumpEpoch();
-    state.model = buildManualFromParsed(parsed, mode, subdivisionPlan);
+    state.model = nextModel;
     if (!isPostImport) {
       const wlDefs = getWordlessSurfaceDefaults(targetWordless);
       state.wordlessMode = targetWordless;
@@ -27309,8 +27371,21 @@ async function finishImport(parsed, mode, subdivisionPlan = null, isPostImport =
       state.backMeta = createDefaultBackMeta();
       state.undoStack = []; state.redoStack = [];
       state.seenDiagnosticKeys = new Set();
-    } else if (hasExplicitWordless && targetWordless !== Boolean(state.wordlessMode)) {
-      applyWordlessMode(targetWordless, { pushHistory: false, render: false });
+    } else {
+      if (pageBreakResolution === 'remove') {
+        const cleared = clearAllStepPageBreaks(state.overrides);
+        state.overrides = cleared.overrides;
+        removedPageBreakCount = cleared.clearedCount;
+      } else {
+        state.overrides = remapPageBreaksAfterRegeneration(
+          prevChapters,
+          nextModel.chapters,
+          state.overrides,
+        );
+      }
+      if (hasExplicitWordless && targetWordless !== Boolean(state.wordlessMode)) {
+        applyWordlessMode(targetWordless, { pushHistory: false, render: false });
+      }
     }
     state.pageIdx = 0; state.mode = 'pan'; state.selectedPartIds.clear();
     errFilter = 'all';
@@ -27345,7 +27420,10 @@ async function finishImport(parsed, mode, subdivisionPlan = null, isPostImport =
     const subSummary = subdivisionPlan && subdivisionPlan.strategy !== 'none'
       ? ` · ${subdivisionPlan.title}`
       : '';
-    showToast(`${isPostImport ? 'Updated' : 'Imported'} ${parsed.title} (${formatPartCount(parsed.parts.length)}, ${steps.length} steps${subSummary}).`);
+    const pbSummary = removedPageBreakCount > 0
+      ? ` · removed ${removedPageBreakCount} page break${removedPageBreakCount === 1 ? '' : 's'}`
+      : '';
+    showToast(`${isPostImport ? 'Updated' : 'Imported'} ${parsed.title} (${formatPartCount(parsed.parts.length)}, ${steps.length} steps${subSummary}${pbSummary}).`);
     if (!isPostImport && state.diagnostics.length > 0) showImportErrorBanner();
     if (!isPostImport && !skipAutoFetch && lastSourceRecord?.kind === 'ldr') {
       void fetchMissingPartsOnline({ silent: true });

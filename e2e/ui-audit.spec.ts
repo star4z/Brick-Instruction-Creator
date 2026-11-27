@@ -1042,4 +1042,87 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
 
     runtime.assertClean(`${testInfo.project.name}: Startup Model Loading Screen`);
   });
+
+  test('Step Regeneration warns with 3 choices when parts before a page break change', async ({
+    page,
+  }, testInfo) => {
+    const runtime = await attachRuntimeIssueCollector(page);
+
+    await page.goto('/');
+    await uploadLdrFile(page, 'multi-chapter-pb-warn.mpd', MULTI_CHAPTER_MPD);
+    const wizard = page.locator('#importWizardModal');
+    await expect(wizard).toBeVisible();
+    await page.locator('#impWizBtnGenerate').click();
+    await expect(wizard).toBeHidden();
+    await expect(page.locator('#stageViewport')).toBeVisible();
+    await closeMenuOnMobile(page);
+
+    // Pin a page break before Step 3 via Pages & Steps Overview (Step 2 differs between Auto-Step and Keep File Steps)
+    await page.locator('#btnPageOverview').click();
+    await expect(page.locator('#overviewModal')).toBeVisible();
+    const step3Pin = page.locator('#overviewList .ov-step-pin').nth(2);
+    await expect(step3Pin).toBeVisible();
+    await step3Pin.click();
+    await expect(step3Pin).toHaveAttribute('aria-pressed', 'true');
+    await page.locator('#btnCloseOverview').click();
+    await expect(page.locator('#overviewModal')).toBeHidden();
+
+    // Open Step Generation and switch to Keep Existing File Steps (changes parts before Step 2)
+    await ensureMenuOpen(page);
+    await page.locator('#menuStepGenBtn').click();
+    await expect(page.locator('#importModal')).toBeVisible();
+    await page.locator('#impProposalList [data-opt-id="keep"]').click();
+    await page.locator('#impBtnAuto').click();
+
+    // 3-choice warning dialog should appear with Cancel, Proceed & Keep Page Breaks, and Proceed & Remove Page Breaks
+    const modal = page.locator('#confirmActionModal');
+    await expect(modal).toBeVisible();
+    await expect(page.locator('#confirmActionTitle')).toContainText(/page break/i);
+    await expect(page.locator('#confirmActionCancel')).toBeVisible();
+    await expect(page.locator('#confirmActionSecondary')).toBeVisible();
+    await expect(page.locator('#confirmActionSecondary')).toHaveText('Proceed & Keep Page Breaks');
+    await expect(page.locator('#confirmActionConfirm')).toBeVisible();
+    await expect(page.locator('#confirmActionConfirm')).toHaveText('Proceed & Remove Page Breaks');
+    await auditSurface(page, `${testInfo.project.name}: Step Regeneration Page Break Warning`, {
+      activeContainerSelector: '#confirmActionModal',
+    });
+
+    // 1) Cancel keeps #importModal open and leaves the manual unchanged
+    await page.locator('#confirmActionCancel').click();
+    await expect(modal).toBeHidden();
+    await expect(page.locator('#importModal')).toBeVisible();
+
+    // 2) Proceed & Keep Page Breaks applies regeneration and keeps the page break active
+    await page.locator('#impBtnAuto').click();
+    await expect(modal).toBeVisible();
+    await page.locator('#confirmActionSecondary').click();
+    await expect(modal).toBeHidden();
+    await expect(page.locator('#importModal')).toBeHidden();
+
+    await page.locator('#btnPageOverview').click();
+    await expect(page.locator('#overviewModal')).toBeVisible();
+    await expect(page.locator('#overviewList .ov-step-pin[aria-pressed="true"]')).toHaveCount(1);
+    await page.locator('#btnCloseOverview').click();
+    await expect(page.locator('#overviewModal')).toBeHidden();
+
+    // 3) Switching back to Auto-Step and choosing Proceed & Remove Page Breaks clears all page breaks
+    await ensureMenuOpen(page);
+    await page.locator('#menuStepGenBtn').click();
+    await expect(page.locator('#importModal')).toBeVisible();
+    await page.locator('#impProposalList [data-opt-id="none"]').click();
+    await page.locator('#impBtnAuto').click();
+    await expect(modal).toBeVisible();
+    await page.locator('#confirmActionConfirm').click();
+    await expect(modal).toBeHidden();
+    await expect(page.locator('#importModal')).toBeHidden();
+
+    await page.locator('#btnPageOverview').click();
+    await expect(page.locator('#overviewModal')).toBeVisible();
+    await expect(page.locator('#overviewList .ov-step-pin[aria-pressed="true"]')).toHaveCount(0);
+    await page.locator('#btnCloseOverview').click();
+    await expect(page.locator('#overviewModal')).toBeHidden();
+
+    runtime.assertClean(`${testInfo.project.name}: Step Regeneration Page Break Warning`);
+  });
 });
+

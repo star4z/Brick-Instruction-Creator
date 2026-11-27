@@ -379,19 +379,22 @@ describe('studioRuntime safety checks', () => {
       expect(runtime).toContain(`'${id}'`);
     }
 
-    // Unified "Are you sure?" confirmation dialog for permanent (non-undoable) actions
+    // Unified confirmation & 3-way choice dialog
     for (const id of [
       'confirmActionModal',
+      'confirmActionCard',
       'confirmActionTitle',
       'confirmActionMessage',
       'confirmActionDetail',
       'confirmActionCancel',
+      'confirmActionSecondary',
       'confirmActionConfirm',
     ]) {
       expect(html).toContain(`id="${id}"`);
       expect(runtime).toContain(`'${id}'`);
     }
     expect(runtime).toContain('function openConfirmActionDialog(');
+    expect(runtime).toContain('function openChoiceActionDialog(');
     expect(runtime).toContain('if (isConfirmActionDialogOpen())');
     // No raw browser window.confirm() calls left for permanent actions
     expect(runtime).not.toMatch(/\bconfirm\(/);
@@ -417,6 +420,9 @@ describe('studioRuntime safety checks', () => {
       'getMergeStepDestructiveNotice(',
       'getPartsMoveStepDestructiveNotice(',
       'getStepGenerationDestructiveNotice(',
+      'getStepRegenerationPageBreakDialog(',
+      'analyzePageBreakChangesOnRegeneration(',
+      'remapPageBreaksAfterRegeneration(',
       'getLayoutGroupOverlapDestructiveNotice(',
       'getCloseModelConfirmDialog(',
       'getReplaceModelConfirmDialog(',

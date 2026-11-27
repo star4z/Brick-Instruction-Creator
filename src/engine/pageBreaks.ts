@@ -1,7 +1,17 @@
+export interface RuntimePartLike {
+  id?: string;
+  p?: string;
+  c?: number;
+  x?: number;
+  y?: number;
+  z?: number;
+  [key: string]: unknown;
+}
+
 export interface RuntimeStepLike {
   id: string;
   num: number;
-  parts?: unknown[];
+  parts?: ReadonlyArray<RuntimePartLike | unknown>;
   minifigName?: string;
   isStandaloneFigure?: boolean;
   isMinifigPoseStep?: boolean;
@@ -261,4 +271,199 @@ export function computeHelpTooltipPosition(opts: {
 
   return { left, top, placement, arrowLeft };
 }
+
+export interface ChangedPageBreakPredecessor {
+  /** Pinned step ID in the previous manual (the step immediately after the page break). */
+  stepId: string;
+  /** Pinned step number in the previous manual. */
+  stepNum: number;
+  /** Step number immediately before the page break in the previous manual (null if break was before Step 1). */
+  beforeStepNum: number | null;
+  /** Matched step ID in the regenerated manual (by ID first, then by step number), or null if no longer present. */
+  nextStepId: string | null;
+  /** Reason the predecessor changed: parts differed or the pinned step no longer exists. */
+  reason: 'parts_changed' | 'step_removed';
+}
+
+export interface PageBreakRegenerationAnalysis {
+  /** Total active page breaks in the previous manual. */
+  totalPageBreaks: number;
+  /** Page breaks whose immediately preceding step changed parts (or whose pinned step disappeared). */
+  changedBreaks: ChangedPageBreakPredecessor[];
+  /** True when at least one page break's preceding step has changed parts. */
+  hasChangedPredecessors: boolean;
+}
+
+/**
+ * Produces a deterministic, order-independent list of canonical keys representing
+ * the parts placed in a single step. Uses each part's stable unique `id` when present,
+ * falling back to part type + color + rounded world coordinates.
+ */
+export function getStepPartKeys(step: RuntimeStepLike | null | undefined): string[] {
+  const parts = step?.parts;
+  if (!parts || parts.length === 0) return [];
+  const keys: string[] = [];
+  for (const raw of parts) {
+    if (raw && typeof raw === 'object') {
+      const part = raw as RuntimePartLike;
+      if (typeof part.id === 'string' && part.id.length > 0) {
+        keys.push(`id:${part.id}`);
+      } else {
+        const px = typeof part.x === 'number' && Number.isFinite(part.x) ? Math.round(part.x * 100) : '';
+        const py = typeof part.y === 'number' && Number.isFinite(part.y) ? Math.round(part.y * 100) : '';
+        const pz = typeof part.z === 'number' && Number.isFinite(part.z) ? Math.round(part.z * 100) : '';
+        keys.push(`sig:${String(part.p ?? '')}|${String(part.c ?? '')}|${px},${py},${pz}`);
+      }
+    } else {
+      keys.push(`val:${String(raw)}`);
+    }
+  }
+  keys.sort();
+  return keys;
+}
+
+/**
+ * Returns true when two steps contain the exact same multiset of parts (ignoring order).
+ */
+export function areStepPartsEqual(
+  a: RuntimeStepLike | null | undefined,
+  b: RuntimeStepLike | null | undefined,
+): boolean {
+  if (!a && !b) return true;
+  if (!a || !b) return false;
+  const ka = getStepPartKeys(a);
+  const kb = getStepPartKeys(b);
+  if (ka.length !== kb.length) return false;
+  for (let i = 0; i < ka.length; i++) {
+    if (ka[i] !== kb[i]) return false;
+  }
+  return true;
+}
+
+function flattenChapterSteps(
+  chapters: RuntimeChapterLike[] | null | undefined,
+): RuntimeStepLike[] {
+  if (!chapters) return [];
+  const out: RuntimeStepLike[] = [];
+  for (const ch of chapters) {
+    if (ch?.steps) {
+      for (const step of ch.steps) {
+        out.push(step);
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Compares the current manual against a freshly regenerated manual to detect whether
+ * the parts in the step immediately before any active page break have changed.
+ */
+export function analyzePageBreakChangesOnRegeneration(
+  prevChapters: RuntimeChapterLike[] | null | undefined,
+  nextChapters: RuntimeChapterLike[] | null | undefined,
+  overrides: Record<string, RuntimeOverrideLike> | null | undefined,
+): PageBreakRegenerationAnalysis {
+  const prevSteps = flattenChapterSteps(prevChapters);
+  const nextSteps = flattenChapterSteps(nextChapters);
+  if (!overrides || prevSteps.length === 0) {
+    return { totalPageBreaks: 0, changedBreaks: [], hasChangedPredecessors: false };
+  }
+
+  const nextIndexById = new Map<string, number>();
+  const nextIndexByNum = new Map<number, number>();
+  for (let j = 0; j < nextSteps.length; j++) {
+    const s = nextSteps[j];
+    if (!nextIndexById.has(s.id)) nextIndexById.set(s.id, j);
+    if (!nextIndexByNum.has(s.num)) nextIndexByNum.set(s.num, j);
+  }
+
+  let totalPageBreaks = 0;
+  const changedBreaks: ChangedPageBreakPredecessor[] = [];
+
+  for (let i = 0; i < prevSteps.length; i++) {
+    const prevStep = prevSteps[i];
+    if (!overrides[prevStep.id]?.pin) continue;
+    totalPageBreaks += 1;
+    const prevBefore = i > 0 ? prevSteps[i - 1] : null;
+
+    const nextIdx = nextIndexById.has(prevStep.id)
+      ? nextIndexById.get(prevStep.id)!
+      : (nextIndexByNum.has(prevStep.num) ? nextIndexByNum.get(prevStep.num)! : -1);
+
+    if (nextIdx === -1) {
+      changedBreaks.push({
+        stepId: prevStep.id,
+        stepNum: prevStep.num,
+        beforeStepNum: prevBefore ? prevBefore.num : null,
+        nextStepId: null,
+        reason: 'step_removed',
+      });
+      continue;
+    }
+
+    const nextStep = nextSteps[nextIdx];
+    const nextBefore = nextIdx > 0 ? nextSteps[nextIdx - 1] : null;
+    if (!areStepPartsEqual(prevBefore, nextBefore)) {
+      changedBreaks.push({
+        stepId: prevStep.id,
+        stepNum: prevStep.num,
+        beforeStepNum: prevBefore ? prevBefore.num : null,
+        nextStepId: nextStep.id,
+        reason: 'parts_changed',
+      });
+    }
+  }
+
+  return {
+    totalPageBreaks,
+    changedBreaks,
+    hasChangedPredecessors: changedBreaks.length > 0,
+  };
+}
+
+/**
+ * Immutably preserves active page breaks across step regeneration. When a pinned step's
+ * internal ID changes (for example switching between Auto-Step, Keep File Steps, or a
+ * different subdivision plan), transfers its `pin` flag to the matching step number in
+ * the regenerated manual so choosing "Keep Page Breaks" keeps breaks visibly intact.
+ */
+export function remapPageBreaksAfterRegeneration<T extends RuntimeOverrideLike>(
+  prevChapters: RuntimeChapterLike[] | null | undefined,
+  nextChapters: RuntimeChapterLike[] | null | undefined,
+  overrides: Record<string, T>,
+): Record<string, T> {
+  const prevSteps = flattenChapterSteps(prevChapters);
+  const nextSteps = flattenChapterSteps(nextChapters);
+  if (prevSteps.length === 0 || nextSteps.length === 0) return { ...overrides };
+
+  const nextIdSet = new Set<string>();
+  const nextByNum = new Map<number, RuntimeStepLike>();
+  for (const s of nextSteps) {
+    nextIdSet.add(s.id);
+    if (!nextByNum.has(s.num)) nextByNum.set(s.num, s);
+  }
+
+  const next: Record<string, T> = { ...overrides };
+  for (const prevStep of prevSteps) {
+    if (!overrides[prevStep.id]?.pin) continue;
+    if (nextIdSet.has(prevStep.id)) continue;
+
+    // Clear stale pin on the old step ID (preserving any non-pin keys)
+    const oldEntry = { ...next[prevStep.id] } as T;
+    delete oldEntry.pin;
+    next[prevStep.id] = oldEntry;
+
+    // Transfer pin to the regenerated step at the same step number if present
+    const matched = nextByNum.get(prevStep.num);
+    if (matched) {
+      const targetEntry = { ...(next[matched.id] || ({} as T)) } as T;
+      targetEntry.pin = true;
+      next[matched.id] = targetEntry;
+    }
+  }
+
+  return next;
+}
+
 
