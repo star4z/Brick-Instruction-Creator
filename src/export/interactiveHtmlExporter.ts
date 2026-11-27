@@ -123,6 +123,8 @@ export interface InteractiveArrowSpec {
 export interface InteractiveSceneSpec {
   prevPartIdx: number[];
   newPartIdx: number[];
+  /** Per-part 3D placement offset vectors (parallel to newPartIdx) for animated offset preview. */
+  newPartOffsets?: Array<[number, number, number]>;
   az: number;
   el: number;
   zoom: number;
@@ -953,8 +955,7 @@ ${staticFallbackHtml}
       <button id="btnZoomIn" class="tool-btn" type="button" title="Zoom in (+)" aria-label="Zoom in">+</button>
       <button id="btnZoomOut" class="tool-btn" type="button" title="Zoom out (-)" aria-label="Zoom out">−</button>
       <button id="btnTogglePli" class="tool-btn" type="button" title="Toggle parts box" aria-label="Toggle parts box" style="display:none">▤</button>
-      <button id="btnToggleHl" class="tool-btn" type="button" title="Toggle highlight new pieces" aria-label="Highlight new pieces" style="display:none">✦</button>
-      <button id="btnXrayToggle" class="tool-btn" type="button" title="X-Ray previous assembly" aria-label="X-Ray previous assembly" style="display:none">◎</button>
+      <button id="btnXrayToggle" class="tool-btn" type="button" title="Fade previous pieces" aria-label="Fade previous pieces" style="display:none">◎</button>
       <button id="btnToggleExplode" class="tool-btn" type="button" title="Toggle piece placement offset" aria-label="Toggle piece placement offset" style="display:none">
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m8 7 4-4 4 4"/><path d="m8 11 4 4 4-4"/><path d="M5 20h14"/></svg>
       </button>
@@ -1414,12 +1415,11 @@ ${staticFallbackHtml}
   let activeScene = null;
   let activeBounds = { center: [0, 0, 0], radius: 40 };
   let showPli = true;
-  let highlightNew = DATA.highlightNew !== false;
   let fadePrev = DATA.fadePrev !== false;
   let xrayPrev = false;
   let explodeActive = false;
-  let explodeLift = 0;
-  let targetExplodeLift = 0;
+  let explodeT = 0;
+  let targetExplodeT = 0;
   const hlRgb = hexToRgb01(DATA.highlightColor || '#ff2d55');
   const arrowRgb01 = hexToRgb01(DATA.arrowColor || '#dc2626');
   const arrowColBytes = [Math.round(arrowRgb01[0] * 255), Math.round(arrowRgb01[1] * 255), Math.round(arrowRgb01[2] * 255), 255];
@@ -1654,11 +1654,11 @@ ${staticFallbackHtml}
         if (done) targetCam = null;
         else needsMore = true;
       }
-      if (Math.abs(targetExplodeLift - explodeLift) > 0.35) {
-        explodeLift += (targetExplodeLift - explodeLift) * 0.22;
+      if (Math.abs(targetExplodeT - explodeT) > 0.005) {
+        explodeT += (targetExplodeT - explodeT) * 0.22;
         needsMore = true;
-      } else if (explodeLift !== targetExplodeLift) {
-        explodeLift = targetExplodeLift;
+      } else if (explodeT !== targetExplodeT) {
+        explodeT = targetExplodeT;
       }
       drawScene();
       if (needsMore) requestDraw();
@@ -1697,9 +1697,8 @@ ${staticFallbackHtml}
     const isThumb = Boolean(opts && opts.isThumb);
     const ndcShiftY = (opts && opts.ndcShiftY) || 0;
     const fitScale = (opts && opts.fitScale) || 1.0;
-    const liftVal = isThumb ? 0 : explodeLift;
+    const liftT = isThumb ? 0 : explodeT;
     const useXray = isThumb ? false : xrayPrev;
-    const useHl = isThumb ? false : highlightNew;
 
     gl.viewport(0, 0, w, h);
     gl.clearColor(0, 0, 0, 0);
@@ -1726,11 +1725,28 @@ ${staticFallbackHtml}
     const isUnlit = (DATA.unlit && !scene.hero) ? 1.0 : 0.0;
     const prevIdx = scene.prevPartIdx || [];
     const newIdx = scene.newPartIdx || [];
+    const newOffsets = Array.isArray(scene.newPartOffsets) ? scene.newPartOffsets : null;
+    const fallbackLiftY = Math.max(32, Math.min(84, r * 0.65));
 
     const drawGroups = [
       { list: prevIdx, fade: useXray ? 0.78 : (fadePrev ? fadeMixVal : 0.0), hl: false, isNewGrp: false },
-      { list: newIdx, fade: 0.0, hl: useHl && prevIdx.length > 0, isNewGrp: true },
+      { list: newIdx, fade: 0.0, hl: false, isNewGrp: true },
     ];
+
+    const liftM4 = new Float32Array(16);
+    const getModelMat = (pm, grp, idxInGrp) => {
+      if (!grp.isNewGrp || liftT <= 0.0001) return pm.m4;
+      const off = newOffsets && newOffsets[idxInGrp];
+      const ox = off ? (Number(off[0]) || 0) : 0;
+      const oy = off ? (Number(off[1]) || 0) : fallbackLiftY;
+      const oz = off ? (Number(off[2]) || 0) : 0;
+      if (Math.abs(ox) < 0.01 && Math.abs(oy) < 0.01 && Math.abs(oz) < 0.01) return pm.m4;
+      liftM4.set(pm.m4);
+      liftM4[12] += ox * liftT;
+      liftM4[13] += oy * liftT;
+      liftM4[14] += oz * liftT;
+      return liftM4;
+    };
 
     // 1. Opaque triangles
     gl.depthMask(true);
@@ -1741,10 +1757,8 @@ ${staticFallbackHtml}
     gl.uniform3f(progs.tri.vdir, vdir[0], vdir[1], vdir[2]);
     resetAttribs([progs.tri.pos, progs.tri.norm, progs.tri.col]);
 
-    const liftM4 = new Float32Array(16);
     for (const grp of drawGroups) {
       gl.uniform1f(progs.tri.fade, grp.fade);
-      const yLift = grp.isNewGrp && liftVal > 0 ? liftVal * 0.45 : 0;
       for (let i = 0; i < grp.list.length; i++) {
         const pm = partMats[grp.list[i]];
         if (!pm) continue;
@@ -1752,13 +1766,7 @@ ${staticFallbackHtml}
         if (!pr || pr.oc <= 0) continue;
         const gpu = ensureProtoGpu(pr);
         if (!gpu || !gpu.tp) continue;
-        if (yLift > 0) {
-          liftM4.set(pm.m4);
-          liftM4[13] += yLift;
-          gl.uniformMatrix4fv(progs.tri.model, false, liftM4);
-        } else {
-          gl.uniformMatrix4fv(progs.tri.model, false, pm.m4);
-        }
+        gl.uniformMatrix4fv(progs.tri.model, false, getModelMat(pm, grp, i));
         gl.uniformMatrix3fv(progs.tri.nmat, false, pm.n3);
         gl.bindBuffer(gl.ARRAY_BUFFER, gpu.tp); gl.vertexAttribPointer(progs.tri.pos, 3, gl.FLOAT, false, 0, 0);
         gl.bindBuffer(gl.ARRAY_BUFFER, gpu.tn); gl.vertexAttribPointer(progs.tri.norm, 3, gl.FLOAT, false, 0, 0);
@@ -1786,7 +1794,7 @@ ${staticFallbackHtml}
         if (!pr || !pr.hasTd) continue;
         const gpu = ensureProtoGpu(pr);
         if (!gpu || !gpu.td.length) continue;
-        gl.uniformMatrix4fv(progs.tex.model, false, pm.m4);
+        gl.uniformMatrix4fv(progs.tex.model, false, getModelMat(pm, grp, i));
         gl.uniformMatrix3fv(progs.tex.nmat, false, pm.n3);
         for (const td of gpu.td) {
           const glTex = glTextures.get(td.k);
@@ -1817,7 +1825,7 @@ ${staticFallbackHtml}
         if (!pr || pr.xc <= 0) continue;
         const gpu = ensureProtoGpu(pr);
         if (!gpu || !gpu.tp) continue;
-        gl.uniformMatrix4fv(progs.tri.model, false, pm.m4);
+        gl.uniformMatrix4fv(progs.tri.model, false, getModelMat(pm, grp, i));
         gl.uniformMatrix3fv(progs.tri.nmat, false, pm.n3);
         gl.bindBuffer(gl.ARRAY_BUFFER, gpu.tp); gl.vertexAttribPointer(progs.tri.pos, 3, gl.FLOAT, false, 0, 0);
         gl.bindBuffer(gl.ARRAY_BUFFER, gpu.tn); gl.vertexAttribPointer(progs.tri.norm, 3, gl.FLOAT, false, 0, 0);
@@ -1827,7 +1835,7 @@ ${staticFallbackHtml}
     }
     gl.depthMask(true);
 
-    // 4. Crisp edge lines
+    // 4. Crisp edge lines (uses exact same animated offset transform as faces so outlines stay attached)
     gl.useProgram(progs.line.p);
     gl.uniformMatrix4fv(progs.line.vp, false, vp);
     gl.uniform1f(progs.line.alpha, isHero > 0.5 ? 0.55 : 0.92);
@@ -1835,7 +1843,7 @@ ${staticFallbackHtml}
     resetAttribs([progs.line.pos, progs.line.col]);
     for (const grp of drawGroups) {
       gl.uniform1f(progs.line.fade, grp.fade);
-      gl.uniform1f(progs.line.useOv, grp.hl ? 1.0 : 0.0);
+      gl.uniform1f(progs.line.useOv, 0.0);
       for (let i = 0; i < grp.list.length; i++) {
         const pm = partMats[grp.list[i]];
         if (!pm) continue;
@@ -1843,42 +1851,10 @@ ${staticFallbackHtml}
         if (!pr || !pr.hasLines) continue;
         const gpu = ensureProtoGpu(pr);
         if (!gpu || !gpu.lp || !gpu.lineCount) continue;
-        gl.uniformMatrix4fv(progs.line.model, false, pm.m4);
+        gl.uniformMatrix4fv(progs.line.model, false, getModelMat(pm, grp, i));
         gl.bindBuffer(gl.ARRAY_BUFFER, gpu.lp); gl.vertexAttribPointer(progs.line.pos, 3, gl.FLOAT, false, 0, 0);
         gl.bindBuffer(gl.ARRAY_BUFFER, gpu.lc); gl.vertexAttribPointer(progs.line.col, 4, gl.UNSIGNED_BYTE, true, 0, 0);
         gl.drawArrays(gl.LINES, 0, gpu.lineCount);
-      }
-    }
-
-    // 5. Placement arrows (default: flat 2D, unlit, no outlines, stud-aligned to current camera azimuth)
-    const arrowGpu = isThumb ? null : buildArrowGpu(scene, viewCam.az, viewCam.el);
-    if (arrowGpu) {
-      if (arrowGpu.count > 0) {
-        gl.useProgram(progs.tri.p);
-        gl.uniformMatrix4fv(progs.tri.vp, false, vp);
-        gl.uniform1f(progs.tri.hero, isHero);
-        gl.uniform1f(progs.tri.unlit, arrowLighting ? isUnlit : 1.0);
-        gl.uniform3f(progs.tri.vdir, vdir[0], vdir[1], vdir[2]);
-        gl.uniform1f(progs.tri.fade, 0.0);
-        gl.uniformMatrix4fv(progs.tri.model, false, ID_M4);
-        gl.uniformMatrix3fv(progs.tri.nmat, false, ID_N3);
-        resetAttribs([progs.tri.pos, progs.tri.norm, progs.tri.col]);
-        gl.bindBuffer(gl.ARRAY_BUFFER, arrowDynBufs.tp); gl.vertexAttribPointer(progs.tri.pos, 3, gl.FLOAT, false, 0, 0);
-        gl.bindBuffer(gl.ARRAY_BUFFER, arrowDynBufs.tn); gl.vertexAttribPointer(progs.tri.norm, 3, gl.FLOAT, false, 0, 0);
-        gl.bindBuffer(gl.ARRAY_BUFFER, arrowDynBufs.tc); gl.vertexAttribPointer(progs.tri.col, 4, gl.UNSIGNED_BYTE, true, 0, 0);
-        gl.drawArrays(gl.TRIANGLES, 0, arrowGpu.count);
-      }
-      if (arrowGpu.lineCount > 0) {
-        gl.useProgram(progs.line.p);
-        gl.uniformMatrix4fv(progs.line.vp, false, vp);
-        gl.uniform1f(progs.line.alpha, 1.0);
-        gl.uniform1f(progs.line.fade, 0.0);
-        gl.uniform1f(progs.line.useOv, 0.0);
-        gl.uniformMatrix4fv(progs.line.model, false, ID_M4);
-        resetAttribs([progs.line.pos, progs.line.col]);
-        gl.bindBuffer(gl.ARRAY_BUFFER, arrowDynBufs.lp); gl.vertexAttribPointer(progs.line.pos, 3, gl.FLOAT, false, 0, 0);
-        gl.bindBuffer(gl.ARRAY_BUFFER, arrowDynBufs.lc); gl.vertexAttribPointer(progs.line.col, 4, gl.UNSIGNED_BYTE, true, 0, 0);
-        gl.drawArrays(gl.LINES, 0, arrowGpu.lineCount);
       }
     }
   }
@@ -2099,7 +2075,6 @@ ${staticFallbackHtml}
     const flatEl = document.getElementById('flatView');
     const hintEl = document.getElementById('hintChip');
     const btnPli = document.getElementById('btnTogglePli');
-    const btnHl = document.getElementById('btnToggleHl');
 
     heroEl.style.display = 'none';
     stepHud.style.display = 'none';
@@ -2116,16 +2091,14 @@ ${staticFallbackHtml}
       cam = getDefaultCamForItem(item);
       targetCam = null;
       explodeActive = false;
-      explodeLift = 0;
-      targetExplodeLift = 0;
+      explodeT = 0;
+      targetExplodeT = 0;
       const hasPrevAssembly = Boolean(step && prevList.length > 0);
       canvas.style.display = 'block';
       camTools.style.display = 'flex';
       hintEl.style.display = interacted ? 'none' : 'block';
       btnPli.style.display = step && step.pli && step.pli.length > 0 ? 'flex' : 'none';
       btnPli.classList.toggle('active', showPli);
-      btnHl.style.display = hasPrevAssembly ? 'flex' : 'none';
-      btnHl.classList.toggle('active', highlightNew);
       const btnXray = document.getElementById('btnXrayToggle');
       if (btnXray) {
         btnXray.style.display = hasPrevAssembly ? 'flex' : 'none';
@@ -2449,7 +2422,6 @@ ${staticFallbackHtml}
   document.getElementById('btnZoomIn').onclick = () => { targetCam = null; cam.zoom = Math.min(4.8, cam.zoom * 1.2); requestDraw(); };
   document.getElementById('btnZoomOut').onclick = () => { targetCam = null; cam.zoom = Math.max(0.4, cam.zoom / 1.2); requestDraw(); };
   document.getElementById('btnTogglePli').onclick = () => { showPli = !showPli; renderView(); };
-  document.getElementById('btnToggleHl').onclick = () => { highlightNew = !highlightNew; document.getElementById('btnToggleHl').classList.toggle('active', highlightNew); requestDraw(); };
   const btnXrayEl = document.getElementById('btnXrayToggle');
   if (btnXrayEl) btnXrayEl.onclick = () => { xrayPrev = !xrayPrev; btnXrayEl.classList.toggle('active', xrayPrev); requestDraw(); };
   const btnExplodeEl = document.getElementById('btnToggleExplode');
@@ -2457,8 +2429,7 @@ ${staticFallbackHtml}
     btnExplodeEl.onclick = () => {
       explodeActive = !explodeActive;
       btnExplodeEl.classList.toggle('active', explodeActive);
-      const liftDist = Math.max(60, Math.min(180, (activeBounds?.radius || 60) * 0.95));
-      targetExplodeLift = explodeActive ? liftDist : 0;
+      targetExplodeT = explodeActive ? 1 : 0;
       requestDraw();
     };
   }

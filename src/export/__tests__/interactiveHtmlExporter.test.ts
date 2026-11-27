@@ -136,6 +136,10 @@ describe('interactiveHtmlExporter', () => {
     expect(html).toContain('--scrub-track:');
     expect(html).toContain('computeStageVerticalFraming');
     expect(html).toContain('id="btnToggleExplode"');
+    expect(html).not.toContain('id="btnToggleHl"');
+    expect(html).toContain('Fade previous pieces');
+    expect(html).toContain('gl.uniformMatrix4fv(progs.line.model, false, getModelMat(pm, grp, i))');
+    expect(html).toContain('scene.newPartOffsets');
     expect(html).not.toContain('id="explodeSlider"');
     expect(html).toContain('lookAtMat4(eye, c, [0, 1, 0])');
     expect(html).toContain('"kind":"cover"');

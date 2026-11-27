@@ -26761,36 +26761,94 @@ async function buildInteractiveHtmlArtifact(mode: 'export' | 'preview' = 'export
           const ov = state.overrides[step.id] || {};
           const effOffsets = getEffectivePartOffsets(step, ov);
           const prevPartIdx = prev.flatMap((p) => registerPartLeaves(p));
-          const newPartIdx = (step.parts || []).flatMap((p) => registerPartLeaves(p, effOffsets[p.id] || null));
-          const stepArrows = [];
-          const stepArrowSpecs = [];
-          for (const p of step.parts || []) {
-            const pOv = effOffsets[p.id];
-            if (!pOv || pOv.arrow === false) continue;
-            const ox = Number(pOv.x) || 0;
-            const oy = Number(pOv.y) || 0;
-            const oz = Number(pOv.z) || 0;
-            if (Math.hypot(ox, oy, oz) < 6) continue;
-            const partColorInfo = resolveColorInfo(p.c) || COLORS[71];
-            const partRgb = hexToRgb255(partColorInfo.hex, 0);
-            const baseArrowHex = pOv.arrowColorOverride || state.arrowColor || DEFAULT_ARROW_COLOR;
-            const adaptiveHex = resolveContrastArrowColor(baseArrowHex, partRgb);
-            const targetBox = pOv.arrowBox || computeWorldBox(p);
-            stepArrowSpecs.push({
-              box: targetBox,
-              offset: [ox, oy, oz],
-              arrowTo: pOv.arrowTo || null,
-              throughGuideTo: pOv.throughGuideTo || null,
-              ...(pOv.extraArrows && pOv.extraArrows.length > 0 ? { extraSegments: pOv.extraArrows } : {}),
-              ...(pOv.suppressPrimaryArrow ? { suppressPrimary: true } : {}),
-              color: adaptiveHex,
-            });
-            if (!pOv.suppressPrimaryArrow) {
-              const segs = computePlacementArrowSegments(targetBox, [ox, oy, oz], pOv.arrowTo || null, pOv.throughGuideTo || null, cam.az);
-              for (const seg of segs) stepArrows.push({ ...seg, color: adaptiveHex });
+          const prevBoxes = prev.length > 0 ? prev.map((p) => computeWorldBox(p)) : [];
+          let prevUnion = null;
+          if (prevBoxes.length > 0) {
+            let minX = Infinity, minY = Infinity, minZ = Infinity;
+            let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+            for (const b of prevBoxes) {
+              if (b.min[0] < minX) minX = b.min[0]; if (b.max[0] > maxX) maxX = b.max[0];
+              if (b.min[1] < minY) minY = b.min[1]; if (b.max[1] > maxY) maxY = b.max[1];
+              if (b.min[2] < minZ) minZ = b.min[2]; if (b.max[2] > maxZ) maxZ = b.max[2];
             }
-            if (pOv.extraArrows && pOv.extraArrows.length > 0) {
-              for (const seg of pOv.extraArrows) stepArrows.push({ ...seg, color: seg.color || adaptiveHex });
+            prevUnion = {
+              min: [minX, minY, minZ],
+              max: [maxX, maxY, maxZ],
+              center: [(minX + maxX) * 0.5, (minY + maxY) * 0.5, (minZ + maxZ) * 0.5],
+            };
+          }
+          const computeAnimatedOffsetForPart = (p, pOv) => {
+            if (pOv) {
+              const ox = Number(pOv.x) || 0;
+              const oy = Number(pOv.y) || 0;
+              const oz = Number(pOv.z) || 0;
+              if (Math.hypot(ox, oy, oz) >= 6) {
+                return [+ox.toFixed(2), +oy.toFixed(2), +oz.toFixed(2)];
+              }
+            }
+            const pBox = computeWorldBox(p);
+            const pDiag = Math.hypot(pBox.max[0] - pBox.min[0], pBox.max[1] - pBox.min[1], pBox.max[2] - pBox.min[2]);
+            const dist = Math.max(28, Math.min(72, pDiag * 0.85));
+            let refBox = prevUnion;
+            if (prevBoxes.length > 0) {
+              let nMinX = Infinity, nMinY = Infinity, nMinZ = Infinity;
+              let nMaxX = -Infinity, nMaxY = -Infinity, nMaxZ = -Infinity;
+              let nearCount = 0;
+              for (const b of prevBoxes) {
+                const dx = Math.max(0, pBox.min[0] - b.max[0], b.min[0] - pBox.max[0]);
+                const dy = Math.max(0, pBox.min[1] - b.max[1], b.min[1] - pBox.max[1]);
+                const dz = Math.max(0, pBox.min[2] - b.max[2], b.min[2] - pBox.max[2]);
+                if (dx <= 10 && dy <= 10 && dz <= 10) {
+                  if (b.min[0] < nMinX) nMinX = b.min[0]; if (b.max[0] > nMaxX) nMaxX = b.max[0];
+                  if (b.min[1] < nMinY) nMinY = b.min[1]; if (b.max[1] > nMaxY) nMaxY = b.max[1];
+                  if (b.min[2] < nMinZ) nMinZ = b.min[2]; if (b.max[2] > nMaxZ) nMaxZ = b.max[2];
+                  nearCount++;
+                }
+              }
+              if (nearCount > 0) {
+                refBox = {
+                  min: [nMinX, nMinY, nMinZ],
+                  max: [nMaxX, nMaxY, nMaxZ],
+                  center: [(nMinX + nMaxX) * 0.5, (nMinY + nMaxY) * 0.5, (nMinZ + nMaxZ) * 0.5],
+                };
+              }
+            }
+            if (!refBox) return [0, +dist.toFixed(2), 0];
+            const sep = [
+              pBox.center[0] - refBox.center[0],
+              pBox.center[1] - refBox.center[1],
+              pBox.center[2] - refBox.center[2],
+            ];
+            const studUp = xformNorm([0, 1, 0], p.m || R_ID, 0);
+            const suLen = Math.hypot(studUp[0], studUp[1], studUp[2]) || 1;
+            const su = [studUp[0] / suLen, studUp[1] / suLen, studUp[2] / suLen];
+            let dir = [0, 1, 0];
+            if (Math.abs(su[1]) < 0.35) {
+              // Side-mounted / SNOT / bracket-attached part: animate horizontally along stud normal
+              const dot = sep[0] * su[0] + sep[1] * su[1] + sep[2] * su[2];
+              const sgn = dot >= 0 ? 1 : -1;
+              dir = [su[0] * sgn, su[1] * sgn, su[2] * sgn];
+            } else if (pBox.max[1] <= refBox.min[1] + 4) {
+              dir = [0, -1, 0];
+            } else if (pBox.min[1] >= refBox.max[1] - 4) {
+              dir = [0, 1, 0];
+            } else {
+              const ax = Math.abs(sep[0]), ay = Math.abs(sep[1]), az = Math.abs(sep[2]);
+              if (ax >= ay && ax >= az && ax > 2) dir = [sep[0] >= 0 ? 1 : -1, 0, 0];
+              else if (az >= ax && az >= ay && az > 2) dir = [0, 0, sep[2] >= 0 ? 1 : -1];
+              else if (ay > 2) dir = [0, sep[1] >= 0 ? 1 : -1, 0];
+            }
+            return [+(dir[0] * dist).toFixed(2), +(dir[1] * dist).toFixed(2), +(dir[2] * dist).toFixed(2)];
+          };
+
+          const newPartIdx = [];
+          const newPartOffsets = [];
+          for (const p of step.parts || []) {
+            const leafIndices = registerPartLeaves(p);
+            const offVec = computeAnimatedOffsetForPart(p, effOffsets[p.id] || null);
+            for (const li of leafIndices) {
+              newPartIdx.push(li);
+              newPartOffsets.push(offVec);
             }
           }
 
@@ -26838,8 +26896,7 @@ async function buildInteractiveHtmlArtifact(mode: 'export' | 'preview' = 'export
               : undefined,
             prevPartIdx,
             newPartIdx,
-            arrows: stepArrows.length > 0 ? stepArrows : undefined,
-            arrowSpecs: stepArrowSpecs.length > 0 ? stepArrowSpecs : undefined,
+            newPartOffsets: newPartOffsets.length > 0 ? newPartOffsets : undefined,
             az: cam.az,
             el: cam.el,
             zoom: ov.modelScale || 1.0,
