@@ -1140,6 +1140,57 @@ function resolveOffsetAlongAxis(
       }
     }
 
+    // Also detect any non-coaxial solid obstacle nested inside a concave/forked/lipped part's
+    // underside (e.g. a brick sitting inside a U-shaped wheel holder, arch, or hanging bracket)
+    // so the arrowhead stops right on that obstacle's stud-top surface instead of burying inside it.
+    let surfaceObsTip: number | null = null;
+    if (isCardinal) {
+      const targetBox = arrowBox || part.box;
+      const defaultEntryFace = sign > 0 ? part.box.min[axis] : part.box.max[axis];
+      const defaultTipAxis = defaultEntryFace + sign * STUD_HEIGHT_LDU;
+      const partExitFace = sign > 0 ? part.box.max[axis] : part.box.min[axis];
+
+      const tSpanA = Math.max(0.5, targetBox.max[perpA] - targetBox.min[perpA]);
+      const tSpanB = Math.max(0.5, targetBox.max[perpB] - targetBox.min[perpB]);
+      const hA = studAxisHalfOffset(tSpanA);
+      const hB = studAxisHalfOffset(tSpanB);
+      const probePts: Array<[number, number]> =
+        hA > 0 || hB > 0
+          ? [
+              [targetBox.center[perpA] + hA, targetBox.center[perpB] + hB],
+              [targetBox.center[perpA] - hA, targetBox.center[perpB] - hB],
+              [targetBox.center[perpA] + hA, targetBox.center[perpB] - hB],
+              [targetBox.center[perpA] - hA, targetBox.center[perpB] + hB],
+            ]
+          : [[targetBox.center[perpA], targetBox.center[perpB]]];
+
+      for (let i = 0; i < obstacles.length; i++) {
+        const obs = obstacles[i];
+        if (obs.id === part.id) continue;
+        if (isCoaxialHostAlongAxis(obs, axis)) continue;
+        const ob = obs.box;
+        const obsFace = sign > 0 ? ob.max[axis] : ob.min[axis];
+        if ((obsFace - defaultTipAxis) * sign <= 1.0) continue;
+        if ((partExitFace - obsFace) * sign <= 2.0) continue;
+        let hitsAnchor = false;
+        for (let k = 0; k < probePts.length; k++) {
+          const pa = probePts[k][0];
+          const pb = probePts[k][1];
+          if (
+            pa >= ob.min[perpA] + 0.5 && pa <= ob.max[perpA] - 0.5 &&
+            pb >= ob.min[perpB] + 0.5 && pb <= ob.max[perpB] - 0.5
+          ) {
+            hitsAnchor = true;
+            break;
+          }
+        }
+        if (!hitsAnchor) continue;
+        if (surfaceObsTip === null || (obsFace - surfaceObsTip) * sign > 0) {
+          surfaceObsTip = obsFace;
+        }
+      }
+    }
+
     const baseMag = computeBaseMag(dir, arrowAnchor);
     let corridorBlockedDir = false;
     for (let extra = 0; extra <= 96; extra += 8) {
@@ -1186,9 +1237,14 @@ function resolveOffsetAlongAxis(
       }
 
       // Ensure crisp open air gap past any coaxial obstacle tip (e.g., bush lifted above axle tip)
-      if (corridorObsTip !== null) {
+      // or nested underside surface (e.g., brick inside a U-shaped arch/bracket/holder).
+      const effectiveTip =
+        corridorObsTip !== null && surfaceObsTip !== null
+          ? ((corridorObsTip - surfaceObsTip) * sign >= 0 ? corridorObsTip : surfaceObsTip)
+          : (corridorObsTip ?? surfaceObsTip);
+      if (effectiveTip !== null) {
         const nearFace = sign > 0 ? shifted.min[axis] : shifted.max[axis];
-        const gapToTip = sign > 0 ? nearFace - corridorObsTip : corridorObsTip - nearFace;
+        const gapToTip = sign > 0 ? nearFace - effectiveTip : effectiveTip - nearFace;
         if (gapToTip < MIN_CORRIDOR_ARROW_GAP) continue;
       }
 
@@ -1245,7 +1301,9 @@ function resolveOffsetAlongAxis(
         const res: AutoPartOffset = { x: dx, y: dy, z: dz, tilt: 0, arrow: true };
         if (arrowBox) res.arrowBox = arrowBox;
         // Stop the arrowhead cleanly at a coaxial obstacle tip (e.g. axle) OR at the exact
-        // engaged stud top when the part's AABB hangs past the studs (e.g. brackets/mudguards).
+        // engaged stud top / nested supporting surface when the part's AABB hangs past the studs.
+        const defaultEntryFace = sign > 0 ? part.box.min[axis] : part.box.max[axis];
+        const defaultTipAxis = defaultEntryFace + sign * STUD_HEIGHT_LDU;
         let targetTipAxis: number | null = null;
         if (corridorObsTip !== null) {
           const pastCenter = sign > 0
@@ -1253,6 +1311,8 @@ function resolveOffsetAlongAxis(
             : part.box.center[axis] - corridorObsTip;
           if (pastCenter > 2) {
             targetTipAxis = corridorObsTip + sign * 2;
+          } else if ((corridorObsTip - defaultTipAxis) * sign > 1.0) {
+            targetTipAxis = corridorObsTip;
           }
         }
         if (isCardinal && alignsWithEngagedStuds && engagedStudTips.length > 0) {
@@ -1261,12 +1321,15 @@ function resolveOffsetAlongAxis(
             const v = engagedStudTips[i][axis];
             if (sign > 0 ? v > studTipAxis : v < studTipAxis) studTipAxis = v;
           }
-          const defaultEntryFace = sign > 0 ? part.box.min[axis] : part.box.max[axis];
-          const defaultTipAxis = defaultEntryFace + sign * STUD_HEIGHT_LDU;
           if ((studTipAxis - defaultTipAxis) * sign > 1.0) {
             if (targetTipAxis === null || (studTipAxis - targetTipAxis) * sign > 0) {
               targetTipAxis = studTipAxis;
             }
+          }
+        }
+        if (surfaceObsTip !== null) {
+          if (targetTipAxis === null || (surfaceObsTip - targetTipAxis) * sign > 0) {
+            targetTipAxis = surfaceObsTip;
           }
         }
         if (targetTipAxis !== null) {
@@ -2031,10 +2094,28 @@ export function computePlacementArrowSegments(
   // Anchor offsets [dx, dy, dz] relative to box.center
   let anchorOffsets: Vec3[];
   if (primaryAxis === 1) {
-    // Vertical insertion: align on the horizontal XZ plane to the nearest and furthest stud centers
+    // Vertical insertion: align on the horizontal XZ plane to the nearest and furthest stud centers,
+    // unless that diagonal projects nearly collinearly in screen X (< 10 LDU, narrower than an arrowhead
+    // — e.g. a 2x2 contact viewed near 45° azimuth), in which case use the wider left/right diagonal.
     const hx = studAxisHalfOffset(s[0]);
     const hz = studAxisHalfOffset(s[2]);
-    if (hx > 0 || hz > 0) {
+    if (hx > 0 && hz > 0) {
+      const rxCam = Math.cos(azRad);
+      const rzCam = -Math.sin(azRad);
+      const sepNearFar = Math.abs(2 * (sx * hx * rxCam + sz * hz * rzCam));
+      const sepLeftRight = Math.abs(2 * (sx * hx * rxCam - sz * hz * rzCam));
+      if (sepNearFar < 10 && sepLeftRight > sepNearFar) {
+        anchorOffsets = [
+          [sx * hx, 0, -sz * hz],
+          [-sx * hx, 0, sz * hz],
+        ];
+      } else {
+        anchorOffsets = [
+          [sx * hx, 0, sz * hz],
+          [-sx * hx, 0, -sz * hz],
+        ];
+      }
+    } else if (hx > 0 || hz > 0) {
       anchorOffsets = [
         [sx * hx, 0, sz * hz],
         [-sx * hx, 0, -sz * hz],

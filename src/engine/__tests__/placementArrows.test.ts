@@ -366,14 +366,15 @@ describe('placementArrows — LEGO-style automatic placement arrows & offsets', 
     expect(segsFL[1].to[0]).toBeCloseTo(30, 4);
     expect(segsFL[1].to[2]).toBeCloseTo(-10, 4);
 
-    // 2x2 plate (40x8x40) -> diagonal corner studs (+10, +10) and (-10, -10)
+    // 2x2 plate (40x8x40) at az=38° -> near/far diagonal (+10,+10)/(-10,-10) projects only 3.44 LDU apart in screen X,
+    // so it switches to the wider non-overlapping left/right diagonal (+10, -10) and (-10, +10) (~28 LDU screen separation)
     const plate2x2 = makeBox(0, 8, 0, 40, 8, 40);
     const segs2x2 = computePlacementArrowSegments(plate2x2, [0, 28, 0], null, null, 38);
     expect(segs2x2).toHaveLength(2);
     expect(segs2x2[0].to[0]).toBeCloseTo(10, 4);
-    expect(segs2x2[0].to[2]).toBeCloseTo(10, 4);
+    expect(segs2x2[0].to[2]).toBeCloseTo(-10, 4);
     expect(segs2x2[1].to[0]).toBeCloseTo(-10, 4);
-    expect(segs2x2[1].to[2]).toBeCloseTo(-10, 4);
+    expect(segs2x2[1].to[2]).toBeCloseTo(10, 4);
 
     // Elongated Technic beam (140x24x20) offset laterally along +Z -> 2 parallel horizontal arrows at nearest/furthest X studs (±60)
     const beamBox = makeBox(0, 0, 0, 140, 24, 20);
@@ -1409,6 +1410,64 @@ describe('placementArrows — LEGO-style automatic placement arrows & offsets', 
     const botOff = botViewRes.get('s1')?.['towball_bot'];
     expect(botOff).toBeDefined();
     expect(botOff!.y).toBeLessThanOrEqual(-24);
+  });
+
+  it('stops arrowheads on top of a supporting brick nested inside a concave/U-shaped part (no buried arrowheads or jagged screen overlap)', () => {
+    // Supporting 2x10 brick at Y=[17..45] (body 17..41, top studs 41..45)
+    // Concave U-shaped housing/holder at Y=[17..69] whose outer forks hang 24 LDU below the brick's top studs
+    const steps: PlacementStepInput[] = [
+      {
+        id: 's1',
+        camera: { az: 38, el: 28, side: 'top' },
+        parts: [
+          makePart('spine_2x10', 0, 17, 0, 40, 28, 200, BLACK),
+          makePart('deck_plate', 0, 41, 0, 80, 12, 80, BLACK),
+          makePart('side_a', -50, 17, 0, 20, 28, 80, BLACK),
+          makePart('side_b', 50, 17, 0, 20, 28, 80, BLACK),
+        ],
+      },
+      {
+        id: 's2',
+        camera: { az: 38, el: 28, side: 'top' },
+        parts: [
+          // Straddles spine_2x10 at z=[50..90] (2x2 contact overlap with spine_2x10), outer flanges hang down to y=17
+          {
+            ...makePart('concave_holder', 0, 17, 70, 80, 52, 40, BLACK),
+            localUp: [0, 1, 0],
+          },
+        ],
+      },
+    ];
+
+    const res = computeAutoPlacementOffsetsForSequence(steps);
+    const off = res.get('s2')?.['concave_holder'];
+    expect(off).toBeDefined();
+    // Must lift high enough that bottom of lifted holder clears spine_2x10 top studs (Y=45) by >= 16 LDU
+    expect(17 + off!.y).toBeGreaterThanOrEqual(45 + 16);
+    // Must clamp arrowTo to the nested supporting brick's stud-top surface (Y=45), never buried at Y=21
+    expect(off!.arrowTo).toBeDefined();
+    expect(off!.arrowTo![1]).toBeCloseTo(45, 4);
+
+    const segs = computePlacementArrowSegments(
+      off!.arrowBox || steps[1].parts[0].box,
+      [off!.x, off!.y, off!.z],
+      off!.arrowTo,
+      null,
+      38,
+    );
+    expect(segs).toHaveLength(2);
+    for (const seg of segs) {
+      // Arrowhead lands right on top of the supporting brick's stud (Y=45), with >= 12 LDU visible arrow length
+      expect(seg.to[1]).toBeCloseTo(45, 4);
+      expect(seg.from[1] - seg.to[1]).toBeGreaterThanOrEqual(12);
+    }
+    // The two arrows must be clearly separated horizontally in screen X (>= 10 LDU) so they never look jagged/merged
+    const azRad = (38 * Math.PI) / 180;
+    const rx = Math.cos(azRad);
+    const rz = -Math.sin(azRad);
+    const u0 = segs[0].to[0] * rx + segs[0].to[2] * rz;
+    const u1 = segs[1].to[0] * rx + segs[1].to[2] * rz;
+    expect(Math.abs(u0 - u1)).toBeGreaterThanOrEqual(10);
   });
 });
 

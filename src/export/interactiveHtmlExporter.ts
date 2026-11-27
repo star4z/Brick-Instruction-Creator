@@ -1414,7 +1414,16 @@ ${staticFallbackHtml}
         let anchors;
         if (primaryAxis === 1) {
           const hx = studHalfOff(sxB), hz = studHalfOff(szB);
-          anchors = (hx > 0 || hz > 0) ? [[sx*hx, 0, sz*hz], [-sx*hx, 0, -sz*hz]] : [[0, 0, 0]];
+          if (hx > 0 && hz > 0) {
+            const rxC = Math.cos(azR), rzC = -Math.sin(azR);
+            const sepNF = Math.abs(2 * (sx*hx*rxC + sz*hz*rzC));
+            const sepLR = Math.abs(2 * (sx*hx*rxC - sz*hz*rzC));
+            anchors = (sepNF < 10 && sepLR > sepNF)
+              ? [[sx*hx, 0, -sz*hz], [-sx*hx, 0, sz*hz]]
+              : [[sx*hx, 0, sz*hz], [-sx*hx, 0, -sz*hz]];
+          } else {
+            anchors = (hx > 0 || hz > 0) ? [[sx*hx, 0, sz*hz], [-sx*hx, 0, -sz*hz]] : [[0, 0, 0]];
+          }
         } else {
           const hp = primaryAxis === 0 ? 2 : 0;
           const hVal = studHalfOff(hp === 0 ? sxB : szB);
