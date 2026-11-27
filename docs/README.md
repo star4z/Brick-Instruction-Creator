@@ -41,6 +41,7 @@ All architecture specifications and feature design proposals for **Brick Instruc
 - [`PAGE_RENDER_CACHING_DESIGN.md`](./PAGE_RENDER_CACHING_DESIGN.md) — Zero-encode offscreen `<canvas>` mounting, pixel-budget LRU page/minifig/1:1 caching (`src/engine/pageRenderCache.ts`), official minifigure wasted-snapshot elimination & adaptive sub-render supersampling, `pageNavigationOnly` fast path, PLI thumbnail ordering, direct PDF canvas drawing, and paint-aware adjacent-page idle pre-warming.
 - [`REMEDIATION_AUDIT_2026.md`](./REMEDIATION_AUDIT_2026.md) — Comprehensive 2026 static-analysis & live-runtime audit remediation across security, streaming PDF & async Interactive 3D HTML export, WebGL shaders/conditional-line rendering, core layout/step algorithms, accessibility, and CI/build hygiene.
 - [`STARTUP_PORTABILITY_AND_ROUTING.md`](./STARTUP_PORTABILITY_AND_ROUTING.md) — Fast startup via internal `.biw` persistence (`lastProject`), targeted BFS lazy `partsLib` loading, parallelized I/O & ZIP decompression, fully portable `.biw` projects (embedded `.dat`s, decals, composite defs, auto-fetch), and GitHub-Pages-safe hash URL routing for manual pages, app views, and Interactive 3D Preview.
+- [`INLINE_SUBASSEMBLIES_DESIGN.md`](./INLINE_SUBASSEMBLIES_DESIGN.md) — Automatic inline micro-subassembly detection for compact hinged/lidded/enclosed props (books, treasure chests, suitcases, laptops, compact containers) constructed in one dedicated step with an inline submodel callout across Live DOM preview, PDF export, and Interactive 3D HTML export.
 
 ## Conventions
 

@@ -146,6 +146,8 @@ export interface InteractiveStepScene extends InteractiveSceneSpec {
   isSubmodelStep?: boolean;
   submodelThumbKey?: string;
   submodelRepeat?: number;
+  inlineCalloutThumbKey?: string;
+  inlineCalloutRepeat?: number;
   previewUrl?: string; // Static preview fallback image for JS-disabled viewers (e.g., iOS Quick Look)
 }
 
@@ -2154,6 +2156,14 @@ ${staticFallbackHtml}
             (subRep > 1 ? '<span class="submodel-rep">' + subRep + '×</span>' : '') +
           '</span>'
         : '';
+      const inlineCalloutUrl = step.inlineCalloutThumbKey && DATA.submodelThumbs ? safeImgSrc(DATA.submodelThumbs[step.inlineCalloutThumbKey]) : '';
+      const inlineCalloutRep = Number(step.inlineCalloutRepeat) || 0;
+      const inlineCalloutHtml = inlineCalloutUrl
+        ? '<span class="submodel-pill" aria-label="Inline Submodel">' +
+            '<img src="' + inlineCalloutUrl + '" alt="" />' +
+            (inlineCalloutRep > 1 ? '<span class="submodel-rep">' + inlineCalloutRep + '×</span>' : '') +
+          '</span>'
+        : '';
       const pliHtml = showPli && step.pli && step.pli.length > 0
         ? '<div class="pli-panel' + (isSubStep ? ' is-submodel' : '') + '"><div class="pli-grid">' + step.pli.map(p =>
             '<div class="pli-item' + (p.isSubmodel ? ' is-submodel' : '') + '">' +
@@ -2166,6 +2176,7 @@ ${staticFallbackHtml}
         : '';
       const showRot = Boolean(step.rotationCue || (step.rotationCueKind && step.rotationCueKind !== 'none'));
       const metaInner =
+        inlineCalloutHtml +
         subBadgeHtml +
         (isWordless || isSubStep ? '' : '<div class="step-chapter">' + esc(pg.chapterName || step.label || '') + '</div>') +
         (step.subLabel ? '<div class="step-chapter" style="color:var(--accent)">' + esc(step.subLabel) + '</div>' : '') +

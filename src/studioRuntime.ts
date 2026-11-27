@@ -10,6 +10,9 @@ import {
   SECTION_PREVIEW_PALETTE,
 } from './engine/subdivisionAnalyzer';
 import {
+  detectInlineSubassemblies,
+} from './engine/inlineSubassemblies';
+import {
   buildImportWizardSummaryItems,
   getFreshImportWizardDefaults,
   getWizardSubpageVisibility,
@@ -6347,6 +6350,23 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount, outPrebui
     }
   }
 
+  // Detect compact self-contained inline micro-subassemblies (books, hinged containers/chests,
+  // suitcases, laptops) so each is built in ONE step with an inline submodel callout box.
+  const localInlineClusters = detectInlineSubassemblies(
+    undersideInputs,
+    adj,
+    belowMap,
+    { excludedIndices: new Set(localPartToDup.keys()) },
+  );
+  const localPartToInlineSub = new Map();
+  const localInlineMemberSets = new Map();
+  for (const cl of localInlineClusters) {
+    localInlineMemberSets.set(cl.id, new Set(cl.partIndices));
+    for (const pi of cl.partIndices) {
+      localPartToInlineSub.set(pi, cl);
+    }
+  }
+
   while (remaining.size > 0) {
     const placedBeforeStep = new Set(placed);
     const isPrereqGrounded = placedBeforeStep.size > 0
@@ -6354,7 +6374,7 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount, outPrebui
       : null;
     let frontier;
     if (placed.size === 0) {
-      const coreNonDup = Array.from(remaining).filter(i => !localPartToDup.has(i));
+      const coreNonDup = Array.from(remaining).filter(i => !localPartToDup.has(i) && !localPartToInlineSub.has(i));
       const basePool = coreNonDup.length > 0 ? coreNonDup : Array.from(remaining);
       const nonWheels = basePool.filter(i => roles[i] !== 'wheel' && roles[i] !== 'pin' && !claddingFlags[i] && !belowMap[i].some(u => remaining.has(u)));
       const pool = nonWheels.length > 0 ? nonWheels : basePool;
@@ -6370,10 +6390,17 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount, outPrebui
     } else {
       const rawFrontier = Array.from(remaining).filter(i => adj[i].some(nb => placedBeforeStep.has(nb)));
       const emptyStepSet = new Set();
-      const baseUnblocked = rawFrontier.filter(i =>
-        !isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, placedBeforeStep)
-        && !belowMap[i].some(u => remaining.has(u) && isPrereqGrounded(u))
-      );
+      const baseUnblocked = rawFrontier.filter(i => {
+        if (isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, placedBeforeStep)) return false;
+        const inl = localPartToInlineSub.get(i);
+        if (inl) {
+          const mSet = localInlineMemberSets.get(inl.id);
+          return !inl.partIndices.some(m =>
+            remaining.has(m) && (belowMap[m] || []).some(u => !mSet.has(u) && remaining.has(u) && isPrereqGrounded(u))
+          );
+        }
+        return !belowMap[i].some(u => remaining.has(u) && isPrereqGrounded(u));
+      });
       const fastenerUnblocked = baseUnblocked.filter(i =>
         !fastenerGuards.isBlocked(i, placedBeforeStep, emptyStepSet, remaining)
       );
@@ -6465,6 +6492,41 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount, outPrebui
       continue;
     }
 
+    const inlineCluster = localPartToInlineSub.get(anchor);
+    if (inlineCluster) {
+      const inlineIndices = inlineCluster.partIndices.filter(pi => remaining.has(pi));
+      for (const pi of inlineIndices) { remaining.delete(pi); placed.add(pi); }
+      const inlineParts = inlineIndices.map(i => canonicalParts[i]);
+      const inlineBoxes = inlineIndices.map(i => boxes[i]);
+      const camChoice = chooseStickyStepCamera(inlineBoxes, builtBoxes, builtBounds, activeCam);
+      activeCam = { side: camChoice.side, corner: camChoice.corner, az: camChoice.az, el: camChoice.el };
+      for (const b of inlineBoxes) {
+        builtBounds = expandBoundsWithBox(builtBounds, b);
+        builtBoxes.push(b);
+      }
+      sNum++;
+      const buildParts = normalizeCanonicalSubParts(inlineParts, `${groupId}_${inlineCluster.id}`);
+      steps.push({
+        id: `${groupId}_s${sNum}`,
+        num: sNum,
+        side: camChoice.side,
+        corner: camChoice.corner,
+        az: camChoice.az,
+        el: camChoice.el,
+        cue: sNum === 1 ? 'none' : camChoice.cue,
+        parts: inlineParts,
+        subassembly: {
+          name: inlineCluster.name,
+          repeatCount: 1,
+          direction: 'horizontal',
+          asPages: false,
+          buildParts,
+        },
+        isSubmodelStep: true,
+      });
+      continue;
+    }
+
     const anchorY = layerY[anchor];
     const anchorConnectedToPrev = placedBeforeStep.size > 0 && adj[anchor].some(nb => placedBeforeStep.has(nb));
     const anchorIsStrictUnderside = placedBeforeStep.size > 0 && isStrictDeckUndersidePart(anchor, boxes, adj, placedBeforeStep);
@@ -6480,6 +6542,7 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount, outPrebui
         return Array.from(remaining).filter(i => {
           if (placedInStep.has(i)) return false;
           if (localPartToDup.has(i)) return false;
+          if (localPartToInlineSub.has(i)) return false;
           if (Math.abs(layerY[i] - anchorY) > 12) return false;
           if (isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, supportSet)) return false;
           if (fastenerGuards.isBlocked(i, placedBeforeStep, placedInStep, remaining)) return false;
@@ -7104,6 +7167,7 @@ function assignAutoPlacementOffsets(chapters) {
         step.isMinifigPoseStep ||
         step.attachedMinifig ||
         step.attachedSubmodel ||
+        step.subassembly ||
         hasStructuralOffsets,
       );
       return {
@@ -7459,6 +7523,42 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
     let activeCam = { ...(initialCam || DEFAULT_STUDIO_CAMERA) };
     let localStepCount = 0;
 
+    // Detect compact self-contained inline micro-subassemblies (books, hinged containers/chests,
+    // suitcases, laptops) within this step scope so each is built in ONE step with an inline submodel.
+    const idxToLocal = new Map();
+    idxList.forEach((gi, li) => idxToLocal.set(gi, li));
+    const localInlineInputs = idxList.map((gi, li) => ({
+      index: li,
+      partId: normId(parts[gi].p),
+      partName: resolvePart(parts[gi].p).name || '',
+      role: roles[gi],
+      box: boxes[gi],
+    }));
+    const localInlineAdj = idxList.map((gi) =>
+      (adj[gi] || []).map((nb) => idxToLocal.get(nb)).filter((v) => v !== undefined)
+    );
+    const localInlineBelow = idxList.map((gi) =>
+      (belowMap[gi] || []).map((u) => idxToLocal.get(u)).filter((v) => v !== undefined)
+    );
+    const localExcluded = new Set();
+    idxList.forEach((gi, li) => {
+      if (partToDup.has(gi) || mfClaimed[gi]) localExcluded.add(li);
+    });
+    const scopeInlineClusters = detectInlineSubassemblies(
+      localInlineInputs,
+      localInlineAdj,
+      localInlineBelow,
+      { excludedIndices: localExcluded },
+    );
+    const scopePartToInlineSub = new Map();
+    const scopeInlineMemberSets = new Map();
+    for (const cl of scopeInlineClusters) {
+      const globalMembers = cl.partIndices.map((li) => idxList[li]);
+      const globalCluster = { ...cl, baseIndex: idxList[cl.baseIndex], partIndices: globalMembers };
+      scopeInlineMemberSets.set(cl.id, new Set(globalMembers));
+      for (const gi of globalMembers) scopePartToInlineSub.set(gi, globalCluster);
+    }
+
     while (remaining.size > 0) {
       const placedBeforeStep = new Set(placed);
       const isPrereqGrounded = placedBeforeStep.size > 0
@@ -7466,8 +7566,10 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
         : null;
       let frontier;
       if (placed.size === 0) {
-        const nonWheels = Array.from(remaining).filter(i => roles[i] !== 'wheel' && roles[i] !== 'pin' && !claddingFlags[i] && !belowMap[i].some(u => remaining.has(u)));
-        const pool = nonWheels.length > 0 ? nonWheels : Array.from(remaining);
+        const coreNonInline = Array.from(remaining).filter(i => !scopePartToInlineSub.has(i));
+        const basePool = coreNonInline.length > 0 ? coreNonInline : Array.from(remaining);
+        const nonWheels = basePool.filter(i => roles[i] !== 'wheel' && roles[i] !== 'pin' && !claddingFlags[i] && !belowMap[i].some(u => remaining.has(u)));
+        const pool = nonWheels.length > 0 ? nonWheels : basePool;
         pool.sort((a, b) => layerY[a] - layerY[b]);
         const minY = layerY[pool[0]];
         const lowBand = pool.filter(i => layerY[i] <= minY + 32);
@@ -7480,10 +7582,17 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
       } else {
         const rawFrontier = Array.from(remaining).filter(i => adj[i].some(nb => placedBeforeStep.has(nb)));
         const emptyStepSet = new Set();
-        const baseUnblocked = rawFrontier.filter(i =>
-          !isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, placedBeforeStep)
-          && !belowMap[i].some(u => remaining.has(u) && isPrereqGrounded(u))
-        );
+        const baseUnblocked = rawFrontier.filter(i => {
+          if (isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, placedBeforeStep)) return false;
+          const inl = scopePartToInlineSub.get(i);
+          if (inl) {
+            const mSet = scopeInlineMemberSets.get(inl.id);
+            return !inl.partIndices.some(m =>
+              remaining.has(m) && (belowMap[m] || []).some(u => !mSet.has(u) && remaining.has(u) && isPrereqGrounded(u))
+            );
+          }
+          return !belowMap[i].some(u => remaining.has(u) && isPrereqGrounded(u));
+        });
         const fastenerUnblocked = baseUnblocked.filter(i =>
           !fastenerGuards.isBlocked(i, placedBeforeStep, emptyStepSet, remaining)
         );
@@ -7525,6 +7634,44 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
       }
 
       const anchor = frontier[0];
+      const inlineCluster = scopePartToInlineSub.get(anchor);
+      if (inlineCluster) {
+        const inlineIndices = inlineCluster.partIndices.filter(pi => remaining.has(pi));
+        for (const pi of inlineIndices) {
+          remaining.delete(pi);
+          placed.add(pi);
+        }
+        const inlineParts = inlineIndices.map(i => parts[i]);
+        const inlineBoxes = inlineIndices.map(i => boxes[i]);
+        const camChoice = chooseStickyStepCamera(inlineBoxes, builtBoxes, builtBounds, activeCam);
+        activeCam = { side: camChoice.side, corner: camChoice.corner, az: camChoice.az, el: camChoice.el };
+        for (const b of inlineBoxes) {
+          builtBounds = expandBoundsWithBox(builtBounds, b);
+          builtBoxes.push(b);
+        }
+        localStepCount++;
+        globalStep++;
+        const buildParts = normalizeCanonicalSubParts(inlineParts, `${idPrefix}_${inlineCluster.id}`);
+        outSteps.push({
+          id: `${idPrefix}_s${globalStep}`,
+          num: globalStep,
+          side: camChoice.side,
+          corner: camChoice.corner,
+          az: camChoice.az,
+          el: camChoice.el,
+          cue: localStepCount === 1 && prePlacedSet.size === 0 ? 'none' : camChoice.cue,
+          parts: inlineParts,
+          subassembly: {
+            name: inlineCluster.name,
+            repeatCount: 1,
+            direction: 'horizontal',
+            asPages: false,
+            buildParts,
+          },
+        });
+        continue;
+      }
+
       const anchorY = layerY[anchor];
       const anchorConnectedToPrev = placedBeforeStep.size > 0 && adj[anchor].some(nb => placedBeforeStep.has(nb));
       const anchorIsStrictUnderside = placedBeforeStep.size > 0 && isStrictDeckUndersidePart(anchor, boxes, adj, placedBeforeStep);
@@ -7539,6 +7686,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
           const supportSet = placedBeforeStep.size > 0 ? placedBeforeStep : placedInStep;
           return Array.from(remaining).filter(i => {
             if (placedInStep.has(i)) return false;
+            if (scopePartToInlineSub.has(i)) return false;
             if (isCladdingWaitingForUpperSupport(i, claddingFlags, boxes, adj, supportSet)) return false;
             if (Math.abs(layerY[i] - anchorY) > 12) return false;
             if (fastenerGuards.isBlocked(i, placedBeforeStep, placedInStep, remaining)) return false;
@@ -8950,7 +9098,7 @@ function getBaseDefaultPartOffsets(step) {
   const def = step?.defaultPartOffsets || null;
   const hasAuto = Boolean(auto && Object.keys(auto).length > 0);
   const hasDef = Boolean(def && Object.keys(def).length > 0);
-  if (!hasAuto && !hasDef && state.autoPlacementArrows !== false && step && !step.isStandaloneFigure && !step.isMinifigPoseStep && !step.attachedSubmodel && Array.isArray(step.parts) && step.parts.length >= 2 && step.parts.length <= 4) {
+  if (!hasAuto && !hasDef && state.autoPlacementArrows !== false && step && !step.isStandaloneFigure && !step.isMinifigPoseStep && !step.attachedSubmodel && !step.subassembly && Array.isArray(step.parts) && step.parts.length >= 2 && step.parts.length <= 4) {
     const stackPlan = detectVerticalStackColumn(step.parts.map((p) => ({ id: p.id, box: computeWorldBox(p) })));
     if (stackPlan && stackPlan.orderedPartIds.length >= 2) {
       const out = {};
@@ -12277,7 +12425,7 @@ function renderAll(renderOpts = {}) {
                   step.attachedMinifig.name || 'Minifigure',
                   `<span>×${step.attachedMinifig.repeatCount || 1}</span>`,
                 )
-              : (!step.subassembly || ov.calloutAsPages ? (() => {
+              : (pli.length > 0 ? (() => {
                 const pliSlice = pli.slice(0, 7);
                 const confusableColors = detectConfusablePliColors(
                   pliSlice.map((it) => {
@@ -12476,17 +12624,21 @@ function renderAll(renderOpts = {}) {
                   return `
                 <div class="relative flex-1 min-h-0 flex ${ov.calloutDir === 'vertical' ? 'flex-col' : 'flex-row'} items-center justify-center overflow-hidden" style="gap:${Math.round(typo.pt(6))}px;margin-top:${(isOfficialMfStyle || useOverlayPli) ? 0 : Math.round(typo.pt(4))}px">
                   ${inlineLeaderHtml}
-                  ${step.subassembly && !ov.calloutAsPages && !isOfficialMfStyle && subSnap ? `
+                  ${step.subassembly && !ov.calloutAsPages && !isOfficialMfStyle && subSnap ? (() => {
+                    const hasSubRep = (step.subassembly.repeatCount || 1) > 1;
+                    const showCalloutHeader = !wordless || showGhostCalloutCue || hasSubRep;
+                    return `
                     <div data-drag="callout" data-step="${step.id}" class="draggable-el relative z-10 shrink-0 ${ov.calloutDir === 'vertical' ? 'max-w-full' : 'max-w-[48%]'} max-h-full flex flex-col overflow-hidden ${isArrangeMode ? 'cursor-move' : ''}" style="width:${isTightSlot ? st.calloutWTight : st.calloutW}px;padding:${Math.round(typo.pt(5))}px;border-radius:${Math.round(typo.pt(8))}px;background:${theme.calloutBg};border:${calloutSel ? `2px solid ${theme.accent}` : `1.5px solid ${theme.calloutBorder}`};transform:translate(${calloutPos.x}px,${calloutPos.y}px)">
-                      <div class="flex items-center ${wordless ? 'justify-end' : 'justify-between'} font-bold shrink-0 min-w-0" style="gap:${Math.round(typo.pt(4))}px;font-size:${st.calloutFont}px">
+                      ${showCalloutHeader ? `<div class="flex items-center ${wordless ? 'justify-end' : 'justify-between'} font-bold shrink-0 min-w-0" style="gap:${Math.round(typo.pt(4))}px;font-size:${st.calloutFont}px">
                         ${wordless ? '' : `<span class="min-w-0 truncate">${escHtml(step.subassembly.name)}</span>`}
-                        <span class="shrink-0 flex items-center" style="gap:${Math.round(typo.pt(3))}px">
+                        ${(showGhostCalloutCue || hasSubRep) ? `<span class="shrink-0 flex items-center" style="gap:${Math.round(typo.pt(3))}px">
                           ${showGhostCalloutCue ? `<span class="rounded-full opacity-75" style="border:1px dashed ${theme.calloutBorder};padding:0 ${Math.round(typo.pt(3.5))}px;font-size:${Math.max(8, Math.round(st.calloutFont * 0.82))}px" title="Completed subassembly preview">↳</span>` : ''}
-                          <span class="rounded-full text-white shrink-0" style="background:${theme.accent};padding:${Math.round(typo.pt(1))}px ${Math.round(typo.pt(4.5))}px">${step.subassembly.repeatCount}×</span>
-                        </span>
-                      </div>
+                          ${hasSubRep ? `<span class="rounded-full text-white shrink-0" style="background:${theme.accent};padding:${Math.round(typo.pt(1))}px ${Math.round(typo.pt(4.5))}px">${step.subassembly.repeatCount}×</span>` : ''}
+                        </span>` : ''}
+                      </div>` : ''}
                       <span data-canvas-mount="sub_${slotIdx}"></span>
-                    </div>` : ''}
+                    </div>`;
+                  })() : ''}
 
                   <div data-step-visual="${step.id}" class="flex-1 min-w-0 min-h-0 w-full h-full flex items-center justify-center relative overflow-hidden">
                     ${showAttachStarburst && attachStarburstInit ? `<div data-attach-starburst="${step.id}" class="absolute pointer-events-none opacity-80" style="left:${attachStarburstInit.cx.toFixed(1)}px;top:${attachStarburstInit.cy.toFixed(1)}px;width:${attachStarburstDiam}px;height:${attachStarburstDiam}px;transform:translate(-50%,-50%)">${buildAttachmentStarburstSvg(attachStarburstDiam)}</div>` : ''}
@@ -23409,21 +23561,76 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
               }),
             )
           : null;
-        if (pdfMosaicPlan) {
-          drawMosaicChartCanvas(ctx, pdfMosaicPlan, sx + st.slotPad, renderTopY, mainAvailW, renderAvailH);
-        } else {
-          drawContain(ctx, stepImg, sx + st.slotPad, renderTopY, mainAvailW, renderAvailH);
+        const hasPdfInlineCallout = Boolean(step.subassembly && !ov.calloutAsPages && !isOfficialMfStyle && Array.isArray(step.subassembly.buildParts) && step.subassembly.buildParts.length > 0);
+        const calloutGapPdf = Math.round(typo.pt(6));
+        let modelDrawX = sx + st.slotPad;
+        let modelDrawW = mainAvailW;
+        let pdfCallBox = null;
+        if (hasPdfInlineCallout) {
+          const cw = Math.min(Math.round(mainAvailW * 0.34), isTightSlot ? st.calloutWTight : st.calloutW);
+          const chH = Math.min(Math.round(renderAvailH * 0.62), Math.max(Math.round(cw * 0.82), Math.round(typo.pt(64))));
+          const cy = renderTopY + Math.round((renderAvailH - chH) / 2);
+          pdfCallBox = { x: sx + st.slotPad, y: cy, w: cw, h: chH };
+          modelDrawX = sx + st.slotPad + cw + calloutGapPdf;
+          modelDrawW = Math.max(40, mainAvailW - cw - calloutGapPdf);
         }
-        if (step.subassembly && !ov.calloutAsPages && !isOfficialMfStyle) {
+        if (pdfMosaicPlan) {
+          drawMosaicChartCanvas(ctx, pdfMosaicPlan, modelDrawX, renderTopY, modelDrawW, renderAvailH);
+        } else {
+          drawContain(ctx, stepImg, modelDrawX, renderTopY, modelDrawW, renderAvailH);
+        }
+        if (hasPdfInlineCallout && pdfCallBox) {
           const reps = Math.min(4, Math.max(1, step.subassembly.repeatCount || 1));
-          const callBox = { x: sx + st.slotPad + 6, y: renderTopY + 8, w: Math.min(110, mainAvailW * 0.28), h: Math.min(72, renderAvailH * 0.32) };
           const targets = reps === 1
-            ? [{ x: sx + st.slotPad + mainAvailW * 0.56, y: renderTopY + renderAvailH * 0.5 }]
+            ? [{ x: modelDrawX + modelDrawW * 0.42, y: renderTopY + renderAvailH * 0.5 }]
             : Array.from({ length: reps }, (_, rIdx) => ({
-                x: sx + st.slotPad + mainAvailW * (0.44 + (rIdx / Math.max(1, reps - 1)) * 0.24),
+                x: modelDrawX + modelDrawW * (0.34 + (rIdx / Math.max(1, reps - 1)) * 0.24),
                 y: renderTopY + renderAvailH * (0.46 + (rIdx % 2) * 0.08),
               }));
-          drawOrthogonalLeadersCanvas(ctx, routeOrthogonalLeaders(callBox, targets), { stroke: theme.text, strokeWidth: 1.5, arrowSize: 8 });
+          drawOrthogonalLeadersCanvas(ctx, routeOrthogonalLeaders(pdfCallBox, targets), { stroke: theme.text, strokeWidth: 1.5, arrowSize: 8 });
+          const cPad = Math.round(typo.pt(5));
+          drawRRect(pdfCallBox.x, pdfCallBox.y, pdfCallBox.w, pdfCallBox.h, Math.round(typo.pt(8)));
+          ctx.fillStyle = theme.calloutBg;
+          ctx.fill();
+          ctx.strokeStyle = theme.calloutBorder;
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+          let imgTopY = pdfCallBox.y + cPad;
+          const hasSubRepPdf = (step.subassembly.repeatCount || 1) > 1;
+          if (!wordless || hasSubRepPdf) {
+            const hdrH = Math.round(st.calloutFont * 1.45);
+            ctx.font = themeCanvasFont(theme, 700, st.calloutFont);
+            if (!wordless && step.subassembly.name) {
+              ctx.fillStyle = theme.text;
+              ctx.fillText(step.subassembly.name, pdfCallBox.x + cPad, imgTopY + Math.round(st.calloutFont * 0.15));
+            }
+            if (hasSubRepPdf) {
+              const repLbl = `${step.subassembly.repeatCount}×`;
+              const repW = Math.ceil(ctx.measureText(repLbl).width + typo.pt(9));
+              const repH = Math.round(st.calloutFont * 1.35);
+              const rx = pdfCallBox.x + pdfCallBox.w - cPad - repW;
+              drawRRect(rx, imgTopY, repW, repH, repH / 2);
+              ctx.fillStyle = theme.accent;
+              ctx.fill();
+              ctx.fillStyle = '#ffffff';
+              ctx.fillText(repLbl, rx + Math.round(typo.pt(4.5)), imgTopY + Math.round((repH - st.calloutFont) * 0.45));
+            }
+            imgTopY += hdrH + Math.round(typo.pt(2));
+          }
+          const subSnapPdf = renderSnapshot([], step.subassembly.buildParts, 38, 30, 520, 360, 1.0, {
+            highlightNew: false,
+            fadePrev: false,
+            showArrows: false,
+            accent: theme.accent,
+            stepLighting: state.stepLighting,
+            highQualityStepRender: state.highQualityStepRender,
+            starkBlackOutlines: state.starkBlackOutlines,
+            outlineLineWeight: state.starkBlackOutlines ? state.outlineLineWeight : 'light',
+            darkBackground: isDarkHexColor(toHexColor(theme.bgColor || '#ffffff', '#ffffff')),
+          });
+          const subImgPdf = await resolveRenderDrawable(subSnapPdf);
+          const imgAvailH = Math.max(16, pdfCallBox.y + pdfCallBox.h - cPad - imgTopY);
+          drawContain(ctx, subImgPdf, pdfCallBox.x + cPad, imgTopY, Math.max(16, pdfCallBox.w - cPad * 2), imgAvailH);
         }
         if (state.showSizeGuides && !isOfficialMfStyle) {
           const pdfCoax = detectCoaxialPositionCallout(
@@ -27338,6 +27545,22 @@ async function buildInteractiveHtmlArtifact(mode: 'export' | 'preview' = 'export
           const submodelThumbKey = isSubmodelStep ? ensureSubmodelThumb(ch) : undefined;
           const rawSubRep = Number(step.submodelRepeat || ch.repeatCount || 1);
           const submodelRepeat = (isSubmodelStep && rawSubRep > 1) ? rawSubRep : undefined;
+          let inlineCalloutThumbKey;
+          let inlineCalloutRepeat;
+          if (step.subassembly && !ov.calloutAsPages && Array.isArray(step.subassembly.buildParts) && step.subassembly.buildParts.length > 0) {
+            const icKey = `ic_${step.id}`;
+            if (!submodelThumbs[icKey]) {
+              const icUrl = getSubmodelThumb(
+                { id: `ih_${icKey}`, name: step.subassembly.name || 'Submodel', canonicalParts: step.subassembly.buildParts },
+                180,
+                135,
+              );
+              if (icUrl) submodelThumbs[icKey] = icUrl;
+            }
+            if (submodelThumbs[icKey]) inlineCalloutThumbKey = icKey;
+            const icRep = Number(step.subassembly.repeatCount || 1);
+            if (icRep > 1) inlineCalloutRepeat = icRep;
+          }
           const effectiveCue = getEffectiveStepCue(ch, step);
           const hasCue = Boolean(state.showRotCues && effectiveCue && effectiveCue !== 'none');
           const cueLabel = hasCue ? getRotationCueLabel(effectiveCue, wordless) : undefined;
@@ -27355,6 +27578,8 @@ async function buildInteractiveHtmlArtifact(mode: 'export' | 'preview' = 'export
             isSubmodelStep: isSubmodelStep || undefined,
             submodelThumbKey,
             submodelRepeat,
+            inlineCalloutThumbKey,
+            inlineCalloutRepeat,
             pli: pliEntries,
             previewUrl: allSteps.length <= 24
               ? renderFallbackPreview(prev, step.parts || [], cam.az, cam.el, ov.modelScale || 1.0, {
