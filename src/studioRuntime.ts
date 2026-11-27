@@ -13413,16 +13413,14 @@ function renderContextOverlay(page) {
           <div class="w-px h-4 bg-[var(--border)] shrink-0 sm:hidden" aria-hidden="true"></div>
           <span class="hidden sm:inline text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)] ml-1 mr-0.5">Rotate</span>
           ${CAMERA_ROTATION_STEPS.map(r => `<button type="button" data-hero-rotate="${r.deltaDeg}" title="${escHtml(r.title)}" class="hero-rotate-btn px-1.5 sm:px-2 py-1 rounded-md text-[11px] sm:text-xs font-semibold inline-flex items-center gap-1 shrink-0 transition-colors cursor-pointer bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] active:bg-[var(--primary-soft)] active:text-[var(--primary)]"><span class="hidden sm:inline-flex">${buildCameraRotateSvg(r.icon)}</span><span class="font-mono">${r.label}</span></button>`).join('')}
+          ${customized ? `<button id="heroResetCam" type="button" title="Reset camera to default" class="px-2 sm:px-2.5 py-1 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] text-[11px] sm:text-xs font-semibold shrink-0 cursor-pointer"><span class="sm:hidden">Reset</span><span class="hidden sm:inline">Reset Camera</span></button>` : ''}
         </div>
         <div class="flex items-center justify-between gap-2 pt-1.5 sm:pt-2 border-t border-[var(--border)]">
           <div class="flex items-center gap-1.5 sm:gap-2">
             <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Zoom</span>
             ${renderZoomStepperHtml({ downId: 'heroZoomOut', upId: 'heroZoomIn', pct: zoomPct, downLabel: 'Zoom model out', upLabel: 'Zoom model in' })}
           </div>
-          <div class="flex items-center gap-2 shrink-0">
-            <span class="sm:hidden hero-cam-readout font-mono text-[10px] font-semibold text-[var(--muted-foreground)] tabular-nums">${heroReadoutText}</span>
-            ${customized ? `<button id="heroResetCam" type="button" class="px-2 sm:px-2.5 py-1 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] text-[11px] sm:text-xs font-semibold cursor-pointer"><span class="sm:hidden">Reset</span><span class="hidden sm:inline">Reset Camera</span></button>` : ''}
-          </div>
+          <span class="sm:hidden hero-cam-readout font-mono text-[10px] font-semibold text-[var(--muted-foreground)] tabular-nums shrink-0">${heroReadoutText}</span>
         </div>
       </div>`;
 
@@ -14008,6 +14006,7 @@ function renderContextOverlay(page) {
             <span class="hidden sm:inline text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)] ml-1 mr-0.5">Rotate</span>
             ${isMfStep ? `<button type="button" id="btnMfFront34" class="px-2 sm:px-2.5 py-1 rounded-md text-[11px] sm:text-xs font-semibold inline-flex items-center gap-1 shrink-0 transition-colors cursor-pointer ${isFront34 ? 'bg-[var(--primary-soft)] text-[var(--primary)] ring-1 ring-[var(--primary)]' : 'bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)]'}"><span>3/4</span><span class="hidden sm:inline">Pose</span></button>` : ''}
             ${CAMERA_ROTATION_STEPS.map(r => `<button type="button" data-step-rotate="${r.deltaDeg}" title="${escHtml(r.title)}" class="step-rotate-btn px-1.5 sm:px-2 py-1 rounded-md text-[11px] sm:text-xs font-semibold inline-flex items-center gap-1 shrink-0 transition-colors cursor-pointer bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] active:bg-[var(--primary-soft)] active:text-[var(--primary)]"><span class="hidden sm:inline-flex">${buildCameraRotateSvg(r.icon)}</span><span class="font-mono">${r.label}</span></button>`).join('')}
+            ${caps.hasCustomCameraAny ? `<button type="button" id="btnResetCam" title="Reset camera to default" class="px-2 sm:px-2.5 py-1 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] text-[11px] sm:text-xs font-semibold shrink-0 cursor-pointer">Reset</button>` : ''}
           </div>
 
           <div class="${camExpanded ? 'block' : 'hidden'} sm:block space-y-2 pt-1.5 sm:pt-0 border-t sm:border-t-0 border-[var(--border)]">
@@ -14024,7 +14023,6 @@ function renderContextOverlay(page) {
                   </div>
                 </div>
               </div>
-              ${caps.hasCustomCameraAny ? `<button type="button" id="btnResetCam" class="px-2.5 py-1 rounded-md bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] text-xs font-semibold cursor-pointer">Reset</button>` : ''}
             </div>
 
             ${caps.canApplyAngleToRange ? `

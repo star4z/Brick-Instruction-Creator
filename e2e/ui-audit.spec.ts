@@ -295,11 +295,24 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     if (await cameraModeBtn.isVisible()) {
       await cameraModeBtn.click();
       await expect(page.locator('#contextOverlay')).toBeVisible();
-      await expect(page.locator('#contextOverlay .hero-rotate-btn')).toHaveText(['−90°', '+90°']);
+      const heroRotateBtns = page.locator('#contextOverlay .hero-rotate-btn');
+      await expect(heroRotateBtns).toHaveText(['−90°', '+90°']);
+      await heroRotateBtns.last().click();
+      const heroResetBtn = page.locator('#heroResetCam');
+      await expect(heroResetBtn).toBeVisible();
+      const heroLastRotateBox = await heroRotateBtns.last().boundingBox();
+      const heroResetBox = await heroResetBtn.boundingBox();
+      expect(heroLastRotateBox && heroResetBox).toBeTruthy();
+      if (heroLastRotateBox && heroResetBox) {
+        expect(Math.abs(heroResetBox.y - heroLastRotateBox.y)).toBeLessThanOrEqual(6);
+        expect(heroResetBox.x).toBeGreaterThanOrEqual(heroLastRotateBox.x + heroLastRotateBox.width - 1);
+      }
       await auditSurface(page, `${testInfo.project.name}: Cover Page (Camera Mode)`, {
         checkWorkspaceChrome: true,
         hasModel: true,
       });
+      await heroResetBtn.click();
+      await expect(heroResetBtn).toBeHidden();
     }
     await page.locator('#modePill [data-mode="page"]').click();
     await expect(page.locator('#contextOverlay')).toBeVisible();
@@ -327,11 +340,24 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
 
     await page.locator('#modePill [data-mode="step"]').click();
     await expect(page.locator('#contextOverlay')).toBeVisible();
-    await expect(page.locator('#contextOverlay .step-rotate-btn')).toHaveText(['−90°', '+90°']);
+    const stepRotateBtns = page.locator('#contextOverlay .step-rotate-btn');
+    await expect(stepRotateBtns).toHaveText(['−90°', '+90°']);
+    await stepRotateBtns.last().click();
+    const stepResetBtn = page.locator('#btnResetCam');
+    await expect(stepResetBtn).toBeVisible();
+    const stepLastRotateBox = await stepRotateBtns.last().boundingBox();
+    const stepResetBox = await stepResetBtn.boundingBox();
+    expect(stepLastRotateBox && stepResetBox).toBeTruthy();
+    if (stepLastRotateBox && stepResetBox) {
+      expect(Math.abs(stepResetBox.y - stepLastRotateBox.y)).toBeLessThanOrEqual(6);
+      expect(stepResetBox.x).toBeGreaterThanOrEqual(stepLastRotateBox.x + stepLastRotateBox.width - 1);
+    }
     await auditSurface(page, `${testInfo.project.name}: Step Page (Step Mode)`, {
       checkWorkspaceChrome: true,
       hasModel: true,
     });
+    await stepResetBtn.click();
+    await expect(stepResetBtn).toBeHidden();
 
     // Open Apply Camera to Steps modal from Step context overlay if present
     const applyCameraBtn = page.locator('#contextOverlay button').filter({ hasText: /Apply to Steps|Apply Camera|Steps…/i }).first();
