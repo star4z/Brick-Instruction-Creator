@@ -525,8 +525,21 @@ export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload)
   const bodyFontStack = sanitizeFontStack(t.bodyFont);
   const headingFontStack = sanitizeFontStack(t.headingFont, bodyFontStack);
   const customFontFacesCss = buildCustomFontFacesCss(t.customFontFaces);
-  const glassBg = t.isDark ? 'rgba(22, 26, 34, 0.86)' : 'rgba(255, 255, 255, 0.88)';
-  const glassBorder = t.isDark ? 'rgba(255, 255, 255, 0.14)' : 'rgba(15, 23, 42, 0.12)';
+  const hexLuma = (hex: string): number | null => {
+    const m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(hex.trim());
+    if (!m) return null;
+    const raw = m[1].length === 3 ? m[1].split('').map((c) => c + c).join('') : m[1];
+    const r = parseInt(raw.slice(0, 2), 16);
+    const g = parseInt(raw.slice(2, 4), 16);
+    const b = parseInt(raw.slice(4, 6), 16);
+    return 0.299 * r + 0.587 * g + 0.114 * b;
+  };
+  const bgLuma = hexLuma(safeBg);
+  const textLuma = hexLuma(safeText);
+  const effectiveIsDark = Boolean(t.isDark) || (bgLuma !== null && bgLuma < 128) || (textLuma !== null && textLuma > 180);
+  const glassBg = effectiveIsDark ? 'rgba(24, 28, 38, 0.88)' : 'rgba(255, 255, 255, 0.90)';
+  const glassBorder = effectiveIsDark ? 'rgba(255, 255, 255, 0.18)' : 'rgba(15, 23, 42, 0.14)';
+  const glassText = effectiveIsDark ? '#f8fafc' : '#0f172a';
   const staticFallbackHtml = buildStaticFallbackHtml(payload, safeEditorUrl);
 
   // Strip static fallback preview URLs and embedded font binaries from the JS 3D payload to avoid duplicating bytes in RAM
@@ -536,7 +549,7 @@ export function generateInteractiveHtmlDocument(payload: InteractiveHtmlPayload)
     editorUrl: /^https?:\/\//i.test(String(payload.editorUrl || '').trim())
       ? String(payload.editorUrl).trim()
       : DEFAULT_EDITOR_URL,
-    theme: runtimeTheme,
+    theme: { ...runtimeTheme, isDark: effectiveIsDark },
     pages: payload.pages.map((pg) => {
       const { previewUrl: _p, steps, ...rest } = pg;
       return {
@@ -571,6 +584,7 @@ ${customFontFacesCss}  :root {
     --callout-border: ${safeCalloutBorder};
     --glass-bg: ${glassBg};
     --glass-border: ${glassBorder};
+    --glass-text: ${glassText};
     --font-body: ${bodyFontStack};
     --font-heading: ${headingFontStack};
   }
@@ -686,10 +700,11 @@ ${customFontFacesCss}  :root {
   canvas#glStage:active { cursor: grabbing; }
   .glass {
     background: var(--glass-bg);
+    color: var(--glass-text);
     border: 1px solid var(--glass-border);
     backdrop-filter: blur(14px);
     -webkit-backdrop-filter: blur(14px);
-    box-shadow: 0 8px 28px rgba(0,0,0,0.12);
+    box-shadow: 0 8px 28px rgba(0,0,0,0.16);
   }
   .topbar {
     position: fixed; top: max(12px, env(safe-area-inset-top)); left: 12px; right: 12px; z-index: 20;
@@ -699,13 +714,13 @@ ${customFontFacesCss}  :root {
   .topbar > * { pointer-events: auto; }
   .pill {
     display: inline-flex; align-items: center; gap: 6px; height: 40px; padding: 0 14px;
-    border-radius: 999px; font-size: 13px; font-weight: 700; color: var(--text);
+    border-radius: 999px; font-size: 13px; font-weight: 700; color: var(--glass-text);
     text-decoration: none; cursor: pointer; transition: transform 120ms ease, opacity 120ms ease;
     border: 1px solid var(--glass-border);
     background: var(--glass-bg);
     backdrop-filter: blur(14px);
     -webkit-backdrop-filter: blur(14px);
-    box-shadow: 0 6px 20px rgba(0,0,0,0.1);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.14);
   }
   .pill:active { transform: scale(0.97); }
   .pill.primary { background: var(--accent); color: #fff; border-color: transparent; }
@@ -717,7 +732,7 @@ ${customFontFacesCss}  :root {
 
   .hero-overlay {
     position: fixed; top: calc(max(12px, env(safe-area-inset-top)) + 52px); left: 50%; transform: translateX(-50%); z-index: 15;
-    width: min(92vw, 520px); text-align: center; pointer-events: none;
+    width: min(calc(100vw - 116px), 520px); text-align: center; pointer-events: none;
     display: flex; flex-direction: column; align-items: center; gap: 6px;
   }
   .hero-badge {
@@ -726,8 +741,9 @@ ${customFontFacesCss}  :root {
     box-shadow: 0 4px 14px rgba(0,0,0,0.16);
   }
   .hero-title {
-    margin: 0; font-size: clamp(22px, 4.4vw, 34px); font-weight: 900; letter-spacing: -0.02em; line-height: 1.1;
+    margin: 0; font-size: clamp(20px, 4.2vw, 34px); font-weight: 900; letter-spacing: -0.02em; line-height: 1.12;
     text-shadow: 0 2px 14px rgba(0,0,0,0.12);
+    overflow-wrap: break-word;
   }
   .hero-sub {
     margin: 0; font-size: 13px; font-weight: 600; color: var(--muted); max-width: 420px;
@@ -754,7 +770,7 @@ ${customFontFacesCss}  :root {
   }
   .step-cue {
     display: inline-flex; align-items: center; gap: 7px; padding: 0;
-    background: transparent; color: var(--text); border: none;
+    background: transparent; color: var(--glass-text); border: none;
     font-size: 13px; font-weight: 800; width: fit-content; box-shadow: none;
   }
   .step-cue-icon {
@@ -762,13 +778,6 @@ ${customFontFacesCss}  :root {
     background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent);
     display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
   }
-
-  .page-step-tabs { display: flex; flex-wrap: wrap; gap: 4px; }
-  .step-tab-btn {
-    border: 1px solid var(--glass-border); background: var(--glass-bg); color: var(--text);
-    border-radius: 999px; padding: 4px 10px; font-size: 11px; font-weight: 700; cursor: pointer;
-  }
-  .step-tab-btn.active { background: var(--accent); color: #fff; border-color: transparent; }
 
   .pli-panel {
     border-radius: 16px; padding: 8px 10px; max-width: min(88vw, 360px); max-height: 34vh; overflow-y: auto;
@@ -790,17 +799,17 @@ ${customFontFacesCss}  :root {
   }
   .tool-btn {
     width: 38px; height: 38px; border-radius: 999px; border: 1px solid var(--glass-border);
-    background: var(--glass-bg); color: var(--text); font-size: 15px; font-weight: 800;
+    background: var(--glass-bg); color: var(--glass-text); font-size: 15px; font-weight: 800;
     display: flex; align-items: center; justify-content: center; cursor: pointer;
     backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-    box-shadow: 0 4px 14px rgba(0,0,0,0.1);
+    box-shadow: 0 4px 14px rgba(0,0,0,0.14);
   }
   .tool-btn.active { background: var(--accent); color: #fff; border-color: transparent; }
 
   .hint-chip {
     position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(max(14px, env(safe-area-inset-bottom)) + 78px); z-index: 12;
     padding: 4px 12px; border-radius: 999px; font-size: 11px; font-weight: 600;
-    background: rgba(0,0,0,0.36); color: #fff; pointer-events: none; white-space: nowrap;
+    background: rgba(0,0,0,0.48); color: #fff; pointer-events: none; white-space: nowrap;
     transition: opacity 400ms ease;
   }
 
@@ -812,14 +821,14 @@ ${customFontFacesCss}  :root {
   .dock-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
   .nav-btn {
     height: 36px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--glass-border);
-    background: transparent; color: var(--text); font-size: 13px; font-weight: 700; cursor: pointer;
+    background: transparent; color: var(--glass-text); font-size: 13px; font-weight: 700; cursor: pointer;
     display: inline-flex; align-items: center; justify-content: center; gap: 5px; flex-shrink: 0;
   }
   .nav-btn.icon-only { width: 36px; padding: 0; }
   .nav-btn.primary { background: var(--accent); color: #fff; border-color: transparent; }
-  .nav-btn:disabled { opacity: 0.32; cursor: default; }
+  .nav-btn:disabled { opacity: 0.34; cursor: default; }
   .page-btn {
-    flex: 1; min-width: 0; height: 36px; border: none; background: transparent; color: var(--text);
+    flex: 1; min-width: 0; height: 36px; border: none; background: transparent; color: var(--glass-text);
     font-size: 12px; font-weight: 700; cursor: pointer; border-radius: 999px; padding: 0 8px;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
@@ -900,9 +909,9 @@ ${staticFallbackHtml}
         ? `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="7" height="7" rx="1.4"/><rect x="14" y="4" width="7" height="7" rx="1.4"/><rect x="3" y="13" width="7" height="7" rx="1.4"/><rect x="14" y="13" width="7" height="7" rx="1.4"/></svg>`
         : `<span>${safeTitle}</span>`}
     </button>
-    <a class="pill editor-link" href="${safeEditorUrl}" target="_blank" rel="noopener noreferrer" title="Open ${TOOL_DISPLAY_NAME}" aria-label="${TOOL_DISPLAY_NAME}">
-      <span>${wordless ? '↗' : `${TOOL_DISPLAY_NAME} ↗`}</span>
-    </a>
+    ${payload.skipStaticFallback || wordless ? '' : `<a class="pill editor-link" href="${safeEditorUrl}" target="_blank" rel="noopener noreferrer" title="Open ${TOOL_DISPLAY_NAME}" aria-label="${TOOL_DISPLAY_NAME}">
+      <span>${TOOL_DISPLAY_NAME} ↗</span>
+    </a>`}
   </header>
 
   <div class="stage-wrap">
@@ -916,10 +925,9 @@ ${staticFallbackHtml}
       <button id="btnTogglePli" class="tool-btn" type="button" title="Toggle parts box" aria-label="Toggle parts box" style="display:none">▤</button>
       <button id="btnToggleHl" class="tool-btn" type="button" title="Toggle highlight new pieces" aria-label="Highlight new pieces" style="display:none">✦</button>
       <button id="btnXrayToggle" class="tool-btn" type="button" title="X-Ray previous assembly" aria-label="X-Ray previous assembly" style="display:none">◎</button>
-      <div id="explodeWrap" title="Explode current step" style="display:none;align-items:center;gap:4px;padding:4px 8px;border-radius:10px;background:rgba(255,255,255,0.88);border:1px solid rgba(15,23,42,0.14);font-size:10px;font-weight:700;color:#0f172a">
-        <span>↕</span>
-        <input id="explodeSlider" type="range" min="0" max="200" value="0" style="width:54px;accent-color:var(--accent);cursor:pointer" aria-label="Explode current step" />
-      </div>
+      <button id="btnToggleExplode" class="tool-btn" type="button" title="Toggle piece placement offset" aria-label="Toggle piece placement offset" style="display:none">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m8 7 4-4 4 4"/><path d="m8 11 4 4 4-4"/><path d="M5 20h14"/></svg>
+      </button>
     </div>
     <div id="hintChip" class="hint-chip">${wordless ? '360° ↻ · ±' : 'Drag to rotate · Pinch or scroll to zoom · Shift-drag or 2-finger to pan'}</div>
     <div id="flatView" class="flat-view"></div>
@@ -1383,7 +1391,9 @@ ${staticFallbackHtml}
   let highlightNew = DATA.highlightNew !== false;
   let fadePrev = DATA.fadePrev !== false;
   let xrayPrev = false;
+  let explodeActive = false;
   let explodeLift = 0;
+  let targetExplodeLift = 0;
   const hlRgb = hexToRgb01(DATA.highlightColor || '#ff2d55');
   const arrowRgb01 = hexToRgb01(DATA.arrowColor || '#dc2626');
   const arrowColBytes = [Math.round(arrowRgb01[0] * 255), Math.round(arrowRgb01[1] * 255), Math.round(arrowRgb01[2] * 255), 255];
@@ -1606,6 +1616,7 @@ ${staticFallbackHtml}
     drawQueued = true;
     requestAnimationFrame(() => {
       drawQueued = false;
+      let needsMore = false;
       if (targetCam) {
         let done = true;
         const lerp = (a, b) => Math.abs(b - a) < 0.01 ? b : (done = false, a + (b - a) * 0.22);
@@ -1615,9 +1626,16 @@ ${staticFallbackHtml}
         cam.panX = lerp(cam.panX, targetCam.panX);
         cam.panY = lerp(cam.panY, targetCam.panY);
         if (done) targetCam = null;
-        else requestDraw();
+        else needsMore = true;
+      }
+      if (Math.abs(targetExplodeLift - explodeLift) > 0.35) {
+        explodeLift += (targetExplodeLift - explodeLift) * 0.22;
+        needsMore = true;
+      } else if (explodeLift !== targetExplodeLift) {
+        explodeLift = targetExplodeLift;
       }
       drawScene();
+      if (needsMore) requestDraw();
     });
   }
 
@@ -1625,8 +1643,8 @@ ${staticFallbackHtml}
     if (!activeScene) return;
     const rect = canvas.getBoundingClientRect();
     const isCompactViewport = (navigator.maxTouchPoints || 0) > 0 || window.innerWidth < 1024;
-    const maxDpr = isCompactViewport ? 1.5 : 2;
-    const maxDim = isCompactViewport ? 1600 : 2560;
+    const maxDpr = isCompactViewport ? 2 : 2.5;
+    const maxDim = isCompactViewport ? 2048 : 2560;
     const dpr = Math.min(Math.max(window.devicePixelRatio || 1, 1), maxDpr);
     const rawW = Math.max(100, Math.round((rect.width || window.innerWidth) * dpr));
     const rawH = Math.max(100, Math.round((rect.height || window.innerHeight) * dpr));
@@ -1648,7 +1666,7 @@ ${staticFallbackHtml}
     const r = activeBounds.radius;
     const dist = r * 3.0;
     const eye = [c[0] + dist*Math.sin(az)*Math.cos(el), c[1] + dist*Math.sin(el), c[2] + dist*Math.cos(az)*Math.cos(el)];
-    const view = lookAtMat4(eye, c, cam.el < 0 ? [0, -1, 0] : [0, 1, 0]);
+    const view = lookAtMat4(eye, c, [0, 1, 0]);
     const halfH = (r * 1.38) / Math.max(0.35, cam.zoom);
     const halfW = halfH * (w / Math.max(1, h));
     const pxX = cam.panX * halfW;
@@ -1954,24 +1972,32 @@ ${staticFallbackHtml}
     activeScene = scene;
 
     if (scene) {
-      const allIdx = [...(scene.prevPartIdx || []), ...(scene.newPartIdx || [])];
+      const prevList = scene.prevPartIdx || [];
+      const allIdx = [...prevList, ...(scene.newPartIdx || [])];
       activeBounds = computeSceneBounds(allIdx);
       cam = getDefaultCamForItem(item);
       targetCam = null;
+      explodeActive = false;
+      explodeLift = 0;
+      targetExplodeLift = 0;
+      const hasPrevAssembly = Boolean(step && prevList.length > 0);
       canvas.style.display = 'block';
       camTools.style.display = 'flex';
       hintEl.style.display = interacted ? 'none' : 'block';
       btnPli.style.display = step && step.pli && step.pli.length > 0 ? 'flex' : 'none';
       btnPli.classList.toggle('active', showPli);
-      btnHl.style.display = step ? 'flex' : 'none';
+      btnHl.style.display = hasPrevAssembly ? 'flex' : 'none';
       btnHl.classList.toggle('active', highlightNew);
       const btnXray = document.getElementById('btnXrayToggle');
       if (btnXray) {
-        btnXray.style.display = step ? 'flex' : 'none';
+        btnXray.style.display = hasPrevAssembly ? 'flex' : 'none';
         btnXray.classList.toggle('active', xrayPrev);
       }
-      const expWrap = document.getElementById('explodeWrap');
-      if (expWrap) expWrap.style.display = step ? 'flex' : 'none';
+      const btnExplode = document.getElementById('btnToggleExplode');
+      if (btnExplode) {
+        btnExplode.style.display = hasPrevAssembly ? 'flex' : 'none';
+        btnExplode.classList.remove('active');
+      }
       try { localStorage.setItem(STORAGE_KEY, String(curIdx)); } catch {}
       requestDraw();
     } else {
@@ -1990,12 +2016,6 @@ ${staticFallbackHtml}
     };
 
     if (pg.kind === 'steps' && step) {
-      const siblingTabs = pg.steps && pg.steps.length > 1
-        ? '<div class="page-step-tabs">' + pg.steps.map((st, si) => {
-            const targetIdx = viewerItems.findIndex(v => v.pageIndex === item.pageIndex && v.stepSlotIndex === si);
-            return '<button type="button" class="step-tab-btn ' + (si === item.stepSlotIndex ? 'active' : '') + '" data-jump="' + targetIdx + '">' + (isWordless ? st.stepNum : ('Step ' + st.stepNum)) + '</button>';
-          }).join('') + '</div>'
-        : '';
       const pliHtml = showPli && step.pli && step.pli.length > 0
         ? '<div class="pli-panel"><div class="pli-grid">' + step.pli.map(p =>
             '<div class="pli-item">' +
@@ -2018,18 +2038,12 @@ ${staticFallbackHtml}
           '<div class="step-num-big">' + step.stepNum + '</div>' +
           (metaInner ? '<div class="step-meta">' + metaInner + '</div>' : '') +
         '</div>' +
-        siblingTabs +
         pliHtml;
       stepHud.style.display = 'flex';
-      stepHud.querySelectorAll('[data-jump]').forEach((b) => {
-        b.onclick = () => { curIdx = Number(b.getAttribute('data-jump')); renderView(); };
-      });
     } else if (pg.kind === 'cover' || pg.kind === 'complete' || pg.kind === 'section_divider' || pg.kind === 'submodel_page' || pg.kind === 'back') {
-      const ctaBtn = pg.kind === 'cover' && viewerItems.length > 1
-        ? '<button id="heroStartBtn" type="button" class="pill primary">' + (isWordless ? '▶' : 'Start Building →') + '</button>'
-        : pg.kind === 'back'
-          ? '<a class="pill primary" href="' + esc(DATA.editorUrl) + '" target="_blank" rel="noopener noreferrer">' + (isWordless ? '↗' : 'Open in ${TOOL_DISPLAY_NAME} ↗') + '</a>'
-          : '';
+      const ctaBtn = pg.kind === 'back'
+        ? '<a class="pill primary" href="' + esc(DATA.editorUrl) + '" target="_blank" rel="noopener noreferrer">' + (isWordless ? '↗' : 'Open in ${TOOL_DISPLAY_NAME} ↗') + '</a>'
+        : '';
       const heroTitle = pg.title !== undefined ? pg.title : (isWordless ? '' : pg.label);
       const bagSvgHtml = isWordless && pg.kind === 'section_divider' && pg.bagNumber
         ? '<svg width="46" height="54" viewBox="0 0 64 76" fill="none" aria-hidden="true" style="display:block;margin:0 auto 4px"><path d="M12 4 L52 4 L56 14 L58 68 A4 4 0 0 1 54 72 L10 72 A4 4 0 0 1 6 68 L8 14 Z" fill="var(--pli-bg)" stroke="var(--accent)" stroke-width="3.2" stroke-linejoin="round"/><path d="M11 14 L53 14" stroke="var(--accent)" stroke-width="2.4" stroke-linecap="round"/><circle cx="32" cy="9" r="2.2" fill="var(--accent)"/><text x="32" y="51" text-anchor="middle" font-size="' + (String(pg.bagNumber).length >= 2 ? 24 : 30) + '" font-weight="900" fill="var(--text)" font-family="inherit">' + esc(String(pg.bagNumber)) + '</text></svg>'
@@ -2042,8 +2056,6 @@ ${staticFallbackHtml}
         (pg.note ? '<p class="hero-sub" style="font-size:11px;opacity:.85">' + esc(pg.note) + '</p>' : '') +
         (ctaBtn ? '<div class="hero-cta-row">' + ctaBtn + '</div>' : '');
       heroEl.style.display = 'flex';
-      const startBtn = document.getElementById('heroStartBtn');
-      if (startBtn) startBtn.onclick = () => { curIdx = Math.min(viewerItems.length - 1, curIdx + 1); renderView(); };
     } else if (pg.kind === 'bom') {
       const items = pg.bomItems || [];
       const fields = (pg.bomFields && pg.bomFields.length > 0)
@@ -2169,10 +2181,10 @@ ${staticFallbackHtml}
     document.getElementById('btnLast').disabled = curIdx >= viewerItems.length - 1;
     const pgPicker = document.getElementById('btnPagePicker');
     if (isWordless) {
-      pgPicker.textContent = pg.num + ' / ' + DATA.pages.length;
+      pgPicker.textContent = (curIdx + 1) + ' / ' + viewerItems.length;
     } else {
-      const stepText = step ? ('Step ' + step.stepNum + ' · Page ' + pg.num) : (pg.label + ' · Page ' + pg.num);
-      pgPicker.textContent = stepText + ' / ' + DATA.pages.length;
+      const stepText = step ? ('Step ' + step.stepNum) : pg.label;
+      pgPicker.textContent = stepText + ' · ' + (curIdx + 1) + ' / ' + viewerItems.length;
     }
     const scrub = document.getElementById('pageScrubber');
     scrub.max = String(Math.max(0, viewerItems.length - 1));
@@ -2218,7 +2230,7 @@ ${staticFallbackHtml}
         : (it.step ? ('Step ' + it.step.stepNum + (it.page.chapterName ? ' · ' + it.page.chapterName : '')) : it.page.label);
       return '<button type="button" class="drawer-item ' + (idx === curIdx ? 'active' : '') + '" data-idx="' + idx + '">' +
         '<span>' + esc(label) + '</span>' +
-        '<span class="drawer-num">' + (isWordless ? String(it.page.num) : ('Page ' + it.page.num)) + '</span>' +
+        '<span class="drawer-num">' + (idx + 1) + '</span>' +
       '</button>';
     }).join('');
     list.querySelectorAll('[data-idx]').forEach((btn) => {
@@ -2256,8 +2268,16 @@ ${staticFallbackHtml}
   document.getElementById('btnToggleHl').onclick = () => { highlightNew = !highlightNew; document.getElementById('btnToggleHl').classList.toggle('active', highlightNew); requestDraw(); };
   const btnXrayEl = document.getElementById('btnXrayToggle');
   if (btnXrayEl) btnXrayEl.onclick = () => { xrayPrev = !xrayPrev; btnXrayEl.classList.toggle('active', xrayPrev); requestDraw(); };
-  const explodeSliderEl = document.getElementById('explodeSlider');
-  if (explodeSliderEl) explodeSliderEl.oninput = (e) => { explodeLift = Number(e.target.value) || 0; requestDraw(); };
+  const btnExplodeEl = document.getElementById('btnToggleExplode');
+  if (btnExplodeEl) {
+    btnExplodeEl.onclick = () => {
+      explodeActive = !explodeActive;
+      btnExplodeEl.classList.toggle('active', explodeActive);
+      const liftDist = Math.max(60, Math.min(180, (activeBounds?.radius || 60) * 0.95));
+      targetExplodeLift = explodeActive ? liftDist : 0;
+      requestDraw();
+    };
+  }
 
   window.addEventListener('keydown', (e) => {
     const tgt = e.target;

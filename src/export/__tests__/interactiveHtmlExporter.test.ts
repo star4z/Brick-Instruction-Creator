@@ -127,7 +127,11 @@ describe('interactiveHtmlExporter', () => {
     expect(html).toContain('data:image/jpeg;base64,COVERPREVIEW');
     expect(html).toContain('data:image/jpeg;base64,STEP1PREVIEW');
     expect(html).toContain('canvas id="glStage"');
-    expect(html).toContain('Start Building');
+    expect(html).not.toContain('id="heroStartBtn"');
+    expect(html).not.toContain('page-step-tabs');
+    expect(html).toContain('id="btnToggleExplode"');
+    expect(html).not.toContain('id="explodeSlider"');
+    expect(html).toContain('lookAtMat4(eye, c, [0, 1, 0])');
     expect(html).toContain('"kind":"cover"');
     expect(html).toContain('"kind":"complete"');
     expect(html).toContain('id="btnFirst"');
@@ -307,7 +311,7 @@ describe('interactiveHtmlExporter font stacks', () => {
     // Wordless payload flag, rotation cue kind, and wordless runtime branch are embedded
     expect(scriptPart).toContain('"wordless":true');
     expect(scriptPart).toContain('"rotationCueKind":"flip_vertical"');
-    expect(scriptPart).toContain("isWordless ? '▶'");
+    expect(scriptPart).not.toContain('heroStartBtn');
     // Inline script must parse cleanly
     const scriptMatch = html.match(/<script>([\s\S]*?)<\/script>/);
     expect(scriptMatch).toBeTruthy();
@@ -419,11 +423,41 @@ describe('interactiveHtmlExporter font stacks', () => {
 
     expect(html).toContain('<div id="noJsFallback" class="sf-root"></div>');
     expect(html).not.toContain('Static Preview Mode');
+    expect(html).not.toContain('class="pill editor-link"');
     expect(html).toContain('DATA.prototypes = [];');
     expect(html).toContain('pr.raw = null;');
-    expect(html).toContain('const maxDpr = isCompactViewport ? 1.5 : 2;');
+    expect(html).toContain('const maxDpr = isCompactViewport ? 2 : 2.5;');
     expect(html).toContain("window.addEventListener('pagehide', disposeGlResources);");
     expect(html).toContain("gl.getExtension('WEBGL_lose_context')");
+
+    const darkHtml = generateInteractiveHtmlDocument({
+      version: 1,
+      title: 'Dark Theme Test',
+      editorUrl: DEFAULT_EDITOR_URL,
+      totalPieces: 1,
+      totalSteps: 1,
+      theme: {
+        bg: '#05070a',
+        text: '#f8fafc',
+        muted: '#94a3b8',
+        accent: '#ef4444',
+        pliBg: '#0f172a',
+        pliBorder: '#334155',
+        calloutBg: '#111827',
+        calloutBorder: '#374151',
+        isDark: false,
+      },
+      highlightNew: true,
+      highlightColor: '#ff2d55',
+      fadePrev: false,
+      fadeOpacity: 1,
+      prototypes: [],
+      textures: {},
+      parts: [],
+      pages: [{ id: 'cover', kind: 'cover', num: 1, label: 'Cover', title: 'Dark Theme Test' }],
+    });
+    expect(darkHtml).toContain('--glass-bg: rgba(24, 28, 38, 0.88);');
+    expect(darkHtml).toContain('--glass-text: #f8fafc;');
   });
 });
 

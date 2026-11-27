@@ -25764,6 +25764,8 @@ async function buildInteractiveHtmlArtifact(mode: 'export' | 'preview' = 'export
 
   try {
     const theme = getActiveTheme();
+    const themeBgHex = toHexColor(theme.bgColor || theme.bg || '#ffffff', '#ffffff');
+    const isDarkThemeBg = isDarkHexColor(themeBgHex);
     const allParts = getAllParts(state.model);
     const allSteps = getAllSteps(state.model);
     const protoIndexByKey = new Map();
@@ -25781,6 +25783,7 @@ async function buildInteractiveHtmlArtifact(mode: 'export' | 'preview' = 'export
         fadePrev: false,
         fadeOpacity: 1.0,
         showArrows: false,
+        darkBackground: isDarkThemeBg,
         accent: theme.accent,
       });
 
@@ -25833,29 +25836,42 @@ async function buildInteractiveHtmlArtifact(mode: 'export' | 'preview' = 'export
       return idx;
     };
 
-    const registerPart = (part, extraOffset = null) => {
+    const registerSingleLeaf = (leaf, extraOffset = null, fallbackKey = '') => {
       const hasOff = extraOffset && (Math.abs(extraOffset.x || 0) > 0.01 || Math.abs(extraOffset.y || 0) > 0.01 || Math.abs(extraOffset.z || 0) > 0.01);
-      const cacheKey = hasOff ? `${part.id}@${Math.round(extraOffset.x || 0)},${Math.round(extraOffset.y || 0)},${Math.round(extraOffset.z || 0)}` : part.id;
-      if (partIndexById.has(cacheKey)) return partIndexById.get(cacheKey);
-      const k = ensurePrototype(part);
-      const m = part.m || [1, 0, 0, 0, 1, 0, 0, 0, 1];
+      const baseId = leaf.id || fallbackKey;
+      const cacheKey = hasOff ? `${baseId}@${Math.round(extraOffset.x || 0)},${Math.round(extraOffset.y || 0)},${Math.round(extraOffset.z || 0)}` : baseId;
+      if (cacheKey && partIndexById.has(cacheKey)) return partIndexById.get(cacheKey);
+      const k = ensurePrototype(leaf);
+      const m = leaf.m || [1, 0, 0, 0, 1, 0, 0, 0, 1];
       const isId = Math.abs(m[0] - 1) < 1e-4 && Math.abs(m[4] - 1) < 1e-4 && Math.abs(m[8] - 1) < 1e-4 &&
         Math.abs(m[1]) < 1e-4 && Math.abs(m[2]) < 1e-4 && Math.abs(m[3]) < 1e-4 &&
         Math.abs(m[5]) < 1e-4 && Math.abs(m[6]) < 1e-4 && Math.abs(m[7]) < 1e-4;
       const entry = {
         k,
-        x: +((part.x || 0) + (extraOffset?.x || 0)).toFixed(2),
-        y: +((part.y || 0) + (extraOffset?.y || 0)).toFixed(2),
-        z: +((part.z || 0) + (extraOffset?.z || 0)).toFixed(2),
+        x: +((leaf.x || 0) + (extraOffset?.x || 0)).toFixed(2),
+        y: +((leaf.y || 0) + (extraOffset?.y || 0)).toFixed(2),
+        z: +((leaf.z || 0) + (extraOffset?.z || 0)).toFixed(2),
         ...(isId ? {} : { m: m.map((v) => +Number(v).toFixed(5)) }),
       };
       const idx = exportedParts.length;
       exportedParts.push(entry);
-      partIndexById.set(cacheKey, idx);
+      if (cacheKey) partIndexById.set(cacheKey, idx);
       return idx;
     };
 
-    const allPartIndices = allParts.map((p) => registerPart(p));
+    const registerPartLeaves = (part, extraOffset = null, parentKey = '') => {
+      const baseKey = part.id || parentKey || `p_${exportedParts.length}`;
+      if (part.children && part.children.length > 0) {
+        const out = [];
+        for (let ci = 0; ci < part.children.length; ci++) {
+          out.push(...registerPartLeaves(part.children[ci], extraOffset, `${baseKey}#${ci}`));
+        }
+        return out;
+      }
+      return [registerSingleLeaf(part, extraOffset, baseKey)];
+    };
+
+    const allPartIndices = allParts.flatMap((p) => registerPartLeaves(p));
     if (modalOpen && progPct && progBar) {
       progPct.textContent = '55%';
       progBar.style.width = '55%';
@@ -25933,7 +25949,7 @@ async function buildInteractiveHtmlArtifact(mode: 'export' | 'preview' = 'export
         const pgParts = pg.kind === 'roadmap' && pg.roadmapPage?.stages?.length
           ? (pg.roadmapPage.stages[pg.roadmapPage.stages.length - 1].cumulativeParts || allParts)
           : allParts;
-        const pgPartIdx = pgParts.map((p) => registerPart(p));
+        const pgPartIdx = pgParts.flatMap((p) => registerPartLeaves(p));
         exportPages.push({
           id: pg.id,
           kind: 'divider',
@@ -25996,7 +26012,7 @@ async function buildInteractiveHtmlArtifact(mode: 'export' | 'preview' = 'export
           },
         });
       } else if (pg.kind === 'section_divider') {
-        const previewIdx = (pg.previewParts || []).map((p) => registerPart(p));
+        const previewIdx = (pg.previewParts || []).flatMap((p) => registerPartLeaves(p));
         exportPages.push({
           id: pg.id,
           kind: 'section_divider',
@@ -26015,7 +26031,7 @@ async function buildInteractiveHtmlArtifact(mode: 'export' | 'preview' = 'export
         });
       } else if (pg.kind === 'submodel_page' && pg.step?.subassembly) {
         const subRaw = pg.step.subassembly.buildParts || [];
-        const subParts = subRaw.map((p) => registerPart(p));
+        const subParts = subRaw.flatMap((p) => registerPartLeaves(p));
         const rep = pg.step.subassembly.repeatCount || 1;
         exportPages.push({
           id: pg.id,
@@ -26074,8 +26090,8 @@ async function buildInteractiveHtmlArtifact(mode: 'export' | 'preview' = 'export
           const cam = getStepCamera(step);
           const ov = state.overrides[step.id] || {};
           const effOffsets = getEffectivePartOffsets(step, ov);
-          const prevPartIdx = prev.map((p) => registerPart(p));
-          const newPartIdx = (step.parts || []).map((p) => registerPart(p, effOffsets[p.id] || null));
+          const prevPartIdx = prev.flatMap((p) => registerPartLeaves(p));
+          const newPartIdx = (step.parts || []).flatMap((p) => registerPartLeaves(p, effOffsets[p.id] || null));
           const stepArrows = [];
           const stepArrowSpecs = [];
           for (const p of step.parts || []) {
@@ -26189,7 +26205,7 @@ async function buildInteractiveHtmlArtifact(mode: 'export' | 'preview' = 'export
       totalPieces: allParts.length,
       totalSteps: allSteps.length,
       theme: {
-        bg: theme.bg,
+        bg: themeBgHex,
         bgEnd: theme.bgEnd,
         bgType: theme.bgType || 'solid',
         bgAngle: theme.bgAngle ?? 180,
@@ -26203,7 +26219,7 @@ async function buildInteractiveHtmlArtifact(mode: 'export' | 'preview' = 'export
         headingFont: getThemeFontStack(theme, 'heading'),
         bodyFont: getThemeFontStack(theme, 'body'),
         customFontFaces: collectReferencedCustomFonts([theme]).map(({ family, format, dataUrl }) => ({ family, format, dataUrl })),
-        isDark: isDarkHexColor(toHexColor(theme.bgColor || '#ffffff', '#ffffff')),
+        isDark: isDarkThemeBg,
       },
       highlightNew: state.highlightNew,
       highlightColor: state.highlightColor,
