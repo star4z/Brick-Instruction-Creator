@@ -61,7 +61,7 @@ export function getIosHtmlExportWarningDialog(
     message:
       'Interactive 3D HTML files cannot be viewed directly on iOS or iPadOS (Files, Mail, Messages, and Safari block scripts in local HTML files).',
     detail:
-      'You can still export the file to share or open on a Mac, Windows PC, or Android device — or export a PDF to view on iOS.',
+      'Use Preview 3D Interactive Viewer to view and test it right here on iOS, export a PDF to view offline, or export anyway to share to a Mac, Windows PC, or Android device.',
     confirmLabel: 'Export Anyway',
     cancelLabel: 'Cancel',
   };

@@ -15107,6 +15107,7 @@ function syncMenuControls() {
   setVisible('menuStyleBtn', vis.showStyle);
   setVisible('menuBomSetupBtn', vis.showBomSetup);
   setVisible('menuPrintBtn', vis.showPrintPdf);
+  setVisible('menuPreviewHtmlBtn', vis.showPrintPdf);
   setVisible('menuExportHtmlBtn', vis.showPrintPdf);
   setVisible('menuFetchLibWrap', vis.showFetchLibrary);
   setVisible('menuClearLibBtn', vis.showClearLibrary);
@@ -23559,6 +23560,7 @@ function getActiveShortcutBlockingSurface() {
     return Boolean(el && !el.classList.contains('hidden'));
   };
   if (isConfirmActionDialogOpen()) return 'confirmAction';
+  if (isInteractiveHtmlPreviewOpen()) return 'export';
   if (isOpen('settingsModal')) return 'shortcuts';
   if (isShortcutsModalOpen()) return 'shortcuts';
   if (isBricksLibraryModalOpen()) return 'bricksLibrary';
@@ -23584,6 +23586,10 @@ function handleGlobalEscapeKey() {
   };
   if (isConfirmActionDialogOpen()) {
     closeConfirmActionDialog(false);
+    return true;
+  }
+  if (isInteractiveHtmlPreviewOpen()) {
+    closeInteractiveHtmlPreview();
     return true;
   }
   if (isOpen('settingsModal')) {
@@ -24684,15 +24690,101 @@ if (toggleDupEl) {
   };
 }
 
-// Self-Contained Interactive 3D HTML Export (LEGO Builder-style offline shareable viewer)
+// Self-Contained Interactive 3D HTML Export & In-App Preview (LEGO Builder-style offline shareable viewer)
+let isInteractiveHtmlBuildActive = false;
+let activeInteractiveHtmlPreview: { htmlDoc: string; fileName: string; blobUrl: string } | null = null;
+
+function isInteractiveHtmlPreviewOpen() {
+  const el = document.getElementById('interactiveHtmlPreviewModal');
+  return Boolean(el && !el.classList.contains('hidden'));
+}
+
+function closeInteractiveHtmlPreview() {
+  const modal = document.getElementById('interactiveHtmlPreviewModal');
+  if (modal) modal.classList.add('hidden');
+  const frame = document.getElementById('interactiveHtmlPreviewFrame') as HTMLIFrameElement | null;
+  if (frame) {
+    try { frame.src = 'about:blank'; } catch (_) {}
+  }
+  if (activeInteractiveHtmlPreview?.blobUrl) {
+    try { URL.revokeObjectURL(activeInteractiveHtmlPreview.blobUrl); } catch (_) {}
+  }
+  activeInteractiveHtmlPreview = null;
+}
+
+function openInteractiveHtmlPreview(htmlDoc: string, fileName: string) {
+  closeInteractiveHtmlPreview();
+  const modal = document.getElementById('interactiveHtmlPreviewModal');
+  const frame = document.getElementById('interactiveHtmlPreviewFrame') as HTMLIFrameElement | null;
+  if (!modal || !frame) return false;
+  const blob = new Blob([htmlDoc], { type: 'text/html;charset=utf-8' });
+  const blobUrl = URL.createObjectURL(blob);
+  activeInteractiveHtmlPreview = { htmlDoc, fileName, blobUrl };
+  frame.src = blobUrl;
+  modal.classList.remove('hidden');
+  document.getElementById('btnCloseInteractiveHtmlPreview')?.focus();
+  return true;
+}
+
+async function downloadInteractiveHtmlArtifact(htmlDoc: string, fileName: string) {
+  const blob = new Blob([htmlDoc], { type: 'text/html;charset=utf-8' });
+  let shared = false;
+  if (navigator.canShare && typeof File !== 'undefined') {
+    try {
+      const file = new File([blob], fileName, { type: 'text/html' });
+      if (navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file] });
+        shared = true;
+      }
+    } catch (_) {}
+  }
+  if (!shared) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  }
+  showToast(`Exported ${fileName}`);
+}
+
 async function runInteractiveHtmlExport() {
   if (!state.model || state.pages.length === 0) {
     showToast('Import a model first.');
     return;
   }
+  if (isInteractiveHtmlBuildActive) return;
   closeMenu();
   const iosWarning = getIosHtmlExportWarningDialog();
   if (iosWarning && !(await openConfirmActionDialog(iosWarning))) return;
+  const artifact = await buildInteractiveHtmlArtifact('export');
+  if (!artifact) return;
+  await downloadInteractiveHtmlArtifact(artifact.htmlDoc, artifact.fileName);
+}
+
+async function runInteractiveHtmlPreview() {
+  if (!state.model || state.pages.length === 0) {
+    showToast('Import a model first.');
+    return;
+  }
+  if (isInteractiveHtmlBuildActive) return;
+  closeMenu();
+  const artifact = await buildInteractiveHtmlArtifact('preview');
+  if (!artifact) return;
+  document.getElementById('exportModal')?.classList.add('hidden');
+  openInteractiveHtmlPreview(artifact.htmlDoc, artifact.fileName);
+}
+
+async function buildInteractiveHtmlArtifact(mode: 'export' | 'preview' = 'export') {
+  if (isInteractiveHtmlBuildActive) return null;
+  isInteractiveHtmlBuildActive = true;
+  const isPreview = mode === 'preview';
+  const phaseMeshes = isPreview ? 'preview_html_meshes' : 'export_html_meshes';
+  const phasePages = isPreview ? 'preview_html_pages' : 'export_html_pages';
+  const phasePackaging = isPreview ? 'preview_html_packaging' : 'export_html_packaging';
   const progWrap = document.getElementById('expProgressWrap');
   const progLbl = document.getElementById('expProgressLabel');
   const progPct = document.getElementById('expProgressPct');
@@ -24700,12 +24792,12 @@ async function runInteractiveHtmlExport() {
   const modalOpen = !document.getElementById('exportModal').classList.contains('hidden');
   if (modalOpen && progWrap) {
     progWrap.classList.remove('hidden');
-    if (progLbl) progLbl.textContent = 'Building Interactive 3D Viewer…';
+    if (progLbl) progLbl.textContent = isPreview ? 'Building Interactive 3D Preview…' : 'Building Interactive 3D Viewer…';
     if (progPct) progPct.textContent = '15%';
     if (progBar) progBar.style.width = '15%';
     await new Promise((r) => setTimeout(r, 15));
   } else {
-    showOperationLoadingOverlay('export_html_meshes', { progressPct: 15 });
+    showOperationLoadingOverlay(phaseMeshes, { progressPct: 15 });
     await yieldToBrowserPaint();
   }
 
@@ -24808,7 +24900,7 @@ async function runInteractiveHtmlExport() {
       progBar.style.width = '55%';
       await new Promise((r) => setTimeout(r, 10));
     } else if (!modalOpen) {
-      showOperationLoadingOverlay('export_html_pages', { progressPct: 55 });
+      showOperationLoadingOverlay(phasePages, { progressPct: 55 });
       await yieldToBrowserPaint();
     }
 
@@ -25112,7 +25204,7 @@ async function runInteractiveHtmlExport() {
       progPct.textContent = '90%';
       progBar.style.width = '90%';
     } else if (!modalOpen) {
-      showOperationLoadingOverlay('export_html_packaging', { progressPct: 90 });
+      showOperationLoadingOverlay(phasePackaging, { progressPct: 90 });
       await yieldToBrowserPaint();
     }
 
@@ -25158,35 +25250,16 @@ async function runInteractiveHtmlExport() {
     });
 
     const fileName = buildInteractiveHtmlFilename(state.model.title);
-    const blob = new Blob([htmlDoc], { type: 'text/html;charset=utf-8' });
     if (modalOpen && progWrap) progWrap.classList.add('hidden');
     else hideOperationLoadingOverlay();
-
-    let shared = false;
-    if (navigator.canShare && typeof File !== 'undefined') {
-      try {
-        const file = new File([blob], fileName, { type: 'text/html' });
-        if (navigator.canShare({ files: [file] })) {
-          await navigator.share({ files: [file] });
-          shared = true;
-        }
-      } catch (_) {}
-    }
-    if (!shared) {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 4000);
-    }
-    showToast(`Exported ${fileName}`);
+    return { htmlDoc, fileName };
   } catch (err) {
     if (modalOpen && progWrap) progWrap.classList.add('hidden');
     else hideOperationLoadingOverlay();
-    showToast('Could not export Interactive 3D HTML.');
+    showToast(isPreview ? 'Could not preview Interactive 3D HTML.' : 'Could not export Interactive 3D HTML.');
+    return null;
+  } finally {
+    isInteractiveHtmlBuildActive = false;
   }
 }
 
@@ -25304,10 +25377,26 @@ function openExportModal() {
   document.getElementById('exportModal').classList.remove('hidden');
 }
 document.getElementById('menuPrintBtn').onclick = openExportModal;
+const menuPreviewHtmlBtn = document.getElementById('menuPreviewHtmlBtn');
+if (menuPreviewHtmlBtn) menuPreviewHtmlBtn.onclick = runInteractiveHtmlPreview;
 const menuExportHtmlBtn = document.getElementById('menuExportHtmlBtn');
 if (menuExportHtmlBtn) menuExportHtmlBtn.onclick = runInteractiveHtmlExport;
 const btnExpInteractiveHtml = document.getElementById('btnExpInteractiveHtml');
 if (btnExpInteractiveHtml) btnExpInteractiveHtml.onclick = runInteractiveHtmlExport;
+const btnPreviewInteractiveHtml = document.getElementById('btnPreviewInteractiveHtml');
+if (btnPreviewInteractiveHtml) btnPreviewInteractiveHtml.onclick = runInteractiveHtmlPreview;
+const btnCloseInteractiveHtmlPreview = document.getElementById('btnCloseInteractiveHtmlPreview');
+if (btnCloseInteractiveHtmlPreview) btnCloseInteractiveHtmlPreview.onclick = closeInteractiveHtmlPreview;
+const btnDownloadInteractiveHtmlPreview = document.getElementById('btnDownloadInteractiveHtmlPreview');
+if (btnDownloadInteractiveHtmlPreview) {
+  btnDownloadInteractiveHtmlPreview.onclick = async () => {
+    if (!activeInteractiveHtmlPreview) return;
+    const iosWarning = getIosHtmlExportWarningDialog();
+    if (iosWarning && !(await openConfirmActionDialog(iosWarning))) return;
+    if (!activeInteractiveHtmlPreview) return;
+    await downloadInteractiveHtmlArtifact(activeInteractiveHtmlPreview.htmlDoc, activeInteractiveHtmlPreview.fileName);
+  };
+}
 document.getElementById('menuPageSetupBtn').onclick = openPageSetupModal;
 const btnBackPageSetupWizardEl = document.getElementById('btnBackPageSetupWizard');
 if (btnBackPageSetupWizardEl) btnBackPageSetupWizardEl.onclick = closePageSetupModal;
@@ -27738,6 +27827,7 @@ async function closeCurrentModel() {
   clearImportWizardState();
   setStylePopoverOpen(false);
   cleanupPrintAllPages();
+  closeInteractiveHtmlPreview();
 
   for (const modalId of [
     'openModelModal',

@@ -849,6 +849,34 @@ describe('studioRuntime safety checks', () => {
     expect(exportHead).toContain('if (iosWarning && !(await openConfirmActionDialog(iosWarning))) return;');
   });
 
+  it('supports in-app Interactive 3D HTML preview with blob iframe CSP and clean teardown without iOS export warning', () => {
+    const html = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf8');
+    const runtime = fs.readFileSync(path.resolve(process.cwd(), 'src/studioRuntime.ts'), 'utf8');
+
+    expect(html).toContain("frame-src 'self' blob:;");
+    expect(html).toContain('id="menuPreviewHtmlBtn"');
+    expect(html).toContain('id="btnPreviewInteractiveHtml"');
+    expect(html).toContain('id="interactiveHtmlPreviewModal"');
+    expect(html).toContain('id="interactiveHtmlPreviewFrame"');
+
+    const previewStart = runtime.indexOf('async function runInteractiveHtmlPreview()');
+    const previewEnd = runtime.indexOf('async function buildInteractiveHtmlArtifact(', previewStart);
+    expect(previewStart).toBeGreaterThan(-1);
+    expect(previewEnd).toBeGreaterThan(previewStart);
+    const previewBody = runtime.slice(previewStart, previewEnd);
+    expect(previewBody).not.toContain('getIosHtmlExportWarningDialog');
+    expect(previewBody).toContain("buildInteractiveHtmlArtifact('preview')");
+    expect(previewBody).toContain('openInteractiveHtmlPreview(');
+
+    const closeStart = runtime.indexOf('function closeInteractiveHtmlPreview()');
+    const closeEnd = runtime.indexOf('function openInteractiveHtmlPreview(', closeStart);
+    expect(closeStart).toBeGreaterThan(-1);
+    expect(closeEnd).toBeGreaterThan(closeStart);
+    const closeBody = runtime.slice(closeStart, closeEnd);
+    expect(closeBody).toContain("frame.src = 'about:blank'");
+    expect(closeBody).toContain('URL.revokeObjectURL(');
+  });
+
   it('prevents opening settings for disabled extra pages from Menu, Style popover, Page Setup, and shortcuts', () => {
     const html = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf8');
     const runtime = fs.readFileSync(path.resolve(process.cwd(), 'src/studioRuntime.ts'), 'utf8');

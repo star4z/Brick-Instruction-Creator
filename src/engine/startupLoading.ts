@@ -139,7 +139,10 @@ export type OperationLoadingPhase =
   | 'project_rendering'
   | 'export_html_meshes'
   | 'export_html_pages'
-  | 'export_html_packaging';
+  | 'export_html_packaging'
+  | 'preview_html_meshes'
+  | 'preview_html_pages'
+  | 'preview_html_packaging';
 
 export interface OperationLoadingOptions {
   label?: string;
@@ -165,6 +168,9 @@ const OPERATION_PHASE_COPY: Record<
   export_html_meshes: { verb: 'Exporting', fallbackTitle: 'Exporting 3D Viewer', status: 'Building 3D part meshes…', progressPct: 15 },
   export_html_pages: { verb: 'Exporting', fallbackTitle: 'Exporting 3D Viewer', status: 'Rendering step previews…', progressPct: 55 },
   export_html_packaging: { verb: 'Exporting', fallbackTitle: 'Exporting 3D Viewer', status: 'Packaging interactive HTML…', progressPct: 90 },
+  preview_html_meshes: { verb: 'Previewing', fallbackTitle: 'Previewing 3D Viewer', status: 'Building 3D part meshes…', progressPct: 15 },
+  preview_html_pages: { verb: 'Previewing', fallbackTitle: 'Previewing 3D Viewer', status: 'Rendering step previews…', progressPct: 55 },
+  preview_html_packaging: { verb: 'Previewing', fallbackTitle: 'Previewing 3D Viewer', status: 'Preparing interactive preview…', progressPct: 90 },
 };
 
 export function stripProjectOrModelExtension(name: string): string {
@@ -179,7 +185,7 @@ export function getOperationLoadingViewModel(
   const rawLabel = (options.label || '').trim();
   const displayName = rawLabel ? stripProjectOrModelExtension(rawLabel) : '';
   const verb = options.isUpdate && spec.verb === 'Building' ? 'Updating' : spec.verb;
-  const title = phase.startsWith('export_html_')
+  const title = phase.startsWith('export_html_') || phase.startsWith('preview_html_')
     ? spec.fallbackTitle
     : displayName
       ? `${verb} ${displayName}`

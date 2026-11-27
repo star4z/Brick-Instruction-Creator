@@ -375,6 +375,7 @@ describe('interactiveHtmlExporter font stacks', () => {
     expect(iphoneSpec!.tone).toBe('warning');
     expect(iphoneSpec!.title).toMatch(/iOS/i);
     expect(iphoneSpec!.message).toMatch(/cannot be viewed directly on iOS/i);
+    expect(iphoneSpec!.detail).toMatch(/Preview/i);
     expect(iphoneSpec!.detail).toMatch(/PDF/i);
     expect(iphoneSpec!.confirmLabel).toBe('Export Anyway');
     expect(iphoneSpec!.cancelLabel).toBe('Cancel');

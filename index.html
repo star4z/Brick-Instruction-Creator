@@ -12,7 +12,7 @@
     />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data: blob:; connect-src 'self' https: data: blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'self';"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data: blob:; connect-src 'self' https: data: blob:; worker-src 'self' blob:; frame-src 'self' blob:; object-src 'none'; base-uri 'self';"
     />
   </head>
   <body class="bg-[var(--background)] text-[var(--foreground)] antialiased">
@@ -125,6 +125,10 @@
                 <span>Parts List Setup</span>
               </span>
               <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+            </button>
+            <button id="menuPreviewHtmlBtn" type="button" class="hidden w-full py-2.5 px-3.5 rounded-lg border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer">
+              <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+              <span>Preview 3D Interactive Viewer</span>
             </button>
             <button id="menuExportHtmlBtn" type="button" class="hidden w-full py-2.5 px-3.5 rounded-lg border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer">
               <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 3 7.5 12 12l9-4.5L12 3Z"/><path d="M3 7.5V16.5L12 21l9-4.5V7.5"/><path d="M12 12v9"/></svg>
@@ -1331,6 +1335,10 @@
             <button id="btnExpInteractiveHtml" type="button" class="w-full py-3 px-4 rounded-lg border border-[var(--border-strong)] bg-[var(--card)] hover:bg-[var(--surface-hover)] text-[var(--foreground)] text-sm font-semibold flex items-center justify-center text-center transition-colors cursor-pointer">
               Export 3D Interactive Viewer (HTML)
             </button>
+            <button id="btnPreviewInteractiveHtml" type="button" class="w-full py-3 px-4 rounded-lg border border-[var(--border-strong)] bg-[var(--card)] hover:bg-[var(--surface-hover)] text-[var(--foreground)] text-sm font-semibold flex items-center justify-center gap-2 text-center transition-colors cursor-pointer">
+              <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+              <span>Preview 3D Interactive Viewer</span>
+            </button>
             <button id="btnSysPrint" type="button" class="w-full py-3 px-4 rounded-lg border border-[var(--border-strong)] bg-[var(--card)] hover:bg-[var(--surface-hover)] text-[var(--foreground)] text-sm font-semibold flex items-center justify-center text-center transition-colors cursor-pointer">
               Print
             </button>
@@ -1365,6 +1373,28 @@
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- INTERACTIVE 3D VIEWER PREVIEW MODAL (iOS & Desktop Live Test)    -->
+    <!-- ================================================================ -->
+    <div id="interactiveHtmlPreviewModal" role="dialog" aria-modal="true" aria-label="Interactive 3D Viewer preview" class="no-print hidden fixed inset-0 z-[60] bg-[var(--background)] flex flex-col">
+      <div class="px-3 sm:px-4 py-2 border-b border-[var(--border)] bg-[var(--chrome)] flex items-center justify-between gap-2 shrink-0" style="padding-top: max(0.5rem, env(safe-area-inset-top));">
+        <div class="flex items-center gap-2 min-w-0">
+          <svg class="w-4 h-4 text-[var(--primary)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 3 7.5 12 12l9-4.5L12 3Z"/><path d="M3 7.5V16.5L12 21l9-4.5V7.5"/><path d="M12 12v9"/></svg>
+          <span class="text-xs sm:text-sm font-bold tracking-tight truncate">3D Viewer Preview</span>
+        </div>
+        <div class="flex items-center gap-1.5 shrink-0">
+          <button id="btnDownloadInteractiveHtmlPreview" type="button" title="Download HTML" aria-label="Download Interactive 3D HTML" class="h-9 px-2.5 sm:px-3 rounded-lg border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer">
+            <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+            <span class="hidden sm:inline">Download HTML</span>
+          </button>
+          <button id="btnCloseInteractiveHtmlPreview" type="button" aria-label="Close 3D preview" class="w-9 h-9 rounded-lg flex items-center justify-center hover:bg-[var(--surface-hover)] transition-colors cursor-pointer">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
+        </div>
+      </div>
+      <iframe id="interactiveHtmlPreviewFrame" title="Interactive 3D Viewer Preview" class="w-full flex-1 border-0 bg-[var(--background)]"></iframe>
     </div>
 
     <!-- ================================================================ -->

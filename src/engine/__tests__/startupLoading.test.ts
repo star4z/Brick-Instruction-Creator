@@ -120,6 +120,7 @@ describe('startupLoading', () => {
     checkMonotonic(['generate_building', 'generate_diagnostics', 'generate_rendering'], { label: 'Castle' });
     checkMonotonic(['project_reading', 'project_fonts', 'project_rendering'], { label: 'castle.biw' });
     checkMonotonic(['export_html_meshes', 'export_html_pages', 'export_html_packaging'], {});
+    checkMonotonic(['preview_html_meshes', 'preview_html_pages', 'preview_html_packaging'], {});
 
     expect(getOperationLoadingViewModel('import_reading', { label: 'castle.io' }).title).toBe('Opening castle');
     expect(getOperationLoadingViewModel('generate_building', { label: 'Castle', isUpdate: false }).title).toBe('Building Castle');
@@ -129,6 +130,11 @@ describe('startupLoading', () => {
       title: 'Exporting 3D Viewer',
       status: 'Rendering step previews…',
       progressPct: 72,
+    });
+    expect(getOperationLoadingViewModel('preview_html_packaging', { progressPct: 90 })).toEqual({
+      title: 'Previewing 3D Viewer',
+      status: 'Preparing interactive preview…',
+      progressPct: 90,
     });
   });
 });

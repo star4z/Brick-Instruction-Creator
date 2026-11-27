@@ -800,6 +800,7 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
 
     for (const modalId of [
       '#exportModal',
+      '#interactiveHtmlPreviewModal',
       '#pageSetupModal',
       '#settingsModal',
       '#shortcutsModal',
@@ -810,6 +811,20 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     }
     await expect(page.locator('#confirmActionModal')).toHaveAttribute('role', 'alertdialog');
     await expect(page.locator('#confirmActionModal')).toHaveAttribute('aria-modal', 'true');
+
+    // Preview Interactive 3D Viewer without downloading (must work in-app on iOS & desktop)
+    await ensureMenuOpen(page);
+    await page.locator('#menuPreviewHtmlBtn').click();
+    await expect(page.locator('#interactiveHtmlPreviewModal')).toBeVisible({ timeout: 25_000 });
+    await expect(page.locator('#interactiveHtmlPreviewFrame')).toHaveAttribute('src', /^blob:/);
+    const previewFrame = page.frameLocator('#interactiveHtmlPreviewFrame');
+    await expect(previewFrame.locator('html')).toHaveClass(/js-3d-active/, { timeout: 15_000 });
+    await expect(previewFrame.locator('#glStage')).toBeVisible();
+    await expect(previewFrame.locator('#btnNext')).toBeVisible();
+    await auditSurface(page, `${testInfo.project.name}: Interactive 3D Viewer Preview Modal`);
+    await page.locator('#btnCloseInteractiveHtmlPreview').click();
+    await expect(page.locator('#interactiveHtmlPreviewModal')).toBeHidden();
+    await expect(page.locator('#interactiveHtmlPreviewFrame')).toHaveAttribute('src', 'about:blank');
 
     // Trigger Interactive 3D HTML export and verify it completes cleanly without hanging
     await ensureMenuOpen(page);
