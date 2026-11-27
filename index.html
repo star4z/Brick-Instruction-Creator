@@ -488,21 +488,25 @@
             <div id="themeStrip" role="listbox" aria-label="Themes" class="theme-selector-grid grid grid-cols-2 gap-2"></div>
           </div>
           <div id="styleSelectorActions" class="shrink-0 px-4 py-3 border-t border-[var(--border)] bg-[var(--card)] space-y-2">
-            <button id="btnEditActiveTheme" type="button" class="w-full py-2 px-3 rounded-lg border border-[var(--primary-border)] bg-[var(--primary-soft)] hover:bg-[var(--primary)] hover:text-[var(--primary-foreground)] text-[var(--primary)] font-semibold text-xs inline-flex items-center justify-between gap-2 transition-colors cursor-pointer">
+            <button id="btnEditActiveTheme" type="button" class="w-full py-2.5 px-3.5 rounded-lg bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] font-semibold text-xs inline-flex items-center justify-between gap-2 transition-colors cursor-pointer shadow-xs">
               <span class="inline-flex items-center gap-2 min-w-0">
                 <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
                 <span id="btnEditActiveThemeLabel" class="truncate">Edit Theme</span>
               </span>
               <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
             </button>
-            <div class="grid grid-cols-2 gap-1.5">
-              <button id="btnNewCustomTheme" type="button" title="New theme from current" class="inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] hover:border-[var(--primary)] hover:text-[var(--primary)] text-xs font-semibold transition-colors cursor-pointer">
+            <div class="grid grid-cols-3 gap-1.5">
+              <button id="btnNewCustomTheme" type="button" title="New theme from current" class="inline-flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] hover:border-[var(--primary)] hover:text-[var(--primary)] text-xs font-semibold transition-colors cursor-pointer">
                 <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="12" x2="12" y1="5" y2="19"/><line x1="5" x2="19" y1="12" y2="12"/></svg>
-                <span>New from Current</span>
+                <span>New</span>
               </button>
-              <button id="btnImportTheme" type="button" title="Import theme file (.biwtheme)" class="inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] hover:border-[var(--primary)] hover:text-[var(--primary)] text-xs font-semibold transition-colors cursor-pointer">
+              <button id="btnImportTheme" type="button" title="Import theme file (.biwtheme)" class="inline-flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] hover:border-[var(--primary)] hover:text-[var(--primary)] text-xs font-semibold transition-colors cursor-pointer">
                 <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
                 <span>Import</span>
+              </button>
+              <button id="btnSelectorDeleteTheme" type="button" title="Delete selected custom theme" class="inline-flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg border border-[var(--danger)]/35 bg-[var(--danger-soft)] text-[var(--danger)] text-xs font-semibold transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
+                <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                <span>Delete</span>
               </button>
             </div>
           </div>
@@ -510,6 +514,10 @@
 
         <!-- PAGE 2: THEME EDITOR (shared across Styles, Parts List Setup, Settings, and Import Wizard) -->
         <div id="styleEditorView" class="hidden flex-1 min-h-0 flex flex-col overflow-hidden">
+        <!-- Sticky live theme preview -->
+        <div id="themeEditorPreviewHeader" class="shrink-0 px-4 py-2.5 border-b border-[var(--border)] bg-[var(--surface-sunken)]">
+          <div id="themeEditorPreview" aria-label="Live theme preview" class="h-[80px] rounded-lg border border-black/15 relative overflow-hidden px-3 py-2 flex flex-col justify-between select-none"></div>
+        </div>
         <!-- Scrollable theme editor options -->
         <div id="stylePopoverScroll" class="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 pt-3 space-y-3">
         <!-- Current theme identity + file actions -->
@@ -547,6 +555,7 @@
             <svg class="style-section-chevron w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
           </summary>
           <div class="pt-2.5 space-y-2.5">
+            <div><span class="inline-block px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-[var(--info-soft)] text-[var(--info)] border border-[var(--info)]/30 whitespace-nowrap">All Pages</span></div>
             <div class="grid grid-cols-2 gap-1 rounded-lg border border-[var(--border)] p-0.5 bg-[var(--surface-sunken)]">
               <button type="button" data-bg-type="solid" class="theme-bgtype-btn inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-semibold cursor-pointer">
                 <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><rect x="2" y="2" width="12" height="12" rx="2.5"/></svg>
@@ -591,7 +600,7 @@
           </div>
         </details>
 
-        <!-- Palette Colors -->
+        <!-- Text, Boxes & Accents (Colors + Fonts) -->
         <details id="stylePaletteSection" class="style-section pt-3 border-t border-[var(--border)]" open>
           <summary class="flex items-center justify-between gap-2 cursor-pointer select-none py-0.5">
             <span class="flex items-center gap-2 min-w-0">
@@ -600,112 +609,110 @@
             </span>
             <svg class="style-section-chevron w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
           </summary>
-          <div class="pt-2.5 grid grid-cols-2 gap-2">
-            <label class="flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg bg-[var(--surface-sunken)] cursor-pointer">
-              <span class="inline-flex items-center gap-1.5 font-medium min-w-0">
-                <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" x2="15" y1="20" y2="20"/><line x1="12" x2="12" y1="4" y2="20"/></svg>
-                <span class="truncate">Primary Text</span>
-              </span>
-              <input id="themeColorText" type="color" value="#172536" class="w-6 h-6 rounded border border-[var(--border)] bg-transparent cursor-pointer shrink-0" />
-            </label>
-            <label class="flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg bg-[var(--surface-sunken)] cursor-pointer">
-              <span class="inline-flex items-center gap-1.5 font-medium min-w-0">
-                <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] opacity-60 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" x2="15" y1="20" y2="20"/><line x1="12" x2="12" y1="4" y2="20"/></svg>
-                <span class="truncate">Muted Text</span>
-              </span>
-              <input id="themeColorMuted" type="color" value="#4a607a" class="w-6 h-6 rounded border border-[var(--border)] bg-transparent cursor-pointer shrink-0" />
-            </label>
-            <label class="flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg bg-[var(--surface-sunken)] cursor-pointer">
-              <span class="inline-flex items-center gap-1.5 font-medium min-w-0">
-                <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/></svg>
-                <span class="truncate">Accent</span>
-              </span>
-              <input id="themeColorAccent" type="color" value="#1a73e8" class="w-6 h-6 rounded border border-[var(--border)] bg-transparent cursor-pointer shrink-0" />
-            </label>
-            <label class="flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg bg-[var(--surface-sunken)] cursor-pointer">
-              <span class="inline-flex items-center gap-1.5 font-medium min-w-0">
-                <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="currentColor" opacity="0.7" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2.5"/></svg>
-                <span class="truncate">Parts Box</span>
-              </span>
-              <input id="themeColorPliBg" type="color" value="#ffffff" class="w-6 h-6 rounded border border-[var(--border)] bg-transparent cursor-pointer shrink-0" />
-            </label>
-            <label class="flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg bg-[var(--surface-sunken)] cursor-pointer">
-              <span class="inline-flex items-center gap-1.5 font-medium min-w-0">
-                <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2.5"/></svg>
-                <span class="truncate">Box Border</span>
-              </span>
-              <input id="themeColorPliBorder" type="color" value="#8ab8e6" class="w-6 h-6 rounded border border-[var(--border)] bg-transparent cursor-pointer shrink-0" />
-            </label>
-            <label class="flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg bg-[var(--surface-sunken)] cursor-pointer">
-              <span class="inline-flex items-center gap-1.5 font-medium min-w-0">
-                <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" fill="currentColor" fill-opacity="0.25"/></svg>
-                <span class="truncate">Callout Box</span>
-              </span>
-              <input id="themeColorCalloutBg" type="color" value="#fffbe6" class="w-6 h-6 rounded border border-[var(--border)] bg-transparent cursor-pointer shrink-0" />
-            </label>
-            <label class="flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg bg-[var(--surface-sunken)] col-span-2 cursor-pointer">
-              <span class="inline-flex items-center gap-1.5 font-medium min-w-0">
-                <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-                <span class="truncate">Callout Border</span>
-              </span>
-              <input id="themeColorCalloutBorder" type="color" value="#eab308" class="w-6 h-6 rounded border border-[var(--border)] bg-transparent cursor-pointer shrink-0" />
-            </label>
-          </div>
-        </details>
-
-        <!-- Typography -->
-        <details id="styleTypographySection" class="style-section pt-3 border-t border-[var(--border)]" open>
-          <summary class="flex items-center justify-between gap-2 cursor-pointer select-none py-0.5">
-            <span class="flex items-center gap-2 min-w-0">
-              <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg>
-              <span class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Typography</span>
-            </span>
-            <svg class="style-section-chevron w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
-          </summary>
-          <div class="pt-2.5 space-y-2">
-            <div class="grid grid-cols-1 gap-1.5">
-              <button id="btnThemeHeadingFont" type="button" aria-expanded="false" aria-controls="themeFontPickerPanel" class="theme-font-trigger w-full flex items-center justify-between gap-2.5 px-3 py-2 rounded-lg border border-transparent bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] text-left transition-colors cursor-pointer">
-                <span class="min-w-0 flex-1">
-                  <span class="block text-[10px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Headings &amp; Numbers</span>
-                  <span id="themeHeadingFontLabel" class="block text-sm font-extrabold truncate text-[var(--foreground)] leading-snug mt-0.5">Public Sans</span>
-                </span>
-                <span class="flex items-center gap-2 shrink-0">
-                  <span id="themeHeadingFontSpecimen" class="text-xs font-black px-2 py-0.5 rounded bg-[var(--card)] border border-[var(--border)] text-[var(--foreground)]">12 · 4×</span>
-                  <svg id="themeHeadingFontChevron" class="w-3.5 h-3.5 text-[var(--muted-foreground)] transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
-                </span>
-              </button>
-              <button id="btnThemeBodyFont" type="button" aria-expanded="false" aria-controls="themeFontPickerPanel" class="theme-font-trigger w-full flex items-center justify-between gap-2.5 px-3 py-2 rounded-lg border border-transparent bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] text-left transition-colors cursor-pointer">
-                <span class="min-w-0 flex-1">
-                  <span class="block text-[10px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Body &amp; Labels</span>
-                  <span id="themeBodyFontLabel" class="block text-sm font-semibold truncate text-[var(--foreground)] leading-snug mt-0.5">Public Sans</span>
-                </span>
-                <span class="flex items-center gap-2 shrink-0">
-                  <span id="themeBodyFontSpecimen" class="text-[11px] font-medium px-2 py-0.5 rounded bg-[var(--card)] border border-[var(--border)] text-[var(--muted-foreground)]">2×4 Brick</span>
-                  <svg id="themeBodyFontChevron" class="w-3.5 h-3.5 text-[var(--muted-foreground)] transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
-                </span>
-              </button>
+          <div class="pt-2.5 space-y-3">
+            <div><span class="inline-block px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-[var(--info-soft)] text-[var(--info)] border border-[var(--info)]/30 whitespace-nowrap">All Pages</span></div>
+            <div class="space-y-2">
+              <div class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Colors</div>
+              <div class="grid grid-cols-2 gap-2">
+                <label class="flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg bg-[var(--surface-sunken)] cursor-pointer">
+                  <span class="inline-flex items-center gap-1.5 font-medium min-w-0">
+                    <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" x2="15" y1="20" y2="20"/><line x1="12" x2="12" y1="4" y2="20"/></svg>
+                    <span class="truncate">Primary Text</span>
+                  </span>
+                  <input id="themeColorText" type="color" value="#172536" class="w-6 h-6 rounded border border-[var(--border)] bg-transparent cursor-pointer shrink-0" />
+                </label>
+                <label class="flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg bg-[var(--surface-sunken)] cursor-pointer">
+                  <span class="inline-flex items-center gap-1.5 font-medium min-w-0">
+                    <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] opacity-60 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" x2="15" y1="20" y2="20"/><line x1="12" x2="12" y1="4" y2="20"/></svg>
+                    <span class="truncate">Muted Text</span>
+                  </span>
+                  <input id="themeColorMuted" type="color" value="#4a607a" class="w-6 h-6 rounded border border-[var(--border)] bg-transparent cursor-pointer shrink-0" />
+                </label>
+                <label class="flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg bg-[var(--surface-sunken)] cursor-pointer">
+                  <span class="inline-flex items-center gap-1.5 font-medium min-w-0">
+                    <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/></svg>
+                    <span class="truncate">Accent</span>
+                  </span>
+                  <input id="themeColorAccent" type="color" value="#1a73e8" class="w-6 h-6 rounded border border-[var(--border)] bg-transparent cursor-pointer shrink-0" />
+                </label>
+                <label class="flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg bg-[var(--surface-sunken)] cursor-pointer">
+                  <span class="inline-flex items-center gap-1.5 font-medium min-w-0">
+                    <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="currentColor" opacity="0.7" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2.5"/></svg>
+                    <span class="truncate">Parts Box</span>
+                  </span>
+                  <input id="themeColorPliBg" type="color" value="#ffffff" class="w-6 h-6 rounded border border-[var(--border)] bg-transparent cursor-pointer shrink-0" />
+                </label>
+                <label class="flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg bg-[var(--surface-sunken)] cursor-pointer">
+                  <span class="inline-flex items-center gap-1.5 font-medium min-w-0">
+                    <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2.5"/></svg>
+                    <span class="truncate">Box Border</span>
+                  </span>
+                  <input id="themeColorPliBorder" type="color" value="#8ab8e6" class="w-6 h-6 rounded border border-[var(--border)] bg-transparent cursor-pointer shrink-0" />
+                </label>
+                <label class="flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg bg-[var(--surface-sunken)] cursor-pointer">
+                  <span class="inline-flex items-center gap-1.5 font-medium min-w-0">
+                    <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" fill="currentColor" fill-opacity="0.25"/></svg>
+                    <span class="truncate">Callout Box</span>
+                  </span>
+                  <input id="themeColorCalloutBg" type="color" value="#fffbe6" class="w-6 h-6 rounded border border-[var(--border)] bg-transparent cursor-pointer shrink-0" />
+                </label>
+                <label class="flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg bg-[var(--surface-sunken)] col-span-2 cursor-pointer">
+                  <span class="inline-flex items-center gap-1.5 font-medium min-w-0">
+                    <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                    <span class="truncate">Callout Border</span>
+                  </span>
+                  <input id="themeColorCalloutBorder" type="color" value="#eab308" class="w-6 h-6 rounded border border-[var(--border)] bg-transparent cursor-pointer shrink-0" />
+                </label>
+              </div>
             </div>
 
-            <!-- Inline Visual Font Picker Panel -->
-            <div id="themeFontPickerPanel" class="hidden rounded-xl border border-[var(--border-strong)] bg-[var(--card)] p-2.5 space-y-2 shadow-[var(--shadow-surface)]">
-              <div class="flex items-center justify-between gap-2">
-                <span id="themeFontPickerRoleTitle" class="text-[11px] font-bold text-[var(--foreground)]">Choose Heading Font</span>
-                <button id="btnCloseFontPicker" type="button" aria-label="Close font picker" class="w-6 h-6 rounded-md hover:bg-[var(--surface-hover)] text-[var(--muted-foreground)] flex items-center justify-center cursor-pointer">
-                  <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+            <!-- Fonts subheading -->
+            <div id="styleTypographySection" class="space-y-2 pt-2.5 border-t border-[var(--border)]">
+              <div class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Fonts</div>
+              <div class="grid grid-cols-1 gap-1.5">
+                <button id="btnThemeHeadingFont" type="button" aria-expanded="false" aria-controls="themeFontPickerPanel" class="theme-font-trigger w-full flex items-center justify-between gap-2.5 px-3 py-2 rounded-lg border border-transparent bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] text-left transition-colors cursor-pointer">
+                  <span class="min-w-0 flex-1">
+                    <span class="block text-[10px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Headings &amp; Numbers</span>
+                    <span id="themeHeadingFontLabel" class="block text-sm font-extrabold truncate text-[var(--foreground)] leading-snug mt-0.5">Public Sans</span>
+                  </span>
+                  <span class="flex items-center gap-2 shrink-0">
+                    <span id="themeHeadingFontSpecimen" class="text-xs font-black px-2 py-0.5 rounded bg-[var(--card)] border border-[var(--border)] text-[var(--foreground)]">12 · 4×</span>
+                    <svg id="themeHeadingFontChevron" class="w-3.5 h-3.5 text-[var(--muted-foreground)] transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+                  </span>
+                </button>
+                <button id="btnThemeBodyFont" type="button" aria-expanded="false" aria-controls="themeFontPickerPanel" class="theme-font-trigger w-full flex items-center justify-between gap-2.5 px-3 py-2 rounded-lg border border-transparent bg-[var(--surface-sunken)] hover:bg-[var(--surface-hover)] text-left transition-colors cursor-pointer">
+                  <span class="min-w-0 flex-1">
+                    <span class="block text-[10px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Body &amp; Labels</span>
+                    <span id="themeBodyFontLabel" class="block text-sm font-semibold truncate text-[var(--foreground)] leading-snug mt-0.5">Public Sans</span>
+                  </span>
+                  <span class="flex items-center gap-2 shrink-0">
+                    <span id="themeBodyFontSpecimen" class="text-[11px] font-medium px-2 py-0.5 rounded bg-[var(--card)] border border-[var(--border)] text-[var(--muted-foreground)]">2×4 Brick</span>
+                    <svg id="themeBodyFontChevron" class="w-3.5 h-3.5 text-[var(--muted-foreground)] transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+                  </span>
                 </button>
               </div>
-              <div class="relative">
-                <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-                <input id="themeFontSearchInput" type="search" aria-label="Filter fonts" placeholder="Search fonts (e.g. Outfit, Bungee, Slab)…" class="w-full pl-8 pr-2.5 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] text-xs outline-none focus:border-[var(--primary)]" />
-              </div>
-              <div id="themeFontCategoryTabs" class="flex items-center gap-1 overflow-x-auto no-scrollbar pb-0.5" role="tablist" aria-label="Font categories"></div>
-              <div id="themeFontList" class="max-h-60 overflow-y-auto overscroll-contain space-y-1 pr-0.5" role="listbox" aria-label="Available fonts"></div>
-            </div>
 
-            <button id="btnUploadCustomFont" type="button" title="Upload your own .ttf, .otf, .woff2, or .woff font" class="w-full py-1.5 px-3 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] hover:border-[var(--primary)] hover:text-[var(--primary)] text-xs font-semibold text-[var(--foreground)] inline-flex items-center justify-center gap-1.5 transition-colors cursor-pointer">
-              <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
-              <span>Upload Font</span>
-            </button>
+              <!-- Inline Visual Font Picker Panel -->
+              <div id="themeFontPickerPanel" class="hidden rounded-xl border border-[var(--border-strong)] bg-[var(--card)] p-2.5 space-y-2 shadow-[var(--shadow-surface)]">
+                <div class="flex items-center justify-between gap-2">
+                  <span id="themeFontPickerRoleTitle" class="text-[11px] font-bold text-[var(--foreground)]">Choose Heading Font</span>
+                  <button id="btnCloseFontPicker" type="button" aria-label="Close font picker" class="w-6 h-6 rounded-md hover:bg-[var(--surface-hover)] text-[var(--muted-foreground)] flex items-center justify-center cursor-pointer">
+                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                  </button>
+                </div>
+                <div class="relative">
+                  <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                  <input id="themeFontSearchInput" type="search" aria-label="Filter fonts" placeholder="Search fonts (e.g. Outfit, Bungee, Slab)…" class="w-full pl-8 pr-2.5 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] text-xs outline-none focus:border-[var(--primary)]" />
+                </div>
+                <div id="themeFontCategoryTabs" class="flex items-center gap-1 overflow-x-auto no-scrollbar pb-0.5" role="tablist" aria-label="Font categories"></div>
+                <div id="themeFontList" class="max-h-60 overflow-y-auto overscroll-contain space-y-1 pr-0.5" role="listbox" aria-label="Available fonts"></div>
+              </div>
+
+              <button id="btnUploadCustomFont" type="button" title="Upload your own .ttf, .otf, .woff2, or .woff font" class="w-full py-1.5 px-3 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] hover:border-[var(--primary)] hover:text-[var(--primary)] text-xs font-semibold text-[var(--foreground)] inline-flex items-center justify-center gap-1.5 transition-colors cursor-pointer">
+                <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
+                <span>Upload Font</span>
+              </button>
+            </div>
           </div>
         </details>
 
@@ -715,11 +722,11 @@
             <span class="flex items-center gap-2 min-w-0">
               <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
               <span class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Rendering Style</span>
-              <span class="px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-[var(--info-soft)] text-[var(--info)] border border-[var(--info)]/30 whitespace-nowrap">All Steps in Theme</span>
             </span>
             <svg class="style-section-chevron w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
           </summary>
           <div class="pt-3 space-y-3">
+            <div><span class="inline-block px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-[var(--info-soft)] text-[var(--info)] border border-[var(--info)]/30 whitespace-nowrap">All Steps</span></div>
             <div class="space-y-1.5">
               <div class="flex items-center justify-between gap-2">
                 <span class="inline-flex items-center gap-1.5 font-medium">
@@ -885,11 +892,11 @@
             <span class="flex items-center gap-2 min-w-0">
               <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
               <span class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Step Display</span>
-              <span class="px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-[var(--info-soft)] text-[var(--info)] border border-[var(--info)]/30 whitespace-nowrap">All Steps in Theme</span>
             </span>
             <svg class="style-section-chevron w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
           </summary>
           <div class="pt-3 space-y-3">
+            <div><span class="inline-block px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-[var(--info-soft)] text-[var(--info)] border border-[var(--info)]/30 whitespace-nowrap">All Pages</span></div>
             <label class="flex items-center justify-between gap-2 cursor-pointer">
               <span class="inline-flex items-center gap-2 font-medium min-w-0">
                 <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>
@@ -989,7 +996,6 @@
             <span class="flex items-center gap-2 min-w-0">
               <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
               <span class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)] shrink-0">Parts List</span>
-              <span class="px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-[var(--info-soft)] text-[var(--info)] border border-[var(--info)]/30 whitespace-nowrap">All Parts List Pages</span>
             </span>
             <svg class="style-section-chevron w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
           </summary>
@@ -1013,6 +1019,23 @@
           <button id="btnDoneStyleWizard" type="button" class="px-5 py-2.5 rounded-md bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] font-semibold transition-colors cursor-pointer">Back to Import Wizard</button>
         </div>
       </div>
+    </div>
+
+    <!-- Theme Card Context Menu (Right-click / Long-press) -->
+    <div id="themeCardContextMenu" role="menu" aria-label="Theme actions" class="no-print hidden fixed z-[70] min-w-[164px] rounded-lg studio-sheet p-1 text-xs shadow-[var(--shadow-sheet)]">
+      <button id="themeCtxEdit" type="button" role="menuitem" class="w-full flex items-center gap-2 px-2.5 py-2 rounded-md hover:bg-[var(--surface-hover)] text-left font-semibold text-[var(--foreground)] transition-colors cursor-pointer">
+        <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+        <span>Edit Theme</span>
+      </button>
+      <button id="themeCtxDuplicate" type="button" role="menuitem" class="w-full flex items-center gap-2 px-2.5 py-2 rounded-md hover:bg-[var(--surface-hover)] text-left font-semibold text-[var(--foreground)] transition-colors cursor-pointer">
+        <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        <span>Duplicate</span>
+      </button>
+      <div class="my-1 border-t border-[var(--border)]"></div>
+      <button id="themeCtxDelete" type="button" role="menuitem" class="w-full flex items-center gap-2 px-2.5 py-2 rounded-md hover:bg-[var(--danger-soft)] text-left font-semibold text-[var(--danger)] transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
+        <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+        <span>Delete Theme</span>
+      </button>
     </div>
 
     <!-- ================================================================ -->

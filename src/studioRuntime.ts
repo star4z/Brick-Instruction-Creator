@@ -22600,6 +22600,13 @@ function syncStylePanelChrome() {
   const editActiveLabel = document.getElementById('btnEditActiveThemeLabel');
   if (editActiveLabel) editActiveLabel.textContent = `Edit "${activeTheme.name}"`;
 
+  const selDelBtn = document.getElementById('btnSelectorDeleteTheme') as HTMLButtonElement | null;
+  if (selDelBtn) {
+    const activeBuiltIn = Boolean(activeTheme.builtIn || BUILT_IN_THEME_IDS.has(activeTheme.id));
+    selDelBtn.disabled = activeBuiltIn;
+    selDelBtn.title = activeBuiltIn ? 'Built-in themes cannot be deleted' : `Delete "${activeTheme.name}"`;
+  }
+
   const canOpenBom = pres.showBomLink && canOpenExtraPageSettings(state, 'bom', Boolean(state.model));
   document.getElementById('styleBomSection')?.classList.toggle('hidden', !canOpenBom);
   const styleBomBtn = document.getElementById('btnStyleOpenBomSetup');
@@ -22615,6 +22622,8 @@ function setStylePopoverOpen(
   } = {},
 ) {
   if (!stylePopEl || !btnStylePopEl) return;
+  closeThemeCardContextMenu();
+  closeAllSwipedThemeCards();
   if (!open) {
     const prevOrigin = themeEditorSession.origin;
     const wasWizardStyle = isStyleWizardActive();
@@ -22799,18 +22808,153 @@ function attachHorizontalWheelScroll(el) {
   }, { passive: false });
 }
 
-function buildThemeSelectorCard(t, isActive, { layout = 'grid', onSelect }) {
+let activeSwipedThemeCard: HTMLElement | null = null;
+let themeContextMenuTarget: { themeId: string; source: 'styles' | 'settings' } | null = null;
+
+function setThemeCardSwipeOffset(wrap: HTMLElement | null, offsetPx: number, open: boolean) {
+  if (!wrap) return;
+  const fg = wrap.querySelector<HTMLElement>('.theme-card-swipe-fg');
+  if (fg) fg.style.transform = offsetPx > 0 ? `translateX(${offsetPx}px)` : '';
+  wrap.dataset.swiped = open ? 'true' : 'false';
+  if (open) {
+    if (activeSwipedThemeCard && activeSwipedThemeCard !== wrap) {
+      setThemeCardSwipeOffset(activeSwipedThemeCard, 0, false);
+    }
+    activeSwipedThemeCard = wrap;
+  } else if (activeSwipedThemeCard === wrap) {
+    activeSwipedThemeCard = null;
+  }
+}
+
+function closeAllSwipedThemeCards() {
+  if (activeSwipedThemeCard) {
+    setThemeCardSwipeOffset(activeSwipedThemeCard, 0, false);
+  }
+}
+
+function closeThemeCardContextMenu() {
+  themeContextMenuTarget = null;
+  document.getElementById('themeCardContextMenu')?.classList.add('hidden');
+}
+
+function openThemeCardContextMenu(
+  theme,
+  clientX: number,
+  clientY: number,
+  source: 'styles' | 'settings',
+) {
+  const menu = document.getElementById('themeCardContextMenu');
+  if (!menu) return;
+  closeAllSwipedThemeCards();
+  themeContextMenuTarget = { themeId: theme.id, source };
+  const isBuiltIn = Boolean(theme.builtIn || BUILT_IN_THEME_IDS.has(theme.id));
+  const delItem = document.getElementById('themeCtxDelete') as HTMLButtonElement | null;
+  if (delItem) {
+    delItem.disabled = isBuiltIn;
+    delItem.title = isBuiltIn ? 'Built-in themes cannot be deleted' : `Delete "${theme.name}"`;
+  }
+  menu.classList.remove('hidden');
+  const rect = menu.getBoundingClientRect();
+  const pad = 12;
+  const x = Math.max(pad, Math.min(window.innerWidth - rect.width - pad, clientX));
+  const y = Math.max(pad, Math.min(window.innerHeight - rect.height - pad, clientY));
+  menu.style.left = `${Math.round(x)}px`;
+  menu.style.top = `${Math.round(y)}px`;
+}
+
+document.getElementById('themeCtxEdit')?.addEventListener('click', () => {
+  const target = themeContextMenuTarget;
+  closeThemeCardContextMenu();
+  if (!target) return;
+  if (target.source === 'settings') {
+    if (appSettings.customDefaults.themeId !== target.themeId) {
+      patchCustomDefaults({ themeId: target.themeId });
+    }
+    closeSettingsModal();
+    openThemeEditor({ origin: 'settings', themeId: target.themeId });
+  } else {
+    if (state.themeId !== target.themeId) selectTheme(target.themeId);
+    openThemeEditor({ origin: isStyleWizardActive() ? 'wizard-selector' : 'style-selector' });
+  }
+});
+
+document.getElementById('themeCtxDuplicate')?.addEventListener('click', () => {
+  const target = themeContextMenuTarget;
+  closeThemeCardContextMenu();
+  if (!target) return;
+  const base = resolveThemeById(target.themeId, customThemes);
+  if (target.source === 'settings') {
+    const created = forkThemeIntoCustom(base, {}, { selectInProject: false });
+    patchCustomDefaults({ themeId: created.id });
+    showToast(`Created "${created.name}".`);
+    closeSettingsModal();
+    openThemeEditor({ origin: 'settings', themeId: created.id });
+  } else {
+    const created = forkThemeIntoCustom(base);
+    renderAll();
+    showToast(`Created "${created.name}".`);
+    openThemeEditor({ origin: isStyleWizardActive() ? 'wizard-selector' : 'style-selector' });
+  }
+  requestAnimationFrame(() => {
+    const nameEl = document.getElementById('themeNameInput') as HTMLInputElement | null;
+    if (nameEl) { nameEl.focus(); nameEl.select(); }
+  });
+});
+
+document.getElementById('themeCtxDelete')?.addEventListener('click', async () => {
+  const target = themeContextMenuTarget;
+  closeThemeCardContextMenu();
+  if (!target) return;
+  await deleteThemeById(target.themeId);
+});
+
+document.addEventListener('pointerdown', (e) => {
+  const menu = document.getElementById('themeCardContextMenu');
+  if (menu && !menu.classList.contains('hidden')) {
+    if (!(e.target instanceof Node) || !menu.contains(e.target)) {
+      closeThemeCardContextMenu();
+    }
+  }
+  if (activeSwipedThemeCard && e.target instanceof Node && !activeSwipedThemeCard.contains(e.target)) {
+    closeAllSwipedThemeCards();
+  }
+}, true);
+
+window.addEventListener('resize', closeThemeCardContextMenu);
+
+function buildThemeSelectorCard(
+  t,
+  isActive: boolean,
+  {
+    layout = 'grid',
+    source = 'styles',
+    allowSwipeDelete = false,
+    onSelect,
+    onReselect,
+  }: {
+    layout?: 'grid' | 'strip';
+    source?: 'styles' | 'settings';
+    allowSwipeDelete?: boolean;
+    onSelect: (themeId: string) => void;
+    onReselect?: (themeId: string) => void;
+  },
+) {
+  const isBuiltIn = Boolean(t.builtIn || BUILT_IN_THEME_IDS.has(t.id));
   const card = document.createElement('button');
   card.type = 'button';
   card.setAttribute('role', 'option');
   card.setAttribute('aria-selected', isActive ? 'true' : 'false');
   card.setAttribute('data-theme-id', t.id);
-  card.title = `${t.name}${t.builtIn ? '' : ' (custom)'}${isActive ? ' — current' : ''}`;
+  card.title = `${t.name}${isBuiltIn ? '' : ' (custom)'}${isActive ? ' — selected (click to edit)' : ''}`;
   const sizeClass = layout === 'strip' ? 'snap-start shrink-0 w-[112px]' : 'w-full min-w-0';
-  card.className = `theme-strip-card ${sizeClass} rounded-lg border p-1.5 text-left transition cursor-pointer bg-[var(--card)] ${isActive ? 'border-[var(--primary)] ring-2 ring-[var(--primary-border)]' : 'border-[var(--border)] hover:border-[var(--primary-border)]'}`;
+  card.className = `theme-strip-card ${allowSwipeDelete && !isBuiltIn ? 'theme-card-swipe-fg ' : ''}${sizeClass} rounded-lg border p-1.5 text-left transition cursor-pointer ${
+    isActive
+      ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]'
+      : 'border-[var(--border)] bg-[var(--card)] text-[var(--foreground)] hover:border-[var(--primary-border)]'
+  }`;
 
   const preview = document.createElement('div');
-  preview.className = 'theme-card-preview h-[58px] rounded-md border border-black/10 relative overflow-hidden px-2 py-1.5 flex flex-col justify-between';
+  preview.className = 'theme-card-preview h-[58px] rounded-md border border-black/15 relative overflow-hidden px-2 py-1.5 flex flex-col justify-between';
   applyThemeBackgroundToElement(preview, t);
   applyThemeFontsToElement(preview, t);
   preview.style.color = t.text;
@@ -22849,9 +22993,9 @@ function buildThemeSelectorCard(t, isActive, { layout = 'grid', onSelect }) {
   name.className = 'text-[11px] font-semibold truncate min-w-0';
   name.textContent = t.name;
   label.appendChild(name);
-  if (!t.builtIn) {
+  if (!isBuiltIn) {
     const tag = document.createElement('span');
-    tag.className = 'shrink-0 text-[var(--muted-foreground)]';
+    tag.className = `shrink-0 ${isActive ? 'text-[var(--primary-foreground)]/85' : 'text-[var(--muted-foreground)]'}`;
     tag.setAttribute('aria-label', 'Custom theme');
     tag.innerHTML = '<svg class="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4Z"/></svg>';
     label.insertBefore(tag, name);
@@ -22859,8 +23003,135 @@ function buildThemeSelectorCard(t, isActive, { layout = 'grid', onSelect }) {
 
   card.appendChild(preview);
   card.appendChild(label);
-  card.onclick = () => onSelect(t.id);
-  return card;
+
+  let suppressNextClick = false;
+  let longPressTimer: number | null = null;
+  let startX = 0;
+  let startY = 0;
+
+  const clearLongPress = () => {
+    if (longPressTimer !== null) {
+      window.clearTimeout(longPressTimer);
+      longPressTimer = null;
+    }
+  };
+
+  card.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    clearLongPress();
+    openThemeCardContextMenu(t, e.clientX, e.clientY, source);
+  });
+
+  // Touch long-press to open context menu
+  card.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    startX = e.clientX;
+    startY = e.clientY;
+    if (e.pointerType !== 'mouse') {
+      clearLongPress();
+      longPressTimer = window.setTimeout(() => {
+        longPressTimer = null;
+        suppressNextClick = true;
+        openThemeCardContextMenu(t, startX, startY, source);
+      }, 480);
+    }
+  });
+  card.addEventListener('pointermove', (e) => {
+    if (longPressTimer !== null && (Math.abs(e.clientX - startX) > 8 || Math.abs(e.clientY - startY) > 8)) {
+      clearLongPress();
+    }
+  });
+  card.addEventListener('pointerup', clearLongPress);
+  card.addEventListener('pointercancel', clearLongPress);
+
+  card.onclick = () => {
+    if (suppressNextClick) {
+      suppressNextClick = false;
+      return;
+    }
+    if (isActive && onReselect) {
+      onReselect(t.id);
+    } else {
+      onSelect(t.id);
+    }
+  };
+
+  if (!allowSwipeDelete || isBuiltIn) {
+    return card;
+  }
+
+  // Swipe-right container for custom theme cards (reveals left-side Delete button)
+  const wrap = document.createElement('div');
+  wrap.className = 'theme-card-swipe-wrap w-full min-w-0';
+  wrap.dataset.swiped = 'false';
+
+  const delAction = document.createElement('button');
+  delAction.type = 'button';
+  delAction.className = 'theme-card-swipe-delete';
+  delAction.setAttribute('aria-label', `Delete ${t.name}`);
+  delAction.innerHTML = '<svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg><span>Delete</span>';
+  delAction.onclick = async (e) => {
+    e.stopPropagation();
+    closeAllSwipedThemeCards();
+    await deleteThemeById(t.id);
+  };
+
+  const MAX_SWIPE = 76;
+  let dragging = false;
+  let swipeLocked = false;
+  let swipeStartX = 0;
+  let swipeStartY = 0;
+  let baseOffset = 0;
+  let currentOffset = 0;
+
+  card.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    dragging = true;
+    swipeLocked = false;
+    swipeStartX = e.clientX;
+    swipeStartY = e.clientY;
+    baseOffset = wrap.dataset.swiped === 'true' ? MAX_SWIPE : 0;
+    currentOffset = baseOffset;
+  });
+
+  card.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const dx = e.clientX - swipeStartX;
+    const dy = e.clientY - swipeStartY;
+    if (!swipeLocked) {
+      if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) {
+        dragging = false;
+        return;
+      }
+      if (Math.abs(dx) > 10 && (dx > 0 || baseOffset > 0)) {
+        swipeLocked = true;
+        clearLongPress();
+        wrap.classList.add('is-swiping');
+      } else {
+        return;
+      }
+    }
+    currentOffset = Math.max(0, Math.min(MAX_SWIPE, baseOffset + dx));
+    card.style.transform = currentOffset > 0 ? `translateX(${currentOffset}px)` : '';
+  });
+
+  const finishSwipe = () => {
+    if (!dragging) return;
+    dragging = false;
+    wrap.classList.remove('is-swiping');
+    if (swipeLocked) {
+      suppressNextClick = true;
+      const shouldOpen = currentOffset >= MAX_SWIPE / 2;
+      setThemeCardSwipeOffset(wrap, shouldOpen ? MAX_SWIPE : 0, shouldOpen);
+      swipeLocked = false;
+    }
+  };
+  card.addEventListener('pointerup', finishSwipe);
+  card.addEventListener('pointercancel', finishSwipe);
+
+  wrap.appendChild(delAction);
+  wrap.appendChild(card);
+  return wrap;
 }
 
 /**
@@ -22872,25 +23143,33 @@ function renderThemeSelector(
   {
     selectedThemeId,
     layout = 'grid',
+    source = 'styles',
+    allowSwipeDelete = false,
     onSelect,
+    onReselect,
   }: {
     selectedThemeId: string;
     layout?: 'grid' | 'strip';
+    source?: 'styles' | 'settings';
+    allowSwipeDelete?: boolean;
     onSelect: (themeId: string) => void;
+    onReselect?: (themeId: string) => void;
   },
 ) {
   if (!containerEl) return;
   if (layout === 'strip') attachHorizontalWheelScroll(containerEl);
   const resolvedId = resolveThemeById(selectedThemeId, customThemes).id;
   const ordered = orderThemesByRecent(getAllThemes(customThemes), themeRecents, resolvedId);
-  const sig = ordered.map(t => `${t.id}:${t.updatedAt || ''}:${t.name}`).join('|') + `#${resolvedId}#${layout}`;
+  const sig = ordered.map(t => `${t.id}:${t.updatedAt || ''}:${t.name}`).join('|') + `#${resolvedId}#${layout}#${allowSwipeDelete ? '1' : '0'}`;
   if (containerEl.dataset.sig === sig) return;
   const keepScroll = containerEl.dataset.sigHead === `${resolvedId}` ? containerEl.scrollLeft : 0;
   containerEl.dataset.sig = sig;
   containerEl.dataset.sigHead = `${resolvedId}`;
   containerEl.innerHTML = '';
   for (const t of ordered) {
-    containerEl.appendChild(buildThemeSelectorCard(t, t.id === resolvedId, { layout, onSelect }));
+    containerEl.appendChild(
+      buildThemeSelectorCard(t, t.id === resolvedId, { layout, source, allowSwipeDelete, onSelect, onReselect }),
+    );
   }
   if (layout === 'strip') containerEl.scrollLeft = keepScroll;
 }
@@ -22901,11 +23180,54 @@ function renderThemeStrip() {
   renderThemeSelector(strip, {
     selectedThemeId: state.themeId,
     layout: 'grid',
+    source: 'styles',
+    allowSwipeDelete: true,
     onSelect: (id) => {
       if (id === state.themeId) return;
       selectTheme(id);
     },
+    onReselect: () => {
+      openThemeEditor({ origin: isStyleWizardActive() ? 'wizard-selector' : 'style-selector' });
+    },
   });
+}
+
+function renderThemeEditorPreview(t) {
+  const preview = document.getElementById('themeEditorPreview');
+  if (!preview) return;
+  applyThemeBackgroundToElement(preview, t);
+  applyThemeFontsToElement(preview, t);
+  preview.style.color = t.text;
+  const opts = getThemeStyleOptions(t);
+  const headingStack = getThemeFontStack(t.headingFont);
+  const bodyStack = getThemeFontStack(t.bodyFont);
+  const dividerColor = getStepDividerLineColor(t);
+  const stepBorderCss =
+    opts.stepBorderStyle === 'boxes'
+      ? `border:1px solid ${dividerColor};border-radius:4px;`
+      : opts.stepBorderStyle === 'lines'
+        ? `border-right:1px solid ${dividerColor};`
+        : '';
+
+  preview.innerHTML = `
+    <div class="flex items-stretch justify-between gap-2 min-h-0 flex-1">
+      <div class="flex-1 min-w-0 pr-2 flex flex-col justify-between" style="${stepBorderCss}">
+        <div class="flex items-center justify-between gap-1.5">
+          <span class="text-lg leading-none" style="font-family:${escHtml(headingStack)};font-weight:${opts.stepNumWeight};color:${escHtml(t.text)}">12</span>
+          <span class="px-1.5 py-0.5 rounded-[4px] text-[9px] font-bold leading-none inline-flex items-center gap-1" style="background:${escHtml(t.pliBg)};border:1px solid ${escHtml(t.pliBorder)};color:${escHtml(t.text)};font-family:${escHtml(headingStack)}">
+            <span class="w-2.5 h-1.5 rounded-[1px] bg-[#c91a09] inline-block"></span>
+            <span>2×</span>
+          </span>
+        </div>
+        <div class="text-[9px] truncate" style="color:${escHtml(t.muted)};font-family:${escHtml(bodyStack)}">${opts.showPageTitle ? 'Model Title · Step 12' : '2×4 Brick'}</div>
+      </div>
+      <div class="w-[78px] shrink-0 rounded-[4px] px-1.5 py-1 flex flex-col justify-between" style="background:${escHtml(t.calloutBg)};border:1px solid ${escHtml(t.calloutBorder)};color:${escHtml(t.text)}">
+        <span class="text-[8px] font-bold uppercase tracking-wider leading-none" style="font-family:${escHtml(headingStack)}">×2</span>
+        <span class="text-[8px] truncate leading-none" style="color:${escHtml(t.muted)};font-family:${escHtml(bodyStack)}">Callout</span>
+      </div>
+    </div>
+    ${opts.showProgressBar ? `<div class="mt-1.5 h-1 rounded-full overflow-hidden" style="background:${escHtml(t.pliBorder)}55"><div class="h-full w-3/5 rounded-full" style="background:${escHtml(t.accent)}"></div></div>` : ''}
+  `;
 }
 
 function syncStylePanel() {
@@ -22913,6 +23235,7 @@ function syncStylePanel() {
   const isBuiltIn = Boolean(t.builtIn || BUILT_IN_THEME_IDS.has(t.id));
   renderThemeStrip();
   syncStylePanelChrome();
+  renderThemeEditorPreview(t);
 
   const nameInput = document.getElementById('themeNameInput');
   if (nameInput && document.activeElement !== nameInput && nameInput.value !== t.name) nameInput.value = t.name;
@@ -23285,9 +23608,9 @@ document.getElementById('btnNewCustomTheme').onclick = () => {
   });
 };
 
-document.getElementById('btnDeleteTheme').onclick = async () => {
-  const t = getEditedTheme();
-  if (t.builtIn || BUILT_IN_THEME_IDS.has(t.id)) return;
+async function deleteThemeById(themeId: string) {
+  const t = resolveThemeById(themeId, customThemes);
+  if (!t || t.builtIn || BUILT_IN_THEME_IDS.has(t.id)) return;
   const referencingGroupNames = (state.layoutGroups || [])
     .filter((g) => g.themeId === t.id)
     .map((g) => g.name);
@@ -23303,7 +23626,7 @@ document.getElementById('btnDeleteTheme').onclick = async () => {
   persistCustomThemes();
   const next = orderThemesByRecent(getAllThemes(customThemes), themeRecents, '')[0];
   const fallbackId = next ? next.id : 'blue';
-  if (isEditingSettingsTheme()) {
+  if (isEditingSettingsTheme() && themeEditorSession.targetThemeId === t.id) {
     themeEditorSession.targetThemeId = fallbackId;
     patchCustomDefaults({ themeId: fallbackId });
     if (state.themeId === t.id) selectTheme(fallbackId);
@@ -23312,10 +23635,26 @@ document.getElementById('btnDeleteTheme').onclick = async () => {
     if (appSettings.customDefaults.themeId === t.id) {
       patchCustomDefaults({ themeId: fallbackId });
     }
-    selectTheme(fallbackId);
+    if (state.themeId === t.id) {
+      selectTheme(fallbackId);
+    } else {
+      renderAll();
+      renderSettingsModalUI();
+    }
   }
   showToast(`Deleted "${t.name}".`);
+}
+
+document.getElementById('btnDeleteTheme').onclick = async () => {
+  await deleteThemeById(getEditedTheme().id);
 };
+
+const btnSelectorDeleteThemeEl = document.getElementById('btnSelectorDeleteTheme');
+if (btnSelectorDeleteThemeEl) {
+  btnSelectorDeleteThemeEl.onclick = async () => {
+    await deleteThemeById(getActiveTheme().id);
+  };
+}
 
 document.getElementById('btnExportTheme').onclick = async () => {
   const t = getEditedTheme();
@@ -23990,6 +24329,11 @@ function handleGlobalEscapeKey() {
   }
   if (isOpen('importModal')) {
     closeImportAssistant(false);
+    return true;
+  }
+  const themeCtxMenu = document.getElementById('themeCardContextMenu');
+  if (themeCtxMenu && !themeCtxMenu.classList.contains('hidden')) {
+    closeThemeCardContextMenu();
     return true;
   }
   if (stylePopEl && !stylePopEl.classList.contains('hidden')) {
@@ -27948,10 +28292,15 @@ function renderSettingsModalUI() {
     renderThemeSelector(defThemeStrip, {
       selectedThemeId: cd.themeId || 'blue',
       layout: 'strip',
+      source: 'settings',
       onSelect: (id) => {
         if (id === appSettings.customDefaults.themeId) return;
         patchCustomDefaults({ themeId: id });
         defThemeStrip.scrollTo({ left: 0, behavior: 'smooth' });
+      },
+      onReselect: (id) => {
+        closeSettingsModal();
+        openThemeEditor({ origin: 'settings', themeId: id });
       },
     });
   }

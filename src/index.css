@@ -756,6 +756,39 @@ body {
   }
 }
 
+/* Swipe-right to expose delete action on custom theme cards */
+.theme-card-swipe-wrap {
+  position: relative;
+  overflow: hidden;
+  border-radius: 0.5rem;
+}
+.theme-card-swipe-delete {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 76px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  background: var(--danger);
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
+  border: 0;
+  cursor: pointer;
+}
+.theme-card-swipe-fg {
+  position: relative;
+  z-index: 1;
+  transition: transform 180ms var(--ease-press);
+  will-change: transform;
+  touch-action: pan-y;
+}
+.theme-card-swipe-wrap.is-swiping .theme-card-swipe-fg {
+  transition: none;
+}
+
 /* Draggable Parts List column/field list */
 .bom-field-row {
   transition: border-color 140ms var(--ease-press), background-color 140ms var(--ease-press), opacity 140ms var(--ease-press);

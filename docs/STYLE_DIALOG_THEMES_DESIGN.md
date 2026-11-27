@@ -12,21 +12,26 @@ The Styles surface (`#stylePopover`) is split into two distinct pages backed by 
 ## Shared Theme Selector Component
 
 `renderThemeSelector()` + `buildThemeSelectorCard()` render theme preview cards consistently across:
-- **Styles → Theme Selector page** (`#themeStrip`, responsive grid: 2 columns in popover / mobile, 3 columns in centered modal), plus pinned actions (**Edit Theme**, **New from Current**, **Import**).
+- **Styles → Theme Selector page** (`#themeStrip`, responsive grid: 2 columns in popover / mobile, 3 columns in centered modal), plus pinned actions: primary **Edit Theme** button (`#btnEditActiveTheme`) and a 3-column **New** / **Import** / **Delete** row (`#btnNewCustomTheme`, `#btnImportTheme`, `#btnSelectorDeleteTheme`).
 - **App Settings → Custom Defaults → Default Theme** (`#settingsDefThemeStrip`, horizontal recency-ordered strip with `Shift + Scroll` desktop wheel support) paired with an **Edit Theme** button (`#btnSettingsEditDefTheme`).
 - **Import Wizard → Theme** (opens the Styles Theme Selector page in modal mode, with one-click access into the Theme Editor).
 
-Each card shows a mini page preview (background, step number `"1"` in the heading font, a parts box, muted text in the body font, accent dot, and a compact pencil marker for custom themes) ordered via `orderThemesByRecent()` with the currently selected theme first.
+Each card shows a mini page preview (background, step number `"1"` in the heading font, a parts box, muted text in the body font, accent dot, and a compact pencil marker for custom themes) ordered via `orderThemesByRecent()` with the currently selected theme first:
+- **Selected styling**: uses the app's primary selection treatment (`bg-[var(--primary)] text-[var(--primary-foreground)]` — white label on reddish primary card).
+- **Tap/click selected to edit**: clicking an unselected card selects it; clicking the already-selected card opens the Theme Editor directly.
+- **Delete from selector**: custom themes can be deleted via (1) swiping right on the card to expose the red left-side Delete action, (2) right-clicking / long-pressing a card to open `#themeCardContextMenu` (`Edit Theme`, `Duplicate`, `Delete Theme`), or (3) the bottom `#btnSelectorDeleteTheme` button — all routed through `deleteThemeById()` and the permanent-action confirmation dialog.
 
 ## Theme Editor Layout & Editing Model
 
 - **Unified Header** (`#stylePopoverHeader`): top-left Back button (`#btnStyleBack`), title (`Edit Theme` + theme name subtitle), `Collapse All / Expand All` (`#btnToggleAllStyleSections`, shown only in Theme Editor), and modal Close (`×`) when presented as a centered modal.
-- **Collapsible Sections** (`#stylePopoverScroll`):
+- **Sticky Live Preview** (`#themeEditorPreviewHeader` + `#themeEditorPreview`): pinned above `#stylePopoverScroll` so background, typography, colors, step dividers, and progress bar changes preview live while scrolling.
+- **Collapsible Sections** (`#stylePopoverScroll`) with scope chips (`All Pages` / `All Steps`) placed inside at the top of each section body:
   1. **Theme Name** + **Export / Delete** (delete disabled for built-ins; built-in auto-fork hint).
-  2. **Page Background**, **Text, Boxes & Accents**, **Typography**.
-  3. **Rendering Style**: lighting (`None` / `Standard` / `Studio`), outlines, placement arrows, and `Fade Earlier Pieces`.
-  4. **Step Display**: rotation badges, 1:1 axle & beam guides, attachment starburst, minifigure step style & 1:1 view, step dividers, step number weight, model title, and build progress bar.
-  5. **Parts List**: direct link (`#btnStyleOpenBomSetup`) to `#bomSetupModal` (hidden in Import Wizard, Settings, and when opened from Parts List Setup).
+  2. **Page Background** (`All Pages`).
+  3. **Text, Boxes & Accents** (`All Pages`) with **Colors** and **Fonts** (`#styleTypographySection`) subheadings.
+  4. **Rendering Style** (`All Steps`): lighting (`None` / `Standard` / `Studio`), outlines, placement arrows, and `Fade Earlier Pieces`.
+  5. **Step Display** (`All Pages`): rotation badges, 1:1 axle & beam guides, attachment starburst, minifigure step style & 1:1 view, step dividers, step number weight, model title, and build progress bar.
+  6. **Parts List** (no redundant scope chip): direct link (`#btnStyleOpenBomSetup`) to `#bomSetupModal` (hidden in Import Wizard, Settings, and when opened from Parts List Setup).
 - `patchEditedTheme(patch)` routes edits to `patchActiveTheme(patch)` for project-scoped origins, or updates/auto-forks `appSettings.customDefaults.themeId` when opened from App Settings (also syncing the open project if it happens to use the same theme). **Built-in themes are never modified.**
 - Custom themes save automatically (300 ms debounced storage persistence, RAF-batched re-renders). Renaming applies as you type and restores the saved name on blur if cleared.
 

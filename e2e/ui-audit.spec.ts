@@ -408,14 +408,23 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     await expect(page.locator('#styleSelectorView')).toBeVisible();
     await expect(page.locator('#styleEditorView')).toBeHidden();
     await expect(page.locator('#btnToggleAllStyleSections')).toBeHidden();
+    await expect(page.locator('#btnSelectorDeleteTheme')).toBeDisabled();
     await auditSurface(page, `${testInfo.project.name}: Style Theme Selector Popover`, {
       activeContainerSelector: '#stylePopover',
     });
 
-    // Navigate from Theme Selector page to Theme Editor page
-    await page.locator('#btnEditActiveTheme').click();
+    // Right-click context menu on a theme card opens & dismisses cleanly
+    await page.locator('#themeStrip [role="option"][aria-selected="true"]').click({ button: 'right' });
+    await expect(page.locator('#themeCardContextMenu')).toBeVisible();
+    await expect(page.locator('#themeCtxDelete')).toBeDisabled();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#themeCardContextMenu')).toBeHidden();
+
+    // Clicking the already-selected theme opens the Theme Editor page directly
+    await page.locator('#themeStrip [role="option"][aria-selected="true"]').click();
     await expect(page.locator('#styleEditorView')).toBeVisible();
     await expect(page.locator('#styleSelectorView')).toBeHidden();
+    await expect(page.locator('#themeEditorPreview')).toBeVisible();
     await expect(page.locator('#styleHeaderTitle')).toHaveText('Edit Theme');
     await expect(page.locator('#btnToggleAllStyleSections')).toContainText('Collapse All');
     await auditSurface(page, `${testInfo.project.name}: Style Theme Editor Popover`, {
@@ -426,11 +435,11 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     await page.locator('#btnToggleAllStyleSections').click();
     await expect(page.locator('#btnToggleAllStyleSections')).toContainText('Expand All');
     await expect(page.locator('#stylePageBgSection')).not.toHaveAttribute('open', '');
-    await expect(page.locator('#styleTypographySection')).not.toHaveAttribute('open', '');
+    await expect(page.locator('#stylePaletteSection')).not.toHaveAttribute('open', '');
     await page.locator('#btnToggleAllStyleSections').click();
     await expect(page.locator('#btnToggleAllStyleSections')).toContainText('Collapse All');
     await expect(page.locator('#stylePageBgSection')).toHaveAttribute('open', '');
-    await expect(page.locator('#styleTypographySection')).toHaveAttribute('open', '');
+    await expect(page.locator('#stylePaletteSection')).toHaveAttribute('open', '');
 
     // Open Typography Font Picker inside Style Popover
     await page.locator('#btnThemeHeadingFont').click();

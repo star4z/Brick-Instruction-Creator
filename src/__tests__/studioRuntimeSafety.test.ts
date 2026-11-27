@@ -1210,6 +1210,9 @@ describe('studioRuntime safety checks', () => {
     expect(styleHtml).toContain('id="themeStrip"');
     expect(styleHtml).toContain('id="btnEditActiveTheme"');
     expect(styleHtml).toContain('id="btnNewCustomTheme"');
+    expect(styleHtml).toContain('id="btnSelectorDeleteTheme"');
+    expect(styleHtml).toContain('id="themeEditorPreview"');
+    expect(styleHtml).toContain('id="themeCardContextMenu"');
 
     const selectorStart = styleHtml.indexOf('id="styleSelectorView"');
     const editorStart = styleHtml.indexOf('id="styleEditorView"');
@@ -1219,19 +1222,23 @@ describe('studioRuntime safety checks', () => {
     expect(selectorHtml).toContain('id="themeStrip"');
     expect(selectorHtml).toContain('id="btnEditActiveTheme"');
     expect(selectorHtml).toContain('id="btnNewCustomTheme"');
+    expect(selectorHtml).toContain('id="btnSelectorDeleteTheme"');
 
     // All Theme Editor sections are collapsible <details class="style-section" ...>
     for (const id of [
       'styleThemeIdentitySection',
       'stylePageBgSection',
       'stylePaletteSection',
-      'styleTypographySection',
       'styleStepDisplaySection',
       'styleStepFeaturesSection',
       'styleBomSection',
     ]) {
       expect(editorHtml).toContain(`<details id="${id}" class="style-section`);
     }
+
+    // Scope chips live inside sections (not "in Theme"), and Parts List has no redundant scope chip
+    expect(editorHtml).not.toContain('All Steps in Theme');
+    expect(editorHtml).not.toContain('All Parts List Pages');
 
     // Solid / Gradient is inside Page Background body (after </summary>) and at the top (before themeColorBg)
     const bgStart = editorHtml.indexOf('id="stylePageBgSection"');
@@ -1242,19 +1249,22 @@ describe('studioRuntime safety checks', () => {
     expect(bgSolidIdx).toBeGreaterThan(bgSummaryEnd);
     expect(bgColorIdx).toBeGreaterThan(bgSolidIdx);
 
-    // Upload Font is inside Typography body (after </summary>) and at the bottom (after themeFontPickerPanel)
-    const typoStart = editorHtml.indexOf('id="styleTypographySection"');
-    const typoEnd = editorHtml.indexOf('</details>', typoStart);
-    const typoSummaryEnd = editorHtml.indexOf('</summary>', typoStart);
-    const fontPickerIdx = editorHtml.indexOf('id="themeFontPickerPanel"', typoStart);
-    const uploadFontIdx = editorHtml.indexOf('id="btnUploadCustomFont"', typoStart);
-    expect(typoSummaryEnd).toBeGreaterThan(typoStart);
+    // Colors and Fonts subheadings live inside Text, Boxes & Accents (#stylePaletteSection)
+    const paletteStart = editorHtml.indexOf('id="stylePaletteSection"');
+    const paletteEnd = editorHtml.indexOf('</details>', paletteStart);
+    const paletteHtml = editorHtml.slice(paletteStart, paletteEnd);
+    expect(paletteHtml).toContain('>Colors<');
+    expect(paletteHtml).toContain('>Fonts<');
+    expect(paletteHtml).toContain('id="styleTypographySection"');
+    const fontPickerIdx = paletteHtml.indexOf('id="themeFontPickerPanel"');
+    const uploadFontIdx = paletteHtml.indexOf('id="btnUploadCustomFont"');
     expect(uploadFontIdx).toBeGreaterThan(fontPickerIdx);
-    expect(uploadFontIdx).toBeLessThan(typoEnd);
 
-    // Runtime wires Expand/Collapse All toggle & unified chrome sync
+    // Runtime wires Expand/Collapse All toggle, unified chrome sync, sticky preview, and shared delete
     expect(runtime).toContain('function syncStyleSectionsToggleAllUI(');
     expect(runtime).toContain('function syncStylePanelChrome(');
     expect(runtime).toContain('function openThemeEditor(');
+    expect(runtime).toContain('function renderThemeEditorPreview(');
+    expect(runtime).toContain('async function deleteThemeById(');
   });
 });
