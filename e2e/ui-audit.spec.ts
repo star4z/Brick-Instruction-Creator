@@ -417,6 +417,10 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     await page.locator('.step-num-weight-btn[data-step-num-weight="800"]').click();
     await expect(page.locator('.step-num-weight-btn[data-step-num-weight="800"]')).toHaveAttribute('aria-pressed', 'true');
 
+    // Verify Attachment Starburst toggle is off by default and interactive
+    await expect(page.locator('#toggleAttachmentStarburst')).toBeVisible();
+    await expect(page.locator('#toggleAttachmentStarburst')).not.toBeChecked();
+
     // Verify Step Dividers default to LEGO-style Lines and Build Progress Bar + Span controls inside Style Popover (auto-forking built-in theme)
     await expect(page.locator('#toggleProgressBar')).toBeVisible();
     await expect(page.locator('#stylePopover .progress-bar-span-btn[data-progress-bar-span="page"]')).toHaveAttribute('aria-pressed', 'true');

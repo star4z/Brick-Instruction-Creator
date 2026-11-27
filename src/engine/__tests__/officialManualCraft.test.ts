@@ -10,6 +10,7 @@ import {
   buildAttachmentStarburstSvg,
   buildCurvedMotionArrowSvg,
   buildOrthogonalLeadersSvg,
+  computeAttachmentStarburstPlacement,
   detectMirroredSubassemblyPairs,
   detectNonOrthogonalArticulationAngle,
   routeOrthogonalLeaders,
@@ -151,6 +152,47 @@ describe('Official Manual Craft — Callout Routing, Chiral Pairing & Articulati
     const c = Math.cos(Math.PI / 4);
     const s = Math.sin(Math.PI / 4);
     expect(detectNonOrthogonalArticulationAngle([c, -s, 0, s, c, 0, 0, 0, 1])).toBe(45);
+  });
+
+  it('anchors attachment starbursts to the projected 2D bounds of newly added submodel parts and defaults off', () => {
+    expect(DEFAULT_THEME_STYLE_OPTIONS.showAttachmentStarburst).toBe(false);
+
+    // Identity MVP maps world [-1, 1] directly to NDC [-1, 1]
+    const identityMvp = [
+      1, 0, 0, 0,
+      0, 1, 0, 0,
+      0, 0, 1, 0,
+      0, 0, 0, 1,
+    ];
+
+    // Submodel positioned in the lower-right quadrant (NDC x in [0.2, 0.6], y in [-0.6, -0.2])
+    // inside a 400x500 slot containing an 800x800 square snapshot (letterboxed y in [50, 450])
+    const placed = computeAttachmentStarburstPlacement({
+      containerW: 400,
+      containerH: 500,
+      snapW: 800,
+      snapH: 800,
+      mvp: identityMvp,
+      newPartBoxes: [{ min: [0.2, -0.6, -0.1], max: [0.6, -0.2, 0.1] }],
+    });
+    expect(placed.anchoredToSubmodel).toBe(true);
+    // NDC x center = 0.4 -> 0 + (0.4 * 0.5 + 0.5) * 400 = 280
+    // NDC y center = -0.4 -> 50 + (0.5 - (-0.4) * 0.5) * 400 = 330
+    expect(placed.cx).toBeCloseTo(280, 1);
+    expect(placed.cy).toBeCloseTo(330, 1);
+    expect(placed.radius).toBeGreaterThanOrEqual(56);
+    expect(placed.radius).toBeLessThanOrEqual(168);
+
+    // Fallback centers cleanly when MVP or boxes are absent
+    const fallback = computeAttachmentStarburstPlacement({
+      containerW: 400,
+      containerH: 500,
+      mvp: null,
+      newPartBoxes: [],
+    });
+    expect(fallback.anchoredToSubmodel).toBe(false);
+    expect(fallback.cx).toBe(200);
+    expect(fallback.cy).toBe(250);
   });
 });
 

@@ -31,7 +31,7 @@ Every mechanism below is implemented using **pure physical, geometric, and perce
 ### 2.4 Callout Routing, Chiral Pairing, Starbursts & Articulation ([`src/engine/calloutCraft.ts`](../src/engine/calloutCraft.ts))
 - **`routeOrthogonalLeaders`**: Routes clean L-shaped (single target) and shared-trunk multi-forked orthogonal leader lines (2+ targets) with crisp arrowheads in both SVG and Canvas 2D.
 - **`detectMirroredSubassemblyPairs`**: Uses centered quantized 3D reflection signatures across X/Z mirror planes (while rejecting rigid Y-rotational duplicates) to pair chiral left/right subassemblies.
-- **Ghost Submodel Preview (`shouldShowGhostSubmodelPreview`)**, **Attachment Starburst (`buildAttachmentStarburstSvg` / `drawAttachmentStarburstCanvas`)**, and **Curved Yellow Articulation Arrows (`buildCurvedMotionArrowSvg`, `drawCurvedMotionArrowCanvas`, `detectNonOrthogonalArticulationAngle`)**.
+- **Ghost Submodel Preview (`shouldShowGhostSubmodelPreview`)**, **Attachment Starburst (`computeAttachmentStarburstPlacement` / `buildAttachmentStarburstSvg` / `drawAttachmentStarburstCanvas`)** — optional via `ThemeStyleOptions.showAttachmentStarburst` (off by default) and anchored directly to the projected 2D bounds of the newly added submodel/parts across Live DOM (including live 3D rotation) and PDF export — and **Curved Yellow Articulation Arrows (`buildCurvedMotionArrowSvg`, `drawCurvedMotionArrowCanvas`, `detectNonOrthogonalArticulationAngle`)**.
 
 ### 2.5 Build Roadmap, Inline Bag Openers & Bottom-Edge Progress Bar ([`src/engine/buildRoadmap.ts`](../src/engine/buildRoadmap.ts))
 - **`computeBuildRoadmapPages`**: Paginates multi-stage builds into 2-column × 3-row cumulative stage progression pages (up to 6 stages per page).

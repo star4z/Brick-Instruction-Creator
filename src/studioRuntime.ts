@@ -165,6 +165,7 @@ import {
   buildCalmCelebrationSvg,
   buildCurvedMotionArrowSvg,
   buildOrthogonalLeadersSvg,
+  computeAttachmentStarburstPlacement,
   detectConfusablePliColors,
   detectMirroredSubassemblyPairs,
   detectNonOrthogonalArticulationAngle,
@@ -8252,6 +8253,7 @@ const state = {
   outlineLineWeight: 'medium',
   showRotCues: true,
   showSizeGuides: true,
+  showAttachmentStarburst: false,
   minifigStyle: 'exploded', // 'exploded' (IMG_0316) | 'sequential' (IMG_0315) | 'classic'
   showMinifig1to1: false,
   stepBorderStyle: 'lines', // 'lines' (LEGO-style dividers) | 'boxes' | 'none'
@@ -11795,7 +11797,18 @@ function renderAll(renderOpts = {}) {
                         (step.parts || []).map((p) => ({ id: p.id, partId: p.p, colorId: p.c, center: computeWorldBox(p).center })),
                       )
                     : null;
-                  const showAttachStarburst = Boolean((step.attachedSubmodel || step.subassembly || radialRing) && !isOfficialMfStyle);
+                  const showAttachStarburst = Boolean(state.showAttachmentStarburst === true && (step.attachedSubmodel || step.subassembly || radialRing) && !isOfficialMfStyle);
+                  const attachStarburstInit = showAttachStarburst
+                    ? computeAttachmentStarburstPlacement({
+                        containerW: estSlotW,
+                        containerH: estSlotH,
+                        snapW: snap?.w || estSlotW,
+                        snapH: snap?.h || estSlotH,
+                        mvp: snap?.mvp || null,
+                        newPartBoxes: snap?.mesh?.newPartBoxes || null,
+                      })
+                    : null;
+                  const attachStarburstDiam = attachStarburstInit ? Math.max(48, Math.round(attachStarburstInit.radius * 2)) : 0;
                   const showGhostCalloutCue = Boolean(
                     step.subassembly && shouldShowGhostSubmodelPreview((step.subassembly.parts || []).length, true),
                   );
@@ -11835,7 +11848,7 @@ function renderAll(renderOpts = {}) {
                     </div>` : ''}
 
                   <div data-step-visual="${step.id}" class="flex-1 min-w-0 min-h-0 w-full h-full flex items-center justify-center relative overflow-hidden">
-                    ${showAttachStarburst ? `<div class="absolute inset-0 flex items-center justify-center pointer-events-none opacity-80">${buildAttachmentStarburstSvg(Math.round(Math.min(estSlotW, estSlotH) * 0.65))}</div>` : ''}
+                    ${showAttachStarburst && attachStarburstInit ? `<div data-attach-starburst="${step.id}" class="absolute pointer-events-none opacity-80" style="left:${attachStarburstInit.cx.toFixed(1)}px;top:${attachStarburstInit.cy.toFixed(1)}px;width:${attachStarburstDiam}px;height:${attachStarburstDiam}px;transform:translate(-50%,-50%)">${buildAttachmentStarburstSvg(attachStarburstDiam)}</div>` : ''}
                     ${(() => {
                       const mosaicPlan = (!showLive3D && !isOfficialMfStyle && (step.parts || []).length >= 12)
                         ? detectMosaicGridStep(
@@ -12075,11 +12088,39 @@ function positionStepRotationBadge(sid, sInfo, frame) {
   host.style.top = `${pos.y.toFixed(1)}px`;
 }
 
+function positionStepAttachmentStarburst(sid, sInfo, frame) {
+  if (!frame || !sInfo) return;
+  const visual = frame.querySelector(`[data-step-visual="${sid}"]`);
+  const burstEl = visual?.querySelector(`[data-attach-starburst="${sid}"]`);
+  if (!visual || !burstEl) return;
+
+  const containerW = visual.clientWidth || 0;
+  const containerH = visual.clientHeight || 0;
+  if (containerW < 24 || containerH < 24) return;
+
+  const isOfficialMf = Boolean(sInfo.isMfExploded || sInfo.isMfSeq);
+  const activeMvp = !isOfficialMf ? (sInfo.liveMvp || sInfo.snap?.mvp || null) : null;
+  const burst = computeAttachmentStarburstPlacement({
+    containerW,
+    containerH,
+    snapW: sInfo.liveW || sInfo.snap?.w || containerW,
+    snapH: sInfo.liveH || sInfo.snap?.h || containerH,
+    mvp: activeMvp,
+    newPartBoxes: !isOfficialMf ? (sInfo.snap?.mesh?.newPartBoxes || null) : null,
+  });
+  const diam = Math.max(48, Math.round(burst.radius * 2));
+  burstEl.style.left = `${burst.cx.toFixed(1)}px`;
+  burstEl.style.top = `${burst.cy.toFixed(1)}px`;
+  burstEl.style.width = `${diam}px`;
+  burstEl.style.height = `${diam}px`;
+}
+
 function positionVisibleStepRotationBadges() {
   const frame = document.getElementById('pageFrame');
   if (!frame || currentSlotRenderInfo.size === 0) return;
   for (const [sid, sInfo] of currentSlotRenderInfo.entries()) {
     positionStepRotationBadge(sid, sInfo, frame);
+    positionStepAttachmentStarburst(sid, sInfo, frame);
   }
 }
 
@@ -12110,6 +12151,9 @@ function syncVisibleStepRotationBadges() {
     }
     if (cueChanged || sInfo.liveMvp) {
       positionStepRotationBadge(sid, sInfo, frame);
+    }
+    if (sInfo.liveMvp) {
+      positionStepAttachmentStarburst(sid, sInfo, frame);
     }
   }
 }
@@ -12383,7 +12427,11 @@ function bindStepPageInteractions(page) {
           });
           if (rendered) {
             const studioMvp = photo.getLastMvp();
-            if (studioMvp) info.liveMvp = studioMvp;
+            if (studioMvp) {
+              info.liveMvp = studioMvp;
+              info.liveW = liveSize.width;
+              info.liveH = liveSize.height;
+            }
             ctx2d.clearRect(0, 0, liveSize.width, liveSize.height);
             ctx2d.imageSmoothingEnabled = true;
             ctx2d.imageSmoothingQuality = interactive ? 'low' : 'high';
@@ -12403,7 +12451,11 @@ function bindStepPageInteractions(page) {
             fixedHalfH,
             stepDrawOpts,
           );
-          if (liveMvp) info.liveMvp = liveMvp;
+          if (liveMvp) {
+            info.liveMvp = liveMvp;
+            info.liveW = liveSize.width;
+            info.liveH = liveSize.height;
+          }
           if (snapshotCanvas.width > 0 && snapshotCanvas.height > 0) {
             ctx2d.clearRect(0, 0, liveSize.width, liveSize.height);
             ctx2d.imageSmoothingEnabled = true;
@@ -12411,6 +12463,7 @@ function bindStepPageInteractions(page) {
             ctx2d.drawImage(snapshotCanvas, 0, 0, snapshotCanvas.width, snapshotCanvas.height, 0, 0, liveSize.width, liveSize.height);
           }
         }
+        positionStepAttachmentStarburst(info.step.id, info, document.getElementById('pageFrame'));
       };
 
       let az = info.cam.az, el = info.cam.el;
@@ -19758,7 +19811,7 @@ function scheduleSaveSessionPrefs() {
       highlightLineWeight: state.highlightLineWeight,
       fadePrev: state.fadePrev, fadeOpacity: state.fadeOpacity, stepLighting: state.stepLighting, highQualityStepRender: state.highQualityStepRender,
       starkBlackOutlines: state.starkBlackOutlines, outlineLineWeight: state.outlineLineWeight, showRotCues: state.showRotCues,
-      showSizeGuides: state.showSizeGuides, minifigStyle: state.minifigStyle, showMinifig1to1: state.showMinifig1to1, stepBorderStyle: state.stepBorderStyle, showStepBorders: state.showStepBorders,
+      showSizeGuides: state.showSizeGuides, showAttachmentStarburst: state.showAttachmentStarburst, minifigStyle: state.minifigStyle, showMinifig1to1: state.showMinifig1to1, stepBorderStyle: state.stepBorderStyle, showStepBorders: state.showStepBorders,
       showPageTitle: state.showPageTitle, wordlessMode: state.wordlessMode, bomShowTextFields: state.bomShowTextFields,
       pageNumberFormat: state.pageNumberFormat,
       pageNumberPosition: normalizePageNumberPosition(state.pageNumberPosition),
@@ -19996,6 +20049,8 @@ async function restoreLastSessionOnStart() {
     if (sbEl) sbEl.checked = Boolean(state.starkBlackOutlines);
     document.getElementById('toggleRotCues').checked = state.showRotCues;
     document.getElementById('toggleSizeGuides').checked = state.showSizeGuides;
+    const attachSbEl = document.getElementById('toggleAttachmentStarburst');
+    if (attachSbEl) attachSbEl.checked = Boolean(state.showAttachmentStarburst);
     const mf1El = document.getElementById('toggleMinifig1to1');
     if (mf1El) mf1El.checked = state.showMinifig1to1;
     const dupEl = document.getElementById('toggleDetectDuplicates');
@@ -21808,8 +21863,21 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
               (step.parts || []).map((p) => ({ id: p.id, partId: p.p, colorId: p.c, center: computeWorldBox(p).center })),
             )
           : null;
-        if ((step.attachedSubmodel || step.subassembly || pdfRadialRing) && !isOfficialMfStyle) {
-          drawAttachmentStarburstCanvas(ctx, sx + st.slotPad + mainAvailW / 2, renderTopY + renderAvailH / 2, Math.min(mainAvailW, renderAvailH) * 0.36);
+        if (state.showAttachmentStarburst === true && (step.attachedSubmodel || step.subassembly || pdfRadialRing) && !isOfficialMfStyle) {
+          const pdfBurst = computeAttachmentStarburstPlacement({
+            containerW: mainAvailW,
+            containerH: renderAvailH,
+            snapW: stepImg?.width || renderedStepSnap?.w || mainAvailW,
+            snapH: stepImg?.height || renderedStepSnap?.h || renderAvailH,
+            mvp: renderedStepSnap?.mvp || null,
+            newPartBoxes: renderedStepSnap?.mesh?.newPartBoxes || null,
+          });
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(sx + st.slotPad, renderTopY, mainAvailW, renderAvailH);
+          ctx.clip();
+          drawAttachmentStarburstCanvas(ctx, sx + st.slotPad + pdfBurst.cx, renderTopY + pdfBurst.cy, pdfBurst.radius);
+          ctx.restore();
         }
         const pdfMosaicPlan = (!isOfficialMfStyle && (step.parts || []).length >= 12)
           ? detectMosaicGridStep(
@@ -22518,6 +22586,7 @@ function syncStylePanel() {
   setChk('toggleStarkBlackOutlines', opts.starkBlackOutlines);
   setChk('toggleRotCues', opts.showRotCues);
   setChk('toggleSizeGuides', opts.showSizeGuides);
+  setChk('toggleAttachmentStarburst', opts.showAttachmentStarburst);
   setChk('toggleMinifig1to1', opts.showMinifig1to1);
   syncStepBorderStyleUI(opts.stepBorderStyle);
   setChk('togglePageTitle', opts.showPageTitle);
@@ -24513,6 +24582,13 @@ if (starkBlackToggleEl) starkBlackToggleEl.onchange = (e) => {
 };
 document.getElementById('toggleRotCues').onchange = (e) => patchActiveTheme({ showRotCues: e.target.checked });
 document.getElementById('toggleSizeGuides').onchange = (e) => patchActiveTheme({ showSizeGuides: e.target.checked });
+const attachStarburstToggleEl = document.getElementById('toggleAttachmentStarburst');
+if (attachStarburstToggleEl) {
+  attachStarburstToggleEl.onchange = (e) => {
+    overviewThumbCache.bumpEpoch();
+    patchActiveTheme({ showAttachmentStarburst: e.target.checked });
+  };
+}
 const mf1to1ToggleEl = document.getElementById('toggleMinifig1to1');
 if (mf1to1ToggleEl) mf1to1ToggleEl.onchange = (e) => patchActiveTheme({ showMinifig1to1: e.target.checked });
 document.querySelectorAll('.mf-style-btn').forEach(b => {
@@ -25304,6 +25380,7 @@ async function exportProjectFile() {
     fadePrev: state.fadePrev,
     fadeOpacity: state.fadeOpacity,
     showRotCues: state.showRotCues,
+    showAttachmentStarburst: state.showAttachmentStarburst,
     pageNumberFormat: state.pageNumberFormat,
     pageNumberPosition: normalizePageNumberPosition(state.pageNumberPosition),
     showCover: state.showCover,
@@ -25386,6 +25463,7 @@ async function handleIncomingProjectFile(f) {
     if (typeof data.fadePrev === 'boolean') state.fadePrev = data.fadePrev;
     if (typeof data.fadeOpacity === 'number' && Number.isFinite(data.fadeOpacity)) state.fadeOpacity = data.fadeOpacity;
     if (typeof data.showRotCues === 'boolean') state.showRotCues = data.showRotCues;
+    if (typeof data.showAttachmentStarburst === 'boolean') state.showAttachmentStarburst = data.showAttachmentStarburst;
     if (Array.isArray(data.customFonts) && data.customFonts.length > 0) {
       showOperationLoadingOverlay('project_fonts', { label: projLabel });
       await yieldToBrowserPaint();

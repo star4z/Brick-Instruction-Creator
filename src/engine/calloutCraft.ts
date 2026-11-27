@@ -405,7 +405,113 @@ export function buildAttachmentStarburstSvg(
     );
   }
   const gradId = `sbGrad_${++starburstGradCounter}`;
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${s}" height="${s}" viewBox="0 0 ${s} ${s}" class="pointer-events-none" aria-hidden="true"><defs><radialGradient id="${gradId}" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="${color}" stop-opacity="0.72"/><stop offset="100%" stop-color="${color}" stop-opacity="0"/></radialGradient></defs><circle cx="${c}" cy="${c}" r="${rOuter.toFixed(1)}" fill="url(#${gradId})"/>${polygons.join('')}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${s}" height="${s}" viewBox="0 0 ${s} ${s}" class="w-full h-full pointer-events-none" aria-hidden="true"><defs><radialGradient id="${gradId}" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="${color}" stop-opacity="0.72"/><stop offset="100%" stop-color="${color}" stop-opacity="0"/></radialGradient></defs><circle cx="${c}" cy="${c}" r="${rOuter.toFixed(1)}" fill="url(#${gradId})"/>${polygons.join('')}</svg>`;
+}
+
+export interface AttachmentStarburstBox3D {
+  min: [number, number, number];
+  max: [number, number, number];
+}
+
+export interface AttachmentStarburstPlacementInput {
+  containerW: number;
+  containerH: number;
+  snapW?: number;
+  snapH?: number;
+  mvp?: ArrayLike<number> | null;
+  newPartBoxes?: AttachmentStarburstBox3D[] | null;
+}
+
+export interface AttachmentStarburstPlacement {
+  cx: number;
+  cy: number;
+  radius: number;
+  anchoredToSubmodel: boolean;
+}
+
+/**
+ * Computes the screen-space center and radius for an attachment starburst so it
+ * radiates specifically around the newly added submodel's projected 2D footprint
+ * (matching official LEGO manual callout/attachment bursts).
+ */
+export function computeAttachmentStarburstPlacement(
+  input: AttachmentStarburstPlacementInput,
+): AttachmentStarburstPlacement {
+  const containerW = Math.max(1, input.containerW || 1);
+  const containerH = Math.max(1, input.containerH || 1);
+  const minDim = Math.min(containerW, containerH);
+  const fallback: AttachmentStarburstPlacement = {
+    cx: containerW / 2,
+    cy: containerH / 2,
+    radius: Math.max(24, minDim * 0.32),
+    anchoredToSubmodel: false,
+  };
+
+  const mvp = input.mvp;
+  const boxes = input.newPartBoxes;
+  if (!mvp || mvp.length < 16 || !boxes || boxes.length === 0) {
+    return fallback;
+  }
+
+  const safeSnapW = input.snapW && input.snapW > 0 ? input.snapW : containerW;
+  const safeSnapH = input.snapH && input.snapH > 0 ? input.snapH : containerH;
+  const containScale = Math.min(containerW / safeSnapW, containerH / safeSnapH);
+  const drawW = safeSnapW * containScale;
+  const drawH = safeSnapH * containScale;
+  const drawX = (containerW - drawW) / 2;
+  const drawY = (containerH - drawH) / 2;
+
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+
+  for (const box of boxes) {
+    if (!box?.min || !box?.max) continue;
+    const xs = [box.min[0], box.max[0]];
+    const ys = [box.min[1], box.max[1]];
+    const zs = [box.min[2], box.max[2]];
+    for (let ix = 0; ix < 2; ix++) {
+      for (let iy = 0; iy < 2; iy++) {
+        for (let iz = 0; iz < 2; iz++) {
+          const px = xs[ix];
+          const py = ys[iy];
+          const pz = zs[iz];
+          const w = mvp[3] * px + mvp[7] * py + mvp[11] * pz + mvp[15] || 1;
+          const ndcX = (mvp[0] * px + mvp[4] * py + mvp[8] * pz + mvp[12]) / w;
+          const ndcY = (mvp[1] * px + mvp[5] * py + mvp[9] * pz + mvp[13]) / w;
+          if (!Number.isFinite(ndcX) || !Number.isFinite(ndcY)) continue;
+          const sx = drawX + (ndcX * 0.5 + 0.5) * drawW;
+          const sy = drawY + (0.5 - ndcY * 0.5) * drawH;
+          if (sx < minX) minX = sx;
+          if (sx > maxX) maxX = sx;
+          if (sy < minY) minY = sy;
+          if (sy > maxY) maxY = sy;
+        }
+      }
+    }
+  }
+
+  if (!Number.isFinite(minX) || !Number.isFinite(maxX) || !Number.isFinite(minY) || !Number.isFinite(maxY)) {
+    return fallback;
+  }
+
+  const cx = Math.max(0, Math.min(containerW, (minX + maxX) / 2));
+  const cy = Math.max(0, Math.min(containerH, (minY + maxY) / 2));
+  const spanW = Math.max(0, maxX - minX);
+  const spanH = Math.max(0, maxY - minY);
+  const diag = Math.hypot(spanW, spanH);
+  const minRadius = Math.max(24, minDim * 0.14);
+  const maxRadius = Math.max(minRadius, minDim * 0.42);
+  const rawRadius = Math.max(diag * 0.72, Math.max(spanW, spanH) * 0.92);
+  const radius = Math.max(minRadius, Math.min(maxRadius, rawRadius));
+
+  return {
+    cx,
+    cy,
+    radius,
+    anchoredToSubmodel: true,
+  };
 }
 
 /**

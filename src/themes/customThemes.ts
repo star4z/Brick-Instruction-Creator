@@ -195,6 +195,7 @@ export interface ThemeStyleOptions {
   outlineLineWeight: LineWeightId;
   showRotCues: boolean;
   showSizeGuides: boolean;
+  showAttachmentStarburst: boolean;
   minifigStyle: ThemeMinifigStyle;
   showMinifig1to1: boolean;
   stepBorderStyle: StepBorderStyle;
@@ -223,6 +224,7 @@ export const THEME_STYLE_OPTION_KEYS: Array<keyof ThemeStyleOptions> = [
   'outlineLineWeight',
   'showRotCues',
   'showSizeGuides',
+  'showAttachmentStarburst',
   'minifigStyle',
   'showMinifig1to1',
   'stepBorderStyle',
@@ -251,6 +253,7 @@ export const DEFAULT_THEME_STYLE_OPTIONS: ThemeStyleOptions = {
   outlineLineWeight: 'medium',
   showRotCues: true,
   showSizeGuides: true,
+  showAttachmentStarburst: false,
   minifigStyle: 'exploded',
   showMinifig1to1: false,
   stepBorderStyle: 'lines',
@@ -334,6 +337,7 @@ export function normalizeThemeStyleOptions(
     outlineLineWeight: sanitizeLineWeight(r.outlineLineWeight, sanitizeLineWeight(fb.outlineLineWeight, 'medium')),
     showRotCues: bool('showRotCues'),
     showSizeGuides: bool('showSizeGuides'),
+    showAttachmentStarburst: bool('showAttachmentStarburst'),
     minifigStyle: mf,
     showMinifig1to1: bool('showMinifig1to1'),
     stepBorderStyle,
@@ -398,6 +402,7 @@ export interface ManualTheme {
   outlineLineWeight?: LineWeightId;
   showRotCues?: boolean;
   showSizeGuides?: boolean;
+  showAttachmentStarburst?: boolean;
   minifigStyle?: ThemeMinifigStyle;
   showMinifig1to1?: boolean;
   stepBorderStyle?: StepBorderStyle;
