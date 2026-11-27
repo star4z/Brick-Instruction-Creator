@@ -1179,5 +1179,53 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
 
     runtime.assertClean(`${testInfo.project.name}: Step Regeneration Page Break Warning`);
   });
+
+  test('Hash URL routing addresses manual pages and app views with reload stability and fallback', async ({
+    page,
+  }, testInfo) => {
+    const runtime = await attachRuntimeIssueCollector(page);
+
+    // 1. Standalone app view URL on empty state opens Settings directly
+    await page.goto('/#/settings');
+    await expect(page.locator('#settingsModal')).toBeVisible();
+    await page.locator('#btnCloseSettings').click();
+    await expect(page.locator('#settingsModal')).toBeHidden();
+    expect(await page.evaluate(() => window.location.hash)).toBe('');
+
+    // 2. Import a model and verify hash updates on page navigation & modal open
+    await uploadLdrFile(page, 'url-route-test.mpd', MULTI_CHAPTER_MPD);
+    const wizard = page.locator('#importWizardModal');
+    await expect(wizard).toBeVisible();
+    await page.locator('#impWizBtnGenerate').click();
+    await expect(wizard).toBeHidden();
+    await expect(page.locator('#stageViewport')).toBeVisible();
+    await closeMenuOnMobile(page);
+
+    expect(await page.evaluate(() => window.location.hash)).toBe('#/cover');
+
+    // Navigate to Page 2 and confirm URL updates to #/page/2
+    await page.locator('#nextPage').click();
+    await expect.poll(() => page.evaluate(() => window.location.hash)).toBe('#/page/2');
+
+    // Reloading at #/page/2 restores the manual via cached snapshot directly onto Page 2
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect(page.locator('#stageViewport')).toBeVisible();
+    expect(await page.evaluate(() => window.location.hash)).toBe('#/page/2');
+
+    // Composed URL (#/page/2?view=settings) opens Settings over Page 2 on direct load
+    await page.goto('/#/page/2?view=settings');
+    await expect(page.locator('#stageViewport')).toBeVisible();
+    await expect(page.locator('#settingsModal')).toBeVisible();
+    await page.locator('#btnCloseSettings').click();
+    await expect(page.locator('#settingsModal')).toBeHidden();
+    expect(await page.evaluate(() => window.location.hash)).toBe('#/page/2');
+
+    // Out-of-range hash falls back cleanly without crashing
+    await page.goto('/#/page/9999');
+    await expect(page.locator('#stageViewport')).toBeVisible();
+
+    runtime.assertClean(`${testInfo.project.name}: Hash URL Routing`);
+  });
 });
+
 

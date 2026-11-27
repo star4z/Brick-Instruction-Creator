@@ -234,6 +234,76 @@ class EmbeddedTextureStore {
     return readyCount;
   }
 
+  async predecodeKeys(texKeys: Iterable<string>, timeoutMs = 8000): Promise<number> {
+    if (typeof Image === 'undefined') return 0;
+    const pending: Promise<void>[] = [];
+    const seen = new Set<string>();
+    for (const rawKey of texKeys) {
+      if (!rawKey || seen.has(rawKey)) continue;
+      seen.add(rawKey);
+      const rec = this.byKey.get(rawKey);
+      if (rec && !rec.image && !rec.failed) {
+        pending.push(this.decodeTexture(rec.texKey));
+      }
+    }
+    if (pending.length === 0) return 0;
+    await Promise.race([
+      Promise.all(pending),
+      new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
+    ]);
+    let readyCount = 0;
+    for (const k of seen) {
+      if (this.byKey.get(k)?.image) readyCount++;
+    }
+    return readyCount;
+  }
+
+  exportEmbeddedTextures(): Array<{ names: string[]; base64Png: string }> {
+    const namesByKey = new Map<string, string[]>();
+    for (const [name, key] of this.byName.entries()) {
+      const rec = this.byKey.get(key);
+      if (!rec || rec.source !== 'embedded') continue;
+      let list = namesByKey.get(key);
+      if (!list) {
+        list = [];
+        namesByKey.set(key, list);
+      }
+      list.push(name);
+    }
+    const out: Array<{ names: string[]; base64Png: string }> = [];
+    for (const [key, rec] of this.byKey.entries()) {
+      if (rec.source !== 'embedded') continue;
+      out.push({
+        names: namesByKey.get(key) ?? [],
+        base64Png: rec.base64Png,
+      });
+    }
+    return out;
+  }
+
+  importEmbeddedTextures(
+    entries: Array<{ names?: string[]; name?: string; base64Png: string }>,
+  ): string[] {
+    const keys: string[] = [];
+    for (const entry of entries || []) {
+      if (!entry || typeof entry.base64Png !== 'string' || entry.base64Png.length < 16) continue;
+      const names = Array.isArray(entry.names)
+        ? entry.names.filter((n): n is string => typeof n === 'string' && n.trim().length > 0)
+        : (typeof entry.name === 'string' && entry.name.trim() ? [entry.name.trim()] : []);
+      if (names.length === 0) {
+        const key = this.registerBase64Texture(entry.base64Png, { source: 'embedded' });
+        if (key) keys.push(key);
+      } else {
+        let key: string | null = null;
+        for (const n of names) {
+          key = this.registerBase64Texture(entry.base64Png, { name: n, source: 'embedded' });
+        }
+        if (key) keys.push(key);
+      }
+    }
+    return keys;
+  }
+
   clearEmbedded(): void {
     for (const [k, rec] of this.byKey.entries()) {
       if (rec.source === 'embedded') this.byKey.delete(k);

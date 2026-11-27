@@ -8,7 +8,7 @@
 
 export const STARTUP_MODEL_HINT_KEY = 'biw.lastModelHint.v1';
 
-export type StartupModelKind = 'io' | 'ldr';
+export type StartupModelKind = 'io' | 'ldr' | 'project';
 
 export interface StartupModelHint {
   fileName: string;
@@ -17,7 +17,7 @@ export interface StartupModelHint {
 }
 
 export interface RestorableModelRecord {
-  kind: StartupModelKind;
+  kind: 'io' | 'ldr';
   fileName?: string;
   data: unknown;
 }
@@ -50,7 +50,7 @@ const PHASE_COPY: Record<StartupLoadingPhase, { status: string; progressPct: num
 };
 
 export function stripModelExtension(name: string): string {
-  return name.replace(/\.(io|ldr|mpd)$/i, '').trim();
+  return name.replace(/\.(io|ldr|mpd|biw)$/i, '').trim();
 }
 
 export function isRestorableModelRecord(rec: unknown): rec is RestorableModelRecord {
@@ -78,7 +78,7 @@ export function readStartupModelHint(
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     if (!parsed || typeof parsed !== 'object') return null;
-    if (parsed.kind !== 'io' && parsed.kind !== 'ldr') return null;
+    if (parsed.kind !== 'io' && parsed.kind !== 'ldr' && parsed.kind !== 'project') return null;
     const fileName = typeof parsed.fileName === 'string' ? parsed.fileName.trim() : '';
     const title = typeof parsed.title === 'string' ? parsed.title.trim() : '';
     const hint: StartupModelHint = { fileName, kind: parsed.kind };

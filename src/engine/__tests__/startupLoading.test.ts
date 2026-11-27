@@ -49,13 +49,16 @@ describe('startupLoading', () => {
     expect(storage.getItem(STARTUP_MODEL_HINT_KEY)).toBeNull();
   });
 
-  it('ignores malformed or unsupported hint payloads safely', () => {
+  it('ignores malformed or unsupported hint payloads safely and supports .biw project hints', () => {
     const storage = createMemoryStorage();
     storage.setItem(STARTUP_MODEL_HINT_KEY, '{not-json');
     expect(readStartupModelHint(storage)).toBeNull();
 
-    storage.setItem(STARTUP_MODEL_HINT_KEY, JSON.stringify({ kind: 'project', fileName: 'foo.biw' }));
+    storage.setItem(STARTUP_MODEL_HINT_KEY, JSON.stringify({ kind: 'unknown', fileName: 'foo.xyz' }));
     expect(readStartupModelHint(storage)).toBeNull();
+
+    storage.setItem(STARTUP_MODEL_HINT_KEY, JSON.stringify({ kind: 'project', fileName: 'foo.biw' }));
+    expect(readStartupModelHint(storage)).toEqual({ kind: 'project', fileName: 'foo.biw' });
   });
 
   it('validates restorable IndexedDB lastModel records', () => {

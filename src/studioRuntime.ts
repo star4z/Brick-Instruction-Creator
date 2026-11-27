@@ -48,13 +48,34 @@ import {
 } from './data/bricklinkColors';
 import { analyzeMissingParts } from './engine/missingParts';
 import {
+  MANUAL_SNAPSHOT_SCHEMA_VERSION,
+  NOT_FOUND_CACHE_TTL_MS,
+  buildLibraryCandidateKeys,
+  collectLeafPartIdsFromChapters,
+  computeSourceSignature,
+  deserializeEmbeddedModelAssets,
+  deserializeNotFoundCache,
+  isMatchingManualSnapshot,
+  isRestorableManualSnapshot,
+  serializeEmbeddedModelAssets,
+  serializeNotFoundCache,
+} from './engine/sessionCache';
+import {
+  buildPageTargetFromPage,
+  formatAppRoute,
+  parseAppRoute,
+  resolvePageIndexFromRouteTarget,
+} from './engine/urlRouting';
+import {
   PUBLIC_LDRAW_MIRRORS,
   buildMirrorConfigList,
   extractCleanDatTitle,
+  extractDatDependencies,
   extractMovedToTarget,
   fetchLDrawDependencyGraph,
   hasMpdGeometryOrPartLines,
   isLDrawPartSubfile,
+  isSynthesizedPrimitiveBase,
   normalizeMpdSubfileKey,
   parseLDrawColorToken,
 } from './engine/ldrLibrary';
@@ -1051,8 +1072,37 @@ const userLibRaw = new Map();
 const userLibTitles = new Map();
 const embeddedDatCompiled = new Map();
 const movedToAliases = new Map(); // LDraw ~Moved to <target> redirect chains for clean human names
-const notFoundDatCache = new Set(); // Session cache of confirmed 404 part IDs to avoid repeat probes
+const notFoundDatCache = new Set(); // Confirmed 404 part IDs (persisted with TTL in IndexedDB)
+const notFoundDatTimestamps = new Map(); // key -> timestamp (ms) for TTL pruning
 const compositePartDefs = new Map(); // Fused assemblies (e.g., Minifig Torso+Arms+Hands, Hips+Legs)
+
+function hydrateNotFoundDatCache(raw) {
+  const restored = deserializeNotFoundCache(raw, Date.now(), NOT_FOUND_CACHE_TTL_MS);
+  notFoundDatCache.clear();
+  notFoundDatTimestamps.clear();
+  for (const [k, ts] of restored.entries()) {
+    notFoundDatCache.add(k);
+    notFoundDatTimestamps.set(k, ts);
+  }
+}
+
+function persistNotFoundDatCache() {
+  const now = Date.now();
+  for (const k of notFoundDatCache) {
+    if (!notFoundDatTimestamps.has(k)) notFoundDatTimestamps.set(k, now);
+  }
+  for (const k of Array.from(notFoundDatTimestamps.keys())) {
+    if (!notFoundDatCache.has(k)) notFoundDatTimestamps.delete(k);
+  }
+  const serialized = serializeNotFoundCache(notFoundDatTimestamps, now, NOT_FOUND_CACHE_TTL_MS);
+  void dbPut('notFoundDatCache', serialized);
+}
+
+function clearNotFoundDatCache() {
+  notFoundDatCache.clear();
+  notFoundDatTimestamps.clear();
+  void dbDelete('notFoundDatCache');
+}
 
 function normId(raw) {
   return String(raw || '').trim().replace(/\\/g, '/').toLowerCase().replace(/^ldraw\//,'').replace(/^parts\//,'').replace(/^p\//,'').replace(/\.dat$/i,'');
@@ -5046,23 +5096,34 @@ async function extractIoArchive(arrayBuffer) {
   const m2Entry = pick('model2.ldr');
   if (!m1Entry && !m2Entry) throw new Error('Could not find model.ldr inside this .io file.');
 
-  const m1Text = m1Entry ? await readZipEntryText(bytes, view, m1Entry) : '';
-  const m2Text = m2Entry ? await readZipEntryText(bytes, view, m2Entry) : '';
+  const texEntries = entries.filter((ent) => {
+    const baseName = ent.name.toLowerCase().split('/').pop() || '';
+    return /\.(png|jpg|jpeg|webp)$/i.test(baseName) && baseName !== 'thumbnail.png' && !(ent.flags & 1);
+  });
+
+  const [m1Text, m2Text, decodedTexList] = await Promise.all([
+    m1Entry ? readZipEntryText(bytes, view, m1Entry) : Promise.resolve(''),
+    m2Entry ? readZipEntryText(bytes, view, m2Entry) : Promise.resolve(''),
+    Promise.all(
+      texEntries.map(async (ent) => {
+        try {
+          const u8 = await readZipEntryBytes(bytes, view, ent);
+          return u8.length > 24 ? { name: ent.name, b64: bytesToBase64(u8) } : null;
+        } catch (_) {
+          return null;
+        }
+      }),
+    ),
+  ]);
 
   embeddedDatRaw.clear(); embeddedDatTitles.clear(); embeddedDatCompiled.clear(); compositePartDefs.clear(); pliThumbCache.clear(); submodelThumbCache.clear(); clearMinifigDiagramCaches(); overviewThumbCache.bumpEpoch();
   textureStore.clearEmbedded();
 
-  // Extract any embedded texture PNGs bundled directly in the .io archive (skipping thumbnail.png)
-  for (const ent of entries) {
-    const lowerName = ent.name.toLowerCase();
-    const baseName = lowerName.split('/').pop() || '';
-    if (!/\.(png|jpg|jpeg|webp)$/i.test(baseName) || baseName === 'thumbnail.png' || (ent.flags & 1)) continue;
-    try {
-      const u8 = await readZipEntryBytes(bytes, view, ent);
-      if (u8.length > 24) {
-        textureStore.registerBase64Texture(bytesToBase64(u8), { name: ent.name, source: 'embedded' });
-      }
-    } catch (_) {}
+  const embeddedTexKeys = [];
+  for (const item of decodedTexList) {
+    if (!item) continue;
+    const key = textureStore.registerBase64Texture(item.b64, { name: item.name, source: 'embedded' });
+    if (key) embeddedTexKeys.push(key);
   }
 
   if (m2Text) {
@@ -5074,7 +5135,12 @@ async function extractIoArchive(arrayBuffer) {
       }
     }
   }
-  await textureStore.predecodeAllPending();
+  const allEmbeddedKeys = new Set(embeddedTexKeys);
+  for (const t of textureStore.exportEmbeddedTextures()) {
+    const rec = textureStore.lookupByName(t.names[0] || '');
+    if (rec?.texKey) allEmbeddedKeys.add(rec.texKey);
+  }
+  await textureStore.predecodeKeys(allEmbeddedKeys);
   return { m1Text, m2Text };
 }
 
@@ -15387,7 +15453,7 @@ function syncPageLayoutControlsUI() {
 
 function syncMenuControls() {
   const hasModel = Boolean(state.model);
-  const hasParsedModel = Boolean(state.model?._parsed);
+  const hasParsedModel = Boolean(state.model?._parsed || isRestorableModelRecord(lastSourceRecord));
   const diagCount = Array.isArray(state.diagnostics) ? state.diagnostics.length : 0;
   const vis = computeMenuVisibility({
     hasModel,
@@ -15769,6 +15835,7 @@ function closeOverviewModal() {
   hidePageBreakHelpTooltip();
   stopOverviewThumbQueue();
   document.getElementById('overviewModal')?.classList.add('hidden');
+  syncAppUrlHash();
 }
 
 function renderOverviewThumbTask(task) {
@@ -17291,6 +17358,49 @@ async function dbGet(key, storeName = DB_STORE) {
     });
   } catch (_) { return null; }
 }
+async function dbGetMany(keys, storeName = DB_STORE) {
+  const uniqueKeys = Array.from(new Set((keys || []).filter(Boolean)));
+  const out = new Map();
+  if (uniqueKeys.length === 0) return out;
+  try {
+    const db = await openSessionDB();
+    await new Promise((res) => {
+      const tx = db.transaction(storeName, 'readonly');
+      const st = tx.objectStore(storeName);
+      for (const k of uniqueKeys) {
+        const req = st.get(k);
+        req.onsuccess = () => {
+          if (req.result !== undefined) out.set(k, req.result);
+        };
+      }
+      tx.oncomplete = () => res();
+      tx.onerror = () => res();
+      tx.onabort = () => res();
+    });
+  } catch (_) {}
+  return out;
+}
+async function dbPutMany(entries, storeName = DB_STORE) {
+  if (!entries || entries.length === 0) return;
+  try {
+    const db = await openSessionDB();
+    await new Promise((res, rej) => {
+      const tx = db.transaction(storeName, 'readwrite');
+      const st = tx.objectStore(storeName);
+      for (const [k, v] of entries) {
+        if (k) st.put(v, k);
+      }
+      tx.oncomplete = () => res();
+      tx.onerror = () => rej(tx.error);
+      tx.onabort = () => rej(tx.error || new Error('IndexedDB transaction aborted'));
+    });
+  } catch (err) {
+    if (!warnedIdbQuota && err && (err.name === 'QuotaExceededError' || /quota/i.test(String(err.message || '')))) {
+      warnedIdbQuota = true;
+      if (typeof showToast === 'function') showToast('Browser storage full — autosave or library cache could not be saved.');
+    }
+  }
+}
 async function dbClearStore(storeName) {
   try {
     const db = await openSessionDB();
@@ -17584,32 +17694,147 @@ function updateLibraryStatusUI() {
   }
 }
 
-async function loadSavedBricksLibrary() {
-  try {
-    const db = await openSessionDB();
-    await new Promise((res, rej) => {
-      const tx = db.transaction(LIB_STORE, 'readonly');
-      const req = tx.objectStore(LIB_STORE).openCursor();
-      req.onsuccess = (e) => {
-        const cursor = e.target.result;
-        if (cursor) {
-          const key = String(cursor.key || '');
-          if (key.startsWith('__tex__:')) {
-            const texName = key.slice(8);
-            if (typeof cursor.value === 'string') {
-              textureStore.registerBase64Texture(cursor.value, { name: texName, source: 'library' });
-            }
-          } else {
-            registerUserLibDat(key, cursor.value);
+let fullBricksLibraryLoaded = false;
+let fullBricksLibraryPromise = null;
+
+/**
+ * Loads ONLY the cached `.dat` files and `__tex__:` textures from IndexedDB `partsLib`
+ * required by `rootPartIds` (walking transitive `.dat` dependencies in batched BFS waves).
+ * Returns the set of newly registered texture keys so the caller can predecode just those.
+ */
+async function loadPartsFromLibraryForIds(rootPartIds) {
+  const registeredTexKeys = new Set();
+  if (fullBricksLibraryLoaded) return registeredTexKeys;
+  const pendingIds = new Set();
+  const visitedIds = new Set();
+  const neededTextures = new Set();
+
+  const enqueueRef = (rawId) => {
+    const k = normId(rawId);
+    if (!k || visitedIds.has(k)) return;
+    const base = k.split('/').pop() || '';
+    if (isSynthesizedPrimitiveBase(base)) return;
+    visitedIds.add(k);
+    const alreadyLoaded = getDirectLoadedDatLines(k);
+    if (alreadyLoaded) {
+      const deps = extractDatDependencies(alreadyLoaded.join('\n'));
+      for (const sub of deps.subfiles) enqueueRef(sub);
+      for (const tex of deps.textures) {
+        const tn = normalizeTextureName(tex);
+        if (tn && !textureStore.lookupByName(tn)) neededTextures.add(tn);
+      }
+      return;
+    }
+    pendingIds.add(k);
+  };
+
+  for (const id of rootPartIds || []) {
+    enqueueRef(id);
+    for (const fb of getPartIdFallbacks(id)) enqueueRef(fb);
+  }
+
+  let wave = 0;
+  while (pendingIds.size > 0 && wave < 12) {
+    wave++;
+    const currentBatch = Array.from(pendingIds);
+    pendingIds.clear();
+    const candidateKeys = [];
+    for (const k of currentBatch) {
+      for (const cand of buildLibraryCandidateKeys(k)) {
+        if (!userLibRaw.has(cand)) candidateKeys.push(cand);
+      }
+    }
+    if (candidateKeys.length === 0) break;
+    const fetchedMap = await dbGetMany(candidateKeys, LIB_STORE);
+    if (fetchedMap.size === 0) break;
+
+    for (const [k, text] of fetchedMap.entries()) {
+      if (typeof text !== 'string' || !text) continue;
+      registerUserLibDat(k, text);
+      const lines = userLibRaw.get(k);
+      if (!lines) continue;
+      const deps = extractDatDependencies(lines.join('\n'));
+      for (const sub of deps.subfiles) enqueueRef(sub);
+      for (const tex of deps.textures) {
+        const tn = normalizeTextureName(tex);
+        if (tn && !textureStore.lookupByName(tn)) neededTextures.add(tn);
+      }
+    }
+  }
+
+  if (neededTextures.size > 0) {
+    const texKeys = Array.from(neededTextures).map((tn) => `__tex__:${tn}`);
+    const fetchedTex = await dbGetMany(texKeys, LIB_STORE);
+    for (const [k, b64] of fetchedTex.entries()) {
+      if (typeof b64 !== 'string') continue;
+      const texName = k.slice(8);
+      const regKey = textureStore.registerBase64Texture(b64, { name: texName, source: 'library' });
+      if (regKey) registeredTexKeys.add(regKey);
+    }
+  }
+
+  return registeredTexKeys;
+}
+
+/**
+ * Bulk-loads the remaining IndexedDB `partsLib` store using `getAllKeys()` + `getAll()`
+ * (much faster than `openCursor()`) without eagerly decoding unrelated library textures.
+ */
+async function ensureFullBricksLibraryLoaded() {
+  if (fullBricksLibraryLoaded) return;
+  if (fullBricksLibraryPromise) return fullBricksLibraryPromise;
+  fullBricksLibraryPromise = (async () => {
+    try {
+      const db = await openSessionDB();
+      const { keys, values } = await new Promise((res, rej) => {
+        const tx = db.transaction(LIB_STORE, 'readonly');
+        const st = tx.objectStore(LIB_STORE);
+        const kReq = st.getAllKeys();
+        const vReq = st.getAll();
+        let keysOut = null;
+        let valsOut = null;
+        kReq.onsuccess = () => { keysOut = kReq.result || []; };
+        vReq.onsuccess = () => { valsOut = vReq.result || []; };
+        tx.oncomplete = () => res({ keys: keysOut || [], values: valsOut || [] });
+        tx.onerror = () => rej(tx.error);
+        tx.onabort = () => rej(tx.error || new Error('IndexedDB transaction aborted'));
+      });
+      for (let i = 0; i < keys.length; i++) {
+        const key = String(keys[i] || '');
+        const val = values[i];
+        if (!key || typeof val !== 'string') continue;
+        if (key.startsWith('__tex__:')) {
+          const texName = key.slice(8);
+          if (!textureStore.lookupByName(texName)) {
+            textureStore.registerBase64Texture(val, { name: texName, source: 'library' });
           }
-          cursor.continue();
-        } else res();
-      };
-      req.onerror = () => rej(req.error);
-    });
-  } catch (_) {}
-  await textureStore.predecodeAllPending();
-  updateLibraryStatusUI();
+        } else if (!userLibRaw.has(key)) {
+          registerUserLibDat(key, val);
+        }
+      }
+      fullBricksLibraryLoaded = true;
+    } catch (_) {
+      // Allow retry if IndexedDB failed transiently
+    } finally {
+      fullBricksLibraryPromise = null;
+    }
+    updateLibraryStatusUI();
+  })();
+  return fullBricksLibraryPromise;
+}
+
+function scheduleIdleFullBricksLibraryLoad() {
+  if (fullBricksLibraryLoaded || fullBricksLibraryPromise) return;
+  const run = () => { void ensureFullBricksLibraryLoaded(); };
+  if (typeof requestIdleCallback === 'function') {
+    requestIdleCallback(run, { timeout: 3000 });
+  } else {
+    setTimeout(run, 1500);
+  }
+}
+
+async function loadSavedBricksLibrary() {
+  await ensureFullBricksLibraryLoaded();
 }
 
 async function importBricksLibraryFiles(fileList) {
@@ -17627,104 +17852,119 @@ async function importBricksLibraryFiles(fileList) {
   let importedHelpers = 0;
   try {
     const db = await openSessionDB().catch(() => null);
-    for (const file of files) {
-      const lower = file.name.toLowerCase();
-      if (lower.endsWith('.dat')) {
-        const text = await file.text();
-        const k = normId(file.name);
-        registerUserLibDat(k, text);
+    const datFiles = files.filter((f) => f.name.toLowerCase().endsWith('.dat'));
+    const zipFiles = files.filter((f) => f.name.toLowerCase().endsWith('.zip'));
+
+    if (datFiles.length > 0) {
+      const readResults = await Promise.all(
+        datFiles.map(async (file) => ({ name: file.name, text: await file.text() })),
+      );
+      const datToStore = [];
+      for (const item of readResults) {
+        const k = normId(item.name);
+        registerUserLibDat(k, item.text);
         const kind = classifyDatEntryKind(k, userLibRaw.get(k), userLibTitles.get(k));
         if (kind === 'part') importedParts++;
         else importedHelpers++;
-        if (db) await dbPut(k, text, LIB_STORE);
-      } else if (lower.endsWith('.zip')) {
-        if (progLabel) progLabel.textContent = `Reading ${file.name}…`;
-        const ab = await file.arrayBuffer();
-        const bytes = new Uint8Array(ab), view = new DataView(ab);
-        let eocd = -1;
-        for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 65558); i--) {
-          if (view.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
-        }
-        if (eocd < 0) throw new Error('Not a valid ZIP archive.');
-        const cdCount = view.getUint16(eocd + 10, true);
-        let ptr = view.getUint32(eocd + 16, true);
-        const datEntries = [];
-        const texEntries = [];
-        for (let i = 0; i < cdCount; i++) {
-          if (view.getUint32(ptr, true) !== 0x02014b50) break;
-          const flags = view.getUint16(ptr + 8, true);
-          const method = view.getUint16(ptr + 10, true);
-          const compSize = view.getUint32(ptr + 20, true);
-          const nameLen = view.getUint16(ptr + 28, true);
-          const extraLen = view.getUint16(ptr + 30, true);
-          const commentLen = view.getUint16(ptr + 32, true);
-          const localOffset = view.getUint32(ptr + 42, true);
-          const name = new TextDecoder().decode(bytes.subarray(ptr + 46, ptr + 46 + nameLen));
-          const ln = name.toLowerCase();
-          if (ln.endsWith('.dat') && !(flags & 1)) {
-            datEntries.push({ name, flags, method, compSize, localOffset });
-          } else if (/\.(png|jpg|jpeg|webp)$/i.test(ln) && ln.includes('texture') && !(flags & 1)) {
-            texEntries.push({ name, flags, method, compSize, localOffset });
-          }
-          ptr += 46 + nameLen + extraLen + commentLen;
-        }
-        const texToStore = [];
-        for (const ent of texEntries) {
-          try {
-            const u8 = await readZipEntryBytes(bytes, view, ent);
-            if (u8.length > 24) {
-              const b64 = bytesToBase64(u8);
-              const normName = normalizeTextureName(ent.name);
-              textureStore.registerBase64Texture(b64, { name: normName || ent.name, source: 'library' });
-              if (normName) texToStore.push([`__tex__:${normName}`, b64]);
-            }
-          } catch (_) {}
-        }
-        if (db && texToStore.length) {
-          for (let i = 0; i < texToStore.length; i += 100) {
-            const chunk = texToStore.slice(i, i + 100);
-            await new Promise((res) => {
-              const tx = db.transaction(LIB_STORE, 'readwrite');
-              const st = tx.objectStore(LIB_STORE);
-              for (const [k, b64] of chunk) st.put(b64, k);
-              tx.oncomplete = () => res(); tx.onerror = () => res();
-            });
-          }
-        }
-        // Batch write to IndexedDB in chunks of 250 for speed & stability
-        for (let i = 0; i < datEntries.length; i += 250) {
-          const batch = datEntries.slice(i, i + 250);
-          const decoded = [];
-          for (const ent of batch) {
-            try {
-              const txt = await readZipEntryText(bytes, view, ent);
-              const k = normId(ent.name);
-              registerUserLibDat(k, txt);
-              const kind = classifyDatEntryKind(k, userLibRaw.get(k), userLibTitles.get(k));
-              if (kind === 'part') importedParts++;
-              else importedHelpers++;
-              decoded.push([k, txt]);
-            } catch (_) {}
-          }
-          if (db && decoded.length) {
-            await new Promise((res) => {
-              const tx = db.transaction(LIB_STORE, 'readwrite');
-              const st = tx.objectStore(LIB_STORE);
-              for (const [k, txt] of decoded) st.put(txt, k);
-              tx.oncomplete = () => res(); tx.onerror = () => res();
-            });
-          }
-          const totalDone = importedParts + importedHelpers;
-          const pct = Math.round((Math.min(i + 250, datEntries.length) / Math.max(1, datEntries.length)) * 100);
-          if (progLabel) progLabel.textContent = `Imported ${importedParts.toLocaleString()} parts (+${importedHelpers.toLocaleString()} subparts/primitives · ${totalDone.toLocaleString()}/${datEntries.length.toLocaleString()} files)…`;
-          if (progPct) progPct.textContent = pct + '%';
-          if (progBar) progBar.style.width = pct + '%';
-          await new Promise(r => setTimeout(r, 4));
-        }
+        datToStore.push([k, item.text]);
+      }
+      if (db && datToStore.length > 0) {
+        await dbPutMany(datToStore, LIB_STORE);
       }
     }
-    notFoundDatCache.clear();
-    await textureStore.predecodeAllPending();
+
+    for (const file of zipFiles) {
+      if (progLabel) progLabel.textContent = `Reading ${file.name}…`;
+      const ab = await file.arrayBuffer();
+      const bytes = new Uint8Array(ab), view = new DataView(ab);
+      let eocd = -1;
+      for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 65558); i--) {
+        if (view.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+      }
+      if (eocd < 0) throw new Error('Not a valid ZIP archive.');
+      const cdCount = view.getUint16(eocd + 10, true);
+      let ptr = view.getUint32(eocd + 16, true);
+      const datEntries = [];
+      const texEntries = [];
+      for (let i = 0; i < cdCount; i++) {
+        if (view.getUint32(ptr, true) !== 0x02014b50) break;
+        const flags = view.getUint16(ptr + 8, true);
+        const method = view.getUint16(ptr + 10, true);
+        const compSize = view.getUint32(ptr + 20, true);
+        const nameLen = view.getUint16(ptr + 28, true);
+        const extraLen = view.getUint16(ptr + 30, true);
+        const commentLen = view.getUint16(ptr + 32, true);
+        const localOffset = view.getUint32(ptr + 42, true);
+        const name = new TextDecoder().decode(bytes.subarray(ptr + 46, ptr + 46 + nameLen));
+        const ln = name.toLowerCase();
+        if (ln.endsWith('.dat') && !(flags & 1)) {
+          datEntries.push({ name, flags, method, compSize, localOffset });
+        } else if (/\.(png|jpg|jpeg|webp)$/i.test(ln) && ln.includes('texture') && !(flags & 1)) {
+          texEntries.push({ name, flags, method, compSize, localOffset });
+        }
+        ptr += 46 + nameLen + extraLen + commentLen;
+      }
+      const texToStore = [];
+      for (let i = 0; i < texEntries.length; i += 32) {
+        const chunk = texEntries.slice(i, i + 32);
+        const decodedChunk = await Promise.all(
+          chunk.map(async (ent) => {
+            try {
+              const u8 = await readZipEntryBytes(bytes, view, ent);
+              if (u8.length > 24) {
+                return { name: ent.name, b64: bytesToBase64(u8) };
+              }
+            } catch (_) {}
+            return null;
+          }),
+        );
+        for (const item of decodedChunk) {
+          if (!item) continue;
+          const normName = normalizeTextureName(item.name);
+          textureStore.registerBase64Texture(item.b64, { name: normName || item.name, source: 'library' });
+          if (normName) texToStore.push([`__tex__:${normName}`, item.b64]);
+        }
+      }
+      if (db && texToStore.length) {
+        for (let i = 0; i < texToStore.length; i += 100) {
+          await dbPutMany(texToStore.slice(i, i + 100), LIB_STORE);
+        }
+      }
+      // Parallel decompress + batch write to IndexedDB in chunks of 250 for speed & stability
+      for (let i = 0; i < datEntries.length; i += 250) {
+        const batch = datEntries.slice(i, i + 250);
+        const decodedBatch = await Promise.all(
+          batch.map(async (ent) => {
+            try {
+              const txt = await readZipEntryText(bytes, view, ent);
+              return [normId(ent.name), txt];
+            } catch (_) {
+              return null;
+            }
+          }),
+        );
+        const decoded = [];
+        for (const item of decodedBatch) {
+          if (!item) continue;
+          const [k, txt] = item;
+          registerUserLibDat(k, txt);
+          const kind = classifyDatEntryKind(k, userLibRaw.get(k), userLibTitles.get(k));
+          if (kind === 'part') importedParts++;
+          else importedHelpers++;
+          decoded.push([k, txt]);
+        }
+        if (db && decoded.length) {
+          await dbPutMany(decoded, LIB_STORE);
+        }
+        const totalDone = importedParts + importedHelpers;
+        const pct = Math.round((Math.min(i + 250, datEntries.length) / Math.max(1, datEntries.length)) * 100);
+        if (progLabel) progLabel.textContent = `Imported ${importedParts.toLocaleString()} parts (+${importedHelpers.toLocaleString()} subparts/primitives · ${totalDone.toLocaleString()}/${datEntries.length.toLocaleString()} files)…`;
+        if (progPct) progPct.textContent = pct + '%';
+        if (progBar) progBar.style.width = pct + '%';
+        await new Promise(r => setTimeout(r, 4));
+      }
+    }
+    clearNotFoundDatCache();
     invalidateLibraryRenderCaches();
     updateLibraryStatusUI();
     if (state.model && !mpState.parsed) {
@@ -17775,9 +18015,8 @@ async function persistLibraryBatchToDb(db, datBatch, texBatch) {
  * Automatically downloads missing official LDraw 3D shapes, nested subparts/primitives, and
  * `!TEXMAP` PNG textures for a parsed model (used on session restore).
  */
-async function autoFetchMissingPartsForParsed(parsed, displayName = '') {
-  const rootPartIds = collectLeafPartIdsFromParsed(parsed);
-  if (rootPartIds.length === 0) {
+async function autoFetchMissingPartsForIds(rootPartIds, displayName = '') {
+  if (!Array.isArray(rootPartIds) || rootPartIds.length === 0) {
     return { fetched: 0, texturesFetched: 0, networkBlocked: false, aborted: false, alreadyComplete: true };
   }
 
@@ -17809,6 +18048,8 @@ async function autoFetchMissingPartsForParsed(parsed, displayName = '') {
   const overlayTimer = setTimeout(showOverlay, 120);
   const mirrors = getSelectedMirrorConfigs();
   const db = await openSessionDB().catch(() => null);
+  const notFoundSizeBefore = notFoundDatCache.size;
+  const newlyFetchedTexKeys = [];
 
   try {
     const res = await fetchLDrawDependencyGraph({
@@ -17824,7 +18065,8 @@ async function autoFetchMissingPartsForParsed(parsed, displayName = '') {
       },
       onTextureLoaded: (texName, b64) => {
         const normName = normalizeTextureName(texName) || texName;
-        textureStore.registerBase64Texture(b64, { name: normName, source: 'library' });
+        const key = textureStore.registerBase64Texture(b64, { name: normName, source: 'library' });
+        if (key) newlyFetchedTexKeys.push(key);
       },
       onBatchComplete: (datBatch, texBatch) => persistLibraryBatchToDb(db, datBatch, texBatch),
       onProgress: ({ fetched, processed, total }) => {
@@ -17840,8 +18082,13 @@ async function autoFetchMissingPartsForParsed(parsed, displayName = '') {
       signal: ctrl?.signal,
     });
 
+    if (notFoundDatCache.size !== notFoundSizeBefore) {
+      persistNotFoundDatCache();
+    }
     if (res.fetched > 0 || res.texturesFetched > 0) {
-      await textureStore.predecodeAllPending();
+      if (newlyFetchedTexKeys.length > 0) {
+        await textureStore.predecodeKeys(newlyFetchedTexKeys);
+      }
       invalidateLibraryRenderCaches();
       updateLibraryStatusUI();
     }
@@ -17851,6 +18098,10 @@ async function autoFetchMissingPartsForParsed(parsed, displayName = '') {
     if (skipBtn) skipBtn.removeEventListener('click', onSkip);
     if (overlay) overlay.classList.add('hidden');
   }
+}
+
+async function autoFetchMissingPartsForParsed(parsed, displayName = '') {
+  return autoFetchMissingPartsForIds(collectLeafPartIdsFromParsed(parsed), displayName);
 }
 
 let fetchPartsInFlight = false;
@@ -18005,7 +18256,7 @@ async function fetchPartsOnline(opts = {}) {
   }
   if (!silent || parsedOverride) {
     // Manual or pre-import trigger clears session 404 cache so switching mirrors or reconnecting retries cleanly
-    notFoundDatCache.clear();
+    clearNotFoundDatCache();
   }
   if (onProgress) onProgress({ phase: 'scan', fetched: 0, fetchedTex: 0, processed: 0, total: 0, pct: 0 });
 
@@ -19277,11 +19528,10 @@ async function saveEmbeddedPartToLocalLibrary(rootId) {
   }
 
   if (toSave.length === 0) return 0;
-  const db = await openSessionDB().catch(() => null);
   for (const entry of toSave) {
     registerUserLibDat(entry.key, entry.text);
-    if (db) await dbPut(entry.key, entry.text, LIB_STORE).catch(() => {});
   }
+  await dbPutMany(toSave.map((entry) => [entry.key, entry.text]), LIB_STORE);
   invalidateLibraryRenderCaches();
   updateLibraryStatusUI();
   return toSave.length;
@@ -19731,6 +19981,7 @@ function renderBricksLibraryModal(resetLimit = false) {
 function openBricksLibraryModal(preferredTab = null) {
   closeMenu();
   libThumbFetchNetworkBlocked = false;
+  void ensureFullBricksLibraryLoaded();
   const { stats } = getLibrarySnapshot(true);
   if (preferredTab === 'browse' || preferredTab === 'manage') {
     libUiState.tab = preferredTab;
@@ -19741,6 +19992,7 @@ function openBricksLibraryModal(preferredTab = null) {
   if (modal) modal.classList.remove('hidden');
   void ensureOnlinePartsCatalog();
   renderBricksLibraryModal(true);
+  syncAppUrlHash();
 }
 
 function closeBricksLibraryModal() {
@@ -19749,6 +20001,7 @@ function closeBricksLibraryModal() {
   stopLibThumbQueue();
   const modal = document.getElementById('bricksLibraryModal');
   if (modal) modal.classList.add('hidden');
+  syncAppUrlHash();
 }
 
 // ---- MODEL ERRORS & DIAGNOSTICS ENGINE ----
@@ -20137,12 +20390,14 @@ function openErrorsModal() {
   acknowledgeCurrentDiagnostics();
   renderErrorsModal();
   document.getElementById('errorsModal').classList.remove('hidden');
+  syncAppUrlHash();
 }
 
 function openPageSetupModal() {
   closeMenu();
   syncMenuControls();
   document.getElementById('pageSetupModal').classList.remove('hidden');
+  syncAppUrlHash();
 }
 
 function isBomSetupModalOpen() {
@@ -20158,6 +20413,7 @@ function openBomSetupModal() {
   document.getElementById('bomSetupModal').classList.remove('hidden');
   const page = state.pages[state.pageIdx];
   if (page) syncModePillButtons(page);
+  syncAppUrlHash();
 }
 
 function closePageSetupModal() {
@@ -20166,6 +20422,7 @@ function closePageSetupModal() {
   if (importWizardState.active && importWizardState.subpage === 'pageSetup') {
     returnToImportWizard();
   }
+  syncAppUrlHash();
 }
 
 function closeBomSetupModal() {
@@ -20173,6 +20430,7 @@ function closeBomSetupModal() {
   if (el) el.classList.add('hidden');
   const page = state.pages[state.pageIdx];
   if (page) syncModePillButtons(page);
+  syncAppUrlHash();
 }
 
 let lastSourceRecord = null; // { kind:'io'|'ldr'|'project', fileName, data, importMode }
@@ -20206,15 +20464,255 @@ function scheduleSaveSessionPrefs() {
   }, 450);
 }
 
-// Hook renderAll to keep session preferences persisted automatically
+function restoreEmbeddedModelAssets(rawAssets) {
+  embeddedDatRaw.clear();
+  embeddedDatTitles.clear();
+  embeddedDatCompiled.clear();
+  compositePartDefs.clear();
+  pliThumbCache.clear();
+  submodelThumbCache.clear();
+  clearMinifigDiagramCaches();
+  overviewThumbCache.bumpEpoch();
+  textureStore.clearEmbedded();
+
+  const assets = deserializeEmbeddedModelAssets(rawAssets);
+  for (const [k, lines] of assets.embeddedDat.entries()) {
+    embeddedDatRaw.set(k, lines);
+    textureStore.scanDatLinesForTextures(lines, 'embedded');
+  }
+  for (const [k, title] of assets.embeddedDatTitles.entries()) {
+    embeddedDatTitles.set(k, title);
+  }
+  for (const [k, def] of assets.compositePartDefs.entries()) {
+    compositePartDefs.set(k, def);
+  }
+  const texKeys = textureStore.importEmbeddedTextures(assets.embeddedTextures);
+  for (const t of textureStore.exportEmbeddedTextures()) {
+    const rec = textureStore.lookupByName(t.names[0] || '');
+    if (rec?.texKey && !texKeys.includes(rec.texKey)) texKeys.push(rec.texKey);
+  }
+  return texKeys;
+}
+
+let saveSnapshotTimer = null;
+function persistManualSnapshot(immediate = false) {
+  if (!state.model || !Array.isArray(state.model.chapters) || state.model.chapters.length === 0 || importWizardState.active) return;
+  const run = () => {
+    try {
+      const kind = lastSourceRecord?.kind === 'io' || lastSourceRecord?.kind === 'ldr' || lastSourceRecord?.kind === 'project'
+        ? lastSourceRecord.kind
+        : 'project';
+      const sourceSignature = (kind === 'io' || kind === 'ldr')
+        ? computeSourceSignature(lastSourceRecord)
+        : `project:${lastSourceRecord?.fileName || state.model.title || 'manual'}`;
+      const embeddedAssets = serializeEmbeddedModelAssets({
+        embeddedDatRaw,
+        embeddedDatTitles,
+        compositePartDefs,
+        embeddedTextures: textureStore.exportEmbeddedTextures(),
+      });
+      const snapshot = {
+        schemaVersion: MANUAL_SNAPSHOT_SCHEMA_VERSION,
+        sourceSignature,
+        kind,
+        fileName: lastSourceRecord?.fileName || '',
+        title: state.model.title || 'Untitled Manual',
+        subtitle: state.model.subtitle || '',
+        chapters: state.model.chapters,
+        importMode: state.model._mode || lastSourceRecord?.importMode || 'auto',
+        subdivisionPlan: state.model._subdivisionPlan ?? lastSourceRecord?.subdivisionPlan ?? null,
+        cameraLayoutAspect: state.model._cameraLayoutAspect,
+        embeddedAssets,
+        savedAt: Date.now(),
+      };
+      void dbPut('lastManualSnapshot', snapshot);
+    } catch (_) {
+      // Ignore snapshot serialization / quota errors
+    }
+  };
+  clearTimeout(saveSnapshotTimer);
+  if (immediate) run();
+  else saveSnapshotTimer = setTimeout(run, 600);
+}
+
+async function ensureParsedModelHydrated() {
+  if (state.model?._parsed) return state.model._parsed;
+  if (!isRestorableModelRecord(lastSourceRecord)) return null;
+  try {
+    if (lastSourceRecord.kind === 'io' && lastSourceRecord.data) {
+      const { m1Text, m2Text } = await extractIoArchive(lastSourceRecord.data);
+      const parsed = parseImportedModel(m1Text, m2Text, lastSourceRecord.fileName);
+      if (state.model) state.model._parsed = parsed;
+      return parsed;
+    }
+    if (lastSourceRecord.kind === 'ldr' && typeof lastSourceRecord.data === 'string') {
+      const parsed = parseImportedModel(lastSourceRecord.data, '', lastSourceRecord.fileName);
+      if (state.model) state.model._parsed = parsed;
+      return parsed;
+    }
+  } catch (_) {}
+  return null;
+}
+
+// =========================================================================
+// HASH URL ROUTING (Manual Pages + App Views with Graceful Fallback)
+// =========================================================================
+let urlRoutingReady = false;
+let isApplyingUrlRoute = false;
+
+function isModalVisibleById(id) {
+  const el = document.getElementById(id);
+  return Boolean(el && !el.classList.contains('hidden'));
+}
+
+function getActiveModalRouteId() {
+  if (isModalVisibleById('settingsModal')) return 'settings';
+  if (isModalVisibleById('bricksLibraryModal')) return 'bricks-library';
+  if (isModalVisibleById('overviewModal')) return 'overview';
+  if (isModalVisibleById('pageSetupModal')) return 'page-setup';
+  if (isModalVisibleById('bomSetupModal')) return 'parts-list-setup';
+  if (isModalVisibleById('exportModal')) return 'export';
+  if (isModalVisibleById('errorsModal')) return 'issues';
+  if (isModalVisibleById('shortcutsModal')) return 'shortcuts';
+  if (isModalVisibleById('openModelModal')) return 'open';
+  return null;
+}
+
+function syncAppUrlHash({ push = false } = {}) {
+  if (!urlRoutingReady || isApplyingUrlRoute || typeof window === 'undefined' || !window.location) return;
+  try {
+    const pageTarget = state.model && Array.isArray(state.pages) && state.pages.length > 0
+      ? buildPageTargetFromPage(state.pages, state.pageIdx)
+      : null;
+    const modal = getActiveModalRouteId();
+    const nextHash = formatAppRoute({ page: pageTarget, modal });
+    const currentHash = window.location.hash || '';
+    if (nextHash === currentHash) return;
+    const baseUrl = window.location.pathname + window.location.search;
+    const targetUrl = nextHash ? `${baseUrl}${nextHash}` : baseUrl;
+    if (push && typeof window.history?.pushState === 'function') {
+      window.history.pushState(null, '', targetUrl);
+    } else if (typeof window.history?.replaceState === 'function') {
+      window.history.replaceState(null, '', targetUrl);
+    }
+  } catch (_) {
+    // Ignore history API restrictions (e.g. sandboxed iframes / file://)
+  }
+}
+
+function closeAllRoutableModals(exceptModal = null) {
+  if (exceptModal !== 'settings' && isModalVisibleById('settingsModal')) closeSettingsModal();
+  if (exceptModal !== 'bricks-library' && isModalVisibleById('bricksLibraryModal')) closeBricksLibraryModal();
+  if (exceptModal !== 'overview' && isModalVisibleById('overviewModal')) closeOverviewModal();
+  if (exceptModal !== 'page-setup' && isModalVisibleById('pageSetupModal')) closePageSetupModal();
+  if (exceptModal !== 'parts-list-setup' && isModalVisibleById('bomSetupModal')) closeBomSetupModal();
+  if (exceptModal !== 'export' && isModalVisibleById('exportModal')) {
+    document.getElementById('exportModal')?.classList.add('hidden');
+  }
+  if (exceptModal !== 'issues' && isModalVisibleById('errorsModal')) {
+    document.getElementById('errorsModal')?.classList.add('hidden');
+  }
+  if (exceptModal !== 'shortcuts' && isModalVisibleById('shortcutsModal')) closeShortcutsModal();
+  if (exceptModal !== 'open' && isModalVisibleById('openModelModal')) closeOpenModelModal();
+}
+
+function applyAppRoute(route) {
+  if (!route) return false;
+  isApplyingUrlRoute = true;
+  let appliedAny = false;
+  try {
+    if (route.page && state.model && Array.isArray(state.pages) && state.pages.length > 0) {
+      const targetIdx = resolvePageIndexFromRouteTarget(state.pages, route.page);
+      if (targetIdx !== null && targetIdx !== state.pageIdx) {
+        state.pageIdx = targetIdx;
+        renderAll({ pageNavigationOnly: true });
+        appliedAny = true;
+      } else if (targetIdx !== null) {
+        appliedAny = true;
+      }
+    }
+
+    const modal = route.modal;
+    closeAllRoutableModals(modal);
+    if (modal) {
+      switch (modal) {
+        case 'settings':
+          if (!isModalVisibleById('settingsModal')) openSettingsModal();
+          appliedAny = true;
+          break;
+        case 'bricks-library':
+          if (!isModalVisibleById('bricksLibraryModal')) openBricksLibraryModal();
+          appliedAny = true;
+          break;
+        case 'shortcuts':
+          if (!isModalVisibleById('shortcutsModal')) openShortcutsModal();
+          appliedAny = true;
+          break;
+        case 'open':
+          if (!isModalVisibleById('openModelModal')) openOpenModelModal();
+          appliedAny = true;
+          break;
+        case 'overview':
+          if (state.model) {
+            if (!isModalVisibleById('overviewModal')) openOverviewModal();
+            appliedAny = true;
+          }
+          break;
+        case 'page-setup':
+          if (state.model) {
+            if (!isModalVisibleById('pageSetupModal')) openPageSetupModal();
+            appliedAny = true;
+          }
+          break;
+        case 'parts-list-setup':
+          if (state.model && canOpenExtraPageSettings(state, 'bom', true)) {
+            if (!isModalVisibleById('bomSetupModal')) openBomSetupModal();
+            appliedAny = true;
+          }
+          break;
+        case 'export':
+          if (state.model) {
+            if (!isModalVisibleById('exportModal')) openExportModal();
+            appliedAny = true;
+          }
+          break;
+        case 'issues':
+          if (state.model) {
+            if (!isModalVisibleById('errorsModal')) openErrorsModal();
+            appliedAny = true;
+          }
+          break;
+      }
+    }
+  } finally {
+    isApplyingUrlRoute = false;
+  }
+  return appliedAny;
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('hashchange', () => {
+    if (!urlRoutingReady || isApplyingUrlRoute) return;
+    const parsed = parseAppRoute(window.location.hash);
+    if (parsed) {
+      applyAppRoute(parsed);
+    } else {
+      isApplyingUrlRoute = true;
+      try { closeAllRoutableModals(null); } finally { isApplyingUrlRoute = false; }
+    }
+  });
+}
+
+// Hook renderAll to keep session preferences & URL hash persisted automatically
 const _origRenderAll = renderAll;
-renderAll = function () {
+renderAll = function (renderOpts = {}) {
   applyActiveThemeStyleToState();
   noteThemeUsed();
-  _origRenderAll();
+  _origRenderAll(renderOpts);
   updateLibraryStatusUI();
   updateErrorIndicators();
   scheduleSaveSessionPrefs();
+  syncAppUrlHash();
 };
 
 function persistCustomUploadedFonts() {
@@ -20283,31 +20781,51 @@ function yieldToBrowserPaint() {
 
 async function restoreLastSessionOnStart() {
   const initialHint = readStartupModelHint();
-  const rec = await dbGet('lastModel');
-  const hasRestorableModel = isRestorableModelRecord(rec);
-  const loadingHint = hasRestorableModel
+  const initialRoute = typeof window !== 'undefined' ? parseAppRoute(window.location.hash) : null;
+
+  // Read all independent session metadata records from IndexedDB in parallel!
+  const [rec, cachedSnapshot, dbCustomFonts, dbThemes, dbPrefs, dbNotFound] = await Promise.all([
+    dbGet('lastModel'),
+    dbGet('lastManualSnapshot'),
+    dbGet('customUploadedFonts'),
+    dbGet('customThemes'),
+    dbGet('prefs'),
+    dbGet('notFoundDatCache'),
+  ]);
+
+  hydrateNotFoundDatCache(dbNotFound);
+
+  const hasRestorableRaw = isRestorableModelRecord(rec);
+  const rawSignature = hasRestorableRaw ? computeSourceSignature(rec) : '';
+  const canUseSnapshotForRaw = hasRestorableRaw && isMatchingManualSnapshot(cachedSnapshot, rawSignature);
+  const canUseStandaloneSnapshot = !hasRestorableRaw && isRestorableManualSnapshot(cachedSnapshot);
+  const canUseSnapshot = canUseSnapshotForRaw || canUseStandaloneSnapshot;
+  const hasAnyRestorableSession = hasRestorableRaw || canUseStandaloneSnapshot;
+
+  const loadingHint = hasRestorableRaw
     ? {
         fileName: rec.fileName || '',
         kind: rec.kind,
-        title: initialHint && initialHint.fileName === (rec.fileName || '') ? initialHint.title : undefined,
+        title: (canUseSnapshotForRaw ? cachedSnapshot.title : undefined)
+          || (initialHint && initialHint.fileName === (rec.fileName || '') ? initialHint.title : undefined),
       }
-    : null;
+    : canUseStandaloneSnapshot
+      ? {
+          fileName: cachedSnapshot.fileName || '',
+          kind: cachedSnapshot.kind,
+          title: cachedSnapshot.title,
+        }
+      : null;
 
-  if (hasRestorableModel && loadingHint) {
+  if (hasAnyRestorableSession && loadingHint) {
     writeStartupModelHint(loadingHint);
-    showStartupLoadingScreen('library', loadingHint);
-    await yieldToBrowserPaint();
+    showStartupLoadingScreen(canUseSnapshot ? 'fetching_parts' : 'library', loadingHint);
   } else {
     writeStartupModelHint(null);
     hideStartupLoadingScreen();
   }
 
-  await loadSavedBricksLibrary();
-  const dbCustomFonts = await dbGet('customUploadedFonts');
-  if (Array.isArray(dbCustomFonts) && dbCustomFonts.length > 0) {
-    await hydrateCustomUploadedFonts(dbCustomFonts);
-  }
-  const dbThemes = await dbGet('customThemes');
+  // Hydrate custom themes synchronously and start font hydration in parallel with model loading
   if (Array.isArray(dbThemes) && dbThemes.length > 0 && customThemes.length === 0) {
     const restored = dbThemes.map(t => normalizeCustomTheme(t)).filter(Boolean);
     if (restored.length > 0) {
@@ -20317,8 +20835,20 @@ async function restoreLastSessionOnStart() {
   } else if (customThemes.length > 0 && (!Array.isArray(dbThemes) || dbThemes.length === 0)) {
     dbPut('customThemes', customThemes);
   }
-  if (!hasRestorableModel) { renderAll(); return; }
-  const prefs = (await dbGet('prefs')) || {};
+  const fontHydrationPromise = (Array.isArray(dbCustomFonts) && dbCustomFonts.length > 0)
+    ? hydrateCustomUploadedFonts(dbCustomFonts).catch(() => {})
+    : Promise.resolve();
+
+  if (!hasAnyRestorableSession) {
+    await fontHydrationPromise;
+    urlRoutingReady = true;
+    renderAll();
+    if (initialRoute) applyAppRoute(initialRoute);
+    scheduleIdleFullBricksLibraryLoad();
+    return;
+  }
+
+  const prefs = dbPrefs || {};
   try {
     if (prefs.themeId) state.themeId = resolveThemeById(prefs.themeId, customThemes).id;
     if (prefs.paperFormat) state.paperFormat = prefs.paperFormat;
@@ -20346,8 +20876,31 @@ async function restoreLastSessionOnStart() {
     state.showPartsList = extraCfg.showPartsList;
     state.showBackCover = extraCfg.showBackCover;
 
-    let effectiveRec = rec;
-    if (rec.kind === 'io' && rec.data) {
+    let effectiveRec = hasRestorableRaw
+      ? rec
+      : { kind: cachedSnapshot.kind, fileName: cachedSnapshot.fileName || '' };
+
+    if (canUseSnapshot) {
+      // FAST PATH: restore built manual snapshot directly (skipping .io unzip, parsing, & buildManualFromParsed!)
+      const embeddedTexKeys = restoreEmbeddedModelAssets(cachedSnapshot.embeddedAssets);
+      const leafIds = collectLeafPartIdsFromChapters(cachedSnapshot.chapters);
+      const [libTexKeys] = await Promise.all([
+        loadPartsFromLibraryForIds(leafIds),
+        fontHydrationPromise,
+      ]);
+      const texKeysToDecode = new Set([...embeddedTexKeys, ...libTexKeys]);
+      if (texKeysToDecode.size > 0) {
+        await textureStore.predecodeKeys(texKeysToDecode);
+      }
+      state.model = {
+        title: cachedSnapshot.title || 'Untitled Manual',
+        subtitle: cachedSnapshot.subtitle || '',
+        chapters: cachedSnapshot.chapters,
+        _mode: cachedSnapshot.importMode || effectiveRec.importMode || 'auto',
+        _subdivisionPlan: cachedSnapshot.subdivisionPlan ?? effectiveRec.subdivisionPlan ?? null,
+        _cameraLayoutAspect: cachedSnapshot.cameraLayoutAspect,
+      };
+    } else if (rec.kind === 'io' && rec.data) {
       showStartupLoadingScreen('extracting', loadingHint);
       await yieldToBrowserPaint();
       const { m1Text, m2Text } = await extractIoArchive(rec.data);
@@ -20355,9 +20908,16 @@ async function restoreLastSessionOnStart() {
       await yieldToBrowserPaint();
       const parsed = parseImportedModel(m1Text, m2Text, rec.fileName);
       showStartupLoadingScreen('fetching_parts', loadingHint);
-      const fetchRes = await autoFetchMissingPartsForParsed(parsed, rec.fileName);
-      showStartupLoadingScreen('textures', loadingHint);
-      await textureStore.predecodeAllPending();
+      const leafIds = collectLeafPartIdsFromParsed(parsed);
+      const [libTexKeys] = await Promise.all([
+        loadPartsFromLibraryForIds(leafIds),
+        fontHydrationPromise,
+      ]);
+      const fetchRes = await autoFetchMissingPartsForIds(leafIds, rec.fileName);
+      if (libTexKeys.size > 0) {
+        showStartupLoadingScreen('textures', loadingHint);
+        await textureStore.predecodeKeys(libTexKeys);
+      }
       const subPlan = (fetchRes.fetched > 0 && rec.subdivisionPlan && rec.subdivisionPlan.strategy !== 'none')
         ? refreshSubdivisionPlanForParsed(parsed, rec.subdivisionPlan)
         : (rec.subdivisionPlan || null);
@@ -20374,9 +20934,16 @@ async function restoreLastSessionOnStart() {
       await yieldToBrowserPaint();
       const parsed = parseImportedModel(rec.data, '', rec.fileName);
       showStartupLoadingScreen('fetching_parts', loadingHint);
-      const fetchRes = await autoFetchMissingPartsForParsed(parsed, rec.fileName);
-      showStartupLoadingScreen('textures', loadingHint);
-      await textureStore.predecodeAllPending();
+      const leafIds = collectLeafPartIdsFromParsed(parsed);
+      const [libTexKeys] = await Promise.all([
+        loadPartsFromLibraryForIds(leafIds),
+        fontHydrationPromise,
+      ]);
+      const fetchRes = await autoFetchMissingPartsForIds(leafIds, rec.fileName);
+      if (libTexKeys.size > 0) {
+        showStartupLoadingScreen('textures', loadingHint);
+        await textureStore.predecodeKeys(libTexKeys);
+      }
       const subPlan = (fetchRes.fetched > 0 && rec.subdivisionPlan && rec.subdivisionPlan.strategy !== 'none')
         ? refreshSubdivisionPlanForParsed(parsed, rec.subdivisionPlan)
         : (rec.subdivisionPlan || null);
@@ -20388,12 +20955,19 @@ async function restoreLastSessionOnStart() {
       await yieldToBrowserPaint();
       state.model = buildManualFromParsed(parsed, rec.importMode || 'auto', subPlan);
     } else {
+      await fontHydrationPromise;
+      urlRoutingReady = true;
       hideStartupLoadingScreen();
       renderAll();
+      if (initialRoute) applyAppRoute(initialRoute);
+      scheduleIdleFullBricksLibraryLoad();
       return;
     }
 
     lastSourceRecord = effectiveRec;
+    if (!canUseSnapshot) {
+      persistManualSnapshot(true);
+    }
     if (state.model?.title) {
       writeStartupModelHint({
         fileName: effectiveRec.fileName || '',
@@ -20442,17 +21016,31 @@ async function restoreLastSessionOnStart() {
       fileName: effectiveRec.fileName || '',
       title: state.model?.title || loadingHint?.title,
     });
-    await yieldToBrowserPaint();
     computeModelDiagnostics();
+    // Apply URL page target before first render if present & valid (fallback to prefs.pageIdx)
+    if (initialRoute?.page) {
+      rebuildPages();
+      const routePageIdx = resolvePageIndexFromRouteTarget(state.pages, initialRoute.page);
+      if (routePageIdx !== null) {
+        state.pageIdx = routePageIdx;
+      }
+    }
     resetZoom();
     hideStartupLoadingScreen();
+    urlRoutingReady = true;
     renderAll();
-    if (rec.kind === 'ldr') void fetchMissingPartsOnline({ silent: true });
+    if (initialRoute?.modal) {
+      applyAppRoute({ page: null, modal: initialRoute.modal });
+    }
+    if (!canUseSnapshot && effectiveRec.kind === 'ldr') void fetchMissingPartsOnline({ silent: true });
     showToast(`Reloaded ${state.model.title}`);
     if (getMenuIconErrorBadgeCount(state.diagnostics, state.seenDiagnosticKeys) > 0) showImportErrorBanner();
+    scheduleIdleFullBricksLibraryLoad();
   } catch (_) {
+    urlRoutingReady = true;
     hideStartupLoadingScreen();
     renderAll();
+    scheduleIdleFullBricksLibraryLoad();
   }
 }
 
@@ -21469,6 +22057,9 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       }
 
       // Data rows
+      const preloadedBomImgs = tCols.some((c) => c.id === 'image')
+        ? await Promise.all(entries.map((entry) => loadImgPromise(getPliThumb(entry.part))))
+        : [];
       for (let ri = 0; ri < entries.length; ri++) {
         const entry = entries[ri];
         const ry = bodyY + tTypo.headerH + ri * tTypo.rowH;
@@ -21492,7 +22083,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
           const cw = col.width;
           const maxW = Math.max(8, cw - tTypo.cellPadX * 2);
           if (col.id === 'image') {
-            const img = await loadImgPromise(getPliThumb(entry.part));
+            const img = preloadedBomImgs[ri];
             drawContain(ctx, img, cx + tTypo.cellPadX, ry + tTypo.imgPad, maxW, Math.max(8, tTypo.rowH - tTypo.imgPad * 2));
           } else if (col.id === 'qty') {
             ctx.textAlign = 'right';
@@ -23806,14 +24397,15 @@ document.getElementById('customFontUploadInput')?.addEventListener('change', asy
   let lastUploaded = null;
   let errorCount = 0;
   let lastError = '';
-  for (const file of files) {
-    try {
-      lastUploaded = await parseUploadedFontFile(file);
-    } catch (err) {
+  const fontResults = await Promise.allSettled(files.map((file) => parseUploadedFontFile(file)));
+  fontResults.forEach((res, idx) => {
+    if (res.status === 'fulfilled') {
+      lastUploaded = res.value;
+    } else {
       errorCount++;
-      lastError = err?.message || `Could not load ${file.name}.`;
+      lastError = res.reason?.message || `Could not load ${files[idx].name}.`;
     }
-  }
+  });
   if (lastUploaded) {
     persistCustomUploadedFonts();
     const targetRole = activeFontPickerRole || 'heading';
@@ -23978,6 +24570,7 @@ function openOverviewModal() {
   if (!modal) return;
   modal.classList.remove('hidden');
   renderOverviewModal({ scrollActiveIntoView: true });
+  syncAppUrlHash();
 }
 
 function switchStudioMode(nextMode) {
@@ -24418,6 +25011,7 @@ function openShortcutsModal() {
   const modal = document.getElementById('shortcutsModal');
   if (modal) modal.classList.remove('hidden');
   syncKeyboardShortcutsMenuSummary();
+  syncAppUrlHash();
   requestAnimationFrame(() => {
     document.getElementById('shortcutsSearchInput')?.focus();
   });
@@ -24427,6 +25021,7 @@ function closeShortcutsModal() {
   stopShortcutRecording();
   const modal = document.getElementById('shortcutsModal');
   if (modal) modal.classList.add('hidden');
+  syncAppUrlHash();
 }
 
 const menuShortcutsBtnEl = document.getElementById('menuShortcutsBtn');
@@ -26373,6 +26968,7 @@ function openExportModal() {
   document.getElementById('expProgressWrap').classList.add('hidden');
   document.getElementById('expReadyWrap').classList.add('hidden');
   document.getElementById('exportModal').classList.remove('hidden');
+  syncAppUrlHash();
 }
 document.getElementById('menuPrintBtn').onclick = openExportModal;
 const menuPreviewHtmlBtn = document.getElementById('menuPreviewHtmlBtn');
@@ -26407,8 +27003,8 @@ document.getElementById('menuBomSetupBtn').onclick = openBomSetupModal;
 document.getElementById('btnCloseBomSetup').onclick = closeBomSetupModal;
 document.getElementById('bomSetupDoneBtn').onclick = closeBomSetupModal;
 document.getElementById('bomSetupModal').onclick = (e) => { if (e.target.id === 'bomSetupModal') closeBomSetupModal(); };
-document.getElementById('errorsModal').onclick = (e) => { if (e.target.id === 'errorsModal') document.getElementById('errorsModal').classList.add('hidden'); };
-document.getElementById('btnCloseExport').onclick = () => document.getElementById('exportModal').classList.add('hidden');
+document.getElementById('errorsModal').onclick = (e) => { if (e.target.id === 'errorsModal') { document.getElementById('errorsModal').classList.add('hidden'); syncAppUrlHash(); } };
+document.getElementById('btnCloseExport').onclick = () => { document.getElementById('exportModal').classList.add('hidden'); syncAppUrlHash(); };
 document.getElementById('btnExpAllPdf').onclick = () => runPdfExport(state.pages);
 const triggerTextDownload = (content, filename, mime) => {
   const blob = new Blob([content], { type: mime });
@@ -26457,24 +27053,32 @@ document.getElementById('btnSysPrint').onclick = () => {
 
 const menuStepGenBtn = document.getElementById('menuStepGenBtn');
 if (menuStepGenBtn) {
-  menuStepGenBtn.onclick = () => {
-    if (!state.model?._parsed) { showToast('Import a model first.'); return; }
+  menuStepGenBtn.onclick = async () => {
+    const parsed = await ensureParsedModelHydrated();
+    if (!parsed) { showToast('Import a model first.'); return; }
     closeMenu();
-    openImportAssistant(state.model._parsed, true);
+    openImportAssistant(parsed, true);
   };
 }
 
-// Export / Import .biw Project (supports iOS Share Sheet + Download!)
+// Export / Import .biw Project (fully portable: embeds custom .dat geometry, decals, composite defs, theme & fonts!)
 async function exportProjectFile() {
   if (!state.model) return;
   const activeTheme = getActiveTheme();
   const embeddedCustomTheme = activeTheme && !activeTheme.builtIn && !BUILT_IN_THEME_IDS.has(activeTheme.id) ? activeTheme : undefined;
   const embeddedCustomFonts = collectReferencedCustomFonts(activeTheme ? [activeTheme] : []);
+  const embeddedAssets = serializeEmbeddedModelAssets({
+    embeddedDatRaw,
+    embeddedDatTitles,
+    compositePartDefs,
+    embeddedTextures: textureStore.exportEmbeddedTextures(),
+  });
   const payload = JSON.stringify({
     format: PROJECT_FILE_FORMAT,
     version: PROJECT_FILE_STUDIO_VERSION,
     title: state.model.title,
     chapters: state.model.chapters,
+    ...embeddedAssets,
     overrides: state.overrides,
     stepInserts: state.stepInserts,
     pageInserts: state.pageInserts,
@@ -26489,16 +27093,22 @@ async function exportProjectFile() {
     showStepBorders: state.showStepBorders,
     showPageTitle: state.showPageTitle,
     showProgressBar: state.showProgressBar,
+    autoPlacementArrows: state.autoPlacementArrows,
     arrowColor: state.arrowColor,
     arrowStyle: state.arrowStyle,
     arrowOutlines: state.arrowOutlines,
     arrowLighting: state.arrowLighting,
     stepLighting: state.stepLighting,
+    highQualityStepRender: state.highQualityStepRender,
     highlightNew: state.highlightNew,
     highlightColor: state.highlightColor,
+    highlightLineWeight: state.highlightLineWeight,
+    starkBlackOutlines: state.starkBlackOutlines,
+    outlineLineWeight: state.outlineLineWeight,
     fadePrev: state.fadePrev,
     fadeOpacity: state.fadeOpacity,
     showRotCues: state.showRotCues,
+    showSizeGuides: state.showSizeGuides,
     showAttachmentStarburst: state.showAttachmentStarburst,
     pageNumberFormat: state.pageNumberFormat,
     pageNumberPosition: normalizePageNumberPosition(state.pageNumberPosition),
@@ -26513,6 +27123,9 @@ async function exportProjectFile() {
     ...(embeddedCustomTheme ? { customTheme: embeddedCustomTheme } : {}),
     ...(embeddedCustomFonts.length > 0 ? { customFonts: embeddedCustomFonts } : {}),
     paperFormat: state.paperFormat,
+    customWidth: state.customWidth,
+    customHeight: state.customHeight,
+    customUnit: state.customUnit,
     customPaperW: state.customPaperW,
     customPaperH: state.customPaperH,
     orientation: state.orientation,
@@ -26547,10 +27160,8 @@ async function handleIncomingProjectFile(f) {
       if (!(await openConfirmActionDialog(replaceConfirm))) return;
     }
     const projLabel = data.title || f.name;
-    submodelThumbCache.clear();
     coverHeroCache.clear();
-    clearMinifigDiagramCaches();
-    overviewThumbCache.bumpEpoch();
+    const embeddedTexKeys = restoreEmbeddedModelAssets(data.embeddedAssets ?? data);
     state.model = { title: data.title || 'Loaded Manual', subtitle: '', chapters: data.chapters || [] };
     state.overrides = data.overrides || {};
     state.stepInserts = data.stepInserts || {};
@@ -26572,16 +27183,22 @@ async function handleIncomingProjectFile(f) {
     state.pageNumberPosition = normalizePageNumberPosition(data.pageNumberPosition);
     if (typeof data.detectDuplicates === 'boolean') state.detectDuplicates = data.detectDuplicates;
     if (typeof data.showProgressBar === 'boolean') state.showProgressBar = data.showProgressBar;
+    if (typeof data.autoPlacementArrows === 'boolean') state.autoPlacementArrows = data.autoPlacementArrows;
     if (typeof data.arrowColor === 'string') state.arrowColor = data.arrowColor;
     if (typeof data.arrowStyle === 'string') state.arrowStyle = data.arrowStyle;
     if (typeof data.arrowOutlines === 'boolean') state.arrowOutlines = data.arrowOutlines;
     if (typeof data.arrowLighting === 'boolean') state.arrowLighting = data.arrowLighting;
-    if (typeof data.stepLighting === 'boolean') state.stepLighting = data.stepLighting;
+    if (typeof data.stepLighting === 'string') state.stepLighting = data.stepLighting;
+    if (typeof data.highQualityStepRender === 'boolean') state.highQualityStepRender = data.highQualityStepRender;
     if (typeof data.highlightNew === 'boolean') state.highlightNew = data.highlightNew;
     if (typeof data.highlightColor === 'string') state.highlightColor = data.highlightColor;
+    if (typeof data.highlightLineWeight === 'string') state.highlightLineWeight = data.highlightLineWeight;
+    if (typeof data.starkBlackOutlines === 'boolean') state.starkBlackOutlines = data.starkBlackOutlines;
+    if (typeof data.outlineLineWeight === 'string') state.outlineLineWeight = data.outlineLineWeight;
     if (typeof data.fadePrev === 'boolean') state.fadePrev = data.fadePrev;
     if (typeof data.fadeOpacity === 'number' && Number.isFinite(data.fadeOpacity)) state.fadeOpacity = data.fadeOpacity;
     if (typeof data.showRotCues === 'boolean') state.showRotCues = data.showRotCues;
+    if (typeof data.showSizeGuides === 'boolean') state.showSizeGuides = data.showSizeGuides;
     if (typeof data.showAttachmentStarburst === 'boolean') state.showAttachmentStarburst = data.showAttachmentStarburst;
     if (Array.isArray(data.customFonts) && data.customFonts.length > 0) {
       showOperationLoadingOverlay('project_fonts', { label: projLabel });
@@ -26607,6 +27224,9 @@ async function handleIncomingProjectFile(f) {
     if (!data.customTheme) adoptLegacyStyleOptions(data);
     state.minifigStyle = normalizeMinifigStepStyle(data.minifigStyle ?? data.customTheme?.minifigStyle ?? 'exploded');
     if (data.paperFormat) state.paperFormat = data.paperFormat;
+    if (typeof data.customWidth === 'number' && Number.isFinite(data.customWidth)) state.customWidth = data.customWidth;
+    if (typeof data.customHeight === 'number' && Number.isFinite(data.customHeight)) state.customHeight = data.customHeight;
+    if (data.customUnit === 'in' || data.customUnit === 'cm') state.customUnit = data.customUnit;
     if (typeof data.customPaperW === 'number' && Number.isFinite(data.customPaperW)) state.customPaperW = data.customPaperW;
     if (typeof data.customPaperH === 'number' && Number.isFinite(data.customPaperH)) state.customPaperH = data.customPaperH;
     if (data.orientation) state.orientation = data.orientation;
@@ -26616,11 +27236,28 @@ async function handleIncomingProjectFile(f) {
     state.layoutGroups = normalizeLayoutGroups(data.layoutGroups);
     syncLegacyLayoutFlag();
     state.model._cameraLayoutAspect = getActivePageLayoutAspect();
+
+    // Load cached standard LDraw parts for this project + auto-fetch any missing parts for full portability!
+    const leafIds = collectLeafPartIdsFromChapters(state.model.chapters);
+    const libTexKeys = await loadPartsFromLibraryForIds(leafIds);
+    await autoFetchMissingPartsForIds(leafIds, projLabel);
+    const texKeysToDecode = new Set([...embeddedTexKeys, ...libTexKeys]);
+    if (texKeysToDecode.size > 0) {
+      await textureStore.predecodeKeys(texKeysToDecode);
+    }
+
     state.pageIdx = 0; state.undoStack = []; state.redoStack = [];
     state.seenDiagnosticKeys = new Set();
     state.pageSizeWarning = null;
     errFilter = 'all';
     lastSourceRecord = { kind: 'project', fileName: f.name };
+    void dbDelete('lastModel');
+    persistManualSnapshot(true);
+    writeStartupModelHint({
+      fileName: f.name,
+      kind: 'project',
+      title: state.model.title,
+    });
     showOperationLoadingOverlay('project_rendering', { label: projLabel });
     await yieldToBrowserPaint();
     computeModelDiagnostics();
@@ -26692,9 +27329,11 @@ function openOpenModelModal() {
   if (!state.model) return;
   closeMenu();
   document.getElementById('openModelModal')?.classList.remove('hidden');
+  syncAppUrlHash();
 }
 function closeOpenModelModal() {
   document.getElementById('openModelModal')?.classList.add('hidden');
+  syncAppUrlHash();
 }
 const triggerImport = () => { closeMenu(); closeOpenModelModal(); document.getElementById('fileInput').click(); };
 document.getElementById('emptyImportBtn').onclick = triggerImport;
@@ -26724,7 +27363,7 @@ if (openModalLoadProjBtn) openModalLoadProjBtn.onclick = triggerProjectLoad;
 
 // Errors Modal, Bottom Error Banner & Dedicated Bricks Library Screen Wiring
 document.getElementById('menuErrorsBtn').onclick = openErrorsModal;
-document.getElementById('btnCloseErrors').onclick = () => document.getElementById('errorsModal').classList.add('hidden');
+document.getElementById('btnCloseErrors').onclick = () => { document.getElementById('errorsModal').classList.add('hidden'); syncAppUrlHash(); };
 document.getElementById('btnBannerSeeErrors').onclick = openErrorsModal;
 document.getElementById('btnBannerDismiss').onclick = dismissErrorBanner;
 document.getElementById('menuBricksLibBtn').onclick = () => openBricksLibraryModal();
@@ -26958,7 +27597,7 @@ if (libPreviewStageEl) {
 }
 
 document.getElementById('libSourceSelect').onchange = (e) => {
-  notFoundDatCache.clear();
+  clearNotFoundDatCache();
   const customWrap = document.getElementById('libCustomUrlWrap');
   if (customWrap) customWrap.classList.toggle('hidden', e.target.value !== 'custom');
 };
@@ -27045,7 +27684,8 @@ document.getElementById('libClearSavedBtn').onclick = async () => {
   userLibRaw.clear();
   userLibTitles.clear();
   movedToAliases.clear();
-  notFoundDatCache.clear();
+  clearNotFoundDatCache();
+  fullBricksLibraryLoaded = true;
   textureStore.clearLibrary();
   invalidateLibraryRenderCaches();
   await dbClearStore(LIB_STORE);
@@ -28123,6 +28763,7 @@ async function finishImport(parsed, mode, subdivisionPlan = null, isPostImport =
     if (!isPostImport && pendingRawFile) {
       lastSourceRecord = { ...pendingRawFile, importMode: mode, subdivisionPlan: subdivisionPlan || null };
       dbPut('lastModel', lastSourceRecord);
+      persistManualSnapshot(true);
       if (lastSourceRecord.kind === 'io' || lastSourceRecord.kind === 'ldr') {
         writeStartupModelHint({
           fileName: lastSourceRecord.fileName || '',
@@ -28134,6 +28775,7 @@ async function finishImport(parsed, mode, subdivisionPlan = null, isPostImport =
     } else if (isPostImport && lastSourceRecord && (lastSourceRecord.kind === 'io' || lastSourceRecord.kind === 'ldr')) {
       lastSourceRecord = { ...lastSourceRecord, importMode: mode, subdivisionPlan: subdivisionPlan || null };
       dbPut('lastModel', lastSourceRecord);
+      persistManualSnapshot(true);
       writeStartupModelHint({
         fileName: lastSourceRecord.fileName || '',
         kind: lastSourceRecord.kind,
@@ -28708,11 +29350,13 @@ function openSettingsModal() {
   if (scrollEl) scrollEl.scrollTop = 0;
   const defStrip = document.getElementById('settingsDefThemeStrip');
   if (defStrip) defStrip.scrollLeft = 0;
+  syncAppUrlHash();
 }
 
 function closeSettingsModal() {
   frozenSettingsThemeOrderIds = null;
   document.getElementById('settingsModal')?.classList.add('hidden');
+  syncAppUrlHash();
 }
 
 const menuSettingsBtnEl = document.getElementById('menuSettingsBtn');
@@ -28997,11 +29641,13 @@ async function closeCurrentModel() {
   const frame = document.getElementById('pageFrame');
   if (frame) frame.innerHTML = '';
 
+  clearTimeout(saveSnapshotTimer);
+  saveSnapshotTimer = null;
   resetZoom();
   renderAll();
   writeStartupModelHint(null);
   try {
-    await dbDelete('lastModel');
+    await Promise.all([dbDelete('lastModel'), dbDelete('lastManualSnapshot')]);
   } catch (_) {}
   showToast(`Closed ${closedTitle}.`);
 }

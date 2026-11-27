@@ -346,12 +346,12 @@
           var _h = localStorage.getItem('biw.lastModelHint.v1');
           if (_h) {
             var _p = JSON.parse(_h);
-            if (_p && (_p.kind === 'io' || _p.kind === 'ldr')) {
+            if (_p && (_p.kind === 'io' || _p.kind === 'ldr' || _p.kind === 'project')) {
               var _es = document.getElementById('emptyState');
               var _sl = document.getElementById('startupLoadingScreen');
               if (_es) _es.classList.add('hidden');
               if (_sl) _sl.classList.remove('hidden');
-              var _n = (_p.title || _p.fileName || '').replace(/\.(io|ldr|mpd)$/i, '').trim();
+              var _n = (_p.title || _p.fileName || '').replace(/\.(io|ldr|mpd|biw)$/i, '').trim();
               var _t = document.getElementById('startupLoadingTitle');
               if (_t && _n) _t.textContent = 'Loading ' + _n;
             }
