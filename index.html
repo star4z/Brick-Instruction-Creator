@@ -2927,35 +2927,53 @@
                     <span>Edit Theme</span>
                   </button>
                 </div>
-                <div id="settingsDefThemeStrip" role="listbox" aria-label="Default theme" class="theme-strip flex gap-2 overflow-x-auto overscroll-x-contain snap-x snap-proximity py-1"></div>
+                <div id="settingsDefThemeStrip" role="listbox" aria-label="Default theme" class="theme-strip flex gap-2 overflow-x-auto overscroll-x-contain snap-x snap-proximity p-1 -mx-1"></div>
                 <p class="theme-strip-scroll-hint items-center gap-1.5 text-[11px] text-[var(--muted-foreground)] leading-snug">
                   <kbd class="px-1.5 py-0.5 rounded border border-[var(--border)] bg-[var(--card)] font-mono text-[10px] font-semibold text-[var(--foreground)]">Shift</kbd>
                   <span>+ Scroll to browse more themes</span>
                 </p>
               </div>
 
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                <label class="block space-y-1">
-                  <span class="text-xs text-[var(--muted-foreground)]">Default Page Format</span>
-                  <select id="settingsDefPaperFormat" class="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--card)] font-semibold outline-none focus:border-[var(--primary)] cursor-pointer">
-                    <option value="screen">Screen Fit</option>
-                    <option value="letter">US Letter (8.5 × 11 in)</option>
-                    <option value="a4">A4 (210 × 297 mm)</option>
-                    <option value="a5">A5 Booklet (148 × 210 mm)</option>
-                    <option value="b5">B5 Booklet (176 × 250 mm)</option>
-                    <option value="half_letter">Half Letter (5.5 × 8.5 in)</option>
-                    <option value="legal">US Legal (8.5 × 14 in)</option>
-                    <option value="tabloid">Tabloid / Ledger (11 × 17 in)</option>
-                    <option value="a3">A3 Poster (297 × 420 mm)</option>
-                    <option value="square">Booklet Square (8.5 × 8.5 in)</option>
-                  </select>
-                </label>
-                <div id="settingsDefOrientWrap" class="space-y-1">
-                  <span class="block text-xs text-[var(--muted-foreground)]">Orientation</span>
-                  <div class="grid grid-cols-2 gap-1.5">
-                    <button type="button" data-settings-orient="landscape" class="settings-orient-btn py-2 px-2 rounded-md border font-semibold text-xs transition cursor-pointer">Landscape</button>
-                    <button type="button" data-settings-orient="portrait" class="settings-orient-btn py-2 px-2 rounded-md border font-semibold text-xs transition cursor-pointer">Portrait</button>
-                  </div>
+              <label class="block space-y-1.5">
+                <span class="block text-xs text-[var(--muted-foreground)]">Default Page Format</span>
+                <select id="settingsDefPaperFormat" class="w-full px-3 py-2.5 rounded-md border border-[var(--border)] bg-[var(--card)] text-xs font-semibold outline-none focus:border-[var(--primary)] cursor-pointer">
+                  <option value="screen">Screen Fit</option>
+                  <option value="letter">US Letter (8.5 × 11 in)</option>
+                  <option value="a4">A4 (210 × 297 mm)</option>
+                  <option value="a5">A5 Booklet (148 × 210 mm)</option>
+                  <option value="b5">B5 Booklet (176 × 250 mm)</option>
+                  <option value="half_letter">Half Letter (5.5 × 8.5 in)</option>
+                  <option value="pocket">Pocket Booklet (4.0 × 5.3 in)</option>
+                  <option value="legal">US Legal (8.5 × 14 in)</option>
+                  <option value="tabloid">Tabloid / Ledger (11 × 17 in)</option>
+                  <option value="a3">A3 Poster (297 × 420 mm)</option>
+                  <option value="square">Booklet Square (8.5 × 8.5 in)</option>
+                </select>
+              </label>
+
+              <div id="settingsDefOrientWrap" class="space-y-1.5">
+                <span class="block text-xs text-[var(--muted-foreground)]">Orientation</span>
+                <div class="grid grid-cols-2 gap-2.5">
+                  <button type="button" data-settings-orient="landscape" class="settings-orient-btn py-2.5 px-3 rounded-lg border font-semibold flex items-center justify-center gap-2.5 transition cursor-pointer">
+                    <span class="inline-flex items-center justify-center w-8 h-6 shrink-0" aria-hidden="true">
+                      <svg class="w-7 h-5" viewBox="0 0 28 20" fill="none">
+                        <rect x="1.5" y="1.5" width="25" height="17" rx="2" stroke="currentColor" stroke-width="2" fill="currentColor" fill-opacity="0.1"/>
+                        <line x1="5" y1="6.5" x2="14" y2="6.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.6"/>
+                        <line x1="5" y1="10.5" x2="22" y2="10.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.4"/>
+                      </svg>
+                    </span>
+                    <span>Landscape</span>
+                  </button>
+                  <button type="button" data-settings-orient="portrait" class="settings-orient-btn py-2.5 px-3 rounded-lg border font-semibold flex items-center justify-center gap-2.5 transition cursor-pointer">
+                    <span class="inline-flex items-center justify-center w-8 h-6 shrink-0" aria-hidden="true">
+                      <svg class="w-5 h-6" viewBox="0 0 20 26" fill="none">
+                        <rect x="1.5" y="1.5" width="17" height="23" rx="2" stroke="currentColor" stroke-width="2" fill="currentColor" fill-opacity="0.1"/>
+                        <line x1="5" y1="7" x2="13" y2="7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.6"/>
+                        <line x1="5" y1="11.5" x2="15" y2="11.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.4"/>
+                      </svg>
+                    </span>
+                    <span>Portrait</span>
+                  </button>
                 </div>
               </div>
 
@@ -2978,20 +2996,53 @@
                 </label>
               </div>
 
-              <div class="space-y-1">
+              <div class="space-y-1.5">
                 <span class="block text-xs text-[var(--muted-foreground)]">Page Margins</span>
-                <div class="grid grid-cols-3 gap-1.5">
-                  <button type="button" data-settings-density="compact" class="settings-density-btn py-1.5 px-2 rounded-md border font-semibold text-xs transition cursor-pointer">Compact</button>
-                  <button type="button" data-settings-density="balanced" class="settings-density-btn py-1.5 px-2 rounded-md border font-semibold text-xs transition cursor-pointer">Balanced</button>
-                  <button type="button" data-settings-density="spacious" class="settings-density-btn py-1.5 px-2 rounded-md border font-semibold text-xs transition cursor-pointer">Spacious</button>
+                <div class="grid grid-cols-3 gap-2">
+                  <button type="button" data-settings-density="compact" class="settings-density-btn py-2.5 px-2 rounded-lg border font-semibold flex flex-col items-center gap-1.5 transition cursor-pointer">
+                    <svg class="w-8 h-6" viewBox="0 0 32 24" fill="none" aria-hidden="true">
+                      <rect x="1" y="1" width="30" height="22" rx="2" stroke="currentColor" stroke-width="1.4" opacity="0.45"/>
+                      <rect x="3" y="3" width="12.2" height="18" rx="1" stroke="currentColor" stroke-width="1.4" fill="currentColor" fill-opacity="0.14"/>
+                      <rect x="16.8" y="3" width="12.2" height="18" rx="1" stroke="currentColor" stroke-width="1.4" fill="currentColor" fill-opacity="0.14"/>
+                    </svg>
+                    <span>Compact</span>
+                  </button>
+                  <button type="button" data-settings-density="balanced" class="settings-density-btn py-2.5 px-2 rounded-lg border font-semibold flex flex-col items-center gap-1.5 transition cursor-pointer">
+                    <svg class="w-8 h-6" viewBox="0 0 32 24" fill="none" aria-hidden="true">
+                      <rect x="1" y="1" width="30" height="22" rx="2" stroke="currentColor" stroke-width="1.4" opacity="0.45"/>
+                      <rect x="4.5" y="4.5" width="10.2" height="15" rx="1" stroke="currentColor" stroke-width="1.4" fill="currentColor" fill-opacity="0.14"/>
+                      <rect x="17.3" y="4.5" width="10.2" height="15" rx="1" stroke="currentColor" stroke-width="1.4" fill="currentColor" fill-opacity="0.14"/>
+                    </svg>
+                    <span>Balanced</span>
+                  </button>
+                  <button type="button" data-settings-density="spacious" class="settings-density-btn py-2.5 px-2 rounded-lg border font-semibold flex flex-col items-center gap-1.5 transition cursor-pointer">
+                    <svg class="w-8 h-6" viewBox="0 0 32 24" fill="none" aria-hidden="true">
+                      <rect x="1" y="1" width="30" height="22" rx="2" stroke="currentColor" stroke-width="1.4" opacity="0.45"/>
+                      <rect x="6.5" y="6" width="8" height="12" rx="1" stroke="currentColor" stroke-width="1.4" fill="currentColor" fill-opacity="0.14"/>
+                      <rect x="17.5" y="6" width="8" height="12" rx="1" stroke="currentColor" stroke-width="1.4" fill="currentColor" fill-opacity="0.14"/>
+                    </svg>
+                    <span>Spacious</span>
+                  </button>
                 </div>
               </div>
 
-              <div class="space-y-1">
+              <div class="space-y-1.5">
                 <span class="block text-xs text-[var(--muted-foreground)]">Page Number Position</span>
-                <div class="grid grid-cols-2 gap-1.5">
-                  <button type="button" data-settings-pgnum-pos="right" class="settings-pgnum-pos-btn py-1.5 px-2 rounded-md border font-semibold text-xs transition cursor-pointer">Bottom Right</button>
-                  <button type="button" data-settings-pgnum-pos="outside" class="settings-pgnum-pos-btn py-1.5 px-2 rounded-md border font-semibold text-xs transition cursor-pointer">Outside Edge (Booklet)</button>
+                <div class="grid grid-cols-2 gap-1.5" role="radiogroup" aria-label="Default page number position">
+                  <button type="button" data-settings-pgnum-pos="right" class="settings-pgnum-pos-btn py-2.5 px-2.5 rounded-lg border font-semibold flex flex-col items-center gap-1.5 transition cursor-pointer">
+                    <span class="inline-flex items-center gap-0.5" aria-hidden="true">
+                      <span class="w-7 h-5 rounded-l border border-current/35 flex items-end justify-end px-1 pb-0.5 font-mono text-[8px] leading-none">2</span>
+                      <span class="w-7 h-5 rounded-r border border-current/35 flex items-end justify-end px-1 pb-0.5 font-mono text-[8px] leading-none">3</span>
+                    </span>
+                    <span class="text-[11px] leading-tight">Bottom Right</span>
+                  </button>
+                  <button type="button" data-settings-pgnum-pos="outside" class="settings-pgnum-pos-btn py-2.5 px-2.5 rounded-lg border font-semibold flex flex-col items-center gap-1.5 transition cursor-pointer">
+                    <span class="inline-flex items-center gap-0.5" aria-hidden="true">
+                      <span class="w-7 h-5 rounded-l border border-current/35 flex items-end justify-start px-1 pb-0.5 font-mono text-[8px] leading-none">2</span>
+                      <span class="w-7 h-5 rounded-r border border-current/35 flex items-end justify-end px-1 pb-0.5 font-mono text-[8px] leading-none">3</span>
+                    </span>
+                    <span class="text-[11px] leading-tight">Outside Edge (Booklet)</span>
+                  </button>
                 </div>
               </div>
 

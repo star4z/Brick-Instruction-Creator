@@ -740,7 +740,7 @@ body {
 .theme-strip {
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
-  scroll-padding-inline: 1rem;
+  scroll-padding-inline: 0.25rem;
 }
 .theme-strip::-webkit-scrollbar {
   display: none;

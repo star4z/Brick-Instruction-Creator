@@ -28312,7 +28312,7 @@ function renderSettingsModalUI() {
 
   document.querySelectorAll('.settings-orient-btn').forEach((b) => {
     const act = b.getAttribute('data-settings-orient') === cd.orientation;
-    b.className = `settings-orient-btn py-2 px-2 rounded-md border font-semibold text-xs transition cursor-pointer ${
+    b.className = `settings-orient-btn py-2.5 px-3 rounded-lg border font-semibold flex items-center justify-center gap-2.5 transition cursor-pointer ${
       act
         ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]'
         : 'border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)]'
@@ -28326,7 +28326,7 @@ function renderSettingsModalUI() {
 
   document.querySelectorAll('.settings-density-btn').forEach((b) => {
     const act = b.getAttribute('data-settings-density') === cd.density;
-    b.className = `settings-density-btn py-1.5 px-2 rounded-md border font-semibold text-xs transition cursor-pointer ${
+    b.className = `settings-density-btn py-2.5 px-2 rounded-lg border font-semibold flex flex-col items-center gap-1.5 transition cursor-pointer ${
       act
         ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]'
         : 'border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)]'
@@ -28337,7 +28337,7 @@ function renderSettingsModalUI() {
   document.querySelectorAll('.settings-pgnum-pos-btn').forEach((b) => {
     const act = b.getAttribute('data-settings-pgnum-pos') === cdPgPos;
     b.setAttribute('aria-pressed', act ? 'true' : 'false');
-    b.className = `settings-pgnum-pos-btn py-1.5 px-2 rounded-md border font-semibold text-xs transition cursor-pointer ${
+    b.className = `settings-pgnum-pos-btn py-2.5 px-2.5 rounded-lg border font-semibold flex flex-col items-center gap-1.5 transition cursor-pointer ${
       act
         ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]'
         : 'border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)]'

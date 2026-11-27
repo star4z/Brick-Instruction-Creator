@@ -786,11 +786,12 @@ describe('studioRuntime safety checks', () => {
 
     const settingsHtml = html.slice(settingsStart, settingsEnd);
     expect(settingsHtml).toContain('id="settingsDefThemeStrip"');
+    expect(settingsHtml).toContain('p-1 -mx-1');
     expect(settingsHtml).toContain('id="btnSettingsEditDefTheme"');
     expect(settingsHtml).toContain('Shift');
     expect(settingsHtml).toContain('Scroll');
 
-    expect(css).toContain('scroll-padding-inline: 1rem;');
+    expect(css).toContain('scroll-padding-inline: 0.25rem;');
     expect(css).toContain('.theme-strip-scroll-hint');
     expect(css).toContain('@media (hover: hover) and (pointer: fine)');
     expect(runtime).toContain('function attachHorizontalWheelScroll(');

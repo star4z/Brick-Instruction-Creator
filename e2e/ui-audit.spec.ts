@@ -145,11 +145,27 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     await page.locator('[data-settings-defaults-mode="custom"]').click();
     await expect(page.locator('#settingsCustomDefaultsWrap')).toBeVisible();
     await expect(page.locator('#settingsDefThemeStrip [role="option"]').first()).toBeVisible();
+    const themeRingClearance = await page.evaluate(() => {
+      const strip = document.getElementById('settingsDefThemeStrip');
+      const selected = strip?.querySelector('[role="option"][aria-selected="true"]');
+      if (!strip || !selected) return null;
+      const sr = strip.getBoundingClientRect();
+      const cr = selected.getBoundingClientRect();
+      return { leftGap: cr.left - sr.left, topGap: cr.top - sr.top };
+    });
+    expect(themeRingClearance).not.toBeNull();
+    expect(themeRingClearance!.leftGap).toBeGreaterThanOrEqual(2);
+    expect(themeRingClearance!.topGap).toBeGreaterThanOrEqual(2);
+    await page.locator('#settingsDefPaperFormat').selectOption('letter');
+    await expect(page.locator('#settingsDefOrientWrap')).toBeVisible();
+    await expect(page.locator('.settings-orient-btn svg')).toHaveCount(2);
+    await expect(page.locator('.settings-density-btn svg')).toHaveCount(3);
     await page.locator('[data-settings-pgnum-pos="outside"]').click();
     await expect(page.locator('[data-settings-pgnum-pos="outside"]')).toHaveAttribute('aria-pressed', 'true');
     await auditSurface(page, `${testInfo.project.name}: App Settings Modal (Custom Defaults)`, {
       activeContainerSelector: '#settingsModal',
     });
+    await page.locator('#settingsDefPaperFormat').selectOption('screen');
     // Open shared Theme Editor from App Settings Custom Defaults and return back to Settings
     await page.locator('#btnSettingsEditDefTheme').click();
     await expect(page.locator('#settingsModal')).toBeHidden();
