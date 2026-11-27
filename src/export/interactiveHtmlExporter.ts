@@ -981,8 +981,14 @@ ${staticFallbackHtml}
       <button id="btnResetCam" class="tool-btn" type="button" title="Reset camera (R)" aria-label="Reset camera">↺</button>
       <button id="btnZoomIn" class="tool-btn" type="button" title="Zoom in (+)" aria-label="Zoom in">+</button>
       <button id="btnZoomOut" class="tool-btn" type="button" title="Zoom out (-)" aria-label="Zoom out">−</button>
-      <button id="btnTogglePli" class="tool-btn" type="button" title="Toggle parts box" aria-label="Toggle parts box" style="display:none">▤</button>
-      <button id="btnXrayToggle" class="tool-btn" type="button" title="Fade previous pieces" aria-label="Fade previous pieces" style="display:none">◎</button>
+      <button id="btnTogglePli" class="tool-btn" type="button" title="Toggle parts list" aria-label="Toggle parts list" style="display:none">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="9" width="18" height="10" rx="2"/><path d="M6.5 9V6.5a1 1 0 0 1 1-1h2.5a1 1 0 0 1 1 1V9"/><path d="M13 9V6.5a1 1 0 0 1 1-1h2.5a1 1 0 0 1 1 1V9"/></svg>
+      </button>
+      <button id="btnXrayToggle" class="tool-btn" type="button" title="${payload.highlightNew && !payload.fadePrev ? 'Outline new pieces' : (payload.highlightNew && payload.fadePrev ? 'Fade previous & outline new pieces' : 'Fade previous pieces')}" aria-label="${payload.highlightNew && !payload.fadePrev ? 'Outline new pieces' : (payload.highlightNew && payload.fadePrev ? 'Fade previous & outline new pieces' : 'Fade previous pieces')}" style="display:none">
+        ${payload.highlightNew && !payload.fadePrev
+          ? '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="11" height="11" rx="2" opacity="0.45"/><rect x="10" y="10" width="11" height="11" rx="2" stroke-width="2.6"/></svg>'
+          : '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="11" height="11" rx="2" stroke-dasharray="3 2.5" opacity="0.55"/><rect x="10" y="10" width="11" height="11" rx="2" fill="currentColor" fill-opacity="0.22"/></svg>'}
+      </button>
       <button id="btnToggleExplode" class="tool-btn" type="button" title="Toggle piece placement offset" aria-label="Toggle piece placement offset" style="display:none">
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m8 7 4-4 4 4"/><path d="m8 11 4 4 4-4"/><path d="M5 20h14"/></svg>
       </button>
@@ -1441,8 +1447,12 @@ ${staticFallbackHtml}
   let activeScene = null;
   let activeBounds = { center: [0, 0, 0], radius: 40 };
   let showPli = true;
-  let fadePrev = DATA.fadePrev !== false;
-  let xrayPrev = false;
+  const editorFadePrev = Boolean(DATA.fadePrev);
+  const editorHighlightNew = Boolean(DATA.highlightNew);
+  const emphasisMode = (editorFadePrev && editorHighlightNew)
+    ? 'both'
+    : (editorHighlightNew ? 'outline' : 'fade');
+  let emphasisActive = editorFadePrev || editorHighlightNew;
   let explodeActive = false;
   let explodeT = 0;
   let targetExplodeT = 0;
@@ -1658,7 +1668,8 @@ ${staticFallbackHtml}
     }
     return { count: pos.length / 3, lineCount: lpos.length / 3 };
   }
-  const fadeMixVal = Math.max(0, Math.min(0.76, (1 - (DATA.fadeOpacity ?? 0.68)) * 0.95 + ((DATA.fadeOpacity ?? 0.68) < 0.99 ? 0.16 : 0)));
+  const rawFadeMix = Math.max(0, Math.min(0.76, (1 - (DATA.fadeOpacity ?? 0.68)) * 0.95 + ((DATA.fadeOpacity ?? 0.68) < 0.99 ? 0.16 : 0)));
+  const effectiveFadeMix = rawFadeMix > 0.05 ? rawFadeMix : 0.56;
   const checkedBom = new Set();
   let drawQueued = false;
   let interacted = false;
@@ -1724,7 +1735,8 @@ ${staticFallbackHtml}
     const ndcShiftY = (opts && opts.ndcShiftY) || 0;
     const fitScale = (opts && opts.fitScale) || 1.0;
     const liftT = isThumb ? 0 : explodeT;
-    const useXray = isThumb ? false : xrayPrev;
+    const applyFade = isThumb ? editorFadePrev : (emphasisActive && (emphasisMode === 'fade' || emphasisMode === 'both'));
+    const applyHighlight = isThumb ? editorHighlightNew : (emphasisActive && (emphasisMode === 'outline' || emphasisMode === 'both'));
 
     gl.viewport(0, 0, w, h);
     gl.clearColor(0, 0, 0, 0);
@@ -1755,8 +1767,8 @@ ${staticFallbackHtml}
     const fallbackLiftY = Math.max(32, Math.min(84, r * 0.65));
 
     const drawGroups = [
-      { list: prevIdx, fade: useXray ? 0.78 : (fadePrev ? fadeMixVal : 0.0), hl: false, isNewGrp: false },
-      { list: newIdx, fade: 0.0, hl: false, isNewGrp: true },
+      { list: prevIdx, fade: applyFade ? effectiveFadeMix : 0.0, hl: false, isNewGrp: false },
+      { list: newIdx, fade: 0.0, hl: applyHighlight, isNewGrp: true },
     ];
 
     const liftM4 = new Float32Array(16);
@@ -1869,7 +1881,7 @@ ${staticFallbackHtml}
     resetAttribs([progs.line.pos, progs.line.col]);
     for (const grp of drawGroups) {
       gl.uniform1f(progs.line.fade, grp.fade);
-      gl.uniform1f(progs.line.useOv, 0.0);
+      gl.uniform1f(progs.line.useOv, grp.hl ? 1.0 : 0.0);
       for (let i = 0; i < grp.list.length; i++) {
         const pm = partMats[grp.list[i]];
         if (!pm) continue;
@@ -2124,7 +2136,7 @@ ${staticFallbackHtml}
       const btnXray = document.getElementById('btnXrayToggle');
       if (btnXray) {
         btnXray.style.display = hasPrevAssembly ? 'flex' : 'none';
-        btnXray.classList.toggle('active', xrayPrev);
+        btnXray.classList.toggle('active', emphasisActive);
       }
       const btnExplode = document.getElementById('btnToggleExplode');
       if (btnExplode) {
@@ -2469,7 +2481,7 @@ ${staticFallbackHtml}
   document.getElementById('btnZoomOut').onclick = () => { targetCam = null; cam.zoom = Math.max(0.4, cam.zoom / 1.2); requestDraw(); };
   document.getElementById('btnTogglePli').onclick = () => { showPli = !showPli; renderView(); };
   const btnXrayEl = document.getElementById('btnXrayToggle');
-  if (btnXrayEl) btnXrayEl.onclick = () => { xrayPrev = !xrayPrev; btnXrayEl.classList.toggle('active', xrayPrev); requestDraw(); };
+  if (btnXrayEl) btnXrayEl.onclick = () => { emphasisActive = !emphasisActive; btnXrayEl.classList.toggle('active', emphasisActive); requestDraw(); };
   const btnExplodeEl = document.getElementById('btnToggleExplode');
   if (btnExplodeEl) {
     btnExplodeEl.onclick = () => {

@@ -137,7 +137,7 @@ describe('interactiveHtmlExporter', () => {
     expect(html).toContain('computeStageVerticalFraming');
     expect(html).toContain('id="btnToggleExplode"');
     expect(html).not.toContain('id="btnToggleHl"');
-    expect(html).toContain('Fade previous pieces');
+    expect(html).toContain('Fade previous & outline new pieces');
     expect(html).toContain('gl.uniformMatrix4fv(progs.line.model, false, getModelMat(pm, grp, i))');
     expect(html).toContain('scene.newPartOffsets');
     expect(html).not.toContain('id="explodeSlider"');
@@ -537,6 +537,62 @@ describe('interactiveHtmlExporter font stacks', () => {
     expect(scriptMatch).toBeTruthy();
     expect(() => new Function(scriptMatch![1])).not.toThrow();
   });
+
+  it('adapts the emphasis toggle and SVG icons to editor fadePrev/highlightNew settings without double-fading', () => {
+    const basePayload = {
+      version: 1 as const,
+      title: 'Emphasis Test',
+      editorUrl: DEFAULT_EDITOR_URL,
+      wordless: true,
+      totalPieces: 4,
+      totalSteps: 1,
+      theme: {
+        bg: '#0b0e14',
+        text: '#f8fafc',
+        muted: '#94a3b8',
+        accent: '#ef4444',
+        pliBg: '#0f172a',
+        pliBorder: '#334155',
+        calloutBg: '#111827',
+        calloutBorder: '#374151',
+        isDark: true,
+      },
+      highlightColor: '#ef4444',
+      fadeOpacity: 0.7,
+      prototypes: [],
+      textures: {},
+      parts: [],
+      pages: [{ id: 'cover', kind: 'cover' as const, num: 1, label: 'Cover' }],
+    };
+
+    const outlineOnly = generateInteractiveHtmlDocument({
+      ...basePayload,
+      highlightNew: true,
+      fadePrev: false,
+    });
+    expect(outlineOnly).toContain('aria-label="Outline new pieces"');
+    expect(outlineOnly).toContain('aria-label="Toggle parts list"');
+    expect(outlineOnly).not.toContain('>▤<');
+    expect(outlineOnly).not.toContain('>◎<');
+    expect(outlineOnly).toContain('gl.uniform1f(progs.line.useOv, grp.hl ? 1.0 : 0.0);');
+
+    const fadeOnly = generateInteractiveHtmlDocument({
+      ...basePayload,
+      highlightNew: false,
+      fadePrev: true,
+    });
+    expect(fadeOnly).toContain('aria-label="Fade previous pieces"');
+    expect(fadeOnly).toContain('let emphasisActive = editorFadePrev || editorHighlightNew;');
+    expect(fadeOnly).not.toContain('useXray ? 0.78');
+
+    const neitherEnabled = generateInteractiveHtmlDocument({
+      ...basePayload,
+      highlightNew: false,
+      fadePrev: false,
+    });
+    expect(neitherEnabled).toContain('aria-label="Fade previous pieces"');
+  });
 });
+
 
 
