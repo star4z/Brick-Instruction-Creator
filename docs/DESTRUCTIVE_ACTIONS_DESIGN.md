@@ -14,14 +14,14 @@ Brick Instruction Works supports rich per-part, per-step, per-range, cover/extra
 
 | Scope \ Reversibility | **Undoable (`pushUndo()`)** | **Permanent / Non-Undoable** |
 | :--- | :--- | :--- |
-| **Visible on current screen only** | **Silent** — no inline warning, no dialog (Cover/Step `Reset Camera`, Parts `Reset`, Divider `Delete Page`, Overview `Clear All` Page Breaks, Step Range Group `Delete`) | **"Are you sure?" dialog** (`#confirmActionModal`) — e.g. `Delete Custom Theme`, Bricks Library `Remove Saved Part`, `Clear Entire Saved Library`, `Close Model` |
+| **Visible on current screen only** | **Silent** — no inline warning, no dialog (Cover/Step `Reset Camera`, Parts `Reset`, Divider `Delete Page`, Step Layout `Clear All` Page Breaks, Step Range Group `Delete`) | **"Are you sure?" dialog** (`#confirmActionModal`) — e.g. `Delete Custom Theme`, Bricks Library `Remove Saved Part`, `Clear Entire Saved Library`, `Close Model` |
 | **Affects edits / overrides elsewhere** | **Conditional inline amber notice** (`.destructive-notice[data-tone="warning"]`) — hidden when no existing overrides are affected | **"Are you sure?" dialog** (`#confirmActionModal`) — names exact unsaved edits, referencing groups, or open-model parts affected |
 
 ## Coverage Matrix
 
 ### Tier 1: Undoable On-Screen Actions (Zero Warnings)
 
-Cover/Build Complete `Reset Camera`, Step Mode Camera `Reset`, Parts Mode `Reset` (and visible current-step part nudges/callouts), Divider Page `Delete Page`, Pages & Steps Overview `Clear All` Page Breaks, and Step Range Group `Delete` stay completely warning-free.
+Cover/Build Complete `Reset Camera`, Step Mode Camera `Reset`, Parts Mode `Reset` (and visible current-step part nudges/callouts), Divider Page `Delete Page`, Step Layout `Clear All` Page Breaks, and Step Range Group `Delete` stay completely warning-free.
 
 ### Tier 2: Conditional Inline Amber Notices (Undoable Off-Screen / Cross-Surface Impacts)
 

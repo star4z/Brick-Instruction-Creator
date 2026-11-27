@@ -1112,17 +1112,33 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     await expect(page.locator('#stageViewport')).toBeVisible();
     await closeMenuOnMobile(page);
 
-    // Pin a page break before Step 3 via Pages & Steps Overview (Step 2 differs between Auto-Step and Keep File Steps)
+    // Jump to Step 3 via Pages & Steps Overview (and verify overview no longer has page break buttons)
     await page.locator('#btnPageOverview').click();
     await expect(page.locator('#overviewModal')).toBeVisible();
-    const step3Pin = page.locator('#overviewList .ov-step-pin').nth(2);
-    await expect(step3Pin).toBeVisible();
-    await step3Pin.click();
-    await expect(step3Pin).toHaveAttribute('aria-pressed', 'true');
-    await page.locator('#btnCloseOverview').click();
+    await expect(page.locator('#overviewList .ov-step-pin')).toHaveCount(0);
+    const step3Row = page.locator('#overviewList .divide-y > div').nth(2);
+    await expect(step3Row).toBeVisible();
+    await step3Row.click();
     await expect(page.locator('#overviewModal')).toBeHidden();
 
-    // Open Step Generation and switch to Keep Existing File Steps (changes parts before Step 2)
+    // Verify Page Options no longer renders page break buttons
+    await page.locator('#modePill [data-mode="page"]').click();
+    await expect(page.locator('#contextOverlay')).toBeVisible();
+    await expect(page.locator('#contextOverlay .page-break-slot-btn')).toHaveCount(0);
+
+    // Pin a page break before Step 3 via the Step bottom sheet (Layout sub-tab)
+    await page.locator('#modePill [data-mode="step"]').click();
+    await page.locator('#contextOverlay [data-step-subtab="layout"]').click();
+    const stepPageBreakBtn = page.locator('#stepPageBreakBtn');
+    await expect(stepPageBreakBtn).toBeVisible();
+    await expect(stepPageBreakBtn).toHaveAttribute('aria-pressed', 'false');
+    await stepPageBreakBtn.click();
+    await expect(stepPageBreakBtn).toHaveAttribute('aria-pressed', 'true');
+    await auditSurface(page, `${testInfo.project.name}: Step Bottom Sheet Layout (Page Break On)`, {
+      activeContainerSelector: '#contextOverlay',
+    });
+
+    // Open Step Generation and switch to Keep Existing File Steps (changes parts before Step 3)
     await ensureMenuOpen(page);
     await page.locator('#menuStepGenBtn').click();
     await expect(page.locator('#importModal')).toBeVisible();
@@ -1154,11 +1170,14 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     await expect(modal).toBeHidden();
     await expect(page.locator('#importModal')).toBeHidden();
 
+    // Verify the page break was preserved (remapped to Step 2 in Keep File Steps)
     await page.locator('#btnPageOverview').click();
     await expect(page.locator('#overviewModal')).toBeVisible();
-    await expect(page.locator('#overviewList .ov-step-pin[aria-pressed="true"]')).toHaveCount(1);
-    await page.locator('#btnCloseOverview').click();
+    await page.locator('#overviewList .divide-y > div').nth(1).click();
     await expect(page.locator('#overviewModal')).toBeHidden();
+    await page.locator('#modePill [data-mode="step"]').click();
+    await page.locator('#contextOverlay [data-step-subtab="layout"]').click();
+    await expect(page.locator('#stepPageBreakBtn')).toHaveAttribute('aria-pressed', 'true');
 
     // 3) Switching back to Auto-Step and choosing Proceed & Remove Page Breaks clears all page breaks
     await ensureMenuOpen(page);
@@ -1173,9 +1192,12 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
 
     await page.locator('#btnPageOverview').click();
     await expect(page.locator('#overviewModal')).toBeVisible();
-    await expect(page.locator('#overviewList .ov-step-pin[aria-pressed="true"]')).toHaveCount(0);
-    await page.locator('#btnCloseOverview').click();
+    await page.locator('#overviewList .divide-y > div').nth(2).click();
     await expect(page.locator('#overviewModal')).toBeHidden();
+    await page.locator('#modePill [data-mode="step"]').click();
+    await page.locator('#contextOverlay [data-step-subtab="layout"]').click();
+    await expect(page.locator('#stepPageBreakBtn')).toHaveAttribute('aria-pressed', 'false');
+    await expect(page.locator('#stepClearAllPageBreaksBtn')).toHaveCount(0);
 
     runtime.assertClean(`${testInfo.project.name}: Step Regeneration Page Break Warning`);
   });

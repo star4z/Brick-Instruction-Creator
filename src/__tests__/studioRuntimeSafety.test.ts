@@ -218,11 +218,14 @@ describe('studioRuntime safety checks', () => {
     expect(html).not.toContain('locks a step to the start of a new page so editing earlier steps');
     expect(runtime).not.toContain('Pins a page break before Step ${step.num} so adding, splitting, or merging earlier steps');
 
-    // Global tooltip & conditional active breaks bar exist in index.html
+    // Global tooltip exists in index.html, while overviewPinsBar is removed from Pages & Steps Overview
     expect(html).toContain('id="pageBreakHelpTooltip"');
-    expect(html).toContain('id="overviewPinsBar"');
+    expect(html).not.toContain('id="overviewPinsBar"');
 
-    // Both overview and floating Page card Page Break buttons include integrated `?` triggers wired to tooltip controller
+    // Step bottom sheet Page Break button includes integrated `?` trigger wired to tooltip controller; Overview no longer renders per-step page breaks
+    expect(runtime).toContain('id="stepPageBreakBtn"');
+    expect(runtime).toContain('id="stepClearAllPageBreaksBtn"');
+    expect(runtime).not.toContain('class="ov-step-pin');
     expect(runtime).toContain('page-break-help-btn');
     expect(runtime).toContain('class="pb-help-btn');
     expect(runtime).toContain('function showPageBreakHelpTooltip(');

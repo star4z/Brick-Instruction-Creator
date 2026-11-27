@@ -13995,6 +13995,38 @@ function renderContextOverlay(page) {
           </div>`);
       }
 
+      const activeSlotIdx = slots.findIndex(sl => sl.step.id === step.id);
+      const activeSlot = activeSlotIdx >= 0 ? slots[activeSlotIdx] : null;
+      const isSeqCont = isStepBreakContinuationSlice(activeSlot);
+      if (!isSeqCont) {
+        const hasBreak = hasStepPageBreak(state.overrides, step.id, activeSlot);
+        const breakCount = countStepPageBreaks(state.model?.chapters, state.overrides);
+        const stepShortLabel = getStepShortLabel(step, ch);
+        const breakTip = getStepBreakTooltip({
+          stepLabel: stepShortLabel,
+          pinned: hasBreak,
+          slotIndex: Math.max(0, activeSlotIdx),
+        });
+        const showClearAll = breakCount > 1 || (breakCount > 0 && !hasBreak);
+        sections.push(`
+          <div class="space-y-1.5">
+            <div class="flex items-center justify-between gap-2 flex-wrap">
+              <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Page Break</span>
+              ${renderScopeBadge('range', 'Affects Later Pages')}
+            </div>
+            <div class="flex items-center justify-between gap-2 flex-wrap">
+              <span class="pb-btn-group inline-flex items-stretch rounded-md border transition-colors ${hasBreak ? 'bg-[var(--primary)] text-[var(--primary-foreground)] border-transparent' : 'border-[var(--border)] bg-[var(--card)]'}">
+                <button id="stepPageBreakBtn" type="button" data-page-break-step="${step.id}" title="${escHtml(breakTip)}" aria-label="${escHtml(`Page break before Step ${step.num}`)}" aria-pressed="${hasBreak ? 'true' : 'false'}" class="page-break-slot-btn pl-2.5 pr-2 py-1.5 rounded-l-[5px] font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer ${hasBreak ? 'hover:bg-[var(--primary-hover)]' : 'hover:bg-[var(--surface-hover)]'}">
+                  <svg class="w-3 h-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4"/><path d="M10 12h4"/><path d="M17 12h4"/><path d="M6 4v3a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V4"/><path d="M6 20v-3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v3"/></svg>
+                  <span>Page Break</span>
+                </button>
+                <button type="button" aria-label="${escHtml(`What is a Page Break? (${stepShortLabel})`)}" aria-expanded="false" data-pb-help-step="${escHtml(stepShortLabel)}" data-pb-help-pinned="${hasBreak ? '1' : '0'}" class="pb-help-btn page-break-help-btn px-2 py-1.5 rounded-r-[5px] border-l inline-flex items-center justify-center font-bold leading-none transition-colors cursor-pointer ${hasBreak ? 'pb-help-btn-pinned' : 'pb-help-btn-default'}"><span aria-hidden="true">?</span></button>
+              </span>
+              ${showClearAll ? `<button id="stepClearAllPageBreaksBtn" type="button" title="Remove all ${breakCount} page break${breakCount === 1 ? '' : 's'}" class="px-2.5 py-1.5 rounded-md text-xs font-semibold text-[var(--primary)] bg-[var(--primary-soft)] hover:bg-[var(--primary)] hover:text-[var(--primary-foreground)] transition-colors cursor-pointer">Clear All</button>` : ''}
+            </div>
+          </div>`);
+      }
+
       const hasDividerAfter = Boolean(page?.id && state.dividerAfter[page.id]);
       if (caps.canInsertDividerAfterPage) {
         sections.push(`
@@ -14235,6 +14267,34 @@ function renderContextOverlay(page) {
         };
       }
 
+      const stepPageBreakBtn = box.querySelector('#stepPageBreakBtn');
+      if (stepPageBreakBtn) {
+        stepPageBreakBtn.onclick = () => {
+          toggleStepPageBreak(step, { ch, followToggledStep: true });
+        };
+      }
+      box.querySelectorAll('.page-break-help-btn').forEach(helpBtn => {
+        helpBtn.onclick = (e) => {
+          e.stopPropagation();
+          togglePageBreakHelpTooltip(helpBtn);
+        };
+      });
+      const stepClearAllPageBreaksBtn = box.querySelector('#stepClearAllPageBreaksBtn');
+      if (stepClearAllPageBreaksBtn) {
+        stepClearAllPageBreaksBtn.onclick = () => {
+          const anchorStepId = step.id;
+          pushUndo();
+          const cleared = clearAllStepPageBreaks(state.overrides);
+          state.overrides = cleared.overrides;
+          rebuildPages();
+          const anchorIdx = findPageIndexForStep(state.pages, anchorStepId);
+          if (anchorIdx >= 0) state.pageIdx = anchorIdx;
+          state.selectedStepId = anchorStepId;
+          renderAll({ skipRebuildPages: true });
+          showToast('Cleared all page breaks — pages can reflow freely.');
+        };
+      }
+
       const stepDivBtn = box.querySelector('#stepInsertDividerBtn');
       if (stepDivBtn) {
         stepDivBtn.onclick = () => insertDividerAfterCurrentPage(page);
@@ -14362,34 +14422,22 @@ function renderContextOverlay(page) {
             </div>
           </div>` : ''}
 
-        <!-- Page Breaks & Page Inserts (affects later pages) -->
+        ${canAddDiv ? `
+        <!-- Page Inserts (affects later pages) -->
         <div class="space-y-1.5">
           <div class="flex items-center justify-between gap-2 flex-wrap">
-            <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Page Breaks &amp; Dividers</span>
+            <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Page Inserts</span>
             ${renderScopeBadge('range', 'Affects Later Pages')}
           </div>
           <div class="flex items-center gap-1.5 flex-wrap">
-            ${slots.map((sl, slIdx) => {
-              const pinned = Boolean((state.overrides[sl.step.id] || {}).pin);
-              const slLabel = getStepShortLabel(sl.step, sl.ch);
-              const tip = getStepBreakTooltip({ stepLabel: slLabel, pinned, slotIndex: slIdx });
-              return `<span class="pb-btn-group inline-flex items-stretch rounded-md border transition-colors ${pinned ? 'bg-[var(--primary)] text-[var(--primary-foreground)] border-transparent' : 'border-[var(--border)] bg-[var(--card)]'}">
-                <button type="button" data-page-break-step="${sl.step.id}" title="${escHtml(tip)}" aria-pressed="${pinned ? 'true' : 'false'}" class="page-break-slot-btn pl-2.5 pr-2 py-1.5 rounded-l-[5px] font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer ${pinned ? 'hover:bg-[var(--primary-hover)]' : 'hover:bg-[var(--surface-hover)]'}">
-                  <svg class="w-3 h-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4"/><path d="M10 12h4"/><path d="M17 12h4"/><path d="M6 4v3a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V4"/><path d="M6 20v-3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v3"/></svg>
-                  <span>Step ${sl.step.num}: ${pinned ? 'Break On' : 'New Page'}</span>
-                </button>
-                <button type="button" aria-label="${escHtml(`What is a Page Break? (${slLabel})`)}" aria-expanded="false" data-pb-help-step="${escHtml(slLabel)}" data-pb-help-pinned="${pinned ? '1' : '0'}" class="pb-help-btn page-break-help-btn px-2 py-1.5 rounded-r-[5px] border-l inline-flex items-center justify-center font-bold leading-none transition-colors cursor-pointer ${pinned ? 'pb-help-btn-pinned' : 'pb-help-btn-default'}"><span aria-hidden="true">?</span></button>
-              </span>`;
-            }).join('')}
-            ${canAddDiv ? `
-              <button id="pageInsertDividerBtn" type="button" class="px-2.5 py-1.5 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold inline-flex items-center gap-1 cursor-pointer">
-                <span>+ Divider After</span>
-              </button>` : ''}
+            <button id="pageInsertDividerBtn" type="button" class="px-2.5 py-1.5 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] font-semibold inline-flex items-center gap-1 cursor-pointer">
+              <span>+ Divider After</span>
+            </button>
           </div>
-        </div>
+        </div>` : ''}
 
         <!-- Step Range Group (affects a custom range of steps/pages) -->
-        <div class="pt-2 border-t border-[var(--border)] flex items-center justify-between gap-2 flex-wrap">
+        <div class="${canAddDiv || pgWarn ? 'pt-2 border-t border-[var(--border)] ' : ''}flex items-center justify-between gap-2 flex-wrap">
           <div class="flex items-center gap-2 min-w-0 flex-1">
             ${renderScopeBadge('range', 'Step Range')}
             <span class="text-[11px] text-[var(--muted-foreground)] truncate">${activeGroup ? `${escHtml(activeGroup.name)} (#${activeGroup.startStepNum}–#${activeGroup.endStepNum})` : 'Using manual default grid'}</span>
@@ -14415,19 +14463,6 @@ function renderContextOverlay(page) {
       pgWarnBtn.onclick = () => applySuggestedPageSize(pgWarnAction);
     }
     bindPageSizeWarningStepLinks(box.querySelector('#pageCardSizeWarning'));
-    box.querySelectorAll('.page-break-slot-btn').forEach(b => {
-      b.onclick = () => {
-        const sid = b.getAttribute('data-page-break-step');
-        const found = slots.find(sl => sl.step.id === sid);
-        if (found) toggleStepPageBreak(found.step, { ch: found.ch, followToggledStep: true });
-      };
-    });
-    box.querySelectorAll('.page-break-help-btn').forEach(helpBtn => {
-      helpBtn.onclick = (e) => {
-        e.stopPropagation();
-        togglePageBreakHelpTooltip(helpBtn);
-      };
-    });
     const divBtn = box.querySelector('#pageInsertDividerBtn');
     if (divBtn) {
       divBtn.onclick = () => insertDividerAfterCurrentPage(page);
@@ -16604,7 +16639,6 @@ function renderOverviewModal(opts = {}) {
   const jobId = overviewThumbRenderJobId;
   list.innerHTML = '';
 
-  const pageBreakSvg = '<svg class="w-3 h-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4"/><path d="M10 12h4"/><path d="M17 12h4"/><path d="M6 4v3a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V4"/><path d="M6 20v-3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v3"/></svg>';
   const resScale = getPreviewResolutionScale();
   const { width: thumbW, height: thumbH } = computeOverviewThumbDimensions(resScale);
   const thumbEpoch = overviewThumbCache.getEpoch();
@@ -16612,42 +16646,6 @@ function renderOverviewModal(opts = {}) {
   const allModelParts = state.model ? getAllParts(state.model) : [];
   const allModelPartsSig = computeStepPreviewPartSignature(allModelParts);
   const observedTargets = [];
-
-  const breakCount = countStepPageBreaks(state.model?.chapters, state.overrides);
-
-  const pinsBar = document.getElementById('overviewPinsBar');
-  const pinsStatus = document.getElementById('overviewPinsStatus');
-  const clearBtn = document.getElementById('btnClearAllPins');
-  if (pinsBar) pinsBar.classList.toggle('hidden', breakCount === 0);
-  if (pinsStatus) {
-    pinsStatus.innerHTML = breakCount > 0
-      ? `<span class="text-[var(--primary)] inline-flex items-center">${pageBreakSvg}</span><span>${breakCount} active page break${breakCount === 1 ? '' : 's'}</span>`
-      : '';
-  }
-  if (clearBtn) {
-    if (breakCount > 0) {
-      clearBtn.textContent = 'Clear All';
-      clearBtn.title = `Remove all ${breakCount} page break${breakCount === 1 ? '' : 's'}`;
-      clearBtn.classList.remove('hidden');
-      clearBtn.onclick = () => {
-        const anchorStepId = state.selectedStepId || state.pages[state.pageIdx]?.slots?.[0]?.step?.id || null;
-        pushUndo();
-        const cleared = clearAllStepPageBreaks(state.overrides);
-        state.overrides = cleared.overrides;
-        rebuildPages();
-        if (anchorStepId) {
-          const anchorIdx = findPageIndexForStep(state.pages, anchorStepId);
-          if (anchorIdx >= 0) state.pageIdx = anchorIdx;
-        }
-        renderAll({ skipRebuildPages: true });
-        renderOverviewModal();
-        showToast('Cleared all page breaks — pages can reflow freely.');
-      };
-    } else {
-      clearBtn.classList.add('hidden');
-      clearBtn.onclick = null;
-    }
-  }
 
   const rangeModeBtn = document.getElementById('btnOverviewRangeMode');
   const rangeBar = document.getElementById('overviewRangeBar');
@@ -16885,20 +16883,6 @@ function renderOverviewModal(opts = {}) {
 
     const firstSlot = slots[0];
     const firstStep = firstSlot.step;
-    const startsWithBreak = hasStepPageBreak(state.overrides, firstStep.id, firstSlot);
-
-    if (startsWithBreak) {
-      const divider = document.createElement('div');
-      divider.className = 'flex items-center gap-2 px-2 pt-1 text-xs font-bold text-[var(--primary)]';
-      divider.innerHTML = `
-        <div class="flex-1 border-t border-dashed border-[var(--primary-border)]"></div>
-        <span class="inline-flex items-center gap-1 whitespace-nowrap">
-          ${pageBreakSvg}
-          <span>Page Break · ${escHtml(getStepShortLabel(firstStep, firstSlot.ch))} starts a new page</span>
-        </span>
-        <div class="flex-1 border-t border-dashed border-[var(--primary-border)]"></div>`;
-      list.appendChild(divider);
-    }
 
     const card = document.createElement('div');
     card.className = `rounded-lg border overflow-hidden transition ${active ? 'border-[var(--primary)] bg-[var(--primary-soft)]' : 'border-[var(--border)] bg-[var(--background)]'}`;
@@ -16931,7 +16915,6 @@ function renderOverviewModal(opts = {}) {
     slots.forEach((slot, slotIdx) => {
       const step = slot.step;
       const isSeqCont = isStepBreakContinuationSlice(slot);
-      const hasBreak = hasStepPageBreak(state.overrides, step.id, slot);
       const isStepActive = active && (state.selectedStepId === step.id || (!state.selectedStepId && slotIdx === 0));
       const inSelRange = isStepInOverviewRange(getAbsStepNum(step));
       const isMfBuild = Boolean((step.isStandaloneFigure || slot.ch?.kind === 'minifigure') && !step.isMinifigPoseStep);
@@ -16961,13 +16944,6 @@ function renderOverviewModal(opts = {}) {
       const stepRow = document.createElement('div');
       if (isStepActive) stepRow.dataset.active = 'true';
       stepRow.className = `flex items-center justify-between gap-2 px-3 py-2 cursor-pointer transition ${inSelRange ? 'bg-[var(--primary-soft)] ring-1 ring-inset ring-[var(--primary-border)]' : (isStepActive ? 'bg-[var(--primary-soft)]' : 'hover:bg-black/[0.03] dark:hover:bg-white/[0.04]')}`;
-
-      const stepShortLabel = getStepShortLabel(step, slot.ch);
-      const breakTitle = getStepBreakTooltip({
-        stepLabel: stepShortLabel,
-        pinned: hasBreak,
-        slotIndex: slotIdx,
-      });
 
       const cam = getStepCamera(step);
       const ov = state.overrides[step.id] || {};
@@ -17058,14 +17034,13 @@ function renderOverviewModal(opts = {}) {
         ${stepMeta ? `<div class="text-xs text-[var(--muted-foreground)] truncate mt-0.5">${escHtml(stepMeta)}</div>` : ''}`;
       leftWrap.appendChild(textWrap);
 
-      const rightWrap = document.createElement('div');
-      rightWrap.className = 'flex items-center gap-1 shrink-0';
-      rightWrap.innerHTML = isSeqCont
-        ? '<span class="px-2 py-0.5 rounded-md text-xs font-medium text-[var(--muted-foreground)] bg-black/5 dark:bg-white/10">Continued</span>'
-        : `<span class="pb-btn-group inline-flex items-stretch rounded-md text-xs font-semibold border transition ${hasBreak ? 'bg-[var(--primary)] text-[var(--primary-foreground)] border-transparent' : 'border-[var(--border)] bg-[var(--card)] hover:border-[var(--primary-border)]'}"><button type="button" title="${escHtml(breakTitle)}" aria-label="${escHtml(`Page break before Step ${step.num}`)}" aria-pressed="${hasBreak ? 'true' : 'false'}" class="ov-step-pin pl-2 pr-1.5 py-1 sm:pl-2.5 sm:pr-2 rounded-l-[5px] inline-flex items-center gap-1 transition-colors cursor-pointer ${hasBreak ? 'hover:bg-[var(--primary-hover)]' : 'hover:bg-[var(--surface-hover)]'}">${pageBreakSvg}<span>Page Break</span></button><button type="button" aria-label="${escHtml(`What is a Page Break? (${stepShortLabel})`)}" aria-expanded="false" data-pb-help-step="${escHtml(stepShortLabel)}" data-pb-help-pinned="${hasBreak ? '1' : '0'}" class="pb-help-btn px-1.5 sm:px-2 py-1 rounded-r-[5px] border-l inline-flex items-center justify-center font-bold leading-none transition-colors cursor-pointer ${hasBreak ? 'pb-help-btn-pinned' : 'pb-help-btn-default'}"><span aria-hidden="true">?</span></button></span>`;
-
       stepRow.appendChild(leftWrap);
-      stepRow.appendChild(rightWrap);
+      if (isSeqCont) {
+        const rightWrap = document.createElement('div');
+        rightWrap.className = 'flex items-center gap-1 shrink-0';
+        rightWrap.innerHTML = '<span class="px-2 py-0.5 rounded-md text-xs font-medium text-[var(--muted-foreground)] bg-black/5 dark:bg-white/10">Continued</span>';
+        stepRow.appendChild(rightWrap);
+      }
 
       stepRow.onclick = () => {
         if (overviewRangeState.active) {
@@ -17074,22 +17049,6 @@ function renderOverviewModal(opts = {}) {
           jumpToPageAndStep(idx, step.id);
         }
       };
-
-      const pinBtn = stepRow.querySelector('.ov-step-pin');
-      if (pinBtn) {
-        pinBtn.onclick = (e) => {
-          e.stopPropagation();
-          toggleStepPageBreak(step, { ch: slot.ch, refreshOverview: true });
-        };
-      }
-      const pinHelpBtn = stepRow.querySelector('.pb-help-btn');
-      if (pinHelpBtn) {
-        pinHelpBtn.onclick = (e) => {
-          e.stopPropagation();
-          e.preventDefault();
-          togglePageBreakHelpTooltip(pinHelpBtn);
-        };
-      }
 
       stepsWrap.appendChild(stepRow);
     });
@@ -25602,11 +25561,11 @@ if (overviewListEl) {
     overviewRo.observe(overviewListEl);
   }
 }
-const stepEditBodyEl = document.getElementById('stepEditBody');
-if (stepEditBodyEl) {
-  stepEditBodyEl.addEventListener('scroll', () => {
+const contextOverlayEl = document.getElementById('contextOverlay');
+if (contextOverlayEl) {
+  contextOverlayEl.addEventListener('scroll', () => {
     if (isPageBreakHelpTooltipOpen()) hidePageBreakHelpTooltip();
-  }, { passive: true });
+  }, { capture: true, passive: true });
 }
 const btnOverviewJumpTop = document.getElementById('btnOverviewJumpTop');
 if (btnOverviewJumpTop) {
