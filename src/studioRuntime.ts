@@ -12081,6 +12081,8 @@ function renderAll(renderOpts = {}) {
       <div class="relative w-full h-full flex flex-col overflow-hidden" style="padding:${padPx}px;padding-bottom:${padPx + footerH}px">
         ${page.submodelIntro ? (() => {
           const mirrorInfo = getMirroredSubassemblyMap(state.model).get(page.submodelIntro.id) || null;
+          const hasMult = page.submodelIntro.repeatCount > 1;
+          const hasRightPills = Boolean(mirrorInfo) || hasMult;
           return `
           <div class="shrink-0 flex items-center ${wordless ? 'w-fit self-start' : 'justify-between'} shadow-xs overflow-hidden" style="margin-bottom:${Math.round(typo.pt(7))}px;padding:${Math.round(typo.pt(5))}px ${Math.round(typo.pt(10))}px;border-radius:${Math.round(typo.pt(10))}px;gap:${Math.round(typo.pt(10))}px;background:${theme.calloutBg};border:1.5px solid ${theme.calloutBorder}">
             <div class="flex items-center min-w-0 ${wordless ? '' : 'flex-1'}" style="gap:${Math.round(typo.pt(8))}px">
@@ -12091,10 +12093,10 @@ function renderAll(renderOpts = {}) {
                   <div class="font-extrabold truncate" style="font-size:${st.introTitleFont}px">${escHtml(page.submodelIntro.name)}</div>
                 </div>`}
             </div>
-            <div class="shrink-0 flex items-center" style="gap:${Math.round(typo.pt(4))}px">
+            ${hasRightPills ? `<div class="shrink-0 flex items-center" style="gap:${Math.round(typo.pt(4))}px">
               ${mirrorInfo ? `<span class="inline-flex items-center rounded-full font-bold tabular-nums" title="${escHtml(`Mirrored pair with ${mirrorInfo.partnerName}`)}" style="background:rgba(15,23,42,0.08);color:${theme.text};border:1px solid ${theme.calloutBorder};font-size:${Math.max(9, Math.round(st.introPillFont * 0.85))}px;padding:${Math.round(typo.pt(2))}px ${Math.round(typo.pt(7))}px">${wordless ? '⇄' : `⇄ Mirror ${mirrorInfo.role}`}</span>` : ''}
-              <span class="shrink-0 inline-flex items-center rounded-full font-black text-white shadow-xs tabular-nums" style="gap:${Math.round(typo.pt(3.5))}px;background:${theme.accent};font-size:${st.introPillFont}px;padding:${Math.round(typo.pt(3))}px ${Math.round(typo.pt(10))}px">${page.submodelIntro.repeatCount > 1 ? `×${page.submodelIntro.repeatCount}` : (wordless ? `${buildBrickGlyphSvg(Math.max(11, Math.round(st.introPillFont * 1.05)))}<span>${page.submodelIntro.pieceCount || page.submodelIntro.canonicalParts.length}</span>` : `${page.submodelIntro.pieceCount || page.submodelIntro.canonicalParts.length} pcs`)}</span>
-            </div>
+              ${hasMult ? `<span class="shrink-0 inline-flex items-center rounded-full font-black text-white shadow-xs tabular-nums" style="gap:${Math.round(typo.pt(3.5))}px;background:${theme.accent};font-size:${st.introPillFont}px;padding:${Math.round(typo.pt(3))}px ${Math.round(typo.pt(10))}px">×${page.submodelIntro.repeatCount}</span>` : ''}
+            </div>` : ''}
           </div>`;
         })() : ''}
         <div class="relative flex-1 min-h-0">
@@ -22413,17 +22415,31 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       const sub = page.submodelIntro;
       const bannerH = Math.round(st.introThumbH + typo.pt(12));
       const hasMult = sub.repeatCount > 1;
-      const rawCount = sub.pieceCount || sub.canonicalParts?.length || 0;
-      const multLabel = hasMult ? `×${sub.repeatCount}` : (wordless ? String(rawCount) : `${rawCount} pcs`);
-      const introBrickSz = wordless && !hasMult ? Math.max(11, Math.round(st.introPillFont * 1.08)) : 0;
-      const introBrickGap = introBrickSz > 0 ? Math.round(typo.pt(4)) : 0;
-      ctx.font = themeCanvasFont(theme, 900, st.introPillFont);
-      const multTextW = Math.ceil(ctx.measureText(multLabel).width);
-      const pillW = Math.max(Math.round(typo.pt(42)), Math.round(multTextW + introBrickSz + introBrickGap + typo.pt(20)));
+      const multLabel = hasMult ? `×${sub.repeatCount}` : '';
       const pillH = Math.round(st.introPillFont * 1.9);
+      let pillW = 0;
+      if (hasMult) {
+        ctx.font = themeCanvasFont(theme, 900, st.introPillFont);
+        const multTextW = Math.ceil(ctx.measureText(multLabel).width);
+        pillW = Math.max(Math.round(typo.pt(42)), Math.round(multTextW + typo.pt(20)));
+      }
+      const pdfMirrorInfo = getMirroredSubassemblyMap(state.model).get(sub.id) || null;
+      const mLabel = pdfMirrorInfo ? (wordless ? '⇄' : `⇄ Mirror ${pdfMirrorInfo.role}`) : '';
+      const mFont = Math.max(9, Math.round(st.introPillFont * 0.85));
+      let mW = 0;
+      const mH = Math.round(pillH * 0.88);
+      if (pdfMirrorInfo) {
+        ctx.font = themeCanvasFont(theme, 700, mFont);
+        mW = Math.ceil(ctx.measureText(mLabel).width) + Math.round(typo.pt(14));
+      }
+      const pillGap = Math.round(typo.pt(6));
+      const rightPillsW = (mW > 0 && pillW > 0) ? (mW + pillGap + pillW) : (mW + pillW);
       const fullBannerW = pxW - pad * 2;
       const bannerW = wordless
-        ? Math.min(fullBannerW, Math.round(typo.pt(10) + st.introThumbW + typo.pt(10) + pillW + typo.pt(10)))
+        ? Math.min(
+            fullBannerW,
+            Math.round(typo.pt(10) + st.introThumbW + (rightPillsW > 0 ? typo.pt(10) + rightPillsW : 0) + typo.pt(10)),
+          )
         : fullBannerW;
       drawRRect(pad, pad, bannerW, bannerH, Math.round(typo.pt(10)));
       ctx.fillStyle = theme.calloutBg;
@@ -22432,8 +22448,11 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       ctx.lineWidth = 1.5;
       ctx.stroke();
 
-      const pillX = pad + bannerW - pillW - Math.round(typo.pt(10));
+      const rightEdgeX = pad + bannerW - Math.round(typo.pt(10));
+      const pillX = hasMult ? rightEdgeX - pillW : rightEdgeX;
       const pillY = pad + Math.round((bannerH - pillH) / 2);
+      const mX = pdfMirrorInfo ? (hasMult ? pillX - mW - pillGap : rightEdgeX - mW) : rightEdgeX;
+      const rightBoundaryX = pdfMirrorInfo ? mX : pillX;
 
       ctx.save();
       drawRRect(pad, pad, bannerW, bannerH, Math.round(typo.pt(10)));
@@ -22445,7 +22464,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       }
       if (!wordless) {
         const textX = pad + Math.round(typo.pt(10)) + st.introThumbW + Math.round(typo.pt(10));
-        const introTextMaxW = Math.max(0, pillX - textX - Math.round(typo.pt(8)));
+        const introTextMaxW = Math.max(0, rightBoundaryX - textX - (rightPillsW > 0 ? Math.round(typo.pt(8)) : 0));
         ctx.fillStyle = theme.muted;
         ctx.font = themeCanvasFont(theme, 700, st.introLabelFont);
         drawTruncatedText(sub.isSectionModule ? 'BUILD SECTION' : 'SUBMODEL', textX, pad + Math.round(bannerH * 0.22), introTextMaxW);
@@ -22454,16 +22473,9 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
         drawTruncatedText(sub.name || 'Submodel', textX, pad + Math.round(bannerH * 0.48), introTextMaxW);
       }
 
-      const pdfMirrorInfo = getMirroredSubassemblyMap(state.model).get(sub.id) || null;
       if (pdfMirrorInfo) {
-        const mLabel = wordless ? '⇄' : `⇄ Mirror ${pdfMirrorInfo.role}`;
-        const mFont = Math.max(9, Math.round(st.introPillFont * 0.85));
-        ctx.font = themeCanvasFont(theme, 700, mFont);
-        const mW = Math.ceil(ctx.measureText(mLabel).width) + Math.round(typo.pt(14));
-        const mH = Math.round(pillH * 0.88);
-        const mX = pillX - mW - Math.round(typo.pt(6));
         const mY = pad + Math.round((bannerH - mH) / 2);
-        if (mX > pad + st.introThumbW + Math.round(typo.pt(24))) {
+        if (mX > pad + st.introThumbW + Math.round(typo.pt(14))) {
           drawRRect(mX, mY, mW, mH, mH / 2);
           ctx.fillStyle = 'rgba(15,23,42,0.08)';
           ctx.fill();
@@ -22471,26 +22483,21 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
           ctx.lineWidth = 1;
           ctx.stroke();
           ctx.fillStyle = theme.text;
+          ctx.font = themeCanvasFont(theme, 700, mFont);
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           ctx.fillText(mLabel, mX + mW / 2, mY + mH / 2 + 0.5);
         }
       }
 
-      drawRRect(pillX, pillY, pillW, pillH, pillH / 2);
-      ctx.fillStyle = theme.accent;
-      ctx.fill();
-      ctx.fillStyle = '#ffffff';
-      ctx.font = themeCanvasFont(theme, 900, st.introPillFont);
-      ctx.textBaseline = 'middle';
-      if (introBrickSz > 0) {
-        const innerW = introBrickSz + introBrickGap + multTextW;
-        const innerX = pillX + (pillW - innerW) / 2;
-        drawBrickGlyphCanvas(ctx, innerX, pillY + (pillH - introBrickSz) / 2, introBrickSz, '#ffffff');
-        ctx.textAlign = 'left';
-        ctx.fillText(multLabel, innerX + introBrickSz + introBrickGap, pillY + pillH / 2 + 1);
-      } else {
+      if (hasMult) {
+        drawRRect(pillX, pillY, pillW, pillH, pillH / 2);
+        ctx.fillStyle = theme.accent;
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.font = themeCanvasFont(theme, 900, st.introPillFont);
         ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
         ctx.fillText(multLabel, pillX + pillW / 2, pillY + pillH / 2 + 1);
       }
       ctx.textAlign = 'left';

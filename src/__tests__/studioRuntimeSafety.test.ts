@@ -1270,4 +1270,35 @@ describe('studioRuntime safety checks', () => {
     expect(runtime).toContain('function renderThemeEditorPreview(');
     expect(runtime).toContain('async function deleteThemeById(');
   });
+
+  it('omits the submodel intro multiplier pill when repeatCount <= 1 instead of falling back to part count', () => {
+    const runtime = fs.readFileSync(path.resolve(process.cwd(), 'src/studioRuntime.ts'), 'utf8');
+
+    // Live DOM submodelIntro block
+    const domStart = runtime.indexOf('${page.submodelIntro ? (() => {');
+    const domEnd = runtime.indexOf("})() : ''}", domStart);
+    expect(domStart).toBeGreaterThan(-1);
+    expect(domEnd).toBeGreaterThan(domStart);
+    const domBlock = runtime.slice(domStart, domEnd);
+    expect(domBlock).toContain('const hasMult = page.submodelIntro.repeatCount > 1;');
+    expect(domBlock).toContain('hasMult ?');
+    expect(domBlock).not.toContain('pieceCount');
+    expect(domBlock).not.toContain('canonicalParts.length');
+    expect(domBlock).not.toContain('buildBrickGlyphSvg');
+    expect(domBlock).not.toContain(' pcs');
+
+    // PDF canvas submodelIntro block
+    const pdfStart = runtime.indexOf('if (page.submodelIntro) {');
+    const pdfEnd = runtime.indexOf('topY = pad + bannerH', pdfStart);
+    expect(pdfStart).toBeGreaterThan(-1);
+    expect(pdfEnd).toBeGreaterThan(pdfStart);
+    const pdfBlock = runtime.slice(pdfStart, pdfEnd);
+    expect(pdfBlock).toContain('const hasMult = sub.repeatCount > 1;');
+    expect(pdfBlock).toContain('if (hasMult) {');
+    expect(pdfBlock).not.toContain('pieceCount');
+    expect(pdfBlock).not.toContain('canonicalParts');
+    expect(pdfBlock).not.toContain('drawBrickGlyphCanvas');
+    expect(pdfBlock).not.toContain(' pcs');
+  });
 });
+
