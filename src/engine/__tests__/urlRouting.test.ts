@@ -30,8 +30,13 @@ describe('urlRouting', () => {
   });
 
   it('parses standalone app modal routes and composed page + modal routes', () => {
+    expect(parseAppRoute('#/preview')).toEqual({ page: null, modal: 'preview' });
     expect(parseAppRoute('#/settings')).toEqual({ page: null, modal: 'settings' });
     expect(parseAppRoute('#/bricks-library')).toEqual({ page: null, modal: 'bricks-library' });
+    expect(parseAppRoute('#/page/2?view=preview')).toEqual({
+      page: { kind: 'page', pageNum: 2 },
+      modal: 'preview',
+    });
     expect(parseAppRoute('#/page/2?view=settings')).toEqual({
       page: { kind: 'page', pageNum: 2 },
       modal: 'settings',
@@ -40,6 +45,7 @@ describe('urlRouting', () => {
       page: { kind: 'cover' },
       modal: 'page-setup',
     });
+    expect(formatAppRoute({ page: { kind: 'page', pageNum: 2 }, modal: 'preview' })).toBe('#/page/2?view=preview');
   });
 
   it('returns null for empty or unrecognized routes so app falls back cleanly', () => {

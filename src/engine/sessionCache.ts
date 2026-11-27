@@ -1,17 +1,18 @@
 /**
- * Session Startup Cache, Portable `.biw` Embedded Assets, & Persisted 404 Cache
+ * Portable `.biw` Project Embedded Assets & Internal Session Helpers
  *
  * Pure helpers shared by:
- * - Fast IndexedDB startup restoration (skipping `.io` extraction + `buildManualFromParsed`
- *   when a matching manual snapshot is already cached)
- * - Fully portable `.biw` project export/import (embedding custom `.dat` geometry,
- *   titles, fused assembly definitions, and `.io`/MPD embedded textures)
- * - TTL-bounded persistence of `notFoundDatCache` so known-missing parts aren't
- *   re-probed across remote mirrors on every reload
+ * - Fully portable `.biw` project export & import (embedding custom `.dat`
+ *   geometry, titles, fused assembly definitions, and `.io`/MPD decals)
+ * - Fast startup restoration by saving the exact same `.biw` project internally
+ *   in IndexedDB (`lastProject`) alongside `lastModel`
+ * - Targeted lazy `partsLib` lookups for only the active manual's part IDs
  */
 
-export const MANUAL_SNAPSHOT_SCHEMA_VERSION = 1;
-export const NOT_FOUND_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+import {
+  PROJECT_FILE_FORMAT,
+  PROJECT_FILE_STUDIO_VERSION,
+} from '../storage/fileFormats';
 
 export interface EmbeddedTextureEntry {
   names: string[];
@@ -32,18 +33,15 @@ export interface DeserializedEmbeddedModelAssets {
   embeddedTextures: EmbeddedTextureEntry[];
 }
 
-export interface ManualSnapshotRecord {
-  schemaVersion: number;
+export interface InternalBiwSessionMeta {
   sourceSignature: string;
   kind: 'io' | 'ldr' | 'project';
   fileName: string;
-  title: string;
-  subtitle?: string;
-  chapters: unknown[];
   importMode?: string;
   subdivisionPlan?: unknown;
   cameraLayoutAspect?: number;
-  embeddedAssets?: EmbeddedModelAssetsPayload;
+  pageIdx?: number;
+  seenDiagnosticKeys?: string[];
   savedAt: number;
 }
 
@@ -60,8 +58,6 @@ function fnv1aBytes(bytes: Uint8Array): string {
   let h = 0x811c9dc5;
   const len = bytes.length;
   h = fnv1aUpdate(h, String(len));
-  // Hash first 8KB, last 8KB, and evenly strided samples across large archives
-  // for O(1) sub-millisecond fingerprinting with negligible collision risk.
   const edge = Math.min(8192, len);
   for (let i = 0; i < edge; i++) {
     h ^= bytes[i];
@@ -85,7 +81,7 @@ function fnv1aBytes(bytes: Uint8Array): string {
 
 /**
  * Computes a fast deterministic signature for a saved `lastModel` record so we
- * can verify whether a cached `ManualSnapshotRecord` matches the current source.
+ * can verify whether the internally saved `.biw` (`lastProject`) matches it.
  */
 export function computeSourceSignature(rec: {
   kind?: string;
@@ -137,8 +133,7 @@ export function computeSourceSignature(rec: {
 
 /**
  * Serializes in-memory embedded `.dat` parts, titles, composite assembly names,
- * and embedded textures into a JSON-safe object suitable for `.biw` files and
- * IndexedDB startup snapshots.
+ * and embedded textures into a JSON-safe object for portable `.biw` files.
  */
 export function serializeEmbeddedModelAssets(input: {
   embeddedDatRaw: Map<string, string[]>;
@@ -187,8 +182,7 @@ export function serializeEmbeddedModelAssets(input: {
 }
 
 /**
- * Safely deserializes embedded model assets from a `.biw` project or IndexedDB
- * manual snapshot.
+ * Safely deserializes embedded model assets from a `.biw` project payload.
  */
 export function deserializeEmbeddedModelAssets(raw: unknown): DeserializedEmbeddedModelAssets {
   const embeddedDat = new Map<string, string[]>();
@@ -246,35 +240,31 @@ export function deserializeEmbeddedModelAssets(raw: unknown): DeserializedEmbedd
 }
 
 /**
- * Checks whether an IndexedDB `lastManualSnapshot` record is structurally valid
- * and matches the expected source signature & schema version.
+ * Checks whether an internally saved `.biw` project (`lastProject`) in IndexedDB
+ * is structurally valid and ready to restore.
  */
-export function isMatchingManualSnapshot(
-  snapshot: unknown,
-  expectedSignature: string,
-  expectedSchemaVersion = MANUAL_SNAPSHOT_SCHEMA_VERSION,
-): snapshot is ManualSnapshotRecord {
-  if (!isRestorableManualSnapshot(snapshot, expectedSchemaVersion)) return false;
-  if (!expectedSignature) return false;
-  return snapshot.sourceSignature === expectedSignature;
+export function isRestorableBiwProject(raw: unknown): raw is Record<string, unknown> & {
+  chapters: unknown[];
+  title?: string;
+  _sessionMeta?: InternalBiwSessionMeta;
+} {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
+  const obj = raw as Record<string, unknown>;
+  return (
+    obj.format === PROJECT_FILE_FORMAT &&
+    obj.version === PROJECT_FILE_STUDIO_VERSION &&
+    Array.isArray(obj.chapters) &&
+    obj.chapters.length > 0
+  );
 }
 
 /**
- * Checks whether an IndexedDB `lastManualSnapshot` record is structurally valid
- * (used for standalone `.biw` project sessions where there is no raw `.io`/`.ldr`
- * source record).
+ * Checks whether an internally saved `.biw` project matches a raw `lastModel`
+ * source signature.
  */
-export function isRestorableManualSnapshot(
-  snapshot: unknown,
-  expectedSchemaVersion = MANUAL_SNAPSHOT_SCHEMA_VERSION,
-): snapshot is ManualSnapshotRecord {
-  if (!snapshot || typeof snapshot !== 'object') return false;
-  const s = snapshot as Record<string, unknown>;
-  if (s.schemaVersion !== expectedSchemaVersion) return false;
-  if (s.kind !== 'io' && s.kind !== 'ldr' && s.kind !== 'project') return false;
-  if (!Array.isArray(s.chapters) || s.chapters.length === 0) return false;
-  if (typeof s.title !== 'string') return false;
-  return true;
+export function matchesBiwSourceSignature(raw: unknown, expectedSignature: string): boolean {
+  if (!isRestorableBiwProject(raw) || !expectedSignature) return false;
+  return raw._sessionMeta?.sourceSignature === expectedSignature;
 }
 
 /**
@@ -334,41 +324,4 @@ export function buildLibraryCandidateKeys(normKey: string): string[] {
     keys.push(k.slice(3));
   }
   return keys;
-}
-
-/**
- * Serializes a timestamped 404 cache map, pruning expired entries.
- */
-export function serializeNotFoundCache(
-  entries: Map<string, number>,
-  now = Date.now(),
-  ttlMs = NOT_FOUND_CACHE_TTL_MS,
-): Record<string, number> {
-  const out: Record<string, number> = {};
-  for (const [k, ts] of entries.entries()) {
-    if (!k || typeof ts !== 'number' || !Number.isFinite(ts)) continue;
-    if (now - ts <= ttlMs && ts <= now + 60_000) {
-      out[k] = ts;
-    }
-  }
-  return out;
-}
-
-/**
- * Deserializes a persisted 404 cache record, discarding expired or malformed entries.
- */
-export function deserializeNotFoundCache(
-  raw: unknown,
-  now = Date.now(),
-  ttlMs = NOT_FOUND_CACHE_TTL_MS,
-): Map<string, number> {
-  const out = new Map<string, number>();
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
-  for (const [k, val] of Object.entries(raw as Record<string, unknown>)) {
-    if (!k || typeof val !== 'number' || !Number.isFinite(val)) continue;
-    if (now - val <= ttlMs && val <= now + 60_000) {
-      out.set(k, val);
-    }
-  }
-  return out;
 }

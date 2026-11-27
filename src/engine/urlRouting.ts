@@ -12,6 +12,7 @@
  */
 
 export type AppModalRouteId =
+  | 'preview'
   | 'settings'
   | 'bricks-library'
   | 'overview'
@@ -23,6 +24,7 @@ export type AppModalRouteId =
   | 'open';
 
 export const APP_MODAL_ROUTE_IDS: readonly AppModalRouteId[] = [
+  'preview',
   'settings',
   'bricks-library',
   'overview',

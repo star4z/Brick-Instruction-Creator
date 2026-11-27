@@ -48,17 +48,13 @@ import {
 } from './data/bricklinkColors';
 import { analyzeMissingParts } from './engine/missingParts';
 import {
-  MANUAL_SNAPSHOT_SCHEMA_VERSION,
-  NOT_FOUND_CACHE_TTL_MS,
   buildLibraryCandidateKeys,
   collectLeafPartIdsFromChapters,
   computeSourceSignature,
   deserializeEmbeddedModelAssets,
-  deserializeNotFoundCache,
-  isMatchingManualSnapshot,
-  isRestorableManualSnapshot,
+  isRestorableBiwProject,
+  matchesBiwSourceSignature,
   serializeEmbeddedModelAssets,
-  serializeNotFoundCache,
 } from './engine/sessionCache';
 import {
   buildPageTargetFromPage,
@@ -1069,37 +1065,8 @@ const userLibRaw = new Map();
 const userLibTitles = new Map();
 const embeddedDatCompiled = new Map();
 const movedToAliases = new Map(); // LDraw ~Moved to <target> redirect chains for clean human names
-const notFoundDatCache = new Set(); // Confirmed 404 part IDs (persisted with TTL in IndexedDB)
-const notFoundDatTimestamps = new Map(); // key -> timestamp (ms) for TTL pruning
+const notFoundDatCache = new Set(); // Session cache of confirmed 404 part IDs to avoid repeat probes
 const compositePartDefs = new Map(); // Fused assemblies (e.g., Minifig Torso+Arms+Hands, Hips+Legs)
-
-function hydrateNotFoundDatCache(raw) {
-  const restored = deserializeNotFoundCache(raw, Date.now(), NOT_FOUND_CACHE_TTL_MS);
-  notFoundDatCache.clear();
-  notFoundDatTimestamps.clear();
-  for (const [k, ts] of restored.entries()) {
-    notFoundDatCache.add(k);
-    notFoundDatTimestamps.set(k, ts);
-  }
-}
-
-function persistNotFoundDatCache() {
-  const now = Date.now();
-  for (const k of notFoundDatCache) {
-    if (!notFoundDatTimestamps.has(k)) notFoundDatTimestamps.set(k, now);
-  }
-  for (const k of Array.from(notFoundDatTimestamps.keys())) {
-    if (!notFoundDatCache.has(k)) notFoundDatTimestamps.delete(k);
-  }
-  const serialized = serializeNotFoundCache(notFoundDatTimestamps, now, NOT_FOUND_CACHE_TTL_MS);
-  void dbPut('notFoundDatCache', serialized);
-}
-
-function clearNotFoundDatCache() {
-  notFoundDatCache.clear();
-  notFoundDatTimestamps.clear();
-  void dbDelete('notFoundDatCache');
-}
 
 function normId(raw) {
   return String(raw || '').trim().replace(/\\/g, '/').toLowerCase().replace(/^ldraw\//,'').replace(/^parts\//,'').replace(/^p\//,'').replace(/\.dat$/i,'');
@@ -18029,7 +17996,7 @@ async function importBricksLibraryFiles(fileList) {
         await new Promise(r => setTimeout(r, 4));
       }
     }
-    clearNotFoundDatCache();
+    notFoundDatCache.clear();
     invalidateLibraryRenderCaches();
     updateLibraryStatusUI();
     if (state.model && !mpState.parsed) {
@@ -18147,9 +18114,6 @@ async function autoFetchMissingPartsForIds(rootPartIds, displayName = '') {
       signal: ctrl?.signal,
     });
 
-    if (notFoundDatCache.size !== notFoundSizeBefore) {
-      persistNotFoundDatCache();
-    }
     if (res.fetched > 0 || res.texturesFetched > 0) {
       if (newlyFetchedTexKeys.length > 0) {
         await textureStore.predecodeKeys(newlyFetchedTexKeys);
@@ -18321,7 +18285,7 @@ async function fetchPartsOnline(opts = {}) {
   }
   if (!silent || parsedOverride) {
     // Manual or pre-import trigger clears session 404 cache so switching mirrors or reconnecting retries cleanly
-    clearNotFoundDatCache();
+    notFoundDatCache.clear();
   }
   if (onProgress) onProgress({ phase: 'scan', fetched: 0, fetchedTex: 0, processed: 0, total: 0, pct: 0 });
 
@@ -20559,45 +20523,114 @@ function restoreEmbeddedModelAssets(rawAssets) {
   return texKeys;
 }
 
-let saveSnapshotTimer = null;
-function persistManualSnapshot(immediate = false) {
+function buildBiwProjectPayload({ includeSessionMeta = false } = {}) {
+  if (!state.model) return null;
+  const activeTheme = getActiveTheme();
+  const embeddedCustomTheme = activeTheme && !activeTheme.builtIn && !BUILT_IN_THEME_IDS.has(activeTheme.id) ? activeTheme : undefined;
+  const embeddedCustomFonts = collectReferencedCustomFonts(activeTheme ? [activeTheme] : []);
+  const embeddedAssets = serializeEmbeddedModelAssets({
+    embeddedDatRaw,
+    embeddedDatTitles,
+    compositePartDefs,
+    embeddedTextures: textureStore.exportEmbeddedTextures(),
+  });
+  const payload = {
+    format: PROJECT_FILE_FORMAT,
+    version: PROJECT_FILE_STUDIO_VERSION,
+    title: state.model.title || 'Untitled Manual',
+    chapters: state.model.chapters,
+    ...embeddedAssets,
+    overrides: state.overrides,
+    stepInserts: state.stepInserts,
+    pageInserts: state.pageInserts,
+    dividerAfter: state.dividerAfter,
+    coverMeta: state.coverMeta,
+    completeMeta: state.completeMeta,
+    backMeta: state.backMeta,
+    bomConfig: state.bomConfig,
+    wordlessMode: state.wordlessMode,
+    bomShowTextFields: state.bomShowTextFields,
+    stepBorderStyle: state.stepBorderStyle,
+    showStepBorders: state.showStepBorders,
+    showPageTitle: state.showPageTitle,
+    showProgressBar: state.showProgressBar,
+    autoPlacementArrows: state.autoPlacementArrows,
+    arrowColor: state.arrowColor,
+    arrowStyle: state.arrowStyle,
+    arrowOutlines: state.arrowOutlines,
+    arrowLighting: state.arrowLighting,
+    stepLighting: state.stepLighting,
+    highQualityStepRender: state.highQualityStepRender,
+    highlightNew: state.highlightNew,
+    highlightColor: state.highlightColor,
+    highlightLineWeight: state.highlightLineWeight,
+    starkBlackOutlines: state.starkBlackOutlines,
+    outlineLineWeight: state.outlineLineWeight,
+    fadePrev: state.fadePrev,
+    fadeOpacity: state.fadeOpacity,
+    showRotCues: state.showRotCues,
+    showSizeGuides: state.showSizeGuides,
+    showAttachmentStarburst: state.showAttachmentStarburst,
+    pageNumberFormat: state.pageNumberFormat,
+    pageNumberPosition: normalizePageNumberPosition(state.pageNumberPosition),
+    showCover: state.showCover,
+    showBuildComplete: state.showBuildComplete,
+    showPartsList: state.showPartsList,
+    showBackCover: state.showBackCover,
+    detectDuplicates: state.detectDuplicates,
+    minifigStyle: state.minifigStyle,
+    showMinifig1to1: state.showMinifig1to1,
+    themeId: state.themeId,
+    ...(embeddedCustomTheme ? { customTheme: embeddedCustomTheme } : {}),
+    ...(embeddedCustomFonts.length > 0 ? { customFonts: embeddedCustomFonts } : {}),
+    paperFormat: state.paperFormat,
+    customWidth: state.customWidth,
+    customHeight: state.customHeight,
+    customUnit: state.customUnit,
+    customPaperW: state.customPaperW,
+    customPaperH: state.customPaperH,
+    orientation: state.orientation,
+    density: state.density,
+    layout: state.layout,
+    layoutConfig: state.layoutConfig,
+    layoutGroups: state.layoutGroups,
+  };
+  if (includeSessionMeta) {
+    const kind = lastSourceRecord?.kind === 'io' || lastSourceRecord?.kind === 'ldr' || lastSourceRecord?.kind === 'project'
+      ? lastSourceRecord.kind
+      : 'project';
+    const sourceSignature = (kind === 'io' || kind === 'ldr')
+      ? computeSourceSignature(lastSourceRecord)
+      : `project:${lastSourceRecord?.fileName || state.model.title || 'manual'}`;
+    payload._sessionMeta = {
+      sourceSignature,
+      kind,
+      fileName: lastSourceRecord?.fileName || '',
+      importMode: state.model._mode || lastSourceRecord?.importMode || 'auto',
+      subdivisionPlan: state.model._subdivisionPlan ?? lastSourceRecord?.subdivisionPlan ?? null,
+      cameraLayoutAspect: state.model._cameraLayoutAspect,
+      pageIdx: state.pageIdx,
+      seenDiagnosticKeys: serializeSeenDiagnosticKeys(state.seenDiagnosticKeys),
+      savedAt: Date.now(),
+    };
+  }
+  return payload;
+}
+
+let saveInternalBiwTimer = null;
+function persistInternalBiwProject(immediate = false) {
   if (!state.model || !Array.isArray(state.model.chapters) || state.model.chapters.length === 0 || importWizardState.active) return;
   const run = () => {
     try {
-      const kind = lastSourceRecord?.kind === 'io' || lastSourceRecord?.kind === 'ldr' || lastSourceRecord?.kind === 'project'
-        ? lastSourceRecord.kind
-        : 'project';
-      const sourceSignature = (kind === 'io' || kind === 'ldr')
-        ? computeSourceSignature(lastSourceRecord)
-        : `project:${lastSourceRecord?.fileName || state.model.title || 'manual'}`;
-      const embeddedAssets = serializeEmbeddedModelAssets({
-        embeddedDatRaw,
-        embeddedDatTitles,
-        compositePartDefs,
-        embeddedTextures: textureStore.exportEmbeddedTextures(),
-      });
-      const snapshot = {
-        schemaVersion: MANUAL_SNAPSHOT_SCHEMA_VERSION,
-        sourceSignature,
-        kind,
-        fileName: lastSourceRecord?.fileName || '',
-        title: state.model.title || 'Untitled Manual',
-        subtitle: state.model.subtitle || '',
-        chapters: state.model.chapters,
-        importMode: state.model._mode || lastSourceRecord?.importMode || 'auto',
-        subdivisionPlan: state.model._subdivisionPlan ?? lastSourceRecord?.subdivisionPlan ?? null,
-        cameraLayoutAspect: state.model._cameraLayoutAspect,
-        embeddedAssets,
-        savedAt: Date.now(),
-      };
-      void dbPut('lastManualSnapshot', snapshot);
+      const biw = buildBiwProjectPayload({ includeSessionMeta: true });
+      if (biw) void dbPut('lastProject', biw);
     } catch (_) {
-      // Ignore snapshot serialization / quota errors
+      // Ignore serialization / quota errors
     }
   };
-  clearTimeout(saveSnapshotTimer);
+  clearTimeout(saveInternalBiwTimer);
   if (immediate) run();
-  else saveSnapshotTimer = setTimeout(run, 600);
+  else saveInternalBiwTimer = setTimeout(run, 600);
 }
 
 async function ensureParsedModelHydrated() {
@@ -20620,7 +20653,7 @@ async function ensureParsedModelHydrated() {
 }
 
 // =========================================================================
-// HASH URL ROUTING (Manual Pages + App Views with Graceful Fallback)
+// HASH URL ROUTING (Manual Pages + App Views & Preview with Graceful Fallback)
 // =========================================================================
 let urlRoutingReady = false;
 let isApplyingUrlRoute = false;
@@ -20631,6 +20664,7 @@ function isModalVisibleById(id) {
 }
 
 function getActiveModalRouteId() {
+  if (isModalVisibleById('interactiveHtmlPreviewModal')) return 'preview';
   if (isModalVisibleById('settingsModal')) return 'settings';
   if (isModalVisibleById('bricksLibraryModal')) return 'bricks-library';
   if (isModalVisibleById('overviewModal')) return 'overview';
@@ -20666,6 +20700,7 @@ function syncAppUrlHash({ push = false } = {}) {
 }
 
 function closeAllRoutableModals(exceptModal = null) {
+  if (exceptModal !== 'preview' && isModalVisibleById('interactiveHtmlPreviewModal')) closeInteractiveHtmlPreview();
   if (exceptModal !== 'settings' && isModalVisibleById('settingsModal')) closeSettingsModal();
   if (exceptModal !== 'bricks-library' && isModalVisibleById('bricksLibraryModal')) closeBricksLibraryModal();
   if (exceptModal !== 'overview' && isModalVisibleById('overviewModal')) closeOverviewModal();
@@ -20701,6 +20736,12 @@ function applyAppRoute(route) {
     closeAllRoutableModals(modal);
     if (modal) {
       switch (modal) {
+        case 'preview':
+          if (state.model && state.pages.length > 0) {
+            if (!isModalVisibleById('interactiveHtmlPreviewModal')) void runInteractiveHtmlPreview();
+            appliedAny = true;
+          }
+          break;
         case 'settings':
           if (!isModalVisibleById('settingsModal')) openSettingsModal();
           appliedAny = true;
@@ -20849,42 +20890,39 @@ async function restoreLastSessionOnStart() {
   const initialRoute = typeof window !== 'undefined' ? parseAppRoute(window.location.hash) : null;
 
   // Read all independent session metadata records from IndexedDB in parallel!
-  const [rec, cachedSnapshot, dbCustomFonts, dbThemes, dbPrefs, dbNotFound] = await Promise.all([
+  const [rec, savedBiw, dbCustomFonts, dbThemes, dbPrefs] = await Promise.all([
     dbGet('lastModel'),
-    dbGet('lastManualSnapshot'),
+    dbGet('lastProject'),
     dbGet('customUploadedFonts'),
     dbGet('customThemes'),
     dbGet('prefs'),
-    dbGet('notFoundDatCache'),
   ]);
-
-  hydrateNotFoundDatCache(dbNotFound);
 
   const hasRestorableRaw = isRestorableModelRecord(rec);
   const rawSignature = hasRestorableRaw ? computeSourceSignature(rec) : '';
-  const canUseSnapshotForRaw = hasRestorableRaw && isMatchingManualSnapshot(cachedSnapshot, rawSignature);
-  const canUseStandaloneSnapshot = !hasRestorableRaw && isRestorableManualSnapshot(cachedSnapshot);
-  const canUseSnapshot = canUseSnapshotForRaw || canUseStandaloneSnapshot;
-  const hasAnyRestorableSession = hasRestorableRaw || canUseStandaloneSnapshot;
+  const canUseBiwForRaw = hasRestorableRaw && matchesBiwSourceSignature(savedBiw, rawSignature);
+  const canUseStandaloneBiw = !hasRestorableRaw && isRestorableBiwProject(savedBiw);
+  const canUseSavedBiw = canUseBiwForRaw || canUseStandaloneBiw;
+  const hasAnyRestorableSession = hasRestorableRaw || canUseStandaloneBiw;
 
   const loadingHint = hasRestorableRaw
     ? {
         fileName: rec.fileName || '',
         kind: rec.kind,
-        title: (canUseSnapshotForRaw ? cachedSnapshot.title : undefined)
+        title: (canUseBiwForRaw ? savedBiw.title : undefined)
           || (initialHint && initialHint.fileName === (rec.fileName || '') ? initialHint.title : undefined),
       }
-    : canUseStandaloneSnapshot
+    : canUseStandaloneBiw
       ? {
-          fileName: cachedSnapshot.fileName || '',
-          kind: cachedSnapshot.kind,
-          title: cachedSnapshot.title,
+          fileName: savedBiw._sessionMeta?.fileName || '',
+          kind: savedBiw._sessionMeta?.kind || 'project',
+          title: savedBiw.title,
         }
       : null;
 
   if (hasAnyRestorableSession && loadingHint) {
     writeStartupModelHint(loadingHint);
-    showStartupLoadingScreen(canUseSnapshot ? 'fetching_parts' : 'library', loadingHint);
+    showStartupLoadingScreen(canUseSavedBiw ? 'fetching_parts' : 'library', loadingHint);
   } else {
     writeStartupModelHint(null);
     hideStartupLoadingScreen();
@@ -20943,12 +20981,12 @@ async function restoreLastSessionOnStart() {
 
     let effectiveRec = hasRestorableRaw
       ? rec
-      : { kind: cachedSnapshot.kind, fileName: cachedSnapshot.fileName || '' };
+      : { kind: savedBiw._sessionMeta?.kind || 'project', fileName: savedBiw._sessionMeta?.fileName || '' };
 
-    if (canUseSnapshot) {
-      // FAST PATH: restore built manual snapshot directly (skipping .io unzip, parsing, & buildManualFromParsed!)
-      const embeddedTexKeys = restoreEmbeddedModelAssets(cachedSnapshot.embeddedAssets);
-      const leafIds = collectLeafPartIdsFromChapters(cachedSnapshot.chapters);
+    if (canUseSavedBiw) {
+      // FAST PATH: restore the internally saved .biw project directly (skipping .io unzip, parsing, & buildManualFromParsed!)
+      const embeddedTexKeys = restoreEmbeddedModelAssets(savedBiw);
+      const leafIds = collectLeafPartIdsFromChapters(savedBiw.chapters);
       const [libTexKeys] = await Promise.all([
         loadPartsFromLibraryForIds(leafIds),
         fontHydrationPromise,
@@ -20957,13 +20995,14 @@ async function restoreLastSessionOnStart() {
       if (texKeysToDecode.size > 0) {
         await textureStore.predecodeKeys(texKeysToDecode);
       }
+      const meta = savedBiw._sessionMeta || {};
       state.model = {
-        title: cachedSnapshot.title || 'Untitled Manual',
-        subtitle: cachedSnapshot.subtitle || '',
-        chapters: cachedSnapshot.chapters,
-        _mode: cachedSnapshot.importMode || effectiveRec.importMode || 'auto',
-        _subdivisionPlan: cachedSnapshot.subdivisionPlan ?? effectiveRec.subdivisionPlan ?? null,
-        _cameraLayoutAspect: cachedSnapshot.cameraLayoutAspect,
+        title: savedBiw.title || 'Untitled Manual',
+        subtitle: '',
+        chapters: savedBiw.chapters,
+        _mode: meta.importMode || effectiveRec.importMode || 'auto',
+        _subdivisionPlan: meta.subdivisionPlan ?? effectiveRec.subdivisionPlan ?? null,
+        _cameraLayoutAspect: meta.cameraLayoutAspect,
       };
     } else if (rec.kind === 'io' && rec.data) {
       showStartupLoadingScreen('extracting', loadingHint);
@@ -21030,8 +21069,8 @@ async function restoreLastSessionOnStart() {
     }
 
     lastSourceRecord = effectiveRec;
-    if (!canUseSnapshot) {
-      persistManualSnapshot(true);
+    if (!canUseSavedBiw) {
+      persistInternalBiwProject(true);
     }
     if (state.model?.title) {
       writeStartupModelHint({
@@ -21097,7 +21136,7 @@ async function restoreLastSessionOnStart() {
     if (initialRoute?.modal) {
       applyAppRoute({ page: null, modal: initialRoute.modal });
     }
-    if (!canUseSnapshot && effectiveRec.kind === 'ldr') void fetchMissingPartsOnline({ silent: true });
+    if (!canUseSavedBiw && effectiveRec.kind === 'ldr') void fetchMissingPartsOnline({ silent: true });
     showToast(`Reloaded ${state.model.title}`);
     if (getMenuIconErrorBadgeCount(state.diagnostics, state.seenDiagnosticKeys) > 0) showImportErrorBanner();
     scheduleIdleFullBricksLibraryLoad();
@@ -26307,6 +26346,7 @@ function closeInteractiveHtmlPreview() {
       }
     });
   }
+  syncAppUrlHash();
 }
 
 function openInteractiveHtmlPreview(htmlDoc: string, fileName: string) {
@@ -26330,6 +26370,7 @@ function openInteractiveHtmlPreview(htmlDoc: string, fileName: string) {
   activeInteractiveHtmlPreview = { fileName, blobUrl, restoreLivePage: hadLiveEngine };
   frame.src = blobUrl;
   modal.classList.remove('hidden');
+  syncAppUrlHash();
   document.getElementById('btnCloseInteractiveHtmlPreview')?.focus();
   return true;
 }
@@ -27182,77 +27223,9 @@ if (menuStepGenBtn) {
 
 // Export / Import .biw Project (fully portable: embeds custom .dat geometry, decals, composite defs, theme & fonts!)
 async function exportProjectFile() {
-  if (!state.model) return;
-  const activeTheme = getActiveTheme();
-  const embeddedCustomTheme = activeTheme && !activeTheme.builtIn && !BUILT_IN_THEME_IDS.has(activeTheme.id) ? activeTheme : undefined;
-  const embeddedCustomFonts = collectReferencedCustomFonts(activeTheme ? [activeTheme] : []);
-  const embeddedAssets = serializeEmbeddedModelAssets({
-    embeddedDatRaw,
-    embeddedDatTitles,
-    compositePartDefs,
-    embeddedTextures: textureStore.exportEmbeddedTextures(),
-  });
-  const payload = JSON.stringify({
-    format: PROJECT_FILE_FORMAT,
-    version: PROJECT_FILE_STUDIO_VERSION,
-    title: state.model.title,
-    chapters: state.model.chapters,
-    ...embeddedAssets,
-    overrides: state.overrides,
-    stepInserts: state.stepInserts,
-    pageInserts: state.pageInserts,
-    dividerAfter: state.dividerAfter,
-    coverMeta: state.coverMeta,
-    completeMeta: state.completeMeta,
-    backMeta: state.backMeta,
-    bomConfig: state.bomConfig,
-    wordlessMode: state.wordlessMode,
-    bomShowTextFields: state.bomShowTextFields,
-    stepBorderStyle: state.stepBorderStyle,
-    showStepBorders: state.showStepBorders,
-    showPageTitle: state.showPageTitle,
-    showProgressBar: state.showProgressBar,
-    autoPlacementArrows: state.autoPlacementArrows,
-    arrowColor: state.arrowColor,
-    arrowStyle: state.arrowStyle,
-    arrowOutlines: state.arrowOutlines,
-    arrowLighting: state.arrowLighting,
-    stepLighting: state.stepLighting,
-    highQualityStepRender: state.highQualityStepRender,
-    highlightNew: state.highlightNew,
-    highlightColor: state.highlightColor,
-    highlightLineWeight: state.highlightLineWeight,
-    starkBlackOutlines: state.starkBlackOutlines,
-    outlineLineWeight: state.outlineLineWeight,
-    fadePrev: state.fadePrev,
-    fadeOpacity: state.fadeOpacity,
-    showRotCues: state.showRotCues,
-    showSizeGuides: state.showSizeGuides,
-    showAttachmentStarburst: state.showAttachmentStarburst,
-    pageNumberFormat: state.pageNumberFormat,
-    pageNumberPosition: normalizePageNumberPosition(state.pageNumberPosition),
-    showCover: state.showCover,
-    showBuildComplete: state.showBuildComplete,
-    showPartsList: state.showPartsList,
-    showBackCover: state.showBackCover,
-    detectDuplicates: state.detectDuplicates,
-    minifigStyle: state.minifigStyle,
-    showMinifig1to1: state.showMinifig1to1,
-    themeId: state.themeId,
-    ...(embeddedCustomTheme ? { customTheme: embeddedCustomTheme } : {}),
-    ...(embeddedCustomFonts.length > 0 ? { customFonts: embeddedCustomFonts } : {}),
-    paperFormat: state.paperFormat,
-    customWidth: state.customWidth,
-    customHeight: state.customHeight,
-    customUnit: state.customUnit,
-    customPaperW: state.customPaperW,
-    customPaperH: state.customPaperH,
-    orientation: state.orientation,
-    density: state.density,
-    layout: state.layout,
-    layoutConfig: state.layoutConfig,
-    layoutGroups: state.layoutGroups,
-  });
+  const projectObj = buildBiwProjectPayload({ includeSessionMeta: false });
+  if (!projectObj) return;
+  const payload = JSON.stringify(projectObj);
   const fileName = buildProjectFileName(state.model.title);
   closeMenu();
   await shareOrDownloadCustomFile(payload, fileName, 'Shared project file.', `Exported ${fileName}`);
@@ -27371,7 +27344,7 @@ async function handleIncomingProjectFile(f) {
     errFilter = 'all';
     lastSourceRecord = { kind: 'project', fileName: f.name };
     void dbDelete('lastModel');
-    persistManualSnapshot(true);
+    persistInternalBiwProject(true);
     writeStartupModelHint({
       fileName: f.name,
       kind: 'project',
@@ -27716,7 +27689,7 @@ if (libPreviewStageEl) {
 }
 
 document.getElementById('libSourceSelect').onchange = (e) => {
-  clearNotFoundDatCache();
+  notFoundDatCache.clear();
   const customWrap = document.getElementById('libCustomUrlWrap');
   if (customWrap) customWrap.classList.toggle('hidden', e.target.value !== 'custom');
 };
@@ -27803,7 +27776,7 @@ document.getElementById('libClearSavedBtn').onclick = async () => {
   userLibRaw.clear();
   userLibTitles.clear();
   movedToAliases.clear();
-  clearNotFoundDatCache();
+  notFoundDatCache.clear();
   fullBricksLibraryLoaded = true;
   textureStore.clearLibrary();
   invalidateLibraryRenderCaches();
@@ -28882,7 +28855,7 @@ async function finishImport(parsed, mode, subdivisionPlan = null, isPostImport =
     if (!isPostImport && pendingRawFile) {
       lastSourceRecord = { ...pendingRawFile, importMode: mode, subdivisionPlan: subdivisionPlan || null };
       dbPut('lastModel', lastSourceRecord);
-      persistManualSnapshot(true);
+      persistInternalBiwProject(true);
       if (lastSourceRecord.kind === 'io' || lastSourceRecord.kind === 'ldr') {
         writeStartupModelHint({
           fileName: lastSourceRecord.fileName || '',
@@ -28894,7 +28867,7 @@ async function finishImport(parsed, mode, subdivisionPlan = null, isPostImport =
     } else if (isPostImport && lastSourceRecord && (lastSourceRecord.kind === 'io' || lastSourceRecord.kind === 'ldr')) {
       lastSourceRecord = { ...lastSourceRecord, importMode: mode, subdivisionPlan: subdivisionPlan || null };
       dbPut('lastModel', lastSourceRecord);
-      persistManualSnapshot(true);
+      persistInternalBiwProject(true);
       writeStartupModelHint({
         fileName: lastSourceRecord.fileName || '',
         kind: lastSourceRecord.kind,
@@ -29760,13 +29733,13 @@ async function closeCurrentModel() {
   const frame = document.getElementById('pageFrame');
   if (frame) frame.innerHTML = '';
 
-  clearTimeout(saveSnapshotTimer);
-  saveSnapshotTimer = null;
+  clearTimeout(saveInternalBiwTimer);
+  saveInternalBiwTimer = null;
   resetZoom();
   renderAll();
   writeStartupModelHint(null);
   try {
-    await Promise.all([dbDelete('lastModel'), dbDelete('lastManualSnapshot')]);
+    await Promise.all([dbDelete('lastModel'), dbDelete('lastProject'), dbDelete('lastManualSnapshot')]);
   } catch (_) {}
   showToast(`Closed ${closedTitle}.`);
 }

@@ -1236,6 +1236,14 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     await expect(page.locator('#settingsModal')).toBeHidden();
     expect(await page.evaluate(() => window.location.hash)).toBe('#/page/2');
 
+    // Interactive 3D Preview URL (#/page/2?view=preview) launches fullscreen preview and closes cleanly back to #/page/2
+    await page.goto('/#/page/2?view=preview');
+    await expect(page.locator('#interactiveHtmlPreviewModal')).toBeVisible({ timeout: 30000 });
+    expect(await page.evaluate(() => window.location.hash)).toBe('#/page/2?view=preview');
+    await page.locator('#btnCloseInteractiveHtmlPreview').click();
+    await expect(page.locator('#interactiveHtmlPreviewModal')).toBeHidden();
+    await expect.poll(() => page.evaluate(() => window.location.hash)).toBe('#/page/2');
+
     // Out-of-range hash falls back cleanly without crashing
     await page.goto('/#/page/9999');
     await expect(page.locator('#stageViewport')).toBeVisible();

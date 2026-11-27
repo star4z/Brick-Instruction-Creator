@@ -1,16 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
-  MANUAL_SNAPSHOT_SCHEMA_VERSION,
-  NOT_FOUND_CACHE_TTL_MS,
+  PROJECT_FILE_FORMAT,
+  PROJECT_FILE_STUDIO_VERSION,
+} from '../../storage/fileFormats';
+import {
   buildLibraryCandidateKeys,
   collectLeafPartIdsFromChapters,
   computeSourceSignature,
   deserializeEmbeddedModelAssets,
-  deserializeNotFoundCache,
-  isMatchingManualSnapshot,
-  isRestorableManualSnapshot,
+  isRestorableBiwProject,
+  matchesBiwSourceSignature,
   serializeEmbeddedModelAssets,
-  serializeNotFoundCache,
 } from '../sessionCache';
 import { textureStore } from '../textureStore';
 
@@ -73,21 +73,24 @@ describe('sessionCache', () => {
     textureStore.clearAll();
   });
 
-  it('validates matching and standalone manual snapshots', () => {
-    const snap = {
-      schemaVersion: MANUAL_SNAPSHOT_SCHEMA_VERSION,
-      sourceSignature: 'abc_123',
-      kind: 'io' as const,
-      fileName: 'model.io',
+  it('validates internally saved .biw projects and source signature matching', () => {
+    const biw = {
+      format: PROJECT_FILE_FORMAT,
+      version: PROJECT_FILE_STUDIO_VERSION,
       title: 'Space Rover',
       chapters: [{ id: 'ch1', steps: [{ id: 's1', num: 1, parts: [] }] }],
-      savedAt: Date.now(),
+      _sessionMeta: {
+        sourceSignature: 'abc_123',
+        kind: 'io' as const,
+        fileName: 'model.io',
+        savedAt: Date.now(),
+      },
     };
-    expect(isMatchingManualSnapshot(snap, 'abc_123')).toBe(true);
-    expect(isMatchingManualSnapshot(snap, 'different')).toBe(false);
-    expect(isMatchingManualSnapshot({ ...snap, schemaVersion: 999 }, 'abc_123')).toBe(false);
-    expect(isRestorableManualSnapshot({ ...snap, kind: 'project' })).toBe(true);
-    expect(isRestorableManualSnapshot({ ...snap, chapters: [] })).toBe(false);
+    expect(isRestorableBiwProject(biw)).toBe(true);
+    expect(matchesBiwSourceSignature(biw, 'abc_123')).toBe(true);
+    expect(matchesBiwSourceSignature(biw, 'different')).toBe(false);
+    expect(isRestorableBiwProject({ ...biw, version: 999 })).toBe(false);
+    expect(isRestorableBiwProject({ ...biw, chapters: [] })).toBe(false);
   });
 
   it('collects unique leaf part IDs from chapters including fused children and nested submodels', () => {
@@ -113,21 +116,5 @@ describe('sessionCache', () => {
     expect(buildLibraryCandidateKeys('3001')).toEqual(['3001', 'bl_3001', '3001-bl']);
     expect(buildLibraryCandidateKeys('bl_973c01')).toEqual(['bl_973c01', 'bl_973c01-bl', '973c01']);
     expect(buildLibraryCandidateKeys('s/3001s01')).toEqual(['s/3001s01']);
-  });
-
-  it('persists notFoundDatCache with TTL pruning', () => {
-    const now = 1_700_000_000_000;
-    const map = new Map<string, number>([
-      ['fresh_part', now - 1000],
-      ['expired_part', now - NOT_FOUND_CACHE_TTL_MS - 1000],
-    ]);
-    const serialized = serializeNotFoundCache(map, now);
-    expect(Object.keys(serialized)).toEqual(['fresh_part']);
-
-    const restored = deserializeNotFoundCache(
-      { fresh_part: now - 5000, expired_part: now - NOT_FOUND_CACHE_TTL_MS - 500, bad: 'nope' },
-      now,
-    );
-    expect(Array.from(restored.keys())).toEqual(['fresh_part']);
   });
 });
