@@ -982,7 +982,7 @@ ${staticFallbackHtml}
       <button id="btnZoomIn" class="tool-btn" type="button" title="Zoom in (+)" aria-label="Zoom in">+</button>
       <button id="btnZoomOut" class="tool-btn" type="button" title="Zoom out (-)" aria-label="Zoom out">−</button>
       <button id="btnTogglePli" class="tool-btn" type="button" title="Toggle parts list" aria-label="Toggle parts list" style="display:none">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="9" width="18" height="10" rx="2"/><path d="M6.5 9V6.5a1 1 0 0 1 1-1h2.5a1 1 0 0 1 1 1V9"/><path d="M13 9V6.5a1 1 0 0 1 1-1h2.5a1 1 0 0 1 1 1V9"/></svg>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="8" width="18" height="10.8" rx="1"/><path d="M4.8 8V6a.5.5 0 0 1 .5-.5h4.4a.5.5 0 0 1 .5.5v2"/><path d="M13.8 8V6a.5.5 0 0 1 .5-.5h4.4a.5.5 0 0 1 .5.5v2"/></svg>
       </button>
       <button id="btnXrayToggle" class="tool-btn" type="button" title="${payload.highlightNew && !payload.fadePrev ? 'Outline new pieces' : (payload.highlightNew && payload.fadePrev ? 'Fade previous & outline new pieces' : 'Fade previous pieces')}" aria-label="${payload.highlightNew && !payload.fadePrev ? 'Outline new pieces' : (payload.highlightNew && payload.fadePrev ? 'Fade previous & outline new pieces' : 'Fade previous pieces')}" style="display:none">
         ${payload.highlightNew && !payload.fadePrev
