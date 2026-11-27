@@ -239,6 +239,8 @@ export interface InteractiveHtmlPayload {
   fadeOpacity: number;
   /** When true, renders instruction steps with flat unlit colors (no lighting or specular shading). */
   unlit?: boolean;
+  /** When true, omits the static no-JS Quick Look HTML cards (used for live in-app preview). */
+  skipStaticFallback?: boolean;
   prototypes: InteractivePartPrototype[];
   textures: Record<string, string>;
   parts: InteractivePartPlacement[];
@@ -329,6 +331,9 @@ export function buildInteractiveHtmlFilename(title: string): string {
  * the complete illustrated manual instead of an empty screen.
  */
 function buildStaticFallbackHtml(payload: InteractiveHtmlPayload, safeEditorUrl: string): string {
+  if (payload.skipStaticFallback) {
+    return '<div id="noJsFallback" class="sf-root"></div>';
+  }
   const wordless = Boolean(payload.wordless);
   const pgLabel = (n: number) => (wordless ? String(n) : `Page ${n}`);
   const rotSvg = (kind?: string) => {
@@ -351,7 +356,7 @@ function buildStaticFallbackHtml(payload: InteractiveHtmlPayload, safeEditorUrl:
                 .map(
                   (p) =>
                     `<div class="sf-pli-item">${
-                      sanitizeExportImageUrl(p.thumb) ? `<img src="${sanitizeExportImageUrl(p.thumb)}" alt="${escapeHtmlText(p.name)}" />` : ''
+                      sanitizeExportImageUrl(p.thumb) ? `<img loading="lazy" src="${sanitizeExportImageUrl(p.thumb)}" alt="${escapeHtmlText(p.name)}" />` : ''
                     }<div><strong>${p.qty}×</strong>${wordless ? '' : `<span>${escapeHtmlText(p.partId.toUpperCase())}</span>`}</div></div>`,
                 )
                 .join('')}</div>`
@@ -371,7 +376,7 @@ function buildStaticFallbackHtml(payload: InteractiveHtmlPayload, safeEditorUrl:
             ${pliHtml}
             ${
               sanitizeExportImageUrl(st.previewUrl)
-                ? `<img class="sf-img" src="${sanitizeExportImageUrl(st.previewUrl)}" alt="${wordless ? String(st.stepNum) : `Step ${st.stepNum}`}" />`
+                ? `<img loading="lazy" class="sf-img" src="${sanitizeExportImageUrl(st.previewUrl)}" alt="${wordless ? String(st.stepNum) : `Step ${st.stepNum}`}" />`
                 : ''
             }
           </section>`);
@@ -410,7 +415,7 @@ function buildStaticFallbackHtml(payload: InteractiveHtmlPayload, safeEditorUrl:
               (b) =>
                 `<tr>${fields
                   .map((f) => {
-                    if (f === 'image') return `<td class="col-image">${sanitizeExportImageUrl(b.thumb) ? `<img src="${sanitizeExportImageUrl(b.thumb)}" alt="${escapeHtmlText(b.name)}" />` : ''}</td>`;
+                    if (f === 'image') return `<td class="col-image">${sanitizeExportImageUrl(b.thumb) ? `<img loading="lazy" src="${sanitizeExportImageUrl(b.thumb)}" alt="${escapeHtmlText(b.name)}" />` : ''}</td>`;
                     if (f === 'qty') return `<td class="col-qty"><strong>${b.qty}×</strong></td>`;
                     if (f === 'name') return `<td class="col-name">${escapeHtmlText(b.name)}</td>`;
                     if (f === 'partId') return `<td class="col-partId"><code>${escapeHtmlText(b.partId)}</code></td>`;
@@ -424,7 +429,7 @@ function buildStaticFallbackHtml(payload: InteractiveHtmlPayload, safeEditorUrl:
               (b) =>
                 `<div class="sf-bom-item">${fields
                   .map((f) => {
-                    if (f === 'image') return sanitizeExportImageUrl(b.thumb) ? `<img src="${sanitizeExportImageUrl(b.thumb)}" alt="${escapeHtmlText(b.name)}" />` : '';
+                    if (f === 'image') return sanitizeExportImageUrl(b.thumb) ? `<img loading="lazy" src="${sanitizeExportImageUrl(b.thumb)}" alt="${escapeHtmlText(b.name)}" />` : '';
                     if (f === 'qty') return `<strong>${b.qty}×</strong>`;
                     if (f === 'name') return `<span>${escapeHtmlText(b.name)}</span>`;
                     if (f === 'partId') return `<small class="bom-mono">${escapeHtmlText(b.partId)}</small>`;
@@ -464,7 +469,7 @@ function buildStaticFallbackHtml(payload: InteractiveHtmlPayload, safeEditorUrl:
           </div>
           ${
             sanitizeExportImageUrl(pg.previewUrl)
-              ? `<img class="sf-img" src="${sanitizeExportImageUrl(pg.previewUrl)}" alt="${escapeHtmlText(headingText || String(pg.num))}" />`
+              ? `<img loading="lazy" class="sf-img" src="${sanitizeExportImageUrl(pg.previewUrl)}" alt="${escapeHtmlText(headingText || String(pg.num))}" />`
               : ''
           }
           ${
@@ -1236,25 +1241,18 @@ ${staticFallbackHtml}
     }
   }
 
-  // Decode prototypes & precompute part matrices
+  // Keep lightweight prototype metadata; lazily decode base64 -> TypedArray -> GPU VBO on demand
+  // and drop CPU/base64 references immediately after upload to stay well under iOS Safari RAM limits.
   const decodedProtos = DATA.prototypes.map((pr) => ({
-    tp: b64ToF32(pr.tp),
-    tn: b64ToF32(pr.tn),
-    tc: b64ToBytes(pr.tc),
     oc: pr.oc || 0,
     xc: pr.xc || 0,
-    lp: b64ToF32(pr.lp),
-    lc: b64ToBytes(pr.lc),
-    td: (pr.td || []).map((d) => ({
-      k: d.k,
-      tp: b64ToF32(d.tp),
-      tn: b64ToF32(d.tn),
-      uv: b64ToF32(d.uv),
-      tc: b64ToBytes(d.tc),
-    })),
+    hasLines: Boolean(pr.lp && pr.lp.length > 0),
+    hasTd: Boolean(pr.td && pr.td.length > 0),
     b: pr.b || [-10, -10, -10, 10, 10, 10],
+    raw: pr,
     gpu: null,
   }));
+  DATA.prototypes = [];
 
   const partMats = DATA.parts.map((p) => ({
     k: p.k,
@@ -1312,27 +1310,45 @@ ${staticFallbackHtml}
     };
     img.src = dataUrl;
   }
+  DATA.textures = {};
 
   function ensureProtoGpu(pr) {
     if (pr.gpu) return pr.gpu;
+    const raw = pr.raw;
+    if (!raw) return null;
     const mk = (arr) => {
+      if (!arr || !arr.length) return null;
       const b = gl.createBuffer();
       gl.bindBuffer(gl.ARRAY_BUFFER, b);
       gl.bufferData(gl.ARRAY_BUFFER, arr, gl.STATIC_DRAW);
       return b;
     };
-    pr.gpu = {
-      tp: pr.tp.length ? mk(pr.tp) : null,
-      tn: pr.tn.length ? mk(pr.tn) : null,
-      tc: pr.tc.length ? mk(pr.tc) : null,
-      lp: pr.lp.length ? mk(pr.lp) : null,
-      lc: pr.lc.length ? mk(pr.lc) : null,
-      td: pr.td.map((d) => ({
+    const tp = b64ToF32(raw.tp);
+    const tn = b64ToF32(raw.tn);
+    const tc = b64ToBytes(raw.tc);
+    const lp = b64ToF32(raw.lp);
+    const lc = b64ToBytes(raw.lc);
+    const td = (raw.td || []).map((d) => {
+      const dtp = b64ToF32(d.tp);
+      const dtn = b64ToF32(d.tn);
+      const duv = b64ToF32(d.uv);
+      const dtc = b64ToBytes(d.tc);
+      return {
         k: d.k,
-        count: d.tp.length / 3,
-        tp: mk(d.tp), tn: mk(d.tn), uv: mk(d.uv), tc: mk(d.tc),
-      })),
+        count: dtp.length / 3,
+        tp: mk(dtp), tn: mk(dtn), uv: mk(duv), tc: mk(dtc),
+      };
+    });
+    pr.gpu = {
+      tp: mk(tp),
+      tn: mk(tn),
+      tc: mk(tc),
+      lp: mk(lp),
+      lc: mk(lc),
+      lineCount: lp.length / 3,
+      td,
     };
+    pr.raw = null;
     return pr.gpu;
   }
 
@@ -1350,6 +1366,8 @@ ${staticFallbackHtml}
 
   // Activate interactive 3D UI now that WebGL + shaders + buffers initialized cleanly
   document.documentElement.classList.add('js-3d-active');
+  const fallbackRootEl = document.getElementById('noJsFallback');
+  if (fallbackRootEl) fallbackRootEl.remove();
 
   const STORAGE_KEY = 'biw_viewer_idx_' + String(DATA.title || 'manual').slice(0, 40);
   let curIdx = 0;
@@ -1606,9 +1624,15 @@ ${staticFallbackHtml}
   function drawScene() {
     if (!activeScene) return;
     const rect = canvas.getBoundingClientRect();
-    const dpr = Math.min(Math.max(window.devicePixelRatio || 1, 1.5), 3);
-    const w = Math.max(100, Math.round((rect.width || window.innerWidth) * dpr));
-    const h = Math.max(100, Math.round((rect.height || window.innerHeight) * dpr));
+    const isCompactViewport = (navigator.maxTouchPoints || 0) > 0 || window.innerWidth < 1024;
+    const maxDpr = isCompactViewport ? 1.5 : 2;
+    const maxDim = isCompactViewport ? 1600 : 2560;
+    const dpr = Math.min(Math.max(window.devicePixelRatio || 1, 1), maxDpr);
+    const rawW = Math.max(100, Math.round((rect.width || window.innerWidth) * dpr));
+    const rawH = Math.max(100, Math.round((rect.height || window.innerHeight) * dpr));
+    const dimScale = Math.min(1, maxDim / Math.max(rawW, rawH));
+    const w = Math.max(100, Math.round(rawW * dimScale));
+    const h = Math.max(100, Math.round(rawH * dimScale));
     if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
 
     gl.viewport(0, 0, w, h);
@@ -1693,8 +1717,9 @@ ${staticFallbackHtml}
         const pm = partMats[grp.list[i]];
         if (!pm) continue;
         const pr = decodedProtos[pm.k];
-        if (!pr || pr.td.length === 0) continue;
+        if (!pr || !pr.hasTd) continue;
         const gpu = ensureProtoGpu(pr);
+        if (!gpu || !gpu.td.length) continue;
         gl.uniformMatrix4fv(progs.tex.model, false, pm.m4);
         gl.uniformMatrix3fv(progs.tex.nmat, false, pm.n3);
         for (const td of gpu.td) {
@@ -1749,13 +1774,13 @@ ${staticFallbackHtml}
         const pm = partMats[grp.list[i]];
         if (!pm) continue;
         const pr = decodedProtos[pm.k];
-        if (!pr || pr.lp.length === 0) continue;
+        if (!pr || !pr.hasLines) continue;
         const gpu = ensureProtoGpu(pr);
-        if (!gpu || !gpu.lp) continue;
+        if (!gpu || !gpu.lp || !gpu.lineCount) continue;
         gl.uniformMatrix4fv(progs.line.model, false, pm.m4);
         gl.bindBuffer(gl.ARRAY_BUFFER, gpu.lp); gl.vertexAttribPointer(progs.line.pos, 3, gl.FLOAT, false, 0, 0);
         gl.bindBuffer(gl.ARRAY_BUFFER, gpu.lc); gl.vertexAttribPointer(progs.line.col, 4, gl.UNSIGNED_BYTE, true, 0, 0);
-        gl.drawArrays(gl.LINES, 0, pr.lp.length / 3);
+        gl.drawArrays(gl.LINES, 0, gpu.lineCount);
       }
     }
 
@@ -2250,6 +2275,44 @@ ${staticFallbackHtml}
     else if (e.key === 'Escape') { document.getElementById('drawerBackdrop').classList.remove('open'); }
   });
   window.addEventListener('resize', () => { requestDraw(); syncDrawerScrollButtons(); });
+
+  let glDisposed = false;
+  function disposeGlResources() {
+    if (glDisposed) return;
+    glDisposed = true;
+    try {
+      for (const pr of decodedProtos) {
+        if (!pr.gpu) continue;
+        if (pr.gpu.tp) gl.deleteBuffer(pr.gpu.tp);
+        if (pr.gpu.tn) gl.deleteBuffer(pr.gpu.tn);
+        if (pr.gpu.tc) gl.deleteBuffer(pr.gpu.tc);
+        if (pr.gpu.lp) gl.deleteBuffer(pr.gpu.lp);
+        if (pr.gpu.lc) gl.deleteBuffer(pr.gpu.lc);
+        for (const td of pr.gpu.td || []) {
+          if (td.tp) gl.deleteBuffer(td.tp);
+          if (td.tn) gl.deleteBuffer(td.tn);
+          if (td.uv) gl.deleteBuffer(td.uv);
+          if (td.tc) gl.deleteBuffer(td.tc);
+        }
+        pr.gpu = null;
+      }
+      for (const b of [arrowDynBufs.tp, arrowDynBufs.tn, arrowDynBufs.tc, arrowDynBufs.lp, arrowDynBufs.lc]) {
+        if (b) gl.deleteBuffer(b);
+      }
+      for (const tex of glTextures.values()) gl.deleteTexture(tex);
+      glTextures.clear();
+      if (emptyTex) gl.deleteTexture(emptyTex);
+      gl.deleteProgram(progs.tri.p);
+      gl.deleteProgram(progs.tex.p);
+      gl.deleteProgram(progs.line.p);
+      canvas.width = 0;
+      canvas.height = 0;
+      const loseExt = gl.getExtension('WEBGL_lose_context');
+      if (loseExt) loseExt.loseContext();
+    } catch (_) {}
+  }
+  window.addEventListener('pagehide', disposeGlResources);
+  window.addEventListener('beforeunload', disposeGlResources);
 
   renderView();
   } catch (err) {

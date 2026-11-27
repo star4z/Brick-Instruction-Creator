@@ -387,5 +387,43 @@ describe('interactiveHtmlExporter font stacks', () => {
     });
     expect(ipadosSpec).toEqual(iphoneSpec);
   });
+
+  it('supports skipStaticFallback and includes iOS memory guards (lazy GPU upload, DPR cap, pagehide WebGL disposal)', () => {
+    const html = generateInteractiveHtmlDocument({
+      version: 1,
+      title: 'iOS Memory Test',
+      editorUrl: DEFAULT_EDITOR_URL,
+      totalPieces: 1,
+      totalSteps: 1,
+      skipStaticFallback: true,
+      theme: {
+        bg: '#ffffff',
+        text: '#111111',
+        muted: '#666666',
+        accent: '#1a73e8',
+        pliBg: '#ffffff',
+        pliBorder: '#cccccc',
+        calloutBg: '#fffbe6',
+        calloutBorder: '#eab308',
+        isDark: false,
+      },
+      highlightNew: true,
+      highlightColor: '#ff2d55',
+      fadePrev: false,
+      fadeOpacity: 1,
+      prototypes: [],
+      textures: {},
+      parts: [],
+      pages: [{ id: 'cover', kind: 'cover', num: 1, label: 'Cover', title: 'iOS Memory Test' }],
+    });
+
+    expect(html).toContain('<div id="noJsFallback" class="sf-root"></div>');
+    expect(html).not.toContain('Static Preview Mode');
+    expect(html).toContain('DATA.prototypes = [];');
+    expect(html).toContain('pr.raw = null;');
+    expect(html).toContain('const maxDpr = isCompactViewport ? 1.5 : 2;');
+    expect(html).toContain("window.addEventListener('pagehide', disposeGlResources);");
+    expect(html).toContain("gl.getExtension('WEBGL_lose_context')");
+  });
 });
 

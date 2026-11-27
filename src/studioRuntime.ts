@@ -25577,7 +25577,7 @@ if (toggleDupEl) {
 
 // Self-Contained Interactive 3D HTML Export & In-App Preview (LEGO Builder-style offline shareable viewer)
 let isInteractiveHtmlBuildActive = false;
-let activeInteractiveHtmlPreview: { htmlDoc: string; fileName: string; blobUrl: string } | null = null;
+let activeInteractiveHtmlPreview: { fileName: string; blobUrl: string; restoreLivePage: boolean } | null = null;
 
 function isInteractiveHtmlPreviewOpen() {
   const el = document.getElementById('interactiveHtmlPreviewModal');
@@ -25585,16 +25585,25 @@ function isInteractiveHtmlPreviewOpen() {
 }
 
 function closeInteractiveHtmlPreview() {
+  const prev = activeInteractiveHtmlPreview;
+  activeInteractiveHtmlPreview = null;
   const modal = document.getElementById('interactiveHtmlPreviewModal');
   if (modal) modal.classList.add('hidden');
   const frame = document.getElementById('interactiveHtmlPreviewFrame') as HTMLIFrameElement | null;
   if (frame) {
+    try { frame.contentWindow?.dispatchEvent(new Event('pagehide')); } catch (_) {}
     try { frame.src = 'about:blank'; } catch (_) {}
   }
-  if (activeInteractiveHtmlPreview?.blobUrl) {
-    try { URL.revokeObjectURL(activeInteractiveHtmlPreview.blobUrl); } catch (_) {}
+  if (prev?.blobUrl) {
+    try { URL.revokeObjectURL(prev.blobUrl); } catch (_) {}
   }
-  activeInteractiveHtmlPreview = null;
+  if (prev?.restoreLivePage && state.model && state.pages.length > 0) {
+    requestAnimationFrame(() => {
+      if (!isInteractiveHtmlPreviewOpen() && state.model && state.pages.length > 0) {
+        renderAll();
+      }
+    });
+  }
 }
 
 function openInteractiveHtmlPreview(htmlDoc: string, fileName: string) {
@@ -25602,9 +25611,20 @@ function openInteractiveHtmlPreview(htmlDoc: string, fileName: string) {
   const modal = document.getElementById('interactiveHtmlPreviewModal');
   const frame = document.getElementById('interactiveHtmlPreviewFrame') as HTMLIFrameElement | null;
   if (!modal || !frame) return false;
+  // Release parent WebGL/GPU backing stores while the fullscreen preview is active (prevents iOS Safari Jetsam crashes).
+  const hadLiveEngine = Boolean(activeLiveEngine);
+  if (activeLiveEngine) {
+    try { activeLiveEngine.dispose(); } catch (_) {}
+    activeLiveEngine = null;
+  }
+  try { studioPhotoEngine?.releaseTransientBuffers?.(); } catch (_) {}
+  if (snapshotCanvas) {
+    snapshotCanvas.width = 1;
+    snapshotCanvas.height = 1;
+  }
   const blob = new Blob([htmlDoc], { type: 'text/html;charset=utf-8' });
   const blobUrl = URL.createObjectURL(blob);
-  activeInteractiveHtmlPreview = { htmlDoc, fileName, blobUrl };
+  activeInteractiveHtmlPreview = { fileName, blobUrl, restoreLivePage: hadLiveEngine };
   frame.src = blobUrl;
   modal.classList.remove('hidden');
   document.getElementById('btnCloseInteractiveHtmlPreview')?.focus();
@@ -25789,11 +25809,14 @@ async function buildInteractiveHtmlArtifact(mode: 'export' | 'preview' = 'export
       await yieldToBrowserPaint();
     }
 
-    const fbCanvas = document.createElement('canvas');
-    fbCanvas.width = 480;
-    fbCanvas.height = 320;
-    const fbCtx = fbCanvas.getContext('2d');
+    const fbCanvas = isPreview ? null : document.createElement('canvas');
+    if (fbCanvas) {
+      fbCanvas.width = 480;
+      fbCanvas.height = 320;
+    }
+    const fbCtx = fbCanvas ? fbCanvas.getContext('2d') : null;
     const renderFallbackPreview = (prevList, newList, az, el, zoom, extraOpts = {}) => {
+      if (isPreview) return undefined;
       try {
         const snap = renderSnapshot(prevList, newList, az, el, 480, 320, zoom || 1.0, {
           highlightNew: state.highlightNew,
@@ -25806,7 +25829,7 @@ async function buildInteractiveHtmlArtifact(mode: 'export' | 'preview' = 'export
           accent: theme.accent,
           ...extraOpts,
         });
-        if (!fbCtx || !snapshotCanvas) return snap?.url || '';
+        if (!fbCtx || !fbCanvas || !snapshotCanvas) return snap?.url || '';
         fbCtx.fillStyle = theme.bg || '#ffffff';
         fbCtx.fillRect(0, 0, fbCanvas.width, fbCanvas.height);
         fbCtx.drawImage(snapshotCanvas, 0, 0, fbCanvas.width, fbCanvas.height);
@@ -26135,6 +26158,7 @@ async function buildInteractiveHtmlArtifact(mode: 'export' | 'preview' = 'export
       fadePrev: state.fadePrev,
       fadeOpacity: state.fadeOpacity,
       unlit: state.stepLighting === 'none',
+      skipStaticFallback: isPreview,
       prototypes,
       textures,
       parts: exportedParts,
@@ -26282,11 +26306,12 @@ if (btnCloseInteractiveHtmlPreview) btnCloseInteractiveHtmlPreview.onclick = clo
 const btnDownloadInteractiveHtmlPreview = document.getElementById('btnDownloadInteractiveHtmlPreview');
 if (btnDownloadInteractiveHtmlPreview) {
   btnDownloadInteractiveHtmlPreview.onclick = async () => {
-    if (!activeInteractiveHtmlPreview) return;
     const iosWarning = getIosHtmlExportWarningDialog();
     if (iosWarning && !(await openConfirmActionDialog(iosWarning))) return;
-    if (!activeInteractiveHtmlPreview) return;
-    await downloadInteractiveHtmlArtifact(activeInteractiveHtmlPreview.htmlDoc, activeInteractiveHtmlPreview.fileName);
+    closeInteractiveHtmlPreview();
+    const artifact = await buildInteractiveHtmlArtifact('export');
+    if (!artifact) return;
+    await downloadInteractiveHtmlArtifact(artifact.htmlDoc, artifact.fileName);
   };
 }
 document.getElementById('menuPageSetupBtn').onclick = openPageSetupModal;
