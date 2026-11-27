@@ -2049,33 +2049,38 @@ export function computePlacementArrowSegments(
   const s = boxSize(box);
   const halfAlong = 0.5 * (Math.abs(ux) * s[0] + Math.abs(uy) * s[1] + Math.abs(uz) * s[2]);
 
-  // Terminate the arrowhead right at the top center of the target stud (4 LDU above
-  // the seated entry face `-halfAlong`, matching the official LDraw stud height).
+  // Start the arrow tail flush at the bottom of the lifted part's anti-stud (`mag - halfAlong`),
+  // and terminate the arrowhead right at the top center of the target stud (`-halfAlong + 4 LDU`).
   // For upside-down attachments onto anti-studs (where the part's own 4 LDU studs
   // protrude at `-halfAlong`), `-halfAlong + 4` lands flush on the receiving underside face.
   const studTopDist = -halfAlong + STUD_HEIGHT_LDU;
-  let fromDist = mag - halfAlong - 2.0;
+  let fromDist = mag - halfAlong;
   let toDist = studTopDist;
-  if (fromDist - toDist < 6) {
-    // Small manual nudge fallback: still anchor the tip at the stud top whenever possible
-    fromDist = Math.max(mag - halfAlong, studTopDist + 6.0);
-  }
 
   // If a coaxial obstacle tip (e.g. top of a vertical axle inside a bush) or an elevated
-  // engaged stud tip (e.g. hanging bracket) was provided, terminate cleanly at that tip.
+  // engaged stud tip (e.g. concave/U-shaped part or hanging bracket) was provided, terminate
+  // cleanly at that tip. When the stud sits recessed inside the part's underside (`proj < halfAlong - 2`),
+  // also lift `fromDist` to that lifted anti-stud bottom (`proj - 4 + mag`) so the arrow tail
+  // connects directly to the lifted anti-stud instead of stopping short in mid-air.
   if (arrowTo) {
     const proj =
       (arrowTo[0] - box.center[0]) * ux +
       (arrowTo[1] - box.center[1]) * uy +
       (arrowTo[2] - box.center[2]) * uz;
-    if (proj > toDist && fromDist - proj >= 8) {
-      toDist = proj;
+    if (proj > toDist) {
+      const candidateFrom = proj < halfAlong - 2
+        ? Math.max(fromDist, proj - STUD_HEIGHT_LDU + mag)
+        : fromDist;
+      if (candidateFrom - proj >= 8) {
+        toDist = proj;
+        fromDist = candidateFrom;
+      }
     }
   }
 
   if (fromDist - toDist < 6) {
-    fromDist = mag;
-    toDist = studTopDist;
+    // Small manual nudge fallback: keep tip on the stud top whenever possible
+    fromDist = Math.max(mag - halfAlong, toDist + 6.0);
   }
 
   // Primary movement axis

@@ -1400,14 +1400,16 @@ ${staticFallbackHtml}
         const szB = Math.max(0.5, box.max[2]-box.min[2]);
         const halfAlong = 0.5 * (Math.abs(ux)*sxB + Math.abs(uy)*syB + Math.abs(uz)*szB);
         const studTopDist = -halfAlong + 4.0;
-        let fromDist = mag - halfAlong - 2.0;
+        let fromDist = mag - halfAlong;
         let toDist = studTopDist;
-        if (fromDist - toDist < 6) fromDist = Math.max(mag - halfAlong, studTopDist + 6.0);
         if (sp.arrowTo) {
           const proj = (sp.arrowTo[0]-box.center[0])*ux + (sp.arrowTo[1]-box.center[1])*uy + (sp.arrowTo[2]-box.center[2])*uz;
-          if (proj > toDist && fromDist - proj >= 8) toDist = proj;
+          if (proj > toDist) {
+            const cFrom = proj < halfAlong - 2 ? Math.max(fromDist, proj - 4.0 + mag) : fromDist;
+            if (cFrom - proj >= 8) { toDist = proj; fromDist = cFrom; }
+          }
         }
-        if (fromDist - toDist < 6) { fromDist = mag; toDist = studTopDist; }
+        if (fromDist - toDist < 6) fromDist = Math.max(mag - halfAlong, toDist + 6.0);
         let primaryAxis = 1;
         if (Math.abs(ux) >= Math.abs(uy) && Math.abs(ux) >= Math.abs(uz)) primaryAxis = 0;
         else if (Math.abs(uz) >= Math.abs(ux) && Math.abs(uz) >= Math.abs(uy)) primaryAxis = 2;

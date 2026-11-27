@@ -310,7 +310,7 @@ describe('placementArrows — LEGO-style automatic placement arrows & offsets', 
     expect(singleSegs).toHaveLength(1);
     expect(singleSegs[0].from[0]).toBeCloseTo(0, 4);
     expect(singleSegs[0].from[2]).toBeCloseTo(0, 4);
-    expect(singleSegs[0].from[1]).toBeLessThan(singleStudBox.center[1] + 28 - 4);
+    expect(singleSegs[0].from[1]).toBeCloseTo(singleStudBox.min[1] + 28, 4);
     expect(singleSegs[0].to[1]).toBeCloseTo(singleStudBox.min[1] + 4, 4);
 
     // 1x2 plate (40x8x20) lifted +28 LDU at az=38° (front-right: +X, +Z) -> nearest stud (+10, 0) & furthest stud (-10, 0)
@@ -1457,7 +1457,9 @@ describe('placementArrows — LEGO-style automatic placement arrows & offsets', 
     );
     expect(segs).toHaveLength(2);
     for (const seg of segs) {
-      // Arrowhead lands right on top of the supporting brick's stud (Y=45), with >= 12 LDU visible arrow length
+      // Arrow tail starts right at the lifted recessed anti-stud bottom (41 + off.y),
+      // and arrowhead lands right on top of the supporting brick's stud (Y=45).
+      expect(seg.from[1]).toBeCloseTo(41 + off!.y, 4);
       expect(seg.to[1]).toBeCloseTo(45, 4);
       expect(seg.from[1] - seg.to[1]).toBeGreaterThanOrEqual(12);
     }
