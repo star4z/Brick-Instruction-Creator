@@ -41,6 +41,8 @@ export interface UndersideAssemblyPlan {
   deckMinY: number;
   deckBandMaxY: number;
   deckPartIndices: number[];
+  /** Standalone single-part underside pieces clutching directly to the deck floor (placed on the flipped deck before pre-built sub-modules). */
+  deckUndersideIndices: number[];
   pockets: UndersidePocketSpec[];
   allUndersideIndices: Set<number>;
   mechanisms: TechnicMechanismSpec[];
@@ -155,6 +157,7 @@ function emptyPlan(): UndersideAssemblyPlan {
     deckMinY: 0,
     deckBandMaxY: 0,
     deckPartIndices: [],
+    deckUndersideIndices: [],
     pockets: [],
     allUndersideIndices: new Set<number>(),
     mechanisms: [],
@@ -226,6 +229,7 @@ export function analyzeUndersideAssembly(
   let chosenDeckY: number | null = null;
   let chosenDeckComp: number[] = [];
   let chosenBelowComps: number[][] = [];
+  let chosenDeckUnderside: number[] = [];
 
   for (const yCand of candYs) {
     // Parts forming the horizontal deck band at yCand (tight -4 LDU lower bound prevents
@@ -318,9 +322,21 @@ export function analyzeUndersideAssembly(
     );
     if (!attachedPockets.some((comp) => comp.length >= 4)) continue;
 
+    // Standalone 1-part pieces clutching directly to the deck underside (e.g. inverted slopes
+    // or underside brackets) should be attached to the flipped floor before adjacent sub-modules
+    // so they are never floating inside a sub-module or blocked by neighboring assemblies.
+    const singleAttachedUnderside = belowComps
+      .filter(
+        (comp) =>
+          comp.length === 1 &&
+          (adj[comp[0]] ?? []).some((nb) => deckAndAbove.has(nb)),
+      )
+      .map((comp) => comp[0]);
+
     chosenDeckY = deckFloorY;
     chosenDeckComp = mainDeckComp;
     chosenBelowComps = attachedPockets;
+    chosenDeckUnderside = singleAttachedUnderside;
     break;
   }
 
@@ -330,7 +346,7 @@ export function analyzeUndersideAssembly(
 
   const deckBandMaxY = chosenDeckY + 20;
   const deckSet = new Set<number>(chosenDeckComp);
-  const chosenBelowSet = new Set<number>();
+  const chosenBelowSet = new Set<number>(chosenDeckUnderside);
   for (const comp of chosenBelowComps) {
     for (const i of comp) chosenBelowSet.add(i);
   }
@@ -345,7 +361,7 @@ export function analyzeUndersideAssembly(
     }
   }
 
-  const allUndersideIndices = new Set<number>();
+  const allUndersideIndices = new Set<number>(chosenDeckUnderside);
   const pockets: UndersidePocketSpec[] = [];
   const allMechanisms: TechnicMechanismSpec[] = [];
   const allSubassemblies: UndersideSubassemblySpec[] = [];
@@ -461,6 +477,7 @@ export function analyzeUndersideAssembly(
     deckMinY: chosenDeckY,
     deckBandMaxY,
     deckPartIndices: Array.from(deckSet),
+    deckUndersideIndices: chosenDeckUnderside,
     pockets,
     allUndersideIndices,
     mechanisms: allMechanisms,

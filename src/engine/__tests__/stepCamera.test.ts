@@ -893,6 +893,22 @@ describe('Step Camera Stability & Steady Framing', () => {
     expect(resolveEffectiveStudioStepCue(chapters, chMech, sMech)).toBe('none');
   });
 
+  it('links split non-section submodel continuation chunks across interleaved nested submodels when resolving rotation cues', () => {
+    type TestCorner = 'front_right' | 'front_left' | 'back_left' | 'back_right';
+    const s1 = { id: 'wa_s1', side: 'top' as 'top' | 'bottom', corner: 'front_right' as TestCorner, az: 38, el: 30 };
+    const sNested = { id: 'hub_s1', side: 'top' as 'top' | 'bottom', corner: 'back_left' as TestCorner, az: 218, el: 30 };
+    const s2 = { id: 'wa_s2', side: 'top' as 'top' | 'bottom', corner: 'front_left' as TestCorner, az: -38, el: 30 };
+
+    const chPart1 = { id: 'subch_wa_1', kind: 'submodel', isSectionModule: false, sectionId: 'subsec_wa', steps: [s1] };
+    const chNested = { id: 'subch_hub', kind: 'submodel', isSectionModule: false, sectionId: 'subsec_hub', steps: [sNested] };
+    const chPart2 = { id: 'subch_wa_2', kind: 'submodel', isSectionModule: false, sectionId: 'subsec_wa', steps: [s2] };
+    const chapters = [chPart1, chNested, chPart2];
+
+    // Continuation chunk chains back to s1 (front_right -> front_left = 90° turn), NOT to nested hub_s1!
+    expect(resolveEffectiveStudioStepCue(chapters, chPart2, s2)).toBe('yaw_90_ccw');
+    expect(resolveEffectiveStudioStepCue(chapters, chNested, sNested)).toBe('none');
+  });
+
   it('evaluates top-view occlusion on 1-3 part early bases so Viterbi turns a submodel around from Step 1 when a tall Step-1 brick occludes Step-2 parts', () => {
     // Reproduces Underside Module: Step 1 places 3 parts (wedge plate + 1x6 plate + tall 2x6 brick on the +Z front edge);
     // Step 2 places shorter slopes/tile behind the 2x6 brick (-Z side); Step 3 places a round tile on the -Z side.

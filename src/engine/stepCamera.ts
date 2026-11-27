@@ -1959,11 +1959,7 @@ export function findPreviousStudioModelStep<TStep extends StudioStepCameraSource
   const isSameStep = (s: TStep) =>
     s === step || (step.id != null && s.id === step.id);
 
-  if (
-    (chapter.kind === 'submodel' && !chapter.isSectionModule) ||
-    !Array.isArray(chapters) ||
-    chapters.length === 0
-  ) {
+  if (!Array.isArray(chapters) || chapters.length === 0) {
     const steps = chapter.steps || [];
     let prev: TStep | null = null;
     for (const s of steps) {
@@ -1977,8 +1973,8 @@ export function findPreviousStudioModelStep<TStep extends StudioStepCameraSource
   let prev: TStep | null = null;
   for (const ch of chapters) {
     if (ch.kind === 'minifigure') continue;
-    if (chapter.isSectionModule) {
-      if (!ch.isSectionModule || (ch.sectionId || ch.id) !== secKey) continue;
+    if (chapter.kind === 'submodel') {
+      if (ch.kind !== 'submodel' || (ch.sectionId || ch.id) !== secKey) continue;
     } else {
       if (ch.kind === 'submodel') continue;
       if ((ch.sectionId || ch.id) !== secKey) continue;

@@ -5453,15 +5453,89 @@ function isSmoothStudlessTopPart(part, box, role, sideCap = 'none') {
   return def?.studs === false;
 }
 
+// Compute world-space upward top stud positions for upright bricks/plates/slopes so
+// vertical stacking verifies real stud engagement rather than outer AABB grazing over a sloped ramp.
+function computePartUpwardStuds(part, box, role) {
+  if (!part || !box) return null;
+  if (part.children && part.children.length > 0) return null;
+  if (role === 'figure' || role === 'wheel' || role === 'axle' || role === 'pin' || role === 'wheel_holder') {
+    return null;
+  }
+  const m = part.m || R_ID;
+  if (m[4] < 0.7) return null;
+  const def = resolvePart(part.p);
+  const name = (def?.name || '').toLowerCase();
+  if (/\b(?:turntable|clip|hinge|bar|bracket|handle|hook|lever|coupler|socket|ball|magnet|window|door|glass|panel|frame)\b/.test(name)) {
+    return null;
+  }
+  const compiled = compileEmbeddedDat(part.p);
+  if (compiled) {
+    if (!compiled.studs || compiled.studs.length === 0 || compiled.studs.length > 256) return null;
+    const out = [];
+    const ox = part.x || 0, oy = part.y || 0, oz = part.z || 0;
+    for (let i = 0; i < compiled.studs.length; i++) {
+      const st = compiled.studs[i];
+      const wn = xformNorm([st[3], st[4], st[5]], m, 0);
+      if (wn[1] >= 0.7) {
+        const wp = xformPt([st[0], st[1], st[2]], m, ox, oy, oz, 0);
+        out.push(wp);
+      }
+    }
+    return out.length > 0 ? out : null;
+  }
+  if (def && def.studs && def.shape === 'slope' && def.topStudsX && def.topStudsX < def.sx) {
+    const sx = Math.round(def.sx), sz = Math.round(def.sz);
+    const startX = -((sx - 1) * 20) / 2, startZ = -((sz - 1) * 20) / 2;
+    const out = [];
+    const ox = part.x || 0, oy = part.y || 0, oz = part.z || 0;
+    for (let ix = 0; ix < def.topStudsX; ix++) {
+      for (let iz = 0; iz < sz; iz++) {
+        out.push(xformPt([startX + ix * 20, 0, startZ + iz * 20], m, ox, oy, oz, 0));
+      }
+    }
+    return out.length > 0 ? out : null;
+  }
+  return null;
+}
+
+// Compute tight world-space bottom footprint for upright parts whose underside is narrower
+// than their outer AABB (e.g. inverted 45-degree slopes 3665/3660).
+function computePartBottomFootprint(part, box, role) {
+  if (!part || !box) return null;
+  if (part.children && part.children.length > 0) return null;
+  if (role === 'figure' || role === 'wheel' || role === 'axle' || role === 'pin' || role === 'wheel_holder') {
+    return null;
+  }
+  const m = part.m || R_ID;
+  if (m[4] < 0.7) return null;
+  const compiled = compileEmbeddedDat(part.p);
+  if (compiled) {
+    if (!compiled.bottomBox) return null;
+    return transformLocalBox6ToWorld(compiled.bottomBox, m, part.x || 0, part.y || 0, part.z || 0);
+  }
+  const def = resolvePart(part.p);
+  if (def && def.shape === 'slope_inv' && def.sx > 1.3) {
+    const w = def.sx * 20, d = def.sz * 20, h = def.h;
+    return transformLocalBox6ToWorld(
+      [-w / 2, -h, -d / 2, -w / 2 + 20, -h + 4, d / 2],
+      m,
+      part.x || 0,
+      part.y || 0,
+      part.z || 0,
+    );
+  }
+  return null;
+}
+
 // Strict LEGO clutch contact check:
 // - Train wheels attach ONLY to wheel holders or Technic axles.
 // - Smooth studless tiles cannot structurally clutch bricks resting on their top face.
 // - Upright bricks/plates/slopes/tiles connect via vertical stud footprint overlap (ovX >= 3 && ovZ >= 3),
-//   NOT by grazing smooth vertical side walls.
+//   NOT by grazing smooth vertical side walls or hovering over studless sloped ramps.
 // - Sideways contacts require either 3-axis interlocking (SNOT studs/pins/clips engaged >= 1.5 LDU)
 //   or BOTH parts having sideways/SNOT/clip/hinge/window connection capability.
-function boxesPhysicallyTouch(a, b, roleA, roleB, sideCapA = true, sideCapB = true, subA = null, subB = null, smoothTopA = false, smoothTopB = false) {
-  return partsPhysicallyTouch(a, b, subA, subB, roleA, roleB, sideCapA, sideCapB, smoothTopA, smoothTopB);
+function boxesPhysicallyTouch(a, b, roleA, roleB, sideCapA = true, sideCapB = true, subA = null, subB = null, smoothTopA = false, smoothTopB = false, topStudsA = null, topStudsB = null, bottomFootA = null, bottomFootB = null) {
+  return partsPhysicallyTouch(a, b, subA, subB, roleA, roleB, sideCapA, sideCapB, smoothTopA, smoothTopB, topStudsA, topStudsB, bottomFootA, bottomFootB);
 }
 
 function mat3Transpose(m) {
@@ -6051,9 +6125,19 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount, outPrebui
       }
     };
 
-    // 2.0 Place deferred deck-underside plates onto the now-exposed inverted deck first
-    if (deferredDeckUnderside.length > 0) {
-      emitInvertedStepBatch(deferredDeckUnderside);
+    // 2.0 Place deferred deck-underside plates & standalone underside pieces (e.g. inverted slopes
+    // clutching directly to the deck floor) onto the now-exposed inverted deck first, before any
+    // adjacent underside sub-modules are attached.
+    const floorUnderside = [];
+    const seenFloorUnderside = new Set();
+    for (const idx of [...deferredDeckUnderside, ...(undersidePlan.deckUndersideIndices || [])]) {
+      if (remaining.has(idx) && !seenFloorUnderside.has(idx)) {
+        seenFloorUnderside.add(idx);
+        floorUnderside.push(idx);
+      }
+    }
+    if (floorUnderside.length > 0) {
+      emitInvertedStepBatch(floorUnderside);
     }
 
     for (const pocket of undersidePlan.pockets) {
@@ -6446,6 +6530,8 @@ function buildSpatialAdjacency(parts, boxes, roles, sideCaps = null, subBoxes = 
   const caps = sideCaps || parts.map((p, i) => canConnectSideways(p, roles[i]));
   const subs = subBoxes || parts.map(p => computeWorldSubBoxes(p));
   const smoothTops = smoothTopFlags || parts.map((p, i) => isSmoothStudlessTopPart(p, boxes[i], roles[i], caps[i]));
+  const topStuds = parts.map((p, i) => computePartUpwardStuds(p, boxes[i], roles[i]));
+  const bottomFoots = parts.map((p, i) => computePartBottomFootprint(p, boxes[i], roles[i]));
   const adj = Array.from({ length: n }, () => []);
   const cellSize = 80;
   const pad = 12;
@@ -6484,7 +6570,15 @@ function buildSpatialAdjacency(parts, boxes, roles, sideCaps = null, subBoxes = 
     const pk = lo * n + hi;
     if (tested.has(pk)) return;
     tested.add(pk);
-    if (boxesPhysicallyTouch(boxes[lo], boxes[hi], roles[lo], roles[hi], caps[lo], caps[hi], subs[lo], subs[hi], smoothTops[lo], smoothTops[hi])) {
+    if (boxesPhysicallyTouch(
+      boxes[lo], boxes[hi],
+      roles[lo], roles[hi],
+      caps[lo], caps[hi],
+      subs[lo], subs[hi],
+      smoothTops[lo], smoothTops[hi],
+      topStuds[lo], topStuds[hi],
+      bottomFoots[lo], bottomFoots[hi],
+    )) {
       adj[lo].push(hi);
       adj[hi].push(lo);
     }
@@ -6900,21 +6994,20 @@ function optimizeManualStepCameras(chapters, targetAspect = getActivePageLayoutA
     flushPendingRun();
   };
 
-  // 1. Optimize each standalone submodel chapter in its own local frame
+  // 1. Group each continuous submodel or main/bag/join sequence by kind + sectionId
+  //    so split submodel continuation chunks optimize together as one unified step sequence.
   const sectionSteps = new Map();
   for (const ch of chapters) {
     if (ch.kind === 'minifigure') continue;
-    if (ch.kind === 'submodel' && !ch.isSectionModule) {
-      optimizeStepList(ch.steps || []);
-      continue;
-    }
-    const secKey = ch.sectionId || ch.id;
+    const secKey = ch.kind === 'submodel'
+      ? `submodel:${ch.sectionId || ch.id}`
+      : `main:${ch.sectionId || ch.id}`;
     if (!sectionSteps.has(secKey)) sectionSteps.set(secKey, []);
     const list = sectionSteps.get(secKey);
     for (const s of ch.steps || []) list.push(s);
   }
 
-  // 2. Optimize each continuous main / bag / join / section-module sequence as one unified step sequence
+  // 2. Optimize each continuous sequence as one unified step sequence
   for (const list of sectionSteps.values()) {
     optimizeStepList(list);
   }
@@ -7033,11 +7126,9 @@ function assignAutoPlacementOffsets(chapters) {
   const sectionSteps = new Map();
   for (const ch of chapters) {
     if (ch.kind === 'minifigure') continue;
-    if (ch.kind === 'submodel' && !ch.isSectionModule) {
-      applyToSequence(ch.steps || []);
-      continue;
-    }
-    const secKey = ch.sectionId || ch.id;
+    const secKey = ch.kind === 'submodel'
+      ? `submodel:${ch.sectionId || ch.id}`
+      : `main:${ch.sectionId || ch.id}`;
     if (!sectionSteps.has(secKey)) sectionSteps.set(secKey, []);
     const list = sectionSteps.get(secKey);
     for (const s of ch.steps || []) list.push(s);
@@ -7209,40 +7300,69 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
   let globalStep = 0, chSeq = 0;
 
   const emitSubmodelWithNested = (subCh, extraProps = {}) => {
+    const subSecId = `subsec_${++chSeq}_${subCh.id}`;
     const nested = Array.isArray(subCh.nestedSubChapters) ? subCh.nestedSubChapters : [];
-    if (nested.length > 0) {
-      const nestedById = new Map();
-      for (const nch of nested) {
-        nestedById.set(nch.id, nch);
-        nestedById.set(`${nch.id}_c0`, nch);
+    const subSteps = Array.isArray(subCh.steps) ? subCh.steps : [];
+    if (nested.length === 0) {
+      chapters.push({
+        id: `subch_${++chSeq}_${subCh.id}`,
+        name: subCh.name,
+        kind: 'submodel',
+        sectionId: subSecId,
+        repeatCount: subCh.repeatCount || 1,
+        ...(typeof subCh.pieceCount === 'number' ? { pieceCount: subCh.pieceCount } : {}),
+        canonicalParts: subCh.canonicalParts,
+        steps: subSteps,
+        ...extraProps,
+      });
+      return;
+    }
+
+    // Authentic official LEGO manual flow: emit every nested submodel inline RIGHT BEFORE
+    // the parent step that attaches it, so a finished submodel is always attached on the very
+    // next step rather than held aside for several unrelated steps.
+    const nestedById = new Map();
+    for (const nch of nested) {
+      nestedById.set(nch.id, nch);
+      nestedById.set(`${nch.id}_c0`, nch);
+    }
+    const emittedNested = new Set();
+    let curChunk = [];
+    let chunkSeq = 0;
+    const flushSubChunk = () => {
+      if (curChunk.length === 0) return;
+      chapters.push({
+        id: `subch_${++chSeq}_${subCh.id}${chunkSeq > 0 ? `_p${chunkSeq + 1}` : ''}`,
+        name: subCh.name,
+        kind: 'submodel',
+        isSectionContinuation: chunkSeq > 0,
+        sectionId: subSecId,
+        repeatCount: subCh.repeatCount || 1,
+        ...(typeof subCh.pieceCount === 'number' ? { pieceCount: subCh.pieceCount } : {}),
+        canonicalParts: subCh.canonicalParts,
+        steps: curChunk,
+        ...extraProps,
+      });
+      curChunk = [];
+      chunkSeq++;
+    };
+    for (const st of subSteps) {
+      const key = st.attachedSubmodel?.subChapterId || st.attachedSubmodel?.id;
+      const nch = key ? nestedById.get(key) : null;
+      if (nch && !emittedNested.has(nch.id)) {
+        flushSubChunk();
+        emitSubmodelWithNested(nch);
+        emittedNested.add(nch.id);
       }
-      const emittedNested = new Set();
-      for (const st of subCh.steps || []) {
-        const key = st.attachedSubmodel?.subChapterId || st.attachedSubmodel?.id;
-        const nch = key ? nestedById.get(key) : null;
-        if (nch && !emittedNested.has(nch.id)) {
-          emitSubmodelWithNested(nch);
-          emittedNested.add(nch.id);
-        }
-      }
-      for (const nch of nested) {
-        if (!emittedNested.has(nch.id)) {
-          emitSubmodelWithNested(nch);
-          emittedNested.add(nch.id);
-        }
+      curChunk.push(st);
+    }
+    flushSubChunk();
+    for (const nch of nested) {
+      if (!emittedNested.has(nch.id)) {
+        emitSubmodelWithNested(nch);
+        emittedNested.add(nch.id);
       }
     }
-    chapters.push({
-      id: `subch_${++chSeq}_${subCh.id}`,
-      name: subCh.name,
-      kind: 'submodel',
-      sectionId: `subsec_${subCh.id}`,
-      repeatCount: subCh.repeatCount || 1,
-      ...(typeof subCh.pieceCount === 'number' ? { pieceCount: subCh.pieceCount } : {}),
-      canonicalParts: subCh.canonicalParts,
-      steps: subCh.steps,
-      ...extraProps,
-    });
   };
 
   if (normalizedMinifigs.length > 0) {
@@ -7738,6 +7858,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
 
       // Partition join indices cleanly when 1 or more articulated axle-through-round-hole joints are present
       const preparedArtJoints = [];
+      const deferredJointChapters = [];
       const cleanFinishIndices = [];
 
       if (artJoinSecs.length > 0 && mainAttachList.length >= 2) {
@@ -7764,7 +7885,8 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
           if (cleanBogieIndices.length > 0 || cleanRodIndices.length > 0) {
             let bogieSubId = null;
             let bogieCanonical = null;
-            // Build each intact end assembly (e.g., Center Wheel Assembly / Pivot Assembly) as its own zoomed-in chapter first
+            // Prepare each intact end assembly (e.g., Center Wheel Assembly / Pivot Assembly) as its own
+            // zoomed-in chapter, deferred until immediately before the join step that attaches it!
             if (cleanBogieIndices.length >= 2) {
               bogieSubId = artJoinSecs.length === 1 ? 'mod_center_end_asm' : `mod_joint_${jIdx + 1}_end_asm`;
               bogieCanonical = normalizeCanonicalSubParts(cleanBogieIndices.map(i => parts[i]), bogieSubId);
@@ -7772,7 +7894,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
               const bogieSteps = buildLocalSubmodelSteps(bogieCanonical, bogieSubId, 1, bogieNested);
               const baseBogieName = aj.bogieName || 'Center Assembly';
               const bogieTitle = artJoinSecs.length === 1 ? baseBogieName : `${baseBogieName} ${jIdx + 1}`;
-              emitSubmodelWithNested({
+              deferredJointChapters.push({
                 id: bogieSubId,
                 name: bogieTitle,
                 repeatCount: 1,
@@ -7780,7 +7902,7 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
                 canonicalParts: bogieCanonical,
                 steps: bogieSteps,
                 nestedSubChapters: bogieNested,
-              }, { isSectionModule: true });
+              });
             }
             preparedArtJoints.push({
               artJoin: aj,
@@ -8278,13 +8400,54 @@ function buildManualFromParsed(parsed, mode, subdivisionPlan = null) {
       }
 
       if (joinSteps.length > 0) {
-        chapters.push({
-          id: `ach_${++chSeq}_connect`,
-          name: 'Connect Sections & Finish',
-          kind: 'main',
-          sectionId: 'sec_connect',
-          steps: joinSteps,
-        });
+        const joinName = 'Connect Sections & Finish';
+        if (deferredJointChapters.length > 0) {
+          const deferredByKey = new Map();
+          for (const spec of deferredJointChapters) {
+            deferredByKey.set(spec.id, spec);
+            deferredByKey.set(`${spec.id}_c0`, spec);
+          }
+          const emittedDeferred = new Set();
+          let curJoinChunk = [];
+          let joinChunkSeq = 0;
+          const flushJoinChunk = () => {
+            if (curJoinChunk.length === 0) return;
+            chapters.push({
+              id: `ach_${++chSeq}_connect${joinChunkSeq > 0 ? `_p${joinChunkSeq + 1}` : ''}`,
+              name: joinName,
+              kind: 'main',
+              isSectionContinuation: joinChunkSeq > 0,
+              sectionId: 'sec_connect',
+              steps: curJoinChunk,
+            });
+            curJoinChunk = [];
+            joinChunkSeq++;
+          };
+          for (const st of joinSteps) {
+            const attId = st.attachedSubmodel?.subChapterId || st.attachedSubmodel?.id;
+            const spec = attId ? deferredByKey.get(attId) : null;
+            if (spec && !emittedDeferred.has(spec.id)) {
+              flushJoinChunk();
+              emitSubmodelWithNested(spec, { isSectionModule: true });
+              emittedDeferred.add(spec.id);
+            }
+            curJoinChunk.push(st);
+          }
+          flushJoinChunk();
+          for (const spec of deferredJointChapters) {
+            if (!emittedDeferred.has(spec.id)) {
+              emitSubmodelWithNested(spec, { isSectionModule: true });
+            }
+          }
+        } else {
+          chapters.push({
+            id: `ach_${++chSeq}_connect`,
+            name: joinName,
+            kind: 'main',
+            sectionId: 'sec_connect',
+            steps: joinSteps,
+          });
+        }
       }
 
       const camAspect = getActivePageLayoutAspect();
@@ -8941,37 +9104,27 @@ function renumberContinuousSteps(model) {
   // `num` = printed step number (restarts per submodel / non-classic minifig chapter).
   // `absNum` = absolute step number, unique across the whole manual; used for all ranges.
   let mainNum = 0;
-  const secModuleCounter = new Map();
-  const lastSecModuleChapter = new Map();
+  const subModuleCounter = new Map();
+  const lastSubModuleChapter = new Map();
   for (const ch of model.chapters) {
-    if (ch.kind === 'submodel' && ch.isSectionModule) {
-      lastSecModuleChapter.set(ch.sectionId || ch.id, ch.id);
+    if (ch.kind === 'submodel') {
+      lastSubModuleChapter.set(ch.sectionId || ch.id, ch.id);
     }
   }
   for (const ch of model.chapters) {
     if (ch.kind === 'submodel') {
       const rep = ch.repeatCount ?? (ch.isSectionModule ? 1 : 2);
-      if (ch.isSectionModule) {
-        const secKey = ch.sectionId || ch.id;
-        let secNum = secModuleCounter.get(secKey) || 0;
-        const isLastChunk = lastSecModuleChapter.get(secKey) === ch.id;
-        ch.steps.forEach((s, idx) => {
-          s.num = ++secNum;
-          s.isMainNumbered = false;
-          s.isSubmodelStep = true;
-          s.isSubmodelFinal = isLastChunk && idx === ch.steps.length - 1 && rep > 1;
-          s.submodelRepeat = rep;
-        });
-        secModuleCounter.set(secKey, secNum);
-      } else {
-        ch.steps.forEach((s, idx) => {
-          s.num = idx + 1;
-          s.isMainNumbered = false;
-          s.isSubmodelStep = true;
-          s.isSubmodelFinal = idx === ch.steps.length - 1 && rep > 1;
-          s.submodelRepeat = rep;
-        });
-      }
+      const secKey = ch.sectionId || ch.id;
+      let secNum = subModuleCounter.get(secKey) || 0;
+      const isLastChunk = lastSubModuleChapter.get(secKey) === ch.id;
+      ch.steps.forEach((s, idx) => {
+        s.num = ++secNum;
+        s.isMainNumbered = false;
+        s.isSubmodelStep = true;
+        s.isSubmodelFinal = isLastChunk && idx === ch.steps.length - 1 && rep > 1;
+        s.submodelRepeat = rep;
+      });
+      subModuleCounter.set(secKey, secNum);
     } else if (ch.kind === 'minifigure' && normalizeMinifigStepStyle(state.minifigStyle) !== 'classic') {
       ch.steps.forEach((s, idx) => { s.num = idx + 1; s.isMainNumbered = false; });
     } else {
@@ -8987,14 +9140,10 @@ function renumberContinuousSteps(model) {
 function getPreviousPartsForStep(model, ch, step) {
   const prev = [];
   if (step.isStandaloneFigure || step.isMinifigPoseStep) return prev;
-  if (ch.kind === 'submodel' && !ch.isSectionModule) {
-    for (const s of ch.steps) { if (s.id === step.id) break; prev.push(...s.parts); }
-    return prev;
-  }
   const sec = ch.sectionId || ch.id;
   for (const c of model.chapters) {
-    if (ch.isSectionModule) {
-      if (!c.isSectionModule || (c.sectionId || c.id) !== sec) continue;
+    if (ch.kind === 'submodel') {
+      if (c.kind !== 'submodel' || (c.sectionId || c.id) !== sec) continue;
     } else {
       if (c.kind === 'submodel') continue;
       if ((c.sectionId || c.id) !== sec) continue;
@@ -9015,7 +9164,7 @@ function getMirroredSubassemblyMap(model) {
   const candidates = [];
   const nameById = new Map();
   for (const ch of model.chapters) {
-    if (ch.kind === 'submodel' && Array.isArray(ch.canonicalParts) && ch.canonicalParts.length >= 2) {
+    if (ch.kind === 'submodel' && !ch.isSectionContinuation && Array.isArray(ch.canonicalParts) && ch.canonicalParts.length >= 2) {
       nameById.set(ch.id, ch.name || 'Submodel');
       candidates.push({
         id: ch.id,
@@ -9383,16 +9532,13 @@ function rebuildPages() {
 
     // Precompute exact physical framing & slot-chrome metrics for every step in this chapter
     // in a single O(parts) pass matching getPreviousPartsForStep + computeStepCameraFraming.
-    const secKey = ch.sectionId || ch.id;
-    let chPrevBoxes;
-    if (isSubCh && !ch.isSectionModule) {
+    const secKey = isSubCh
+      ? `submodel:${ch.sectionId || ch.id}`
+      : `main:${ch.sectionId || ch.id}`;
+    let chPrevBoxes = sectionPrevBoxes.get(secKey);
+    if (!chPrevBoxes) {
       chPrevBoxes = [];
-    } else {
-      chPrevBoxes = sectionPrevBoxes.get(secKey);
-      if (!chPrevBoxes) {
-        chPrevBoxes = [];
-        sectionPrevBoxes.set(secKey, chPrevBoxes);
-      }
+      sectionPrevBoxes.set(secKey, chPrevBoxes);
     }
 
     const stepMetrics = ch.steps.map((step) => {

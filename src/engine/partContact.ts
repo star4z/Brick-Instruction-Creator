@@ -662,6 +662,10 @@ export function partsPhysicallyTouch(
   sideCapB: SidewaysCap = true,
   smoothTopA = false,
   smoothTopB = false,
+  topStudsA?: readonly (readonly [number, number, number])[] | null,
+  topStudsB?: readonly (readonly [number, number, number])[] | null,
+  bottomFootprintA?: WorldBox | null,
+  bottomFootprintB?: WorldBox | null,
 ): boolean {
   if (!boxesPhysicallyTouchBasic(boxA, boxB, roleA, roleB, sideCapA, sideCapB, smoothTopA, smoothTopB)) {
     return false;
@@ -674,19 +678,94 @@ export function partsPhysicallyTouch(
 
   const hasSubA = Boolean(subBoxesA && subBoxesA.length > 1);
   const hasSubB = Boolean(subBoxesB && subBoxesB.length > 1);
-  if (!hasSubA && !hasSubB) return true;
+  if (hasSubA || hasSubB) {
+    const listA = hasSubA ? subBoxesA! : [boxA];
+    const listB = hasSubB ? subBoxesB! : [boxB];
+    let anySubTouch = false;
+    for (let i = 0; i < listA.length && !anySubTouch; i++) {
+      const sa = listA[i];
+      for (let j = 0; j < listB.length; j++) {
+        if (boxesPhysicallyTouchBasic(sa, listB[j], roleA, roleB, sideCapA, sideCapB, smoothTopA, smoothTopB)) {
+          anySubTouch = true;
+          break;
+        }
+      }
+    }
+    if (!anySubTouch) return false;
+  }
 
-  const listA = hasSubA ? subBoxesA! : [boxA];
-  const listB = hasSubB ? subBoxesB! : [boxB];
-  for (let i = 0; i < listA.length; i++) {
-    const sa = listA[i];
-    for (let j = 0; j < listB.length; j++) {
-      if (boxesPhysicallyTouchBasic(sa, listB[j], roleA, roleB, sideCapA, sideCapB, smoothTopA, smoothTopB)) {
-        return true;
+  // Exact top-stud & bottom-footprint verification for vertical stacking between upright bricks:
+  // Prevents a brick hovering over the studless sloped ramp of a partial-stud slope (e.g. 3665
+  // inverted slope above 3040 45-degree slope) or overhanging an inverted slope's empty bevel
+  // from forming a phantom structural clutch connection.
+  const isSpecialFastener =
+    roleA === 'axle' || roleB === 'axle' ||
+    roleA === 'pin' || roleB === 'pin' ||
+    roleA === 'figure' || roleB === 'figure';
+  if (!isSpecialFastener && (topStudsA || topStudsB || bottomFootprintA || bottomFootprintB)) {
+    const ovX = Math.min(boxA.max[0], boxB.max[0]) - Math.max(boxA.min[0], boxB.min[0]);
+    const ovY = Math.min(boxA.max[1], boxB.max[1]) - Math.max(boxA.min[1], boxB.min[1]);
+    const ovZ = Math.min(boxA.max[2], boxB.max[2]) - Math.max(boxA.min[2], boxB.min[2]);
+    // Only apply to vertical stacking seams (not deep 3-axis interlocking or flush sideways SNOT)
+    const isFlushSideways =
+      ovY >= 6.0 &&
+      (Math.min(ovX, ovZ) < 3.0) &&
+      canFlushSidewaysConnect(sideCapA, sideCapB);
+    const isDeepInterlock = ovX >= 3.0 && ovZ >= 3.0 && ovY >= 6.0;
+    if (!isFlushSideways && !isDeepInterlock && ovX >= 3.0 && ovZ >= 3.0) {
+      const checkVerticalStudClutch = (
+        lowerBox: WorldBox,
+        upperBox: WorldBox,
+        lowerStuds: readonly (readonly [number, number, number])[] | null | undefined,
+        upperBottom: WorldBox | null | undefined,
+        upperSubs: readonly WorldBox[] | null | undefined,
+      ): boolean => {
+        if (upperBox.min[1] < lowerBox.max[1] - 6.0 || upperBox.center[1] <= lowerBox.center[1] + 1.0) {
+          return true;
+        }
+        // If upper has a narrowed bottom footprint (e.g. inverted slope 1x1 foot), verify
+        // horizontal overlap against that real bottom foot even when lowerStuds isn't provided.
+        const foot = upperBottom || upperBox;
+        const footOvX = Math.min(lowerBox.max[0], foot.max[0]) - Math.max(lowerBox.min[0], foot.min[0]);
+        const footOvZ = Math.min(lowerBox.max[2], foot.max[2]) - Math.max(lowerBox.min[2], foot.min[2]);
+        if (footOvX < 3.0 || footOvZ < 3.0) return false;
+
+        if (!lowerStuds || lowerStuds.length === 0) return true;
+        const footTargets = upperSubs && upperSubs.length > 1
+          ? upperSubs.filter((sb) => sb.min[1] <= upperBox.min[1] + 6.0)
+          : [foot];
+        const targets = footTargets.length > 0 ? footTargets : [foot];
+        for (let si = 0; si < lowerStuds.length; si++) {
+          const st = lowerStuds[si];
+          if (st[1] < upperBox.min[1] - 5.0 || st[1] > upperBox.max[1] + 2.0) continue;
+          for (let ti = 0; ti < targets.length; ti++) {
+            const tb = targets[ti];
+            if (
+              st[0] >= tb.min[0] - 2.0 &&
+              st[0] <= tb.max[0] + 2.0 &&
+              st[2] >= tb.min[2] - 2.0 &&
+              st[2] <= tb.max[2] + 2.0
+            ) {
+              return true;
+            }
+          }
+        }
+        return false;
+      };
+
+      if (boxB.center[1] > boxA.center[1] + 1.0 && boxB.min[1] >= boxA.max[1] - 6.0) {
+        if (!checkVerticalStudClutch(boxA, boxB, topStudsA, bottomFootprintB, subBoxesB)) {
+          return false;
+        }
+      } else if (boxA.center[1] > boxB.center[1] + 1.0 && boxA.min[1] >= boxB.max[1] - 6.0) {
+        if (!checkVerticalStudClutch(boxB, boxA, topStudsB, bottomFootprintA, subBoxesA)) {
+          return false;
+        }
       }
     }
   }
-  return false;
+
+  return true;
 }
 
 /**

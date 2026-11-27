@@ -488,6 +488,73 @@ describe('undersideAssembly — general deck-first & upside-down underside physi
       new Set([topPlate, turntableBase, holder, wheelL, wheelR, topTileL]),
     );
   });
+
+  it('collects standalone 1-part deck-attached underside pieces (e.g. inverted slopes) into deckUndersideIndices for floor placement prior to sub-modules', () => {
+    const parts: UndersidePartInput[] = [];
+    const adj: number[][] = [];
+    const add = (
+      partId: string,
+      partName: string,
+      box: WorldBox,
+      extra: Partial<UndersidePartInput> = {},
+    ): number => {
+      const idx = parts.length;
+      parts.push({
+        index: idx,
+        partId,
+        partName,
+        role: extra.role ?? 'structural',
+        box,
+        isCladding: false,
+        hasStuds: extra.hasStuds ?? true,
+        ...extra,
+      });
+      adj.push([]);
+      return idx;
+    };
+
+    const deck: number[] = [];
+    for (let k = 0; k < 8; k++) {
+      const z0 = -240 + k * 60;
+      const d = add('3032', 'Plate 4x6', makeBox(-60, 72, z0, 60, 84, z0 + 60));
+      deck.push(d);
+      if (k > 0) link(adj, deck[k - 1], d);
+    }
+    for (let k = 0; k < 8; k++) {
+      const z0 = -240 + k * 60;
+      const wL = add('3001', 'Brick 2x4', makeBox(-60, 80, z0, -40, 152, z0 + 60));
+      const wR = add('3001', 'Brick 2x4', makeBox(40, 80, z0, 60, 152, z0 + 60));
+      link(adj, deck[k], wL);
+      link(adj, deck[k], wR);
+    }
+
+    // Cohesive 4-part underside sub-module under deck[0]
+    const upperA = add('2357', 'Brick 2x2 Corner', makeBox(-40, 48, -220, 0, 76, -180));
+    const upperB = add('2357', 'Brick 2x2 Corner', makeBox(0, 48, -220, 40, 76, -180));
+    const midBrick = add('2456', 'Brick 2x6', makeBox(-60, 24, -220, 60, 52, -180));
+    const capPlate = add('32059', 'Plate Modified 4x6', makeBox(-60, 16, -240, 60, 28, -180));
+    link(adj, deck[0], upperA);
+    link(adj, deck[0], upperB);
+    link(adj, upperA, midBrick);
+    link(adj, upperB, midBrick);
+    link(adj, midBrick, capPlate);
+
+    // Two standalone inverted 1x2 slopes clutching ONLY upward into the deck floor (not touching the sub-module!)
+    const invSlopeL = add('3665', 'Slope Brick 45 2 x 1 Inverted', makeBox(-60, 48, -240, -40, 76, -200));
+    const invSlopeR = add('3665', 'Slope Brick 45 2 x 1 Inverted', makeBox(40, 48, -240, 60, 76, -200));
+    link(adj, deck[0], invSlopeL);
+    link(adj, deck[0], invSlopeR);
+
+    const plan = analyzeUndersideAssembly(parts, adj);
+    expect(plan.hasSuspendedUnderside).toBe(true);
+    expect(new Set(plan.deckUndersideIndices)).toEqual(new Set([invSlopeL, invSlopeR]));
+    expect(plan.allUndersideIndices.has(invSlopeL)).toBe(true);
+    expect(plan.allUndersideIndices.has(invSlopeR)).toBe(true);
+    expect(plan.subassemblies).toHaveLength(1);
+    expect(plan.subassemblies[0].partIndices).not.toContain(invSlopeL);
+    expect(plan.subassemblies[0].partIndices).not.toContain(invSlopeR);
+  });
 });
+
 
 

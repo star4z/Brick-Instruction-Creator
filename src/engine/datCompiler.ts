@@ -64,6 +64,8 @@ export interface CompiledDatMesh {
   texBatches?: CompiledTexBatch[];
   /** Compact local-space tight sub-boxes for concave parts (undefined for solid/convex bricks). */
   subBoxes?: LocalBox6[];
+  /** Optional tight bottom-face footprint box when the bottom surface is significantly narrower than the outer AABB (e.g. inverted slopes, arches, brackets). */
+  bottomBox?: LocalBox6;
   /** Local-space outward external stud positions & unit normals (top & SNOT side studs). */
   studs?: LocalStud[];
   /** Optional local-space unit vector pointing from narrow shaft toward wide head/ball/stop on asymmetric headed fasteners. */
@@ -2241,6 +2243,32 @@ export function compileDatEntry(
     [maxX, maxY, maxZ],
   );
 
+  // Compute tight bottom-face footprint box when the part's bottom surface is significantly
+  // narrower than its outer AABB (e.g. inverted 45-degree slopes, arches, hanging brackets).
+  let bottomBox: LocalBox6 | undefined;
+  if (trisArr.length >= 9) {
+    let bMinX = Infinity, bMaxX = -Infinity, bMinZ = Infinity, bMaxZ = -Infinity;
+    const yCut = minY + 2.5;
+    for (let i = 0; i < trisArr.length; i += 3) {
+      const y = trisArr[i + 1];
+      if (y <= yCut) {
+        const x = trisArr[i];
+        const z = trisArr[i + 2];
+        if (x < bMinX) bMinX = x;
+        if (x > bMaxX) bMaxX = x;
+        if (z < bMinZ) bMinZ = z;
+        if (z > bMaxZ) bMaxZ = z;
+      }
+    }
+    if (
+      Number.isFinite(bMinX) &&
+      (bMaxX - bMinX >= 12 && bMaxZ - bMinZ >= 12) &&
+      ((bMaxX - bMinX) < (maxX - minX) - 6.0 || (bMaxZ - bMinZ) < (maxZ - minZ) - 6.0)
+    ) {
+      bottomBox = [bMinX, minY, bMinZ, bMaxX, Math.min(maxY, minY + 4.0), bMaxZ];
+    }
+  }
+
   return {
     tris: trisArr,
     norms: normsArr,
@@ -2255,6 +2283,7 @@ export function compileDatEntry(
     triCols: triColsArr,
     ...(texBatches.length > 0 ? { texBatches } : {}),
     ...(subBoxes ? { subBoxes } : {}),
+    ...(bottomBox ? { bottomBox } : {}),
     ...(localStuds.length > 0 ? { studs: localStuds } : {}),
     ...(headedShaftDir ? { headedShaftDir } : {}),
     ...(cavityAo ? { cavityAo } : {}),

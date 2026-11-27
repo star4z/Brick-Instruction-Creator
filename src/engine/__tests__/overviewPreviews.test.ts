@@ -135,6 +135,31 @@ describe('overviewPreviews helpers', () => {
     // Unrelated sections and submodels keep identical signatures
     expect(mutatedSigs.get('sub_2')?.prevSignature).toBe(sigs.get('sub_2')?.prevSignature);
     expect(mutatedSigs.get('st_b1')?.prevSignature).toBe(sigs.get('st_b1')?.prevSignature);
+
+    // Split submodel continuation chunks sharing sectionId chain cleanly across an interleaved nested submodel
+    const splitSigs = computeOverviewStepSignatures([
+      {
+        id: 'subch_parent_1',
+        kind: 'submodel',
+        sectionId: 'subsec_parent',
+        steps: [{ id: 'p_s1', parts: [{ id: 'p1', p: '3001', c: 0, x: 0, y: 0, z: 0 }] }],
+      },
+      {
+        id: 'subch_nested',
+        kind: 'submodel',
+        sectionId: 'subsec_nested',
+        steps: [{ id: 'n_s1', parts: [{ id: 'n1', p: '3004', c: 4, x: 0, y: 0, z: 0 }] }],
+      },
+      {
+        id: 'subch_parent_2',
+        kind: 'submodel',
+        sectionId: 'subsec_parent',
+        steps: [{ id: 'p_s2', parts: [{ id: 'p2', p: '3001', c: 0, x: 0, y: 24, z: 0 }] }],
+      },
+    ]);
+    expect(splitSigs.get('p_s1')?.prevCount).toBe(0);
+    expect(splitSigs.get('n_s1')?.prevCount).toBe(0);
+    expect(splitSigs.get('p_s2')?.prevCount).toBe(1);
   });
 
   it('invalidates step preview cache keys when camera, offsets, display options, or sequential slice change', () => {

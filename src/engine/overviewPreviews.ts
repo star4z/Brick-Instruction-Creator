@@ -89,27 +89,9 @@ export function computeOverviewStepSignatures(
   const sectionState = new Map<string, { count: number; hash: number }>();
 
   for (const ch of chapters) {
-    if (ch.kind === 'submodel') {
-      let count = 0;
-      let hash = 2166136261;
-      for (const step of ch.steps) {
-        const stepSig = computeStepPreviewPartSignature(step.parts);
-        if (step.isStandaloneFigure || step.isMinifigPoseStep) {
-          out.set(step.id, { prevCount: 0, prevSignature: '0:0', stepSignature: stepSig });
-        } else {
-          out.set(step.id, {
-            prevCount: count,
-            prevSignature: `${count}:${hash.toString(36)}`,
-            stepSignature: stepSig,
-          });
-          count += step.parts?.length || 0;
-          hash = hashString32(hash, `${step.id}:${stepSig}`);
-        }
-      }
-      continue;
-    }
-
-    const sec = ch.sectionId || ch.id;
+    const sec = ch.kind === 'submodel'
+      ? `submodel:${ch.sectionId || ch.id}`
+      : `main:${ch.sectionId || ch.id}`;
     const running = sectionState.get(sec) || { count: 0, hash: 2166136261 };
     for (const step of ch.steps) {
       const stepSig = computeStepPreviewPartSignature(step.parts);

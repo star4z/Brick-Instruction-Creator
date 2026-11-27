@@ -995,5 +995,75 @@ describe('Concave Sub-Box Collider & Zero-Floating Support Rules', () => {
     // Brick (2) only has smooth tile (1) below it, so smooth tile does NOT count as structural lower support
     expect(belowMap[3]).not.toContain(2);
   });
+
+  it('rejects vertical clutch over a partial-stud slope ramp (e.g. 3665 inverted slope hovering above 3040) while preserving real stud & bottom-foot clutch', () => {
+    // 3040 45° slope 1x2 spanning X=[-10..10], Y=[8..36], Z=[-30..10] with ONLY 1 top stud on its back half at (0, 32, 0)
+    const slope3040 = makeWorldBox(-10, 8, -30, 10, 36, 10);
+    const slope3040Studs: [number, number, number][] = [[0, 32, 0]];
+
+    // Front 3665 inverted 45° slope hovering above 3040's studless front ramp (Z=[-50..-10], narrowed 1x1 bottom foot at Z=[-30..-10])
+    const frontInv3665 = makeWorldBox(-10, 32, -50, 10, 60, -10);
+    const frontInv3665Foot = makeWorldBox(-10, 32, -30, 10, 36, -10);
+
+    // 3004 1x2 brick sitting directly on 3040's real back stud at Z=0
+    const brick3004 = makeWorldBox(-10, 32, -10, 10, 60, 30);
+
+    // Rear 3665 inverted slope whose narrowed 1x1 bottom foot sits over a full-stud 1x6 brick (studs at Z=10, 30, 50)
+    const brick2456 = makeWorldBox(-10, 8, 10, 10, 36, 70);
+    const brick2456Studs: [number, number, number][] = [[0, 32, 20], [0, 32, 40], [0, 32, 60]];
+    const rearInv3665 = makeWorldBox(-10, 32, 10, 10, 60, 50);
+    const rearInv3665Foot = makeWorldBox(-10, 32, 10, 10, 36, 30);
+
+    // Front inverted slope over studless front ramp of 3040 -> ZERO engaged studs -> MUST NOT connect
+    expect(
+      partsPhysicallyTouch(
+        slope3040, frontInv3665,
+        null, null,
+        'structural', 'structural',
+        'none', 'none',
+        false, false,
+        slope3040Studs, null,
+        null, frontInv3665Foot,
+      ),
+    ).toBe(false);
+
+    // 1x2 brick engaging 3040's real back stud -> MUST connect
+    expect(
+      partsPhysicallyTouch(
+        slope3040, brick3004,
+        null, null,
+        'structural', 'structural',
+        'none', 'none',
+        false, false,
+        slope3040Studs, null,
+        null, null,
+      ),
+    ).toBe(true);
+
+    // Rear inverted slope whose narrowed bottom foot sits squarely on 2456's stud at Z=20 -> MUST connect
+    expect(
+      partsPhysicallyTouch(
+        brick2456, rearInv3665,
+        null, null,
+        'structural', 'structural',
+        'none', 'none',
+        false, false,
+        brick2456Studs, null,
+        null, rearInv3665Foot,
+      ),
+    ).toBe(true);
+
+    // Inverted slope compiled from LDraw geometry produces a tight narrowed bottomBox
+    const invSlopeCompiled = compileLines('inv_slope_3665', [
+      // Narrow 1x1 bottom foot at y=0..20 (LDraw +Y down -> GL y=-24..-4), X=[-10..10], Z=[-10..10]
+      ...ldrawBoxQuads(-10, 0, -10, 10, 20, 10),
+      // Wide 1x2 top lip at y=20..24 (GL y=-4..0), X=[-10..10], Z=[-10..30]
+      ...ldrawBoxQuads(-10, 20, -10, 10, 24, 30),
+    ])!;
+    expect(invSlopeCompiled.bottomBox).toBeDefined();
+    // Bottom Z span is 20 LDU (1 stud), narrower than full 40 LDU outer AABB
+    expect(invSlopeCompiled.bottomBox![5] - invSlopeCompiled.bottomBox![2]).toBeCloseTo(20, 1);
+  });
 });
+
 
