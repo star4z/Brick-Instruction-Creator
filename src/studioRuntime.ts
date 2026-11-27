@@ -3375,7 +3375,7 @@ class WebGLBrickEngine {
     }
     this.uploadedMesh = mesh;
   }
-  computeMVP(mesh, w, h, azDeg, elDeg, zoom = 1, fixedHalfH = 0, tightFit = false, fixedCenter = null, panX = 0, panY = 0) {
+  computeMVP(mesh, w, h, azDeg, elDeg, zoom = 1, fixedHalfH = 0, tightFit = false, fixedCenter = null, panX = 0, panY = 0, keepUpright = false) {
     const az = azDeg * Math.PI / 180, el = elDeg * Math.PI / 180;
     const center = fixedCenter || mesh.center;
     // Tight near/far ortho depth range around full model radius for 4x sharper Z-buffer occlusion!
@@ -3384,7 +3384,7 @@ class WebGLBrickEngine {
     const eye = [center[0]+dist*Math.sin(az)*Math.cos(el), center[1]+dist*Math.sin(el), center[2]+dist*Math.cos(az)*Math.cos(el)];
     const near = Math.max(1, dist - clipRadius * 2.4);
     const far = dist + clipRadius * 2.4;
-    const view = lookAtMat4(eye, center, elDeg < 0 ? [0, -1, 0] : [0, 1, 0]);
+    const view = lookAtMat4(eye, center, (!keepUpright && elDeg < 0) ? [0, -1, 0] : [0, 1, 0]);
     if (tightFit && fixedHalfH <= 0) {
       const tightArrays = [];
       if (mesh.triPos && mesh.triPos.length >= 9) tightArrays.push(mesh.triPos);
@@ -3492,7 +3492,8 @@ class WebGLBrickEngine {
     const fixedCenter = drawOpts?.fixedCenter || null;
     const panX = typeof drawOpts?.panX === 'number' ? drawOpts.panX : 0;
     const panY = typeof drawOpts?.panY === 'number' ? drawOpts.panY : 0;
-    const mvp = this.computeMVP(mesh, dw, dh, azDeg, elDeg, zoom, fixedHalfH, tightFit, fixedCenter, panX, panY);
+    const keepUpright = Boolean(drawOpts?.keepUpright);
+    const mvp = this.computeMVP(mesh, dw, dh, azDeg, elDeg, zoom, fixedHalfH, tightFit, fixedCenter, panX, panY, keepUpright);
     const { right, up, forward } = computeCameraBasis(azDeg, elDeg);
     const lights = computePreviewLightDirs(right, up, forward);
     const center = fixedCenter || mesh.center;
@@ -13054,8 +13055,11 @@ function bindHeroCameraInteractions(page) {
       document.getElementById('contextOverlay')?.classList.add('is-orbit-dragging');
     }
     moved = true;
-    az = (((az + (el < 0 ? dx : -dx) * 0.7) % 360) + 360) % 360;
-    el = clampCoverElevation(el + dy * 0.5);
+    const isBotDrag = el < 0;
+    az = (((az + (isBotDrag ? dx : -dx) * 0.7) % 360) + 360) % 360;
+    el = isBotDrag
+      ? clampCoverElevation(Math.min(-2, el - dy * 0.5))
+      : clampCoverElevation(Math.max(2, el + dy * 0.5));
     const roundedAz = ((Math.round(az) % 360) + 360) % 360;
     const roundedEl = Math.round(el);
     const curMeta = getHeroMeta();
@@ -13297,8 +13301,11 @@ function bindStepPageInteractions(page) {
           document.getElementById('contextOverlay')?.classList.add('is-orbit-dragging');
         }
         moved = true;
-        az = (((az + (el < 0 ? dx : -dx) * 0.7) % 360) + 360) % 360;
-        el = Math.max(-75, Math.min(75, el + dy * 0.5));
+        const isBotDrag = el < 0;
+        az = (((az + (isBotDrag ? dx : -dx) * 0.7) % 360) + 360) % 360;
+        el = isBotDrag
+          ? Math.max(-75, Math.min(-2, el - dy * 0.5))
+          : Math.max(2, Math.min(75, el + dy * 0.5));
         const nextSide = el < 0 ? 'bottom' : 'top';
         const matchedPreset = findMatchingCameraPreset(az);
         const roundedAz = ((Math.round(az) % 360) + 360) % 360;
@@ -19058,6 +19065,7 @@ function drawLibPartMesh(mesh, size, az, el, style = getLibRenderStyleState()) {
         outlineLineWeight: style.outlineLineWeight,
         highlightLineWeight: 'medium',
         darkBackground: false,
+        keepUpright: true,
         getTextureImage: (texKey) => textureStore.getDecodedImage(texKey),
       });
       if (rendered) return rendered;
@@ -19065,6 +19073,7 @@ function drawLibPartMesh(mesh, size, az, el, style = getLibRenderStyleState()) {
     snapshotEngine.draw(mesh, size, size, az, el, 1.0, 0, {
       tightFit: true,
       heroShading: true,
+      keepUpright: true,
       starkBlackOutlines: style.starkBlackOutlines,
       outlineLineWeight: style.outlineLineWeight,
       lineAlpha: style.starkBlackOutlines ? 1.0 : 0.52,
@@ -19073,6 +19082,7 @@ function drawLibPartMesh(mesh, size, az, el, style = getLibRenderStyleState()) {
   }
   snapshotEngine.draw(mesh, size, size, az, el, 1.0, 0, {
     tightFit: true,
+    keepUpright: true,
     unlit: style.stepLighting === 'none',
     starkBlackOutlines: style.starkBlackOutlines,
     outlineLineWeight: style.outlineLineWeight,
@@ -28726,6 +28736,7 @@ function drawImportPreviewFrame() {
   const h = Math.min(maxDim, Math.max(380, Math.round(cssH * dpr)));
   impPreviewEngine.draw(impPreviewMesh, w, h, impState.az, impState.el, impState.zoom || 1.0, 0, {
     heroShading: true,
+    keepUpright: true,
     lineAlpha: 0.48,
     panX: impState.panX || 0,
     panY: impState.panY || 0,

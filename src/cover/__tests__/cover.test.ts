@@ -630,6 +630,20 @@ describe('Photorealistic Studio Camera & Softbox Light Rig', () => {
       expect(dir[1]).toBeLessThan(-0.5);
     }
   });
+
+  it('keeps the model upright (world +Y up on screen) when keepUpright is true even if elDeg < 0', () => {
+    const camUpright = computeStudioOrthoCamera([0, 20, 0], 80, 120, 38, -30, 1200, 900, 1.0, 0, undefined, 0, 0, null, null, true);
+    const m = camUpright.mvp;
+    const ndcYBelow = m[1] * 0 + m[5] * 0 + m[9] * 0 + m[13];
+    const ndcYAbove = m[1] * 0 + m[5] * 40 + m[9] * 0 + m[13];
+    expect(ndcYAbove).toBeGreaterThan(ndcYBelow);
+
+    const uprightLights = computeStudioLightDirs(38, -30, true);
+    for (const dir of [uprightLights.key, uprightLights.fill, uprightLights.rim, uprightLights.overhead]) {
+      expect(dir[1]).toBeGreaterThan(0.5);
+    }
+  });
 });
+
 
 

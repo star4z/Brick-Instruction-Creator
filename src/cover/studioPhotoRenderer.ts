@@ -83,6 +83,7 @@ export interface StudioRenderOptions {
   azDeg: number;
   elDeg: number;
   width: number;
+  keepUpright?: boolean;
   height: number;
   zoom?: number;
   darkBackground?: boolean;
@@ -305,6 +306,7 @@ export function computeStudioOrthoCamera(
   panY = 0,
   bounds?: WorldBounds3D | null,
   frustumOptions?: StepOrthoFrustumOptions | null,
+  keepUpright = false,
 ): StudioCameraResult {
   const az = (azDeg * Math.PI) / 180;
   const el = (elDeg * Math.PI) / 180;
@@ -318,7 +320,7 @@ export function computeStudioOrthoCamera(
   ];
   const near = Math.max(1, dist - clipRadius * 2.4);
   const far = dist + clipRadius * 2.4;
-  const view = lookAtMat4(eye, target, elDeg < 0 ? [0, -1, 0] : [0, 1, 0]);
+  const view = lookAtMat4(eye, target, (!keepUpright && elDeg < 0) ? [0, -1, 0] : [0, 1, 0]);
 
   const aspect = width / Math.max(1, height);
   const safeZoom = Math.max(0.4, zoom);
@@ -403,13 +405,14 @@ export function computeLightOrthoMVP(
 export function computeStudioLightDirs(
   azDeg: number,
   elDeg = 30,
+  keepUpright = false,
 ): {
   key: [number, number, number];
   fill: [number, number, number];
   rim: [number, number, number];
   overhead: [number, number, number];
 } {
-  const upSign = elDeg < 0 ? -1 : 1;
+  const upSign = (!keepUpright && elDeg < 0) ? -1 : 1;
   const dirFrom = (az: number, el: number): [number, number, number] => {
     const a = (az * Math.PI) / 180;
     const e = (el * Math.PI) / 180;
@@ -1469,6 +1472,7 @@ export class StudioPhotoRenderer {
                 pliObstacle: mesh.pliObstacle,
               }
             : null,
+          Boolean(options.keepUpright),
         )
       : computeStudioTelephotoCamera(
           mesh.triPos.length >= 9 ? mesh.triPos : mesh.texDraws![0].triPos,
@@ -1482,7 +1486,7 @@ export class StudioPhotoRenderer {
         );
     this.lastMvp = cam.mvp;
 
-    const lights = computeStudioLightDirs(options.azDeg, options.elDeg);
+    const lights = computeStudioLightDirs(options.azDeg, options.elDeg, Boolean(options.keepUpright));
     const modelRadius = Math.max(mesh.fullRadius || mesh.radius, 20);
     const shadowCenter: [number, number, number] = [
       (mesh.bounds.minX + mesh.bounds.maxX) * 0.5,
@@ -1640,7 +1644,7 @@ export class StudioPhotoRenderer {
       gl.uniform2f(gl.getUniformLocation(prog, 'uOverTexel'), 1 / this.overFbo!.w, 1 / this.overFbo!.h);
       gl.uniform1f(gl.getUniformLocation(prog, 'uMinY'), mesh.bounds.minY);
       gl.uniform1f(gl.getUniformLocation(prog, 'uModelHeight'), Math.max(10, mesh.bounds.maxY - mesh.bounds.minY));
-      gl.uniform1f(gl.getUniformLocation(prog, 'uUpSign'), options.elDeg < 0 ? -1.0 : 1.0);
+      gl.uniform1f(gl.getUniformLocation(prog, 'uUpSign'), (!options.keepUpright && options.elDeg < 0) ? -1.0 : 1.0);
 
       gl.activeTexture(gl.TEXTURE3);
       gl.bindTexture(gl.TEXTURE_2D, this.emptyTex);
