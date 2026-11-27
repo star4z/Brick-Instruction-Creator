@@ -529,6 +529,62 @@ export function getStepDividerLineColor(
   return `rgba(${Math.round(textRgb.r)},${Math.round(textRgb.g)},${Math.round(textRgb.b)},${alpha})`;
 }
 
+/**
+ * Returns true when a CSS/hex color has low perceptual luminance (< 110).
+ * Properly handles pure black (`#000000`) and zero-valued channels.
+ */
+export function isDarkHexColor(color: string): boolean {
+  const rgb = parseRgbChannels(color);
+  if (!rgb) return false;
+  return (0.299 * rgb.r + 0.587 * rgb.g + 0.114 * rgb.b) < 110;
+}
+
+export interface InlineCalloutBoxStyle {
+  bg: string;
+  border: string;
+  bgHex: string;
+  isDarkBg: boolean;
+  arrowPalette: {
+    red: string;
+    blue: string;
+    dark: string;
+  };
+  arrowHalo: string;
+  shadowColor: string;
+}
+
+/**
+ * Resolves the callout box styling for inline submodel diagrams (exploded
+ * minifigure stacks, handheld accessory callouts, and sequential multi-part
+ * accessory pills) from the active theme's `calloutBg` and `calloutBorder`
+ * tokens, with contrast-calibrated internal arrow colors and halos.
+ */
+export function resolveInlineCalloutBoxStyle(
+  theme?: Partial<Pick<ManualTheme, 'bgColor' | 'calloutBg' | 'calloutBorder'>> | null,
+): InlineCalloutBoxStyle {
+  const pageBgHex = toHexColor(theme?.bgColor || '#ffffff', '#ffffff');
+  const darkPage = isDarkHexColor(pageBgHex);
+  const bg = sanitizeCssColor(theme?.calloutBg, '#ffffff');
+  const border = sanitizeCssColor(theme?.calloutBorder, '#1f2937');
+  const bgHex = toHexColor(bg, pageBgHex);
+  const isDarkBg = isDarkHexColor(bgHex);
+  const bgRgb = parseRgbChannels(bgHex) || { r: 255, g: 255, b: 255, a: 1 };
+  return {
+    bg,
+    border,
+    bgHex,
+    isDarkBg,
+    arrowPalette: {
+      red: isDarkBg ? '#f87171' : '#d92626',
+      blue: isDarkBg ? '#38bdf8' : '#0088ce',
+      dark: isDarkBg ? '#f8fafc' : '#1f2937',
+    },
+    arrowHalo: `rgba(${Math.round(bgRgb.r)},${Math.round(bgRgb.g)},${Math.round(bgRgb.b)},0.82)`,
+    shadowColor: darkPage ? 'rgba(0,0,0,0.45)' : 'rgba(15,23,42,0.12)',
+  };
+}
+
+
 export function buildThemeBgCss(
   bgType: ThemeBgType,
   bgColor: string,

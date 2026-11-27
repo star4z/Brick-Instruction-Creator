@@ -5,9 +5,9 @@
 Official LEGO instruction manuals use two distinct visual conventions for minifigure construction steps depending on the set's target age and layout style:
 
 1. **Exploded Stack Callout (`exploded`)** — Compact adult / standard set style:
-   - A slender **white vertical callout box** (`#ffffff`, crisp dark border) on the left displays the minifigure's vertical body layers exploded from bottom to top (`legs` → `torso` → optional `cape` / `neckwear` → `head` → optional `headgear`) with **crimson-red downward assembly arrows** (two parallel arrows from the torso waist into the left and right hip studs; single centered arrows for upper layers).
-   - A crisp **horizontal connector arrow** points from the lower-right side of the vertical box to the **completed standing minifigure** on the right.
-   - Any **handheld accessories** (e.g., letter tile, mug, lightsaber) appear in crisp **white bordered accessory callout boxes** positioned above the minifigure's hand(s), with a white-haloed downward pointer arrow landing directly on the accessory in hand (and internal exploded red arrow(s) if the accessory is multi-part).
+   - A slender **vertical callout box** on the left — styled with the active theme's **Callout Box** tokens (`theme.calloutBg`, `theme.calloutBorder`, and rounded corners via `resolveInlineCalloutBoxStyle`) — displays the minifigure's vertical body layers exploded from bottom to top (`legs` → `torso` → optional `cape` / `neckwear` → `head` → optional `headgear`) with **contrast-calibrated crimson-red downward assembly arrows** (two parallel arrows from the torso waist into the left and right hip studs; single centered arrows for upper layers).
+   - A crisp **horizontal connector arrow** (contrast-adapted to light or dark page backgrounds, including pure black `#000000`) points from the lower-right side of the vertical box to the **completed standing minifigure** on the right.
+   - Any **handheld accessories** (e.g., letter tile, mug, lightsaber) appear in matching **themed rounded accessory callout boxes** positioned above the minifigure's hand(s), with a haloed downward pointer arrow landing directly on the accessory in hand (and internal exploded red arrow(s) if the accessory is multi-part).
 
 2. **Sequential Step-by-Step (`sequential`)** — Detailed / 4+ booklet style:
    - Breaks the minifigure into **numbered local sub-steps (`1, 2, 3, ...`)** laid out horizontally across pages (3 across per page for 5–6+ stage figures, or up to 4 across on landscape pages for 4-stage figures).
@@ -15,7 +15,7 @@ Official LEGO instruction manuals use two distinct visual conventions for minifi
    - **Stage 2 (optional)**: Floating cape / back wearable with cyan-blue downward arrow onto the neck stud.
    - **Stage 3**: Floating head (or stacked collar/neckwear + head with continuous cyan-blue downward arrows).
    - **Stage 4 (optional)**: Floating hair / helmet / headgear with cyan-blue downward arrow onto the head stud.
-   - **Multi-part accessory stages**: Assembled minifigure holding the accessory, with a **warm peach/amber rounded pill callout box** (`#fde4a6`, crisp dark border) centered directly above the accessory showing its constituent parts exploded with a cyan-blue arrow and a **black downward pointer arrow** pointing into the minifigure's hand.
+   - **Multi-part accessory stages**: Assembled minifigure holding the accessory, with a **themed rounded pill callout box** (`theme.calloutBg`, `theme.calloutBorder`) centered directly above the accessory showing its constituent parts exploded with a cyan-blue arrow and a **contrast-adapted downward pointer arrow** pointing into the minifigure's hand.
    - **Final completion stage**: Fully completed minifigure (including any final single-piece prop) backed by a **radial light-ray starburst** and **three hollow 5-point outline stars**.
 
 3. **Classic PLI (`classic`)** — Preserves the original single-step render with Parts List (PLI) box for users who prefer standard step formatting.

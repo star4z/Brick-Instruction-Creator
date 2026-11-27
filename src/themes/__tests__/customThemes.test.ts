@@ -4,10 +4,12 @@ import {
   CUSTOM_THEMES_STORAGE_KEY,
   buildThemeBgCss,
   createThemeDraftFromBase,
+  isDarkHexColor,
   loadCustomThemesFromStorage,
   mergeImportedThemes,
   normalizeCustomTheme,
   parseImportedThemesJson,
+  resolveInlineCalloutBoxStyle,
   resolveThemeById,
   sanitizeCssColor,
   saveCustomThemesToStorage,
@@ -427,4 +429,47 @@ describe('theme style options, recents & naming', () => {
     expect(draft.bomConfig?.format).toBe('table');
     expect(draft.bomConfig?.fields[0].id).toBe('partId');
   });
+
+  it('detects dark hex colors accurately including pure black #000000', () => {
+    expect(isDarkHexColor('#000000')).toBe(true);
+    expect(isDarkHexColor('#000')).toBe(true);
+    expect(isDarkHexColor('#111622')).toBe(true);
+    expect(isDarkHexColor('#0d3b66')).toBe(true);
+    expect(isDarkHexColor('#ffffff')).toBe(false);
+    expect(isDarkHexColor('#fffbe6')).toBe(false);
+    expect(isDarkHexColor('#d8ecfd')).toBe(false);
+  });
+
+  it('resolves inline submodel callout box styles from active theme tokens', () => {
+    const collectorBlack = resolveInlineCalloutBoxStyle(BUILT_IN_THEMES['collector-black']);
+    expect(collectorBlack.bg).toBe('#111622');
+    expect(collectorBlack.border).toBe('#94a3b8');
+    expect(collectorBlack.isDarkBg).toBe(true);
+    expect(collectorBlack.arrowPalette.red).toBe('#f87171');
+    expect(collectorBlack.arrowPalette.dark).toBe('#f8fafc');
+    expect(collectorBlack.arrowHalo).toBe('rgba(17,22,34,0.82)');
+
+    const editorialDark = resolveInlineCalloutBoxStyle(BUILT_IN_THEMES.dark);
+    expect(editorialDark.bg).toBe('rgba(255, 255, 255, 0.06)');
+    expect(editorialDark.border).toBe('rgba(255, 255, 255, 0.2)');
+    expect(editorialDark.isDarkBg).toBe(true);
+
+    const classicBlue = resolveInlineCalloutBoxStyle(BUILT_IN_THEMES.blue);
+    expect(classicBlue.bg).toBe('#fffbe6');
+    expect(classicBlue.border).toBe('#eab308');
+    expect(classicBlue.isDarkBg).toBe(false);
+    expect(classicBlue.arrowPalette.red).toBe('#d92626');
+    expect(classicBlue.arrowPalette.blue).toBe('#0088ce');
+    expect(classicBlue.arrowHalo).toBe('rgba(255,251,230,0.82)');
+
+    const custom = resolveInlineCalloutBoxStyle({
+      bgColor: '#0f172a',
+      calloutBg: '#1e293b',
+      calloutBorder: '#38bdf8',
+    });
+    expect(custom.bg).toBe('#1e293b');
+    expect(custom.border).toBe('#38bdf8');
+    expect(custom.isDarkBg).toBe(true);
+  });
 });
+

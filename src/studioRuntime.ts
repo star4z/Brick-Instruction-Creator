@@ -431,6 +431,8 @@ import {
   serializeThemeExport,
   getLineWeightTapOffsets,
   getStepDividerLineColor,
+  isDarkHexColor,
+  resolveInlineCalloutBoxStyle,
   sanitizeLineWeight,
   sanitizePlacementArrowStyle,
   sanitizeProgressBarSpan,
@@ -3912,15 +3914,6 @@ function getStudioPhotoEngine() {
   return studioPhotoEngine;
 }
 
-function isDarkHexColor(hex) {
-  const clean = String(hex || '#ffffff').replace('#', '');
-  const full = clean.length === 3 ? clean.split('').map(c => c + c).join('') : clean.padEnd(6, '0');
-  const r = parseInt(full.slice(0, 2), 16) || 255;
-  const g = parseInt(full.slice(2, 4), 16) || 255;
-  const b = parseInt(full.slice(4, 6), 16) || 255;
-  return (0.299 * r + 0.587 * g + 0.114 * b) < 110;
-}
-
 function getPliThumb(part) {
   const sb = Boolean(state.starkBlackOutlines);
   const outW = sb ? sanitizeLineWeight(state.outlineLineWeight, 'medium') : 'light';
@@ -4438,11 +4431,12 @@ function renderMinifigExplodedDiagram(step, cam, w, h, theme, zoom = 1.0) {
   const rh = Math.max(240, Math.round(h));
   const bgHex = toHexColor(theme?.bgColor || '#ffffff', '#ffffff');
   const darkBg = isDarkHexColor(bgHex);
+  const calloutStyle = resolveInlineCalloutBoxStyle(theme);
   const sb = Boolean(state.starkBlackOutlines);
   const outW = sb ? sanitizeLineWeight(state.outlineLineWeight, 'medium') : 'light';
   const unlit = state.stepLighting === 'none';
   const mfDrawOpts = sb ? { tightFit: true, starkBlackOutlines: true, outlineLineWeight: outW, unlit } : { tightFit: true, unlit };
-  const cacheKey = `exp|${minifigDiagramCache.getEpoch()}|${step.id}|${(step.parts || []).length}|${Math.round(cam.az)}|${Math.round(cam.el)}|${Math.round(zoom * 100)}|${rw}x${rh}|${darkBg ? 'd' : 'l'}|${sb ? outW : 'n'}${unlit ? '|u' : ''}`;
+  const cacheKey = `exp|${minifigDiagramCache.getEpoch()}|${step.id}|${(step.parts || []).length}|${Math.round(cam.az)}|${Math.round(cam.el)}|${Math.round(zoom * 100)}|${rw}x${rh}|${bgHex}|${calloutStyle.bg}|${calloutStyle.border}|${sb ? outW : 'n'}${unlit ? '|u' : ''}`;
   const cachedExp = minifigDiagramCache.get(cacheKey);
   if (isRenderEntryUsable(cachedExp)) return cachedExp;
 
@@ -4457,25 +4451,28 @@ function renderMinifigExplodedDiagram(step, cam, w, h, theme, zoom = 1.0) {
   const padX = Math.round(rw * 0.05);
   const padY = Math.round(rh * 0.06);
 
-  // 1. Left white vertical exploded callout box (slender vertical proportions matching IMG_0316)
+  // 1. Left vertical exploded callout box styled with active theme's callout box tokens
   const boxH = Math.round(rh - padY * 2);
   const boxW = Math.round(Math.min(rw * 0.34, Math.max(rw * 0.22, boxH * 0.42)));
   const boxX = Math.round(padX + Math.max(0, (rw * 0.4 - boxW) * 0.42));
   const boxY = padY;
+  const boxRadius = Math.max(6, Math.min(14, Math.round(Math.min(boxW, boxH) * 0.08)));
 
   ctx.save();
-  ctx.shadowColor = darkBg ? 'rgba(0,0,0,0.45)' : 'rgba(15,23,42,0.12)';
+  ctx.shadowColor = calloutStyle.shadowColor;
   ctx.shadowBlur = Math.max(4, rh * 0.014);
   ctx.shadowOffsetY = Math.max(1, rh * 0.004);
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(boxX, boxY, boxW, boxH);
+  drawMinifigRoundedRect(ctx, boxX, boxY, boxW, boxH, boxRadius);
+  ctx.fillStyle = calloutStyle.bg;
+  ctx.fill();
   ctx.restore();
 
-  ctx.strokeStyle = '#1f2937';
-  ctx.lineWidth = Math.max(1.6, Math.min(2.6, rh * 0.0042));
-  ctx.strokeRect(boxX + 0.5, boxY + 0.5, boxW - 1, boxH - 1);
+  drawMinifigRoundedRect(ctx, boxX + 0.5, boxY + 0.5, boxW - 1, boxH - 1, boxRadius);
+  ctx.strokeStyle = calloutStyle.border;
+  ctx.lineWidth = Math.max(1.5, Math.min(2.4, rh * 0.004));
+  ctx.stroke();
 
-  // Render exploded body stack inside the white callout box
+  // Render exploded body stack inside the themed callout box
   const innerPadX = Math.round(boxW * 0.08);
   const innerPadY = Math.round(boxH * 0.045);
   const stackW = Math.max(48, boxW - innerPadX * 2);
@@ -4513,9 +4510,9 @@ function renderMinifigExplodedDiagram(step, cam, w, h, theme, zoom = 1.0) {
     boxY + innerPadY,
     stackW,
     stackH,
-    { red: '#d92626', blue: '#0088ce', dark: '#1f2937' },
+    calloutStyle.arrowPalette,
     redLineW,
-    'rgba(255,255,255,0.82)',
+    calloutStyle.arrowHalo,
   );
 
   // 2. Right region: Completed standing minifigure (with headroom above if accessories exist)
@@ -4548,7 +4545,7 @@ function renderMinifigExplodedDiagram(step, cam, w, h, theme, zoom = 1.0) {
     1.5,
   );
 
-  // 3. Horizontal black connector arrow from lower-right edge of white callout box to the standing figure's legs
+  // 3. Horizontal connector arrow from lower-right edge of callout box to the standing figure's legs
   const bodyBox = plan.decomposed.bodyBox;
   const legsTargetY = bodyBox.min[1] + (bodyBox.max[1] - bodyBox.min[1]) * 0.18;
   const figLeftLegPt = figMvp
@@ -4565,7 +4562,7 @@ function renderMinifigExplodedDiagram(step, cam, w, h, theme, zoom = 1.0) {
     haloWidth: 2.4,
   });
 
-  // 4. Optional handheld accessory callout box(es) above the minifigure's hand(s) (matching IMG_0316 envelope box!)
+  // 4. Optional handheld accessory callout box(es) above the minifigure's hand(s)
   if (hasAcc && figMvp) {
     const shownAcc = plan.accessoryCallouts.slice(0, 2);
     const placedBoxes = [];
@@ -4597,15 +4594,18 @@ function renderMinifigExplodedDiagram(step, cam, w, h, theme, zoom = 1.0) {
       const ay = Math.round(Math.max(padY, Math.min(accTopPt[1] - accBoxH - 26, figAreaY - accBoxH * 0.35)));
       placedBoxes.push({ x: ax, y: ay, w: accBoxW, h: accBoxH });
 
+      const accRadius = Math.max(5, Math.min(12, Math.round(Math.min(accBoxW, accBoxH) * 0.14)));
       ctx.save();
-      ctx.shadowColor = darkBg ? 'rgba(0,0,0,0.42)' : 'rgba(15,23,42,0.12)';
+      ctx.shadowColor = calloutStyle.shadowColor;
       ctx.shadowBlur = Math.max(3, rh * 0.01);
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(ax, ay, accBoxW, accBoxH);
+      drawMinifigRoundedRect(ctx, ax, ay, accBoxW, accBoxH, accRadius);
+      ctx.fillStyle = calloutStyle.bg;
+      ctx.fill();
       ctx.restore();
-      ctx.strokeStyle = '#1f2937';
+      drawMinifigRoundedRect(ctx, ax + 0.5, ay + 0.5, accBoxW - 1, accBoxH - 1, accRadius);
+      ctx.strokeStyle = calloutStyle.border;
       ctx.lineWidth = Math.max(1.5, rh * 0.0036);
-      ctx.strokeRect(ax + 0.5, ay + 0.5, accBoxW - 1, accBoxH - 1);
+      ctx.stroke();
 
       const aPad = Math.max(5, Math.round(Math.min(accBoxW, accBoxH) * 0.12));
       const aInnerW = Math.max(28, accBoxW - aPad * 2);
@@ -4645,13 +4645,13 @@ function renderMinifigExplodedDiagram(step, cam, w, h, theme, zoom = 1.0) {
           ay + aPad,
           aInnerW,
           aInnerH,
-          { red: '#d92626', blue: '#0088ce', dark: '#1f2937' },
+          calloutStyle.arrowPalette,
           Math.max(1.5, rh * 0.0036),
-          'rgba(255,255,255,0.85)',
+          calloutStyle.arrowHalo,
         );
       }
 
-      // Crisp white-haloed downward pointer arrow straight to the accessory in the minifigure's hand
+      // Crisp haloed downward pointer arrow straight to the accessory in the minifigure's hand
       const ptrStartX = Math.max(ax + 8, Math.min(ax + accBoxW - 8, accCenterPt[0]));
       const ptrStartY = ay + accBoxH + 1;
       const ptrEndX = accCenterPt[0];
@@ -4683,11 +4683,12 @@ function renderMinifigSequentialStage(step, stage, plan, cam, w, h, theme, zoom 
   const rh = Math.max(240, Math.round(h));
   const bgHex = toHexColor(theme?.bgColor || '#ffffff', '#ffffff');
   const darkBg = isDarkHexColor(bgHex);
+  const calloutStyle = resolveInlineCalloutBoxStyle(theme);
   const textColor = theme?.text || (darkBg ? '#f8fafc' : '#1f2937');
   const sb = Boolean(state.starkBlackOutlines);
   const outW = sb ? sanitizeLineWeight(state.outlineLineWeight, 'medium') : 'light';
   const unlit = state.stepLighting === 'none';
-  const cacheKey = `seq|${minifigDiagramCache.getEpoch()}|${step.id}|s${stage.stepNumber}|${(step.parts || []).length}|${Math.round(cam.az)}|${Math.round(cam.el)}|${Math.round(zoom * 100)}|${rw}x${rh}|${bgHex}|${textColor}|${sb ? outW : 'n'}${unlit ? '|u' : ''}`;
+  const cacheKey = `seq|${minifigDiagramCache.getEpoch()}|${step.id}|s${stage.stepNumber}|${(step.parts || []).length}|${Math.round(cam.az)}|${Math.round(cam.el)}|${Math.round(zoom * 100)}|${rw}x${rh}|${bgHex}|${calloutStyle.bg}|${calloutStyle.border}|${textColor}|${sb ? outW : 'n'}${unlit ? '|u' : ''}`;
   const cachedSeq = minifigDiagramCache.get(cacheKey);
   if (isRenderEntryUsable(cachedSeq)) return cachedSeq;
 
@@ -4770,7 +4771,7 @@ function renderMinifigSequentialStage(step, stage, plan, cam, w, h, theme, zoom 
     darkBg ? 'rgba(15,23,42,0.55)' : 'rgba(255,255,255,0.68)',
   );
 
-  // 4. Multi-part accessory subassembly warm peach rounded pill box (IMG_0315 Step 5 lightsaber!)
+  // 4. Multi-part accessory subassembly callout box styled with active theme's callout box tokens
   if (stage.accessoryPill && stageMvp) {
     const acc = stage.accessoryPill;
     const accTopPt = projectWorldToCanvasPt(
@@ -4800,15 +4801,20 @@ function renderMinifigSequentialStage(step, stage, plan, cam, w, h, theme, zoom 
     );
     const pillX = Math.round(Math.max(numColW + 4, Math.min(rw - rightPad - pillW, accTopPt[0] - pillW / 2)));
     const pillY = Math.round(Math.max(topPad + 2, accTopPt[1] - pillH - 28));
+    const pillRadius = Math.min(14, pillW * 0.28);
 
     ctx.save();
-    drawMinifigRoundedRect(ctx, pillX, pillY, pillW, pillH, Math.min(14, pillW * 0.28));
-    ctx.fillStyle = '#fde4a6';
+    ctx.shadowColor = calloutStyle.shadowColor;
+    ctx.shadowBlur = Math.max(3, rh * 0.01);
+    drawMinifigRoundedRect(ctx, pillX, pillY, pillW, pillH, pillRadius);
+    ctx.fillStyle = calloutStyle.bg;
     ctx.fill();
-    ctx.strokeStyle = '#1f2937';
-    ctx.lineWidth = Math.max(1.6, rh * 0.004);
-    ctx.stroke();
     ctx.restore();
+
+    drawMinifigRoundedRect(ctx, pillX + 0.5, pillY + 0.5, pillW - 1, pillH - 1, pillRadius);
+    ctx.strokeStyle = calloutStyle.border;
+    ctx.lineWidth = Math.max(1.5, rh * 0.004);
+    ctx.stroke();
 
     const pPadX = Math.max(5, Math.round(pillW * 0.14));
     const pPadY = Math.max(6, Math.round(pillH * 0.08));
@@ -4837,7 +4843,7 @@ function renderMinifigSequentialStage(step, stage, plan, cam, w, h, theme, zoom 
       2.0,
     );
 
-    // Blue downward arrow inside the warm peach pill (blade -> hilt)
+    // Blue downward arrow inside the callout box (blade -> hilt)
     drawProjectedMinifigArrows(
       ctx,
       accDisplay.subassemblyArrows,
@@ -4846,9 +4852,9 @@ function renderMinifigSequentialStage(step, stage, plan, cam, w, h, theme, zoom 
       pillY + pPadY,
       pInnerW,
       pInnerH,
-      { blue: '#0088ce', red: '#d92626', dark: '#1f2937' },
+      calloutStyle.arrowPalette,
       Math.max(1.8, rh * 0.0044),
-      'rgba(253,228,166,0.8)',
+      calloutStyle.arrowHalo,
     );
 
     // Crisp black downward arrow from peach pill straight down to the accessory in the minifigure's hand
@@ -26186,7 +26192,7 @@ async function buildInteractiveHtmlArtifact(mode: 'export' | 'preview' = 'export
         headingFont: getThemeFontStack(theme, 'heading'),
         bodyFont: getThemeFontStack(theme, 'body'),
         customFontFaces: collectReferencedCustomFonts([theme]).map(({ family, format, dataUrl }) => ({ family, format, dataUrl })),
-        isDark: isDarkHexColor(theme.bg),
+        isDark: isDarkHexColor(toHexColor(theme.bgColor || '#ffffff', '#ffffff')),
       },
       highlightNew: state.highlightNew,
       highlightColor: state.highlightColor,
