@@ -38,6 +38,10 @@ export interface OptimizableStepCameraInput {
   isSubmodelAttach?: boolean;
   /** Optional lifted/offset boxes of the attached submodel when `defaultPartOffsets` pulls it above its mating site. */
   shiftedStepBoxes?: readonly WorldBox[];
+  /** Optional world-space horizontal outward normals of SNOT parts attaching onto side studs in this step. */
+  engagedSideNormals?: readonly Vec3[];
+  /** Optional world-space horizontal outward normals of exposed side studs on SNOT brackets/bricks placed in this step. */
+  exposedSideStudNormals?: readonly Vec3[];
   /** Optional hard side constraint (e.g. 'bottom' during an upside-down underside assembly phase). */
   forceSide?: 'top' | 'bottom';
 }
@@ -1091,6 +1095,34 @@ export function optimizeStudioStepCameraSequence(
 
     const deadband = step.isSectionAttach ? 0.6 : STEP_VISIBILITY_DEADBAND;
 
+    // Compute dominant horizontal outward stud normal for SNOT steps (cancels cleanly to 0 when
+    // opposite sides are placed simultaneously so symmetric bilateral steps stay steady).
+    let studDirX = 0;
+    let studDirZ = 0;
+    let studIsEngaged = false;
+    const activeSideNormals =
+      step.engagedSideNormals && step.engagedSideNormals.length > 0
+        ? ((studIsEngaged = true), step.engagedSideNormals)
+        : step.exposedSideStudNormals && step.exposedSideStudNormals.length > 0
+          ? step.exposedSideStudNormals
+          : null;
+    if (activeSideNormals) {
+      let sx = 0;
+      let sz = 0;
+      for (let i = 0; i < activeSideNormals.length; i++) {
+        const n = activeSideNormals[i];
+        const hLen = Math.hypot(n[0], n[2]);
+        if (hLen < 0.3) continue;
+        sx += n[0] / hLen;
+        sz += n[2] / hLen;
+      }
+      const meanLen = Math.hypot(sx, sz) / activeSideNormals.length;
+      if (meanLen >= 0.35) {
+        const norm = Math.hypot(sx, sz);
+        studDirX = sx / norm;
+        studDirZ = sz / norm;
+      }
+    }
     for (let v = 0; v < V; v++) {
       const view = canonicalViews[v];
       if (view.isBottom && !allowBottom) continue;
@@ -1133,12 +1165,25 @@ export function optimizeStudioStepCameraSequence(
           subAttachCost += -0.35 * clamp(cornerDot(stepUnionBoxes[t], view.corner, builtBounds), -1, 1);
         }
       }
+      let studFacingCost = 0;
+      if (studDirX !== 0 || studDirZ !== 0) {
+        const azRad = (view.az * Math.PI) / 180;
+        const dot = studDirX * Math.sin(azRad) + studDirZ * Math.cos(azRad);
+        if (studIsEngaged) {
+          // Blind-side SNOT stud attachment (dot < 0) is strongly penalized; facing camera (dot > 0) is rewarded
+          studFacingCost = dot < 0 ? -dot * 0.95 : -dot * 0.25;
+        } else {
+          // Exposed SNOT bracket side studs gently prefer facing the camera (strong enough to pick the clear Step-1 corner)
+          studFacingCost = -dot * 0.22;
+        }
+      }
       const emissionCost =
         stepVisibilityPenalty(vis, deadband) +
         uprightBias +
         startAnchorBias +
         step1FacingCost +
-        subAttachCost;
+        subAttachCost +
+        studFacingCost;
 
       if (t === 0) {
         const initTransCost = initialCam ? stepCameraTransitionCost(initialCam, view) : 0;

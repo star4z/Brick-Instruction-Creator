@@ -1011,6 +1011,56 @@ describe('Step Camera Stability & Steady Framing', () => {
     const res = optimizeStudioStepCameraSequence(inputs);
     expect(res[2].side).toBe('bottom');
   });
+
+  it('orients a SNOT bracket submodel from Step 1 so exposed and engaged side studs face the camera with zero rotations', () => {
+    // Reproduces Bogie Side Plate (IMG_0419 / IMG_0420): brackets + sideways 2x4 plate face -X on Step 1,
+    // and sideways 1x4 tile + slopes attach onto those -X studs on Steps 2 & 3.
+    const s1Boxes = [
+      makeBox(-10, 0, -40, 10, 40, 0),  // bracket 1
+      makeBox(-10, 0, 0, 10, 40, 40),   // bracket 2
+      makeBox(-18, 0, -40, -10, 32, 40), // sideways 2x4 plate on -X face
+    ];
+    const s2Boxes = [
+      makeBox(-26, 0, -40, -18, 16, 40), // sideways 1x4 tile on -X face
+    ];
+    const s3Boxes = [
+      makeBox(-26, 16, -40, -18, 32, 40), // sideways slopes/tiles on -X face
+    ];
+
+    const inputs = buildSequenceInputs([s1Boxes, s2Boxes, s3Boxes]);
+    inputs[0].exposedSideStudNormals = [[-1, 0, 0], [-1, 0, 0], [-1, 0, 0]];
+    inputs[0].engagedSideNormals = [[-1, 0, 0]];
+    inputs[1].engagedSideNormals = [[-1, 0, 0]];
+    inputs[2].engagedSideNormals = [[-1, 0, 0], [-1, 0, 0]];
+
+    const res = optimizeStudioStepCameraSequence(inputs);
+    expect(res).toHaveLength(3);
+    expect(res[0].side).toBe('top');
+    // Camera must look from the -X side (sin(az) < 0 -> front_left or back_left) so all -X studs face the camera!
+    expect(Math.sin((res[0].az * Math.PI) / 180)).toBeLessThan(0);
+    expect(res[0].corner === 'front_left' || res[0].corner === 'back_left').toBe(true);
+    // Zero unnecessary rotations across the entire submodel
+    expect(res[1].corner).toBe(res[0].corner);
+    expect(res[1].cue).toBe('none');
+    expect(res[2].corner).toBe(res[0].corner);
+    expect(res[2].cue).toBe('none');
+  });
+
+  it('cancels opposing bilateral SNOT stud normals cleanly without causing spurious camera rotations', () => {
+    const s1 = [makeBox(-40, 0, -40, 40, 24, 40)];
+    const s2 = [
+      makeBox(-48, 0, -20, -40, 16, 20), // -X tile
+      makeBox(40, 0, -20, 48, 16, 20),   // +X tile (symmetric opposite)
+    ];
+
+    const inputs = buildSequenceInputs([s1, s2]);
+    inputs[1].engagedSideNormals = [[-1, 0, 0], [1, 0, 0]];
+
+    const res = optimizeStudioStepCameraSequence(inputs);
+    expect(res[0].corner).toBe('front_right');
+    expect(res[1].corner).toBe('front_right');
+    expect(res[1].cue).toBe('none');
+  });
 });
 
 

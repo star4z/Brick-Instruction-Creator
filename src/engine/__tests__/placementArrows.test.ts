@@ -1559,6 +1559,112 @@ describe('placementArrows — LEGO-style automatic placement arrows & offsets', 
     // 2 stud arrows + 1 coaxial arrow = 3 flat arrows × 3 triangles × 9 floats = 81 floats
     expect(geom.triPos.length).toBe(81);
   });
+
+  it('uses concave subBoxes so a 4x4 plate plugging vertically upward into L-bracket top flanges offsets vertically, never horizontally', () => {
+    // Reproduces IMG_0419 Step 2: two L-shaped brackets (44728.dat) whose outer AABB drops down to Y=17,
+    // while their horizontal top flange spans Y=[49..57]. A 4x4 plate at Y=[41..49] plugs its +Y studs
+    // upward into the underside of the horizontal top flanges (Y=49) -> attachment is strictly vertical!
+    const bracketA = {
+      ...makePart('bracket_a', 30, 17, -20, 20, 44, 40, BLACK),
+      localUp: [0, 1, 0] as readonly [number, number, number],
+      subBoxes: [
+        makeBox(20, 49, -40, 40, 61, 0), // horizontal top flange (underside at Y=49)
+        makeBox(36, 17, -40, 44, 57, 0), // vertical side skirt hanging down to Y=17
+      ],
+    };
+    const bracketB = {
+      ...makePart('bracket_b', 30, 17, 20, 20, 44, 40, BLACK),
+      localUp: [0, 1, 0] as readonly [number, number, number],
+      subBoxes: [
+        makeBox(20, 49, 0, 40, 61, 40),
+        makeBox(36, 17, 0, 44, 57, 40),
+      ],
+    };
+    const plate4x4 = {
+      ...makePart('plate_4x4', 0, 41, 0, 80, 12, 80, BLACK),
+      localUp: [0, 1, 0] as readonly [number, number, number],
+      studs: [
+        [30, 49, -30, 0, 1, 0] as const,
+        [30, 49, -10, 0, 1, 0] as const,
+        [30, 49, 10, 0, 1, 0] as const,
+        [30, 49, 30, 0, 1, 0] as const,
+      ],
+    };
+
+    const res = computeAutoPlacementOffsetsForSequence([
+      {
+        id: 's1',
+        camera: { az: 38, el: 28, side: 'top' },
+        parts: [bracketA, bracketB],
+      },
+      {
+        id: 's2',
+        camera: { az: 38, el: 28, side: 'top' },
+        parts: [plate4x4],
+      },
+    ]);
+
+    const off = res.get('s2')?.['plate_4x4'];
+    // Either strictly vertical (-Y) or omitted if hidden, NEVER horizontal!
+    if (off) {
+      expect(off.x).toBe(0);
+      expect(off.z).toBe(0);
+      expect(off.y).toBeLessThan(0);
+    }
+  });
+
+  it('never falls back to a physically impossible vertical offset when a purely lateral side attachment is on the camera-occluded far side', () => {
+    // Reproduces Wheel hub Step 2: wheel holder at X=[-40..40], far-side wheel plugged horizontally
+    // into its -X side (camDot < -0.15 from az=38). When the -X lateral pull is rejected by the
+    // visibility gate, it must omit the offset rather than pulling the wheel vertically through the holder roof.
+    const holder = makePart('wheel_holder', 0, 20, 0, 80, 36, 40, BLACK);
+    const farWheel = makePart('wheel_far', -48, 0, 0, 20, 40, 40, BLACK);
+
+    const res = computeAutoPlacementOffsetsForSequence([
+      {
+        id: 's1',
+        camera: { az: 38, el: 28, side: 'top' },
+        parts: [holder],
+      },
+      {
+        id: 's2',
+        camera: { az: 38, el: 28, side: 'top' },
+        parts: [farWheel],
+      },
+    ]);
+
+    const off = res.get('s2')?.['wheel_far'];
+    if (off) {
+      expect(off.y).toBe(0);
+    }
+  });
+
+  it('never pulls a bottom-protruding wheel tucked underneath a closed-top wheel holder arch upward (+Y) through its solid roof', () => {
+    // Reproduces Wheel hub x2 Step 2: 38340 wheel sits inside 38339 wheel holder XZ footprint,
+    // protrudes below the holder (minY=10 < 21), and stays strictly below the closed top (maxY=48 < 65).
+    const holder = makePart('wheel_holder_38339', 0, 21, 0, 120, 44, 40, BLACK);
+    const wheelInArch = makePart('wheel_38340', -44, 10, 0, 22, 38, 32, BLACK);
+
+    const res = computeAutoPlacementOffsetsForSequence([
+      {
+        id: 's1',
+        camera: { az: 38, el: 28, side: 'top' },
+        parts: [holder],
+      },
+      {
+        id: 's2',
+        camera: { az: 38, el: 28, side: 'top' },
+        parts: [wheelInArch],
+      },
+    ]);
+
+    const off = res.get('s2')?.['wheel_38340'];
+    // On an upright top view, pulling upward (+Y) through the closed top is impossible,
+    // and pulling downward (-Y) is occluded behind the holder -> must stay cleanly seated (or never pull +Y).
+    if (off) {
+      expect(off.y).toBeLessThanOrEqual(0);
+    }
+  });
 });
 
 

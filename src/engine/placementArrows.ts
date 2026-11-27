@@ -57,6 +57,8 @@ export interface PlacementPartInput {
   studs?: ReadonlyArray<PlacementStud>;
   /** Optional world-space unit vector pointing from narrow shaft toward wide head/ball/stop on asymmetric headed fasteners. */
   headedShaftDir?: readonly [number, number, number];
+  /** Optional world-space tight convex sub-boxes for concave parts (e.g. L-brackets, arches, frames). */
+  subBoxes?: ReadonlyArray<PlacementAABB>;
 }
 
 export interface PlacementStepInput {
@@ -278,6 +280,10 @@ interface ContactSummary {
   supportedFromAbove: boolean;
   /** True when the piece passes vertically through a hole or sleeves coaxially around a vertical rod/axle. */
   verticalCoaxial: boolean;
+  /** True when a verticalCoaxial part is enclosed below the host top and only protrudes downward (cannot pull +Y through roof). */
+  verticalCoaxialTopBlocked: boolean;
+  /** True when a verticalCoaxial part is enclosed above the host bottom and only protrudes upward (cannot pull -Y through floor). */
+  verticalCoaxialBotBlocked: boolean;
   /** True when the piece passes horizontally through a side hole (e.g. Technic pin/axle inside a Technic brick). */
   horizontalCoaxial: boolean;
   /** Primary world horizontal insertion axis (0 = X, 2 = Z) when `horizontalCoaxial` is true. */
@@ -358,6 +364,22 @@ function isStudEngagingBox(stud: PlacementStud, targetBox: PlacementAABB): boole
   return midIn && tipIn && centerAhead >= 2.0;
 }
 
+/**
+ * Concave-aware stud engagement test: when a target part has convex `subBoxes`
+ * (e.g. an L-shaped bracket whose vertical skirt drops far below its horizontal
+ * top flange), tests each convex sub-box so studs engaging the horizontal flange
+ * are never missed by the outer AABB's dropped entry face.
+ */
+function isStudEngagingPart(stud: PlacementStud, target: PlacementPartInput): boolean {
+  if (target.subBoxes && target.subBoxes.length > 0) {
+    for (let i = 0; i < target.subBoxes.length; i++) {
+      if (isStudEngagingBox(stud, target.subBoxes[i])) return true;
+    }
+    return false;
+  }
+  return isStudEngagingBox(stud, target.box);
+}
+
 interface EngagedStudSummary {
   pullDir: Vec3;
   count: number;
@@ -402,7 +424,7 @@ function findEngagedStuds(
     if (!ref.studs || ref.studs.length === 0) continue;
     for (let j = 0; j < ref.studs.length; j++) {
       const st = ref.studs[j];
-      if (!isStudEngagingBox(st, part.box)) continue;
+      if (!isStudEngagingPart(st, part)) continue;
       let weight = 1.0;
       let alignBonus = 0;
       if (part.localUp) {
@@ -431,7 +453,7 @@ function findEngagedStuds(
       const st = part.studs[j];
       for (let i = 0; i < touchingRefs.length; i++) {
         const ref = touchingRefs[i];
-        if (!isStudEngagingBox(st, ref.box)) continue;
+        if (!isStudEngagingPart(st, ref)) continue;
         let weight = 1.0;
         let alignBonus = 0;
         if (ref.localUp) {
@@ -532,6 +554,8 @@ function analyzeContacts(
   let supportedFromBelow = false;
   let supportedFromAbove = false;
   let verticalCoaxial = false;
+  let verticalCoaxialTopBlocked = false;
+  let verticalCoaxialBotBlocked = false;
   let horizontalCoaxial = false;
   let horizontalCoaxialAxis: 0 | 2 | null = null;
   const coaxialHostIds = new Set<string>();
@@ -560,14 +584,24 @@ function analyzeContacts(
       }
     }
 
-    // Resting on top of ref (allow -CONTACT_EPS for 4 LDU stud penetration, but at most +1.5 LDU air gap
-    // so horizontal Technic pins sitting 2 LDU above deck studs are never misclassified as vertically seated)
-    if (ovX > 2 && ovZ > 2 && b.min[1] >= rb.max[1] - CONTACT_EPS && b.min[1] <= rb.max[1] + SUPPORT_GAP_MAX) {
-      supportedFromBelow = true;
-    }
-    // Attached underneath ref
-    if (ovX > 2 && ovZ > 2 && rb.min[1] >= b.max[1] - CONTACT_EPS && rb.min[1] <= b.max[1] + SUPPORT_GAP_MAX) {
-      supportedFromAbove = true;
+    // Resting on top of ref or attached underneath ref (concave-aware via subBoxes so
+    // L-shaped brackets register vertical flange support instead of false lateral nesting).
+    const partSubs = part.subBoxes && part.subBoxes.length > 0 ? part.subBoxes : [b];
+    const refSubs = ref.subBoxes && ref.subBoxes.length > 0 ? ref.subBoxes : [rb];
+    for (let ps = 0; ps < partSubs.length; ps++) {
+      const pb = partSubs[ps];
+      for (let rsIdx = 0; rsIdx < refSubs.length; rsIdx++) {
+        const rsb = refSubs[rsIdx];
+        const sovX = overlap1D(pb.min[0], pb.max[0], rsb.min[0], rsb.max[0]);
+        const sovZ = overlap1D(pb.min[2], pb.max[2], rsb.min[2], rsb.max[2]);
+        if (sovX <= 2 || sovZ <= 2) continue;
+        if (pb.min[1] >= rsb.max[1] - CONTACT_EPS && pb.min[1] <= rsb.max[1] + SUPPORT_GAP_MAX) {
+          supportedFromBelow = true;
+        }
+        if (rsb.min[1] >= pb.max[1] - CONTACT_EPS && rsb.min[1] <= pb.max[1] + SUPPORT_GAP_MAX) {
+          supportedFromAbove = true;
+        }
+      }
     }
 
     // Coaxial / through-hole penetration (overlapping in all 3 axes):
@@ -579,7 +613,9 @@ function analyzeContacts(
     if (ovY > 3 && nestedXZ) {
       const partVertElongated = s[1] >= Math.max(s[0], s[2]) * 1.1;
       const partHorizElongated = Math.max(s[0], s[2]) >= s[1] * 1.15;
-      const partProtrudesVert = b.max[1] > rb.max[1] + 2 || b.min[1] < rb.min[1] - 2;
+      const partProtrudesTop = b.max[1] > rb.max[1] + 2;
+      const partProtrudesBot = b.min[1] < rb.min[1] - 2;
+      const partProtrudesVert = partProtrudesTop || partProtrudesBot;
       const refHorizWider = Math.max(rs[0], rs[2]) >= Math.max(s[0], s[2]) * 1.3;
       const partWrapsRefXZ = s[0] >= rs[0] + 1 && s[2] >= rs[2] + 1;
       const refInsidePartXZ =
@@ -594,8 +630,22 @@ function analyzeContacts(
         refInsidePartXZ &&
         rs[1] >= Math.max(rs[0], rs[2]) * 1.8 &&
         (rb.max[1] > b.max[1] + 2 || rb.min[1] < b.min[1] - 2);
-      if (coaxialXZ && ((partVertElongated && (partProtrudesVert || refHorizWider)) || (partProtrudesVert && refHorizWider) || refVertRod)) {
+      const hangsOffOneSide =
+        (b.min[0] < rb.min[0] - 2 && b.max[0] < rb.max[0] - 2) ||
+        (b.max[0] > rb.max[0] + 2 && b.min[0] > rb.min[0] + 2) ||
+        (b.min[2] < rb.min[2] - 2 && b.max[2] < rb.max[2] - 2) ||
+        (b.max[2] > rb.max[2] + 2 && b.min[2] > rb.min[2] + 2);
+      const isSideMountedBelowTop = hangsOffOneSide && b.max[1] <= rb.max[1] + 2;
+      if (coaxialXZ && !isSideMountedBelowTop && ((partVertElongated && (partProtrudesVert || refHorizWider)) || (partProtrudesVert && refHorizWider) || refVertRod)) {
         verticalCoaxial = true;
+        if (!refVertRod) {
+          if (partProtrudesBot && !partProtrudesTop && b.max[1] < rb.max[1] - 2) {
+            verticalCoaxialTopBlocked = true;
+          }
+          if (partProtrudesTop && !partProtrudesBot && b.min[1] > rb.min[1] + 2) {
+            verticalCoaxialBotBlocked = true;
+          }
+        }
         coaxialHostIds.add(ref.id);
         continue;
       }
@@ -661,6 +711,8 @@ function analyzeContacts(
     supportedFromBelow,
     supportedFromAbove,
     verticalCoaxial,
+    verticalCoaxialTopBlocked,
+    verticalCoaxialBotBlocked,
     horizontalCoaxial,
     horizontalCoaxialAxis,
     coaxialHostIds,
@@ -1478,6 +1530,18 @@ function chooseInsertionDirs(
         fallbacks: [],
       };
     }
+    if (contacts.verticalCoaxialTopBlocked && !contacts.verticalCoaxialBotBlocked) {
+      return {
+        preferred: [0, -1, 0],
+        fallbacks: [],
+      };
+    }
+    if (contacts.verticalCoaxialBotBlocked && !contacts.verticalCoaxialTopBlocked) {
+      return {
+        preferred: [0, 1, 0],
+        fallbacks: [],
+      };
+    }
     return {
       preferred: verticalDefault,
       fallbacks: [verticalOpposite],
@@ -1507,13 +1571,13 @@ function chooseInsertionDirs(
     const lat = contacts.lateralNormal;
     return {
       preferred: lat,
-      fallbacks: [verticalDefault, [-lat[0], 0, -lat[2]], verticalOpposite],
+      fallbacks: [],
     };
   }
   if (contacts.supportedFromAbove && !contacts.supportedFromBelow) {
     return {
       preferred: [0, -1, 0],
-      fallbacks: contacts.lateralNormal ? [contacts.lateralNormal, [0, 1, 0]] : [[0, 1, 0]],
+      fallbacks: contacts.lateralNormal ? [contacts.lateralNormal] : [],
     };
   }
   if (contacts.supportedFromBelow) {
