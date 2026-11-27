@@ -273,6 +273,7 @@ import {
   describePageLayoutSpec,
   evaluateStepInSlot,
   findLayoutGroupForStep,
+  getLayoutGroupStepRanges,
   getPageSizeWarningStepLinks,
   getSpecStepsPerPageCap,
   DEFAULT_PAGE_NUMBER_POSITION,
@@ -328,7 +329,7 @@ import {
   FOCUS_MODE_OPTIONS,
   MINIFIG_STYLE_OPTIONS,
   PAPER_FORMAT_SPECS,
-  applyCameraAngleToStepRange,
+  applyCameraAngleToStepSelection,
   clampStepModelScale,
   clearStepArrangeOverride,
   clearStepCameraOverride,
@@ -529,13 +530,27 @@ import { loadPartsCatalog } from './engine/partsCatalog';
 import { loadPartColorsCatalog } from './engine/partColors';
 import {
   assignAbsoluteStepNumbers,
+  countStepsInRangeSpans,
   formatAbsRange,
   formatDualStepLabel,
+  formatStepRangeSpans,
   getAbsStepNum,
   getChapterAbsRange,
   getSectionAbsRange,
+  isStepInRangeSpans,
   migrateLegacyLayoutGroups,
+  parseStepRangeInput,
+  stepSetToRangeSpans,
 } from './engine/stepNumbering';
+import {
+  clearStepRangeSelection,
+  clickSpanInSelection,
+  clickStepInSelection,
+  computeDragRangeSelection,
+  createStepRangeSelection,
+  resolveDragRangeAction,
+  setStepRangeSelectionSpan,
+} from './engine/stepRangeSelection';
 import {
   DEFAULT_WORDLESS_MODE,
   buildAttachArrowIconSvg,
@@ -14576,8 +14591,163 @@ function renderContextOverlay(page) {
 }
 
 // =========================================================================
-// 8A. APPLY CAMERA TO STEP RANGE MODAL (Dual-Handle Range + 3D Thumbs)
+// 8A. SHARED TOUCH HOLD-AND-DRAG RANGE CONTROLLER + APPLY CAMERA MODAL
 // =========================================================================
+function attachStepRangeTouchDrag(listEl, { isEnabled, getStepNumFromEl, getSelectionModel, onSelectionChanged }) {
+  if (!listEl || listEl._stepRangeTouchDragController) {
+    return listEl?._stepRangeTouchDragController || { shouldSuppressClick: () => false };
+  }
+  const HOLD_MS = 260;
+  const MOVE_CANCEL_PX = 10;
+  const EDGE_ZONE_PX = 48;
+
+  let holdTimer = null;
+  let dragActive = false;
+  let startX = 0;
+  let startY = 0;
+  let lastX = 0;
+  let lastY = 0;
+  let dragStartStep = null;
+  let dragLastStep = null;
+  let dragAction = null;
+  let baseSelected = null;
+  let suppressClickUntil = 0;
+  let autoScrollRaf = 0;
+
+  const stopAutoScroll = () => {
+    if (autoScrollRaf) {
+      cancelAnimationFrame(autoScrollRaf);
+      autoScrollRaf = 0;
+    }
+  };
+
+  const updateDragTargetAtPoint = (clientX, clientY) => {
+    const el = document.elementFromPoint(clientX, clientY);
+    const targetStep = el ? getStepNumFromEl(el) : null;
+    if (targetStep == null || targetStep === dragLastStep) return;
+    if (dragAction === null) {
+      dragAction = resolveDragRangeAction(baseSelected, dragStartStep, targetStep) || 'select';
+    }
+    const model = getSelectionModel();
+    model.selectedSteps = computeDragRangeSelection(baseSelected, dragStartStep, targetStep, dragAction);
+    model.anchorStep = targetStep;
+    model.anchorAction = dragAction;
+    dragLastStep = targetStep;
+    onSelectionChanged();
+  };
+
+  const runAutoScroll = () => {
+    if (!dragActive) {
+      autoScrollRaf = 0;
+      return;
+    }
+    const rect = listEl.getBoundingClientRect();
+    let delta = 0;
+    if (lastY < rect.top + EDGE_ZONE_PX) {
+      delta = -Math.ceil(((rect.top + EDGE_ZONE_PX - lastY) / EDGE_ZONE_PX) * 10);
+    } else if (lastY > rect.bottom - EDGE_ZONE_PX) {
+      delta = Math.ceil(((lastY - (rect.bottom - EDGE_ZONE_PX)) / EDGE_ZONE_PX) * 10);
+    }
+    if (delta !== 0) {
+      const prevTop = listEl.scrollTop;
+      listEl.scrollTop += delta;
+      if (listEl.scrollTop !== prevTop) {
+        updateDragTargetAtPoint(lastX, lastY);
+      }
+      autoScrollRaf = requestAnimationFrame(runAutoScroll);
+    } else {
+      autoScrollRaf = 0;
+    }
+  };
+
+  const clearPendingHold = () => {
+    if (holdTimer) {
+      clearTimeout(holdTimer);
+      holdTimer = null;
+    }
+  };
+
+  listEl.addEventListener('touchstart', (e) => {
+    if (!isEnabled() || e.touches.length !== 1) return;
+    const stepNum = getStepNumFromEl(e.target);
+    if (stepNum == null) return;
+    const t = e.touches[0];
+    startX = t.clientX;
+    startY = t.clientY;
+    lastX = t.clientX;
+    lastY = t.clientY;
+    dragStartStep = stepNum;
+    dragLastStep = stepNum;
+    dragActive = false;
+    clearPendingHold();
+    holdTimer = setTimeout(() => {
+      holdTimer = null;
+      if (!isEnabled()) return;
+      const model = getSelectionModel();
+      dragActive = true;
+      baseSelected = new Set(model.selectedSteps);
+      dragAction = resolveDragRangeAction(baseSelected, dragStartStep, null);
+      if (dragAction !== null) {
+        model.selectedSteps = computeDragRangeSelection(baseSelected, dragStartStep, dragStartStep, dragAction);
+        model.anchorStep = dragStartStep;
+        model.anchorAction = dragAction;
+        onSelectionChanged();
+      }
+      listEl.classList.add('select-none');
+      if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+        try { navigator.vibrate(15); } catch {}
+      }
+    }, HOLD_MS);
+  }, { passive: true });
+
+  listEl.addEventListener('touchmove', (e) => {
+    if (e.touches.length !== 1) {
+      clearPendingHold();
+      return;
+    }
+    const t = e.touches[0];
+    lastX = t.clientX;
+    lastY = t.clientY;
+    if (!dragActive) {
+      if (holdTimer && Math.hypot(t.clientX - startX, t.clientY - startY) > MOVE_CANCEL_PX) {
+        clearPendingHold();
+      }
+      return;
+    }
+    e.preventDefault();
+    updateDragTargetAtPoint(t.clientX, t.clientY);
+    if (!autoScrollRaf) {
+      const rect = listEl.getBoundingClientRect();
+      if (t.clientY < rect.top + EDGE_ZONE_PX || t.clientY > rect.bottom - EDGE_ZONE_PX) {
+        autoScrollRaf = requestAnimationFrame(runAutoScroll);
+      }
+    }
+  }, { passive: false });
+
+  const endTouch = () => {
+    clearPendingHold();
+    stopAutoScroll();
+    if (dragActive) {
+      suppressClickUntil = performance.now() + 450;
+      dragActive = false;
+      baseSelected = null;
+      dragStartStep = null;
+      dragLastStep = null;
+      dragAction = null;
+      listEl.classList.remove('select-none');
+    }
+  };
+
+  listEl.addEventListener('touchend', endTouch, { passive: true });
+  listEl.addEventListener('touchcancel', endTouch, { passive: true });
+
+  const controller = {
+    shouldSuppressClick: () => performance.now() < suppressClickUntil,
+  };
+  listEl._stepRangeTouchDragController = controller;
+  return controller;
+}
+
 const applyAngleState = {
   sourceStep: null,
   sourceCh: null,
@@ -14586,9 +14756,7 @@ const applyAngleState = {
   sourceFocusMode: 'auto',
   includeFraming: false,
   allSteps: [],
-  startNum: 1,
-  endNum: 1,
-  awaitingEndClick: false,
+  selection: createStepRangeSelection(),
   thumbCache: new Map(),
   renderJobId: 0,
 };
@@ -14618,9 +14786,11 @@ function openApplyAngleModal(step, ch) {
   applyAngleState.sourceFocusMode = focusMode;
   applyAngleState.includeFraming = false;
   applyAngleState.allSteps = allSteps;
-  applyAngleState.startNum = srcAbs;
-  applyAngleState.endNum = Math.min(maxNum, Math.max(srcAbs, chMaxNum || maxNum));
-  applyAngleState.awaitingEndClick = false;
+  setStepRangeSelectionSpan(
+    applyAngleState.selection,
+    srcAbs,
+    Math.min(maxNum, Math.max(srcAbs, chMaxNum || maxNum)),
+  );
   applyAngleState.thumbCache.clear();
   applyAngleState.renderJobId++;
 
@@ -14668,8 +14838,11 @@ function syncApplyAngleRangeUI() {
   if (!allSteps.length) return;
   const minBound = getAbsStepNum(allSteps[0].step);
   const maxBound = getAbsStepNum(allSteps[allSteps.length - 1].step);
-  const lo = Math.min(applyAngleState.startNum, applyAngleState.endNum);
-  const hi = Math.max(applyAngleState.startNum, applyAngleState.endNum);
+  const selectedSet = applyAngleState.selection.selectedSteps;
+  const spans = stepSetToRangeSpans(selectedSet, maxBound);
+  const lo = spans.length > 0 ? spans[0].start : minBound;
+  const hi = spans.length > 0 ? spans[spans.length - 1].end : minBound;
+  const isDiscontinuous = spans.length > 1;
 
   const minInp = document.getElementById('angleRangeMin');
   const maxInp = document.getElementById('angleRangeMax');
@@ -14677,27 +14850,72 @@ function syncApplyAngleRangeUI() {
   if (maxInp) maxInp.value = String(hi);
 
   const span = Math.max(1, maxBound - minBound);
-  const leftPct = ((lo - minBound) / span) * 100;
-  const rightPct = ((hi - minBound) / span) * 100;
   const fill = document.getElementById('angleRangeFill');
-  if (fill) {
-    fill.style.left = `${leftPct.toFixed(2)}%`;
-    fill.style.width = `${Math.max(2, rightPct - leftPct).toFixed(2)}%`;
+  const segsEl = document.getElementById('angleRangeSegments');
+  if (fill && segsEl) {
+    if (spans.length === 0) {
+      fill.style.left = '0%';
+      fill.style.width = '0%';
+      fill.classList.remove('hidden');
+      segsEl.classList.add('hidden');
+      segsEl.innerHTML = '';
+    } else if (!isDiscontinuous) {
+      const leftPct = ((lo - minBound) / span) * 100;
+      const rightPct = ((hi - minBound) / span) * 100;
+      fill.style.left = `${leftPct.toFixed(2)}%`;
+      fill.style.width = `${Math.max(2, rightPct - leftPct).toFixed(2)}%`;
+      fill.classList.remove('hidden');
+      segsEl.classList.add('hidden');
+      segsEl.innerHTML = '';
+    } else {
+      fill.classList.add('hidden');
+      segsEl.classList.remove('hidden');
+      segsEl.innerHTML = spans.map((sp) => {
+        const l = ((sp.start - minBound) / span) * 100;
+        const r = ((sp.end - minBound) / span) * 100;
+        const w = Math.max(2, r - l);
+        return `<div class="dual-range-fill" style="left:${l.toFixed(2)}%;width:${w.toFixed(2)}%"></div>`;
+      }).join('');
+    }
   }
 
+  const fromToWrap = document.getElementById('angleRangeFromToWrap');
+  const summaryPill = document.getElementById('angleRangeSummaryPill');
   const startLbl = document.getElementById('angleRangeStartLbl');
   const endLbl = document.getElementById('angleRangeEndLbl');
-  const loStep = allSteps.find(({ step }) => getAbsStepNum(step) === lo)?.step;
-  const hiStep = allSteps.find(({ step }) => getAbsStepNum(step) === hi)?.step;
-  if (startLbl) startLbl.textContent = loStep ? formatDualStepLabel(loStep, { alwaysShowAbs: true }) : `#${lo}`;
-  if (endLbl) endLbl.textContent = hiStep ? formatDualStepLabel(hiStep, { alwaysShowAbs: true }) : `#${hi}`;
+  if (fromToWrap && summaryPill) {
+    if (spans.length === 0) {
+      fromToWrap.classList.add('hidden');
+      summaryPill.classList.remove('hidden');
+      summaryPill.textContent = 'No steps selected';
+      summaryPill.title = 'No steps selected';
+    } else if (isDiscontinuous) {
+      fromToWrap.classList.add('hidden');
+      summaryPill.classList.remove('hidden');
+      const formatted = formatStepRangeSpans(spans);
+      summaryPill.textContent = formatted;
+      summaryPill.title = formatted;
+    } else {
+      fromToWrap.classList.remove('hidden');
+      summaryPill.classList.add('hidden');
+      const loStep = allSteps.find(({ step }) => getAbsStepNum(step) === lo)?.step;
+      const hiStep = allSteps.find(({ step }) => getAbsStepNum(step) === hi)?.step;
+      if (startLbl) startLbl.textContent = loStep ? formatDualStepLabel(loStep, { alwaysShowAbs: true }) : `#${lo}`;
+      if (endLbl) endLbl.textContent = hiStep ? formatDualStepLabel(hiStep, { alwaysShowAbs: true }) : `#${hi}`;
+    }
+  }
 
-  const selectedCount = allSteps.filter(({ step }) => getAbsStepNum(step) >= lo && getAbsStepNum(step) <= hi).length;
+  const selectedCount = allSteps.filter(({ step }) => selectedSet.has(getAbsStepNum(step))).length;
   const countBadge = document.getElementById('angleRangeCountBadge');
   if (countBadge) countBadge.textContent = `${selectedCount} step${selectedCount === 1 ? '' : 's'}`;
 
   const confirmBtn = document.getElementById('btnConfirmApplyAngle');
-  if (confirmBtn) confirmBtn.textContent = `Apply Camera to ${selectedCount} Step${selectedCount === 1 ? '' : 's'}`;
+  if (confirmBtn) {
+    confirmBtn.disabled = selectedCount === 0;
+    confirmBtn.textContent = selectedCount === 0
+      ? 'Select Steps to Apply'
+      : `Apply Camera to ${selectedCount} Step${selectedCount === 1 ? '' : 's'}`;
+  }
 
   const conflictRes = getApplyCameraDestructiveNotice({
     steps: allSteps.map(x => x.step),
@@ -14705,6 +14923,7 @@ function syncApplyAngleRangeUI() {
     sourceStepId: applyAngleState.sourceStep?.id,
     startNum: lo,
     endNum: hi,
+    selectedAbsNums: selectedSet,
     includeFraming: applyAngleState.includeFraming,
   });
   applyDestructiveNoticeToEl('applyAngleConflictNotice', conflictRes.notice);
@@ -14716,18 +14935,16 @@ function syncApplyAngleRangeUI() {
   listEl.querySelectorAll('.angle-step-row').forEach((row) => {
     const num = Number(row.getAttribute('data-step-num'));
     const sid = row.getAttribute('data-step-id');
-    const inRange = num >= lo && num <= hi;
-    const isEdge = num === lo || num === hi;
+    const isSelected = selectedSet.has(num);
     const willOverwrite = Boolean(sid && conflictSet.has(sid));
     const badge = row.querySelector('.angle-edge-badge');
     const ovChip = row.querySelector('.angle-override-chip');
-    row.className = `angle-step-row w-full flex items-center gap-3 p-2 rounded-lg border text-left transition-colors cursor-pointer ${
-      isEdge
-        ? 'border-[var(--primary)] bg-[var(--primary-soft)] ring-1 ring-[var(--primary)]'
-        : inRange
-          ? 'border-[var(--primary-border)] bg-[var(--primary-soft)]/55'
-          : 'border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)]'
+    row.className = `angle-step-row w-full flex items-center gap-3 p-2 rounded-lg border text-left transition-colors cursor-pointer select-none ${
+      isSelected
+        ? 'border-[var(--primary)] bg-[var(--primary-soft)] ring-1 ring-inset ring-[var(--primary-border)]'
+        : 'border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)]'
     }`;
+    row.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
     if (ovChip) {
       if (willOverwrite) {
         ovChip.textContent = 'Will overwrite';
@@ -14741,18 +14958,9 @@ function syncApplyAngleRangeUI() {
       }
     }
     if (badge) {
-      if (num === lo && num === hi) {
-        badge.textContent = 'Start & End';
+      if (isSelected) {
+        badge.textContent = 'Selected';
         badge.className = 'angle-edge-badge px-2 py-0.5 rounded-md bg-[var(--primary)] text-[var(--primary-foreground)] text-[10px] font-bold shrink-0';
-      } else if (num === lo) {
-        badge.textContent = 'Start';
-        badge.className = 'angle-edge-badge px-2 py-0.5 rounded-md bg-[var(--primary)] text-[var(--primary-foreground)] text-[10px] font-bold shrink-0';
-      } else if (num === hi) {
-        badge.textContent = 'End';
-        badge.className = 'angle-edge-badge px-2 py-0.5 rounded-md bg-[var(--primary)] text-[var(--primary-foreground)] text-[10px] font-bold shrink-0';
-      } else if (inRange) {
-        badge.textContent = 'Included';
-        badge.className = 'angle-edge-badge px-2 py-0.5 rounded-md bg-[var(--card)] border border-[var(--primary-border)] text-[var(--primary)] text-[10px] font-semibold shrink-0';
       } else {
         badge.textContent = '';
         badge.className = 'angle-edge-badge hidden';
@@ -14768,6 +14976,18 @@ function renderApplyAngleModal(scrollToSource = false) {
   const srcId = applyAngleState.sourceStep?.id;
   const jobId = ++applyAngleState.renderJobId;
 
+  const touchDrag = attachStepRangeTouchDrag(listEl, {
+    isEnabled: () => !document.getElementById('applyAngleModal')?.classList.contains('hidden'),
+    getStepNumFromEl: (el) => {
+      const row = el?.closest?.('.angle-step-row');
+      if (!row) return null;
+      const n = Number(row.getAttribute('data-step-num'));
+      return Number.isFinite(n) && n >= 1 ? n : null;
+    },
+    getSelectionModel: () => applyAngleState.selection,
+    onSelectionChanged: () => syncApplyAngleRangeUI(),
+  });
+
   let prevChId = null;
   listEl.innerHTML = allSteps.map(({ ch, step }) => {
     const isCur = step.id === srcId;
@@ -14782,10 +15002,10 @@ function renderApplyAngleModal(scrollToSource = false) {
       : '';
     prevChId = ch.id;
     return `${chHeader}
-      <button type="button" data-step-num="${abs}" data-step-id="${step.id}" class="angle-step-row w-full flex items-center gap-3 p-2 rounded-lg border border-[var(--border)] bg-[var(--card)] text-left transition-colors cursor-pointer">
+      <button type="button" data-step-num="${abs}" data-step-id="${step.id}" class="angle-step-row w-full flex items-center gap-3 p-2 rounded-lg border border-[var(--border)] bg-[var(--card)] text-left transition-colors cursor-pointer select-none">
         <div class="w-14 h-14 rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] shrink-0 overflow-hidden flex items-center justify-center relative">
-          <img data-angle-thumb="${step.id}" alt="Step ${step.num} (absolute #${abs}) 3D preview" class="w-full h-full object-contain opacity-0 transition-opacity duration-150" />
-          <span data-angle-ph="${step.id}" class="font-mono text-[10px] text-[var(--muted-foreground)] absolute">#${abs}</span>
+          <img data-angle-thumb="${step.id}" alt="Step ${step.num} (absolute #${abs}) 3D preview" class="w-full h-full object-contain opacity-0 transition-opacity duration-150 pointer-events-none" />
+          <span data-angle-ph="${step.id}" class="font-mono text-[10px] text-[var(--muted-foreground)] absolute pointer-events-none">#${abs}</span>
         </div>
         <div class="flex-1 min-w-0">
           <div class="flex items-center gap-1.5 flex-wrap">
@@ -14802,16 +15022,14 @@ function renderApplyAngleModal(scrollToSource = false) {
   }).join('');
 
   listEl.querySelectorAll('.angle-step-row').forEach((row) => {
-    row.onclick = () => {
-      const clickedNum = Number(row.getAttribute('data-step-num'));
-      if (!applyAngleState.awaitingEndClick) {
-        applyAngleState.startNum = clickedNum;
-        applyAngleState.endNum = clickedNum;
-        applyAngleState.awaitingEndClick = true;
-      } else {
-        applyAngleState.endNum = clickedNum;
-        applyAngleState.awaitingEndClick = false;
+    row.onclick = (e) => {
+      if (touchDrag.shouldSuppressClick()) return;
+      if (e.shiftKey) {
+        e.preventDefault();
+        window.getSelection?.()?.removeAllRanges();
       }
+      const clickedNum = Number(row.getAttribute('data-step-num'));
+      clickStepInSelection(applyAngleState.selection, clickedNum, { shiftKey: Boolean(e.shiftKey) });
       syncApplyAngleRangeUI();
     };
   });
@@ -15031,7 +15249,7 @@ function syncMinifigStyleButtonsUI(rawStyle = state.minifigStyle) {
 // =========================================================================
 // 9. MENU, STYLE POPOVER, PAGE LAYOUT GROUPS & PAGE OVERVIEW OVERLAY SYNC
 // =========================================================================
-const overviewRangeState = { active: false, startStep: null, endStep: null };
+const overviewRangeState = { active: false, selection: createStepRangeSelection() };
 const layoutGroupEditorState = { editingId: null, slotSizes: [] };
 
 function syncLegacyLayoutFlag() {
@@ -15316,13 +15534,18 @@ function getSmartAutoPreviewSample(spec = state.layoutConfig, stepRange = null) 
   const allMetrics = Array.isArray(state.lastStepMetrics) ? state.lastStepMetrics : [];
   let scopedMetrics = allMetrics;
   if (stepRange && allMetrics.length > 0) {
-    const lo = Math.min(stepRange.startStepNum, stepRange.endStepNum);
-    const hi = Math.max(stepRange.startStepNum, stepRange.endStepNum);
-    const filtered = allMetrics.filter((m) => {
-      const n = Number.isFinite(m.absStepNum) ? m.absStepNum : m.stepNum;
-      return n >= lo && n <= hi;
-    });
-    if (filtered.length > 0) scopedMetrics = filtered;
+    const spans = Array.isArray(stepRange.stepRanges) && stepRange.stepRanges.length > 0
+      ? stepRange.stepRanges
+      : (Number.isFinite(stepRange.startStepNum) && Number.isFinite(stepRange.endStepNum)
+          ? [{ start: stepRange.startStepNum, end: stepRange.endStepNum }]
+          : []);
+    if (spans.length > 0) {
+      const filtered = allMetrics.filter((m) => {
+        const n = Number.isFinite(m.absStepNum) ? m.absStepNum : m.stepNum;
+        return isStepInRangeSpans(n, spans);
+      });
+      if (filtered.length > 0) scopedMetrics = filtered;
+    }
   }
   const repMetric = computeRepresentativeStepMetric(scopedMetrics);
   const est = computeSmartAutoPreviewGrid(ctx, repMetric ?? 45, spec);
@@ -15425,15 +15648,18 @@ function readGroupEditorDraftSpec() {
   });
 }
 
+function readGroupEditorStepSpans() {
+  const maxStep = Math.max(1, getAllSteps(state.model).length);
+  const raw = document.getElementById('grpStepsInput')?.value || '';
+  return parseStepRangeInput(raw, maxStep);
+}
+
 function renderGroupGridPreviewUI() {
   const el = document.getElementById('grpGridPreview');
   if (!el) return;
   const draftSpec = readGroupEditorDraftSpec();
-  const startVal = parseInt(document.getElementById('grpStartInput')?.value || '', 10);
-  const endVal = parseInt(document.getElementById('grpEndInput')?.value || '', 10);
-  const range = Number.isFinite(startVal) && Number.isFinite(endVal)
-    ? { startStepNum: startVal, endStepNum: endVal }
-    : null;
+  const spans = readGroupEditorStepSpans();
+  const range = spans.length > 0 ? { stepRanges: spans } : null;
   const autoPreview = getSpecStepsPerPageCap(draftSpec) === null
     ? getSmartAutoPreviewSample(draftSpec, range)
     : null;
@@ -15450,8 +15676,9 @@ function renderLayoutGroupsList() {
   listEl.innerHTML = state.layoutGroups.map((grp) => {
     const themeObj = grp.themeId ? resolveThemeById(grp.themeId, customThemes) : null;
     const summary = describePageLayoutSpec(grp.layout);
-    const rangeLabel = formatAbsRange(grp.startStepNum, grp.endStepNum);
-    const rangeDetail = describeAbsStepRange(grp.startStepNum, grp.endStepNum);
+    const spans = getLayoutGroupStepRanges(grp);
+    const rangeLabel = formatStepRangeSpans(spans);
+    const rangeDetail = describeAbsStepSpans(spans);
     return `
       <div class="flex items-center justify-between gap-2 px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--background)]">
         <div class="min-w-0">
@@ -15491,15 +15718,26 @@ function describeAbsStepRange(lo, hi) {
   return `${fmt(a)} → ${fmt(b)}`;
 }
 
-function syncGroupEditorDestructiveNotices() {
-  const s = parseInt(document.getElementById('grpStartStepInput')?.value, 10) || 1;
-  const e = parseInt(document.getElementById('grpEndStepInput')?.value, 10) || s;
+/** Human-readable summary for one or more (possibly discontinuous) absolute step spans. */
+function describeAbsStepSpans(spans) {
+  if (!Array.isArray(spans) || spans.length === 0) return '';
+  if (spans.length === 1) return describeAbsStepRange(spans[0].start, spans[0].end);
+  const count = countStepsInRangeSpans(spans);
+  return `${count} step${count === 1 ? '' : 's'} across ${spans.length} ranges`;
+}
+
+function syncGroupEditorDestructiveNotices(spans = readGroupEditorStepSpans()) {
+  if (!spans || spans.length === 0) {
+    applyDestructiveNoticeToEl('grpOverlapNotice', null);
+    return;
+  }
   applyDestructiveNoticeToEl(
     'grpOverlapNotice',
     getLayoutGroupOverlapDestructiveNotice({
       editingId: layoutGroupEditorState.editingId,
-      startStepNum: s,
-      endStepNum: e,
+      startStepNum: spans[0].start,
+      endStepNum: spans[spans.length - 1].end,
+      stepRanges: spans,
       existingGroups: state.layoutGroups,
     }),
   );
@@ -15507,11 +15745,23 @@ function syncGroupEditorDestructiveNotices() {
 
 function syncGroupRangeHintUI() {
   const hint = document.getElementById('grpRangeHint');
-  if (!hint) return;
-  const s = parseInt(document.getElementById('grpStartStepInput')?.value, 10) || 1;
-  const e = parseInt(document.getElementById('grpEndStepInput')?.value, 10) || s;
-  hint.textContent = `${formatAbsRange(s, e)} = ${describeAbsStepRange(s, e)}`;
-  syncGroupEditorDestructiveNotices();
+  const saveBtn = document.getElementById('btnGrpSave');
+  const spans = readGroupEditorStepSpans();
+  if (spans.length === 0) {
+    if (hint) hint.textContent = 'Enter step numbers or ranges (e.g. 1-4, 7, 10-12)';
+    if (saveBtn) saveBtn.disabled = true;
+    applyDestructiveNoticeToEl('grpOverlapNotice', null);
+    return;
+  }
+  if (saveBtn) saveBtn.disabled = false;
+  if (hint) {
+    const detail = describeAbsStepSpans(spans);
+    hint.textContent = detail
+      ? `${formatStepRangeSpans(spans)} = ${detail}`
+      : formatStepRangeSpans(spans);
+  }
+  syncGroupEditorDestructiveNotices(spans);
+  renderGroupGridPreviewUI();
 }
 
 function openLayoutGroupEditor(existingGroup = null, prefillRange = null) {
@@ -15523,17 +15773,23 @@ function openLayoutGroupEditor(existingGroup = null, prefillRange = null) {
   const curSlots = curPage?.slots || [];
   const defaultStart = prefillRange?.start ?? (curSlots[0]?.step ? getAbsStepNum(curSlots[0].step) : 1);
   const defaultEnd = prefillRange?.end ?? (curSlots[curSlots.length - 1]?.step ? getAbsStepNum(curSlots[curSlots.length - 1].step) : Math.min(maxStep, defaultStart + 3));
+  const initialSpans = existingGroup
+    ? getLayoutGroupStepRanges(existingGroup)
+    : (Array.isArray(prefillRange?.ranges) && prefillRange.ranges.length > 0
+        ? prefillRange.ranges
+        : [{ start: defaultStart, end: defaultEnd }]);
 
   layoutGroupEditorState.editingId = existingGroup?.id || null;
   layoutGroupEditorState.slotSizes = existingGroup?.layout?.slotSizes ? [...existingGroup.layout.slotSizes] : [];
 
   document.getElementById('grpEditorTitle').textContent = existingGroup ? `Edit "${existingGroup.name}"` : 'New Step Range Group';
-  document.getElementById('grpNameInput').value = existingGroup ? existingGroup.name : `Steps ${formatAbsRange(defaultStart, defaultEnd)}`;
-  document.getElementById('grpStartStepInput').value = String(existingGroup ? existingGroup.startStepNum : defaultStart);
-  document.getElementById('grpEndStepInput').value = String(existingGroup ? existingGroup.endStepNum : defaultEnd);
-  for (const id of ['grpStartStepInput', 'grpEndStepInput']) {
-    const inp = document.getElementById(id);
-    if (inp) { inp.max = String(maxStep); inp.oninput = syncGroupRangeHintUI; }
+  document.getElementById('grpNameInput').value = existingGroup
+    ? existingGroup.name
+    : `Steps ${formatStepRangeSpans(initialSpans)}`;
+  const stepsInp = document.getElementById('grpStepsInput');
+  if (stepsInp) {
+    stepsInp.value = formatStepRangeSpans(initialSpans, { prefix: '', rangeDash: '-' });
+    stepsInp.oninput = syncGroupRangeHintUI;
   }
   syncGroupRangeHintUI();
   document.getElementById('grpColsSelect').value = existingGroup ? String(existingGroup.layout.cols) : 'auto';
@@ -16737,6 +16993,85 @@ function syncBomSetupUI() {
   renderBomSetupPreview(effBc);
 }
 
+function syncOverviewRangeSelectionDOM() {
+  const rangeModeBtn = document.getElementById('btnOverviewRangeMode');
+  const rangeBar = document.getElementById('overviewRangeBar');
+  const rangeStatus = document.getElementById('overviewRangeStatus');
+  const rangeCreateBtn = document.getElementById('btnOverviewRangeCreate');
+  const ovSub = document.getElementById('overviewSubtitle');
+  const list = document.getElementById('overviewList');
+
+  if (rangeModeBtn) {
+    rangeModeBtn.textContent = overviewRangeState.active ? 'Done Selecting' : 'Select Range';
+    rangeModeBtn.className = `px-2.5 py-1.5 rounded-full border text-[11px] font-semibold transition ${overviewRangeState.active ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)] hover:border-[var(--primary)]'}`;
+  }
+  if (ovSub) {
+    ovSub.textContent = overviewRangeState.active
+      ? 'Click steps to toggle · Shift+click or hold & drag for a range'
+      : 'Tap any page or step to jump to it';
+  }
+  if (rangeBar) rangeBar.classList.toggle('hidden', !overviewRangeState.active);
+
+  const selectedSet = overviewRangeState.selection.selectedSteps;
+  const maxStep = Math.max(1, getAllSteps(state.model).length);
+  const spans = stepSetToRangeSpans(selectedSet, maxStep);
+
+  if (rangeStatus && rangeCreateBtn) {
+    if (spans.length === 1) {
+      const sp = spans[0];
+      const msg = `Selected ${formatAbsRange(sp.start, sp.end)} · ${describeAbsStepRange(sp.start, sp.end)}`;
+      rangeStatus.textContent = msg;
+      rangeStatus.title = msg;
+      rangeCreateBtn.disabled = false;
+    } else if (spans.length > 1) {
+      const count = countStepsInRangeSpans(spans);
+      const msg = `Selected ${formatStepRangeSpans(spans)} (${count} steps)`;
+      rangeStatus.textContent = msg;
+      rangeStatus.title = msg;
+      rangeCreateBtn.disabled = false;
+    } else {
+      const msg = 'Click steps to select · Shift+click or hold & drag for ranges';
+      rangeStatus.textContent = msg;
+      rangeStatus.title = msg;
+      rangeCreateBtn.disabled = true;
+    }
+  }
+
+  if (!list) return;
+  list.querySelectorAll('[data-abs-step]').forEach((row) => {
+    const absNum = Number(row.getAttribute('data-abs-step'));
+    const isStepActive = row.getAttribute('data-active') === 'true';
+    const inSelRange = overviewRangeState.active && selectedSet.has(absNum);
+    row.className = `flex items-center justify-between gap-2 px-3 py-2 cursor-pointer transition ${overviewRangeState.active ? 'select-none ' : ''}${inSelRange ? 'bg-[var(--primary-soft)] ring-1 ring-inset ring-[var(--primary-border)]' : (isStepActive ? 'bg-[var(--primary-soft)]' : 'hover:bg-black/[0.03] dark:hover:bg-white/[0.04]')}`;
+    const thumbBox = row.querySelector('.ov-step-thumb-box');
+    if (thumbBox) {
+      const highlighted = inSelRange || isStepActive;
+      thumbBox.classList.toggle('border-[var(--primary)]', highlighted);
+      thumbBox.classList.toggle('ring-1', highlighted);
+      thumbBox.classList.toggle('ring-[var(--primary-border)]', highlighted);
+      thumbBox.classList.toggle('border-[var(--border)]', !highlighted);
+      let chk = thumbBox.querySelector('.ov-step-check');
+      if (inSelRange && !chk) {
+        chk = document.createElement('span');
+        chk.className = 'ov-step-check absolute top-0.5 left-0.5 w-4 h-4 rounded bg-[var(--primary)] text-[var(--primary-foreground)] text-[10px] font-bold inline-flex items-center justify-center shadow-xs pointer-events-none';
+        chk.setAttribute('aria-hidden', 'true');
+        chk.textContent = '✓';
+        thumbBox.appendChild(chk);
+      } else if (!inSelRange && chk) {
+        chk.remove();
+      }
+    }
+    const titleEl = row.querySelector('.ov-step-title');
+    if (titleEl) {
+      titleEl.classList.toggle('text-[var(--primary)]', inSelRange || isStepActive);
+    }
+    const activeDot = row.querySelector('.ov-active-dot');
+    if (activeDot) {
+      activeDot.classList.toggle('hidden', inSelRange || !isStepActive);
+    }
+  });
+}
+
 function renderOverviewModal(opts = {}) {
   const list = document.getElementById('overviewList');
   if (!list) return;
@@ -16746,6 +17081,18 @@ function renderOverviewModal(opts = {}) {
   const jobId = overviewThumbRenderJobId;
   list.innerHTML = '';
 
+  const touchDrag = attachStepRangeTouchDrag(list, {
+    isEnabled: () => overviewRangeState.active && !document.getElementById('overviewModal')?.classList.contains('hidden'),
+    getStepNumFromEl: (el) => {
+      const row = el?.closest?.('[data-abs-step]');
+      if (!row) return null;
+      const n = Number(row.getAttribute('data-abs-step'));
+      return Number.isFinite(n) && n >= 1 ? n : null;
+    },
+    getSelectionModel: () => overviewRangeState.selection,
+    onSelectionChanged: () => syncOverviewRangeSelectionDOM(),
+  });
+
   const resScale = getPreviewResolutionScale();
   const { width: thumbW, height: thumbH } = computeOverviewThumbDimensions(resScale);
   const thumbEpoch = overviewThumbCache.getEpoch();
@@ -16754,61 +17101,18 @@ function renderOverviewModal(opts = {}) {
   const allModelPartsSig = computeStepPreviewPartSignature(allModelParts);
   const observedTargets = [];
 
-  const rangeModeBtn = document.getElementById('btnOverviewRangeMode');
-  const rangeBar = document.getElementById('overviewRangeBar');
-  const rangeStatus = document.getElementById('overviewRangeStatus');
-  const rangeCreateBtn = document.getElementById('btnOverviewRangeCreate');
-  const ovSub = document.getElementById('overviewSubtitle');
+  syncOverviewRangeSelectionDOM();
 
-  if (rangeModeBtn) {
-    rangeModeBtn.textContent = overviewRangeState.active ? 'Done Selecting' : 'Select Range';
-    rangeModeBtn.className = `px-2.5 py-1.5 rounded-full border text-[11px] font-semibold transition ${overviewRangeState.active ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--background)] hover:border-[var(--primary)]'}`;
-  }
-  if (ovSub) {
-    ovSub.textContent = overviewRangeState.active
-      ? 'Tap a start step and an end step (or page header) to group them'
-      : 'Tap any page or step to jump to it';
-  }
-  if (rangeBar) rangeBar.classList.toggle('hidden', !overviewRangeState.active);
-  if (rangeStatus && rangeCreateBtn) {
-    if (overviewRangeState.startStep != null && overviewRangeState.endStep != null) {
-      const lo = Math.min(overviewRangeState.startStep, overviewRangeState.endStep);
-      const hi = Math.max(overviewRangeState.startStep, overviewRangeState.endStep);
-      rangeStatus.textContent = `Selected ${formatAbsRange(lo, hi)} · ${describeAbsStepRange(lo, hi)}`;
-      rangeCreateBtn.disabled = false;
-    } else if (overviewRangeState.startStep != null) {
-      rangeStatus.textContent = `Start: #${overviewRangeState.startStep} (${describeAbsStepRange(overviewRangeState.startStep, overviewRangeState.startStep)}) · Tap an end step`;
-      rangeCreateBtn.disabled = false;
-    } else {
-      rangeStatus.textContent = 'Tap a start step, then an end step to group them';
-      rangeCreateBtn.disabled = true;
-    }
-  }
-
-  const pickRangeStep = (stepNum) => {
-    if (overviewRangeState.startStep == null || overviewRangeState.endStep != null) {
-      overviewRangeState.startStep = stepNum;
-      overviewRangeState.endStep = null;
-    } else {
-      overviewRangeState.endStep = stepNum;
-    }
-    renderOverviewModal();
+  const pickRangeStep = (stepNum, shiftKey = false) => {
+    clickStepInSelection(overviewRangeState.selection, stepNum, { shiftKey });
+    syncOverviewRangeSelectionDOM();
   };
-  const pickRangeSpan = (lo, hi) => {
-    if (overviewRangeState.startStep == null || overviewRangeState.endStep != null) {
-      overviewRangeState.startStep = lo;
-      overviewRangeState.endStep = hi;
-    } else {
-      overviewRangeState.startStep = Math.min(overviewRangeState.startStep, lo);
-      overviewRangeState.endStep = Math.max(overviewRangeState.startStep, hi);
-    }
-    renderOverviewModal();
+  const pickRangeSpan = (lo, hi, shiftKey = false) => {
+    clickSpanInSelection(overviewRangeState.selection, lo, hi, { shiftKey });
+    syncOverviewRangeSelectionDOM();
   };
   const isStepInOverviewRange = (num) => {
-    if (!overviewRangeState.active || overviewRangeState.startStep == null) return false;
-    const lo = Math.min(overviewRangeState.startStep, overviewRangeState.endStep ?? overviewRangeState.startStep);
-    const hi = Math.max(overviewRangeState.startStep, overviewRangeState.endStep ?? overviewRangeState.startStep);
-    return num >= lo && num <= hi;
+    return overviewRangeState.active && overviewRangeState.selection.selectedSteps.has(num);
   };
 
   const jumpToPageAndStep = (idx, stepId = null) => {
@@ -17007,9 +17311,14 @@ function renderOverviewModal(opts = {}) {
         ${grpBadge}
       </div>
       <span class="text-xs font-semibold text-[var(--muted-foreground)] shrink-0">${slots.length === 1 ? '1 step' : `${slots.length} steps`}</span>`;
-    pageHeader.onclick = () => {
+    pageHeader.onclick = (e) => {
       if (overviewRangeState.active) {
-        pickRangeSpan(getAbsStepNum(slots[0].step), getAbsStepNum(slots[slots.length - 1].step));
+        if (touchDrag.shouldSuppressClick()) return;
+        if (e.shiftKey) {
+          e.preventDefault();
+          window.getSelection?.()?.removeAllRanges();
+        }
+        pickRangeSpan(getAbsStepNum(slots[0].step), getAbsStepNum(slots[slots.length - 1].step), Boolean(e.shiftKey));
       } else {
         jumpToPageAndStep(idx, firstStep.id);
       }
@@ -17049,8 +17358,9 @@ function renderOverviewModal(opts = {}) {
       const stepMeta = metaParts.join(' · ');
 
       const stepRow = document.createElement('div');
+      stepRow.dataset.absStep = String(absNum);
       if (isStepActive) stepRow.dataset.active = 'true';
-      stepRow.className = `flex items-center justify-between gap-2 px-3 py-2 cursor-pointer transition ${inSelRange ? 'bg-[var(--primary-soft)] ring-1 ring-inset ring-[var(--primary-border)]' : (isStepActive ? 'bg-[var(--primary-soft)]' : 'hover:bg-black/[0.03] dark:hover:bg-white/[0.04]')}`;
+      stepRow.className = `flex items-center justify-between gap-2 px-3 py-2 cursor-pointer transition ${overviewRangeState.active ? 'select-none ' : ''}${inSelRange ? 'bg-[var(--primary-soft)] ring-1 ring-inset ring-[var(--primary-border)]' : (isStepActive ? 'bg-[var(--primary-soft)]' : 'hover:bg-black/[0.03] dark:hover:bg-white/[0.04]')}`;
 
       const cam = getStepCamera(step);
       const ov = state.overrides[step.id] || {};
@@ -17084,6 +17394,7 @@ function renderOverviewModal(opts = {}) {
       const cachedUrl = overviewThumbCache.get(cacheKey);
 
       const thumbBox = createPreviewBox(pageTheme, inSelRange || isStepActive);
+      thumbBox.classList.add('ov-step-thumb-box');
       const img = document.createElement('img');
       img.alt = `Step ${step.num} (absolute #${absNum}) preview`;
       img.className = `w-full h-full object-contain p-0.5 pointer-events-none ${cachedUrl ? '' : 'opacity-0 transition-opacity duration-150'}`;
@@ -17097,7 +17408,7 @@ function renderOverviewModal(opts = {}) {
       thumbBox.appendChild(ph);
       if (inSelRange) {
         const chk = document.createElement('span');
-        chk.className = 'absolute top-0.5 left-0.5 w-4 h-4 rounded bg-[var(--primary)] text-[var(--primary-foreground)] text-[10px] font-bold inline-flex items-center justify-center shadow-xs pointer-events-none';
+        chk.className = 'ov-step-check absolute top-0.5 left-0.5 w-4 h-4 rounded bg-[var(--primary)] text-[var(--primary-foreground)] text-[10px] font-bold inline-flex items-center justify-center shadow-xs pointer-events-none';
         chk.setAttribute('aria-hidden', 'true');
         chk.textContent = '✓';
         thumbBox.appendChild(chk);
@@ -17134,8 +17445,8 @@ function renderOverviewModal(opts = {}) {
       textWrap.className = 'min-w-0 flex-1';
       textWrap.innerHTML = `
         <div class="flex items-center gap-1.5 min-w-0">
-          ${!inSelRange && isStepActive ? '<span class="w-1.5 h-1.5 rounded-full bg-[var(--primary)] shrink-0" aria-hidden="true"></span>' : ''}
-          <span class="font-semibold truncate ${inSelRange || isStepActive ? 'text-[var(--primary)]' : ''}">${escHtml(stepTitle)}</span>
+          ${isStepActive ? `<span class="ov-active-dot w-1.5 h-1.5 rounded-full bg-[var(--primary)] shrink-0 ${inSelRange ? 'hidden' : ''}" aria-hidden="true"></span>` : ''}
+          <span class="ov-step-title font-semibold truncate ${inSelRange || isStepActive ? 'text-[var(--primary)]' : ''}">${escHtml(stepTitle)}</span>
           <span class="shrink-0 px-1 py-0.5 rounded border border-[var(--border)] font-mono text-[10px] font-semibold text-[var(--muted-foreground)]" title="Absolute step number (unique across the whole manual)">${absBadge}</span>
         </div>
         ${stepMeta ? `<div class="text-xs text-[var(--muted-foreground)] truncate mt-0.5">${escHtml(stepMeta)}</div>` : ''}`;
@@ -17149,9 +17460,14 @@ function renderOverviewModal(opts = {}) {
         stepRow.appendChild(rightWrap);
       }
 
-      stepRow.onclick = () => {
+      stepRow.onclick = (e) => {
         if (overviewRangeState.active) {
-          pickRangeStep(absNum);
+          if (touchDrag.shouldSuppressClick()) return;
+          if (e.shiftKey) {
+            e.preventDefault();
+            window.getSelection?.()?.removeAllRanges();
+          }
+          pickRangeStep(absNum, Boolean(e.shiftKey));
         } else {
           jumpToPageAndStep(idx, step.id);
         }
@@ -25755,20 +26071,24 @@ const angleRangeMaxEl = document.getElementById('angleRangeMax');
 if (angleRangeMinEl) {
   angleRangeMinEl.oninput = (e) => {
     const val = Number(e.target.value);
-    const curHi = Math.max(applyAngleState.startNum, applyAngleState.endNum);
-    applyAngleState.startNum = Math.min(val, curHi);
-    applyAngleState.endNum = curHi;
-    applyAngleState.awaitingEndClick = false;
+    const maxBound = applyAngleState.allSteps.length > 0
+      ? getAbsStepNum(applyAngleState.allSteps[applyAngleState.allSteps.length - 1].step)
+      : val;
+    const spans = stepSetToRangeSpans(applyAngleState.selection.selectedSteps, maxBound);
+    const curHi = spans.length > 0 ? spans[spans.length - 1].end : val;
+    setStepRangeSelectionSpan(applyAngleState.selection, Math.min(val, curHi), curHi);
     syncApplyAngleRangeUI();
   };
 }
 if (angleRangeMaxEl) {
   angleRangeMaxEl.oninput = (e) => {
     const val = Number(e.target.value);
-    const curLo = Math.min(applyAngleState.startNum, applyAngleState.endNum);
-    applyAngleState.startNum = curLo;
-    applyAngleState.endNum = Math.max(val, curLo);
-    applyAngleState.awaitingEndClick = false;
+    const maxBound = applyAngleState.allSteps.length > 0
+      ? getAbsStepNum(applyAngleState.allSteps[applyAngleState.allSteps.length - 1].step)
+      : val;
+    const spans = stepSetToRangeSpans(applyAngleState.selection.selectedSteps, maxBound);
+    const curLo = spans.length > 0 ? spans[0].start : val;
+    setStepRangeSelectionSpan(applyAngleState.selection, curLo, Math.max(val, curLo));
     syncApplyAngleRangeUI();
   };
 }
@@ -25777,9 +26097,11 @@ if (btnAnglePresetFollowing) {
   btnAnglePresetFollowing.onclick = () => {
     const all = applyAngleState.allSteps;
     if (!all.length || !applyAngleState.sourceStep) return;
-    applyAngleState.startNum = getAbsStepNum(applyAngleState.sourceStep);
-    applyAngleState.endNum = getAbsStepNum(all[all.length - 1].step);
-    applyAngleState.awaitingEndClick = false;
+    setStepRangeSelectionSpan(
+      applyAngleState.selection,
+      getAbsStepNum(applyAngleState.sourceStep),
+      getAbsStepNum(all[all.length - 1].step),
+    );
     syncApplyAngleRangeUI();
   };
 }
@@ -25788,9 +26110,7 @@ if (btnAnglePresetSubmodel) {
   btnAnglePresetSubmodel.onclick = () => {
     const r = applyAngleState.sourceCh?.kind === 'submodel' ? getChapterAbsRange(applyAngleState.sourceCh) : null;
     if (!r) return;
-    applyAngleState.startNum = r.lo;
-    applyAngleState.endNum = r.hi;
-    applyAngleState.awaitingEndClick = false;
+    setStepRangeSelectionSpan(applyAngleState.selection, r.lo, r.hi);
     syncApplyAngleRangeUI();
   };
 }
@@ -25799,9 +26119,7 @@ if (btnAnglePresetSection) {
   btnAnglePresetSection.onclick = () => {
     const r = getSectionAbsRange(state.model?.chapters || [], applyAngleState.sourceCh);
     if (!r) return;
-    applyAngleState.startNum = r.lo;
-    applyAngleState.endNum = r.hi;
-    applyAngleState.awaitingEndClick = false;
+    setStepRangeSelectionSpan(applyAngleState.selection, r.lo, r.hi);
     syncApplyAngleRangeUI();
   };
 }
@@ -25810,9 +26128,11 @@ if (btnAnglePresetAll) {
   btnAnglePresetAll.onclick = () => {
     const all = applyAngleState.allSteps;
     if (!all.length) return;
-    applyAngleState.startNum = getAbsStepNum(all[0].step);
-    applyAngleState.endNum = getAbsStepNum(all[all.length - 1].step);
-    applyAngleState.awaitingEndClick = false;
+    setStepRangeSelectionSpan(
+      applyAngleState.selection,
+      getAbsStepNum(all[0].step),
+      getAbsStepNum(all[all.length - 1].step),
+    );
     syncApplyAngleRangeUI();
   };
 }
@@ -25827,6 +26147,7 @@ const btnConfirmApplyAngle = document.getElementById('btnConfirmApplyAngle');
 if (btnConfirmApplyAngle) {
   btnConfirmApplyAngle.onclick = () => {
     if (!applyAngleState.camera || !applyAngleState.allSteps.length) return;
+    if (applyAngleState.selection.selectedSteps.size === 0) return;
     pushUndo();
     const cameraPayload = applyAngleState.includeFraming
       ? {
@@ -25835,11 +26156,10 @@ if (btnConfirmApplyAngle) {
           focusMode: applyAngleState.sourceFocusMode,
         }
       : applyAngleState.camera;
-    const res = applyCameraAngleToStepRange(
+    const res = applyCameraAngleToStepSelection(
       applyAngleState.allSteps.map(x => x.step),
       state.overrides,
-      applyAngleState.startNum,
-      applyAngleState.endNum,
+      applyAngleState.selection.selectedSteps,
       cameraPayload,
     );
     state.overrides = res.overrides;
@@ -25952,8 +26272,10 @@ if (btnGrpUseCur) {
     if (curSlots.length === 0) { showToast('Navigate to a step page first.'); return; }
     const s1 = getAbsStepNum(curSlots[0].step);
     const s2 = getAbsStepNum(curSlots[curSlots.length - 1].step);
-    document.getElementById('grpStartStepInput').value = String(s1);
-    document.getElementById('grpEndStepInput').value = String(s2);
+    const stepsInp = document.getElementById('grpStepsInput');
+    if (stepsInp) {
+      stepsInp.value = formatStepRangeSpans([{ start: s1, end: s2 }], { prefix: '', rangeDash: '-' });
+    }
     syncGroupRangeHintUI();
   };
 }
@@ -25968,22 +26290,26 @@ if (grpFlowSel) grpFlowSel.onchange = renderGroupGridPreviewUI;
 const btnGrpSave = document.getElementById('btnGrpSave');
 if (btnGrpSave) {
   btnGrpSave.onclick = () => {
-    const rawStart = Math.max(1, parseInt(document.getElementById('grpStartStepInput')?.value, 10) || 1);
-    const rawEnd = Math.max(1, parseInt(document.getElementById('grpEndStepInput')?.value, 10) || rawStart);
-    const startStepNum = Math.min(rawStart, rawEnd);
-    const endStepNum = Math.max(rawStart, rawEnd);
+    const stepRanges = readGroupEditorStepSpans();
+    if (stepRanges.length === 0) {
+      showToast('Enter at least one step number or range (e.g. 1-4, 7).');
+      return;
+    }
+    const startStepNum = stepRanges[0].start;
+    const endStepNum = stepRanges[stepRanges.length - 1].end;
     const colsRaw = document.getElementById('grpColsSelect')?.value || 'auto';
     const rowsRaw = document.getElementById('grpRowsSelect')?.value || 'auto';
     const flow = document.getElementById('grpFlowSelect')?.value === 'row' ? 'row' : 'column';
     const mixedLayout = document.getElementById('grpMixedSelect')?.value || 'even';
     const themeId = (document.getElementById('grpThemeSelect')?.value || '').trim() || null;
-    const name = (document.getElementById('grpNameInput')?.value || '').trim() || `Steps ${formatAbsRange(startStepNum, endStepNum)}`;
+    const name = (document.getElementById('grpNameInput')?.value || '').trim() || `Steps ${formatStepRangeSpans(stepRanges)}`;
 
     const newGroup = {
       id: layoutGroupEditorState.editingId || `grp_${Date.now().toString(36)}`,
       name,
       startStepNum,
       endStepNum,
+      stepRanges,
       stepBasis: 'absolute',
       layout: normalizePageLayoutSpec({
         cols: colsRaw === 'auto' ? 'auto' : parseInt(colsRaw, 10),
@@ -26025,32 +26351,29 @@ if (btnOverviewRangeMode) {
   btnOverviewRangeMode.onclick = () => {
     overviewRangeState.active = !overviewRangeState.active;
     if (!overviewRangeState.active) {
-      overviewRangeState.startStep = null;
-      overviewRangeState.endStep = null;
+      clearStepRangeSelection(overviewRangeState.selection);
     }
-    renderOverviewModal();
+    syncOverviewRangeSelectionDOM();
   };
 }
 const btnOverviewRangeClear = document.getElementById('btnOverviewRangeClear');
 if (btnOverviewRangeClear) {
   btnOverviewRangeClear.onclick = () => {
-    overviewRangeState.startStep = null;
-    overviewRangeState.endStep = null;
-    renderOverviewModal();
+    clearStepRangeSelection(overviewRangeState.selection);
+    syncOverviewRangeSelectionDOM();
   };
 }
 const btnOverviewRangeCreate = document.getElementById('btnOverviewRangeCreate');
 if (btnOverviewRangeCreate) {
   btnOverviewRangeCreate.onclick = () => {
-    if (overviewRangeState.startStep == null) return;
-    const lo = Math.min(overviewRangeState.startStep, overviewRangeState.endStep ?? overviewRangeState.startStep);
-    const hi = Math.max(overviewRangeState.startStep, overviewRangeState.endStep ?? overviewRangeState.startStep);
+    const maxStep = Math.max(1, getAllSteps(state.model).length);
+    const ranges = stepSetToRangeSpans(overviewRangeState.selection.selectedSteps, maxStep);
+    if (ranges.length === 0) return;
     overviewRangeState.active = false;
-    overviewRangeState.startStep = null;
-    overviewRangeState.endStep = null;
+    clearStepRangeSelection(overviewRangeState.selection);
     closeOverviewModal();
     openPageSetupModal();
-    openLayoutGroupEditor(null, { start: lo, end: hi });
+    openLayoutGroupEditor(null, { ranges, start: ranges[0].start, end: ranges[ranges.length - 1].end });
   };
 }
 

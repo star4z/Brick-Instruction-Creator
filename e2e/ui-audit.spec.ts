@@ -364,6 +364,12 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     if (await applyCameraBtn.isVisible()) {
       await applyCameraBtn.click();
       await expect(page.locator('#applyAngleModal')).toBeVisible();
+      // Toggle an interior step off to verify discontinuous selection + multi-segment slider
+      const angleRows = page.locator('#angleStepList .angle-step-row');
+      if ((await angleRows.count()) >= 3) {
+        await angleRows.nth(1).click();
+        await expect(page.locator('#angleRangeSummaryPill')).toBeVisible();
+      }
       await auditSurface(page, `${testInfo.project.name}: Apply Camera to Steps Modal`, {
         activeContainerSelector: '#applyAngleModal',
       });
@@ -414,9 +420,17 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
       activeContainerSelector: '#overviewModal',
     });
 
-    // Toggle Select Range mode inside Overview Modal
+    // Toggle Select Range mode inside Overview Modal and verify discontinuous click + Shift+click selection
     await page.locator('#btnOverviewRangeMode').click();
     await expect(page.locator('#overviewRangeBar')).toBeVisible();
+    const ovStepRows = page.locator('#overviewList [data-abs-step]');
+    if ((await ovStepRows.count()) >= 4) {
+      await ovStepRows.nth(0).click();
+      await ovStepRows.nth(2).click();
+      await ovStepRows.nth(3).click({ modifiers: ['Shift'] });
+      await expect(page.locator('#overviewRangeStatus')).toContainText('#1, #3–#4');
+      await expect(page.locator('#btnOverviewRangeCreate')).toBeEnabled();
+    }
     await auditSurface(page, `${testInfo.project.name}: Overview Modal (Range Select)`, {
       activeContainerSelector: '#overviewModal',
     });

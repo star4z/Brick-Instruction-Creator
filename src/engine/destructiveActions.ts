@@ -7,8 +7,14 @@ import {
   type CompleteMeta,
   type CoverMeta,
 } from '../cover/coverLayout';
-import type { StepLayoutGroup } from './pageLayout';
+import { getLayoutGroupStepRanges, type StepLayoutGroup } from './pageLayout';
 import type { PageBreakRegenerationAnalysis } from './pageBreaks';
+import {
+  doRangeSpansOverlap,
+  formatStepRangeSpans,
+  normalizeStepRangeSpans,
+  type StepRangeSpan,
+} from './stepNumbering';
 import type { StepOverrideLike } from './stepToolbar';
 import {
   getWordlessSurfaceDefaults,
@@ -385,6 +391,7 @@ export function getApplyCameraDestructiveNotice(input: {
   sourceStepId: string | null | undefined;
   startNum: number;
   endNum: number;
+  selectedAbsNums?: ReadonlySet<number> | ReadonlyArray<number> | null;
   includeFraming: boolean;
 }): {
   notice: DestructiveNotice | null;
@@ -394,6 +401,9 @@ export function getApplyCameraDestructiveNotice(input: {
 } {
   const lo = Math.min(input.startNum, input.endNum);
   const hi = Math.max(input.startNum, input.endNum);
+  const selectedSet = input.selectedAbsNums
+    ? (input.selectedAbsNums instanceof Set ? input.selectedAbsNums : new Set(input.selectedAbsNums))
+    : null;
   const overrides = input.overrides || {};
 
   const affectedStepIds: string[] = [];
@@ -404,7 +414,7 @@ export function getApplyCameraDestructiveNotice(input: {
   for (const step of input.steps) {
     if (!step || step.id === input.sourceStepId) continue;
     const abs = typeof step.absNum === 'number' ? step.absNum : step.num;
-    if (abs < lo || abs > hi) continue;
+    if (selectedSet ? !selectedSet.has(abs) : (abs < lo || abs > hi)) continue;
 
     const ov = overrides[step.id];
     const hasAngle = hasCameraAngleOverride(ov);
@@ -683,11 +693,15 @@ export function getLayoutGroupOverlapDestructiveNotice(input: {
   editingId: string | null;
   startStepNum: number;
   endStepNum: number;
+  stepRanges?: ReadonlyArray<StepRangeSpan> | null;
   existingGroups: ReadonlyArray<StepLayoutGroup>;
 }): DestructiveNotice | null {
-  const lo = Math.min(input.startStepNum, input.endStepNum);
-  const hi = Math.max(input.startStepNum, input.endStepNum);
-  const rangeStr = lo === hi ? `#${lo}` : `#${lo}–#${hi}`;
+  const targetSpans =
+    input.stepRanges && input.stepRanges.length > 0
+      ? normalizeStepRangeSpans(input.stepRanges)
+      : normalizeStepRangeSpans([{ start: input.startStepNum, end: input.endStepNum }]);
+  if (targetSpans.length === 0) return null;
+  const rangeStr = formatStepRangeSpans(targetSpans);
 
   const editingIdx = input.editingId
     ? input.existingGroups.findIndex((g) => g.id === input.editingId)
@@ -699,10 +713,9 @@ export function getLayoutGroupOverlapDestructiveNotice(input: {
 
   input.existingGroups.forEach((grp, idx) => {
     if (grp.id === input.editingId) return;
-    const gLo = Math.min(grp.startStepNum, grp.endStepNum);
-    const gHi = Math.max(grp.startStepNum, grp.endStepNum);
-    if (lo <= gHi && hi >= gLo) {
-      const label = `"${grp.name}" (${gLo === gHi ? `#${gLo}` : `#${gLo}–#${gHi}`})`;
+    const grpSpans = getLayoutGroupStepRanges(grp);
+    if (doRangeSpansOverlap(targetSpans, grpSpans)) {
+      const label = `"${grp.name}" (${formatStepRangeSpans(grpSpans)})`;
       if (idx < effectiveIdx) overriddenEarlier.push(label);
       else shadowedByLater.push(label);
     }

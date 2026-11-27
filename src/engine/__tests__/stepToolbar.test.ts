@@ -8,6 +8,7 @@ import {
   PAPER_FORMAT_ORDER,
   PAPER_FORMAT_SPECS,
   applyCameraAngleToStepRange,
+  applyCameraAngleToStepSelection,
   clampStepModelScale,
   clearStepArrangeOverride,
   clearStepCameraOverride,
@@ -364,6 +365,15 @@ describe('Step Toolbar & Scope-Based Editor Capabilities', () => {
     const res = applyCameraAngleToStepRange(steps, {}, 1, 2, { side: 'top', corner: 'front_right', az: 38, el: 29 });
     expect(res.appliedCount).toBe(2);
     expect(Object.keys(res.overrides).sort()).toEqual(['mf1', 'mf2']);
+
+    const disc = applyCameraAngleToStepSelection(steps, {}, new Set([1, 3, 5]), {
+      side: 'bottom',
+      corner: 'back_left',
+      az: 215,
+      el: -28,
+    });
+    expect(disc.appliedCount).toBe(3);
+    expect(Object.keys(disc.overrides).sort()).toEqual(['fh2', 'mf1', 'mf3']);
   });
 
   it('computes accurate paper format preview box proportions for landscape, portrait, A4, A5, and square', () => {

@@ -27,9 +27,10 @@ Implemented in [`src/engine/pageLayout.ts`](../src/engine/pageLayout.ts) and [`s
     - `'hero_right'`: Companion steps packed dynamically on the left; final step featured large on the right
     - `'custom_weights'`: Per-slot `S / M / L` relative sizing (`slotSizes: ('sm' | 'md' | 'lg')[]`) packed dynamically by physical min sizes
 - **`StepLayoutGroup`**:
-  - Named, editable rule covering an inclusive 1-based **absolute** step range (`startStepNum..endStepNum`, `stepBasis: 'absolute'`; see [`ABSOLUTE_STEP_NUMBERING_DESIGN.md`](./ABSOLUTE_STEP_NUMBERING_DESIGN.md))
+  - Named, editable rule covering one or more inclusive 1-based **absolute** step ranges (`stepRanges: StepRangeSpan[]` with `startStepNum..endStepNum` kept synced as bounding `[min..max]`, `stepBasis: 'absolute'`; see [`ABSOLUTE_STEP_NUMBERING_DESIGN.md`](./ABSOLUTE_STEP_NUMBERING_DESIGN.md)), supporting both contiguous (`1-4`) and discontinuous (`1-2, 5, 8-10`) step selections
+  - Interactive step selection in both Pages & Steps Overview (`Select Range`) and Apply Camera to Steps (`#applyAngleModal`) uses `StepRangeSelectionModel` ([`src/engine/stepRangeSelection.ts`](../src/engine/stepRangeSelection.ts)): plain click/tap toggles individual steps, `Shift+click` extends a range from the anchor step, and touch hold-and-drag selects/deselects a range on mobile (including tapping a step then holding & dragging from it)
   - Carries its own `PageLayoutSpec`, optional `themeId` style override, and optional `stepBorderStyle` (`'lines' | 'boxes' | 'none'`, with legacy `showStepBorders` fallback) override
-  - Multiple groups can coexist; overlapping ranges resolve with latest-group precedence so narrower overrides can refine broader sections.
+  - Multiple groups can coexist; overlapping ranges resolve with latest-group precedence so narrower overrides can refine broader sections (overlap warnings check exact span intersections rather than bounding boxes).
 
 ## LEGO-Style Step Divider Lines & Orientation-Based Priority
 Implemented via `computePageDividerLines()` and `resolveEffectiveStepBorderStyle()` in [`src/engine/pageLayout.ts`](../src/engine/pageLayout.ts) and `getStepDividerLineColor()` in [`src/themes/customThemes.ts`](../src/themes/customThemes.ts):

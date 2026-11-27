@@ -22,6 +22,12 @@ import type { Vec3, WorldBox } from './minifigPose';
 import { computePageTypography, type PageDensity } from './pageTypography';
 import { STEP_CAMERA_FRAMING_MARGIN, type WorldBounds3D } from './stepCamera';
 import { PAPER_FORMAT_ORDER, PAPER_FORMAT_SPECS, type PaperFormatSpec } from './stepToolbar';
+import {
+  formatStepRangeSpans,
+  isStepInRangeSpans,
+  normalizeStepRangeSpans,
+  type StepRangeSpan,
+} from './stepNumbering';
 
 export type StepFlowDirection = 'row' | 'column';
 
@@ -82,6 +88,12 @@ export interface StepLayoutGroup {
   /** Inclusive range start. Absolute step number (unique across the manual) when stepBasis === 'absolute'. */
   startStepNum: number;
   endStepNum: number;
+  /**
+   * Optional normalized, sorted, non-overlapping inclusive ranges of absolute step numbers.
+   * When present and non-empty, defines the exact (possibly discontinuous) step membership
+   * of this group while `startStepNum`..`endStepNum` remain synced to its bounding [min..max].
+   */
+  stepRanges?: StepRangeSpan[];
   /**
    * 'absolute' — range uses absolute step numbers (current format).
    * 'legacy'   — saved before absolute numbering; range uses printed main-build numbers
@@ -857,6 +869,18 @@ export function resolveEffectiveStepBorderStyle(
 }
 
 /**
+ * Returns the normalized, sorted, non-overlapping inclusive absolute step spans
+ * covered by a StepLayoutGroup (supporting both contiguous and discontinuous groups).
+ */
+export function getLayoutGroupStepRanges(
+  group: Pick<StepLayoutGroup, 'startStepNum' | 'endStepNum' | 'stepRanges'>,
+): StepRangeSpan[] {
+  const fromSpans = normalizeStepRangeSpans(group.stepRanges);
+  if (fromSpans.length > 0) return fromSpans;
+  return normalizeStepRangeSpans([{ start: group.startStepNum, end: group.endStepNum }]);
+}
+
+/**
  * Finds the matching StepLayoutGroup for a given 1-based ABSOLUTE step number
  * (unique across the manual — never the printed per-submodel number).
  * Later groups in the array take precedence if ranges overlap (allowing users to
@@ -870,9 +894,7 @@ export function findLayoutGroupForStep(
   for (let i = groups.length - 1; i >= 0; i--) {
     const g = groups[i];
     if (!g) continue;
-    const lo = Math.min(g.startStepNum, g.endStepNum);
-    const hi = Math.max(g.startStepNum, g.endStepNum);
-    if (stepNum >= lo && stepNum <= hi) return g;
+    if (isStepInRangeSpans(stepNum, getLayoutGroupStepRanges(g))) return g;
   }
   return null;
 }
@@ -888,8 +910,16 @@ export function normalizeLayoutGroups(raw: unknown): StepLayoutGroup[] {
     const item = raw[i];
     if (!item || typeof item !== 'object') continue;
     const obj = item as Partial<StepLayoutGroup>;
-    const start = Math.max(1, Math.round(Number(obj.startStepNum) || 1));
-    const end = Math.max(start, Math.round(Number(obj.endStepNum) || start));
+    const normalizedSpans = normalizeStepRangeSpans(obj.stepRanges);
+    const start = normalizedSpans.length > 0
+      ? normalizedSpans[0].start
+      : Math.max(1, Math.round(Number(obj.startStepNum) || 1));
+    const end = normalizedSpans.length > 0
+      ? normalizedSpans[normalizedSpans.length - 1].end
+      : Math.max(start, Math.round(Number(obj.endStepNum) || start));
+    const stepRanges: StepRangeSpan[] = normalizedSpans.length > 0
+      ? normalizedSpans
+      : [{ start, end }];
     const id = typeof obj.id === 'string' && obj.id.trim() ? obj.id.trim() : `grp_${i + 1}`;
     if (seen.has(id)) continue;
     seen.add(id);
@@ -899,14 +929,18 @@ export function normalizeLayoutGroups(raw: unknown): StepLayoutGroup[] {
       obj.stepBorderStyle === 'none'
         ? obj.stepBorderStyle
         : null;
+    const defaultName = stepRanges.length > 1
+      ? `Steps ${formatStepRangeSpans(stepRanges)}`
+      : `Steps ${start}–${end}`;
     out.push({
       id,
       name:
         typeof obj.name === 'string' && obj.name.trim()
           ? obj.name.trim().slice(0, 48)
-          : `Steps ${start}–${end}`,
+          : defaultName,
       startStepNum: start,
       endStepNum: end,
+      stepRanges,
       stepBasis: obj.stepBasis === 'absolute' ? 'absolute' : 'legacy',
       layout: normalizePageLayoutSpec(obj.layout),
       themeId: typeof obj.themeId === 'string' && obj.themeId.trim() ? obj.themeId.trim() : null,

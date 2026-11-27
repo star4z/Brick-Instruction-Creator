@@ -1062,7 +1062,7 @@
           </div>
         </div>
         <div id="overviewRangeBar" class="hidden px-5 py-3 border-b border-[var(--border)] bg-[var(--primary-soft)] flex items-center justify-between gap-2.5 text-xs shrink-0">
-          <span id="overviewRangeStatus" class="font-semibold text-[var(--primary)] truncate">Tap a start step, then an end step to group them</span>
+          <span id="overviewRangeStatus" class="font-semibold text-[var(--primary)] truncate">Click steps to select · Shift+click or hold &amp; drag for ranges</span>
           <div class="flex items-center gap-2 shrink-0">
             <button id="btnOverviewRangeClear" type="button" class="px-3 py-1.5 rounded-md border border-[var(--border)] bg-[var(--card)] font-semibold cursor-pointer">Reset</button>
             <button id="btnOverviewRangeCreate" type="button" disabled class="px-3 py-1.5 rounded-md bg-[var(--primary)] text-[var(--primary-foreground)] font-semibold disabled:opacity-40 cursor-pointer">Style / Layout Group…</button>
@@ -1652,13 +1652,9 @@
                   <span class="text-xs text-[var(--muted-foreground)]">Group Name</span>
                   <input id="grpNameInput" type="text" maxlength="48" placeholder="e.g. Detail Steps" class="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--card)] font-semibold outline-none focus:border-[var(--primary)]" />
                 </label>
-                <label class="space-y-1">
-                  <span class="text-xs text-[var(--muted-foreground)]" title="Absolute step number — unique across the whole manual, never restarts in submodels">From Step #</span>
-                  <input id="grpStartStepInput" type="number" min="1" value="1" class="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--card)] font-mono font-semibold outline-none focus:border-[var(--primary)]" />
-                </label>
-                <label class="space-y-1">
-                  <span class="text-xs text-[var(--muted-foreground)]" title="Absolute step number — unique across the whole manual, never restarts in submodels">To Step #</span>
-                  <input id="grpEndStepInput" type="number" min="1" value="4" class="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--card)] font-mono font-semibold outline-none focus:border-[var(--primary)]" />
+                <label class="space-y-1 sm:col-span-2">
+                  <span class="text-xs text-[var(--muted-foreground)]" title="Absolute step numbers or ranges separated by commas (e.g. 1-4, 7, 10-12)">Steps</span>
+                  <input id="grpStepsInput" type="text" placeholder="e.g. 1-4, 7, 10-12" value="1-4" class="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--card)] font-mono font-semibold outline-none focus:border-[var(--primary)]" />
                 </label>
                 <p id="grpRangeHint" class="sm:col-span-2 text-[11px] text-[var(--muted-foreground)] font-mono -mt-1"></p>
               </div>
@@ -2418,7 +2414,7 @@
               <h2 id="applyAngleTitle" class="text-base font-bold tracking-tight">Apply Camera to Steps</h2>
               <span class="px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-[var(--warning-soft)] text-[var(--warning)] border border-[var(--warning)]/30 whitespace-nowrap">Step Range</span>
             </div>
-            <p id="applyAngleSubtitle" class="text-xs text-[var(--muted-foreground)] mt-0.5 truncate">Pick a start and end step to share this 3D camera</p>
+            <p id="applyAngleSubtitle" class="text-xs text-[var(--muted-foreground)] mt-0.5 truncate">Select steps to share this 3D camera</p>
           </div>
           <button id="btnCloseApplyAngle" type="button" aria-label="Close Apply Camera to Steps" class="w-9 h-9 rounded-md flex items-center justify-center hover:bg-[var(--surface-hover)] transition-colors shrink-0 cursor-pointer">
             <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
@@ -2428,24 +2424,26 @@
         <!-- Dual-Handle Range Selector Bar (Flight / Hotel Date Range Style) -->
         <div class="px-5 py-4 border-b border-[var(--border)] bg-[var(--surface-sunken)] space-y-3 shrink-0">
           <div class="flex items-center justify-between gap-2 flex-wrap">
-            <div class="flex items-center gap-2">
+            <div id="angleRangeFromToWrap" class="flex items-center gap-2">
               <span class="px-2.5 py-1 rounded-md border border-[var(--primary)]/40 bg-[var(--card)] font-mono font-bold text-xs">From <span id="angleRangeStartLbl" class="text-[var(--primary)]">Step 1</span></span>
               <span class="text-[var(--muted-foreground)] font-bold">→</span>
               <span class="px-2.5 py-1 rounded-md border border-[var(--primary)]/40 bg-[var(--card)] font-mono font-bold text-xs">To <span id="angleRangeEndLbl" class="text-[var(--primary)]">Step 1</span></span>
             </div>
+            <span id="angleRangeSummaryPill" class="hidden px-2.5 py-1 rounded-md border border-[var(--primary)]/40 bg-[var(--card)] font-mono font-bold text-xs text-[var(--primary)] truncate max-w-[72%]"></span>
             <span id="angleRangeCountBadge" class="font-mono text-xs font-bold text-[var(--primary)]">1 step</span>
           </div>
 
           <div class="dual-range-wrap" aria-label="Step range slider">
             <div class="dual-range-track">
               <div id="angleRangeFill" class="dual-range-fill" style="left:0%;width:100%"></div>
+              <div id="angleRangeSegments" class="hidden absolute inset-0 pointer-events-none"></div>
             </div>
             <input id="angleRangeMin" type="range" min="1" max="1" value="1" aria-label="Start step" class="dual-range-input" />
             <input id="angleRangeMax" type="range" min="1" max="1" value="1" aria-label="End step" class="dual-range-input" />
           </div>
 
           <div class="flex items-center justify-between gap-2 flex-wrap">
-            <span class="text-[11px] text-[var(--muted-foreground)]">Drag either handle or tap start &amp; end steps below</span>
+            <span class="text-[11px] text-[var(--muted-foreground)]">Click to toggle · Shift+click or hold &amp; drag for ranges</span>
             <div class="flex items-center gap-1.5 flex-wrap">
               <button id="btnAnglePresetFollowing" type="button" class="px-2.5 py-1 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] text-[11px] font-semibold cursor-pointer">This Step Onward</button>
               <button id="btnAnglePresetSubmodel" type="button" class="hidden px-2.5 py-1 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] text-[11px] font-semibold cursor-pointer">This Submodel</button>

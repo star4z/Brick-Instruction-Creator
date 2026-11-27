@@ -193,6 +193,41 @@ describe('pageLayout engine', () => {
     expect(describePageLayoutSpec(groups[1].layout)).toContain('Large Left');
   });
 
+  it('supports discontinuous stepRanges in StepLayoutGroup lookup and normalization', () => {
+    const groups: StepLayoutGroup[] = normalizeLayoutGroups([
+      {
+        id: 'disc',
+        name: 'Key Details',
+        startStepNum: 1,
+        endStepNum: 9,
+        stepRanges: [
+          { start: 1, end: 2 },
+          { start: 6, end: 6 },
+          { start: 8, end: 9 },
+        ],
+        stepBasis: 'absolute',
+        layout: { cols: 1, rows: 1, flow: 'column' },
+        themeId: 'dark',
+      },
+    ]);
+
+    expect(groups[0].startStepNum).toBe(1);
+    expect(groups[0].endStepNum).toBe(9);
+    expect(groups[0].stepRanges).toEqual([
+      { start: 1, end: 2 },
+      { start: 6, end: 6 },
+      { start: 8, end: 9 },
+    ]);
+    expect(findLayoutGroupForStep(groups, 1)?.id).toBe('disc');
+    expect(findLayoutGroupForStep(groups, 2)?.id).toBe('disc');
+    expect(findLayoutGroupForStep(groups, 3)).toBeNull();
+    expect(findLayoutGroupForStep(groups, 5)).toBeNull();
+    expect(findLayoutGroupForStep(groups, 6)?.id).toBe('disc');
+    expect(findLayoutGroupForStep(groups, 7)).toBeNull();
+    expect(findLayoutGroupForStep(groups, 8)?.id).toBe('disc');
+    expect(findLayoutGroupForStep(groups, 9)?.id).toBe('disc');
+  });
+
   it('packs more than 2 steps per page in Smart Auto Grid based on 1"×1" (+ margins) and 1 stud ≥ 0.5 cm', () => {
     const letterLand = buildSmartAutoPageContext({
       pageWidthIn: 11,

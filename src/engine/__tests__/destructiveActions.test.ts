@@ -409,6 +409,43 @@ describe('destructiveActions engine', () => {
         existingGroups: groups,
       });
       expect(editEarlier?.message).toContain('listed later and takes priority');
+
+      // Discontinuous group whose gaps cleanly avoid an existing group should not warn
+      const discExisting: StepLayoutGroup[] = [
+        {
+          id: 'gd',
+          name: 'Split Detail',
+          startStepNum: 1,
+          endStepNum: 10,
+          stepRanges: [
+            { start: 1, end: 2 },
+            { start: 8, end: 10 },
+          ],
+          stepBasis: 'absolute',
+          layout: createDefaultPageLayoutSpec(),
+        },
+      ];
+      expect(
+        getLayoutGroupOverlapDestructiveNotice({
+          editingId: null,
+          startStepNum: 3,
+          endStepNum: 7,
+          stepRanges: [{ start: 3, end: 7 }],
+          existingGroups: discExisting,
+        }),
+      ).toBeNull();
+      const discHit = getLayoutGroupOverlapDestructiveNotice({
+        editingId: null,
+        startStepNum: 2,
+        endStepNum: 6,
+        stepRanges: [
+          { start: 2, end: 2 },
+          { start: 5, end: 6 },
+        ],
+        existingGroups: discExisting,
+      });
+      expect(discHit?.tone).toBe('warning');
+      expect(discHit?.message).toContain('"Split Detail" (#1–#2, #8–#10)');
     });
   });
 

@@ -659,6 +659,43 @@ export function applyCameraAngleToStepRange<T extends StepOverrideLike>(
 }
 
 /**
+ * Applies a camera orientation (and optionally model zoom & framing) to every step whose
+ * 1-based ABSOLUTE step number is present in `selectedAbsNums` (supporting discontinuous
+ * selections and individual steps).
+ */
+export function applyCameraAngleToStepSelection<T extends StepOverrideLike>(
+  steps: ReadonlyArray<{ id: string; num: number; absNum?: number }>,
+  overrides: Readonly<Record<string, T>>,
+  selectedAbsNums: ReadonlySet<number> | ReadonlyArray<number>,
+  camera: { side: string; corner: string; az: number; el: number; modelScale?: number; focusMode?: string },
+): { overrides: Record<string, T>; appliedCount: number } {
+  const targetSet = selectedAbsNums instanceof Set ? selectedAbsNums : new Set(selectedAbsNums);
+  const next: Record<string, T> = { ...overrides };
+  let appliedCount = 0;
+  for (const s of steps) {
+    const n = typeof s.absNum === 'number' ? s.absNum : s.num;
+    if (targetSet.has(n)) {
+      const updated: StepOverrideLike = {
+        ...(next[s.id] || ({} as T)),
+        side: camera.side,
+        corner: camera.corner,
+        az: camera.az,
+        el: camera.el,
+      };
+      if (typeof camera.modelScale === 'number' && Number.isFinite(camera.modelScale)) {
+        updated.modelScale = clampStepModelScale(camera.modelScale);
+      }
+      if (typeof camera.focusMode === 'string' && camera.focusMode.length > 0) {
+        updated.focusMode = camera.focusMode;
+      }
+      next[s.id] = updated as T;
+      appliedCount++;
+    }
+  }
+  return { overrides: next, appliedCount };
+}
+
+/**
  * Migrates legacy page-keyed custom inserts (`pageInserts[pageId]`) to
  * step-keyed custom inserts (`stepInserts[stepId]`) by binding each page's
  * legacy inserts to the first step on that page.
