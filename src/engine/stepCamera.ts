@@ -889,14 +889,15 @@ export function optimizeStudioStepCameraSequence(
     const forceBottom = step.forceSide === 'bottom' && occCount > 0;
     const forceTop = step.forceSide === 'top';
 
-    // Evaluate all 4 top canonical views first
+    // Evaluate all 4 top canonical views first (always run exact occlusion whenever occCount > 0
+    // so a tall Step-1 brick blocking Step-2 details lets Viterbi pick the unobstructed side from Step 1)
     let bestTopVis = 0;
     for (let v = 0; v < 4; v++) {
       if (forceBottom) {
         visTable[t][v] = -1;
         continue;
       }
-      if (isTinyEarlyBase || step.stepBoxes.length === 0) {
+      if (occCount === 0 || step.stepBoxes.length === 0) {
         visTable[t][v] = 1;
       } else {
         const view = canonicalViews[v];

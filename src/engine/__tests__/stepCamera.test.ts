@@ -892,5 +892,34 @@ describe('Step Camera Stability & Steady Framing', () => {
     expect(resolveEffectiveStudioStepCue(chapters, chCont, sAttach)).toBe('flip_vertical');
     expect(resolveEffectiveStudioStepCue(chapters, chMech, sMech)).toBe('none');
   });
+
+  it('evaluates top-view occlusion on 1-3 part early bases so Viterbi turns a submodel around from Step 1 when a tall Step-1 brick occludes Step-2 parts', () => {
+    // Reproduces Underside Module: Step 1 places 3 parts (wedge plate + 1x6 plate + tall 2x6 brick on the +Z front edge);
+    // Step 2 places shorter slopes/tile behind the 2x6 brick (-Z side); Step 3 places a round tile on the -Z side.
+    const step1 = [
+      makeBox(-60, 0, -40, 60, 12, 40),   // 4x6 base plate
+      makeBox(-60, 0, 40, 60, 12, 60),    // 1x6 front lip plate
+      makeBox(-60, 8, 10, 60, 36, 50),    // tall 2x6 brick along the +Z front edge
+    ];
+    const step2 = [
+      makeBox(-60, 8, -30, -40, 28, -10), // left slope behind 2x6 brick
+      makeBox(40, 8, -30, 60, 28, -10),   // right slope behind 2x6 brick
+      makeBox(-40, 8, -30, 40, 16, -10),  // 1x4 tile tucked behind 2x6 brick
+    ];
+    const step3 = [
+      makeBox(-20, 16, -40, 20, 24, 0),   // 2x2 round tile
+    ];
+
+    const res = optimizeStudioStepCameraSequence(buildSequenceInputs([step1, step2, step3]));
+    expect(res).toHaveLength(3);
+    // Must pick a back corner (viewing from -Z so the 2x6 brick sits in the background) from Step 1 with zero mid-submodel turns!
+    expect(res[0].side).toBe('top');
+    expect(res[0].corner === 'back_left' || res[0].corner === 'back_right').toBe(true);
+    expect(res[1].corner).toBe(res[0].corner);
+    expect(res[1].cue).toBe('none');
+    expect(res[2].corner).toBe(res[0].corner);
+    expect(res[2].cue).toBe('none');
+  });
 });
+
 
