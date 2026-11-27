@@ -695,30 +695,38 @@ describe('dynamicStepSizer', () => {
     const cockpitR = makePart(1, '3665', 71, makeBox(40, 24, 60, 20, 24, 40));
     expect(classifySameSkuPattern(cockpitR.box, [cockpitL.box], wingedBounds)).toBe('structured');
 
-    // 4. Asymmetric side protrusion shifting modelBounds.center[0] to +40 while structural median stays at x = 0
-    const skewedBounds = makeBox(40, 40, 0, 200, 80, 240);
-    const coreParts: DynamicPartDescriptor[] = [
-      makePart(0, '3665', 72, makeBox(-50, 24, -60, 20, 24, 40)),
-      makePart(1, '3665', 72, makeBox(50, 24, -60, 20, 24, 40)),
-      makePart(2, '3001', 4, makeBox(0, 12, -40, 80, 24, 40)),
-      makePart(3, '3001', 4, makeBox(0, 12, 0, 80, 24, 40)),
-      makePart(4, '3001', 4, makeBox(0, 12, 40, 80, 24, 40)),
-      makePart(5, '3023', 15, makeBox(130, 36, 0, 20, 8, 20)), // single side protrusion
-    ];
+    // 4. Off-center flanking pair (e.g. twin pillars around a doorway at x = +30 and x = +110, NOT on centerline x = 0)
+    const asymmetricBounds = makeBox(0, 40, 0, 320, 80, 240);
+    const doorPillarL = makePart(0, '3665', 72, makeBox(30, 24, -60, 20, 24, 40));
+    const doorPillarR = makePart(1, '3665', 72, makeBox(110, 24, -60, 20, 24, 40));
+    expect(classifySameSkuPattern(doorPillarR.box, [doorPillarL.box], asymmetricBounds)).toBe('structured');
     expect(
       selectDynamicStepIndices({
         anchor: 0,
-        parts: coreParts,
+        parts: [doorPillarL, doorPillarR],
         getEligibleCandidates: (placed) => [0, 1].filter((i) => !placed.has(i)),
-        modelBounds: skewedBounds,
-        builtBounds: skewedBounds,
+        modelBounds: asymmetricBounds,
+        builtBounds: asymmetricBounds,
         activeCam: DEFAULT_STUDIO_CAMERA,
         isFirstStep: false,
         totalPartsInScope: 30,
       }),
     ).toEqual([0, 1]);
 
-    // 5. Wide building (320 x 320): opposite exterior walls (pairDist = 300 > 180) remain separated
+    // 5. Off-center 2x2 corner rectangle (all 4 corners group cleanly without centerline symmetry)
+    const c1 = makeBox(20, 24, 20, 20, 24, 20);
+    const c2 = makeBox(100, 24, 20, 20, 24, 20);
+    const c3 = makeBox(20, 24, 100, 20, 24, 20);
+    const c4 = makeBox(100, 24, 100, 20, 24, 20);
+    expect(classifySameSkuPattern(c2, [c1], asymmetricBounds)).toBe('structured');
+    expect(classifySameSkuPattern(c3, [c1, c2], asymmetricBounds)).toBe('structured');
+    expect(classifySameSkuPattern(c4, [c1, c2, c3], asymmetricBounds)).toBe('structured');
+
+    // 6. Non-uniform 3rd collinear piece is still classified as scattered
+    const irregularThird = makeBox(150, 24, 20, 20, 24, 20);
+    expect(classifySameSkuPattern(irregularThird, [c1, c2], asymmetricBounds)).toBe('scattered');
+
+    // 7. Wide building (320 x 320): opposite exterior walls (pairDist = 300 > 180) remain separated
     const wideBounds = makeBox(0, 60, 0, 320, 120, 320);
     const wallL = makePart(0, '3665', 72, makeBox(-150, 12, 0, 20, 24, 40));
     const wallR = makePart(1, '3665', 72, makeBox(150, 12, 0, 20, 24, 40));
