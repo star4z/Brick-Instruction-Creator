@@ -275,6 +275,37 @@ function estimateCameraOcclusion(
   return hits / samples.length;
 }
 
+/**
+ * Estimates what fraction of `targetBox` is occluded by a single `occluderBox`
+ * along orthographic `viewDir` (0 = fully clear, 1 = fully hidden).
+ * Uses a uniform 3×3×3 inset grid (27 rays) so elongated plates/beams are
+ * sampled evenly across their full length rather than clustered at the center.
+ */
+function estimateBoxOcclusionBySingle(
+  targetBox: PlacementAABB,
+  occluderBox: PlacementAABB,
+  viewDir: Vec3,
+): number {
+  const sx = targetBox.max[0] - targetBox.min[0];
+  const sy = targetBox.max[1] - targetBox.min[1];
+  const sz = targetBox.max[2] - targetBox.min[2];
+  const fracs = [0.18, 0.5, 0.82] as const;
+  let hits = 0;
+  for (let ix = 0; ix < 3; ix++) {
+    const x = targetBox.min[0] + sx * fracs[ix];
+    for (let iy = 0; iy < 3; iy++) {
+      const y = targetBox.min[1] + sy * fracs[iy];
+      for (let iz = 0; iz < 3; iz++) {
+        const z = targetBox.min[2] + sz * fracs[iz];
+        if (rayIntersectsBox([x, y, z], viewDir, occluderBox) !== null) {
+          hits++;
+        }
+      }
+    }
+  }
+  return hits / 27;
+}
+
 interface ContactSummary {
   supportedFromBelow: boolean;
   supportedFromAbove: boolean;
@@ -1098,6 +1129,8 @@ function resolveOffsetAlongAxis(
     engagedStudTips?: ReadonlyArray<Vec3>;
     coaxialAxis?: 0 | 1 | 2 | null;
     coaxialHostIds?: ReadonlySet<string>;
+    /** Same-step sibling pieces (at their rendered positions) that the lifted piece must not hide from the camera. */
+    visibleSiblings?: ReadonlyArray<PlacementPartInput>;
   } = {},
 ): AutoPartOffset | null {
   const s = boxSize(part.box);
@@ -1107,6 +1140,12 @@ function resolveOffsetAlongAxis(
   const engagedStudTips = options.engagedStudTips ?? [];
   const coaxialAxis = options.coaxialAxis ?? null;
   const coaxialHostIds = options.coaxialHostIds;
+  const visibleSiblings = options.visibleSiblings ?? [];
+  const camViewDir: Vec3 | null = camera ? cameraBasis(camera.az, camera.el).viewDir : null;
+  const sibBaseOcc: number[] =
+    camViewDir && visibleSiblings.length > 0
+      ? visibleSiblings.map((sib) => estimateBoxOcclusionBySingle(sib.box, part.box, camViewDir))
+      : [];
 
   const visObstacles: PlacementPartInput[] = [];
   if (camera) {
@@ -1456,6 +1495,27 @@ function resolveOffsetAlongAxis(
             }
           }
         }
+        // Sibling non-occlusion gate: never let a lifted piece hide another newly added
+        // piece in the same step behind it along the orthographic camera sightline.
+        // Try lifting slightly further (up to a natural height cap) so the sibling behind
+        // it sits cleanly in view; if it still hides a sibling, reject this direction.
+        if (camViewDir && visibleSiblings.length > 0) {
+          let hidesSibling = false;
+          for (let i = 0; i < visibleSiblings.length; i++) {
+            const occAfter = estimateBoxOcclusionBySingle(visibleSiblings[i].box, shifted, camViewDir);
+            if (occAfter >= 0.18 && occAfter > sibBaseOcc[i] + 0.08) {
+              hidesSibling = true;
+              break;
+            }
+          }
+          if (hidesSibling) {
+            const siblingClearMaxMag = Math.max(68, baseMag + 24);
+            if (mag < siblingClearMaxMag) {
+              continue;
+            }
+            break;
+          }
+        }
         // Auto-detect pass-through alignment guide when a lateral pin/axle penetrates a perforated beam/frame
         if (isCardinal && axis !== 1) {
           const penetratingHostBoxes = obstacles
@@ -1726,6 +1786,14 @@ function computeFirstStepOffsets(
       p.headedShaftDir,
     );
     const otherSiblings = parts.filter((q) => q.id !== p.id && !baseSet.has(q.id));
+    const visibleSiblings: PlacementPartInput[] = [
+      ...otherSiblings.filter((q) => !out[q.id]),
+      ...acceptedShiftedBoxes.map((sb, idx) => ({
+        id: `__vis_shifted_${acceptedParts[idx].id}`,
+        box: sb,
+        rgb: acceptedParts[idx].rgb,
+      })),
+    ];
     const coaxialAxis: 0 | 1 | 2 | null = contacts.verticalCoaxial
       ? 1
       : contacts.horizontalCoaxial
@@ -1746,6 +1814,7 @@ function computeFirstStepOffsets(
         engagedStudTips: contacts.engagedStudTips,
         coaxialAxis,
         coaxialHostIds: contacts.coaxialHostIds,
+        visibleSiblings,
       },
     );
     if (!resolved) continue;
@@ -1978,6 +2047,14 @@ function computeSubsequentStepOffsets(
     const extraHostIds = new Set((c.extraHosts ?? []).map((h) => h.id));
     const baseObstacles = c.extraHosts ? [...prevParts, ...c.extraHosts] : prevParts;
     const otherSiblings = step.parts.filter((p) => p.id !== c.part.id && !extraHostIds.has(p.id));
+    const visibleSiblings: PlacementPartInput[] = [
+      ...otherSiblings.filter((p) => !out[p.id]),
+      ...accepted.map((acc) => ({
+        id: `__vis_shifted_${acc.part.id}`,
+        box: acc.shiftedBox,
+        rgb: acc.part.rgb,
+      })),
+    ];
 
     const { preferred, fallbacks, preferShortestDir } = chooseInsertionDirs(
       c.contacts,
@@ -2006,6 +2083,7 @@ function computeSubsequentStepOffsets(
         engagedStudTips: c.contacts.engagedStudTips,
         coaxialAxis,
         coaxialHostIds: c.contacts.coaxialHostIds,
+        visibleSiblings,
       },
     );
     if (!resolved) continue;

@@ -1726,6 +1726,123 @@ describe('computeAnimatedStepOffsets', () => {
   });
 });
 
+describe('placementArrows — sibling non-occlusion (never hide another piece behind an offset)', () => {
+  it('bottom view: lifts a foreground red plate cleanly past a dark-gray sibling behind it instead of hiding it', () => {
+    // Mirrors IMG_0465 Step 14: underside build (el = -30, side = 'bottom') where a red
+    // plate sits directly in front of a newly added dark-gray plate along the camera view.
+    const hull = [
+      makePart('hull_1', 0, 0, -100, 120, 8, 100, RED),
+      makePart('hull_2', 0, 0, 0, 120, 8, 100, RED),
+      makePart('hull_3', 0, 0, 100, 120, 8, 100, RED),
+      makePart('hull_4', 0, 8, 0, 120, 8, 300, DARK_GRAY),
+    ];
+    const cam = { az: 38, el: -30, side: 'bottom' as const };
+    const redFront = makePart('red_front', 0, -8, 10, 80, 8, 40, RED);
+    const grayBehind = makePart('gray_behind', 0, -8, -20, 80, 8, 20, DARK_GRAY);
+
+    const soloOffs = computeAutoPlacementOffsetsForSequence([
+      { id: 's1', camera: cam, parts: hull },
+      { id: 's2', camera: cam, parts: [redFront] },
+    ]).get('s2');
+    const pairOffs = computeAutoPlacementOffsetsForSequence([
+      { id: 's1', camera: cam, parts: hull },
+      { id: 's2', camera: cam, parts: [redFront, grayBehind] },
+    ]).get('s2');
+
+    expect(soloOffs?.['red_front']).toBeDefined();
+    expect(pairOffs?.['red_front']).toBeDefined();
+    // With `gray_behind` present, `red_front` must lift strictly higher along -Y to clear its sightline
+    expect(pairOffs!['red_front'].y).toBeLessThan(soloOffs!['red_front'].y);
+    expect(pairOffs!['red_front'].y).toBeGreaterThanOrEqual(-72);
+  });
+
+  it('top view: lifts a foreground camouflaged plate cleanly past a sibling behind it', () => {
+    const deck = [
+      makePart('deck_1', 0, 0, -100, 120, 8, 100, LIGHT_BLUE),
+      makePart('deck_2', 0, 0, 0, 120, 8, 100, LIGHT_BLUE),
+      makePart('deck_3', 0, 0, 100, 120, 8, 100, LIGHT_BLUE),
+      makePart('deck_4', 0, -8, 0, 120, 8, 300, DARK_GRAY),
+    ];
+    const cam = { az: 38, el: 30, side: 'top' as const };
+    const blueFront = makePart('blue_front', 0, 8, 10, 80, 8, 40, LIGHT_BLUE);
+    const yellowBehind = makePart('yellow_behind', 0, 8, -20, 80, 8, 20, YELLOW);
+
+    const soloOffs = computeAutoPlacementOffsetsForSequence([
+      { id: 's1', camera: cam, parts: deck },
+      { id: 's2', camera: cam, parts: [blueFront] },
+    ]).get('s2');
+    const pairOffs = computeAutoPlacementOffsetsForSequence([
+      { id: 's1', camera: cam, parts: deck },
+      { id: 's2', camera: cam, parts: [blueFront, yellowBehind] },
+    ]).get('s2');
+
+    expect(soloOffs?.['blue_front']).toBeDefined();
+    expect(pairOffs?.['blue_front']).toBeDefined();
+    expect(pairOffs!['blue_front'].y).toBeGreaterThan(soloOffs!['blue_front'].y);
+    expect(pairOffs!['blue_front'].y).toBeLessThanOrEqual(72);
+  });
+
+  it('rejects an offset when lifting within the natural height cap would still hide a tall sibling behind it', () => {
+    const steps: PlacementStepInput[] = [
+      {
+        id: 's1',
+        camera: { az: 0, el: 30, side: 'top' },
+        parts: [
+          makePart('deck_1', 0, 0, -100, 120, 8, 100, RED),
+          makePart('deck_2', 0, 0, 0, 120, 8, 100, RED),
+          makePart('deck_3', 0, 0, 100, 120, 8, 100, RED),
+          makePart('deck_4', 0, -8, 0, 120, 8, 300, DARK_GRAY),
+        ],
+      },
+      {
+        id: 's2',
+        camera: { az: 0, el: 30, side: 'top' },
+        parts: [
+          // Foreground camouflaged 2x4 red plate (z = 10..50)
+          makePart('red_front', 0, 8, 30, 80, 8, 40, RED),
+          // Tall contrasting brick wall directly behind it (z = -30..0, y = 8..72) so every lift up to 68 LDU still hides it
+          makePart('tall_behind', 0, 8, -15, 80, 64, 30, YELLOW),
+        ],
+      },
+    ];
+
+    const res = computeAutoPlacementOffsetsForSequence(steps);
+    const offs = res.get('s2');
+    expect(offs?.['red_front']).toBeUndefined();
+  });
+
+  it('control: keeps a compact lift height when the offset piece is BEHIND the seated sibling (Step 13)', () => {
+    const steps: PlacementStepInput[] = [
+      {
+        id: 's1',
+        camera: { az: 38, el: -30, side: 'bottom' },
+        parts: [
+          makePart('hull_1', 0, 0, -80, 120, 8, 80, RED),
+          makePart('hull_2', 0, 0, 0, 120, 8, 80, RED),
+          makePart('hull_3', 0, 0, 80, 120, 8, 80, RED),
+          makePart('hull_4', 0, 8, 0, 120, 8, 240, DARK_GRAY),
+        ],
+      },
+      {
+        id: 's2',
+        camera: { az: 38, el: -30, side: 'bottom' },
+        parts: [
+          // Red 1x6 plate FURTHER from camera (-Z) — lifting it moves into open background
+          makePart('red_back', 0, -8, -40, 120, 8, 20, RED),
+          // Dark gray 1x6 plate CLOSER to camera (+Z)
+          makePart('gray_front', 0, -8, 10, 120, 8, 20, DARK_GRAY),
+        ],
+      },
+    ];
+
+    const res = computeAutoPlacementOffsetsForSequence(steps);
+    const offs = res.get('s2');
+    expect(offs?.['red_back']).toBeDefined();
+    // Should remain compact (~28–36 LDU) since lifting `red_back` does not hide `gray_front`
+    expect(Math.abs(offs!['red_back'].y)).toBeLessThanOrEqual(36);
+  });
+});
+
 
 
 
