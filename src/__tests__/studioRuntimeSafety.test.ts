@@ -1300,5 +1300,54 @@ describe('studioRuntime safety checks', () => {
     expect(pdfBlock).not.toContain('drawBrickGlyphCanvas');
     expect(pdfBlock).not.toContain(' pcs');
   });
+
+  it('guards Step Generation against WebGL lost-context reuse, uncapped mobile DPR, and stuck loading overlays', () => {
+    const html = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf8');
+    const runtime = fs.readFileSync(path.resolve(process.cwd(), 'src/studioRuntime.ts'), 'utf8');
+
+    // Progress overlay exists in #importModal
+    expect(html).toContain('id="impLoadingOverlay"');
+    expect(html).toContain('id="impLoadingLabel"');
+    expect(html).toContain('id="impLoadingBarFill"');
+
+    // WebGLBrickEngine guards already-lost contexts before compiling shaders
+    const engineCtorStart = runtime.indexOf('class WebGLBrickEngine');
+    const engineCtorEnd = runtime.indexOf('const fragPrec =', engineCtorStart);
+    expect(engineCtorStart).toBeGreaterThan(-1);
+    expect(engineCtorEnd).toBeGreaterThan(engineCtorStart);
+    expect(runtime.slice(engineCtorStart, engineCtorEnd)).toContain('gl.isContextLost()');
+
+    // closeImportAssistant replaces #impPreviewCanvas after dispose() so reopening never reuses a lost-context canvas
+    const closeStart = runtime.indexOf('function closeImportAssistant(');
+    const closeEnd = runtime.indexOf('function getPreviewPartMaps(', closeStart);
+    expect(closeStart).toBeGreaterThan(-1);
+    expect(closeEnd).toBeGreaterThan(closeStart);
+    const closeBody = runtime.slice(closeStart, closeEnd);
+    expect(closeBody).toContain('impOpenSeq++');
+    expect(closeBody).toContain('setImportAssistantLoading(false)');
+    expect(closeBody).toContain('replaceImportPreviewCanvas()');
+
+    // drawImportPreviewFrame caps DPR on compact/mobile viewports to prevent iOS Safari GPU OOM
+    const drawStart = runtime.indexOf('function drawImportPreviewFrame(');
+    const drawEnd = runtime.indexOf('const IMP_EXPLODED_PCT', drawStart);
+    expect(drawStart).toBeGreaterThan(-1);
+    expect(drawEnd).toBeGreaterThan(drawStart);
+    const drawBody = runtime.slice(drawStart, drawEnd);
+    expect(drawBody).toContain('isCompactMemoryViewport');
+    expect(drawBody).toContain('1.5');
+    expect(drawBody).toContain('catch (err)');
+
+    // openImportAssistant wraps async analysis & preview in try/catch/finally so loading overlay never hangs
+    const openStart = runtime.indexOf('async function openImportAssistant(');
+    const openEnd = runtime.indexOf('// IMPORT WIZARD', openStart);
+    expect(openStart).toBeGreaterThan(-1);
+    expect(openEnd).toBeGreaterThan(openStart);
+    const openBody = runtime.slice(openStart, openEnd);
+    expect(openBody).toContain('try {');
+    expect(openBody).toContain('catch (err)');
+    expect(openBody).toContain('finally {');
+    expect(openBody).toContain('setImportAssistantLoading(false)');
+  });
 });
+
 

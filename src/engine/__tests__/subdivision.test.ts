@@ -1406,5 +1406,70 @@ describe('Large & Elongated Model Subdivision Analyzer', () => {
       expect(plan.exteriorMinifigIds).toEqual(['mf_exterior']);
     });
   });
+
+  describe('Step Generation / Subdivision Analyzer resilience on edge-case models', () => {
+    const mkPart = (
+      index: number,
+      min: [number, number, number],
+      max: [number, number, number],
+      overrides: Partial<SubdivisionPartInput> = {},
+    ): SubdivisionPartInput => ({
+      index,
+      id: `p_${index}`,
+      partId: '3001',
+      partName: 'Brick 2 x 4',
+      colorId: 15,
+      box: {
+        min,
+        max,
+        center: [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2],
+      },
+      ...overrides,
+    });
+
+    it('never throws on empty, 1-part, tiny, all-minifig, disconnected, or degenerate zero-size models', () => {
+      // Empty model
+      const empty = analyzeModelSubdivisions([], []);
+      expect(empty.proposals).toEqual([]);
+      expect(empty.assessment.shouldPrompt).toBe(false);
+
+      // Single part
+      const one = analyzeModelSubdivisions([mkPart(0, [0, 0, 0], [40, 24, 80])], [[]]);
+      expect(one.proposals).toEqual([]);
+
+      // All-minifig model
+      const figs = Array.from({ length: 30 }, (_, i) =>
+        mkPart(i, [i * 40, 0, 0], [i * 40 + 20, 40, 20], { isMinifig: true }),
+      );
+      const figRes = analyzeModelSubdivisions(figs, figs.map(() => []));
+      expect(Array.isArray(figRes.proposals)).toBe(true);
+
+      // 50 completely disconnected singletons
+      const loose = Array.from({ length: 50 }, (_, i) =>
+        mkPart(i, [i * 100, 0, 0], [i * 100 + 20, 24, 20]),
+      );
+      const looseRes = analyzeModelSubdivisions(loose, loose.map(() => []));
+      for (const prop of looseRes.proposals) {
+        expect(verifyProposalZeroFloating(prop, loose.map(() => [])).valid).toBe(true);
+      }
+
+      // Degenerate zero-size AABBs all at origin
+      const degen = Array.from({ length: 30 }, (_, i) => mkPart(i, [0, 0, 0], [0, 0, 0]));
+      const degenAdj = degen.map((_, i) => (i > 0 ? [i - 1] : []));
+      for (let i = 0; i < degen.length - 1; i++) degenAdj[i].push(i + 1);
+      expect(() => analyzeModelSubdivisions(degen, degenAdj)).not.toThrow();
+    });
+
+    it('is idempotent across repeated invocations without mutating input arrays', () => {
+      const model = parseLDrawSource(buildSyntheticModularBuildingLdr(), 'modular_repeat.ldr', 'ldr');
+      const graph = buildConnectivityGraph(model.parts);
+      const { parts, adjacency } = buildSubdivisionInputsFromCanonical(model, graph);
+      const first = analyzeModelSubdivisions(parts, adjacency);
+      const second = analyzeModelSubdivisions(parts, adjacency);
+      expect(second.proposals.map((p) => p.id)).toEqual(first.proposals.map((p) => p.id));
+      expect(second.proposals.map((p) => p.sections.length)).toEqual(first.proposals.map((p) => p.sections.length));
+    });
+  });
 });
+
 

@@ -763,7 +763,7 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     await page.locator('#btnCloseBomSetup').click();
     await expect(page.locator('#bomSetupModal')).toBeHidden();
 
-    // 2. Step Generation Modal (3D preview + Build Organization)
+    // 2. Step Generation Modal (3D preview + Build Organization + reopen WebGL resilience)
     await ensureMenuOpen(page);
     await page.locator('#menuStepGenBtn').click();
     await expect(page.locator('#importModal')).toBeVisible();
@@ -771,6 +771,23 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     await auditSurface(page, `${testInfo.project.name}: Step Generation Modal`, {
       activeContainerSelector: '#importModal',
     });
+    // Toggle color mode & switch proposals, then close and reopen twice to verify fresh WebGL canvas (no lost-context crash)
+    const colorToggle = page.locator('#impColorModeToggleBtn');
+    if (await colorToggle.isVisible()) await colorToggle.click();
+    await page.locator('#impBtnCancel').click();
+    await expect(page.locator('#importModal')).toBeHidden();
+
+    // Reopen Step Generation a 2nd time after WebGL dispose() + canvas replacement
+    await ensureMenuOpen(page);
+    await page.locator('#menuStepGenBtn').click();
+    await expect(page.locator('#importModal')).toBeVisible();
+    await expect(page.locator('#impLoadingOverlay')).toBeHidden();
+    await expect(page.locator('#impPreviewCanvas')).toBeVisible();
+    const radios = page.locator('#impProposalList [role="radio"]');
+    if ((await radios.count()) >= 2) {
+      await radios.nth(1).click();
+      await radios.nth(0).click();
+    }
     await page.locator('#impBtnCancel').click();
     await expect(page.locator('#importModal')).toBeHidden();
 

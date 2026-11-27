@@ -3036,8 +3036,11 @@ class WebGLBrickEngine {
     this.anisoExt = null;
     this.maxAniso = 1;
     const gl = canvas.getContext('webgl', { antialias: true, alpha: true, preserveDrawingBuffer: true, powerPreference: 'default' });
+    if (!gl || (typeof gl.isContextLost === 'function' && gl.isContextLost())) {
+      this.gl = null;
+      return;
+    }
     this.gl = gl;
-    if (!gl) return;
     canvas.addEventListener('webglcontextlost', (e) => {
       e.preventDefault();
       this.uploadedMesh = null;
@@ -27926,17 +27929,26 @@ if (menuStepGenBtn) {
     if (summaryEl) summaryEl.textContent = state.model.title || '';
     document.getElementById('importModal')?.classList.remove('hidden');
     setImportAssistantLoading(true, 'Loading model…', 15);
-    await waitForImportPaint();
-    if (openToken !== impOpenSeq) return;
-    const parsed = await ensureParsedModelHydrated();
-    if (openToken !== impOpenSeq) return;
-    if (!parsed) {
-      setImportAssistantLoading(false);
-      document.getElementById('importModal')?.classList.add('hidden');
-      showToast('Import a model first.');
-      return;
+    try {
+      await waitForImportPaint();
+      if (openToken !== impOpenSeq) return;
+      const parsed = await ensureParsedModelHydrated();
+      if (openToken !== impOpenSeq) return;
+      if (!parsed) {
+        setImportAssistantLoading(false);
+        document.getElementById('importModal')?.classList.add('hidden');
+        showToast('Import a model first.');
+        return;
+      }
+      await openImportAssistant(parsed, true, { openToken });
+    } catch (err) {
+      console.error('[StepGeneration] Failed to open:', err);
+      if (openToken === impOpenSeq) {
+        setImportAssistantLoading(false);
+        document.getElementById('importModal')?.classList.add('hidden');
+        showToast('Could not open Step Generation. Please try again.');
+      }
     }
-    await openImportAssistant(parsed, true, { openToken });
   };
 }
 
@@ -28692,55 +28704,78 @@ function replaceImportPreviewCanvas() {
 function rebuildAndDrawImportPreview() {
   let canvas = document.getElementById('impPreviewCanvas');
   if (!canvas || !impState.parsed) return;
-  if (impPreviewEngine && (!impPreviewEngine.gl || impPreviewEngine.gl.isContextLost())) {
-    try { impPreviewEngine.dispose(); } catch (_) {}
-    impPreviewEngine = null;
-    canvas = replaceImportPreviewCanvas() || canvas;
-  }
-  if (!impPreviewEngine) {
-    impPreviewEngine = new WebGLBrickEngine(canvas, deviceGpuBudget.maxWebGlDim);
-    if (!impPreviewEngine.gl || impPreviewEngine.gl.isContextLost()) {
-      canvas = replaceImportPreviewCanvas() || canvas;
-      impPreviewEngine = new WebGLBrickEngine(canvas, deviceGpuBudget.maxWebGlDim);
+  try {
+    // Release prior mesh buffers before building new buffers to avoid peak RAM spikes on mobile Safari
+    impPreviewMesh = null;
+    if (isCompactMemoryViewport && studioPhotoEngine) {
+      try { studioPhotoEngine.dispose(); } catch (_) {}
+      studioPhotoEngine = null;
     }
-  }
-  if (!impPreviewEngine.gl || impPreviewEngine.gl.isContextLost()) return;
+    if (impPreviewEngine && (!impPreviewEngine.gl || (typeof impPreviewEngine.gl.isContextLost === 'function' && impPreviewEngine.gl.isContextLost()))) {
+      try { impPreviewEngine.dispose(); } catch (_) {}
+      impPreviewEngine = null;
+      canvas = replaceImportPreviewCanvas() || canvas;
+    }
+    const previewDimCap = isCompactMemoryViewport
+      ? Math.min(deviceGpuBudget.maxWebGlDim, 1024)
+      : deviceGpuBudget.maxWebGlDim;
+    if (!impPreviewEngine) {
+      impPreviewEngine = new WebGLBrickEngine(canvas, previewDimCap);
+      if (!impPreviewEngine.gl || (typeof impPreviewEngine.gl.isContextLost === 'function' && impPreviewEngine.gl.isContextLost())) {
+        canvas = replaceImportPreviewCanvas() || canvas;
+        impPreviewEngine = new WebGLBrickEngine(canvas, previewDimCap);
+      }
+    }
+    if (!impPreviewEngine.gl || (typeof impPreviewEngine.gl.isContextLost === 'function' && impPreviewEngine.gl.isContextLost())) return;
 
-  const { parts, partOffsets, partColorOverrides } = getPreviewPartMaps();
-  impPreviewMesh = buildMeshBuffers([], parts, {
-    highlightNew: false,
-    fadePrev: false,
-    fadeOpacity: 1.0,
-    showArrows: false,
-    accent: '#1a73e8',
-    partOffsets,
-    partColorOverrides,
-  });
-  drawImportPreviewFrame();
+    const { parts, partOffsets, partColorOverrides } = getPreviewPartMaps();
+    impPreviewMesh = buildMeshBuffers([], parts, {
+      highlightNew: false,
+      fadePrev: false,
+      fadeOpacity: 1.0,
+      showArrows: false,
+      accent: '#1a73e8',
+      partOffsets,
+      partColorOverrides,
+    });
+    drawImportPreviewFrame();
+  } catch (err) {
+    console.warn('[StepGeneration] 3D preview fallback:', err);
+    impPreviewMesh = null;
+  }
 }
 
 function drawImportPreviewFrame() {
   const canvas = document.getElementById('impPreviewCanvas');
   if (!canvas || !impPreviewEngine || !impPreviewMesh) return;
-  if (!impPreviewEngine.gl || impPreviewEngine.gl.isContextLost()) {
+  if (!impPreviewEngine.gl || (typeof impPreviewEngine.gl.isContextLost === 'function' && impPreviewEngine.gl.isContextLost())) {
     rebuildAndDrawImportPreview();
     return;
   }
-  const host = canvas.parentElement || canvas;
-  const cssW = host.clientWidth || 360;
-  const cssH = host.clientHeight || 240;
-  const maxDpr = deviceGpuBudget.constrained ? 2 : 2.5;
-  const dpr = Math.min(Math.max(window.devicePixelRatio || 1, 1.5), maxDpr);
-  const maxDim = deviceGpuBudget.maxWebGlDim || 2048;
-  const w = Math.min(maxDim, Math.max(540, Math.round(cssW * dpr)));
-  const h = Math.min(maxDim, Math.max(380, Math.round(cssH * dpr)));
-  impPreviewEngine.draw(impPreviewMesh, w, h, impState.az, impState.el, impState.zoom || 1.0, 0, {
-    heroShading: true,
-    keepUpright: true,
-    lineAlpha: 0.48,
-    panX: impState.panX || 0,
-    panY: impState.panY || 0,
-  });
+  try {
+    const host = canvas.parentElement || canvas;
+    const cssW = host.clientWidth || 360;
+    const cssH = host.clientHeight || 240;
+    const dpr = isCompactMemoryViewport
+      ? Math.min(Math.max(window.devicePixelRatio || 1, 1), 1.5)
+      : Math.min(Math.max(window.devicePixelRatio || 1, 1.5), deviceGpuBudget.constrained ? 2 : 2.5);
+    const maxDim = isCompactMemoryViewport
+      ? Math.min(deviceGpuBudget.maxWebGlDim || 2048, 1024)
+      : (deviceGpuBudget.maxWebGlDim || 2048);
+    const minW = isCompactMemoryViewport ? 360 : 540;
+    const minH = isCompactMemoryViewport ? 240 : 380;
+    const w = Math.min(maxDim, Math.max(minW, Math.round(cssW * dpr)));
+    const h = Math.min(maxDim, Math.max(minH, Math.round(cssH * dpr)));
+    impPreviewEngine.draw(impPreviewMesh, w, h, impState.az, impState.el, impState.zoom || 1.0, 0, {
+      heroShading: true,
+      keepUpright: true,
+      lineAlpha: 0.48,
+      panX: impState.panX || 0,
+      panY: impState.panY || 0,
+    });
+  } catch (err) {
+    console.warn('[StepGeneration] 3D preview frame skipped:', err);
+  }
 }
 
 // Orbit, zoom (wheel/pinch), and pan pointer gestures for the 3D Import Preview canvas
@@ -28810,6 +28845,8 @@ function animateImportExplode(nextExploded) {
   };
   impExplodeAnimRaf = requestAnimationFrame(stepFrame);
 }
+
+let impPreviewResizeObserver = null;
 
 function bindImportPreviewCanvasEvents(canvas) {
   if (!canvas) return;
@@ -28914,12 +28951,12 @@ function bindImportPreviewCanvasEvents(canvas) {
   if (!canvas) return;
   bindImportPreviewCanvasEvents(canvas);
 
-  if (typeof ResizeObserver !== 'undefined' && canvas.parentElement) {
-    const ro = new ResizeObserver(() => {
+  if (!impPreviewResizeObserver && typeof ResizeObserver !== 'undefined' && canvas.parentElement) {
+    impPreviewResizeObserver = new ResizeObserver(() => {
       const modal = document.getElementById('importModal');
       if (modal && !modal.classList.contains('hidden')) drawImportPreviewFrame();
     });
-    ro.observe(canvas.parentElement);
+    impPreviewResizeObserver.observe(canvas.parentElement);
   }
 })();
 
@@ -29118,106 +29155,118 @@ async function openImportAssistant(parsed, isPostImport = false, opts = {}) {
   }
   modalEl?.classList.remove('hidden');
 
-  const cached = parsed?._cachedSubdivisionAnalysis || null;
-  const hasProvidedPrep = Boolean(opts?.prep);
-  const hasProvidedAnalysis = Boolean(opts?.assessment && opts?.proposals);
-  const needsCompute = (!hasProvidedPrep && !cached?.prep) || (!hasProvidedAnalysis && !cached?.analyzed);
+  try {
+    const cached = parsed?._cachedSubdivisionAnalysis || null;
+    const hasProvidedPrep = Boolean(opts?.prep);
+    const hasProvidedAnalysis = Boolean(opts?.assessment && opts?.proposals);
+    const needsCompute = (!hasProvidedPrep && !cached?.prep) || (!hasProvidedAnalysis && !cached?.analyzed);
 
-  let prep = opts?.prep || cached?.prep || null;
-  if (!prep) {
-    setImportAssistantLoading(true, 'Analyzing part connections…', 38);
-    await waitForImportPaint();
-    if (openToken !== impOpenSeq) return;
-    prep = prepareSubdivisionData(parsed);
-  }
-
-  let analyzed = hasProvidedAnalysis
-    ? { assessment: opts.assessment, proposals: opts.proposals }
-    : (cached?.analyzed || null);
-  if (!analyzed) {
-    setImportAssistantLoading(true, 'Finding detachable sub-assemblies…', 70);
-    await waitForImportPaint();
-    if (openToken !== impOpenSeq) return;
-    analyzed = analyzeModelSubdivisions(prep.inputs, prep.adjacency);
-  }
-
-  if (parsed && !parsed._cachedSubdivisionAnalysis) {
-    parsed._cachedSubdivisionAnalysis = { prep, analyzed };
-  }
-
-  const { assessment, proposals } = analyzed;
-  if (openToken !== impOpenSeq) return;
-
-  state.pendingImport = parsed;
-  impState.parsed = parsed;
-  impState.prep = prep;
-  impState.assessment = assessment;
-  impState.proposals = proposals;
-  impState.isPostImport = isPostImport;
-  impState.isWizardSubpage = isWizardSubpage;
-  impState.pickerOpen = false;
-  impState.colorMode = 'sections';
-  impState.az = 38;
-  impState.el = 28;
-  impState.zoom = 1.0;
-  impState.panX = 0;
-  impState.panY = 0;
-
-  if (isWizardSubpage) {
-    impState.selectedId = importWizardState.importMode === 'keep'
-      ? 'keep'
-      : (importWizardState.selectedId || 'none');
-    impState.activeProposal = importWizardState.importMode === 'keep'
-      ? null
-      : importWizardState.activeProposal
-        ? JSON.parse(JSON.stringify(importWizardState.activeProposal))
-        : null;
-  } else {
-    // When reopened from Step Generation menu, match the currently active plan if any; otherwise pick recommended
-    const currentPlan = isPostImport ? state.model?._subdivisionPlan : null;
-    const matchedExisting = currentPlan
-      ? proposals.find(p => p.id === currentPlan.id || p.strategy === currentPlan.strategy)
-      : null;
-
-    const defaultProp = pickDefaultSubdivisionProposal(assessment, proposals);
-    if (matchedExisting) {
-      impState.selectedId = matchedExisting.id;
-      impState.activeProposal = JSON.parse(JSON.stringify(matchedExisting));
-    } else if (isPostImport && !currentPlan) {
-      impState.selectedId = 'none';
-      impState.activeProposal = null;
-    } else if (defaultProp) {
-      impState.selectedId = defaultProp.id;
-      impState.activeProposal = JSON.parse(JSON.stringify(defaultProp));
-    } else {
-      impState.selectedId = 'none';
-      impState.activeProposal = null;
+    let prep = opts?.prep || cached?.prep || null;
+    if (!prep) {
+      setImportAssistantLoading(true, 'Analyzing part connections…', 38);
+      await waitForImportPaint();
+      if (openToken !== impOpenSeq) return;
+      prep = prepareSubdivisionData(parsed);
     }
-  }
 
-  impState.initialSelectedId = impState.selectedId;
-  impState.minifigStyle = normalizeMinifigStepStyle(state.minifigStyle);
-  impState.isExploded = Boolean(impState.activeProposal);
-  impState.explodePct = impState.isExploded ? IMP_EXPLODED_PCT : 0;
+    let analyzed = hasProvidedAnalysis
+      ? { assessment: opts.assessment, proposals: opts.proposals }
+      : (cached?.analyzed || null);
+    if (!analyzed) {
+      setImportAssistantLoading(true, 'Finding detachable sub-assemblies…', 70);
+      await waitForImportPaint();
+      if (openToken !== impOpenSeq) return;
+      analyzed = analyzeModelSubdivisions(prep.inputs, prep.adjacency);
+    }
 
-  const reasonStr = assessment.reasons.length > 0
-    ? `${parsed.title} · ${assessment.reasons.join(' · ')}.`
-    : `${parsed.title} · ${formatPartCount(parsed.parts.length)}${parsed.submodelCount ? ` across ${parsed.submodelCount} submodels` : ''}.`;
-  if (summaryEl) summaryEl.textContent = reasonStr;
+    if (parsed && !parsed._cachedSubdivisionAnalysis) {
+      parsed._cachedSubdivisionAnalysis = { prep, analyzed };
+    }
 
-  renderImportAssistantUI();
-
-  if (needsCompute || (parsed.parts?.length || 0) >= 120) {
-    setImportAssistantLoading(true, 'Rendering 3D preview…', 92);
-    await waitForImportPaint();
+    const { assessment, proposals } = analyzed;
     if (openToken !== impOpenSeq) return;
-    rebuildAndDrawImportPreview();
-    setImportAssistantLoading(false);
-  } else {
-    setImportAssistantLoading(false);
-    requestAnimationFrame(() => {
-      if (openToken === impOpenSeq) rebuildAndDrawImportPreview();
-    });
+
+    state.pendingImport = parsed;
+    impState.parsed = parsed;
+    impState.prep = prep;
+    impState.assessment = assessment;
+    impState.proposals = proposals;
+    impState.isPostImport = isPostImport;
+    impState.isWizardSubpage = isWizardSubpage;
+    impState.pickerOpen = false;
+    impState.colorMode = 'sections';
+    impState.az = 38;
+    impState.el = 28;
+    impState.zoom = 1.0;
+    impState.panX = 0;
+    impState.panY = 0;
+
+    if (isWizardSubpage) {
+      impState.selectedId = importWizardState.importMode === 'keep'
+        ? 'keep'
+        : (importWizardState.selectedId || 'none');
+      impState.activeProposal = importWizardState.importMode === 'keep'
+        ? null
+        : importWizardState.activeProposal
+          ? JSON.parse(JSON.stringify(importWizardState.activeProposal))
+          : null;
+    } else {
+      // When reopened from Step Generation menu, match the currently active plan if any; otherwise pick recommended
+      const currentPlan = isPostImport ? state.model?._subdivisionPlan : null;
+      const matchedExisting = currentPlan
+        ? proposals.find(p => p.id === currentPlan.id || p.strategy === currentPlan.strategy)
+        : null;
+
+      const defaultProp = pickDefaultSubdivisionProposal(assessment, proposals);
+      if (matchedExisting) {
+        impState.selectedId = matchedExisting.id;
+        impState.activeProposal = JSON.parse(JSON.stringify(matchedExisting));
+      } else if (isPostImport && !currentPlan) {
+        impState.selectedId = 'none';
+        impState.activeProposal = null;
+      } else if (defaultProp) {
+        impState.selectedId = defaultProp.id;
+        impState.activeProposal = JSON.parse(JSON.stringify(defaultProp));
+      } else {
+        impState.selectedId = 'none';
+        impState.activeProposal = null;
+      }
+    }
+
+    impState.initialSelectedId = impState.selectedId;
+    impState.minifigStyle = normalizeMinifigStepStyle(state.minifigStyle);
+    impState.isExploded = Boolean(impState.activeProposal);
+    impState.explodePct = impState.isExploded ? IMP_EXPLODED_PCT : 0;
+
+    const reasonStr = assessment.reasons.length > 0
+      ? `${parsed.title} · ${assessment.reasons.join(' · ')}.`
+      : `${parsed.title} · ${formatPartCount(parsed.parts.length)}${parsed.submodelCount ? ` across ${parsed.submodelCount} submodels` : ''}.`;
+    if (summaryEl) summaryEl.textContent = reasonStr;
+
+    renderImportAssistantUI();
+
+    if (needsCompute || (parsed.parts?.length || 0) >= 120) {
+      setImportAssistantLoading(true, 'Rendering 3D preview…', 92);
+      await waitForImportPaint();
+      if (openToken !== impOpenSeq) return;
+      rebuildAndDrawImportPreview();
+      setImportAssistantLoading(false);
+    } else {
+      setImportAssistantLoading(false);
+      requestAnimationFrame(() => {
+        if (openToken === impOpenSeq) rebuildAndDrawImportPreview();
+      });
+    }
+  } catch (err) {
+    console.error('[StepGeneration] Error while loading Step Generation:', err);
+    if (openToken === impOpenSeq) {
+      setImportAssistantLoading(false);
+      showToast('Could not finish loading Step Generation.');
+    }
+  } finally {
+    if (openToken === impOpenSeq) {
+      setImportAssistantLoading(false);
+    }
   }
 }
 
