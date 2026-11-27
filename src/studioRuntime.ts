@@ -358,6 +358,7 @@ import {
   getApplyCameraDestructiveNotice,
   getCloseModelConfirmDialog,
   getDeleteThemeConfirmDialog,
+  getDocumentLinkConfirmDialog,
   getLayoutGroupOverlapDestructiveNotice,
   getLibraryClearSavedConfirmDialog,
   getLibraryRemovePartConfirmDialog,
@@ -18312,6 +18313,45 @@ function scrollOverviewListTo(edge) {
       switchStudioMode('pan');
     }
   });
+
+  // Confirm before opening any navigable link inside the rendered manual document (#pageFrame),
+  // including the Brick Instruction Works attribution/QR links on the front & back covers.
+  if (pageFrame) {
+    const handleDocumentLinkClick = (e) => {
+      if (e.type === 'auxclick' && e.button !== 1) return;
+      const targetEl = e.target instanceof Element ? e.target : e.target?.parentElement;
+      const link = targetEl?.closest?.('a[href]');
+      if (!link || !pageFrame.contains(link)) return;
+      const rawHref = (link.getAttribute('href') || '').trim();
+      const linkTarget = (link.getAttribute('target') || '').trim();
+      const opensInNewTab =
+        linkTarget === '_blank' || e.type === 'auxclick' || e.metaKey || e.ctrlKey || e.shiftKey;
+      const label =
+        link.getAttribute('aria-label') ||
+        link.getAttribute('title') ||
+        link.textContent ||
+        '';
+      const spec = getDocumentLinkConfirmDialog({
+        href: rawHref,
+        label,
+        opensInNewTab,
+      });
+      if (!spec) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const resolvedHref = link.href || rawHref;
+      void openConfirmActionDialog(spec).then((confirmed) => {
+        if (!confirmed) return;
+        if (opensInNewTab) {
+          window.open(resolvedHref, '_blank', 'noopener,noreferrer');
+        } else {
+          window.location.assign(resolvedHref);
+        }
+      });
+    };
+    pageFrame.addEventListener('click', handleDocumentLinkClick);
+    pageFrame.addEventListener('auxclick', handleDocumentLinkClick);
+  }
 })();
 
 // =========================================================================

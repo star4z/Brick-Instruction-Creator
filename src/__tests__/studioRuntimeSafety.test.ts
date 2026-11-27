@@ -430,11 +430,14 @@ describe('studioRuntime safety checks', () => {
       'getCloseModelConfirmDialog(',
       'getReplaceModelConfirmDialog(',
       'getDeleteThemeConfirmDialog(',
+      'getDocumentLinkConfirmDialog(',
       'getLibraryRemovePartConfirmDialog(',
       'getLibraryClearSavedConfirmDialog(',
     ]) {
       expect(runtime).toContain(fnName);
     }
+    expect(runtime).toContain("pageFrame.addEventListener('click', handleDocumentLinkClick)");
+    expect(runtime).toContain("pageFrame.addEventListener('auxclick', handleDocumentLinkClick)");
 
     for (const removedFn of [
       'getStepResetCameraDestructiveNotice',

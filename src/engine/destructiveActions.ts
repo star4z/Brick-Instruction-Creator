@@ -31,6 +31,7 @@ export interface DestructiveNotice {
 }
 
 export interface PermanentActionConfirmSpec {
+  tone?: DestructiveTone;
   title: string;
   message: string;
   detail?: string;
@@ -39,7 +40,6 @@ export interface PermanentActionConfirmSpec {
 }
 
 export interface ChoiceActionDialogSpec extends PermanentActionConfirmSpec {
-  tone?: DestructiveTone;
   secondaryLabel: string;
 }
 
@@ -943,4 +943,43 @@ export function getStepRegenerationPageBreakDialog(
     cancelLabel: 'Cancel',
   };
 }
+
+/**
+ * Confirmation dialog shown when the user clicks a navigable link inside the
+ * rendered manual document (`#pageFrame`) from the editor — including the
+ * Brick Instruction Works attribution/QR links on the front and back covers.
+ * Returns `null` for empty, fragment-only (`#...`), or `javascript:` hrefs.
+ */
+export function getDocumentLinkConfirmDialog(input: {
+  href?: string | null;
+  label?: string | null;
+  opensInNewTab?: boolean;
+}): PermanentActionConfirmSpec | null {
+  const href = String(input.href || '').trim();
+  if (!href || href.startsWith('#') || /^javascript:/i.test(href)) {
+    return null;
+  }
+
+  let cleanLabel = String(input.label || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^open\s+/i, '')
+    .trim();
+  if (cleanLabel.length > 60) {
+    cleanLabel = `${cleanLabel.slice(0, 59).trimEnd()}…`;
+  }
+
+  const opensInNewTab = input.opensInNewTab !== false;
+  return {
+    tone: 'warning',
+    title: cleanLabel ? `Open "${cleanLabel}"?` : 'Open link?',
+    message: opensInNewTab
+      ? 'Are you sure you want to open this link from the document? It will open in a new tab.'
+      : 'Are you sure you want to leave the editor and open this link?',
+    detail: href,
+    confirmLabel: 'Open Link',
+    cancelLabel: 'Cancel',
+  };
+}
+
 

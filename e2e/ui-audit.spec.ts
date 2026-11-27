@@ -1330,6 +1330,99 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
 
     runtime.assertClean(`${testInfo.project.name}: Hash URL Routing`);
   });
+
+  test('Clicking links in the editor document (including cover BIW links) opens an Are You Sure confirmation dialog', async ({
+    page,
+  }, testInfo) => {
+    const runtime = await attachRuntimeIssueCollector(page);
+
+    await page.goto('/');
+    await uploadLdrFile(page, 'cover-link-confirm.mpd', MULTI_CHAPTER_MPD);
+    const wizard = page.locator('#importWizardModal');
+    await expect(wizard).toBeVisible();
+    await page.locator('#impWizBtnGenerate').click();
+    await expect(wizard).toBeHidden();
+    await expect(page.locator('#stageViewport')).toBeVisible();
+    await closeMenuOnMobile(page);
+
+    // Spy on window.open so confirming a link never opens an external site during CI
+    await page.evaluate(() => {
+      const calls: Array<{ url: string; target?: string; features?: string }> = [];
+      (window as unknown as Record<string, unknown>).__openedLinks = calls;
+      window.open = ((url?: string | URL, target?: string, features?: string) => {
+        calls.push({ url: String(url || ''), target, features });
+        return null;
+      }) as typeof window.open;
+    });
+
+    const modal = page.locator('#confirmActionModal');
+    const title = page.locator('#confirmActionTitle');
+    const detail = page.locator('#confirmActionDetail');
+
+    // 1. Front Cover BIW editor link -> shows confirmation dialog; Cancel does not open link
+    const frontCoverLink = page.locator('#pageFrame a[data-cover-link="true"]');
+    await expect(frontCoverLink).toBeVisible();
+    await frontCoverLink.click();
+    await expect(modal).toBeVisible();
+    await expect(title).toContainText('Brick Instruction Works');
+    await expect(detail).toContainText('star4z.github.io/Brick-Instruction-Creator');
+    await expect(page.locator('#confirmActionConfirm')).toHaveText('Open Link');
+    await auditSurface(page, `${testInfo.project.name}: Document Link Confirm Modal`, {
+      activeContainerSelector: '#confirmActionModal',
+    });
+    await page.locator('#confirmActionCancel').click();
+    await expect(modal).toBeHidden();
+    expect(await page.evaluate(() => ((window as unknown as Record<string, unknown>).__openedLinks as unknown[]).length)).toBe(0);
+
+    // 2. Back Cover BIW editor link -> shows confirmation dialog; Open Link opens target URL
+    await page.goto('/#/back');
+    const backCoverLink = page.locator('#pageFrame a[data-cover-link="true"]');
+    await expect(backCoverLink).toBeVisible();
+    await backCoverLink.click();
+    await expect(modal).toBeVisible();
+    await expect(title).toContainText('Brick Instruction Works');
+    await page.locator('#confirmActionConfirm').click();
+    await expect(modal).toBeHidden();
+
+    const openedAfterBack = await page.evaluate(
+      () => (window as unknown as Record<string, unknown>).__openedLinks as Array<{ url: string; target?: string; features?: string }>,
+    );
+    expect(openedAfterBack).toHaveLength(1);
+    expect(openedAfterBack[0].url).toContain('star4z.github.io/Brick-Instruction-Creator');
+    expect(openedAfterBack[0].target).toBe('_blank');
+    expect(openedAfterBack[0].features).toContain('noopener');
+
+    // 3. Any generic link inside #pageFrame also triggers the confirmation dialog
+    await page.evaluate(() => {
+      const frame = document.getElementById('pageFrame');
+      if (!frame) return;
+      const a = document.createElement('a');
+      a.id = 'testGenericDocLink';
+      a.href = 'https://example.com/build-notes';
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.textContent = 'Build Notes';
+      a.style.position = 'absolute';
+      a.style.top = '12px';
+      a.style.left = '12px';
+      a.style.zIndex = '30';
+      frame.appendChild(a);
+    });
+    await page.locator('#testGenericDocLink').click();
+    await expect(modal).toBeVisible();
+    await expect(title).toHaveText('Open "Build Notes"?');
+    await expect(detail).toHaveText('https://example.com/build-notes');
+    await page.locator('#confirmActionConfirm').click();
+    await expect(modal).toBeHidden();
+
+    const openedAfterGeneric = await page.evaluate(
+      () => (window as unknown as Record<string, unknown>).__openedLinks as Array<{ url: string; target?: string }>,
+    );
+    expect(openedAfterGeneric).toHaveLength(2);
+    expect(openedAfterGeneric[1].url).toBe('https://example.com/build-notes');
+
+    runtime.assertClean(`${testInfo.project.name}: Document Link Confirm Dialog`);
+  });
 });
 
 

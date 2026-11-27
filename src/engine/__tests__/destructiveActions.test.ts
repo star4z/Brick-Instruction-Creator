@@ -4,6 +4,7 @@ import {
   getApplyCameraDestructiveNotice,
   getCloseModelConfirmDialog,
   getDeleteThemeConfirmDialog,
+  getDocumentLinkConfirmDialog,
   getLayoutGroupOverlapDestructiveNotice,
   getLibraryClearSavedConfirmDialog,
   getLibraryRemovePartConfirmDialog,
@@ -657,6 +658,43 @@ describe('destructiveActions engine', () => {
       expect(multi?.confirmLabel).toBe('Proceed & Remove Page Breaks');
       expect(multi?.secondaryLabel).toBe('Proceed & Keep Page Breaks');
       expect(multi?.cancelLabel).toBe('Cancel');
+    });
+
+    it('Document link confirmation dialog prompts with warning tone for navigable URLs and ignores non-navigable hrefs', () => {
+      expect(getDocumentLinkConfirmDialog({ href: '' })).toBeNull();
+      expect(getDocumentLinkConfirmDialog({ href: '   ' })).toBeNull();
+      expect(getDocumentLinkConfirmDialog({ href: '#section-1' })).toBeNull();
+      expect(getDocumentLinkConfirmDialog({ href: 'javascript:void(0)' })).toBeNull();
+
+      const coverSpec = getDocumentLinkConfirmDialog({
+        href: 'https://star4z.github.io/Brick-Instruction-Creator/',
+        label: 'Open Brick Instruction Works',
+        opensInNewTab: true,
+      });
+      expect(coverSpec).not.toBeNull();
+      expect(coverSpec?.tone).toBe('warning');
+      expect(coverSpec?.title).toBe('Open "Brick Instruction Works"?');
+      expect(coverSpec?.message).toContain('Are you sure');
+      expect(coverSpec?.message).toContain('new tab');
+      expect(coverSpec?.detail).toBe('https://star4z.github.io/Brick-Instruction-Creator/');
+      expect(coverSpec?.confirmLabel).toBe('Open Link');
+      expect(coverSpec?.cancelLabel).toBe('Cancel');
+
+      const sameTabSpec = getDocumentLinkConfirmDialog({
+        href: 'https://example.com/manual',
+        label: '',
+        opensInNewTab: false,
+      });
+      expect(sameTabSpec?.title).toBe('Open link?');
+      expect(sameTabSpec?.message).toContain('leave the editor');
+      expect(sameTabSpec?.detail).toBe('https://example.com/manual');
+
+      const longLabelSpec = getDocumentLinkConfirmDialog({
+        href: 'https://example.com/long',
+        label: 'A'.repeat(80),
+      });
+      expect(longLabelSpec?.title).toContain('…');
+      expect(longLabelSpec!.title.length).toBeLessThanOrEqual(70);
     });
   });
 });
