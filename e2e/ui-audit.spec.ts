@@ -655,11 +655,17 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     await expect(page.locator('#bomVariableWidthColumns')).toBeVisible();
     await page.locator('#bomVariableWidthColumns').click();
     await expect(page.locator('#bomVariableWidthColumns')).toBeChecked();
+    await expect(page.locator('#bomWrapPartNames')).toBeVisible();
+    await expect(page.locator('#bomWrapPartNames')).not.toBeChecked();
+    await page.locator('#bomWrapPartNames').click();
+    await expect(page.locator('#bomWrapPartNames')).toBeChecked();
     await auditSurface(page, `${testInfo.project.name}: Parts List Setup (Grid Custom)`, {
       activeContainerSelector: '#bomSetupModal',
     });
 
     await page.locator('[data-bom-format="table"]').click();
+    await expect(page.locator('#bomWrapPartNames')).toBeVisible();
+    await expect(page.locator('#bomWrapPartNames')).toBeChecked();
     await auditSurface(page, `${testInfo.project.name}: Parts List Setup (Table)`, {
       activeContainerSelector: '#bomSetupModal',
     });

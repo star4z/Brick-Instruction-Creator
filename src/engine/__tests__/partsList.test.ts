@@ -19,6 +19,7 @@ import {
   resolveBomGridPlan,
   summarizeBomConfig,
   toggleBomField,
+  wrapBomTextLines,
 } from '../partsList';
 
 function makeBrick(id: string, dx: number, dy: number, dz: number) {
@@ -435,5 +436,65 @@ describe('Adaptive grid typography & Table format', () => {
 
     expect(summarizeBomConfig(customCfg)).toContain('Table');
     expect(summarizeBomConfig(customCfg)).toContain('15 rows');
+  });
+
+  it('normalizes and compares wrapPartNames and computes nameMaxLines when enabled', () => {
+    const off = normalizeBomConfig({});
+    const on = normalizeBomConfig({ wrapPartNames: true });
+    expect(off.wrapPartNames).toBeUndefined();
+    expect(on.wrapPartNames).toBe(true);
+    expect(bomConfigsEqual(off, on)).toBe(false);
+    expect(bomConfigsEqual(normalizeBomConfig({ wrapPartNames: false }), off)).toBe(true);
+
+    const truncatedTypo = computeBomCellTypography({
+      cellW: 90,
+      cellH: 96,
+      pxPerInch: 96,
+      enabledFields: ['image', 'qty', 'name', 'partId'],
+      wrapPartNames: false,
+    });
+    expect(truncatedTypo.nameMaxLines).toBe(1);
+
+    const wrappedTypo = computeBomCellTypography({
+      cellW: 90,
+      cellH: 96,
+      pxPerInch: 96,
+      enabledFields: ['image', 'qty', 'name', 'partId'],
+      wrapPartNames: true,
+    });
+    expect(wrappedTypo.nameMaxLines).toBeGreaterThanOrEqual(2);
+    expect(wrappedTypo.nameMaxLines).toBeLessThanOrEqual(3);
+  });
+
+  it('wraps long part names cleanly across lines and only truncates when exceeding maxLines', () => {
+    const measure = (s: string) => s.length * 6; // 6px per char
+    expect(wrapBomTextLines('Tile 1 x 2', 80, measure, 3)).toEqual(['Tile 1 x 2']);
+
+    const wrapped = wrapBomTextLines('Slope, Curved 1 x 2 x 2/3', 80, measure, 3);
+    expect(wrapped.length).toBeGreaterThanOrEqual(2);
+    expect(wrapped.length).toBeLessThanOrEqual(3);
+    expect(wrapped.join(' ')).toBe('Slope, Curved 1 x 2 x 2/3');
+    for (const line of wrapped) {
+      expect(measure(line)).toBeLessThanOrEqual(80);
+    }
+
+    const clamped = wrapBomTextLines(
+      'Technic, Plate 1 x 5 with Toothed Ends and Reinforced Axle Holes',
+      80,
+      measure,
+      2,
+    );
+    expect(clamped).toHaveLength(2);
+    expect(clamped[1].endsWith('…')).toBe(true);
+    for (const line of clamped) {
+      expect(measure(line)).toBeLessThanOrEqual(80);
+    }
+
+    // Overlong single token without spaces breaks across lines without overflowing
+    const unbroken = wrapBomTextLines('Supercalifragilisticexpialidocious', 60, measure, 3);
+    expect(unbroken.length).toBeGreaterThanOrEqual(2);
+    for (const line of unbroken) {
+      expect(measure(line)).toBeLessThanOrEqual(60);
+    }
   });
 });

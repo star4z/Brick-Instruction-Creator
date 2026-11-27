@@ -298,6 +298,7 @@ import {
   resolveBomGridPlan,
   summarizeBomConfig,
   toggleBomField,
+  wrapBomTextLines,
 } from './engine/partsList';
 import {
   CAMERA_ANGLE_PRESETS,
@@ -11223,6 +11224,7 @@ function renderAll(renderOpts = {}) {
   } else if (page.kind === 'bom') {
     const cfg = getEffectiveBomConfig();
     const enabledFields = getEnabledBomFields(cfg);
+    const wrapPartNames = Boolean(cfg.wrapPartNames);
     const entries = page.bomEntries || [];
     const bt = typo.bom;
     const bodyW = Math.max(60, dims.width - padPx * 2);
@@ -11251,6 +11253,9 @@ function renderAll(renderOpts = {}) {
           }).join('')}
         </div>`;
 
+      const tableNameMaxLines = wrapPartNames
+        ? Math.max(2, Math.min(3, Math.floor((tTypo.rowH - 4) / Math.max(1, tTypo.bodyFont * 1.18))))
+        : 1;
       const rowsHtml = entries.map((entry, idx) => {
         const { part, qty, meta, partIdDisplay, colorName, colorHex } = entry;
         const stripeBg = idx % 2 === 1 ? 'rgba(127,127,127,0.06)' : 'transparent';
@@ -11274,7 +11279,10 @@ function renderAll(renderOpts = {}) {
               <span class="truncate">${escHtml(colorName)}</span>
             </div>`;
           }
-          return `<div class="h-full flex items-center justify-start font-medium overflow-hidden" style="${wStyle};font-size:${tTypo.bodyFont}px;color:${theme.text}" title="${escHtml(meta.name)}"><span class="truncate">${escHtml(meta.name)}</span></div>`;
+          if (wrapPartNames) {
+            return `<div class="h-full flex items-center justify-start font-medium overflow-hidden" style="${wStyle};font-size:${tTypo.bodyFont}px;line-height:1.18;color:${theme.text}" title="${escHtml(meta.name)}"><span data-bom-part-name="wrapped" style="display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:${tableNameMaxLines};overflow:hidden;overflow-wrap:break-word;word-break:break-word">${escHtml(meta.name)}</span></div>`;
+          }
+          return `<div class="h-full flex items-center justify-start font-medium overflow-hidden" style="${wStyle};font-size:${tTypo.bodyFont}px;color:${theme.text}" title="${escHtml(meta.name)}"><span data-bom-part-name="truncated" class="truncate">${escHtml(meta.name)}</span></div>`;
         }).join('');
         return `<div class="shrink-0 flex items-center border-b overflow-hidden" style="height:${tTypo.rowH}px;background:${stripeBg};border-color:color-mix(in srgb, ${theme.pliBorder} 48%, transparent)">${cellsHtml}</div>`;
       }).join('');
@@ -11288,7 +11296,10 @@ function renderAll(renderOpts = {}) {
           return `<div class="shrink-0 font-extrabold w-full truncate ${alignCls}" style="font-size:${ct.qtyFont}px;line-height:1.12;color:${theme.text}">${entry.qty}×</div>`;
         }
         if (fieldId === 'name') {
-          return `<div class="shrink-0 font-medium w-full truncate opacity-85 ${alignCls}" style="font-size:${ct.nameFont}px;line-height:1.18;color:${theme.text}" title="${escHtml(entry.meta.name)}">${escHtml(entry.meta.name)}</div>`;
+          if (wrapPartNames) {
+            return `<div data-bom-part-name="wrapped" class="shrink-0 font-medium w-full opacity-85 ${alignCls}" style="font-size:${ct.nameFont}px;line-height:1.18;color:${theme.text};display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:${ct.nameMaxLines};overflow:hidden;overflow-wrap:break-word;word-break:break-word" title="${escHtml(entry.meta.name)}">${escHtml(entry.meta.name)}</div>`;
+          }
+          return `<div data-bom-part-name="truncated" class="shrink-0 font-medium w-full truncate opacity-85 ${alignCls}" style="font-size:${ct.nameFont}px;line-height:1.18;color:${theme.text}" title="${escHtml(entry.meta.name)}">${escHtml(entry.meta.name)}</div>`;
         }
         if (fieldId === 'partId') {
           return `<div class="shrink-0 font-mono w-full truncate opacity-75 ${alignCls}" style="font-size:${ct.partIdFont}px;line-height:1.15;color:${theme.muted}">${escHtml(entry.partIdDisplay)}</div>`;
@@ -11312,6 +11323,7 @@ function renderAll(renderOpts = {}) {
           pxPerInch: dims.pxPerInch,
           enabledFields,
           typeScale: typo.typeScale,
+          wrapPartNames,
         });
         const thumb = enabledFields.includes('image') ? getBomPartThumb(item.part, colSpan, rowSpan) : '';
         const bomLengthBadge = state.bomConfig?.showLengthBadges !== false ? getActualSizeGuide(item.part.p) : null;
@@ -15989,7 +16001,11 @@ function renderBomSetupPreview(bc) {
     const sampleRowCells = enabledFields.map((id) => {
       if (id === 'image') return '<span class="px-1.5 py-0.5 rounded bg-[#c91a09]/15 text-[#c91a09] font-bold text-[10px]">🧱</span>';
       if (id === 'qty') return '<span class="font-extrabold text-[11px]">4×</span>';
-      if (id === 'name') return '<span class="font-medium text-[10px] truncate">Brick 2×4</span>';
+      if (id === 'name') {
+        return bc.wrapPartNames
+          ? '<span class="font-medium text-[10px] leading-tight break-words">Slope, Curved 1×2</span>'
+          : '<span class="font-medium text-[10px] truncate max-w-[66px]">Slope, Curved 1×2</span>';
+      }
       if (id === 'partId') return '<span class="font-mono text-[10px] text-[var(--muted-foreground)]">3001</span>';
       return '<span class="inline-flex items-center gap-1 text-[10px]"><span class="w-2 h-2 rounded-full bg-[#c91a09] inline-block"></span>Red</span>';
     }).join('<span class="text-[var(--border-strong)]">│</span>');
@@ -16064,7 +16080,11 @@ function renderBomSetupPreview(bc) {
         </div>`;
       }
       if (id === 'qty') return `<div class="font-extrabold text-[11px] leading-tight" style="color:${theme.text}">4×</div>`;
-      if (id === 'name') return `<div class="font-medium text-[10px] leading-tight truncate w-full" style="color:${theme.text}">Brick 2×4</div>`;
+      if (id === 'name') {
+        return bc.wrapPartNames
+          ? `<div class="font-medium text-[10px] leading-tight break-words w-full" style="color:${theme.text}">Slope, Curved 1×2</div>`
+          : `<div class="font-medium text-[10px] leading-tight truncate w-full" style="color:${theme.text}">Slope, Curved 1×2</div>`;
+      }
       if (id === 'partId') return `<div class="font-mono text-[9.5px] leading-tight" style="color:${theme.muted}">3001</div>`;
       return `<div class="inline-flex items-center justify-center gap-1 text-[9.5px] leading-tight" style="color:${theme.muted}"><span class="w-2 h-2 rounded-full bg-[#c91a09] inline-block border border-black/20"></span>Red</div>`;
     }).join('');
@@ -16207,6 +16227,8 @@ function syncBomSetupUI() {
   // Draggable fields & columns list
   document.getElementById('bomWordlessFieldsBanner')?.classList.toggle('hidden', Boolean(state.bomShowTextFields));
   renderBomFieldsList(bc);
+  const bomWrapNamesChk = document.getElementById('bomWrapPartNames');
+  if (bomWrapNamesChk) bomWrapNamesChk.checked = Boolean(bc.wrapPartNames);
 
   // Sorting selects
   const spEl = document.getElementById('bomSortPrimary');
@@ -21285,7 +21307,18 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
             ctx.textAlign = 'left';
             ctx.fillStyle = theme.text;
             ctx.font = themeCanvasFont(theme, 500, tTypo.bodyFont);
-            ctx.fillText(fitText(entry.meta.name, maxW), cx + tTypo.cellPadX, midY);
+            if (cfg.wrapPartNames) {
+              const tableLineH = tTypo.bodyFont * 1.18;
+              const tableNameMaxLines = Math.max(2, Math.min(3, Math.floor((tTypo.rowH - 4) / Math.max(1, tableLineH))));
+              const lines = wrapBomTextLines(entry.meta.name, maxW, (s) => ctx.measureText(s).width, tableNameMaxLines);
+              const blockH = lines.length * tableLineH;
+              const startY = midY - blockH / 2 + tableLineH / 2;
+              for (let li = 0; li < lines.length; li++) {
+                ctx.fillText(lines[li], cx + tTypo.cellPadX, startY + li * tableLineH);
+              }
+            } else {
+              ctx.fillText(fitText(entry.meta.name, maxW), cx + tTypo.cellPadX, midY);
+            }
           }
         }
       }
@@ -21293,7 +21326,8 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
       ctx.textAlign = 'left';
     } else {
       const cells = page.bomCells || [];
-      const drawGridTextField = (fieldId, entry, ct, xLeft, boxW, yTop, centered) => {
+      const wrapPartNames = Boolean(cfg.wrapPartNames);
+      const drawGridTextField = (fieldId, entry, ct, xLeft, boxW, yTop, centered, precomputedNameLines = null) => {
         ctx.textBaseline = 'top';
         if (fieldId === 'qty') {
           ctx.fillStyle = theme.text;
@@ -21306,6 +21340,14 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
           ctx.fillStyle = theme.text;
           ctx.font = themeCanvasFont(theme, 500, ct.nameFont);
           ctx.textAlign = centered ? 'center' : 'left';
+          if (wrapPartNames) {
+            const lines = precomputedNameLines || wrapBomTextLines(entry.meta.name, boxW, (s) => ctx.measureText(s).width, ct.nameMaxLines);
+            const drawX = centered ? xLeft + boxW / 2 : xLeft;
+            for (let li = 0; li < lines.length; li++) {
+              ctx.fillText(lines[li], drawX, yTop + li * ct.textLineH);
+            }
+            return Math.max(1, lines.length) * ct.textLineH;
+          }
           ctx.fillText(fitText(entry.meta.name, boxW), centered ? xLeft + boxW / 2 : xLeft, yTop);
           return ct.textLineH;
         }
@@ -21351,6 +21393,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
           pxPerInch,
           enabledFields,
           typeScale: typo.typeScale,
+          wrapPartNames,
         });
 
         const hasImage = enabledFields.includes('image');
@@ -21387,9 +21430,15 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
             }
           }
           const textFields = enabledFields.filter((f) => f !== 'image');
-          let curY = cy + ct.padY + Math.max(0, (innerH - ct.totalTextH) / 2);
+          let nameLines = null;
+          if (wrapPartNames && enabledFields.includes('name')) {
+            ctx.font = themeCanvasFont(theme, 500, ct.nameFont);
+            nameLines = wrapBomTextLines(entry.meta.name, txtColW, (s) => ctx.measureText(s).width, ct.nameMaxLines);
+          }
+          const actualTextH = ct.totalTextH + (nameLines ? Math.max(0, nameLines.length - 1) * ct.textLineH : 0);
+          let curY = cy + ct.padY + Math.max(0, (innerH - actualTextH) / 2);
           for (const f of textFields) {
-            const lh = drawGridTextField(f, entry, ct, txtX, txtColW, curY, false);
+            const lh = drawGridTextField(f, entry, ct, txtX, txtColW, curY, false, f === 'name' ? nameLines : null);
             curY += lh + ct.textGap;
           }
         } else {
@@ -21397,10 +21446,16 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
           const innerW = Math.max(10, cw - ct.padX * 2);
           const innerH = Math.max(10, ch - ct.padY * 2);
           const totalGap = Math.max(0, enabledFields.length - 1) * ct.textGap;
-          const imgSlotH = hasImage ? Math.max(8, innerH - ct.totalTextH - totalGap) : 0;
+          let nameLines = null;
+          if (wrapPartNames && enabledFields.includes('name')) {
+            ctx.font = themeCanvasFont(theme, 500, ct.nameFont);
+            nameLines = wrapBomTextLines(entry.meta.name, innerW, (s) => ctx.measureText(s).width, ct.nameMaxLines);
+          }
+          const actualTextH = ct.totalTextH + (nameLines ? Math.max(0, nameLines.length - 1) * ct.textLineH : 0);
+          const imgSlotH = hasImage ? Math.max(8, innerH - actualTextH - totalGap) : 0;
           let curY = hasImage
             ? cy + ct.padY
-            : cy + ct.padY + Math.max(0, (innerH - ct.totalTextH) / 2);
+            : cy + ct.padY + Math.max(0, (innerH - actualTextH) / 2);
 
           for (const f of enabledFields) {
             if (f === 'image') {
@@ -21417,7 +21472,7 @@ async function renderPageToJpegBytes(page, pxW, pxH, pageWpt = 792, pageHpt = 61
               }
               curY += imgSlotH + ct.textGap;
             } else {
-              const lh = drawGridTextField(f, entry, ct, innerX, innerW, curY, true);
+              const lh = drawGridTextField(f, entry, ct, innerX, innerW, curY, true, f === 'name' ? nameLines : null);
               curY += lh + ct.textGap;
             }
           }
@@ -24770,6 +24825,8 @@ const bomLenBadgesEl = document.getElementById('bomShowLengthBadges');
 if (bomLenBadgesEl) bomLenBadgesEl.onchange = (e) => patchBomConfig({ showLengthBadges: e.target.checked }, { immediate: true });
 const bomVarColsEl = document.getElementById('bomVariableWidthColumns');
 if (bomVarColsEl) bomVarColsEl.onchange = (e) => patchBomConfig({ variableWidthColumns: e.target.checked }, { immediate: true });
+const bomWrapNamesEl = document.getElementById('bomWrapPartNames');
+if (bomWrapNamesEl) bomWrapNamesEl.onchange = (e) => patchBomConfig({ wrapPartNames: e.target.checked }, { immediate: true });
 document.querySelectorAll('.bom-flowaxis-btn').forEach(b => {
   b.onclick = () => patchBomConfig({ flowAxis: b.getAttribute('data-bom-flow-axis') === 'columns' ? 'columns' : 'rows' }, { immediate: true });
 });

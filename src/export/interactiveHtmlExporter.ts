@@ -648,6 +648,7 @@ ${customFontFacesCss}  :root {
     display: flex; flex-direction: column; align-items: center; text-align: center; gap: 3px; font-size: 11px;
   }
   .sf-bom-item img { width: 48px; height: 48px; object-fit: contain; }
+  .sf-bom-item span { max-width: 100%; overflow-wrap: break-word; word-break: break-word; }
   .sf-bom-item small { font-size: 10px; color: var(--muted); }
   .bom-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
   .bom-color-cell { display: inline-flex; align-items: center; gap: 5px; justify-content: center; }
@@ -835,7 +836,7 @@ ${customFontFacesCss}  :root {
   .bom-card.checked { opacity: 0.42; text-decoration: line-through; }
   .bom-card img { width: 58px; height: 58px; object-fit: contain; }
   .bom-qty { font-size: 14px; font-weight: 900; }
-  .bom-name { font-size: 11px; font-weight: 600; line-height: 1.25; }
+  .bom-name { font-size: 11px; font-weight: 600; line-height: 1.25; max-width: 100%; overflow-wrap: break-word; word-break: break-word; }
   .bom-sub { font-size: 10px; color: var(--muted); }
   .divider-card { max-width: 520px; margin: 12vh auto 0; padding: 32px 24px; border-radius: 28px; text-align: center; }
 

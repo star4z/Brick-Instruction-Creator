@@ -49,6 +49,8 @@ export interface BomConfig {
   variableWidthColumns?: boolean;
   /** When true (default), renders circled (N) / squared [N] length badges on axles, bars, and liftarms. */
   showLengthBadges?: boolean;
+  /** When true, wraps long part names onto multiple lines instead of truncating with an ellipsis. */
+  wrapPartNames?: boolean;
   /** Table format row count mode. */
   tableRowsMode: 'auto' | 'custom';
   /** Explicit rows per page when format === 'table' && tableRowsMode === 'custom'. */
@@ -299,6 +301,7 @@ function isUnmodifiedLegacyBomConfig(r: Record<string, unknown>): boolean {
     r.relativeScale !== undefined ||
     r.variableWidthColumns !== undefined ||
     r.showLengthBadges !== undefined ||
+    r.wrapPartNames !== undefined ||
     r.tableRowsMode !== undefined ||
     r.tableRowsPerPage !== undefined ||
     r.fields !== undefined;
@@ -423,6 +426,8 @@ export function normalizeBomConfig(
     typeof r.variableWidthColumns === 'boolean' ? r.variableWidthColumns : fb.variableWidthColumns;
   const showLengthBadges =
     typeof r.showLengthBadges === 'boolean' ? r.showLengthBadges : fb.showLengthBadges;
+  const wrapPartNames =
+    typeof r.wrapPartNames === 'boolean' ? r.wrapPartNames : fb.wrapPartNames;
 
   return {
     format,
@@ -438,6 +443,7 @@ export function normalizeBomConfig(
     ...(relativeScale !== undefined ? { relativeScale } : {}),
     ...(variableWidthColumns !== undefined ? { variableWidthColumns } : {}),
     ...(showLengthBadges !== undefined ? { showLengthBadges } : {}),
+    ...(wrapPartNames !== undefined ? { wrapPartNames } : {}),
     tableRowsMode,
     tableRowsPerPage,
     fields,
@@ -462,6 +468,7 @@ export function bomConfigsEqual(a: BomConfig, b: BomConfig): boolean {
     Boolean(a.relativeScale) !== Boolean(b.relativeScale) ||
     Boolean(a.variableWidthColumns) !== Boolean(b.variableWidthColumns) ||
     (a.showLengthBadges !== false) !== (b.showLengthBadges !== false) ||
+    Boolean(a.wrapPartNames) !== Boolean(b.wrapPartNames) ||
     a.tableRowsMode !== b.tableRowsMode ||
     a.tableRowsPerPage !== b.tableRowsPerPage ||
     a.sortPrimary !== b.sortPrimary ||
@@ -1092,9 +1099,104 @@ export interface BomCellTypography {
   qtyLineH: number;
   textLineH: number;
   idLineH: number;
+  /** Maximum lines allowed for the Part Name field (1 when truncated, 2..5 when wrapped). */
+  nameMaxLines: number;
   totalTextH: number;
   imageBoxW: number;
   imageBoxH: number;
+}
+
+/**
+ * Wraps a text string onto at most `maxLines` lines within `maxWidth` pixels,
+ * breaking at word boundaries first and falling back to character-level breaks
+ * for overlong tokens. Truncates the final line with `…` only when the text
+ * exceeds `maxLines`.
+ */
+export function wrapBomTextLines(
+  rawText: string,
+  maxWidth: number,
+  measureWidth: (s: string) => number,
+  maxLines: number,
+): string[] {
+  const text = String(rawText || '').trim();
+  if (!text || maxWidth <= 2) return [];
+  const cap = Math.max(1, Math.round(maxLines));
+
+  const truncateWithEllipsis = (s: string): string => {
+    if (measureWidth(s) <= maxWidth) return s;
+    const ell = '…';
+    const ellW = measureWidth(ell);
+    if (ellW >= maxWidth) return '';
+    let lo = 0;
+    let hi = s.length;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (measureWidth(s.slice(0, mid)) + ellW <= maxWidth) lo = mid;
+      else hi = mid - 1;
+    }
+    return lo > 0 ? s.slice(0, lo).trimEnd() + ell : ell;
+  };
+
+  if (cap === 1 || measureWidth(text) <= maxWidth) {
+    const single = truncateWithEllipsis(text);
+    return single ? [single] : [];
+  }
+
+  const words = text.split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let cur = '';
+  let wi = 0;
+
+  while (wi < words.length) {
+    const word = words[wi];
+    const isLastLine = lines.length === cap - 1;
+
+    if (!cur) {
+      if (measureWidth(word) <= maxWidth) {
+        cur = word;
+        wi++;
+      } else if (isLastLine) {
+        const rest = words.slice(wi).join(' ');
+        const fitted = truncateWithEllipsis(rest);
+        if (fitted) lines.push(fitted);
+        cur = '';
+        break;
+      } else {
+        // Hard-break an overlong single token across lines
+        let lo = 1;
+        let hi = word.length;
+        while (lo < hi) {
+          const mid = (lo + hi + 1) >> 1;
+          if (measureWidth(word.slice(0, mid)) <= maxWidth) lo = mid;
+          else hi = mid - 1;
+        }
+        lines.push(word.slice(0, lo));
+        words[wi] = word.slice(lo);
+        if (!words[wi]) wi++;
+      }
+      continue;
+    }
+
+    const candidate = `${cur} ${word}`;
+    if (measureWidth(candidate) <= maxWidth) {
+      cur = candidate;
+      wi++;
+    } else if (isLastLine) {
+      const rest = `${cur} ${words.slice(wi).join(' ')}`;
+      const fitted = truncateWithEllipsis(rest);
+      if (fitted) lines.push(fitted);
+      cur = '';
+      break;
+    } else {
+      lines.push(cur);
+      cur = '';
+    }
+  }
+
+  if (cur && lines.length < cap) {
+    lines.push(cur);
+  }
+  return lines;
 }
 
 /**
@@ -1110,9 +1212,11 @@ export function computeBomCellTypography(params: {
   pxPerInch: number;
   enabledFields: readonly BomFieldId[];
   typeScale?: number;
+  wrapPartNames?: boolean;
 }): BomCellTypography {
   const { cellW, cellH, pxPerInch, enabledFields } = params;
   const typeScale = params.typeScale ?? 1.0;
+  const wrapPartNames = Boolean(params.wrapPartNames);
   const ptToPx = (pts: number) => pts * (pxPerInch / 72) * typeScale;
 
   const hasImage = enabledFields.includes('image');
@@ -1185,6 +1289,23 @@ export function computeBomCellTypography(params: {
     m = measureTextBlock(scale);
   }
 
+  let nameMaxLines = 1;
+  if (wrapPartNames && enabledFields.includes('name')) {
+    const otherTextH = Math.max(0, m.total - m.nH);
+    if (!hasImage) {
+      const remH = Math.max(m.nH, availH * 0.88 - otherTextH);
+      nameMaxLines = clamp(Math.floor(remH / Math.max(1, m.nH)), 2, 5);
+    } else if (layoutMode !== 'vertical') {
+      const remH = Math.max(m.nH, availH * 0.86 - otherTextH);
+      nameMaxLines = clamp(Math.floor(remH / Math.max(1, m.nH)), 2, 4);
+    } else {
+      // Reserve at least ~36% of vertical cell height for the thumbnail while allowing 2-3 wrapped lines
+      const extraGap = textFields.length > 0 ? textGap : 0;
+      const maxNameH = availH * 0.64 - otherTextH - extraGap;
+      nameMaxLines = clamp(Math.floor(maxNameH / Math.max(1, m.nH)), 2, 3);
+    }
+  }
+
   let imageBoxW = 0;
   let imageBoxH = 0;
   if (hasImage) {
@@ -1213,6 +1334,7 @@ export function computeBomCellTypography(params: {
     qtyLineH: roundTo(m.qH, 2),
     textLineH: roundTo(m.nH, 2),
     idLineH: roundTo(m.pH, 2),
+    nameMaxLines,
     totalTextH: roundTo(m.total, 2),
     imageBoxW: roundTo(imageBoxW, 1),
     imageBoxH: roundTo(imageBoxH, 1),
