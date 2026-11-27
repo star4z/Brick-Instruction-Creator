@@ -245,17 +245,30 @@ export function analyzeUndersideAssembly(
     const deckSpan = horizontalSpan(mainDeckComp, parts);
     if (deckSpan < longSpan * 0.55 || mainDeckComp.length < 4) continue;
 
+    // Use the exact underside plane of `mainDeckComp` (rather than the 8-LDU quantized
+    // bucket `yCand`) so bricks clutched directly beneath the deck with 4 LDU top studs
+    // are never dropped when a model's deck sits slightly off an exact 8-LDU multiple.
+    const mainDeckSet = new Set(mainDeckComp);
+    let actualDeckMinY = Infinity;
+    for (const idx of mainDeckComp) {
+      if (parts[idx].box.min[1] < actualDeckMinY) {
+        actualDeckMinY = parts[idx].box.min[1];
+      }
+    }
+    const deckUnderPlaneY = Number.isFinite(actualDeckMinY) ? actualDeckMinY : yCand;
+
     // Collect parts strictly below the deck (plus vertical Technic mechanisms hanging below it)
     const belowParts: number[] = [];
     const belowSet = new Set<number>();
     for (let i = 0; i < n; i++) {
+      if (mainDeckSet.has(i)) continue;
       const p = parts[i];
       if (p.role === 'figure') continue;
       const b = p.box;
-      if (b.max[1] <= yCand + 5.0) {
+      if (b.max[1] <= deckUnderPlaneY + 5.5) {
         belowParts.push(i);
         belowSet.add(i);
-      } else if (mechFlags[i] && b.min[1] < yCand - 8.0 && b.center[1] < yCand + 6.0) {
+      } else if (mechFlags[i] && b.min[1] < deckUnderPlaneY - 8.0 && b.center[1] < deckUnderPlaneY + 6.0) {
         // Vertical axle/mechanism extending from below up into a deck hole
         belowParts.push(i);
         belowSet.add(i);

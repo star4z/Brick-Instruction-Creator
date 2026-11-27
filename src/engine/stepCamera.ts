@@ -966,7 +966,7 @@ export function optimizeStudioStepCameraSequence(
         if (interlocks && !isLargeFlatDeck) {
           interlocking.push(ob);
           if (shaftEntersFromAbove) {
-            const tipMaxY = Math.min(ob.max[1], ob.min[1] + 16);
+            const tipMaxY = Math.min(ob.max[1], ob.min[1] + 8);
             verticalShaftMatingBoxes.push({
               min: [ob.min[0], ob.min[1], ob.min[2]],
               max: [ob.max[0], tipMaxY, ob.max[2]],
@@ -983,7 +983,7 @@ export function optimizeStudioStepCameraSequence(
     // If a downward-lifted underside submodel receives a protruding vertical Technic pin/axle
     // into a top-facing hole, a bottom view hides that hole behind the submodel's own solid
     // underside. When an upright top view clearly reveals BOTH the lifted submodel and the
-    // protruding vertical shaft, flip upright so the builder can see the pin entering the hole.
+    // protruding vertical shaft tip, flip upright so the builder can see the pin entering the hole.
     if (
       forceBottom &&
       isDownwardLiftedSub &&
@@ -994,14 +994,14 @@ export function optimizeStudioStepCameraSequence(
       let hasClearTopPinHoleView = false;
       for (let v = 0; v < 4; v++) {
         const view = canonicalViews[v];
-        const shiftedVis = evaluateStepVisibilityWithProj(
+        const shiftedMetrics = evaluateStepVisibilityWithProj(
           step.shiftedStepBoxes,
           getProj(step.occludersBefore, v),
           occCount,
           view.az,
           view.el,
-        ).visibility;
-        if (shiftedVis < 0.65) continue;
+        );
+        if (shiftedMetrics.meanVisibility < 0.55) continue;
         const shaftVisVsOcc = evaluateStepVisibilityWithProj(
           verticalShaftMatingBoxes,
           getProj(step.occludersBefore, v),
@@ -1015,7 +1015,7 @@ export function optimizeStudioStepCameraSequence(
           view.az,
           view.el,
         ).visibility;
-        if (Math.min(shaftVisVsOcc, shaftVisVsSub) >= 0.55) {
+        if (Math.min(shaftVisVsOcc, shaftVisVsSub) >= 0.45) {
           hasClearTopPinHoleView = true;
           break;
         }

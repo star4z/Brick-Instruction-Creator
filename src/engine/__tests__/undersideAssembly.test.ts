@@ -340,5 +340,70 @@ describe('undersideAssembly — general deck-first & upside-down underside physi
     expect(isStrictDeckUndersidePart(hTopL, boxes, adj, placedDeck)).toBe(true);
     expect(isStrictDeckUndersidePart(8, boxes, adj, placedDeck)).toBe(false);
   });
+
+  it('captures the first brick layer directly beneath a deck whose Y sits off an 8-LDU grid multiple (with 4 LDU top studs)', () => {
+    const parts: UndersidePartInput[] = [];
+    const adj: number[][] = [];
+    const add = (
+      partId: string,
+      partName: string,
+      box: WorldBox,
+      opts: Partial<UndersidePartInput> = {},
+    ): number => {
+      const index = parts.length;
+      parts.push({
+        index,
+        partId,
+        partName,
+        role: opts.role ?? 'structural',
+        box,
+        isCladding: false,
+        hasStuds: opts.hasStuds ?? true,
+        shape: opts.shape,
+      });
+      adj.push([]);
+      return index;
+    };
+
+    // Deck plates sitting at Y=[73.003..85.003] (1.003 LDU above the 72 quantized bucket!)
+    const deck: number[] = [];
+    for (let k = 0; k < 8; k++) {
+      const z0 = -240 + k * 60;
+      const d = add('3032', 'Plate 4x6', makeBox(-60, 73.003, z0, 60, 85.003, z0 + 60));
+      deck.push(d);
+      if (k > 0) link(adj, deck[k - 1], d);
+    }
+    // Upper walls above the deck so the deck sits in the lower 55% of model height and total parts >= 24
+    for (let k = 0; k < 8; k++) {
+      const z0 = -240 + k * 60;
+      const wL = add('3001', 'Brick 2x4', makeBox(-60, 81.003, z0, -40, 157.003, z0 + 60));
+      const wR = add('3001', 'Brick 2x4', makeBox(40, 81.003, z0, 60, 157.003, z0 + 60));
+      link(adj, deck[k], wL);
+      link(adj, deck[k], wR);
+    }
+
+    // Upper underside brick layer directly clutched to deck underside (Y=[49.003..77.003], maxY = 77.003 > 72 + 5.0!)
+    const upperA = add('2357', 'Brick 2x2 Corner', makeBox(-40, 49.003, -240, 0, 77.003, -200));
+    const upperB = add('2357', 'Brick 2x2 Corner', makeBox(0, 49.003, -240, 40, 77.003, -200));
+    // Lower underside bricks & cap plate attached beneath upperA/upperB
+    const midBrick = add('2456', 'Brick 2x6', makeBox(-60, 25.003, -240, 60, 53.003, -200));
+    const capPlate = add('32059', 'Plate Modified 4x6', makeBox(-60, 17.003, -240, 60, 29.003, -180));
+    link(adj, deck[0], upperA);
+    link(adj, deck[0], upperB);
+    link(adj, upperA, midBrick);
+    link(adj, upperB, midBrick);
+    link(adj, midBrick, capPlate);
+
+    const plan = analyzeUndersideAssembly(parts, adj);
+    expect(plan.hasSuspendedUnderside).toBe(true);
+    // Both upper underside bricks MUST be included in the pocket & Underside Module (never missing!)
+    expect(plan.allUndersideIndices.has(upperA)).toBe(true);
+    expect(plan.allUndersideIndices.has(upperB)).toBe(true);
+    expect(plan.subassemblies).toHaveLength(1);
+    expect(new Set(plan.subassemblies[0].partIndices)).toEqual(
+      new Set([upperA, upperB, midBrick, capPlate]),
+    );
+  });
 });
+
 

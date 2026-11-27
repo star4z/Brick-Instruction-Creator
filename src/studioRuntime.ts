@@ -6122,7 +6122,7 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount, outPrebui
           underParts.length > 0 &&
           underParts.every(u => (adj[u] || []).some(nb => topSet.has(nb)));
         if (allUnderConnected && topParts.length >= 2) {
-          const emitMechStep = (idxs, isBottom) => {
+          const emitMechStep = (idxs, keepUpright = false) => {
             if (idxs.length === 0) return;
             for (const i of idxs) { remaining.delete(i); placed.add(i); }
             const stepBoxes = idxs.map(i => boxes[i]);
@@ -6134,26 +6134,26 @@ function buildLocalSubmodelSteps(canonicalParts, groupId, repeatCount, outPrebui
             steps.push({
               id: `${groupId}_s${sNum}`,
               num: sNum,
-              side: isBottom ? 'bottom' : 'top',
+              side: 'top',
               corner: activeCam.corner,
               az: activeCam.az,
-              el: isBottom ? -30 : 30,
-              cue: isBottom ? 'flip_vertical' : 'none',
-              ...(isBottom ? { isUpsideDownUndersideStep: true } : {}),
+              el: 30,
+              cue: 'none',
+              ...(keepUpright ? { keepUpright: true } : {}),
               parts: idxs.map(i => canonicalParts[i]),
               isSubmodelStep: true,
             });
           };
           if (topParts.length <= 5) {
-            emitMechStep(topParts, false);
+            emitMechStep(topParts, true);
           } else {
             // Step 1: primary host beam + shafts/axles directly piercing it; Step 2: remaining top beams/axles
             const hostAdj = new Set(adj[hostIdx] || []);
             const step1Top = [hostIdx, ...topParts.filter(i => i !== hostIdx && hostAdj.has(i) && (roles[i] === 'axle' || roles[i] === 'pin' || upHeadedShafts.includes(i)))];
             const step1Set = new Set(step1Top);
             const step2Top = topParts.filter(i => !step1Set.has(i));
-            emitMechStep(step1Top, false);
-            emitMechStep(step2Top, false);
+            emitMechStep(step1Top, true);
+            emitMechStep(step2Top, true);
           }
           emitMechStep(underParts, true);
         }
@@ -6812,7 +6812,7 @@ function optimizeManualStepCameras(chapters, targetAspect = getActivePageLayoutA
           shiftedStepBoxes,
           ...(engagedSideNormals.length > 0 ? { engagedSideNormals } : {}),
           ...(exposedSideStudNormals.length > 0 ? { exposedSideStudNormals } : {}),
-          forceSide: step.isUpsideDownUndersideStep ? 'bottom' : undefined,
+          forceSide: step.isUpsideDownUndersideStep ? 'bottom' : (step.keepUpright ? 'top' : undefined),
         });
 
         for (let k = 0; k < stepOccs.length; k++) {
