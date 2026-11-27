@@ -459,66 +459,58 @@
     <div id="stylePopover" role="dialog" aria-label="Style options" class="no-print hidden fixed top-[60px] right-3 z-45 w-[min(94vw,372px)]">
       <div class="style-popover-tail" aria-hidden="true"></div>
       <div class="style-popover-body rounded-xl studio-sheet text-xs max-h-[78vh] flex flex-col overflow-hidden">
-        <!-- Styles popover header (shown in normal popover mode) -->
+        <!-- Unified header for Theme Selector & Theme Editor (popover + modal modes) -->
         <div id="stylePopoverHeader" class="px-4 py-2.5 border-b border-[var(--border)] bg-[var(--chrome)] flex items-center justify-between gap-2 shrink-0">
           <div class="flex items-center gap-2 min-w-0">
-            <svg class="w-4 h-4 text-[var(--primary)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></svg>
-            <h2 class="text-sm font-bold tracking-tight text-[var(--foreground)]">Styles</h2>
-          </div>
-          <button id="btnToggleAllStyleSections" type="button" data-action="collapse" title="Collapse all sections" aria-label="Collapse all sections" class="btn-toggle-all-style-sections inline-flex items-center gap-1 px-2 py-1 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] text-[11px] font-semibold text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors cursor-pointer shrink-0">
-            <svg class="toggle-all-style-sections-icon w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 20 5-5 5 5"/><path d="m7 4 5 5 5-5"/></svg>
-            <span class="toggle-all-style-sections-label">Collapse All</span>
-          </button>
-        </div>
-
-        <!-- Wizard-only modal header (shown when opened from Import Wizard) -->
-        <div id="styleWizardHeader" class="hidden px-4 sm:px-5 py-4 border-b border-[var(--border)] bg-[var(--chrome)] flex items-center justify-between gap-2.5 shrink-0">
-          <div class="flex items-center gap-2 min-w-0">
-            <button id="btnBackStyleWizard" type="button" title="Back to Import Wizard" aria-label="Back to Import Wizard" class="w-9 h-9 -ml-1 rounded-md flex items-center justify-center hover:bg-[var(--surface-hover)] shrink-0 transition-colors cursor-pointer">
+            <button id="btnStyleBack" type="button" title="Back" aria-label="Back" class="hidden w-8 h-8 -ml-1 rounded-md flex items-center justify-center hover:bg-[var(--surface-hover)] shrink-0 transition-colors cursor-pointer">
               <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
             </button>
+            <svg id="styleHeaderIcon" class="w-4 h-4 text-[var(--primary)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></svg>
             <div class="min-w-0">
-              <h2 class="text-base font-bold tracking-tight">Style &amp; Themes</h2>
-              <p class="text-xs text-[var(--muted-foreground)] truncate mt-0.5">Project-level theme and rendering defaults</p>
+              <h2 id="styleHeaderTitle" class="text-sm font-bold tracking-tight text-[var(--foreground)] truncate">Styles</h2>
+              <p id="styleHeaderSubtitle" class="hidden text-[11px] text-[var(--muted-foreground)] truncate leading-tight"></p>
             </div>
           </div>
           <div class="flex items-center gap-1.5 shrink-0">
-            <button type="button" data-action="collapse" title="Collapse all sections" aria-label="Collapse all sections" class="btn-toggle-all-style-sections inline-flex items-center gap-1 px-2 py-1 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] text-[11px] font-semibold text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors cursor-pointer shrink-0">
+            <button id="btnToggleAllStyleSections" type="button" data-action="collapse" title="Collapse all sections" aria-label="Collapse all sections" class="hidden btn-toggle-all-style-sections flex items-center gap-1 px-2 py-1 rounded-md border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--surface-hover)] text-[11px] font-semibold text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors cursor-pointer shrink-0">
               <svg class="toggle-all-style-sections-icon w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 20 5-5 5 5"/><path d="m7 4 5 5 5-5"/></svg>
               <span class="toggle-all-style-sections-label">Collapse All</span>
             </button>
-            <button id="btnCloseStyleWizard" type="button" aria-label="Back to Import Wizard" class="w-9 h-9 rounded-md flex items-center justify-center hover:bg-[var(--surface-hover)] shrink-0 transition-colors cursor-pointer">
+            <button id="btnCloseStyleWizard" type="button" aria-label="Close" class="hidden w-8 h-8 rounded-md flex items-center justify-center hover:bg-[var(--surface-hover)] shrink-0 transition-colors cursor-pointer">
               <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
             </button>
           </div>
         </div>
 
-        <!-- Sticky theme header: stays visible while scrolling style options -->
-        <div id="stylePopoverThemeHeader" class="shrink-0 px-4 py-3 bg-[var(--card)] border-b border-[var(--border)]">
-          <details id="styleThemesSection" class="style-section" open>
-            <summary class="flex items-center justify-between gap-2 cursor-pointer select-none py-0.5">
-              <span class="flex items-center gap-2 min-w-0">
-                <svg class="w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><circle cx="17.5" cy="17.5" r="3.5"/></svg>
-                <span class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Themes</span>
-                <span class="px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-[var(--info-soft)] text-[var(--info)] border border-[var(--info)]/30 whitespace-nowrap">All Pages</span>
+        <!-- PAGE 1: THEME SELECTOR -->
+        <div id="styleSelectorView" class="flex-1 min-h-0 flex flex-col overflow-hidden">
+          <div id="styleSelectorScroll" class="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4">
+            <div id="themeStrip" role="listbox" aria-label="Themes" class="theme-selector-grid grid grid-cols-2 gap-2"></div>
+          </div>
+          <div id="styleSelectorActions" class="shrink-0 px-4 py-3 border-t border-[var(--border)] bg-[var(--card)] space-y-2">
+            <button id="btnEditActiveTheme" type="button" class="w-full py-2 px-3 rounded-lg border border-[var(--primary-border)] bg-[var(--primary-soft)] hover:bg-[var(--primary)] hover:text-[var(--primary-foreground)] text-[var(--primary)] font-semibold text-xs inline-flex items-center justify-between gap-2 transition-colors cursor-pointer">
+              <span class="inline-flex items-center gap-2 min-w-0">
+                <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+                <span id="btnEditActiveThemeLabel" class="truncate">Edit Theme</span>
               </span>
-              <svg class="style-section-chevron w-3.5 h-3.5 text-[var(--muted-foreground)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
-            </summary>
-            <div class="pt-2 space-y-2">
-              <div id="themeStrip" role="listbox" aria-label="Themes" class="theme-strip flex gap-2 overflow-x-auto overscroll-x-contain snap-x snap-proximity -mx-4 px-4 scroll-px-4 py-1"></div>
-              <p id="themeStripScrollHint" class="theme-strip-scroll-hint items-center gap-1.5 text-[11px] text-[var(--muted-foreground)] leading-snug">
-                <kbd class="px-1.5 py-0.5 rounded border border-[var(--border)] bg-[var(--surface-sunken)] font-mono text-[10px] font-semibold text-[var(--foreground)]">Shift</kbd>
-                <span>+ Scroll to browse more themes</span>
-              </p>
-              <button id="btnNewCustomTheme" type="button" title="New theme from current" class="w-full inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] hover:border-[var(--primary)] hover:text-[var(--primary)] text-xs font-semibold transition-colors cursor-pointer">
+              <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+            </button>
+            <div class="grid grid-cols-2 gap-1.5">
+              <button id="btnNewCustomTheme" type="button" title="New theme from current" class="inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] hover:border-[var(--primary)] hover:text-[var(--primary)] text-xs font-semibold transition-colors cursor-pointer">
                 <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="12" x2="12" y1="5" y2="19"/><line x1="5" x2="19" y1="12" y2="12"/></svg>
                 <span>New from Current</span>
               </button>
+              <button id="btnImportTheme" type="button" title="Import theme file (.biwtheme)" class="inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] hover:border-[var(--primary)] hover:text-[var(--primary)] text-xs font-semibold transition-colors cursor-pointer">
+                <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+                <span>Import</span>
+              </button>
             </div>
-          </details>
+          </div>
         </div>
 
-        <!-- Scrollable style options -->
+        <!-- PAGE 2: THEME EDITOR (shared across Styles, Parts List Setup, Settings, and Import Wizard) -->
+        <div id="styleEditorView" class="hidden flex-1 min-h-0 flex flex-col overflow-hidden">
+        <!-- Scrollable theme editor options -->
         <div id="stylePopoverScroll" class="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 pt-3 space-y-3">
         <!-- Current theme identity + file actions -->
         <details id="styleThemeIdentitySection" class="style-section" open>
@@ -532,11 +524,7 @@
           <div class="pt-2 space-y-2">
             <input id="themeNameInput" type="text" maxlength="40" aria-label="Theme Name" placeholder="e.g. Pressroom Cream" class="w-full px-3 py-2 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] text-sm font-medium outline-none focus:border-[var(--primary)]" />
             <p id="themeBuiltInHint" class="hidden text-[11px] leading-snug text-[var(--muted-foreground)]">Built-in theme — any change below automatically creates a custom copy.</p>
-            <div class="grid grid-cols-3 gap-1.5">
-              <button id="btnImportTheme" type="button" title="Import theme file (.biwtheme)" class="inline-flex items-center justify-center gap-1 py-1.5 px-2 rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] hover:border-[var(--primary)] font-semibold transition-colors cursor-pointer">
-                <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
-                <span>Import</span>
-              </button>
+            <div class="grid grid-cols-2 gap-1.5">
               <button id="btnExportTheme" type="button" title="Export this theme (.biwtheme)" class="inline-flex items-center justify-center gap-1 py-1.5 px-2 rounded-md border border-[var(--border)] bg-[var(--surface-sunken)] hover:border-[var(--primary)] font-semibold transition-colors cursor-pointer">
                 <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
                 <span>Export</span>
@@ -1039,7 +1027,8 @@
           </div>
         </details>
         </div>
-        <!-- Wizard-only modal footer -->
+        </div>
+        <!-- Modal footer (shown when opened from Import Wizard, Settings, or Parts List Setup) -->
         <div id="styleWizardFooter" class="hidden px-5 py-3.5 border-t border-[var(--border)] bg-[var(--chrome)] flex items-center justify-end gap-2.5 shrink-0">
           <button id="btnDoneStyleWizard" type="button" class="px-5 py-2.5 rounded-md bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--primary-foreground)] font-semibold transition-colors cursor-pointer">Back to Import Wizard</button>
         </div>
@@ -1960,8 +1949,8 @@
         </div>
 
         <div id="bomSetupScroll" class="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 sm:p-5 space-y-5">
-          <!-- Theme ownership banner (links to Style dialog) -->
-          <button id="btnBomOpenStyle" type="button" title="Open Style settings" class="group w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] hover:border-[var(--primary)] text-left transition-colors cursor-pointer">
+          <!-- Theme ownership banner (links to shared Theme Editor) -->
+          <button id="btnBomOpenStyle" type="button" title="Edit theme" class="group w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] hover:border-[var(--primary)] text-left transition-colors cursor-pointer">
             <span class="flex items-center gap-2 min-w-0">
               <span id="bomThemeSwatch" class="w-3.5 h-3.5 rounded-full border border-black/20 shrink-0"></span>
               <span class="text-[11px] text-[var(--muted-foreground)] truncate">
@@ -1970,7 +1959,7 @@
               </span>
             </span>
             <span class="inline-flex items-center gap-1 shrink-0 text-[11px] font-semibold text-[var(--muted-foreground)] group-hover:text-[var(--primary)] transition-colors">
-              <span>Style</span>
+              <span>Edit Theme</span>
               <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
             </span>
           </button>
@@ -2891,10 +2880,20 @@
                 <button id="btnSettingsCopyFromProject" type="button" class="hidden px-2.5 py-1 rounded-md border border-[var(--primary-border)] bg-[var(--primary-soft)] text-[var(--primary)] font-semibold text-[11px] hover:opacity-90 transition cursor-pointer">Copy from Current Project</button>
               </div>
 
-              <label class="block space-y-1">
-                <span class="text-xs text-[var(--muted-foreground)]">Default Theme</span>
-                <select id="settingsDefTheme" class="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--card)] font-semibold outline-none focus:border-[var(--primary)] cursor-pointer"></select>
-              </label>
+              <div class="space-y-1.5">
+                <div class="flex items-center justify-between gap-2">
+                  <span class="text-xs text-[var(--muted-foreground)]">Default Theme</span>
+                  <button id="btnSettingsEditDefTheme" type="button" class="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-[var(--border)] bg-[var(--card)] hover:border-[var(--primary)] hover:text-[var(--primary)] font-semibold text-[11px] transition-colors cursor-pointer">
+                    <svg class="w-3 h-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+                    <span>Edit Theme</span>
+                  </button>
+                </div>
+                <div id="settingsDefThemeStrip" role="listbox" aria-label="Default theme" class="theme-strip flex gap-2 overflow-x-auto overscroll-x-contain snap-x snap-proximity py-1"></div>
+                <p class="theme-strip-scroll-hint items-center gap-1.5 text-[11px] text-[var(--muted-foreground)] leading-snug">
+                  <kbd class="px-1.5 py-0.5 rounded border border-[var(--border)] bg-[var(--card)] font-mono text-[10px] font-semibold text-[var(--foreground)]">Shift</kbd>
+                  <span>+ Scroll to browse more themes</span>
+                </p>
+              </div>
 
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <label class="block space-y-1">

@@ -144,11 +144,26 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     });
     await page.locator('[data-settings-defaults-mode="custom"]').click();
     await expect(page.locator('#settingsCustomDefaultsWrap')).toBeVisible();
+    await expect(page.locator('#settingsDefThemeStrip [role="option"]').first()).toBeVisible();
     await page.locator('[data-settings-pgnum-pos="outside"]').click();
     await expect(page.locator('[data-settings-pgnum-pos="outside"]')).toHaveAttribute('aria-pressed', 'true');
     await auditSurface(page, `${testInfo.project.name}: App Settings Modal (Custom Defaults)`, {
       activeContainerSelector: '#settingsModal',
     });
+    // Open shared Theme Editor from App Settings Custom Defaults and return back to Settings
+    await page.locator('#btnSettingsEditDefTheme').click();
+    await expect(page.locator('#settingsModal')).toBeHidden();
+    await expect(page.locator('#stylePopover')).toBeVisible();
+    await expect(page.locator('#styleEditorView')).toBeVisible();
+    await expect(page.locator('#styleSelectorView')).toBeHidden();
+    await expect(page.locator('#styleHeaderTitle')).toHaveText('Edit Theme');
+    await auditSurface(page, `${testInfo.project.name}: Settings -> Theme Editor Modal`, {
+      activeContainerSelector: '#stylePopover',
+    });
+    await page.locator('#btnStyleBack').click();
+    await expect(page.locator('#stylePopover')).toBeHidden();
+    await expect(page.locator('#settingsModal')).toBeVisible();
+
     await page.locator('[data-settings-defaults-mode="builtin"]').click();
     await page.locator('#btnCloseSettings').click();
     await expect(page.locator('#settingsModal')).toBeHidden();
@@ -179,6 +194,25 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     await auditSurface(page, `${testInfo.project.name}: Import Wizard Modal`, {
       activeContainerSelector: '#importWizardModal',
     });
+
+    // Click into Theme from Import Wizard -> Theme Selector -> Theme Editor -> Back
+    const wizardThemeBtn = page.locator('#impWizItemsList button[data-wiz-section="theme"]');
+    if (await wizardThemeBtn.isVisible()) {
+      await wizardThemeBtn.click();
+      await expect(page.locator('#stylePopover')).toBeVisible();
+      await expect(page.locator('#styleSelectorView')).toBeVisible();
+      await expect(page.locator('#styleEditorView')).toBeHidden();
+      await auditSurface(page, `${testInfo.project.name}: Import Wizard -> Theme Selector`, {
+        activeContainerSelector: '#stylePopover',
+      });
+      await page.locator('#btnEditActiveTheme').click();
+      await expect(page.locator('#styleEditorView')).toBeVisible();
+      await expect(page.locator('#styleSelectorView')).toBeHidden();
+      await page.locator('#btnStyleBack').click();
+      await expect(page.locator('#styleSelectorView')).toBeVisible();
+      await page.locator('#btnStyleBack').click();
+      await expect(page.locator('#importWizardModal')).toBeVisible();
+    }
 
     // Click into Step Generation — Slicing from Import Wizard and verify inline options & back-navigation
     const wizardSlicingBtn = page.locator('#impWizItemsList button[data-wiz-section="slicing"]');
@@ -366,13 +400,25 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
     await loadCleanManual(page);
     await closeMenuOnMobile(page);
 
-    // 1. Style & Themes Popover + Font Picker + Undo/Redo
+    // 1. Style & Themes Popover: Theme Selector page -> Theme Editor page + Font Picker
     await page.locator('#btnStylePop').click();
     await expect(page.locator('#stylePopover')).toBeVisible();
     await expect(page.locator('#stylePopoverHeader')).toBeVisible();
     await expect(page.locator('#stylePopoverHeader')).toContainText('Styles');
+    await expect(page.locator('#styleSelectorView')).toBeVisible();
+    await expect(page.locator('#styleEditorView')).toBeHidden();
+    await expect(page.locator('#btnToggleAllStyleSections')).toBeHidden();
+    await auditSurface(page, `${testInfo.project.name}: Style Theme Selector Popover`, {
+      activeContainerSelector: '#stylePopover',
+    });
+
+    // Navigate from Theme Selector page to Theme Editor page
+    await page.locator('#btnEditActiveTheme').click();
+    await expect(page.locator('#styleEditorView')).toBeVisible();
+    await expect(page.locator('#styleSelectorView')).toBeHidden();
+    await expect(page.locator('#styleHeaderTitle')).toHaveText('Edit Theme');
     await expect(page.locator('#btnToggleAllStyleSections')).toContainText('Collapse All');
-    await auditSurface(page, `${testInfo.project.name}: Style & Themes Popover`, {
+    await auditSurface(page, `${testInfo.project.name}: Style Theme Editor Popover`, {
       activeContainerSelector: '#stylePopover',
     });
 
@@ -588,6 +634,17 @@ test.describe('Full UI & Feature Audit (Desktop + Mobile)', () => {
       activeContainerSelector: '#bomSetupModal',
     });
     await page.locator('[data-bom-format="grid"]').click();
+
+    // Open shared Theme Editor from Parts List Setup banner and navigate back
+    await page.locator('#btnBomOpenStyle').click();
+    await expect(page.locator('#bomSetupModal')).toBeHidden();
+    await expect(page.locator('#stylePopover')).toBeVisible();
+    await expect(page.locator('#styleEditorView')).toBeVisible();
+    await expect(page.locator('#styleHeaderTitle')).toHaveText('Edit Theme');
+    await page.locator('#btnStyleBack').click();
+    await expect(page.locator('#stylePopover')).toBeHidden();
+    await expect(page.locator('#bomSetupModal')).toBeVisible();
+
     await page.locator('#btnCloseBomSetup').click();
     await expect(page.locator('#bomSetupModal')).toBeHidden();
 

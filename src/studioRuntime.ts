@@ -438,6 +438,12 @@ import {
   unregisterCustomUploadedFont,
 } from './themes/customThemes';
 import {
+  createInitialThemeEditorSession,
+  getStylePanelPresentation,
+  type ThemeEditorOrigin,
+  type ThemeEditorSession,
+} from './themes/themeEditorState';
+import {
   CUSTOM_FILE_MIME_TYPE,
   PROJECT_FILE_EXT,
   PROJECT_FILE_FORMAT,
@@ -801,20 +807,39 @@ function selectTheme(id) {
   if (isBricksLibraryModalOpen()) renderBricksLibraryModal(false);
 }
 
-/** Creates (and selects) a new custom theme copied from `base`, with optional overrides. */
-function forkThemeIntoCustom(base, overrides = {}) {
+let themeEditorSession: ThemeEditorSession = createInitialThemeEditorSession();
+
+function isEditingSettingsTheme(): boolean {
+  return (
+    themeEditorSession.view === 'editor' &&
+    themeEditorSession.origin === 'settings' &&
+    Boolean(themeEditorSession.targetThemeId)
+  );
+}
+
+function getEditedTheme() {
+  if (isEditingSettingsTheme() && themeEditorSession.targetThemeId) {
+    return resolveThemeById(themeEditorSession.targetThemeId, customThemes);
+  }
+  return getActiveTheme();
+}
+
+/** Creates (and optionally selects in the current project) a new custom theme copied from `base`. */
+function forkThemeIntoCustom(base, overrides = {}, { selectInProject = true } = {}) {
   const desired = base.builtIn ? `${base.name} Custom` : `${base.name} Copy`;
   const draft = createThemeDraftFromBase(base, makeUniqueThemeName(desired, getAllThemes(customThemes).map(t => t.name)));
   const normalized = normalizeCustomTheme({ ...draft, ...overrides, id: draft.id }, draft);
   customThemes.push(normalized);
   persistCustomThemes();
-  state.themeId = normalized.id;
-  applyActiveThemeStyleToState();
+  if (selectInProject) {
+    state.themeId = normalized.id;
+    applyActiveThemeStyleToState();
+  }
   return normalized;
 }
 
 /**
- * Applies a partial change to the active theme. Built-in themes are never
+ * Applies a partial change to the active project theme. Built-in themes are never
  * modified: the first edit forks them into a new custom theme automatically.
  */
 function patchActiveTheme(patch, { render = true } = {}) {
@@ -832,6 +857,38 @@ function patchActiveTheme(patch, { render = true } = {}) {
     applyActiveThemeStyleToState();
   }
   if (render) scheduleThemeRender();
+}
+
+/**
+ * Applies a partial change to whichever theme is currently open in the shared
+ * Theme Editor (either the active project theme or the App Settings default theme).
+ */
+function patchEditedTheme(patch, { render = true } = {}) {
+  if (!isEditingSettingsTheme()) {
+    patchActiveTheme(patch, { render });
+    return;
+  }
+  const theme = getEditedTheme();
+  if (theme.builtIn || BUILT_IN_THEME_IDS.has(theme.id)) {
+    const forked = forkThemeIntoCustom(theme, patch, { selectInProject: false });
+    themeEditorSession.targetThemeId = forked.id;
+    patchCustomDefaults({ themeId: forked.id });
+    showToast(`Created "${forked.name}" — built-in themes stay unchanged.`);
+  } else {
+    const idx = customThemes.findIndex(t => t.id === theme.id);
+    const normalized = normalizeCustomTheme({ ...theme, ...patch, id: theme.id, updatedAt: new Date().toISOString() }, theme);
+    if (!normalized) return;
+    const next = { ...normalized, createdAt: theme.createdAt || normalized.createdAt };
+    if (idx >= 0) customThemes[idx] = next; else customThemes.push(next);
+    schedulePersistCustomThemes();
+    if (state.themeId === theme.id) {
+      applyActiveThemeStyleToState();
+      if (render) scheduleThemeRender();
+    }
+  }
+  syncStylePanelChrome();
+  syncStylePanel();
+  renderSettingsModalUI();
 }
 
 /**
@@ -15128,10 +15185,7 @@ function syncMenuControls() {
   if (pageSetupDoneBtnEl) {
     pageSetupDoneBtnEl.textContent = isPageSetupWizard ? 'Back to Import Wizard' : 'Done';
   }
-  setVisible('styleBomSection', styleWizVis.showStyleBomLink);
-  setVisible('stylePopoverHeader', !styleWizVis.showStyleWizardChrome);
-  setVisible('styleWizardHeader', styleWizVis.showStyleWizardChrome);
-  setVisible('styleWizardFooter', styleWizVis.showStyleWizardChrome);
+  syncStylePanelChrome();
 
   const activeFmt = PAPER_FORMATS[state.paperFormat] || PAPER_FORMATS.screen;
   document.getElementById('customSizeWrap').classList.toggle('hidden', state.paperFormat !== 'custom');
@@ -22375,30 +22429,154 @@ function updateStylePopoverTail() {
   stylePopEl.style.setProperty('--style-tail-right', `${tailRight.toFixed(1)}px`);
 }
 
-function setStylePopoverOpen(open) {
+function isStyleWizardActive(): boolean {
+  return Boolean(importWizardState.active && importWizardState.subpage === 'style');
+}
+
+function syncStylePanelChrome() {
+  const isWizardStyle = isStyleWizardActive();
+  const pres = getStylePanelPresentation(themeEditorSession, isWizardStyle);
+  const editedTheme = getEditedTheme();
+  const activeTheme = getActiveTheme();
+
+  if (stylePopEl) {
+    stylePopEl.classList.toggle('style-popover-wizard-mode', isWizardStyle);
+    stylePopEl.classList.toggle('style-popover-modal-mode', pres.isModal);
+  }
+
+  document.getElementById('styleSelectorView')?.classList.toggle('hidden', !pres.showSelectorView);
+  document.getElementById('styleEditorView')?.classList.toggle('hidden', !pres.showEditorView);
+
+  const backBtn = document.getElementById('btnStyleBack');
+  if (backBtn) {
+    backBtn.classList.toggle('hidden', !pres.showBackButton);
+    backBtn.setAttribute('aria-label', pres.backAriaLabel);
+    backBtn.setAttribute('title', pres.backAriaLabel);
+  }
+  document.getElementById('styleHeaderIcon')?.classList.toggle('hidden', !pres.showHeaderIcon);
+
+  const titleEl = document.getElementById('styleHeaderTitle');
+  if (titleEl) titleEl.textContent = pres.headerTitle;
+
+  const subEl = document.getElementById('styleHeaderSubtitle');
+  if (subEl) {
+    if (pres.showEditorView) {
+      subEl.textContent = editedTheme.name;
+      subEl.classList.remove('hidden');
+    } else {
+      subEl.textContent = '';
+      subEl.classList.add('hidden');
+    }
+  }
+
+  document.getElementById('btnToggleAllStyleSections')?.classList.toggle('hidden', !pres.showCollapseAll);
+
+  const closeBtn = document.getElementById('btnCloseStyleWizard');
+  if (closeBtn) {
+    closeBtn.classList.toggle('hidden', !pres.showModalClose);
+    closeBtn.setAttribute('aria-label', pres.backAriaLabel);
+  }
+
+  document.getElementById('styleWizardFooter')?.classList.toggle('hidden', !pres.showModalFooter);
+  const doneBtn = document.getElementById('btnDoneStyleWizard');
+  if (doneBtn) doneBtn.textContent = pres.footerButtonLabel;
+
+  const editActiveLabel = document.getElementById('btnEditActiveThemeLabel');
+  if (editActiveLabel) editActiveLabel.textContent = `Edit "${activeTheme.name}"`;
+
+  const canOpenBom = pres.showBomLink && canOpenExtraPageSettings(state, 'bom', Boolean(state.model));
+  document.getElementById('styleBomSection')?.classList.toggle('hidden', !canOpenBom);
+  const styleBomBtn = document.getElementById('btnStyleOpenBomSetup');
+  if (styleBomBtn) styleBomBtn.disabled = !canOpenBom;
+}
+
+function setStylePopoverOpen(
+  open: boolean,
+  opts: {
+    view?: 'selector' | 'editor';
+    origin?: ThemeEditorOrigin | null;
+    targetThemeId?: string | null;
+  } = {},
+) {
   if (!stylePopEl || !btnStylePopEl) return;
-  if (!open && importWizardState.active && importWizardState.subpage === 'style') {
-    stylePopEl.classList.remove('style-popover-wizard-mode');
+  if (!open) {
+    const prevOrigin = themeEditorSession.origin;
+    const wasWizardStyle = isStyleWizardActive();
+    themeEditorSession = createInitialThemeEditorSession();
+    stylePopEl.classList.remove('style-popover-wizard-mode', 'style-popover-modal-mode');
     stylePopEl.classList.add('hidden');
     btnStylePopEl.classList.remove('style-chip-open');
     btnStylePopEl.setAttribute('aria-expanded', 'false');
     menuStyleBtnEl?.setAttribute('aria-expanded', 'false');
     closeThemeFontPicker();
-    returnToImportWizard();
+    if (wasWizardStyle) {
+      returnToImportWizard();
+    } else if (prevOrigin === 'bom-setup') {
+      openBomSetupModal();
+    } else if (prevOrigin === 'settings') {
+      openSettingsModal();
+    }
     return;
   }
-  const isWizardStyle = Boolean(open && importWizardState.active && importWizardState.subpage === 'style');
-  stylePopEl.classList.toggle('style-popover-wizard-mode', isWizardStyle);
-  stylePopEl.classList.toggle('hidden', !open);
-  btnStylePopEl.classList.toggle('style-chip-open', Boolean(open && !isWizardStyle));
-  btnStylePopEl.setAttribute('aria-expanded', open && !isWizardStyle ? 'true' : 'false');
-  menuStyleBtnEl?.setAttribute('aria-expanded', open && !isWizardStyle ? 'true' : 'false');
-  if (open) {
-    syncMenuControls();
-    if (!isWizardStyle) updateStylePopoverTail();
-  } else {
+
+  themeEditorSession = {
+    view: opts.view || 'selector',
+    origin: opts.origin ?? null,
+    targetThemeId: opts.targetThemeId ?? null,
+  };
+  const isWizardStyle = isStyleWizardActive();
+  const pres = getStylePanelPresentation(themeEditorSession, isWizardStyle);
+  stylePopEl.classList.remove('hidden');
+  btnStylePopEl.classList.toggle('style-chip-open', !pres.isModal);
+  btnStylePopEl.setAttribute('aria-expanded', !pres.isModal ? 'true' : 'false');
+  menuStyleBtnEl?.setAttribute('aria-expanded', !pres.isModal ? 'true' : 'false');
+  syncMenuControls();
+  syncStylePanelChrome();
+  syncStylePanel();
+  syncStyleSectionsToggleAllUI();
+  if (!pres.isModal) updateStylePopoverTail();
+}
+
+function openThemeEditor(opts: {
+  origin: ThemeEditorOrigin;
+  themeId?: string | null;
+  section?: string | null;
+}) {
+  setStylePopoverOpen(true, {
+    view: 'editor',
+    origin: opts.origin,
+    targetThemeId: opts.origin === 'settings' ? (opts.themeId || appSettings.customDefaults.themeId || 'blue') : null,
+  });
+  requestAnimationFrame(() => {
+    const scrollEl = document.getElementById('stylePopoverScroll');
+    if (!scrollEl) return;
+    if (opts.section === 'rendering') {
+      const target = document.getElementById('styleStepDisplaySection');
+      if (target) {
+        if (target instanceof HTMLDetailsElement) target.open = true;
+        target.scrollIntoView({ block: 'start', behavior: 'smooth' });
+        return;
+      }
+    }
+    scrollEl.scrollTop = 0;
+  });
+}
+
+function handleStyleBackAction() {
+  if (
+    themeEditorSession.view === 'editor' &&
+    (themeEditorSession.origin === 'style-selector' || themeEditorSession.origin === 'wizard-selector')
+  ) {
+    const nameEl = document.getElementById('themeNameInput');
+    if (nameEl && document.activeElement === nameEl) nameEl.blur();
     closeThemeFontPicker();
+    themeEditorSession = createInitialThemeEditorSession();
+    syncStylePanelChrome();
+    syncStylePanel();
+    if (!isStyleWizardActive()) updateStylePopoverTail();
+    return;
   }
+  setStylePopoverOpen(false);
 }
 
 btnStylePopEl.onclick = () => {
@@ -22411,22 +22589,28 @@ if (menuStyleBtnEl) {
     setStylePopoverOpen(shouldOpen);
   };
 }
-const btnBackStyleWizardEl = document.getElementById('btnBackStyleWizard');
-if (btnBackStyleWizardEl) btnBackStyleWizardEl.onclick = () => setStylePopoverOpen(false);
+const btnStyleBackEl = document.getElementById('btnStyleBack');
+if (btnStyleBackEl) btnStyleBackEl.onclick = () => handleStyleBackAction();
 const btnCloseStyleWizardEl = document.getElementById('btnCloseStyleWizard');
 if (btnCloseStyleWizardEl) btnCloseStyleWizardEl.onclick = () => setStylePopoverOpen(false);
 const btnDoneStyleWizardEl = document.getElementById('btnDoneStyleWizard');
 if (btnDoneStyleWizardEl) btnDoneStyleWizardEl.onclick = () => setStylePopoverOpen(false);
+const btnEditActiveThemeEl = document.getElementById('btnEditActiveTheme');
+if (btnEditActiveThemeEl) {
+  btnEditActiveThemeEl.onclick = () => {
+    openThemeEditor({ origin: isStyleWizardActive() ? 'wizard-selector' : 'style-selector' });
+  };
+}
 if (stylePopEl) {
   stylePopEl.addEventListener('click', (e) => {
-    if (e.target === stylePopEl && importWizardState.active && importWizardState.subpage === 'style') {
+    if (e.target === stylePopEl && getStylePanelPresentation(themeEditorSession, isStyleWizardActive()).isModal) {
       setStylePopoverOpen(false);
     }
   });
 }
 
 function getStyleCollapsibleSections(): HTMLDetailsElement[] {
-  return Array.from(document.querySelectorAll<HTMLDetailsElement>('#stylePopover details.style-section'));
+  return Array.from(document.querySelectorAll<HTMLDetailsElement>('#styleEditorView details.style-section'));
 }
 
 function syncStyleSectionsToggleAllUI() {
@@ -22465,7 +22649,7 @@ syncStyleSectionsToggleAllUI();
 
 document.addEventListener('pointerdown', (e) => {
   if (!stylePopEl || stylePopEl.classList.contains('hidden')) return;
-  if (importWizardState.active && importWizardState.subpage === 'style') return;
+  if (getStylePanelPresentation(themeEditorSession, isStyleWizardActive()).isModal) return;
   const t = e.target;
   if (t instanceof Node && (stylePopEl.contains(t) || (btnStylePopEl && btnStylePopEl.contains(t)) || (menuStyleBtnEl && menuStyleBtnEl.contains(t)))) return;
   suppressedBlankResetEvent = e;
@@ -22473,7 +22657,7 @@ document.addEventListener('pointerdown', (e) => {
 }, true);
 
 /* ------------------------------------------------------------------
- * Style dialog: theme strip + inline theme editing
+ * Shared Theme Selector component + Unified Theme Editor sync
  * ------------------------------------------------------------------ */
 const THEME_COLOR_FIELDS = [
   ['themeColorBg', 'bgColor', '#d8ecfd'],
@@ -22487,13 +22671,27 @@ const THEME_COLOR_FIELDS = [
   ['themeColorCalloutBorder', 'calloutBorder', '#eab308'],
 ];
 
-function buildThemeStripCard(t, isActive) {
+function attachHorizontalWheelScroll(el) {
+  if (!el || el.dataset.hWheelBound === '1') return;
+  el.dataset.hWheelBound = '1';
+  el.addEventListener('wheel', (e) => {
+    if (e.shiftKey && Math.abs(e.deltaY) > 0 && Math.abs(e.deltaX) === 0) {
+      e.preventDefault();
+      const scale = e.deltaMode === 1 ? 32 : e.deltaMode === 2 ? el.clientWidth : 1;
+      el.scrollLeft += e.deltaY * scale;
+    }
+  }, { passive: false });
+}
+
+function buildThemeSelectorCard(t, isActive, { layout = 'grid', onSelect }) {
   const card = document.createElement('button');
   card.type = 'button';
   card.setAttribute('role', 'option');
   card.setAttribute('aria-selected', isActive ? 'true' : 'false');
+  card.setAttribute('data-theme-id', t.id);
   card.title = `${t.name}${t.builtIn ? '' : ' (custom)'}${isActive ? ' — current' : ''}`;
-  card.className = `theme-strip-card snap-start shrink-0 w-[112px] rounded-lg border p-1.5 text-left transition cursor-pointer ${isActive ? 'border-[var(--primary)] ring-2 ring-[var(--primary-border)]' : 'border-[var(--border)] hover:border-[var(--primary-border)]'}`;
+  const sizeClass = layout === 'strip' ? 'snap-start shrink-0 w-[112px]' : 'w-full min-w-0';
+  card.className = `theme-strip-card ${sizeClass} rounded-lg border p-1.5 text-left transition cursor-pointer bg-[var(--card)] ${isActive ? 'border-[var(--primary)] ring-2 ring-[var(--primary-border)]' : 'border-[var(--border)] hover:border-[var(--primary-border)]'}`;
 
   const preview = document.createElement('div');
   preview.className = 'theme-card-preview h-[58px] rounded-md border border-black/10 relative overflow-hidden px-2 py-1.5 flex flex-col justify-between';
@@ -22536,7 +22734,6 @@ function buildThemeStripCard(t, isActive) {
   name.textContent = t.name;
   label.appendChild(name);
   if (!t.builtIn) {
-    // Compact pencil marker for custom themes (keeps names readable on narrow cards)
     const tag = document.createElement('span');
     tag.className = 'shrink-0 text-[var(--muted-foreground)]';
     tag.setAttribute('aria-label', 'Custom theme');
@@ -22546,33 +22743,60 @@ function buildThemeStripCard(t, isActive) {
 
   card.appendChild(preview);
   card.appendChild(label);
-  card.onclick = () => {
-    if (t.id === state.themeId) return;
-    selectTheme(t.id);
-    const strip = document.getElementById('themeStrip');
-    if (strip) strip.scrollTo({ left: 0, behavior: 'smooth' });
-  };
+  card.onclick = () => onSelect(t.id);
   return card;
+}
+
+/**
+ * Shared Theme Selector renderer used in the Styles Theme Selector page,
+ * Import Wizard Theme Selector, and App Settings Default Theme picker.
+ */
+function renderThemeSelector(
+  containerEl,
+  {
+    selectedThemeId,
+    layout = 'grid',
+    onSelect,
+  }: {
+    selectedThemeId: string;
+    layout?: 'grid' | 'strip';
+    onSelect: (themeId: string) => void;
+  },
+) {
+  if (!containerEl) return;
+  if (layout === 'strip') attachHorizontalWheelScroll(containerEl);
+  const resolvedId = resolveThemeById(selectedThemeId, customThemes).id;
+  const ordered = orderThemesByRecent(getAllThemes(customThemes), themeRecents, resolvedId);
+  const sig = ordered.map(t => `${t.id}:${t.updatedAt || ''}:${t.name}`).join('|') + `#${resolvedId}#${layout}`;
+  if (containerEl.dataset.sig === sig) return;
+  const keepScroll = containerEl.dataset.sigHead === `${resolvedId}` ? containerEl.scrollLeft : 0;
+  containerEl.dataset.sig = sig;
+  containerEl.dataset.sigHead = `${resolvedId}`;
+  containerEl.innerHTML = '';
+  for (const t of ordered) {
+    containerEl.appendChild(buildThemeSelectorCard(t, t.id === resolvedId, { layout, onSelect }));
+  }
+  if (layout === 'strip') containerEl.scrollLeft = keepScroll;
 }
 
 function renderThemeStrip() {
   const strip = document.getElementById('themeStrip');
   if (!strip) return;
-  const ordered = orderThemesByRecent(getAllThemes(customThemes), themeRecents, state.themeId);
-  const sig = ordered.map(t => `${t.id}:${t.updatedAt || ''}:${t.name}`).join('|') + `#${state.themeId}`;
-  if (strip.dataset.sig === sig) return;
-  const keepScroll = strip.dataset.sigHead === `${state.themeId}` ? strip.scrollLeft : 0;
-  strip.dataset.sig = sig;
-  strip.dataset.sigHead = `${state.themeId}`;
-  strip.innerHTML = '';
-  for (const t of ordered) strip.appendChild(buildThemeStripCard(t, t.id === state.themeId));
-  strip.scrollLeft = keepScroll;
+  renderThemeSelector(strip, {
+    selectedThemeId: state.themeId,
+    layout: 'grid',
+    onSelect: (id) => {
+      if (id === state.themeId) return;
+      selectTheme(id);
+    },
+  });
 }
 
 function syncStylePanel() {
-  const t = getActiveTheme();
+  const t = getEditedTheme();
   const isBuiltIn = Boolean(t.builtIn || BUILT_IN_THEME_IDS.has(t.id));
   renderThemeStrip();
+  syncStylePanelChrome();
 
   const nameInput = document.getElementById('themeNameInput');
   if (nameInput && document.activeElement !== nameInput && nameInput.value !== t.name) nameInput.value = t.name;
@@ -22622,22 +22846,25 @@ function syncStylePanel() {
   setChk('toggleMinifig1to1', opts.showMinifig1to1);
   syncStepBorderStyleUI(opts.stepBorderStyle);
   setChk('togglePageTitle', opts.showPageTitle);
-  setChk('togglePageTitleSetup', opts.showPageTitle);
+  setChk('togglePageTitleSetup', getThemeStyleOptions(getActiveTheme()).showPageTitle);
   syncProgressBarUI(opts);
-  const wordlessOn = Boolean(state.wordlessMode);
-  for (const [chkId, lblId, noteId] of [
-    ['togglePageTitle', 'togglePageTitleLabel', 'pageTitleWordlessNote'],
-    ['togglePageTitleSetup', 'togglePageTitleSetupLabel', 'pageTitleSetupWordlessNote'],
+  const wordlessForEditor = isEditingSettingsTheme()
+    ? Boolean(appSettings.customDefaults.wordlessMode)
+    : Boolean(state.wordlessMode);
+  const wordlessForProject = Boolean(state.wordlessMode);
+  for (const [chkId, lblId, noteId, isWl] of [
+    ['togglePageTitle', 'togglePageTitleLabel', 'pageTitleWordlessNote', wordlessForEditor],
+    ['togglePageTitleSetup', 'togglePageTitleSetupLabel', 'pageTitleSetupWordlessNote', wordlessForProject],
   ]) {
     const chk = document.getElementById(chkId);
     const lbl = document.getElementById(lblId);
     const note = document.getElementById(noteId);
-    if (chk) chk.disabled = wordlessOn;
+    if (chk) chk.disabled = isWl;
     if (lbl) {
-      lbl.classList.toggle('opacity-55', wordlessOn);
-      lbl.title = wordlessOn ? 'Hidden while Wordless Instructions is enabled' : '';
+      lbl.classList.toggle('opacity-55', isWl);
+      lbl.title = isWl ? 'Hidden while Wordless Instructions is enabled' : '';
     }
-    if (note) note.classList.toggle('hidden', !wordlessOn);
+    if (note) note.classList.toggle('hidden', !isWl);
   }
   const arrColEl = document.getElementById('arrowColor');
   if (arrColEl && arrColEl.value !== opts.arrowColor) arrColEl.value = opts.arrowColor;
@@ -22648,11 +22875,6 @@ function syncStylePanel() {
   const effBc = resolveEffectiveBomConfig(bc, Boolean(state.bomShowTextFields));
   const styleBomSum = document.getElementById('styleBomSummary');
   if (styleBomSum) styleBomSum.textContent = summarizeBomConfig(effBc);
-  const canOpenBom = canOpenExtraPageSettings(state, 'bom', Boolean(state.model));
-  const styleBomSec = document.getElementById('styleBomSection');
-  if (styleBomSec) styleBomSec.classList.toggle('hidden', !canOpenBom);
-  const styleBomBtn = document.getElementById('btnStyleOpenBomSetup');
-  if (styleBomBtn) styleBomBtn.disabled = !canOpenBom;
 }
 
 let activeFontPickerRole = null; // 'heading' | 'body' | null
@@ -22723,7 +22945,7 @@ function openThemeFontPicker(role) {
     title.textContent = role === 'heading' ? 'Choose Heading & Number Font' : 'Choose Body & Label Font';
   }
   panel?.classList.remove('hidden');
-  syncThemeFontUI(getActiveTheme());
+  syncThemeFontUI(getEditedTheme());
   renderThemeFontPicker();
   const activeItem = document.querySelector('#themeFontList [data-font-selected="true"]');
   if (activeItem && typeof activeItem.scrollIntoView === 'function') {
@@ -22737,7 +22959,7 @@ function renderThemeFontPicker() {
   const listEl = document.getElementById('themeFontList');
   if (!tabsEl || !listEl) return;
 
-  const theme = getActiveTheme();
+  const theme = getEditedTheme();
   const currentId = sanitizeThemeFontId(
     activeFontPickerRole === 'heading' ? theme.headingFont : theme.bodyFont,
   );
@@ -22840,7 +23062,7 @@ function renderThemeFontPicker() {
   listEl.querySelectorAll('[data-pick-font]').forEach((btn) => {
     btn.onclick = () => {
       const picked = sanitizeThemeFontId(btn.getAttribute('data-pick-font'));
-      patchActiveTheme({ [activeFontPickerRole === 'heading' ? 'headingFont' : 'bodyFont']: picked });
+      patchEditedTheme({ [activeFontPickerRole === 'heading' ? 'headingFont' : 'bodyFont']: picked });
       renderThemeFontPicker();
     };
   });
@@ -22902,7 +23124,7 @@ document.getElementById('customFontUploadInput')?.addEventListener('change', asy
   if (lastUploaded) {
     persistCustomUploadedFonts();
     const targetRole = activeFontPickerRole || 'heading';
-    patchActiveTheme({ [targetRole === 'heading' ? 'headingFont' : 'bodyFont']: lastUploaded.id });
+    patchEditedTheme({ [targetRole === 'heading' ? 'headingFont' : 'bodyFont']: lastUploaded.id });
     activeFontPickerCategory = 'custom';
     if (!activeFontPickerRole) openThemeFontPicker(targetRole);
     else renderThemeFontPicker();
@@ -22918,50 +23140,38 @@ document.getElementById('customFontUploadInput')?.addEventListener('change', asy
 
 for (const [elId, field] of THEME_COLOR_FIELDS) {
   const el = document.getElementById(elId);
-  if (el) el.oninput = (e) => patchActiveTheme({ [field]: e.target.value });
+  if (el) el.oninput = (e) => patchEditedTheme({ [field]: e.target.value });
 }
 document.querySelectorAll('.theme-bgtype-btn').forEach(b => {
-  b.onclick = () => patchActiveTheme({ bgType: b.getAttribute('data-bg-type') === 'gradient' ? 'gradient' : 'solid' });
+  b.onclick = () => patchEditedTheme({ bgType: b.getAttribute('data-bg-type') === 'gradient' ? 'gradient' : 'solid' });
 });
 document.querySelectorAll('.theme-angle-btn').forEach(b => {
-  b.onclick = () => patchActiveTheme({ bgAngle: Number(b.getAttribute('data-bg-angle')) || 180 });
+  b.onclick = () => patchEditedTheme({ bgAngle: Number(b.getAttribute('data-bg-angle')) || 180 });
 });
-document.getElementById('themeBlueprintGrid').onchange = (e) => patchActiveTheme({ bp: e.target.checked });
-
-const themeStripWheelEl = document.getElementById('themeStrip');
-if (themeStripWheelEl) {
-  themeStripWheelEl.addEventListener('wheel', (e) => {
-    if (e.shiftKey && Math.abs(e.deltaY) > 0 && Math.abs(e.deltaX) === 0) {
-      e.preventDefault();
-      const scale = e.deltaMode === 1 ? 32 : e.deltaMode === 2 ? themeStripWheelEl.clientWidth : 1;
-      themeStripWheelEl.scrollLeft += e.deltaY * scale;
-    }
-  }, { passive: false });
-}
+document.getElementById('themeBlueprintGrid').onchange = (e) => patchEditedTheme({ bp: e.target.checked });
 
 const themeNameInputEl = document.getElementById('themeNameInput');
 themeNameInputEl.oninput = (e) => {
   const v = String(e.target.value || '').slice(0, 40);
   if (!v.trim()) return; // keep the old name until something is typed
-  patchActiveTheme({ name: v });
+  patchEditedTheme({ name: v });
 };
-themeNameInputEl.onblur = () => { themeNameInputEl.value = getActiveTheme().name; };
+themeNameInputEl.onblur = () => { themeNameInputEl.value = getEditedTheme().name; };
 themeNameInputEl.onkeydown = (e) => { if (e.key === 'Enter') themeNameInputEl.blur(); };
 
 document.getElementById('btnNewCustomTheme').onclick = () => {
   const created = forkThemeIntoCustom(getActiveTheme());
   renderAll();
   showToast(`Created "${created.name}" from the current theme.`);
+  openThemeEditor({ origin: isStyleWizardActive() ? 'wizard-selector' : 'style-selector' });
   requestAnimationFrame(() => {
-    const strip = document.getElementById('themeStrip');
-    if (strip) strip.scrollTo({ left: 0, behavior: 'smooth' });
     themeNameInputEl.focus();
     themeNameInputEl.select();
   });
 };
 
 document.getElementById('btnDeleteTheme').onclick = async () => {
-  const t = getActiveTheme();
+  const t = getEditedTheme();
   if (t.builtIn || BUILT_IN_THEME_IDS.has(t.id)) return;
   const referencingGroupNames = (state.layoutGroups || [])
     .filter((g) => g.themeId === t.id)
@@ -22977,12 +23187,23 @@ document.getElementById('btnDeleteTheme').onclick = async () => {
   saveThemeRecentsToStorage(themeRecents);
   persistCustomThemes();
   const next = orderThemesByRecent(getAllThemes(customThemes), themeRecents, '')[0];
-  selectTheme(next ? next.id : 'blue');
+  const fallbackId = next ? next.id : 'blue';
+  if (isEditingSettingsTheme()) {
+    themeEditorSession.targetThemeId = fallbackId;
+    patchCustomDefaults({ themeId: fallbackId });
+    if (state.themeId === t.id) selectTheme(fallbackId);
+    syncStylePanel();
+  } else {
+    if (appSettings.customDefaults.themeId === t.id) {
+      patchCustomDefaults({ themeId: fallbackId });
+    }
+    selectTheme(fallbackId);
+  }
   showToast(`Deleted "${t.name}".`);
 };
 
 document.getElementById('btnExportTheme').onclick = async () => {
-  const t = getActiveTheme();
+  const t = getEditedTheme();
   const payload = serializeThemeExport(t);
   const fileName = buildThemeFileName(t.name);
   await shareOrDownloadCustomFile(payload, fileName, `Shared "${t.name}" theme.`, `Exported ${fileName}`);
@@ -23657,7 +23878,7 @@ function handleGlobalEscapeKey() {
     return true;
   }
   if (stylePopEl && !stylePopEl.classList.contains('hidden')) {
-    setStylePopoverOpen(false);
+    handleStyleBackAction();
     return true;
   }
   if (isOpen('importWizardModal')) {
@@ -24366,20 +24587,20 @@ document.querySelectorAll('.step-lighting-chip').forEach(b => {
     libThumbCache.clear();
     libPreviewMeshCache = { key: '', mesh: null };
     overviewThumbCache.bumpEpoch();
-    patchActiveTheme({ stepLighting: mode, highQualityStepRender: mode === 'studio' });
+    patchEditedTheme({ stepLighting: mode, highQualityStepRender: mode === 'studio' });
     if (isBricksLibraryModalOpen()) renderBricksLibraryModal(false);
   };
 });
 document.querySelectorAll('.fade-chip').forEach(b => {
   b.onclick = () => {
     const val = parseFloat(b.getAttribute('data-fade'));
-    patchActiveTheme({ fadeOpacity: val, fadePrev: val < 0.99 });
+    patchEditedTheme({ fadeOpacity: val, fadePrev: val < 0.99 });
   };
 });
 document.querySelectorAll('.hl-weight-chip').forEach(b => {
   b.onclick = () => {
     overviewThumbCache.bumpEpoch();
-    patchActiveTheme({ highlightLineWeight: sanitizeLineWeight(b.getAttribute('data-hl-weight'), 'medium') });
+    patchEditedTheme({ highlightLineWeight: sanitizeLineWeight(b.getAttribute('data-hl-weight'), 'medium') });
   };
 });
 document.querySelectorAll('.outline-weight-chip').forEach(b => {
@@ -24389,7 +24610,7 @@ document.querySelectorAll('.outline-weight-chip').forEach(b => {
     libThumbCache.clear();
     libPreviewMeshCache = { key: '', mesh: null };
     overviewThumbCache.bumpEpoch();
-    patchActiveTheme({ outlineLineWeight: sanitizeLineWeight(b.getAttribute('data-outline-weight'), 'medium') });
+    patchEditedTheme({ outlineLineWeight: sanitizeLineWeight(b.getAttribute('data-outline-weight'), 'medium') });
     if (isBricksLibraryModalOpen()) renderBricksLibraryModal(false);
   };
 });
@@ -24410,7 +24631,7 @@ const btnBomOpenStyle = document.getElementById('btnBomOpenStyle');
 if (btnBomOpenStyle) {
   btnBomOpenStyle.onclick = () => {
     closeBomSetupModal();
-    setStylePopoverOpen(true);
+    openThemeEditor({ origin: 'bom-setup', themeId: state.themeId });
   };
 }
 
@@ -24574,39 +24795,39 @@ for (const [btnId, kind] of [
   const el = document.getElementById(btnId);
   if (el) el.onclick = () => openExtraPageSettings(kind);
 }
-// Rendering style & step display options are part of the active theme (built-ins fork on first edit)
+// Rendering style & step display options are part of the edited theme (built-ins fork on first edit)
 const toggleAutoArrowsEl = document.getElementById('toggleAutoPlacementArrows');
 if (toggleAutoArrowsEl) toggleAutoArrowsEl.onchange = (e) => {
   overviewThumbCache.bumpEpoch();
-  patchActiveTheme({ autoPlacementArrows: e.target.checked });
+  patchEditedTheme({ autoPlacementArrows: e.target.checked });
 };
 const arrowColorEl = document.getElementById('arrowColor');
 if (arrowColorEl) arrowColorEl.oninput = (e) => {
   clearMinifigDiagramCaches();
   overviewThumbCache.bumpEpoch();
-  patchActiveTheme({ arrowColor: e.target.value });
+  patchEditedTheme({ arrowColor: e.target.value });
 };
 document.querySelectorAll('.arrow-style-chip').forEach(b => {
   b.onclick = () => {
     clearMinifigDiagramCaches();
     overviewThumbCache.bumpEpoch();
-    patchActiveTheme({ arrowStyle: sanitizePlacementArrowStyle(b.getAttribute('data-arrow-style'), 'flat') });
+    patchEditedTheme({ arrowStyle: sanitizePlacementArrowStyle(b.getAttribute('data-arrow-style'), 'flat') });
   };
 });
 const toggleArrowOutlinesEl = document.getElementById('toggleArrowOutlines');
 if (toggleArrowOutlinesEl) toggleArrowOutlinesEl.onchange = (e) => {
   clearMinifigDiagramCaches();
   overviewThumbCache.bumpEpoch();
-  patchActiveTheme({ arrowOutlines: e.target.checked });
+  patchEditedTheme({ arrowOutlines: e.target.checked });
 };
 const toggleArrowLightingEl = document.getElementById('toggleArrowLighting');
 if (toggleArrowLightingEl) toggleArrowLightingEl.onchange = (e) => {
   clearMinifigDiagramCaches();
   overviewThumbCache.bumpEpoch();
-  patchActiveTheme({ arrowLighting: e.target.checked });
+  patchEditedTheme({ arrowLighting: e.target.checked });
 };
-document.getElementById('toggleHighlight').onchange = (e) => patchActiveTheme({ highlightNew: e.target.checked });
-document.getElementById('highlightColor').oninput = (e) => patchActiveTheme({ highlightColor: e.target.value });
+document.getElementById('toggleHighlight').onchange = (e) => patchEditedTheme({ highlightNew: e.target.checked });
+document.getElementById('highlightColor').oninput = (e) => patchEditedTheme({ highlightColor: e.target.value });
 const starkBlackToggleEl = document.getElementById('toggleStarkBlackOutlines');
 if (starkBlackToggleEl) starkBlackToggleEl.onchange = (e) => {
   pliThumbCache.clear();
@@ -24614,55 +24835,69 @@ if (starkBlackToggleEl) starkBlackToggleEl.onchange = (e) => {
   libThumbCache.clear();
   libPreviewMeshCache = { key: '', mesh: null };
   overviewThumbCache.bumpEpoch();
-  patchActiveTheme({ starkBlackOutlines: e.target.checked });
+  patchEditedTheme({ starkBlackOutlines: e.target.checked });
   if (isBricksLibraryModalOpen()) renderBricksLibraryModal(false);
 };
-document.getElementById('toggleRotCues').onchange = (e) => patchActiveTheme({ showRotCues: e.target.checked });
-document.getElementById('toggleSizeGuides').onchange = (e) => patchActiveTheme({ showSizeGuides: e.target.checked });
+document.getElementById('toggleRotCues').onchange = (e) => patchEditedTheme({ showRotCues: e.target.checked });
+document.getElementById('toggleSizeGuides').onchange = (e) => patchEditedTheme({ showSizeGuides: e.target.checked });
 const attachStarburstToggleEl = document.getElementById('toggleAttachmentStarburst');
 if (attachStarburstToggleEl) {
   attachStarburstToggleEl.onchange = (e) => {
     overviewThumbCache.bumpEpoch();
-    patchActiveTheme({ showAttachmentStarburst: e.target.checked });
+    patchEditedTheme({ showAttachmentStarburst: e.target.checked });
   };
 }
 const mf1to1ToggleEl = document.getElementById('toggleMinifig1to1');
-if (mf1to1ToggleEl) mf1to1ToggleEl.onchange = (e) => patchActiveTheme({ showMinifig1to1: e.target.checked });
+if (mf1to1ToggleEl) mf1to1ToggleEl.onchange = (e) => patchEditedTheme({ showMinifig1to1: e.target.checked });
 document.querySelectorAll('.mf-style-btn').forEach(b => {
-  b.onclick = () => applyMinifigStyleChange(b.getAttribute('data-mf-style'));
+  b.onclick = () => {
+    const rawStyle = b.getAttribute('data-mf-style');
+    if (isEditingSettingsTheme()) {
+      patchEditedTheme({ minifigStyle: normalizeMinifigStepStyle(rawStyle) });
+    } else {
+      applyMinifigStyleChange(rawStyle);
+    }
+  };
 });
-const applyStepBorderStyle = (mode) => {
+const applyStepBorderStyle = (mode, useEdited = false) => {
   const next = sanitizeStepBorderStyle(mode, 'lines');
   overviewThumbCache.bumpEpoch();
-  patchActiveTheme({ stepBorderStyle: next, showStepBorders: next === 'boxes' });
+  (useEdited ? patchEditedTheme : patchActiveTheme)({ stepBorderStyle: next, showStepBorders: next === 'boxes' });
 };
-document.querySelectorAll('.step-border-style-btn, .step-border-style-setup-btn').forEach(b => {
-  b.onclick = () => applyStepBorderStyle(b.getAttribute('data-step-border-style'));
+document.querySelectorAll('.step-border-style-btn').forEach(b => {
+  b.onclick = () => applyStepBorderStyle(b.getAttribute('data-step-border-style'), true);
+});
+document.querySelectorAll('.step-border-style-setup-btn').forEach(b => {
+  b.onclick = () => applyStepBorderStyle(b.getAttribute('data-step-border-style'), false);
 });
 document.querySelectorAll('.step-num-weight-btn').forEach(b => {
   b.onclick = () => {
     const w = Number(b.getAttribute('data-step-num-weight'));
-    patchActiveTheme({ stepNumWeight: w === 300 || w === 500 ? w : 800 });
+    patchEditedTheme({ stepNumWeight: w === 300 || w === 500 ? w : 800 });
   };
 });
-const setPageTitle = (e) => patchActiveTheme({ showPageTitle: e.target.checked });
-document.getElementById('togglePageTitle').onchange = setPageTitle;
-document.getElementById('togglePageTitleSetup').onchange = setPageTitle;
-const setProgressBar = (e) => {
+document.getElementById('togglePageTitle').onchange = (e) => patchEditedTheme({ showPageTitle: e.target.checked });
+document.getElementById('togglePageTitleSetup').onchange = (e) => patchActiveTheme({ showPageTitle: e.target.checked });
+const toggleProgressBarEl = document.getElementById('toggleProgressBar');
+if (toggleProgressBarEl) toggleProgressBarEl.onchange = (e) => {
+  overviewThumbCache.bumpEpoch();
+  patchEditedTheme({ showProgressBar: e.target.checked });
+};
+const toggleProgressBarSetupEl = document.getElementById('toggleProgressBarSetup');
+if (toggleProgressBarSetupEl) toggleProgressBarSetupEl.onchange = (e) => {
   overviewThumbCache.bumpEpoch();
   patchActiveTheme({ showProgressBar: e.target.checked });
 };
-const toggleProgressBarEl = document.getElementById('toggleProgressBar');
-if (toggleProgressBarEl) toggleProgressBarEl.onchange = setProgressBar;
-const toggleProgressBarSetupEl = document.getElementById('toggleProgressBarSetup');
-if (toggleProgressBarSetupEl) toggleProgressBarSetupEl.onchange = setProgressBar;
-const applyProgressBarSpan = (span) => {
+const applyProgressBarSpan = (span, useEdited = false) => {
   const next = sanitizeProgressBarSpan(span, 'page');
   overviewThumbCache.bumpEpoch();
-  patchActiveTheme({ progressBarSpan: next });
+  (useEdited ? patchEditedTheme : patchActiveTheme)({ progressBarSpan: next });
 };
-document.querySelectorAll('.progress-bar-span-btn, .progress-bar-span-setup-btn').forEach(b => {
-  b.onclick = () => applyProgressBarSpan(b.getAttribute('data-progress-bar-span'));
+document.querySelectorAll('.progress-bar-span-btn').forEach(b => {
+  b.onclick = () => applyProgressBarSpan(b.getAttribute('data-progress-bar-span'), true);
+});
+document.querySelectorAll('.progress-bar-span-setup-btn').forEach(b => {
+  b.onclick = () => applyProgressBarSpan(b.getAttribute('data-progress-bar-span'), false);
 });
 const toggleWordlessEl = document.getElementById('toggleWordlessMode');
 if (toggleWordlessEl) {
@@ -26848,20 +27083,15 @@ function openStyleFromImportWizard(section = 'theme') {
   if (!importWizardState.active) return;
   importWizardState.subpage = 'style';
   document.getElementById('importWizardModal')?.classList.add('hidden');
-  setStylePopoverOpen(true);
-  requestAnimationFrame(() => {
-    const scrollEl = document.getElementById('stylePopoverScroll');
-    if (!scrollEl) return;
-    if (section === 'rendering') {
-      const target = document.getElementById('styleStepDisplaySection');
-      if (target) {
-        if (target instanceof HTMLDetailsElement) target.open = true;
-        target.scrollIntoView({ block: 'start', behavior: 'smooth' });
-      }
-    } else {
-      scrollEl.scrollTop = 0;
-    }
-  });
+  if (section === 'rendering') {
+    openThemeEditor({ origin: 'wizard-direct', section: 'rendering' });
+  } else {
+    setStylePopoverOpen(true, { view: 'selector' });
+    requestAnimationFrame(() => {
+      const scrollEl = document.getElementById('styleSelectorScroll');
+      if (scrollEl) scrollEl.scrollTop = 0;
+    });
+  }
 }
 
 function openPageSetupFromImportWizard(section = 'format') {
@@ -27525,14 +27755,17 @@ function renderSettingsModalUI() {
 
   const cd = appSettings.customDefaults;
 
-  const themeSel = document.getElementById('settingsDefTheme');
-  if (themeSel) {
-    const allThemes = getAllThemes(customThemes);
-    themeSel.innerHTML = allThemes
-      .map((t) => `<option value="${escHtml(t.id)}">${escHtml(t.name)}${t.builtIn ? '' : ' (Custom)'}</option>`)
-      .join('');
-    const hasMatch = allThemes.some((t) => t.id === cd.themeId);
-    themeSel.value = hasMatch ? cd.themeId : 'blue';
+  const defThemeStrip = document.getElementById('settingsDefThemeStrip');
+  if (defThemeStrip) {
+    renderThemeSelector(defThemeStrip, {
+      selectedThemeId: cd.themeId || 'blue',
+      layout: 'strip',
+      onSelect: (id) => {
+        if (id === appSettings.customDefaults.themeId) return;
+        patchCustomDefaults({ themeId: id });
+        defThemeStrip.scrollTo({ left: 0, behavior: 'smooth' });
+      },
+    });
   }
 
   const fmtSel = document.getElementById('settingsDefPaperFormat');
@@ -27670,8 +27903,13 @@ const patchCustomDefaults = (patch) => {
   });
 };
 
-const settingsDefThemeEl = document.getElementById('settingsDefTheme');
-if (settingsDefThemeEl) settingsDefThemeEl.onchange = (e) => patchCustomDefaults({ themeId: e.target.value });
+const btnSettingsEditDefThemeEl = document.getElementById('btnSettingsEditDefTheme');
+if (btnSettingsEditDefThemeEl) {
+  btnSettingsEditDefThemeEl.onclick = () => {
+    closeSettingsModal();
+    openThemeEditor({ origin: 'settings', themeId: appSettings.customDefaults.themeId || 'blue' });
+  };
+}
 const settingsDefPaperFormatEl = document.getElementById('settingsDefPaperFormat');
 if (settingsDefPaperFormatEl) settingsDefPaperFormatEl.onchange = (e) => patchCustomDefaults({ paperFormat: e.target.value });
 document.querySelectorAll('.settings-orient-btn').forEach((b) => {

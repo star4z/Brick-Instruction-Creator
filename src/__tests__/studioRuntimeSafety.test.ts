@@ -769,22 +769,22 @@ describe('studioRuntime safety checks', () => {
     const css = fs.readFileSync(path.resolve(process.cwd(), 'src/index.css'), 'utf8');
     const runtime = fs.readFileSync(path.resolve(process.cwd(), 'src/studioRuntime.ts'), 'utf8');
 
-    const popStart = html.indexOf('id="stylePopover"');
-    const popEnd = html.indexOf('id="overviewModal"', popStart);
-    expect(popStart).toBeGreaterThan(-1);
-    expect(popEnd).toBeGreaterThan(popStart);
+    const settingsStart = html.indexOf('id="settingsModal"');
+    const settingsEnd = html.indexOf('id="confirmActionModal"', settingsStart);
+    expect(settingsStart).toBeGreaterThan(-1);
+    expect(settingsEnd).toBeGreaterThan(settingsStart);
 
-    const styleHtml = html.slice(popStart, popEnd);
-    expect(styleHtml).toContain('id="themeStrip"');
-    expect(styleHtml).toContain('scroll-px-4');
-    expect(styleHtml).toContain('id="themeStripScrollHint"');
-    expect(styleHtml).toContain('Shift');
-    expect(styleHtml).toContain('Scroll');
+    const settingsHtml = html.slice(settingsStart, settingsEnd);
+    expect(settingsHtml).toContain('id="settingsDefThemeStrip"');
+    expect(settingsHtml).toContain('id="btnSettingsEditDefTheme"');
+    expect(settingsHtml).toContain('Shift');
+    expect(settingsHtml).toContain('Scroll');
 
     expect(css).toContain('scroll-padding-inline: 1rem;');
     expect(css).toContain('.theme-strip-scroll-hint');
     expect(css).toContain('@media (hover: hover) and (pointer: fine)');
-    expect(runtime).toContain("themeStripWheelEl.addEventListener('wheel'");
+    expect(runtime).toContain('function attachHorizontalWheelScroll(');
+    expect(runtime).toContain('function renderThemeSelector(');
   });
 
   it('does not include a redundant View Parts List button in the Parts List Setup dialog', () => {
@@ -803,7 +803,7 @@ describe('studioRuntime safety checks', () => {
     expect(runtime).not.toContain('bomSetupJumpBtn');
   });
 
-  it('links the Parts List Setup Saved with theme banner to the Style dialog', () => {
+  it('links the Parts List Setup Saved with theme banner to the shared Theme Editor', () => {
     const html = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf8');
     const runtime = fs.readFileSync(path.resolve(process.cwd(), 'src/studioRuntime.ts'), 'utf8');
 
@@ -821,6 +821,7 @@ describe('studioRuntime safety checks', () => {
     const bannerHtml = bomSetupHtml.slice(btnStart, btnEnd);
     expect(bannerHtml).toContain('Saved with theme:');
     expect(bannerHtml).toContain('id="bomThemeName"');
+    expect(bannerHtml).toContain('Edit Theme');
 
     const wireStart = runtime.indexOf("const btnBomOpenStyle = document.getElementById('btnBomOpenStyle');");
     const wireEnd = runtime.indexOf('document.querySelectorAll(\'.bom-gridmode-btn\')', wireStart);
@@ -829,7 +830,7 @@ describe('studioRuntime safety checks', () => {
 
     const wireBlock = runtime.slice(wireStart, wireEnd);
     expect(wireBlock).toContain('closeBomSetupModal();');
-    expect(wireBlock).toContain('setStylePopoverOpen(true);');
+    expect(wireBlock).toContain("openThemeEditor({ origin: 'bom-setup'");
   });
 
   it('warns iOS users with a dialog when selecting Export HTML before generating the file', () => {
@@ -937,9 +938,9 @@ describe('studioRuntime safety checks', () => {
     expect(wizHtml).not.toContain('<select');
     expect(wizHtml).not.toContain('<textarea');
 
-    // Style modal supports wizard chrome, top-left back arrow, and section targeting
-    expect(html).toContain('id="styleWizardHeader"');
-    expect(html).toContain('id="btnBackStyleWizard"');
+    // Style modal supports unified header, top-left back arrow, and section targeting
+    expect(html).toContain('id="stylePopoverHeader"');
+    expect(html).toContain('id="btnStyleBack"');
     expect(html).toContain('id="styleWizardFooter"');
     expect(html).toContain('id="styleStepDisplaySection"');
 
@@ -1014,7 +1015,8 @@ describe('studioRuntime safety checks', () => {
     for (const id of [
       'settingsCustomDefaultsWrap',
       'btnSettingsCopyFromProject',
-      'settingsDefTheme',
+      'settingsDefThemeStrip',
+      'btnSettingsEditDefTheme',
       'settingsDefPaperFormat',
       'settingsDefCols',
       'settingsDefRows',
@@ -1174,15 +1176,31 @@ describe('studioRuntime safety checks', () => {
     expect(popEnd).toBeGreaterThan(popStart);
     const styleHtml = html.slice(popStart, popEnd);
 
-    // Styles header with Expand/Collapse All control
+    // Unified header with Back button, Styles title, and Expand/Collapse All control
     expect(styleHtml).toContain('id="stylePopoverHeader"');
+    expect(styleHtml).toContain('id="btnStyleBack"');
     expect(styleHtml).toContain('>Styles<');
     expect(styleHtml).toContain('id="btnToggleAllStyleSections"');
     expect(styleHtml).toContain('Collapse All');
 
-    // All major sections are collapsible <details class="style-section" ...>
+    // Separate Theme Selector page and Theme Editor page
+    expect(styleHtml).toContain('id="styleSelectorView"');
+    expect(styleHtml).toContain('id="styleEditorView"');
+    expect(styleHtml).toContain('id="themeStrip"');
+    expect(styleHtml).toContain('id="btnEditActiveTheme"');
+    expect(styleHtml).toContain('id="btnNewCustomTheme"');
+
+    const selectorStart = styleHtml.indexOf('id="styleSelectorView"');
+    const editorStart = styleHtml.indexOf('id="styleEditorView"');
+    expect(editorStart).toBeGreaterThan(selectorStart);
+    const selectorHtml = styleHtml.slice(selectorStart, editorStart);
+    const editorHtml = styleHtml.slice(editorStart);
+    expect(selectorHtml).toContain('id="themeStrip"');
+    expect(selectorHtml).toContain('id="btnEditActiveTheme"');
+    expect(selectorHtml).toContain('id="btnNewCustomTheme"');
+
+    // All Theme Editor sections are collapsible <details class="style-section" ...>
     for (const id of [
-      'styleThemesSection',
       'styleThemeIdentitySection',
       'stylePageBgSection',
       'stylePaletteSection',
@@ -1191,36 +1209,31 @@ describe('studioRuntime safety checks', () => {
       'styleStepFeaturesSection',
       'styleBomSection',
     ]) {
-      expect(styleHtml).toContain(`<details id="${id}" class="style-section`);
+      expect(editorHtml).toContain(`<details id="${id}" class="style-section`);
     }
 
     // Solid / Gradient is inside Page Background body (after </summary>) and at the top (before themeColorBg)
-    const bgStart = styleHtml.indexOf('id="stylePageBgSection"');
-    const bgSummaryEnd = styleHtml.indexOf('</summary>', bgStart);
-    const bgSolidIdx = styleHtml.indexOf('data-bg-type="solid"', bgStart);
-    const bgColorIdx = styleHtml.indexOf('id="themeColorBg"', bgStart);
+    const bgStart = editorHtml.indexOf('id="stylePageBgSection"');
+    const bgSummaryEnd = editorHtml.indexOf('</summary>', bgStart);
+    const bgSolidIdx = editorHtml.indexOf('data-bg-type="solid"', bgStart);
+    const bgColorIdx = editorHtml.indexOf('id="themeColorBg"', bgStart);
     expect(bgSummaryEnd).toBeGreaterThan(bgStart);
     expect(bgSolidIdx).toBeGreaterThan(bgSummaryEnd);
     expect(bgColorIdx).toBeGreaterThan(bgSolidIdx);
 
     // Upload Font is inside Typography body (after </summary>) and at the bottom (after themeFontPickerPanel)
-    const typoStart = styleHtml.indexOf('id="styleTypographySection"');
-    const typoEnd = styleHtml.indexOf('</details>', typoStart);
-    const typoSummaryEnd = styleHtml.indexOf('</summary>', typoStart);
-    const fontPickerIdx = styleHtml.indexOf('id="themeFontPickerPanel"', typoStart);
-    const uploadFontIdx = styleHtml.indexOf('id="btnUploadCustomFont"', typoStart);
+    const typoStart = editorHtml.indexOf('id="styleTypographySection"');
+    const typoEnd = editorHtml.indexOf('</details>', typoStart);
+    const typoSummaryEnd = editorHtml.indexOf('</summary>', typoStart);
+    const fontPickerIdx = editorHtml.indexOf('id="themeFontPickerPanel"', typoStart);
+    const uploadFontIdx = editorHtml.indexOf('id="btnUploadCustomFont"', typoStart);
     expect(typoSummaryEnd).toBeGreaterThan(typoStart);
     expect(uploadFontIdx).toBeGreaterThan(fontPickerIdx);
     expect(uploadFontIdx).toBeLessThan(typoEnd);
 
-    // New from Current is inside Themes body (after </summary>) rather than inline in the header
-    const themesStart = styleHtml.indexOf('id="styleThemesSection"');
-    const themesSummaryEnd = styleHtml.indexOf('</summary>', themesStart);
-    const newThemeIdx = styleHtml.indexOf('id="btnNewCustomTheme"', themesStart);
-    expect(newThemeIdx).toBeGreaterThan(themesSummaryEnd);
-
-    // Runtime wires Expand/Collapse All toggle
+    // Runtime wires Expand/Collapse All toggle & unified chrome sync
     expect(runtime).toContain('function syncStyleSectionsToggleAllUI(');
-    expect(runtime).toContain("setVisible('stylePopoverHeader'");
+    expect(runtime).toContain('function syncStylePanelChrome(');
+    expect(runtime).toContain('function openThemeEditor(');
   });
 });
